@@ -11,6 +11,8 @@ pub struct GameInfo {
     pub game_path: Option<String>,
     pub mods_path: Option<String>,
     pub disabled_mods_path: Option<String>,
+    pub mods_count: usize,
+    pub disabled_count: usize,
     pub valid: bool,
 }
 
@@ -58,8 +60,6 @@ pub fn parse_library_folders(steam_path: &Path) -> Vec<PathBuf> {
         Err(_) => return libraries,
     };
 
-    // Simple VDF parser: look for "path" keys with string values.
-    // Format: "path"		"/some/path"
     for line in content.lines() {
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_prefix("\"path\"") {
@@ -91,16 +91,17 @@ pub fn find_game_in_libraries(libraries: &[PathBuf]) -> Option<PathBuf> {
 }
 
 /// Validate that a path is a legitimate STS2 installation.
-/// Checks for sts2.dll and SlayTheSpire2.pck.
 pub fn validate_game_path(path: &Path) -> bool {
     if !path.exists() || !path.is_dir() {
         return false;
     }
 
+    let has_exe = path.join("SlayTheSpire2.exe").exists()
+        || path.join("Slay the Spire 2.exe").exists();
     let has_dll = path.join("sts2.dll").exists();
     let has_pck = path.join("SlayTheSpire2.pck").exists();
 
-    has_dll || has_pck
+    has_exe || has_dll || has_pck
 }
 
 /// Auto-detect the STS2 game installation.
@@ -116,33 +117,84 @@ pub fn detect_game() -> Option<PathBuf> {
     }
 }
 
+/// Count .json files in a directory (rough mod count).
+fn count_mods_in_dir(dir: &Path) -> usize {
+    if !dir.exists() {
+        return 0;
+    }
+    let mut count = 0;
+    // Count top-level .json files
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("json") {
+                count += 1;
+            } else if path.is_dir() {
+                // Count subdirectory mods (one mod per subfolder)
+                let has_json = std::fs::read_dir(&path)
+                    .map(|entries| {
+                        entries.flatten().any(|e| {
+                            e.path().extension().and_then(|ext| ext.to_str()) == Some("json")
+                        })
+                    })
+                    .unwrap_or(false);
+                let has_dll = std::fs::read_dir(&path)
+                    .map(|entries| {
+                        entries.flatten().any(|e| {
+                            e.path().extension().and_then(|ext| ext.to_str()) == Some("dll")
+                        })
+                    })
+                    .unwrap_or(false);
+                if has_json || has_dll {
+                    count += 1;
+                }
+            }
+        }
+    }
+    // Also count DLL-only mods at top level (DLLs without matching .json)
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("dll") {
+                let json_path = path.with_extension("json");
+                if !json_path.exists() {
+                    count += 1;
+                }
+            }
+        }
+    }
+    count
+}
+
 // ── Tauri Commands ──────────────────────────────────────────────────────────
 
-/// Auto-detect the game path and store it in state.
+/// Auto-detect the game path and store it in state. Returns GameInfo.
 #[tauri::command]
-pub fn detect_game_path(state: tauri::State<'_, AppState>) -> std::result::Result<Option<String>, String> {
+pub fn detect_game_path(state: tauri::State<'_, AppState>) -> std::result::Result<GameInfo, String> {
     let path = detect_game();
     if let Some(ref p) = path {
         let mut s = state.lock().map_err(|e| e.to_string())?;
         s.set_game_path(p.clone());
     }
-    Ok(path.map(|p| p.to_string_lossy().to_string()))
+    // Return current game info
+    get_game_info(state)
 }
 
-/// Manually set the game path after validation.
+/// Manually set the game path after validation. Returns GameInfo.
 #[tauri::command]
-pub fn set_game_path(path: String, state: tauri::State<'_, AppState>) -> std::result::Result<bool, String> {
+pub fn set_game_path(path: String, state: tauri::State<'_, AppState>) -> std::result::Result<GameInfo, String> {
     let game_path = PathBuf::from(&path);
     if !validate_game_path(&game_path) {
         return Err(AppError::GameNotFound(format!(
-            "Invalid game path: {}. Expected sts2.dll or SlayTheSpire2.pck.",
+            "Invalid game path: {}. Could not find STS2 game files.",
             path
         ))
         .to_string());
     }
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.set_game_path(game_path);
-    Ok(true)
+    drop(s);
+    get_game_info(state)
 }
 
 /// Return current game info from state.
@@ -154,10 +206,80 @@ pub fn get_game_info(state: tauri::State<'_, AppState>) -> std::result::Result<G
         .as_ref()
         .map(|p| validate_game_path(p))
         .unwrap_or(false);
+
+    let mods_count = s.mods_path.as_ref().map(|p| count_mods_in_dir(p)).unwrap_or(0);
+    let disabled_count = s.disabled_mods_path.as_ref().map(|p| count_mods_in_dir(p)).unwrap_or(0);
+
     Ok(GameInfo {
         game_path: s.game_path.as_ref().map(|p| p.to_string_lossy().to_string()),
         mods_path: s.mods_path.as_ref().map(|p| p.to_string_lossy().to_string()),
         disabled_mods_path: s.disabled_mods_path.as_ref().map(|p| p.to_string_lossy().to_string()),
+        mods_count,
+        disabled_count,
         valid,
     })
+}
+
+/// Open the mods folder in the system file explorer.
+/// Falls back to game folder if mods folder doesn't exist.
+#[tauri::command]
+pub fn open_mods_folder(state: tauri::State<'_, AppState>) -> std::result::Result<bool, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+
+    // Try mods folder first
+    if let Some(ref mods_path) = s.mods_path {
+        if mods_path.exists() {
+            open::that_in_background(mods_path);
+            return Ok(true);
+        }
+    }
+
+    // Fall back to game folder
+    if let Some(ref game_path) = s.game_path {
+        if game_path.exists() {
+            open::that_in_background(game_path);
+            return Ok(true);
+        }
+    }
+
+    Err("No game or mods folder found. Set the game path in Settings.".to_string())
+}
+
+/// Open the game folder in the system file explorer.
+#[tauri::command]
+pub fn open_game_folder(state: tauri::State<'_, AppState>) -> std::result::Result<bool, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+
+    if let Some(ref game_path) = s.game_path {
+        if game_path.exists() {
+            open::that_in_background(game_path);
+            return Ok(true);
+        }
+    }
+
+    Err("Game folder not found. Set the game path in Settings.".to_string())
+}
+
+/// Launch STS2 via Steam.
+#[tauri::command]
+pub fn launch_game() -> std::result::Result<bool, String> {
+    // STS2 Steam App ID: 2868840
+    open::that_in_background("steam://rungameid/2868840");
+    Ok(true)
+}
+
+/// Set the GitHub personal access token (store in state and keyring).
+#[tauri::command]
+pub fn set_github_token(
+    token: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.github_token = Some(token.clone());
+
+    if let Ok(entry) = keyring::Entry::new("sts2-mod-manager", "github-token") {
+        let _ = entry.set_password(&token);
+    }
+
+    Ok(true)
 }

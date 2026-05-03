@@ -55,15 +55,21 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_deep_link::init())
         .invoke_handler(tauri::generate_handler![
-            // Game detection
+            // Game detection & QOL
             game::detect_game_path,
             game::set_game_path,
             game::get_game_info,
+            game::open_mods_folder,
+            game::open_game_folder,
+            game::launch_game,
+            game::set_github_token,
             // Mod management
             mods::get_installed_mods,
             mods::toggle_mod,
             mods::delete_mod_cmd,
             mods::install_mod_from_file,
+            mods::enable_all_mods,
+            mods::disable_all_mods,
             // Downloads
             download::search_github_mods,
             download::download_github_mod,

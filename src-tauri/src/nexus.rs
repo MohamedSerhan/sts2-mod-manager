@@ -228,15 +228,15 @@ pub async fn get_nexus_mod_info(
 /// Set the Nexus Mods API key (store in state and optionally in keyring).
 #[tauri::command]
 pub fn set_nexus_api_key(
-    api_key: String,
+    key: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<bool, String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    s.nexus_api_key = Some(api_key.clone());
+    s.nexus_api_key = Some(key.clone());
 
     // Attempt to store in system keyring for persistence
     if let Ok(entry) = keyring::Entry::new("sts2-mod-manager", "nexus-api-key") {
-        let _ = entry.set_password(&api_key);
+        let _ = entry.set_password(&key);
     }
 
     Ok(true)

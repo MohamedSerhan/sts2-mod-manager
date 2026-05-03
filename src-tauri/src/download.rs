@@ -233,6 +233,7 @@ pub async fn download_and_install_github_mod(
             source: Some(format!("github:{}/{}", owner, repo)),
             hash: None,
             dependencies: Vec::new(),
+            size_bytes: 0,
         })
     } else {
         Err(AppError::Other(format!(
@@ -331,6 +332,7 @@ pub async fn download_url_mod(
             source: Some(url),
             hash: None,
             dependencies: Vec::new(),
+            size_bytes: 0,
         })
     } else {
         Err(format!("Unsupported file type: {}", file_name))

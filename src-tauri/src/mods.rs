@@ -20,6 +20,7 @@ pub struct ModInfo {
     pub source: Option<String>,
     pub hash: Option<String>,
     pub dependencies: Vec<String>,
+    pub size_bytes: u64,
 }
 
 /// Raw manifest structure from STS2 mod JSON files.
@@ -58,65 +59,75 @@ fn hash_file(path: &Path) -> Option<String> {
     Some(format!("{:x}", hasher.finalize()))
 }
 
+/// Calculate total size of files in a list relative to a base directory.
+fn calculate_mod_size(base_dir: &Path, files: &[String]) -> u64 {
+    files.iter().map(|f| {
+        let path = base_dir.join(f);
+        path.metadata().map(|m| m.len()).unwrap_or(0)
+    }).sum()
+}
+
 /// Collect all files belonging to a mod entry (the .json and co-located .dll/.pck files).
-fn collect_mod_files(manifest_path: &Path) -> Vec<String> {
+fn collect_mod_files(manifest_path: &Path, base_dir: &Path) -> Vec<String> {
     let parent = match manifest_path.parent() {
         Some(p) => p,
         None => return vec![manifest_path.to_string_lossy().to_string()],
     };
-    let stem = manifest_path
-        .file_stem()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_string();
 
     let mut files = Vec::new();
 
-    // If the manifest is directly inside the mods folder
-    // look for same-named .dll and .pck files
-    if let Ok(entries) = fs::read_dir(parent) {
-        for entry in entries.flatten() {
-            let fname = entry.file_name().to_string_lossy().to_string();
-            let fstem = Path::new(&fname)
-                .file_stem()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
-            if fstem == stem {
-                files.push(fname);
+    // If the manifest is inside the base mods dir (not a subdirectory)
+    if parent == base_dir {
+        let stem = manifest_path
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+
+        // Look for same-named .dll, .pck, .json files
+        if let Ok(entries) = fs::read_dir(parent) {
+            for entry in entries.flatten() {
+                let fname = entry.file_name().to_string_lossy().to_string();
+                let fstem = Path::new(&fname)
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                if fstem == stem && entry.path().is_file() {
+                    files.push(fname);
+                }
             }
         }
-    }
-
-    // If the mod lives in a subdirectory, include all files in it
-    if files.len() <= 1 {
-        let mod_dir = parent.join(&stem);
-        if mod_dir.is_dir() {
-            for entry in WalkDir::new(&mod_dir).into_iter().flatten() {
-                if entry.file_type().is_file() {
-                    if let Ok(rel) = entry.path().strip_prefix(parent) {
-                        files.push(rel.to_string_lossy().to_string());
-                    }
+    } else {
+        // Manifest is in a subdirectory - collect all files in that subdirectory
+        for entry in WalkDir::new(parent).into_iter().flatten() {
+            if entry.file_type().is_file() {
+                if let Ok(rel) = entry.path().strip_prefix(base_dir) {
+                    files.push(rel.to_string_lossy().to_string());
                 }
             }
         }
     }
 
     if files.is_empty() {
-        files.push(
-            manifest_path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string(),
-        );
+        if let Ok(rel) = manifest_path.strip_prefix(base_dir) {
+            files.push(rel.to_string_lossy().to_string());
+        } else {
+            files.push(
+                manifest_path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string(),
+            );
+        }
     }
 
     files
 }
 
 /// Parse a single manifest JSON into a ModInfo.
-fn parse_manifest(manifest_path: &Path, enabled: bool) -> Option<ModInfo> {
+fn parse_manifest(manifest_path: &Path, base_dir: &Path, enabled: bool) -> Option<ModInfo> {
     let content = fs::read_to_string(manifest_path).ok()?;
     let raw: RawManifest = serde_json::from_str(&content).ok()?;
 
@@ -130,13 +141,15 @@ fn parse_manifest(manifest_path: &Path, enabled: bool) -> Option<ModInfo> {
         raw.name
     };
 
-    let files = collect_mod_files(manifest_path);
+    let files = collect_mod_files(manifest_path, base_dir);
     let dll_path = manifest_path.with_extension("dll");
     let file_hash = if dll_path.exists() {
         hash_file(&dll_path)
     } else {
         hash_file(manifest_path)
     };
+
+    let size_bytes = calculate_mod_size(base_dir, &files);
 
     Some(ModInfo {
         name,
@@ -147,7 +160,46 @@ fn parse_manifest(manifest_path: &Path, enabled: bool) -> Option<ModInfo> {
         source: raw.source,
         hash: file_hash,
         dependencies: raw.dependencies,
+        size_bytes,
     })
+}
+
+/// Create a ModInfo for a DLL-only mod (no JSON manifest).
+fn dll_only_mod(dll_path: &Path, base_dir: &Path, enabled: bool) -> ModInfo {
+    let name = dll_path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
+    let file_name = if let Ok(rel) = dll_path.strip_prefix(base_dir) {
+        rel.to_string_lossy().to_string()
+    } else {
+        dll_path.file_name().unwrap_or_default().to_string_lossy().to_string()
+    };
+
+    let size_bytes = dll_path.metadata().map(|m| m.len()).unwrap_or(0);
+
+    // Also check for a co-located .pck file
+    let pck_path = dll_path.with_extension("pck");
+    let mut files = vec![file_name];
+    if pck_path.exists() {
+        if let Ok(rel) = pck_path.strip_prefix(base_dir) {
+            files.push(rel.to_string_lossy().to_string());
+        }
+    }
+
+    ModInfo {
+        name,
+        version: "unknown".to_string(),
+        description: String::new(),
+        enabled,
+        files,
+        source: None,
+        hash: hash_file(dll_path),
+        dependencies: Vec::new(),
+        size_bytes,
+    }
 }
 
 /// Scan a directory for mod manifests (.json files).
@@ -162,22 +214,100 @@ pub fn scan_disabled_mods(disabled_path: &Path) -> Vec<ModInfo> {
 
 fn scan_mods_inner(dir: &Path, enabled: bool) -> Vec<ModInfo> {
     let mut mods = Vec::new();
+    let mut found_names = std::collections::HashSet::new();
+
     if !dir.exists() {
         return mods;
     }
 
-    // Look for .json files in the top level
+    // PASS 1: Look for .json manifests at the top level
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("json") {
-                if let Some(info) = parse_manifest(&path, enabled) {
+            if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("json") {
+                if let Some(info) = parse_manifest(&path, dir, enabled) {
+                    found_names.insert(info.name.clone());
                     mods.push(info);
                 }
             }
         }
     }
 
+    // PASS 2: Look in subdirectories (one level deep)
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            // Skip known non-mod directories
+            let dir_name = entry.file_name().to_string_lossy().to_string();
+            if dir_name.starts_with('.') || dir_name == "__MACOSX" {
+                continue;
+            }
+
+            // Look for .json manifests inside this subdirectory
+            let mut found_json = false;
+            if let Ok(sub_entries) = fs::read_dir(&path) {
+                for sub_entry in sub_entries.flatten() {
+                    let sub_path = sub_entry.path();
+                    if sub_path.is_file()
+                        && sub_path.extension().and_then(|e| e.to_str()) == Some("json")
+                    {
+                        if let Some(info) = parse_manifest(&sub_path, dir, enabled) {
+                            if !found_names.contains(&info.name) {
+                                found_names.insert(info.name.clone());
+                                mods.push(info);
+                            }
+                            found_json = true;
+                            break; // One manifest per subdirectory
+                        }
+                    }
+                }
+            }
+
+            // If no JSON found, check for DLL-only mod in this subdirectory
+            if !found_json {
+                if let Ok(sub_entries) = fs::read_dir(&path) {
+                    for sub_entry in sub_entries.flatten() {
+                        let sub_path = sub_entry.path();
+                        if sub_path.is_file()
+                            && sub_path.extension().and_then(|e| e.to_str()) == Some("dll")
+                        {
+                            let info = dll_only_mod(&sub_path, dir, enabled);
+                            if !found_names.contains(&info.name) {
+                                found_names.insert(info.name.clone());
+                                mods.push(info);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // PASS 3: Find DLL-only mods at top level (DLLs without a matching .json)
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("dll") {
+                let stem = path
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                if !found_names.contains(&stem) {
+                    let info = dll_only_mod(&path, dir, enabled);
+                    found_names.insert(info.name.clone());
+                    mods.push(info);
+                }
+            }
+        }
+    }
+
+    // Sort by name for consistent ordering
+    mods.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     mods
 }
 
@@ -331,13 +461,16 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
 
         // If it's a json, try parsing as manifest
         if ext == "json" && manifest.is_none() {
-            manifest = parse_manifest(&dest_path, true);
+            manifest = parse_manifest(&dest_path, mods_path, true);
         }
     }
+
+    let size_bytes = calculate_mod_size(mods_path, &extracted_files);
 
     match manifest {
         Some(mut m) => {
             m.files = extracted_files;
+            m.size_bytes = size_bytes;
             Ok(m)
         }
         None => {
@@ -356,6 +489,7 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
                 source: None,
                 hash: hash_file(zip_path),
                 dependencies: Vec::new(),
+                size_bytes,
             })
         }
     }
@@ -381,15 +515,15 @@ pub fn get_installed_mods(state: tauri::State<'_, AppState>) -> std::result::Res
 
 /// Toggle a mod between enabled and disabled.
 #[tauri::command]
-pub fn toggle_mod(mod_name: String, enable: bool, state: tauri::State<'_, AppState>) -> std::result::Result<bool, String> {
+pub fn toggle_mod(name: String, enable: bool, state: tauri::State<'_, AppState>) -> std::result::Result<bool, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
     let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
 
     if enable {
-        enable_mod(&mod_name, mods_path, disabled_path).map_err(|e| e.to_string())?;
+        enable_mod(&name, mods_path, disabled_path).map_err(|e| e.to_string())?;
     } else {
-        disable_mod(&mod_name, mods_path, disabled_path).map_err(|e| e.to_string())?;
+        disable_mod(&name, mods_path, disabled_path).map_err(|e| e.to_string())?;
     }
 
     Ok(true)
@@ -397,15 +531,43 @@ pub fn toggle_mod(mod_name: String, enable: bool, state: tauri::State<'_, AppSta
 
 /// Permanently delete a mod.
 #[tauri::command]
-pub fn delete_mod_cmd(mod_name: String, state: tauri::State<'_, AppState>) -> std::result::Result<bool, String> {
+pub fn delete_mod_cmd(name: String, state: tauri::State<'_, AppState>) -> std::result::Result<bool, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
     let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
 
     // Try removing from both enabled and disabled dirs
-    let _ = delete_mod_files(&mod_name, mods_path);
-    let _ = delete_mod_files(&mod_name, disabled_path);
+    let _ = delete_mod_files(&name, mods_path);
+    let _ = delete_mod_files(&name, disabled_path);
 
+    Ok(true)
+}
+
+/// Enable all currently disabled mods.
+#[tauri::command]
+pub fn enable_all_mods(state: tauri::State<'_, AppState>) -> std::result::Result<bool, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
+    let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
+
+    let disabled = scan_disabled_mods(disabled_path);
+    for m in &disabled {
+        let _ = enable_mod(&m.name, mods_path, disabled_path);
+    }
+    Ok(true)
+}
+
+/// Disable all currently enabled mods.
+#[tauri::command]
+pub fn disable_all_mods(state: tauri::State<'_, AppState>) -> std::result::Result<bool, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
+    let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
+
+    let enabled = scan_mods(mods_path);
+    for m in &enabled {
+        let _ = disable_mod(&m.name, mods_path, disabled_path);
+    }
     Ok(true)
 }
 
@@ -421,11 +583,7 @@ pub fn install_mod_from_file(path: String, state: tauri::State<'_, AppState>) ->
 // ── Dependency Resolution ──────────────────────────────────────────────────
 
 /// Check which dependencies of a mod are not currently installed.
-///
-/// Reads the mod's JSON manifest for its `Dependencies` field and checks
-/// whether each dependency has a corresponding manifest in the mods directory.
 pub fn check_dependencies(mod_name: &str, mods_path: &Path) -> Vec<String> {
-    // Find the manifest for the target mod
     let manifest_path = mods_path.join(format!("{}.json", mod_name));
     let content = match fs::read_to_string(&manifest_path) {
         Ok(c) => c,
@@ -436,13 +594,11 @@ pub fn check_dependencies(mod_name: &str, mods_path: &Path) -> Vec<String> {
         Err(_) => return Vec::new(),
     };
 
-    // Collect names of all installed mods
     let installed: std::collections::HashSet<String> = scan_mods(mods_path)
         .into_iter()
         .map(|m| m.name)
         .collect();
 
-    // Return dependencies that are not installed
     raw.dependencies
         .into_iter()
         .filter(|dep| !installed.contains(dep))
@@ -450,9 +606,6 @@ pub fn check_dependencies(mod_name: &str, mods_path: &Path) -> Vec<String> {
 }
 
 /// Find all installed mods that depend on the given mod.
-///
-/// Scans every installed mod's manifest and returns the names of those
-/// that list `mod_name` in their `Dependencies`.
 pub fn get_dependents(mod_name: &str, mods_path: &Path) -> Vec<String> {
     scan_mods(mods_path)
         .into_iter()

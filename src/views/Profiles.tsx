@@ -16,6 +16,8 @@ import {
 } from 'lucide-react';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
+import { useApp } from '../contexts/AppContext';
+import { useToast } from '../contexts/ToastContext';
 import {
   listProfiles,
   createProfile,
@@ -44,19 +46,12 @@ export function ProfilesView() {
   const [sharingProfile, setSharingProfile] = useState<string | null>(null);
   const [shareResult, setShareResult] = useState<ShareResult | null>(null);
   const [copiedUrl, setCopiedUrl] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const { refreshAll } = useApp();
+  const toastCtx = useToast();
 
   useEffect(() => {
     loadProfiles();
   }, []);
-
-  // Auto-dismiss toast
-  useEffect(() => {
-    if (toast) {
-      const timer = setTimeout(() => setToast(null), 4000);
-      return () => clearTimeout(timer);
-    }
-  }, [toast]);
 
   async function loadProfiles() {
     try {
@@ -107,7 +102,7 @@ export function ProfilesView() {
     try {
       const json = await exportProfile(name);
       await navigator.clipboard.writeText(json);
-      setToast('Profile JSON copied to clipboard!');
+      toastCtx.success('Profile JSON copied to clipboard!');
     } catch (e) {
       console.error('Failed to export profile:', e);
     }
@@ -142,7 +137,7 @@ export function ProfilesView() {
       setShareResult(result);
       setCopiedUrl(false);
     } catch (e) {
-      setToast(`Failed to share: ${e instanceof Error ? e.message : String(e)}`);
+      toastCtx.error(`Failed to share: ${e instanceof Error ? e.message : String(e)}`);
       setSharingProfile(null);
     }
   }
@@ -154,7 +149,7 @@ export function ProfilesView() {
       setShareResult(result);
       setCopiedUrl(false);
     } catch (e) {
-      setToast(`Failed to re-share: ${e instanceof Error ? e.message : String(e)}`);
+      toastCtx.error(`Failed to re-share: ${e instanceof Error ? e.message : String(e)}`);
       setSharingProfile(null);
     }
   }
@@ -197,9 +192,10 @@ export function ProfilesView() {
       setProfiles((prev) => [...prev, profile]);
       setImportLink('');
       setShowImportLink(false);
-      setToast(`Imported profile "${profile.name}" successfully!`);
+      await refreshAll();
+      toastCtx.success(`Imported profile "${profile.name}" successfully!`);
     } catch (e) {
-      setToast(`Failed to import: ${e instanceof Error ? e.message : String(e)}`);
+      toastCtx.error(`Failed to import: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setImportingLink(false);
     }
@@ -207,19 +203,6 @@ export function ProfilesView() {
 
   return (
     <div className="p-6 space-y-4">
-      {/* Toast Notification */}
-      {toast && (
-        <div className="fixed top-4 right-4 z-50 bg-surface border border-border rounded-lg px-4 py-3 shadow-lg flex items-center gap-2 text-sm text-text animate-in fade-in slide-in-from-top-2">
-          <span>{toast}</span>
-          <button
-            onClick={() => setToast(null)}
-            className="text-text-dim hover:text-text"
-          >
-            <X size={14} />
-          </button>
-        </div>
-      )}
-
       {/* Share Result Modal */}
       {shareResult && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50">

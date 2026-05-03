@@ -3,25 +3,30 @@ import { Search, Star, Download, ExternalLink } from 'lucide-react';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { Badge } from '../components/Badge';
+import { useApp } from '../contexts/AppContext';
+import { useToast } from '../contexts/ToastContext';
 import { searchGithubMods, downloadGithubMod } from '../hooks/useTauri';
 import type { GitHubRepo } from '../types';
 
 export function BrowseView() {
+  const { refreshAll } = useApp();
+  const toast = useToast();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<GitHubRepo[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [installing, setInstalling] = useState<string | null>(null);
 
   async function handleSearch() {
     if (!query.trim()) return;
     try {
       setLoading(true);
-      setError(null);
       const repos = await searchGithubMods(query.trim());
       setResults(repos);
+      if (repos.length === 0) {
+        toast.info('No mods found. Try different keywords.');
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      toast.error(`Search failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setLoading(false);
     }
@@ -30,9 +35,11 @@ export function BrowseView() {
   async function handleInstall(repo: GitHubRepo) {
     try {
       setInstalling(repo.full_name);
-      await downloadGithubMod(repo.owner, repo.name);
+      const mod = await downloadGithubMod(repo.owner.login, repo.name);
+      await refreshAll();
+      toast.success(`Installed: ${mod.name}`);
     } catch (e) {
-      console.error('Failed to install mod:', e);
+      toast.error(`Failed to install ${repo.name}: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setInstalling(null);
     }
@@ -73,13 +80,6 @@ export function BrowseView() {
         </Button>
       </form>
 
-      {/* Error */}
-      {error && (
-        <Card className="text-center py-4">
-          <p className="text-danger text-sm">{error}</p>
-        </Card>
-      )}
-
       {/* Results */}
       {results.length > 0 ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
@@ -93,9 +93,9 @@ export function BrowseView() {
                     </h3>
                     <p className="text-xs text-text-dim">{repo.full_name}</p>
                   </div>
-                  <div className="flex items-center gap-1 text-xs text-warning ml-2 shrink-0">
+                  <div className="flex items-center gap-1 text-xs text-yellow-400 ml-2 shrink-0">
                     <Star size={12} />
-                    {repo.stars}
+                    {repo.stargazers_count}
                   </div>
                 </div>
                 <p className="text-xs text-text-muted line-clamp-2 mb-3">
@@ -103,12 +103,10 @@ export function BrowseView() {
                 </p>
               </div>
               <div className="flex items-center justify-between">
-                {repo.latest_version && (
-                  <Badge variant="github">{repo.latest_version}</Badge>
-                )}
+                <Badge variant="github">GitHub</Badge>
                 <div className="flex gap-2 ml-auto">
                   <a
-                    href={repo.url}
+                    href={repo.html_url}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="p-1.5 rounded-md text-text-dim hover:text-text hover:bg-surface-hover transition-colors"

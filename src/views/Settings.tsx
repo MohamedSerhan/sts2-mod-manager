@@ -1,37 +1,58 @@
-import { useState } from 'react';
-import { FolderSearch, Key, ExternalLink } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { FolderSearch, Key, FolderOpen } from 'lucide-react';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
-import { detectGamePath, setGamePath, setNexusApiKey } from '../hooks/useTauri';
+import { useApp } from '../contexts/AppContext';
+import { useToast } from '../contexts/ToastContext';
+import {
+  detectGamePath,
+  setGamePath,
+  setNexusApiKey,
+  setGithubToken,
+  openGameFolder,
+  openModsFolder,
+} from '../hooks/useTauri';
 
 export function SettingsView() {
+  const { gameInfo, refreshAll } = useApp();
+  const toast = useToast();
   const [gamePath, setGamePathValue] = useState('');
   const [nexusKey, setNexusKey] = useState('');
-  const [githubToken, setGithubToken] = useState('');
-  const [status, setStatus] = useState<string | null>(null);
+  const [githubToken, setGithubTokenValue] = useState('');
+
+  // Load current game path on mount
+  useEffect(() => {
+    if (gameInfo?.game_path) {
+      setGamePathValue(gameInfo.game_path);
+    }
+  }, [gameInfo?.game_path]);
 
   async function handleDetectGame() {
     try {
       const info = await detectGamePath();
-      if (info.path) {
-        setGamePathValue(info.path);
-        setStatus('Game detected successfully!');
+      if (info.valid && info.game_path) {
+        setGamePathValue(info.game_path);
+        await refreshAll();
+        toast.success('Game detected successfully!');
       } else {
-        setStatus('Could not auto-detect game path.');
+        toast.error('Could not auto-detect game path. Please set it manually.');
       }
     } catch (e) {
-      setStatus(e instanceof Error ? e.message : String(e));
+      toast.error(e instanceof Error ? e.message : String(e));
     }
   }
 
   async function handleSetGamePath() {
     if (!gamePath.trim()) return;
     try {
-      await setGamePath(gamePath.trim());
-      setStatus('Game path updated.');
+      const info = await setGamePath(gamePath.trim());
+      if (info.valid) {
+        await refreshAll();
+        toast.success('Game path updated.');
+      }
     } catch (e) {
-      setStatus(e instanceof Error ? e.message : String(e));
+      toast.error(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -39,9 +60,37 @@ export function SettingsView() {
     if (!nexusKey.trim()) return;
     try {
       await setNexusApiKey(nexusKey.trim());
-      setStatus('Nexus API key saved.');
+      toast.success('Nexus API key saved.');
+      setNexusKey('');
     } catch (e) {
-      setStatus(e instanceof Error ? e.message : String(e));
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function handleSaveGithubToken() {
+    if (!githubToken.trim()) return;
+    try {
+      await setGithubToken(githubToken.trim());
+      toast.success('GitHub token saved.');
+      setGithubTokenValue('');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function handleOpenGameFolder() {
+    try {
+      await openGameFolder();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function handleOpenModsFolder() {
+    try {
+      await openModsFolder();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -54,12 +103,6 @@ export function SettingsView() {
         </p>
       </div>
 
-      {status && (
-        <div className="bg-primary/10 border border-primary/30 rounded-lg px-4 py-2 text-sm text-primary">
-          {status}
-        </div>
-      )}
-
       {/* Game Path */}
       <Card className="space-y-3">
         <h3 className="text-sm font-semibold text-text flex items-center gap-2">
@@ -69,9 +112,10 @@ export function SettingsView() {
         <div className="flex gap-2">
           <div className="flex-1">
             <Input
-              placeholder="C:\Program Files\Steam\steamapps\common\STS2"
+              placeholder="C:\Program Files\Steam\steamapps\common\Slay the Spire 2"
               value={gamePath}
               onChange={(e) => setGamePathValue(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSetGamePath()}
             />
           </div>
           <Button variant="secondary" size="md" onClick={handleDetectGame}>
@@ -81,6 +125,21 @@ export function SettingsView() {
             Save
           </Button>
         </div>
+        {gameInfo?.valid && (
+          <div className="flex gap-2 text-xs">
+            <span className="text-green-400">
+              {gameInfo.mods_count} mods detected
+            </span>
+            <span className="text-text-dim">|</span>
+            <button onClick={handleOpenGameFolder} className="text-primary hover:underline">
+              Open Game Folder
+            </button>
+            <span className="text-text-dim">|</span>
+            <button onClick={handleOpenModsFolder} className="text-primary hover:underline">
+              Open Mods Folder
+            </button>
+          </div>
+        )}
       </Card>
 
       {/* Nexus API Key */}
@@ -96,6 +155,7 @@ export function SettingsView() {
               placeholder="Enter your Nexus API key"
               value={nexusKey}
               onChange={(e) => setNexusKey(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSaveNexusKey()}
             />
           </div>
           <Button size="md" onClick={handleSaveNexusKey}>
@@ -106,9 +166,8 @@ export function SettingsView() {
           href="https://www.nexusmods.com/users/myaccount?tab=api"
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-primary hover:text-primary-hover transition-colors"
+          className="inline-flex items-center gap-1 text-xs text-primary hover:underline transition-colors"
         >
-          <ExternalLink size={12} />
           Get your API key from Nexus Mods
         </a>
       </Card>
@@ -126,16 +185,33 @@ export function SettingsView() {
               type="password"
               placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
               value={githubToken}
-              onChange={(e) => setGithubToken(e.target.value)}
+              onChange={(e) => setGithubTokenValue(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSaveGithubToken()}
             />
           </div>
-          <Button variant="secondary" size="md">
+          <Button variant="secondary" size="md" onClick={handleSaveGithubToken}>
             Save
           </Button>
         </div>
         <p className="text-xs text-text-dim">
-          A GitHub token increases the API rate limit for mod searches.
+          Increases GitHub API rate limit from 60 to 5,000 requests/hour for mod searches.
         </p>
+      </Card>
+
+      {/* Quick Actions */}
+      <Card className="space-y-3">
+        <h3 className="text-sm font-semibold text-text flex items-center gap-2">
+          <FolderOpen size={16} />
+          Quick Actions
+        </h3>
+        <div className="flex gap-2 flex-wrap">
+          <Button variant="secondary" size="sm" onClick={handleOpenGameFolder}>
+            Open Game Folder
+          </Button>
+          <Button variant="secondary" size="sm" onClick={handleOpenModsFolder}>
+            Open Mods Folder
+          </Button>
+        </div>
       </Card>
 
       {/* Protocol Handlers */}
@@ -146,23 +222,19 @@ export function SettingsView() {
             <div>
               <p className="text-sm text-text">sts2mm:// handler</p>
               <p className="text-xs text-text-dim">
-                Handle one-click install links
+                Handle one-click install links (registered automatically)
               </p>
             </div>
-            <Button variant="secondary" size="sm">
-              Register
-            </Button>
+            <span className="text-xs text-green-400">Active</span>
           </div>
           <div className="flex items-center justify-between py-1">
             <div>
               <p className="text-sm text-text">nxm:// handler</p>
               <p className="text-xs text-text-dim">
-                Handle Nexus Mods download links
+                Handle Nexus Mods download links (registered automatically)
               </p>
             </div>
-            <Button variant="secondary" size="sm">
-              Register
-            </Button>
+            <span className="text-xs text-green-400">Active</span>
           </div>
         </div>
       </Card>
@@ -172,7 +244,7 @@ export function SettingsView() {
         <h3 className="text-sm font-semibold text-text">About</h3>
         <div className="text-xs text-text-dim space-y-1">
           <p>STS2 Mod Manager v0.1.0</p>
-          <p>Built with Tauri + React</p>
+          <p>Built with Tauri 2 + React + Rust</p>
           <p>Manage your Slay the Spire 2 mods with ease.</p>
         </div>
       </Card>

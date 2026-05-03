@@ -4,7 +4,7 @@ use crate::error::{AppError, Result};
 use crate::profiles::Profile;
 use crate::state::AppState;
 
-const DEFAULT_SHARING_URL: &str = "https://sts2mm.dev";
+const DEFAULT_SHARING_URL: &str = "https://sts2mm.workers.dev";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShareResult {

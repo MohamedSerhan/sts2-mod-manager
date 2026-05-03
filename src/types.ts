@@ -7,12 +7,13 @@ export interface ModInfo {
   source: string | null;
   hash: string | null;
   dependencies: string[];
+  size_bytes: number;
 }
 
 export interface Profile {
   name: string;
-  game_version: string;
-  created_by: string;
+  game_version: string | null;
+  created_by: string | null;
   mods: ProfileMod[];
   created_at: string;
   updated_at: string;
@@ -21,25 +22,28 @@ export interface Profile {
 export interface ProfileMod {
   name: string;
   version: string;
-  source: string;
+  source: string | null;
   hash: string | null;
   files: string[];
 }
 
 export interface GameInfo {
-  path: string | null;
-  version: string | null;
+  game_path: string | null;
+  mods_path: string | null;
+  disabled_mods_path: string | null;
   mods_count: number;
+  disabled_count: number;
+  valid: boolean;
 }
 
 export interface GitHubRepo {
-  owner: string;
-  name: string;
   full_name: string;
-  description: string;
-  stars: number;
-  url: string;
-  latest_version: string | null;
+  name: string;
+  description: string | null;
+  html_url: string;
+  stargazers_count: number;
+  updated_at: string;
+  owner: { login: string; avatar_url: string };
 }
 
 export interface GitHubRelease {
@@ -52,16 +56,16 @@ export interface GitHubRelease {
 export interface GitHubAsset {
   name: string;
   size: number;
-  download_url: string;
+  browser_download_url: string;
 }
 
 export interface NexusModInfo {
   mod_id: number;
-  name: string;
-  summary: string;
-  version: string;
-  author: string;
-  category: string;
+  name: string | null;
+  summary: string | null;
+  version: string | null;
+  author: string | null;
+  category_id: number | null;
 }
 
 export interface ModUpdate {

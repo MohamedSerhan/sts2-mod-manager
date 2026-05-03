@@ -1,6 +1,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { ModInfo, Profile, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo } from '../types';
 
+// ── Game Detection & QOL ───────────────────────────────────────────────────
+
 export async function detectGamePath(): Promise<GameInfo> {
   return invoke('detect_game_path');
 }
@@ -8,6 +10,28 @@ export async function detectGamePath(): Promise<GameInfo> {
 export async function setGamePath(path: string): Promise<GameInfo> {
   return invoke('set_game_path', { path });
 }
+
+export async function getGameInfo(): Promise<GameInfo> {
+  return invoke('get_game_info');
+}
+
+export async function openModsFolder(): Promise<boolean> {
+  return invoke('open_mods_folder');
+}
+
+export async function openGameFolder(): Promise<boolean> {
+  return invoke('open_game_folder');
+}
+
+export async function launchGame(): Promise<boolean> {
+  return invoke('launch_game');
+}
+
+export async function setGithubToken(token: string): Promise<boolean> {
+  return invoke('set_github_token', { token });
+}
+
+// ── Mod Management ─────────────────────────────────────────────────────────
 
 export async function getInstalledMods(): Promise<ModInfo[]> {
   return invoke('get_installed_mods');
@@ -21,6 +45,20 @@ export async function deleteMod(name: string): Promise<void> {
   return invoke('delete_mod_cmd', { name });
 }
 
+export async function enableAllMods(): Promise<boolean> {
+  return invoke('enable_all_mods');
+}
+
+export async function disableAllMods(): Promise<boolean> {
+  return invoke('disable_all_mods');
+}
+
+export async function installModFromFile(path: string): Promise<ModInfo> {
+  return invoke('install_mod_from_file', { path });
+}
+
+// ── Downloads ──────────────────────────────────────────────────────────────
+
 export async function searchGithubMods(query: string): Promise<GitHubRepo[]> {
   return invoke('search_github_mods', { query });
 }
@@ -32,6 +70,14 @@ export async function downloadGithubMod(owner: string, repo: string, tag?: strin
 export async function downloadUrlMod(url: string): Promise<ModInfo> {
   return invoke('download_url_mod', { url });
 }
+
+// ── Nexus Mods ─────────────────────────────────────────────────────────────
+
+export async function setNexusApiKey(key: string): Promise<void> {
+  return invoke('set_nexus_api_key', { key });
+}
+
+// ── Profiles ───────────────────────────────────────────────────────────────
 
 export async function listProfiles(): Promise<Profile[]> {
   return invoke('list_profiles_cmd');
@@ -61,13 +107,7 @@ export async function importProfile(json: string): Promise<Profile> {
   return invoke('import_profile_cmd', { json });
 }
 
-export async function setNexusApiKey(key: string): Promise<void> {
-  return invoke('set_nexus_api_key', { key });
-}
-
-export async function installModFromFile(path: string): Promise<ModInfo> {
-  return invoke('install_mod_from_file', { path });
-}
+// ── Curator Workflow ───────────────────────────────────────────────────────
 
 export async function checkForUpdates(): Promise<ModUpdate[]> {
   return invoke('check_for_updates');
@@ -84,6 +124,8 @@ export async function updateAllMods(): Promise<ModInfo[]> {
 export async function quickAddMod(url: string): Promise<QuickAddResult> {
   return invoke('quick_add_mod', { url });
 }
+
+// ── Sharing ────────────────────────────────────────────────────────────────
 
 export async function shareProfile(name: string): Promise<ShareResult> {
   return invoke('share_profile', { name });

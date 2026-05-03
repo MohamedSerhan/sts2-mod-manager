@@ -46,9 +46,7 @@ jobs:
             librsvg2-dev
 
       - name: Install Rust stable
-        uses: dtolnay/rust-action/setup@v1
-        with:
-          toolchain: stable
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Add Rust targets (macOS universal)
         if: matrix.platform == 'macos-latest'

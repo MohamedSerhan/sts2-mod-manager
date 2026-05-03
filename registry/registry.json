@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "updated_at": "2026-05-03T00:00:00Z",
+  "mods": [
+    {
+      "name": "BaseLib",
+      "description": "Base modding library for STS2 - required by most mods",
+      "github": "Alchyr/BaseLib-StS2",
+      "nexus_id": null,
+      "category": "framework",
+      "tags": ["required", "library"]
+    },
+    {
+      "name": "Minty Spire 2",
+      "description": "Quality of life compilation mod",
+      "github": "erasels/Minty-Spire-2",
+      "nexus_id": null,
+      "category": "qol",
+      "tags": ["qol", "ui"]
+    },
+    {
+      "name": "Quick Restart",
+      "description": "Quick room reload mod",
+      "github": "erasels/StS2-Quick-Restart",
+      "nexus_id": null,
+      "category": "qol",
+      "tags": ["qol"]
+    },
+    {
+      "name": "Mod Template",
+      "description": "Official mod project template for creating new mods",
+      "github": "Alchyr/ModTemplate-StS2",
+      "nexus_id": null,
+      "category": "development",
+      "tags": ["template", "development"]
+    }
+  ]
+}

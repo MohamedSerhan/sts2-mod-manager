@@ -1,0 +1,15 @@
+{
+  "updated_at": "2026-05-03T00:00:00Z",
+  "versions": {
+    "Alchyr/BaseLib-StS2": {
+      "tag": "v3.1.0",
+      "published_at": "2026-04-28T00:00:00Z",
+      "download_url": "https://github.com/Alchyr/BaseLib-StS2/releases/latest"
+    },
+    "erasels/Minty-Spire-2": {
+      "tag": "v1.2.0",
+      "published_at": "2026-04-20T00:00:00Z",
+      "download_url": "https://github.com/erasels/Minty-Spire-2/releases/latest"
+    }
+  }
+}

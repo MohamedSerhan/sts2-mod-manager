@@ -1,0 +1,85 @@
+name: Update Mod Versions
+
+on:
+  schedule:
+    # Run daily at 06:00 UTC
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-versions:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Fetch latest versions from GitHub
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          REGISTRY="registry/registry.json"
+          OUTPUT="registry/latest_versions.json"
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          # Start building the JSON output
+          echo "{" > "$OUTPUT"
+          echo "  \"updated_at\": \"$TIMESTAMP\"," >> "$OUTPUT"
+          echo "  \"versions\": {" >> "$OUTPUT"
+
+          FIRST=true
+
+          # Read each mod's GitHub repo from the registry
+          for REPO in $(jq -r '.mods[] | select(.github != null) | .github' "$REGISTRY"); do
+            echo "Fetching latest release for $REPO..."
+
+            # Get latest release info via GitHub API
+            RELEASE_JSON=$(gh api "repos/$REPO/releases/latest" 2>/dev/null || echo "")
+
+            if [ -z "$RELEASE_JSON" ] || echo "$RELEASE_JSON" | jq -e '.message' > /dev/null 2>&1; then
+              echo "  No release found for $REPO, skipping."
+              continue
+            fi
+
+            TAG=$(echo "$RELEASE_JSON" | jq -r '.tag_name')
+            PUBLISHED=$(echo "$RELEASE_JSON" | jq -r '.published_at')
+            DOWNLOAD_URL="https://github.com/$REPO/releases/latest"
+
+            if [ "$FIRST" = true ]; then
+              FIRST=false
+            else
+              echo "," >> "$OUTPUT"
+            fi
+
+            # Write entry (no trailing comma handling via FIRST flag)
+            printf '    "%s": {\n      "tag": "%s",\n      "published_at": "%s",\n      "download_url": "%s"\n    }' \
+              "$REPO" "$TAG" "$PUBLISHED" "$DOWNLOAD_URL" >> "$OUTPUT"
+          done
+
+          echo "" >> "$OUTPUT"
+          echo "  }" >> "$OUTPUT"
+          echo "}" >> "$OUTPUT"
+
+          # Pretty-print with jq
+          jq '.' "$OUTPUT" > "${OUTPUT}.tmp" && mv "${OUTPUT}.tmp" "$OUTPUT"
+
+          echo "Updated $OUTPUT"
+
+      - name: Check for changes
+        id: changes
+        run: |
+          git diff --quiet registry/latest_versions.json || echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add registry/latest_versions.json
+          git commit -m "chore: update mod version data [automated]"
+          git push

@@ -100,3 +100,70 @@ jobs:
             src-tauri/target/universal-apple-darwin/release/bundle/**/*.dmg
           if-no-files-found: warn
           retention-days: 7
+
+  # After all platform builds finish, format the release body with download links
+  format-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate release body
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          REPO="${GITHUB_REPOSITORY}"
+          BASE="https://github.com/${REPO}/releases/download/${TAG}"
+
+          # Get the list of assets for this release
+          ASSETS=$(gh release view "$TAG" --json assets --jq '.assets[].name')
+
+          # Helper: link if asset exists
+          link() {
+            local file="$1" label="$2" desc="$3" bold="${4:-false}"
+            if echo "$ASSETS" | grep -qF "$file"; then
+              if [ "$bold" = "true" ]; then
+                echo "- **[${label}](${BASE}/${file})** - ${desc}"
+              else
+                echo "- [${label}](${BASE}/${file}) - ${desc}"
+              fi
+            fi
+          }
+
+          # Build the body
+          BODY="## STS2 Mod Manager ${TAG}
+
+          ### Download for your platform
+
+          #### Windows
+          $(link "STS2.Mod.Manager_${VERSION}_x64-setup.exe" "STS2.Mod.Manager_${VERSION}_x64-setup.exe" "Recommended. Double-click to install." true)
+          $(link "STS2.Mod.Manager_${VERSION}_x64_en-US.msi" "STS2.Mod.Manager_${VERSION}_x64_en-US.msi" "Alternative MSI installer.")
+
+          #### macOS
+          $(link "STS2.Mod.Manager_${VERSION}_universal.dmg" "STS2.Mod.Manager_${VERSION}_universal.dmg" "Works on both Intel and Apple Silicon Macs. Open the DMG and drag to Applications." true)
+
+          #### Linux
+          $(link "STS2.Mod.Manager_${VERSION}_amd64.deb" "STS2.Mod.Manager_${VERSION}_amd64.deb" "For Ubuntu, Debian, Pop!_OS, Linux Mint. Install with \`sudo dpkg -i\`." true)
+          $(link "STS2.Mod.Manager-${VERSION}-1.x86_64.rpm" "STS2.Mod.Manager-${VERSION}-1.x86_64.rpm" "For Fedora, openSUSE. Install with \`sudo rpm -i\`." true)
+          $(link "STS2.Mod.Manager_${VERSION}_amd64.AppImage" "STS2.Mod.Manager_${VERSION}_amd64.AppImage" "Portable, no install needed. **Note:** May show a white screen on Arch-based distros (CachyOS, Manjaro) -- use the .deb or .rpm instead.")
+
+          > **Arch/CachyOS users:** The AppImage has a known WebKitGTK issue. Use the .deb package with \`debtap\`:
+          > \`\`\`
+          > yay -S debtap && sudo debtap -u
+          > sudo debtap STS2.Mod.Manager_${VERSION}_amd64.deb
+          > sudo pacman -U sts2-mod-manager-*.pkg.tar.zst
+          > \`\`\`
+
+          ---
+
+          **Full Changelog**: https://github.com/${REPO}/compare/$(gh release list --limit 2 --json tagName --jq '.[1].tagName')...${TAG}"
+
+          # Strip leading whitespace from heredoc-style indentation
+          BODY=$(echo "$BODY" | sed 's/^          //')
+
+          # Update the release body
+          gh release edit "$TAG" --notes "$BODY"

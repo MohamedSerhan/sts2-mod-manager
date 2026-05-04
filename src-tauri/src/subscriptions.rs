@@ -287,33 +287,76 @@ pub async fn apply_subscription_update(
     // Save the profile locally
     crate::profiles::save_profile(&remote, &profiles_path).map_err(|e| e.to_string())?;
 
-    // ── STEP 1: Download missing mods BEFORE applying the profile ──
+    // ── STEP 1: Download missing mods and restore version-mismatched mods ──
     let local_mods = crate::mods::scan_mods(&mods_path);
     let local_disabled = crate::mods::scan_disabled_mods(&disabled_path);
-    // Build comprehensive identifier set (name, folder_name, mod_id)
-    let mut local_identifiers: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for m in local_mods.iter().chain(local_disabled.iter()) {
-        local_identifiers.insert(m.name.clone());
+    let all_on_disk: Vec<crate::mods::ModInfo> = local_mods.into_iter()
+        .chain(local_disabled.into_iter())
+        .collect();
+
+    // Build a map from identifiers to on-disk mod info (for version comparison)
+    let mut on_disk_by_id: std::collections::HashMap<String, &crate::mods::ModInfo> = std::collections::HashMap::new();
+    for m in &all_on_disk {
+        on_disk_by_id.insert(m.name.clone(), m);
         if let Some(ref folder) = m.folder_name {
-            local_identifiers.insert(folder.clone());
+            on_disk_by_id.insert(folder.clone(), m);
         }
         if let Some(ref id) = m.mod_id {
-            local_identifiers.insert(id.clone());
+            on_disk_by_id.insert(id.clone(), m);
         }
     }
 
     let mod_sources_db = crate::mod_sources::load_sources(&config_path);
 
     for pm in &remote.mods {
-        // Check if mod exists by name, folder_name, or mod_id
-        let already_exists = local_identifiers.contains(&pm.name)
-            || pm.folder_name.as_ref().map_or(false, |f| local_identifiers.contains(f))
-            || pm.mod_id.as_ref().map_or(false, |id| local_identifiers.contains(id));
-        if already_exists {
-            continue;
+        // Find matching on-disk mod
+        let on_disk_mod = on_disk_by_id.get(&pm.name)
+            .or_else(|| pm.folder_name.as_ref().and_then(|f| on_disk_by_id.get(f)))
+            .or_else(|| pm.mod_id.as_ref().and_then(|id| on_disk_by_id.get(id)))
+            .copied();
+
+        if let Some(disk_mod) = on_disk_mod {
+            let disk_ver = disk_mod.version.trim_start_matches('v');
+            let profile_ver = pm.version.trim_start_matches('v');
+
+            let version_ok = disk_ver == profile_ver
+                || profile_ver == "unknown" || profile_ver == "0.0.0"
+                || disk_ver == "unknown" || disk_ver == "0.0.0";
+
+            if version_ok {
+                continue;
+            }
+
+            // Version mismatch -- reinstall from bundle or cache
+            log::info!(
+                "Subscription update: mod '{}' version mismatch (disk: {}, remote: {})",
+                pm.name, disk_mod.version, pm.version
+            );
+
+            // Cache current version before deleting
+            crate::mods::cache_mod_version(disk_mod, if disk_mod.enabled { &mods_path } else { &disabled_path }, &cache_path);
+
+            // Try local cache first
+            if crate::mods::get_cached_mod_path(&cache_path, &pm.name, &pm.version).is_some() {
+                let base = if disk_mod.enabled { &mods_path } else { &disabled_path };
+                crate::mods::delete_mod_files_by_info(disk_mod, base);
+                if crate::mods::restore_mod_from_cache(&cache_path, &pm.name, &pm.version, &mods_path).is_ok() {
+                    log::info!("Restored '{}' v{} from local cache", pm.name, pm.version);
+                    continue;
+                }
+            }
+
+            if pm.bundle_url.is_some() {
+                let base = if disk_mod.enabled { &mods_path } else { &disabled_path };
+                crate::mods::delete_mod_files_by_info(disk_mod, base);
+                // Fall through to download
+            } else {
+                log::info!("Mod '{}' version mismatch but no bundle or cache -- keeping disk version", pm.name);
+                continue;
+            }
         }
 
-        log::info!("Subscription update: mod '{}' missing, downloading", pm.name);
+        log::info!("Subscription update: mod '{}' needs download", pm.name);
         let mut downloaded = false;
 
         // Prefer bundle_url (curator's bundled copy)

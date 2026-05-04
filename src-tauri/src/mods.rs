@@ -596,6 +596,174 @@ pub fn move_directory(src: &Path, dest: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Delete a mod's files from disk using its scanned file list.
+/// Used during profile switching to remove version-mismatched mods before reinstalling.
+pub fn delete_mod_files_by_info(mod_info: &ModInfo, base_path: &Path) {
+    let mut parent_dirs = std::collections::HashSet::new();
+
+    for file_rel in &mod_info.files {
+        let normalized = file_rel.replace('\\', "/");
+        let file_path = base_path.join(&normalized);
+        if file_path.is_dir() {
+            let _ = fs::remove_dir_all(&file_path);
+        } else if file_path.exists() {
+            let _ = fs::remove_file(&file_path);
+        }
+        if let Some(parent_rel) = Path::new(&normalized).parent() {
+            if !parent_rel.as_os_str().is_empty() {
+                parent_dirs.insert(base_path.join(parent_rel));
+            }
+        }
+    }
+
+    for dir in &parent_dirs {
+        if dir.is_dir() {
+            if fs::read_dir(dir).map(|mut d| d.next().is_none()).unwrap_or(false) {
+                let _ = fs::remove_dir(dir);
+            }
+        }
+    }
+
+    log::info!("Deleted {} files for mod '{}' from {}", mod_info.files.len(), mod_info.name, base_path.display());
+}
+
+// ── Local Mod Version Cache ────────────────────────────────────────────────
+
+/// Sanitize a string for use in filenames.
+fn sanitize_for_filename(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '_' })
+        .collect()
+}
+
+/// Build the local cache path for a specific mod version.
+fn mod_cache_path(cache_path: &Path, mod_name: &str, version: &str) -> PathBuf {
+    let safe_name = sanitize_for_filename(mod_name);
+    let safe_ver = sanitize_for_filename(version.trim_start_matches('v'));
+    cache_path.join("mod_versions").join(format!("{}_{}.zip", safe_name, safe_ver))
+}
+
+/// Cache a mod's current files to a local versioned zip.
+/// Returns the cache file path if successful. Skips if already cached.
+pub fn cache_mod_version(
+    mod_info: &ModInfo,
+    base_path: &Path,
+    cache_path: &Path,
+) -> Option<PathBuf> {
+    let ver = mod_info.version.trim_start_matches('v');
+    if ver == "unknown" || ver == "0.0.0" || ver.is_empty() {
+        return None;
+    }
+
+    let dest = mod_cache_path(cache_path, &mod_info.name, &mod_info.version);
+
+    if dest.exists() {
+        return Some(dest);
+    }
+
+    if let Some(parent) = dest.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+
+    let file = match fs::File::create(&dest) {
+        Ok(f) => f,
+        Err(e) => {
+            log::warn!("Failed to create cache file for '{}': {}", mod_info.name, e);
+            return None;
+        }
+    };
+
+    let mut zip_writer = zip::ZipWriter::new(file);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    for file_rel in &mod_info.files {
+        let normalized = file_rel.replace('\\', "/");
+        let file_path = base_path.join(&normalized);
+
+        if file_path.is_file() {
+            if zip_writer.start_file(&normalized, options).is_err() {
+                continue;
+            }
+            if let Ok(data) = fs::read(&file_path) {
+                let _ = io::Write::write_all(&mut zip_writer, &data);
+            }
+        } else if file_path.is_dir() {
+            if let Ok(entries) = fs::read_dir(&file_path) {
+                for entry in entries.flatten() {
+                    if entry.path().is_file() {
+                        let entry_rel = format!("{}/{}", normalized, entry.file_name().to_string_lossy());
+                        if zip_writer.start_file(&entry_rel, options).is_err() {
+                            continue;
+                        }
+                        if let Ok(data) = fs::read(entry.path()) {
+                            let _ = io::Write::write_all(&mut zip_writer, &data);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    match zip_writer.finish() {
+        Ok(_) => {
+            log::info!("Cached mod '{}' v{} to local cache", mod_info.name, mod_info.version);
+            Some(dest)
+        }
+        Err(e) => {
+            log::warn!("Failed to finalize cache zip for '{}': {}", mod_info.name, e);
+            let _ = fs::remove_file(&dest);
+            None
+        }
+    }
+}
+
+/// Check if a cached version of a mod exists locally.
+pub fn get_cached_mod_path(cache_path: &Path, mod_name: &str, version: &str) -> Option<PathBuf> {
+    let path = mod_cache_path(cache_path, mod_name, version);
+    if path.exists() { Some(path) } else { None }
+}
+
+/// Restore a mod from the local version cache by extracting its zip to mods_path.
+pub fn restore_mod_from_cache(
+    cache_path: &Path,
+    mod_name: &str,
+    version: &str,
+    mods_path: &Path,
+) -> Result<()> {
+    let zip_path = mod_cache_path(cache_path, mod_name, version);
+    if !zip_path.exists() {
+        return Err(AppError::Other(format!(
+            "No cached version for '{}' v{}",
+            mod_name, version
+        )));
+    }
+
+    let file = fs::File::open(&zip_path)?;
+    let mut archive = zip::ZipArchive::new(file)
+        .map_err(|e| AppError::Other(format!("Invalid cache zip for '{}': {}", mod_name, e)))?;
+
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i)
+            .map_err(|e| AppError::Other(e.to_string()))?;
+        let Some(outpath) = entry.enclosed_name().map(|p| mods_path.join(p)) else {
+            continue;
+        };
+        if entry.name().ends_with('/') {
+            fs::create_dir_all(&outpath)?;
+        } else {
+            if let Some(parent) = outpath.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let mut outfile = fs::File::create(&outpath)?;
+            io::copy(&mut entry, &mut outfile)?;
+        }
+    }
+
+    log::info!("Restored mod '{}' v{} from local cache", mod_name, version);
+    Ok(())
+}
+
 /// Permanently remove a mod and all its files.
 pub fn delete_mod_files(mod_name: &str, mods_path: &Path) -> Result<()> {
     let mut found = false;

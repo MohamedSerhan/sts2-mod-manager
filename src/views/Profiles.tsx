@@ -78,19 +78,19 @@ export function ProfilesView() {
     };
     loadShareInfos();
 
-    // Load drift for all profiles
+    // Load drift only for the active profile (other profiles will naturally differ from disk)
     const loadDrift = async () => {
       const map: Record<string, ProfileDrift> = {};
-      for (const p of profiles) {
+      if (activeProfile) {
         try {
-          const drift = await getProfileDrift(p.name);
-          if (drift.has_drift) map[p.name] = drift;
+          const drift = await getProfileDrift(activeProfile);
+          if (drift.has_drift) map[activeProfile] = drift;
         } catch { /* ignore */ }
       }
       setDriftMap(map);
     };
     loadDrift();
-  }, [profiles]);
+  }, [profiles, activeProfile]);
 
   async function loadProfiles() {
     try {

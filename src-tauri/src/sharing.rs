@@ -307,10 +307,12 @@ fn zip_mod_files(mod_name: &str, files: &[String], mods_path: &std::path::Path) 
 }
 
 /// Upload a binary file (mod zip) to the profiles repo using base64 encoding.
+/// Uses versioned filenames so different profile versions don't overwrite each other.
 async fn upload_mod_bundle(
     token: &str,
     username: &str,
     mod_name: &str,
+    version: &str,
     zip_data: &[u8],
 ) -> Result<String> {
     let client = build_client(token);
@@ -318,7 +320,12 @@ async fn upload_mod_bundle(
         .chars()
         .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
         .collect::<String>();
-    let filename = format!("mods/{}.zip", safe_name);
+    let safe_ver = version
+        .trim_start_matches('v')
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '.' || c == '-' { c } else { '_' })
+        .collect::<String>();
+    let filename = format!("mods/{}_{}.zip", safe_name, safe_ver);
     let url = format!(
         "https://api.github.com/repos/{}/{}/contents/{}",
         username, PROFILES_REPO, filename
@@ -339,7 +346,7 @@ async fn upload_mod_bundle(
 
     let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, zip_data);
     let mut body = serde_json::json!({
-        "message": format!("Bundle mod: {}", mod_name),
+        "message": format!("Bundle mod: {} v{}", mod_name, version),
         "content": encoded,
     });
     if let Some(sha) = &existing_sha {
@@ -457,29 +464,70 @@ pub async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::P
 }
 
 /// Fetch a profile from any user's profiles repo (public, no auth needed).
+/// Uses the GitHub Contents API to avoid CDN caching issues with raw.githubusercontent.com.
+/// This ensures that recently reshared profiles are fetched immediately.
 pub async fn fetch_shared_profile(owner: &str, filename: &str) -> Result<Profile> {
-    // Use raw.githubusercontent.com for public access without auth
-    let url = format!(
-        "https://raw.githubusercontent.com/{}/{}/main/{}",
-        owner, PROFILES_REPO, filename
-    );
-
     let client = reqwest::Client::builder()
         .user_agent("sts2-mod-manager/0.1")
         .build()
         .unwrap_or_default();
 
-    let resp = client.get(&url).send().await?;
+    // Primary: use GitHub Contents API with raw accept header to bypass CDN cache.
+    // Works without auth for public repos (60 req/hour rate limit, plenty for subscription checks).
+    let api_url = format!(
+        "https://api.github.com/repos/{}/{}/contents/{}",
+        owner, PROFILES_REPO, filename
+    );
+    log::info!("Fetching shared profile via GitHub API: {}", api_url);
 
-    if !resp.status().is_success() {
-        let status = resp.status();
-        return Err(AppError::Other(format!(
-            "Profile not found ({}). Check the code and try again.",
-            status
-        )));
-    }
+    let api_resp = client
+        .get(&api_url)
+        .header("Accept", "application/vnd.github.raw+json")
+        .send()
+        .await;
 
-    let text = resp.text().await?;
+    let text = match api_resp {
+        Ok(resp) if resp.status().is_success() => resp.text().await?,
+        Ok(resp) => {
+            let status = resp.status();
+            log::warn!(
+                "GitHub API fetch failed for profile ({}) -- falling back to raw URL",
+                status
+            );
+            // Fallback: raw.githubusercontent.com (may be cached but better than nothing)
+            let raw_url = format!(
+                "https://raw.githubusercontent.com/{}/{}/main/{}",
+                owner, PROFILES_REPO, filename
+            );
+            let fallback_resp = client.get(&raw_url).send().await?;
+            if !fallback_resp.status().is_success() {
+                return Err(AppError::Other(format!(
+                    "Profile not found ({}). Check the code and try again.",
+                    fallback_resp.status()
+                )));
+            }
+            fallback_resp.text().await?
+        }
+        Err(e) => {
+            log::warn!(
+                "GitHub API request failed for profile: {} -- falling back to raw URL",
+                e
+            );
+            let raw_url = format!(
+                "https://raw.githubusercontent.com/{}/{}/main/{}",
+                owner, PROFILES_REPO, filename
+            );
+            let fallback_resp = client.get(&raw_url).send().await?;
+            if !fallback_resp.status().is_success() {
+                return Err(AppError::Other(format!(
+                    "Profile not found ({}). Check the code and try again.",
+                    fallback_resp.status()
+                )));
+            }
+            fallback_resp.text().await?
+        }
+    };
+
     let profile: Profile = serde_json::from_str(&text)
         .map_err(|e| AppError::Other(format!("Invalid profile data: {}", e)))?;
 
@@ -537,7 +585,7 @@ pub async fn share_profile(
         log::info!("Bundling mod '{}' ({} files)", pm.name, pm.files.len());
         match zip_mod_files(&pm.name, &pm.files, &mods_path) {
             Ok(zip_data) => {
-                match upload_mod_bundle(&token, &username, &pm.name, &zip_data).await {
+                match upload_mod_bundle(&token, &username, &pm.name, &pm.version, &zip_data).await {
                     Ok(url) => {
                         pm.bundle_url = Some(url);
                         log::info!("Bundled mod '{}' successfully ({} bytes)", pm.name, zip_data.len());
@@ -683,7 +731,7 @@ pub async fn reshare_profile(
         log::info!("Re-bundling mod '{}' ({} files)", pm.name, pm.files.len());
         match zip_mod_files(&pm.name, &pm.files, &mods_path) {
             Ok(zip_data) => {
-                match upload_mod_bundle(&token, &share_info.owner, &pm.name, &zip_data).await {
+                match upload_mod_bundle(&token, &share_info.owner, &pm.name, &pm.version, &zip_data).await {
                     Ok(url) => {
                         pm.bundle_url = Some(url);
                         log::info!("Re-bundled mod '{}' successfully ({} bytes)", pm.name, zip_data.len());
@@ -785,18 +833,22 @@ pub async fn install_shared_profile(
     // Save the profile locally
     crate::profiles::save_profile(&profile, &profiles_path).map_err(|e| e.to_string())?;
 
-    // ── STEP 1: Download missing mods BEFORE applying the profile ──
+    // ── STEP 1: Download missing mods and restore version-mismatched mods ──
     let local_mods = crate::mods::scan_mods(&mods_path);
     let local_disabled = crate::mods::scan_disabled_mods(&disabled_path);
-    // Build lookup sets by name, folder_name, and mod_id for robust matching
-    let mut local_identifiers: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for m in local_mods.iter().chain(local_disabled.iter()) {
-        local_identifiers.insert(m.name.clone());
+    let all_on_disk: Vec<crate::mods::ModInfo> = local_mods.into_iter()
+        .chain(local_disabled.into_iter())
+        .collect();
+
+    // Build a map from identifiers to on-disk mod info (for version comparison)
+    let mut on_disk_by_id: std::collections::HashMap<String, &crate::mods::ModInfo> = std::collections::HashMap::new();
+    for m in &all_on_disk {
+        on_disk_by_id.insert(m.name.clone(), m);
         if let Some(ref folder) = m.folder_name {
-            local_identifiers.insert(folder.clone());
+            on_disk_by_id.insert(folder.clone(), m);
         }
         if let Some(ref id) = m.mod_id {
-            local_identifiers.insert(id.clone());
+            on_disk_by_id.insert(id.clone(), m);
         }
     }
 
@@ -804,13 +856,44 @@ pub async fn install_shared_profile(
     let mut download_failures: Vec<String> = Vec::new();
 
     for pm in &profile.mods {
-        // Check if mod exists by name, folder_name, or mod_id
-        let already_exists = local_identifiers.contains(&pm.name)
-            || pm.folder_name.as_ref().map_or(false, |f| local_identifiers.contains(f))
-            || pm.mod_id.as_ref().map_or(false, |id| local_identifiers.contains(id));
-        if already_exists {
-            log::info!("Mod '{}' already on disk (matched by name/folder/id)", pm.name);
-            continue;
+        // Find matching on-disk mod
+        let on_disk_mod = on_disk_by_id.get(&pm.name)
+            .or_else(|| pm.folder_name.as_ref().and_then(|f| on_disk_by_id.get(f)))
+            .or_else(|| pm.mod_id.as_ref().and_then(|id| on_disk_by_id.get(id)))
+            .copied();
+
+        if let Some(disk_mod) = on_disk_mod {
+            let disk_ver = disk_mod.version.trim_start_matches('v');
+            let profile_ver = pm.version.trim_start_matches('v');
+
+            let version_ok = disk_ver == profile_ver
+                || profile_ver == "unknown" || profile_ver == "0.0.0"
+                || disk_ver == "unknown" || disk_ver == "0.0.0";
+
+            if version_ok {
+                log::info!("Mod '{}' already on disk at correct version ({})", pm.name, disk_mod.version);
+                continue;
+            }
+
+            // Version mismatch -- need to replace with the profile's version
+            if pm.bundle_url.is_some() {
+                log::info!(
+                    "Mod '{}' version mismatch (disk: {}, profile: {}) -- will reinstall",
+                    pm.name, disk_mod.version, pm.version
+                );
+                // Cache the current version before deleting (so user can switch back)
+                crate::mods::cache_mod_version(disk_mod, if disk_mod.enabled { &mods_path } else { &disabled_path }, &cache_path);
+                // Delete old version
+                let base = if disk_mod.enabled { &mods_path } else { &disabled_path };
+                crate::mods::delete_mod_files_by_info(disk_mod, base);
+                // Fall through to download the correct version
+            } else {
+                log::info!(
+                    "Mod '{}' version mismatch (disk: {}, profile: {}) but no bundle -- keeping disk version",
+                    pm.name, disk_mod.version, pm.version
+                );
+                continue;
+            }
         }
 
         // Prefer bundle_url over GitHub -- the curator bundled it because

@@ -14,6 +14,7 @@ import {
   ArrowRight,
   ExternalLink,
 } from 'lucide-react';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { useApp } from '../contexts/AppContext';
@@ -112,8 +113,12 @@ export function DashboardView() {
     }
   }
 
-  function handleOpenNexus(url: string) {
-    window.open(url, '_blank');
+  async function handleOpenNexus(url: string) {
+    try {
+      await openUrl(url);
+    } catch (e) {
+      toast.error(`Failed to open URL: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   async function handleAutoDetect() {

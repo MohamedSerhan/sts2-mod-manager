@@ -211,6 +211,17 @@ fn snapshot_current_inner(
         .map(|p| crate::mod_sources::load_sources(p))
         .unwrap_or_default();
 
+    // Load existing profile to preserve bundle_urls, created_at, and created_by
+    let existing_profile = load_profile(name, profiles_path).ok();
+    let existing_bundle_urls: std::collections::HashMap<String, String> = existing_profile
+        .as_ref()
+        .map(|p| {
+            p.mods.iter()
+                .filter_map(|m| m.bundle_url.as_ref().map(|url| (m.name.clone(), url.clone())))
+                .collect()
+        })
+        .unwrap_or_default();
+
     let mut profile_mods: Vec<ProfileMod> = Vec::new();
 
     // Add enabled mods
@@ -220,6 +231,7 @@ fn snapshot_current_inner(
                 .and_then(|e| e.github_repo.as_ref())
                 .map(|repo| format!("github:{}", repo))
         });
+        let bundle_url = existing_bundle_urls.get(&m.name).cloned();
         profile_mods.push(ProfileMod {
             name: m.name,
             version: m.version,
@@ -229,7 +241,7 @@ fn snapshot_current_inner(
             folder_name: m.folder_name,
             mod_id: m.mod_id,
             enabled: true,
-            bundle_url: None,
+            bundle_url,
         });
     }
 
@@ -240,6 +252,7 @@ fn snapshot_current_inner(
                 .and_then(|e| e.github_repo.as_ref())
                 .map(|repo| format!("github:{}", repo))
         });
+        let bundle_url = existing_bundle_urls.get(&m.name).cloned();
         profile_mods.push(ProfileMod {
             name: m.name,
             version: m.version,
@@ -249,16 +262,17 @@ fn snapshot_current_inner(
             folder_name: m.folder_name,
             mod_id: m.mod_id,
             enabled: false,
-            bundle_url: None,
+            bundle_url,
         });
     }
 
     let profile = Profile {
         name: name.to_string(),
-        game_version: None,
-        created_by: Some("sts2-mod-manager".to_string()),
+        game_version: existing_profile.as_ref().and_then(|p| p.game_version.clone()),
+        created_by: existing_profile.as_ref().and_then(|p| p.created_by.clone())
+            .or_else(|| Some("sts2-mod-manager".to_string())),
         mods: profile_mods,
-        created_at: now,
+        created_at: existing_profile.as_ref().map(|p| p.created_at).unwrap_or(now),
         updated_at: now,
     };
 
@@ -468,20 +482,21 @@ pub async fn switch_profile(
         });
     }
 
-    // ── STEP 1: Download missing mods ──
+    // ── STEP 1: Download missing mods AND restore version-mismatched mods ──
     let all_on_disk: Vec<crate::mods::ModInfo> = scan_mods(&mods_path)
         .into_iter()
         .chain(scan_disabled_mods(&disabled_path).into_iter())
         .collect();
-    // Build lookup sets by name, folder_name, and mod_id for robust matching
-    let mut on_disk_identifiers: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    // Build a map from identifiers to on-disk mod info (for version comparison)
+    let mut on_disk_by_id: std::collections::HashMap<String, &crate::mods::ModInfo> = std::collections::HashMap::new();
     for m in &all_on_disk {
-        on_disk_identifiers.insert(m.name.clone());
+        on_disk_by_id.insert(m.name.clone(), m);
         if let Some(ref folder) = m.folder_name {
-            on_disk_identifiers.insert(folder.clone());
+            on_disk_by_id.insert(folder.clone(), m);
         }
         if let Some(ref id) = m.mod_id {
-            on_disk_identifiers.insert(id.clone());
+            on_disk_by_id.insert(id.clone(), m);
         }
     }
 
@@ -490,14 +505,64 @@ pub async fn switch_profile(
     let mut download_failures: Vec<String> = Vec::new();
 
     for pm in &profile.mods {
-        let already_exists = on_disk_identifiers.contains(&pm.name)
-            || pm.folder_name.as_ref().map_or(false, |f| on_disk_identifiers.contains(f))
-            || pm.mod_id.as_ref().map_or(false, |id| on_disk_identifiers.contains(id));
-        if already_exists {
-            continue;
+        // Find matching on-disk mod
+        let on_disk_mod = on_disk_by_id.get(&pm.name)
+            .or_else(|| pm.folder_name.as_ref().and_then(|f| on_disk_by_id.get(f)))
+            .or_else(|| pm.mod_id.as_ref().and_then(|id| on_disk_by_id.get(id)))
+            .copied();
+
+        if let Some(disk_mod) = on_disk_mod {
+            let disk_ver = disk_mod.version.trim_start_matches('v');
+            let profile_ver = pm.version.trim_start_matches('v');
+
+            let version_ok = disk_ver == profile_ver
+                || profile_ver == "unknown" || profile_ver == "0.0.0"
+                || disk_ver == "unknown" || disk_ver == "0.0.0";
+
+            if version_ok {
+                continue; // Correct version on disk
+            }
+
+            // Version mismatch -- try to restore the profile's exact version
+            log::info!(
+                "Mod '{}' version mismatch (disk: {}, profile: {}) -- restoring profile version",
+                pm.name, disk_mod.version, pm.version
+            );
+
+            // Cache the current version before deleting (so user can switch back later)
+            crate::mods::cache_mod_version(disk_mod, if disk_mod.enabled { &mods_path } else { &disabled_path }, &cache_path);
+
+            // Try local cache first (fastest, no network needed)
+            if crate::mods::get_cached_mod_path(&cache_path, &pm.name, &pm.version).is_some() {
+                let base = if disk_mod.enabled { &mods_path } else { &disabled_path };
+                crate::mods::delete_mod_files_by_info(disk_mod, base);
+                match crate::mods::restore_mod_from_cache(&cache_path, &pm.name, &pm.version, &mods_path) {
+                    Ok(()) => {
+                        log::info!("Restored '{}' v{} from local cache", pm.name, pm.version);
+                        downloaded_count += 1;
+                        continue;
+                    }
+                    Err(e) => {
+                        log::warn!("Cache restore failed for '{}': {} -- trying bundle", pm.name, e);
+                    }
+                }
+            }
+
+            // Try bundle_url next
+            if pm.bundle_url.is_some() {
+                let base = if disk_mod.enabled { &mods_path } else { &disabled_path };
+                crate::mods::delete_mod_files_by_info(disk_mod, base);
+                // Fall through to the download logic below
+            } else {
+                log::info!(
+                    "Mod '{}' version mismatch but no bundle or cache -- keeping disk version",
+                    pm.name
+                );
+                continue;
+            }
         }
 
-        log::info!("Mod '{}' missing from disk -- attempting download", pm.name);
+        log::info!("Mod '{}' needs download (missing or version mismatch)", pm.name);
 
         let mut downloaded = false;
 

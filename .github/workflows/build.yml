@@ -111,89 +111,12 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
       - name: Assemble and upload latest.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          TAG="${GITHUB_REF_NAME}"
-          VERSION="${TAG#v}"
-          REPO="${GITHUB_REPOSITORY}"
-          BASE="https://github.com/${REPO}/releases/download/${TAG}"
-
-          # Download all .sig files from the release
-          SIGDIR=$(mktemp -d)
-          gh release download "$TAG" --repo "$REPO" --pattern "*.sig" --dir "$SIGDIR"
-
-          # Helper: read signature for a given asset filename
-          sig() {
-            local f="${SIGDIR}/$1.sig"
-            if [ -f "$f" ]; then cat "$f"; else echo ""; fi
-          }
-
-          # Discover asset filenames from the release
-          ASSETS_JSON=$(gh release view "$TAG" --repo "$REPO" --json assets)
-          asset_name() {
-            echo "$ASSETS_JSON" | jq -r ".assets[] | select(.name | test(\"$1\")) | .name" | head -1
-          }
-
-          NSIS=$(asset_name 'setup\.exe$')
-          MSI=$(asset_name '\.msi$')
-          APPIMAGE=$(asset_name '\.AppImage$')
-          DEB=$(asset_name '\.deb$')
-          RPM=$(asset_name '\.rpm$')
-          APP_TAR=$(asset_name '\.app\.tar\.gz$')
-
-          PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
-
-          # Build the platforms object incrementally with jq
-          PLATFORMS="{}"
-          add_platform() {
-            local key="$1" file="$2"
-            [ -z "$file" ] && return
-            local signature
-            signature=$(sig "$file")
-            [ -z "$signature" ] && return
-            PLATFORMS=$(echo "$PLATFORMS" | jq \
-              --arg k "$key" --arg sig "$signature" --arg url "${BASE}/${file}" \
-              '. + {($k): {signature: $sig, url: $url}}')
-          }
-
-          # macOS (universal binary serves both architectures)
-          add_platform "darwin-aarch64"     "$APP_TAR"
-          add_platform "darwin-x86_64"      "$APP_TAR"
-          add_platform "darwin-aarch64-app"  "$APP_TAR"
-          add_platform "darwin-x86_64-app"   "$APP_TAR"
-
-          # Linux
-          add_platform "linux-x86_64"           "$APPIMAGE"
-          add_platform "linux-x86_64-appimage"  "$APPIMAGE"
-          add_platform "linux-x86_64-deb"       "$DEB"
-          add_platform "linux-x86_64-rpm"       "$RPM"
-
-          # Windows — NSIS (.exe) is the preferred/default installer
-          if [ -n "$NSIS" ]; then
-            add_platform "windows-x86_64"       "$NSIS"
-            add_platform "windows-x86_64-nsis"  "$NSIS"
-          elif [ -n "$MSI" ]; then
-            add_platform "windows-x86_64"       "$MSI"
-          fi
-          [ -n "$MSI" ] && add_platform "windows-x86_64-msi" "$MSI"
-
-          # Assemble final JSON
-          jq -n \
-            --arg version "$VERSION" \
-            --arg pub_date "$PUB_DATE" \
-            --argjson platforms "$PLATFORMS" \
-            '{version: $version, notes: "", pub_date: $pub_date, platforms: $platforms}' \
-            > latest.json
-
-          echo "Generated latest.json with platforms:"
-          jq -r '.platforms | keys[]' latest.json
-
-          # Upload to the release (replace if a stale one exists)
-          gh release delete-asset "$TAG" --repo "$REPO" "latest.json" --yes 2>/dev/null || true
-          gh release upload "$TAG" --repo "$REPO" latest.json
+        run: bash scripts/publish-updater.sh "${GITHUB_REF_NAME}" "${GITHUB_REPOSITORY}"
 
   # After all platform builds finish, format the release body with download links
   format-release:
@@ -239,6 +162,8 @@ jobs:
 
           #### macOS
           $(link "STS2.Mod.Manager_${VERSION}_universal.dmg" "STS2.Mod.Manager_${VERSION}_universal.dmg" "Works on both Intel and Apple Silicon Macs. Open the DMG and drag to Applications." true)
+
+          > **macOS security warning:** The app isn't notarized by Apple, so on first launch you'll see *\"STS2 Mod Manager cannot be opened because Apple cannot check it for malicious software\"* (or *\"unidentified developer\"*). To open it: **right-click (or Control-click) the app in Applications and choose Open**, then click **Open** in the dialog. You only need to do this once. Alternatively, go to **System Settings → Privacy & Security** and click **Open Anyway**.
 
           #### Linux
           $(link "STS2.Mod.Manager_${VERSION}_amd64.deb" "STS2.Mod.Manager_${VERSION}_amd64.deb" "For Ubuntu, Debian, Pop!_OS, Linux Mint. Install with \`sudo dpkg -i\`." true)

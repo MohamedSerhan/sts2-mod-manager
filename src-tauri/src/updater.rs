@@ -392,18 +392,19 @@ pub async fn update_mod(
 pub async fn update_all_mods(
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Vec<ModInfo>, String> {
-    let (mods_path, cache_path, config_path, token) = {
+    let (mods_path, cache_path, config_path, token, nexus_key) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
         let cache_path = s.cache_path.clone();
         let config_path = s.config_path.clone();
         let token = s.github_token.clone();
-        (mods_path, cache_path, config_path, token)
+        let nexus_key = s.nexus_api_key.clone();
+        (mods_path, cache_path, config_path, token, nexus_key)
     };
 
     let installed = scan_mods(&mods_path);
     let sources_db = load_sources(&config_path);
-    let updates = check_all_updates(&installed, &sources_db.mods, token.as_deref())
+    let updates = check_all_updates(&installed, &sources_db.mods, token.as_deref(), nexus_key.as_deref())
         .await
         .map_err(|e| e.to_string())?;
 

@@ -46,20 +46,47 @@ pub struct Profile {
 // ── Core Functions ──────────────────────────────────────────────────────────
 
 /// List all saved profiles.
+/// Includes profiles that only have a .share file (remote profiles not yet fetched).
 pub fn list_profiles(profiles_path: &Path) -> Vec<Profile> {
     let mut profiles = Vec::new();
+    let mut seen_names = std::collections::HashSet::new();
+
     if !profiles_path.exists() {
         return profiles;
     }
 
+    // First pass: load all .json profiles
     if let Ok(entries) = fs::read_dir(profiles_path) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) == Some("json") {
                 if let Ok(content) = fs::read_to_string(&path) {
                     if let Ok(profile) = serde_json::from_str::<Profile>(&content) {
+                        seen_names.insert(profile.name.clone());
                         profiles.push(profile);
                     }
+                }
+            }
+        }
+    }
+
+    // Second pass: create placeholder entries for .share files without matching .json
+    if let Ok(entries) = fs::read_dir(profiles_path) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("share") {
+                let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
+                if !seen_names.contains(&stem) {
+                    // Create a placeholder profile -- will be fetched from GitHub on activation
+                    profiles.push(Profile {
+                        name: stem.clone(),
+                        game_version: None,
+                        created_by: Some("Shared (click Activate to fetch)".to_string()),
+                        mods: vec![],
+                        created_at: chrono::Utc::now(),
+                        updated_at: chrono::Utc::now(),
+                    });
+                    seen_names.insert(stem);
                 }
             }
         }
@@ -285,46 +312,172 @@ pub fn delete_profile_cmd(
     Ok(true)
 }
 
-/// Switch to a profile: auto-snapshots current state first, then applies the target profile.
-/// Missing mods are listed in the return value for the frontend to handle.
+/// Switch to a profile: auto-snapshots current state first, downloads missing mods,
+/// then applies the target profile's exact enabled/disabled state.
 #[tauri::command]
-pub fn switch_profile(
+pub async fn switch_profile(
     name: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<SwitchProfileResult, String> {
-    let mut s = state.lock().map_err(|e| e.to_string())?;
-    let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?.clone();
-    let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?.clone();
-    let profiles_path = s.profiles_path.clone();
-    let config_path = s.config_path.clone();
+    let (mods_path, disabled_path, profiles_path, config_path, cache_path, token, current_profile_name) = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        let mods = s.mods_path.as_ref().ok_or("Game path not set")?.clone();
+        let disabled = s.disabled_mods_path.as_ref().ok_or("Game path not set")?.clone();
+        let profiles = s.profiles_path.clone();
+        let config = s.config_path.clone();
+        let cache = s.cache_path.clone();
+        let token = s.github_token.clone();
+        let current = s.active_profile.clone();
+        (mods, disabled, profiles, config, cache, token, current)
+    };
 
     // Auto-snapshot current state before switching (so user can switch back)
-    let current_profile_name = s.active_profile.clone();
-    drop(s); // Release lock for snapshot
-
-    if let Some(ref current_name) = current_profile_name {
-        log::info!("Auto-snapshotting current state as '{}' before switching to '{}'", current_name, name);
-        let _ = snapshot_current_with_sources(current_name, &mods_path, &profiles_path, Some(&config_path));
+    // BUT: don't snapshot if switching to the same profile (re-activating)
+    // AND: don't snapshot if current state has no mods (nothing to preserve)
+    let current_mods_count = scan_mods(&mods_path).len() + scan_disabled_mods(&disabled_path).len();
+    if current_mods_count > 0 {
+        if let Some(ref current_name) = current_profile_name {
+            if current_name != &name {
+                log::info!("Auto-snapshotting current state as '{}' before switching to '{}'", current_name, name);
+                let _ = snapshot_current_with_sources(current_name, &mods_path, &profiles_path, Some(&config_path));
+            }
+        } else {
+            log::info!("No active profile -- saving current state as '_Previous State'");
+            let _ = snapshot_current_with_sources("_Previous State", &mods_path, &profiles_path, Some(&config_path));
+        }
     } else {
-        // No active profile -- save as "_Previous State" so user can get back
-        log::info!("No active profile -- saving current state as '_Previous State'");
-        let _ = snapshot_current_with_sources("_Previous State", &mods_path, &profiles_path, Some(&config_path));
+        log::info!("Skipping auto-snapshot: no mods on disk to preserve");
     }
 
-    // Load target profile
-    let profile = load_profile(&name, &profiles_path).map_err(|e| e.to_string())?;
+    // Load target profile -- try local JSON first, then re-fetch from share code if missing
+    let profile = match load_profile(&name, &profiles_path) {
+        Ok(p) => p,
+        Err(_) => {
+            // Local .json missing -- check for .share file to re-fetch from GitHub
+            let share_file = profiles_path.join(format!("{}.share", sanitize_filename(&name)));
+            if share_file.exists() {
+                log::info!("Profile '{}' JSON missing, re-fetching from share code", name);
+                let share_content = std::fs::read_to_string(&share_file).map_err(|e| e.to_string())?;
+                let share_info: serde_json::Value = serde_json::from_str(&share_content).map_err(|e| e.to_string())?;
+                let owner = share_info["owner"].as_str().ok_or("Share file missing owner")?;
+                let code = share_info["code"].as_str().ok_or("Share file missing code")?;
+                let filename = format!("{}.json", code.replace('-', "").to_lowercase());
+                let fetched = crate::sharing::fetch_shared_profile(owner, &filename)
+                    .await
+                    .map_err(|e| format!("Failed to re-fetch shared profile: {}", e))?;
+                // Save locally so we have it next time
+                let _ = save_profile(&fetched, &profiles_path);
+                fetched
+            } else {
+                return Err(format!("Profile '{}' not found (no local data or share code)", name));
+            }
+        }
+    };
 
-    // Apply the profile (moves mods between enabled/disabled)
-    apply_profile(&profile, &mods_path, &disabled_path).map_err(|e| e.to_string())?;
+    if profile.mods.is_empty() {
+        // Update active profile even if empty
+        let mut s = state.lock().map_err(|e| e.to_string())?;
+        s.active_profile = Some(name.clone());
+        return Ok(SwitchProfileResult {
+            applied: true,
+            missing_mods: vec![],
+            downloaded: 0,
+            failed_downloads: vec![],
+        });
+    }
 
-    // Check for missing mods (in profile but not on disk at all)
+    // ── STEP 1: Download missing mods ──
     let all_on_disk: Vec<crate::mods::ModInfo> = scan_mods(&mods_path)
         .into_iter()
         .chain(scan_disabled_mods(&disabled_path).into_iter())
         .collect();
     let on_disk_names: std::collections::HashSet<String> = all_on_disk.iter().map(|m| m.name.clone()).collect();
-    let missing: Vec<String> = profile.mods.iter()
-        .filter(|pm| !on_disk_names.contains(&pm.name))
+
+    let mod_sources_db = crate::mod_sources::load_sources(&config_path);
+    let mut downloaded_count = 0u32;
+    let mut download_failures: Vec<String> = Vec::new();
+
+    for pm in &profile.mods {
+        if on_disk_names.contains(&pm.name) {
+            continue; // Already have this mod locally
+        }
+
+        log::info!("Mod '{}' missing from disk -- attempting download", pm.name);
+
+        // Try GitHub source
+        let github_repo = pm.source.as_ref().and_then(|s| {
+            if let Some(repo) = s.strip_prefix("github:") {
+                return Some(repo.to_string());
+            }
+            if s.contains("github.com/") {
+                let parts: Vec<&str> = s.split("github.com/").collect();
+                if parts.len() > 1 {
+                    let repo_path = parts[1].trim_end_matches('/');
+                    let segs: Vec<&str> = repo_path.splitn(3, '/').collect();
+                    if segs.len() >= 2 {
+                        return Some(format!("{}/{}", segs[0], segs[1]));
+                    }
+                }
+            }
+            None
+        }).or_else(|| {
+            mod_sources_db.mods.get(&pm.name).and_then(|e| e.github_repo.clone())
+        });
+
+        let mut downloaded = false;
+
+        if let Some(repo) = github_repo {
+            let parts: Vec<&str> = repo.splitn(2, '/').collect();
+            if parts.len() == 2 {
+                match crate::download::download_and_install_github_mod(
+                    parts[0], parts[1], None, &mods_path, &cache_path, token.as_deref(),
+                ).await {
+                    Ok(info) => {
+                        log::info!("Downloaded mod '{}' from GitHub", info.name);
+                        downloaded_count += 1;
+                        downloaded = true;
+                    }
+                    Err(e) => {
+                        log::warn!("GitHub download failed for '{}': {}", pm.name, e);
+                    }
+                }
+            }
+        }
+
+        // Try bundle_url as fallback
+        if !downloaded {
+            if let Some(ref bundle_url) = pm.bundle_url {
+                log::info!("Downloading bundled mod '{}' from bundle URL", pm.name);
+                match crate::sharing::download_bundle(bundle_url, &pm.name, &mods_path).await {
+                    Ok(_) => {
+                        log::info!("Installed bundled mod '{}'", pm.name);
+                        downloaded_count += 1;
+                        downloaded = true;
+                    }
+                    Err(e) => {
+                        log::warn!("Bundle download failed for '{}': {}", pm.name, e);
+                    }
+                }
+            }
+        }
+
+        if !downloaded {
+            log::warn!("No download source for mod '{}' -- cannot restore", pm.name);
+            download_failures.push(pm.name.clone());
+        }
+    }
+
+    // ── STEP 2: Apply profile AFTER downloads ──
+    apply_profile(&profile, &mods_path, &disabled_path).map_err(|e| e.to_string())?;
+
+    // ── STEP 3: Check what's still missing ──
+    let final_on_disk: Vec<crate::mods::ModInfo> = scan_mods(&mods_path)
+        .into_iter()
+        .chain(scan_disabled_mods(&disabled_path).into_iter())
+        .collect();
+    let final_names: std::collections::HashSet<String> = final_on_disk.iter().map(|m| m.name.clone()).collect();
+    let still_missing: Vec<String> = profile.mods.iter()
+        .filter(|pm| !final_names.contains(&pm.name))
         .map(|pm| pm.name.clone())
         .collect();
 
@@ -334,15 +487,19 @@ pub fn switch_profile(
 
     Ok(SwitchProfileResult {
         applied: true,
-        missing_mods: missing,
+        missing_mods: still_missing,
+        downloaded: downloaded_count,
+        failed_downloads: download_failures,
     })
 }
 
-/// Result of switching profiles, including any mods that need to be downloaded.
+/// Result of switching profiles, including download stats and any mods that couldn't be restored.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SwitchProfileResult {
     pub applied: bool,
     pub missing_mods: Vec<String>,
+    pub downloaded: u32,
+    pub failed_downloads: Vec<String>,
 }
 
 #[tauri::command]

@@ -97,10 +97,18 @@ export function ProfilesView() {
       setActiveProfile(name);
       await refreshAll();
       await loadProfiles();
+
+      const parts: string[] = [];
+      if (result.downloaded > 0) parts.push(`${result.downloaded} mod(s) downloaded`);
+      if (result.failed_downloads && result.failed_downloads.length > 0) {
+        parts.push(`${result.failed_downloads.length} failed: ${result.failed_downloads.join(', ')}`);
+      }
       if (result.missing_mods.length > 0) {
-        toastCtx.info(
-          `Switched to "${name}". ${result.missing_mods.length} mod(s) are missing and need to be downloaded: ${result.missing_mods.join(', ')}`
-        );
+        parts.push(`${result.missing_mods.length} still missing: ${result.missing_mods.join(', ')}`);
+      }
+
+      if (parts.length > 0) {
+        toastCtx.info(`Switched to "${name}". ${parts.join('. ')}`);
       } else {
         toastCtx.success(`Switched to profile "${name}"`);
       }

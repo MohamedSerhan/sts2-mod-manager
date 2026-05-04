@@ -34,6 +34,8 @@ export interface ProfileMod {
 export interface SwitchProfileResult {
   applied: boolean;
   missing_mods: string[];
+  downloaded: number;
+  failed_downloads: string[];
 }
 
 export interface GameInfo {

@@ -365,7 +365,7 @@ async fn upload_mod_bundle(
     Ok(download_url)
 }
 /// Download a bundled mod zip from a URL and extract into mods_path.
-async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::Path) -> Result<()> {
+pub async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::Path) -> Result<()> {
     let client = reqwest::Client::builder()
         .user_agent("sts2-mod-manager/0.1")
         .build()

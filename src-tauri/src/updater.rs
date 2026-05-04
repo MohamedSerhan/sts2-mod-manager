@@ -124,15 +124,19 @@ fn resolve_github_repo(
     None
 }
 
-/// Check installed mods for available updates by querying GitHub releases.
+/// Check installed mods for available updates by querying GitHub releases AND Nexus Mods.
 /// Uses mod_sources.json for source resolution, then falls back to legacy source field.
 pub async fn check_all_updates(
     mods: &[ModInfo],
     sources: &std::collections::HashMap<String, ModSourceEntry>,
     token: Option<&str>,
+    nexus_api_key: Option<&str>,
 ) -> Result<Vec<ModUpdate>> {
     let mut updates = Vec::new();
+    // Track which mods already got a GitHub update so we don't double-list
+    let mut github_updated: std::collections::HashSet<String> = std::collections::HashSet::new();
 
+    // --- Phase 1: GitHub checks (existing logic, untouched) ---
     for m in mods {
         let (owner, repo) = match resolve_github_repo(m, sources) {
             Some(pair) => pair,
@@ -204,6 +208,7 @@ pub async fn check_all_updates(
             .map(|a| a.browser_download_url.clone())
             .unwrap_or_else(|| release.html_url.clone());
 
+        github_updated.insert(m.name.clone());
         updates.push(ModUpdate {
             mod_name: m.name.clone(),
             current_version: m.version.clone(),
@@ -214,27 +219,94 @@ pub async fn check_all_updates(
         });
     }
 
+    // --- Phase 2: Nexus checks (for mods not already flagged by GitHub) ---
+    if let Some(nkey) = nexus_api_key {
+        let client = crate::nexus::NexusClient::new(nkey);
+
+        for m in mods {
+            // Skip if already flagged via GitHub
+            if github_updated.contains(&m.name) {
+                continue;
+            }
+
+            let source_entry = match sources.get(&m.name) {
+                Some(e) => e,
+                None => continue,
+            };
+
+            let domain = match source_entry.nexus_game_domain.as_ref() {
+                Some(d) => d,
+                None => continue,
+            };
+            let mod_id = match source_entry.nexus_mod_id {
+                Some(id) => id,
+                None => continue,
+            };
+
+            let nexus_url = source_entry.nexus_url.clone().unwrap_or_else(|| {
+                format!("https://www.nexusmods.com/{}/mods/{}", domain, mod_id)
+            });
+
+            match client.get_mod_info(domain, mod_id).await {
+                Ok(info) => {
+                    if let Some(ref nv) = info.version {
+                        // Best known installed version (same logic as audit)
+                        let sources_ver = source_entry
+                            .installed_version
+                            .as_deref()
+                            .unwrap_or("");
+                        let manifest_ver = m.version.trim_start_matches('v');
+                        let current_ver = if !sources_ver.is_empty() {
+                            let sv = sources_ver.trim_start_matches('v');
+                            if is_newer_version(manifest_ver, sv) { sv } else { manifest_ver }
+                        } else {
+                            manifest_ver
+                        };
+                        let nexus_ver = nv.trim_start_matches('v');
+
+                        if current_ver != "unknown" && current_ver != "0.0.0"
+                            && is_newer_version(current_ver, nexus_ver)
+                        {
+                            updates.push(ModUpdate {
+                                mod_name: m.name.clone(),
+                                current_version: m.version.clone(),
+                                latest_version: nv.clone(),
+                                source_type: "nexus".to_string(),
+                                source_id: nexus_url.clone(),
+                                download_url: format!("{}?tab=files", nexus_url),
+                            });
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Nexus update check failed for {} (mod {}): {}", m.name, mod_id, e);
+                }
+            }
+        }
+    }
+
     Ok(updates)
 }
 
 // ── Tauri Commands ──────────────────────────────────────────────────────────
 
-/// Check all installed mods (with GitHub sources) for available updates.
+/// Check all installed mods for available updates (GitHub + Nexus).
 #[tauri::command]
 pub async fn check_for_updates(
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Vec<ModUpdate>, String> {
-    let (mods_path, config_path, token) = {
+    let (mods_path, config_path, token, nexus_key) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
         let config_path = s.config_path.clone();
         let token = s.github_token.clone();
-        (mods_path, config_path, token)
+        let nexus_key = s.nexus_api_key.clone();
+        (mods_path, config_path, token, nexus_key)
     };
 
     let installed = scan_mods(&mods_path);
     let sources_db = load_sources(&config_path);
-    check_all_updates(&installed, &sources_db.mods, token.as_deref())
+    check_all_updates(&installed, &sources_db.mods, token.as_deref(), nexus_key.as_deref())
         .await
         .map_err(|e| e.to_string())
 }

@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   Users,
   ArrowRight,
+  ExternalLink,
 } from 'lucide-react';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
@@ -89,18 +90,30 @@ export function DashboardView() {
     }
   }
 
+  const githubUpdates = updates.filter((u) => u.source_type === 'github');
+  const nexusUpdates = updates.filter((u) => u.source_type === 'nexus');
+
   async function handleUpdateAll() {
     try {
       setUpdatingAll(true);
       const results = await updateAllMods();
       await refreshAll();
-      setUpdates([]);
-      toast.success(`Updated ${results.length} mod${results.length !== 1 ? 's' : ''}`);
+      setUpdates((prev) => prev.filter((u) => u.source_type !== 'github'));
+      const msg = `Auto-updated ${results.length} mod${results.length !== 1 ? 's' : ''}`;
+      if (nexusUpdates.length > 0) {
+        toast.success(`${msg}. ${nexusUpdates.length} Nexus mod${nexusUpdates.length !== 1 ? 's' : ''} need manual download.`);
+      } else {
+        toast.success(msg);
+      }
     } catch (e) {
       toast.error(`Update failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setUpdatingAll(false);
     }
+  }
+
+  function handleOpenNexus(url: string) {
+    window.open(url, '_blank');
   }
 
   async function handleAutoDetect() {
@@ -340,14 +353,14 @@ export function DashboardView() {
             )}
           </div>
           <div className="flex gap-2">
-            {updates.length > 0 && (
+            {githubUpdates.length > 0 && (
               <Button
                 size="sm"
                 onClick={handleUpdateAll}
                 disabled={updatingAll}
               >
                 <Download size={14} />
-                {updatingAll ? 'Updating...' : 'Update All'}
+                {updatingAll ? 'Updating...' : `Update All GitHub (${githubUpdates.length})`}
               </Button>
             )}
             <Button
@@ -371,22 +384,37 @@ export function DashboardView() {
                     <span>{u.current_version}</span>
                     <ArrowRight size={10} />
                     <span className="text-green-400">{u.latest_version}</span>
-                    <span className="text-text-dim">via {u.source_type}</span>
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                      u.source_type === 'nexus' ? 'bg-orange-500/15 text-orange-400' : 'bg-blue-500/15 text-blue-400'
+                    }`}>
+                      {u.source_type === 'nexus' ? 'Nexus' : 'GitHub'}
+                    </span>
                   </div>
                 </div>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => handleUpdateMod(u.mod_name)}
-                  disabled={updatingMod === u.mod_name || updatingAll}
-                >
-                  {updatingMod === u.mod_name ? (
-                    <RefreshCw size={14} className="animate-spin" />
-                  ) : (
-                    <Download size={14} />
-                  )}
-                  {updatingMod === u.mod_name ? 'Updating...' : 'Update'}
-                </Button>
+                {u.source_type === 'nexus' ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => handleOpenNexus(u.download_url)}
+                  >
+                    <ExternalLink size={14} />
+                    Download from Nexus
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => handleUpdateMod(u.mod_name)}
+                    disabled={updatingMod === u.mod_name || updatingAll}
+                  >
+                    {updatingMod === u.mod_name ? (
+                      <RefreshCw size={14} className="animate-spin" />
+                    ) : (
+                      <Download size={14} />
+                    )}
+                    {updatingMod === u.mod_name ? 'Updating...' : 'Update'}
+                  </Button>
+                )}
               </div>
             ))}
           </div>

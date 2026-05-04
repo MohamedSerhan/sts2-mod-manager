@@ -178,6 +178,14 @@ export async function removeModSource(modName: string): Promise<boolean> {
   return invoke('remove_mod_source', { modName });
 }
 
+export async function pinMod(modName: string): Promise<boolean> {
+  return invoke('pin_mod', { modName });
+}
+
+export async function unpinMod(modName: string): Promise<boolean> {
+  return invoke('unpin_mod', { modName });
+}
+
 export async function autoDetectSources(): Promise<AutoDetectResult> {
   return invoke('auto_detect_sources');
 }

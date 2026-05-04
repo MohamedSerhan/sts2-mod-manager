@@ -170,6 +170,8 @@ pub fn run() {
             mod_sources::set_mod_source,
             mod_sources::set_mod_sources_full,
             mod_sources::remove_mod_source,
+            mod_sources::pin_mod,
+            mod_sources::unpin_mod,
             mod_sources::auto_detect_sources,
             mod_sources::find_github_from_nexus,
             // Dependency resolution

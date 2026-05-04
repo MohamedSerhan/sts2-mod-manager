@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
-import { FolderSearch, Key, FolderOpen, RefreshCw, ClipboardCheck, ExternalLink, Download } from 'lucide-react';
+import { FolderSearch, Key, FolderOpen, RefreshCw, ClipboardCheck, ExternalLink, Download, Pin, PinOff } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
@@ -21,6 +21,8 @@ import {
   getLogPath,
   auditModVersions,
   repairModFolders,
+  pinMod,
+  unpinMod,
 } from '../hooks/useTauri';
 import type { ModAuditEntry } from '../types';
 
@@ -381,8 +383,43 @@ export function SettingsView() {
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="font-medium">{entry.mod_name}</span>
-                  <span className="font-mono">
+                  <span className="font-medium flex items-center gap-1.5">
+                    {entry.mod_name}
+                    {entry.pinned && (
+                      <span className="text-blue-400 text-[10px] font-normal flex items-center gap-0.5">
+                        <Pin size={9} /> Pinned
+                      </span>
+                    )}
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <button
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        try {
+                          if (entry.pinned) {
+                            await unpinMod(entry.mod_name);
+                            toast.success(`Unpinned '${entry.mod_name}' — updates will be checked again.`);
+                          } else {
+                            await pinMod(entry.mod_name);
+                            toast.success(`Pinned '${entry.mod_name}' — excluded from all update checks.`);
+                          }
+                          // Re-run audit to reflect change
+                          const results = await auditModVersions();
+                          setAuditResults(results);
+                        } catch (err) {
+                          toast.error(err instanceof Error ? err.message : String(err));
+                        }
+                      }}
+                      className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors ${
+                        entry.pinned
+                          ? 'bg-blue-500/20 text-blue-300 hover:bg-blue-500/30'
+                          : 'bg-surface text-text-dim hover:bg-surface-hover hover:text-text'
+                      }`}
+                      title={entry.pinned ? 'Unpin — re-enable update checking' : 'Pin — exclude from update checks'}
+                    >
+                      {entry.pinned ? <><PinOff size={9} /> Unpin</> : <><Pin size={9} /> Pin</>}
+                    </button>
+                    <span className="font-mono">
                     {hasRealError
                       ? 'ERROR'
                       : entry.needs_update
@@ -394,6 +431,7 @@ export function SettingsView() {
                       : !hasAnySource
                       ? 'No source linked'
                       : `${entry.installed_version} (latest)`}
+                  </span>
                   </span>
                 </div>
                 {/* Source links row */}
@@ -463,6 +501,7 @@ export function SettingsView() {
           </div>
           <div className="text-xs text-text-dim border-t border-border pt-2">
             {auditResults.filter(r => r.needs_update).length} need updates &middot;
+            {auditResults.filter(r => r.pinned).length} pinned &middot;
             {auditResults.filter(r => !r.github_repo && !r.nexus_url).length} unlinked &middot;
             {auditResults.filter(r => r.error && !r.github_auto_detected).length} errors &middot;
             {auditResults.filter(r => (r.github_repo || r.nexus_url) && !r.needs_update && !r.error).length} up to date

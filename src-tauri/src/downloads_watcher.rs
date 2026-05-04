@@ -139,6 +139,24 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                             disabled_path.as_deref(),
                         );
 
+                        // If the existing mod is pinned, skip auto-install entirely
+                        if let Some(ref existing) = existing_mod {
+                            let sources_db = crate::mod_sources::load_sources(&config_path);
+                            if let Some(entry) = sources_db.mods.get(&existing.name) {
+                                if entry.pinned {
+                                    log::info!(
+                                        "Downloads watcher: skipping '{}' — mod is pinned",
+                                        existing.name
+                                    );
+                                    let _ = app.emit("mod-auto-install-failed", serde_json::json!({
+                                        "file_name": path.file_name().unwrap_or_default().to_string_lossy().to_string(),
+                                        "error": format!("'{}' is pinned and cannot be auto-updated. Unpin it first.", existing.name)
+                                    }));
+                                    continue;
+                                }
+                            }
+                        }
+
                         // If we found an existing mod, remove old files first
                         let replaced_name = if let Some(ref existing) = existing_mod {
                             log::info!(

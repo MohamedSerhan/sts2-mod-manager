@@ -138,6 +138,11 @@ pub async fn check_all_updates(
 
     // --- Phase 1: GitHub checks (existing logic, untouched) ---
     for m in mods {
+        // Skip pinned mods — they must be updated manually
+        if let Some(entry) = sources.get(&m.name) {
+            if entry.pinned { continue; }
+        }
+
         let (owner, repo) = match resolve_github_repo(m, sources) {
             Some(pair) => pair,
             None => continue,
@@ -227,6 +232,11 @@ pub async fn check_all_updates(
             // Skip if already flagged via GitHub
             if github_updated.contains(&m.name) {
                 continue;
+            }
+
+            // Skip pinned mods
+            if let Some(entry) = sources.get(&m.name) {
+                if entry.pinned { continue; }
             }
 
             let source_entry = match sources.get(&m.name) {
@@ -475,6 +485,8 @@ pub struct ModAuditEntry {
     pub update_source: Option<String>,
     /// Whether the GitHub link was auto-detected (informational only, not used for updates).
     pub github_auto_detected: bool,
+    /// Whether this mod is pinned (excluded from update checks).
+    pub pinned: bool,
 }
 
 /// Valid mod asset extensions for STS2 mods.
@@ -517,6 +529,7 @@ pub async fn audit_mod_versions(
 
     for m in &all_mods {
         let source_entry = sources_db.mods.get(&m.name);
+        let is_pinned = source_entry.map(|e| e.pinned).unwrap_or(false);
         let github_pair = resolve_github_repo(m, &sources_db.mods);
 
         // Also get auto-detected GitHub repo for display (even though it's not used for updates)
@@ -650,7 +663,7 @@ pub async fn audit_mod_versions(
             }
         }
 
-        let needs_update = github_needs_update || nexus_update_available;
+        let needs_update = !is_pinned && (github_needs_update || nexus_update_available);
         let update_source = if github_needs_update && nexus_update_available {
             Some("both".to_string())
         } else if github_needs_update {
@@ -679,6 +692,7 @@ pub async fn audit_mod_versions(
                 nexus_update_available: false,
                 update_source: None,
                 github_auto_detected: false,
+                pinned: is_pinned,
             });
             continue;
         }
@@ -710,6 +724,7 @@ pub async fn audit_mod_versions(
             nexus_update_available,
             update_source,
             github_auto_detected: final_auto_detected,
+            pinned: is_pinned,
         });
     }
 

@@ -33,6 +33,10 @@ pub struct ModSourceEntry {
     /// Tracks the version (release tag) that was last installed via the updater
     #[serde(skip_serializing_if = "Option::is_none")]
     pub installed_version: Option<String>,
+    /// If true, this mod is pinned — excluded from update checks, audit flags,
+    /// and auto-install from Downloads. Must be updated manually.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub pinned: bool,
 }
 
 fn is_false(v: &bool) -> bool { !*v }
@@ -306,6 +310,35 @@ pub fn remove_mod_source(
     let mut db = load_sources(&s.config_path);
     db.mods.remove(&mod_name);
     save_sources(&db, &s.config_path).map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+/// Pin a mod — excludes it from update checks, audit flags, and auto-install.
+#[tauri::command]
+pub fn pin_mod(
+    mod_name: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let mut db = load_sources(&s.config_path);
+    let entry = db.mods.entry(mod_name).or_default();
+    entry.pinned = true;
+    save_sources(&db, &s.config_path).map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+/// Unpin a mod — re-enables update checks and auto-install for it.
+#[tauri::command]
+pub fn unpin_mod(
+    mod_name: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let mut db = load_sources(&s.config_path);
+    if let Some(entry) = db.mods.get_mut(&mod_name) {
+        entry.pinned = false;
+        save_sources(&db, &s.config_path).map_err(|e| e.to_string())?;
+    }
     Ok(true)
 }
 

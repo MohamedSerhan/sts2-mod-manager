@@ -314,6 +314,65 @@ fn dll_only_mod(dll_path: &Path, base_dir: &Path, enabled: bool) -> ModInfo {
     }
 }
 
+/// If `dir` contains exactly one entry which is a directory of the same name,
+/// return that nested path. Used to recover from doubly-nested mod folders.
+fn single_same_named_child(dir: &Path) -> Option<PathBuf> {
+    let entries: Vec<_> = fs::read_dir(dir).ok()?.flatten().collect();
+    if entries.len() != 1 {
+        return None;
+    }
+    let only = &entries[0];
+    let only_path = only.path();
+    if only_path.is_dir() && only.file_name() == dir.file_name()? {
+        Some(only_path)
+    } else {
+        None
+    }
+}
+
+/// Try to load a mod from `dir`, looking first for a parsable .json manifest,
+/// then falling back to a DLL-only mod. Returns true on success.
+fn try_load_mod_from(
+    dir: &Path,
+    base_dir: &Path,
+    enabled: bool,
+    found_names: &mut std::collections::HashSet<String>,
+    mods: &mut Vec<ModInfo>,
+) -> bool {
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return false,
+    };
+    let entries: Vec<_> = entries.flatten().collect();
+
+    for sub_entry in &entries {
+        let sub_path = sub_entry.path();
+        if sub_path.is_file() && sub_path.extension().and_then(|e| e.to_str()) == Some("json") {
+            if let Some(info) = parse_manifest(&sub_path, base_dir, enabled) {
+                if !found_names.contains(&info.name) {
+                    found_names.insert(info.name.clone());
+                    mods.push(info);
+                }
+                return true;
+            }
+        }
+    }
+
+    for sub_entry in &entries {
+        let sub_path = sub_entry.path();
+        if sub_path.is_file() && sub_path.extension().and_then(|e| e.to_str()) == Some("dll") {
+            let info = dll_only_mod(&sub_path, base_dir, enabled);
+            if !found_names.contains(&info.name) {
+                found_names.insert(info.name.clone());
+                mods.push(info);
+            }
+            return true;
+        }
+    }
+
+    false
+}
+
 /// Scan a directory for mod manifests (.json files).
 pub fn scan_mods(mods_path: &Path) -> Vec<ModInfo> {
     scan_mods_inner(mods_path, true)
@@ -358,44 +417,16 @@ fn scan_mods_inner(dir: &Path, enabled: bool) -> Vec<ModInfo> {
                 continue;
             }
 
-            // Look for .json manifests inside this subdirectory
-            let mut found_json = false;
-            if let Ok(sub_entries) = fs::read_dir(&path) {
-                for sub_entry in sub_entries.flatten() {
-                    let sub_path = sub_entry.path();
-                    if sub_path.is_file()
-                        && sub_path.extension().and_then(|e| e.to_str()) == Some("json")
-                    {
-                        if let Some(info) = parse_manifest(&sub_path, dir, enabled) {
-                            if !found_names.contains(&info.name) {
-                                found_names.insert(info.name.clone());
-                                mods.push(info);
-                            }
-                            found_json = true;
-                            break; // One manifest per subdirectory
-                        }
-                    }
+            // Try to find a manifest or DLL at this depth, then (as a fallback)
+            // one level deeper inside a same-named subdir to recover from
+            // packaging quirks where mods land at mods/Foo/Foo/Foo.dll.
+            let mut found = try_load_mod_from(&path, dir, enabled, &mut found_names, &mut mods);
+            if !found {
+                if let Some(nested) = single_same_named_child(&path) {
+                    found = try_load_mod_from(&nested, dir, enabled, &mut found_names, &mut mods);
                 }
             }
-
-            // If no JSON found, check for DLL-only mod in this subdirectory
-            if !found_json {
-                if let Ok(sub_entries) = fs::read_dir(&path) {
-                    for sub_entry in sub_entries.flatten() {
-                        let sub_path = sub_entry.path();
-                        if sub_path.is_file()
-                            && sub_path.extension().and_then(|e| e.to_str()) == Some("dll")
-                        {
-                            let info = dll_only_mod(&sub_path, dir, enabled);
-                            if !found_names.contains(&info.name) {
-                                found_names.insert(info.name.clone());
-                                mods.push(info);
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
+            let _ = found;
         }
     }
 
@@ -926,6 +957,22 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
     // - If there are multiple top-level dirs, extract as-is
     let has_single_subdir = top_dirs.len() == 1 || (top_dirs.is_empty() && all_top_dirs.len() == 1);
     let all_at_root = relevant_entries.iter().all(|n| !n.contains('/'));
+
+    // Detect a packaging quirk where the zip wraps everything in a redundant
+    // outer folder of the same name (e.g. "Foo/Foo/Foo.dll"). Strip the outer
+    // level so the mod ends up at "Foo/Foo.dll" rather than nested two deep,
+    // which would confuse scan_mods (it only descends one level).
+    let strip_redundant_outer: Option<String> = if all_top_dirs.len() == 1 && !all_entries.is_empty() {
+        let outer = all_top_dirs.iter().next().cloned().unwrap();
+        let nested_prefix = format!("{}/{}/", outer, outer);
+        if all_entries.iter().all(|n| n.starts_with(&nested_prefix)) {
+            Some(outer)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     
     // Use the all_top_dirs single dir if mod files are at root but other files aren't
     let effective_single_subdir = if top_dirs.len() == 1 {
@@ -991,7 +1038,11 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
         // missing dependency files that were filtered out.
 
         // Determine the relative path to extract to
-        let rel_path = if has_single_subdir {
+        let rel_path = if let Some(ref outer) = strip_redundant_outer {
+            // Doubly-nested same-name folder in the zip — drop the outer
+            // "Foo/" prefix so we install at "Foo/<files>" not "Foo/Foo/<files>".
+            name.strip_prefix(&format!("{}/", outer)).unwrap_or(&name).to_string()
+        } else if has_single_subdir {
             // Keep the subdirectory structure as-is (e.g., ModName/ModName.dll)
             name.clone()
         } else if all_at_root {

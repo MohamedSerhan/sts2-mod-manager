@@ -466,16 +466,50 @@ pub async fn share_profile(
         .await
         .map_err(|e| e.to_string())?;
 
-    // Load mod sources to check which mods have GitHub links
-    let sources_db = crate::mod_sources::load_sources(&config_path);
-
-    // Bundle mods without GitHub sources
+    // For each mod, validate GitHub source has a downloadable release.
+    // If not, bundle the mod files directly.
     for pm in &mut profile.mods {
-        let has_github = pm.source.as_ref().map_or(false, |s| s.starts_with("github:"))
-            || sources_db.mods.get(&pm.name).and_then(|e| e.github_repo.as_ref()).is_some();
+        if pm.files.is_empty() {
+            continue;
+        }
 
-        if !has_github && !pm.files.is_empty() {
-            log::info!("Bundling mod '{}' (no GitHub source, {} files)", pm.name, pm.files.len());
+        let mut needs_bundle = true;
+
+        // Check if GitHub source has a valid downloadable .zip release
+        if let Some(ref source) = pm.source {
+            if let Some(repo_path) = source.strip_prefix("github:") {
+                let parts: Vec<&str> = repo_path.splitn(2, '/').collect();
+                if parts.len() == 2 {
+                    log::info!("Validating GitHub source for '{}': {}", pm.name, repo_path);
+                    match crate::download::fetch_latest_release(parts[0], parts[1], Some(&token)).await {
+                        Ok(release) => {
+                            // Check if release has a .zip asset
+                            let has_zip = release.assets.iter().any(|a| a.name.ends_with(".zip"));
+                            let has_dll = release.assets.iter().any(|a| a.name.ends_with(".dll"));
+                            if has_zip || has_dll {
+                                log::info!("GitHub source valid for '{}': {} ({} assets)", pm.name, release.tag_name, release.assets.len());
+                                needs_bundle = false;
+                            } else {
+                                log::warn!("GitHub release for '{}' has no .zip/.dll assets ({}): {:?}",
+                                    pm.name, release.tag_name,
+                                    release.assets.iter().map(|a| &a.name).collect::<Vec<_>>());
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!("GitHub source invalid for '{}' ({}): {}", pm.name, repo_path, e);
+                        }
+                    }
+                }
+            }
+        }
+
+        if needs_bundle {
+            log::info!("Bundling mod '{}' ({} files)", pm.name, pm.files.len());
+            // Clear invalid GitHub source so friends don't waste time trying it
+            if pm.source.as_ref().map_or(false, |s| s.starts_with("github:")) {
+                log::info!("Clearing invalid GitHub source for '{}'", pm.name);
+                pm.source = None;
+            }
             match zip_mod_files(&pm.name, &pm.files, &mods_path) {
                 Ok(zip_data) => {
                     match upload_mod_bundle(&token, &username, &pm.name, &zip_data).await {
@@ -484,7 +518,7 @@ pub async fn share_profile(
                             log::info!("Bundled mod '{}' successfully", pm.name);
                         }
                         Err(e) => {
-                            log::warn!("Failed to bundle mod '{}': {}", pm.name, e);
+                            log::warn!("Failed to upload bundle for '{}': {}", pm.name, e);
                         }
                     }
                 }
@@ -560,16 +594,36 @@ pub async fn reshare_profile(
     )
     .map_err(|e| e.to_string())?;
 
-    // Load mod sources to check which mods have GitHub links
-    let sources_db = crate::mod_sources::load_sources(&config_path);
-
-    // Bundle mods without GitHub sources
+    // Validate GitHub sources and bundle mods that can't be downloaded
     for pm in &mut profile.mods {
-        let has_github = pm.source.as_ref().map_or(false, |s| s.starts_with("github:"))
-            || sources_db.mods.get(&pm.name).and_then(|e| e.github_repo.as_ref()).is_some();
+        if pm.files.is_empty() {
+            continue;
+        }
 
-        if !has_github && !pm.files.is_empty() {
-            log::info!("Re-bundling mod '{}' (no GitHub source)", pm.name);
+        let mut needs_bundle = true;
+
+        if let Some(ref source) = pm.source {
+            if let Some(repo_path) = source.strip_prefix("github:") {
+                let parts: Vec<&str> = repo_path.splitn(2, '/').collect();
+                if parts.len() == 2 {
+                    match crate::download::fetch_latest_release(parts[0], parts[1], Some(&token)).await {
+                        Ok(release) => {
+                            let has_zip = release.assets.iter().any(|a| a.name.ends_with(".zip"));
+                            let has_dll = release.assets.iter().any(|a| a.name.ends_with(".dll"));
+                            if has_zip || has_dll {
+                                needs_bundle = false;
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                }
+            }
+        }
+
+        if needs_bundle {
+            if pm.source.as_ref().map_or(false, |s| s.starts_with("github:")) {
+                pm.source = None;
+            }
             match zip_mod_files(&pm.name, &pm.files, &mods_path) {
                 Ok(zip_data) => {
                     match upload_mod_bundle(&token, &share_info.owner, &pm.name, &zip_data).await {
@@ -577,7 +631,7 @@ pub async fn reshare_profile(
                             pm.bundle_url = Some(url);
                         }
                         Err(e) => {
-                            log::warn!("Failed to bundle mod '{}': {}", pm.name, e);
+                            log::warn!("Failed to upload bundle for '{}': {}", pm.name, e);
                         }
                     }
                 }

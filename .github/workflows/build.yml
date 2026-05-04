@@ -160,6 +160,8 @@ jobs:
           $(link "STS2.Mod.Manager_${VERSION}_x64-setup.exe" "STS2.Mod.Manager_${VERSION}_x64-setup.exe" "Recommended. Double-click to install." true)
           $(link "STS2.Mod.Manager_${VERSION}_x64_en-US.msi" "STS2.Mod.Manager_${VERSION}_x64_en-US.msi" "Alternative MSI installer.")
 
+          > **Windows SmartScreen warning:** The installer isn't code-signed yet, so when you run it you'll see *\"Windows protected your PC\"* from Microsoft Defender SmartScreen. To install: click **More info**, then click **Run anyway**. Your browser may also flag the download as untrusted -- choose **Keep** (Edge/Chrome) to save the file.
+
           #### macOS
           $(link "STS2.Mod.Manager_${VERSION}_universal.dmg" "STS2.Mod.Manager_${VERSION}_universal.dmg" "Works on both Intel and Apple Silicon Macs. Open the DMG and drag to Applications." true)
 

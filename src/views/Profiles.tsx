@@ -93,11 +93,17 @@ export function ProfilesView() {
 
   async function handleSwitch(name: string) {
     try {
-      await switchProfile(name);
+      const result = await switchProfile(name);
       setActiveProfile(name);
       await refreshAll();
       await loadProfiles();
-      toastCtx.success(`Switched to profile "${name}"`);
+      if (result.missing_mods.length > 0) {
+        toastCtx.info(
+          `Switched to "${name}". ${result.missing_mods.length} mod(s) are missing and need to be downloaded: ${result.missing_mods.join(', ')}`
+        );
+      } else {
+        toastCtx.success(`Switched to profile "${name}"`);
+      }
     } catch (e) {
       toastCtx.error(`Failed to switch: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -421,8 +427,10 @@ export function ProfilesView() {
                 </h3>
                 <div className="flex items-center gap-3 mt-1 text-xs text-text-dim">
                   <span>
-                    {profile.mods.length} mod
-                    {profile.mods.length !== 1 ? 's' : ''}
+                    {profile.mods.filter(m => m.enabled).length} enabled
+                    {profile.mods.filter(m => !m.enabled).length > 0 && (
+                      <>, {profile.mods.filter(m => !m.enabled).length} disabled</>
+                    )}
                   </span>
                   {profile.game_version && <span>{profile.game_version}</span>}
                   <span>

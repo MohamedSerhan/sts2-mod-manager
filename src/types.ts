@@ -27,7 +27,13 @@ export interface ProfileMod {
   source: string | null;
   hash: string | null;
   files: string[];
+  enabled: boolean;
   bundle_url: string | null;
+}
+
+export interface SwitchProfileResult {
+  applied: boolean;
+  missing_mods: string[];
 }
 
 export interface GameInfo {

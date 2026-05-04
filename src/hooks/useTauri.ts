@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ModInfo, Profile, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate } from '../types';
+import type { ModInfo, Profile, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult } from '../types';
 
 // ── Game Detection & QOL ───────────────────────────────────────────────────
 
@@ -91,7 +91,7 @@ export async function createProfile(name: string): Promise<Profile> {
   return invoke('create_profile', { name });
 }
 
-export async function switchProfile(name: string): Promise<void> {
+export async function switchProfile(name: string): Promise<SwitchProfileResult> {
   return invoke('switch_profile', { name });
 }
 

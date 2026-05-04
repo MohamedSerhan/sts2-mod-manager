@@ -18,10 +18,18 @@ pub struct ProfileMod {
     pub source: Option<String>,
     pub hash: Option<String>,
     pub files: Vec<String>,
+    /// Whether this mod should be enabled when the profile is applied.
+    /// Defaults to true for backwards compatibility with older profiles.
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
     /// Direct download URL for mods bundled in the curator's profiles repo.
     /// Set automatically when sharing for mods without a GitHub source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bundle_url: Option<String>,
+}
+
+fn default_enabled() -> bool {
+    true
 }
 
 /// A saved profile capturing a snapshot of installed/enabled mods.
@@ -111,13 +119,19 @@ pub fn snapshot_current(
 }
 
 /// Create a snapshot with optional source enrichment from config_path.
+/// Captures BOTH enabled and disabled mods with their current state.
 pub fn snapshot_current_with_sources(
     name: &str,
     mods_path: &Path,
     profiles_path: &Path,
     config_path: Option<&Path>,
 ) -> Result<Profile> {
-    let installed = scan_mods(mods_path);
+    let enabled_mods = scan_mods(mods_path);
+    // Also get the disabled mods path (sibling of mods_path)
+    let disabled_path = mods_path.parent()
+        .map(|p| p.join("mods_disabled"))
+        .unwrap_or_else(|| mods_path.with_file_name("mods_disabled"));
+    let disabled_mods = scan_disabled_mods(&disabled_path);
     let now = Utc::now();
 
     // Load mod sources DB if config_path provided, to enrich profile with download links
@@ -125,25 +139,43 @@ pub fn snapshot_current_with_sources(
         .map(|p| crate::mod_sources::load_sources(p))
         .unwrap_or_default();
 
-    let profile_mods: Vec<ProfileMod> = installed
-        .into_iter()
-        .map(|m| {
-            // Try to enrich source with GitHub repo from mod_sources DB
-            let source = m.source.clone().or_else(|| {
-                sources_db.mods.get(&m.name)
-                    .and_then(|e| e.github_repo.as_ref())
-                    .map(|repo| format!("github:{}", repo))
-            });
-            ProfileMod {
-                name: m.name,
-                version: m.version,
-                source,
-                hash: m.hash,
-                files: m.files,
-                bundle_url: None,
-            }
-        })
-        .collect();
+    let mut profile_mods: Vec<ProfileMod> = Vec::new();
+
+    // Add enabled mods
+    for m in enabled_mods {
+        let source = m.source.clone().or_else(|| {
+            sources_db.mods.get(&m.name)
+                .and_then(|e| e.github_repo.as_ref())
+                .map(|repo| format!("github:{}", repo))
+        });
+        profile_mods.push(ProfileMod {
+            name: m.name,
+            version: m.version,
+            source,
+            hash: m.hash,
+            files: m.files,
+            enabled: true,
+            bundle_url: None,
+        });
+    }
+
+    // Add disabled mods
+    for m in disabled_mods {
+        let source = m.source.clone().or_else(|| {
+            sources_db.mods.get(&m.name)
+                .and_then(|e| e.github_repo.as_ref())
+                .map(|repo| format!("github:{}", repo))
+        });
+        profile_mods.push(ProfileMod {
+            name: m.name,
+            version: m.version,
+            source,
+            hash: m.hash,
+            files: m.files,
+            enabled: false,
+            bundle_url: None,
+        });
+    }
 
     let profile = Profile {
         name: name.to_string(),
@@ -158,32 +190,38 @@ pub fn snapshot_current_with_sources(
     Ok(profile)
 }
 
-/// Apply a profile: enable only the mods listed, disable everything else.
-/// Uses move_mod_by_info (actual file list) with fallback to name-based matching.
+/// Apply a profile: restore exact enabled/disabled state for all listed mods.
+/// Mods not in the profile are disabled. Uses move_mod_by_info with fallback.
 pub fn apply_profile(
     profile: &Profile,
     mods_path: &Path,
     disabled_path: &Path,
 ) -> Result<()> {
-    let profile_mod_names: std::collections::HashSet<String> =
-        profile.mods.iter().map(|m| m.name.clone()).collect();
+    use std::collections::HashMap;
 
-    // First, disable all currently enabled mods that are NOT in the profile
+    // Build a map of profile mod states
+    let profile_state: HashMap<String, bool> = profile.mods.iter()
+        .map(|m| (m.name.clone(), m.enabled))
+        .collect();
+
+    // Step 1: Move mods that should be DISABLED from enabled to disabled
     let current_enabled = scan_mods(mods_path);
     for m in &current_enabled {
-        if !profile_mod_names.contains(&m.name) {
-            // Try file-list-based move first, fall back to name-based
+        let should_be_enabled = profile_state.get(&m.name).copied().unwrap_or(false);
+        if !should_be_enabled {
+            log::info!("Profile apply: disabling '{}'", m.name);
             if crate::mods::move_mod_by_info(m, mods_path, disabled_path).is_err() {
                 let _ = crate::mods::disable_mod(&m.name, mods_path, disabled_path);
             }
         }
     }
 
-    // Then, enable all mods that ARE in the profile but currently disabled
+    // Step 2: Move mods that should be ENABLED from disabled to enabled
     let current_disabled = scan_disabled_mods(disabled_path);
     for m in &current_disabled {
-        if profile_mod_names.contains(&m.name) {
-            // Try file-list-based move first, fall back to name-based
+        let should_be_enabled = profile_state.get(&m.name).copied().unwrap_or(false);
+        if should_be_enabled {
+            log::info!("Profile apply: enabling '{}'", m.name);
             if crate::mods::move_mod_by_info(m, disabled_path, mods_path).is_err() {
                 let _ = crate::mods::enable_mod(&m.name, mods_path, disabled_path);
             }
@@ -247,19 +285,64 @@ pub fn delete_profile_cmd(
     Ok(true)
 }
 
+/// Switch to a profile: auto-snapshots current state first, then applies the target profile.
+/// Missing mods are listed in the return value for the frontend to handle.
 #[tauri::command]
 pub fn switch_profile(
     name: String,
     state: tauri::State<'_, AppState>,
-) -> std::result::Result<bool, String> {
+) -> std::result::Result<SwitchProfileResult, String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?.clone();
     let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?.clone();
-    let profile = load_profile(&name, &s.profiles_path).map_err(|e| e.to_string())?;
-    s.active_profile = Some(name);
-    drop(s); // Release lock before applying
+    let profiles_path = s.profiles_path.clone();
+    let config_path = s.config_path.clone();
+
+    // Auto-snapshot current state before switching (so user can switch back)
+    let current_profile_name = s.active_profile.clone();
+    drop(s); // Release lock for snapshot
+
+    if let Some(ref current_name) = current_profile_name {
+        log::info!("Auto-snapshotting current state as '{}' before switching to '{}'", current_name, name);
+        let _ = snapshot_current_with_sources(current_name, &mods_path, &profiles_path, Some(&config_path));
+    } else {
+        // No active profile -- save as "_Previous State" so user can get back
+        log::info!("No active profile -- saving current state as '_Previous State'");
+        let _ = snapshot_current_with_sources("_Previous State", &mods_path, &profiles_path, Some(&config_path));
+    }
+
+    // Load target profile
+    let profile = load_profile(&name, &profiles_path).map_err(|e| e.to_string())?;
+
+    // Apply the profile (moves mods between enabled/disabled)
     apply_profile(&profile, &mods_path, &disabled_path).map_err(|e| e.to_string())?;
-    Ok(true)
+
+    // Check for missing mods (in profile but not on disk at all)
+    let all_on_disk: Vec<crate::mods::ModInfo> = scan_mods(&mods_path)
+        .into_iter()
+        .chain(scan_disabled_mods(&disabled_path).into_iter())
+        .collect();
+    let on_disk_names: std::collections::HashSet<String> = all_on_disk.iter().map(|m| m.name.clone()).collect();
+    let missing: Vec<String> = profile.mods.iter()
+        .filter(|pm| !on_disk_names.contains(&pm.name))
+        .map(|pm| pm.name.clone())
+        .collect();
+
+    // Update active profile
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.active_profile = Some(name.clone());
+
+    Ok(SwitchProfileResult {
+        applied: true,
+        missing_mods: missing,
+    })
+}
+
+/// Result of switching profiles, including any mods that need to be downloaded.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SwitchProfileResult {
+    pub applied: bool,
+    pub missing_mods: Vec<String>,
 }
 
 #[tauri::command]

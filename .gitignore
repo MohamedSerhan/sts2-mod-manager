@@ -41,3 +41,5 @@ Thumbs.db
 # Temp files
 whatisee.txt
 continue.txt
+*.7z
+godot.log

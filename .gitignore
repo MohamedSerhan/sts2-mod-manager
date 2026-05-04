@@ -37,3 +37,7 @@ src-tauri/gen/
 
 # OS files
 Thumbs.db
+
+# Temp files
+whatisee.txt
+continue.txt

@@ -421,3 +421,65 @@ pub fn open_log_file(
         Err("Log file not found".to_string())
     }
 }
+
+/// Check for app updates by querying GitHub releases.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppUpdateInfo {
+    pub current_version: String,
+    pub latest_version: String,
+    pub update_available: bool,
+    pub download_url: String,
+    pub release_notes: String,
+}
+
+#[tauri::command]
+pub async fn check_app_update() -> std::result::Result<AppUpdateInfo, String> {
+    let current = env!("CARGO_PKG_VERSION");
+
+    let client = reqwest::Client::builder()
+        .user_agent("sts2-mod-manager")
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let resp = client
+        .get("https://api.github.com/repos/MohamedSerhan/sts2-mod-manager/releases/latest")
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to check for updates: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("GitHub API returned {}", resp.status()));
+    }
+
+    let release: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+
+    let tag = release["tag_name"]
+        .as_str()
+        .unwrap_or("v0.0.0")
+        .trim_start_matches('v');
+    let notes = release["body"].as_str().unwrap_or("").to_string();
+    let html_url = release["html_url"]
+        .as_str()
+        .unwrap_or("https://github.com/MohamedSerhan/sts2-mod-manager/releases")
+        .to_string();
+
+    // Simple version comparison: split by '.' and compare numerically
+    let current_parts: Vec<u32> = current.split('.').filter_map(|s| s.parse().ok()).collect();
+    let latest_parts: Vec<u32> = tag.split('.').filter_map(|s| s.parse().ok()).collect();
+
+    let update_available = latest_parts > current_parts;
+
+    log::info!(
+        "App update check: current={}, latest={}, update_available={}",
+        current, tag, update_available
+    );
+
+    Ok(AppUpdateInfo {
+        current_version: current.to_string(),
+        latest_version: tag.to_string(),
+        update_available,
+        download_url: html_url,
+        release_notes: notes,
+    })
+}

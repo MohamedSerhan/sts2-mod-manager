@@ -117,6 +117,7 @@ pub fn run() {
             game::set_active_profile,
             game::get_log_path,
             game::open_log_file,
+            game::check_app_update,
             // Mod management
             mods::get_installed_mods,
             mods::toggle_mod,

@@ -9,7 +9,8 @@ import { ModsView } from './views/Mods';
 import { BrowseView } from './views/Browse';
 import { ProfilesView } from './views/Profiles';
 import { SettingsView } from './views/Settings';
-import { launchGame, launchVanilla, installModFromFile } from './hooks/useTauri';
+import { launchGame, launchVanilla, installModFromFile, checkAppUpdate } from './hooks/useTauri';
+import type { AppUpdateInfo } from './types';
 
 type View = 'home' | 'dashboard' | 'mods' | 'browse' | 'profiles' | 'settings';
 
@@ -50,6 +51,19 @@ function AppInner() {
   const { gameInfo, mods, refreshAll, activeProfile } = useApp();
   const toast = useToast();
   const [dragOver, setDragOver] = useState(false);
+  const [appUpdate, setAppUpdate] = useState<AppUpdateInfo | null>(null);
+  const [updateDismissed, setUpdateDismissed] = useState(false);
+
+  // Check for app updates on mount
+  useEffect(() => {
+    checkAppUpdate()
+      .then((info) => {
+        if (info.update_available) {
+          setAppUpdate(info);
+        }
+      })
+      .catch(() => { /* silent fail for update check */ });
+  }, []);
 
   const enabledCount = mods.filter((m) => m.enabled).length;
   const totalCount = mods.length;
@@ -150,7 +164,7 @@ function AppInner() {
       <nav className="w-[240px] flex-shrink-0 bg-surface border-r border-border flex flex-col">
         <div className="px-5 py-5 border-b border-border">
           <h1 className="text-lg font-bold text-text tracking-tight">STS2 Mod Manager</h1>
-          <p className="text-xs text-text-dim mt-1">v0.1.0</p>
+          <p className="text-xs text-text-dim mt-1">v0.2.0</p>
         </div>
 
         <div className="flex-1 py-3 px-2">
@@ -224,6 +238,30 @@ function AppInner() {
 
       {/* Main Content */}
       <main className="flex-1 overflow-auto bg-background">
+        {/* App Update Banner */}
+        {appUpdate && !updateDismissed && (
+          <div className="bg-blue-600/90 text-white px-5 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-medium">
+                Update available: v{appUpdate.latest_version} (you have v{appUpdate.current_version})
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => window.open(appUpdate.download_url, '_blank')}
+                className="px-3 py-1 bg-white text-blue-600 rounded text-xs font-semibold hover:bg-blue-50 transition-colors"
+              >
+                Download
+              </button>
+              <button
+                onClick={() => setUpdateDismissed(true)}
+                className="px-2 py-1 text-white/70 hover:text-white text-xs transition-colors"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
         {activeView === 'home' && <HomeView onGoToSettings={() => setActiveView('settings')} />}
         {activeView === 'dashboard' && <DashboardView />}
         {activeView === 'mods' && <ModsView advancedMode={advancedMode} />}

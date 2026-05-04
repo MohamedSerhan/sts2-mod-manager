@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::error::{AppError, Result};
 use crate::profiles::Profile;
@@ -6,85 +7,108 @@ use crate::state::AppState;
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
+const PROFILES_REPO: &str = "sts2mm-profiles";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShareResult {
-    /// The profile code (formatted gist ID, e.g. "AA5A-315D-61AE")
+    /// The profile code (e.g. "AA5A-315D-61AE")
     pub code: String,
-    /// The raw gist ID (for API calls)
-    pub gist_id: String,
-    /// The gist URL for viewing in browser
-    pub gist_url: String,
+    /// The GitHub username who shared it
+    pub owner: String,
+    /// The raw file path in the repo
+    pub file_path: String,
+    /// The URL to view on GitHub
+    pub url: String,
 }
 
 /// Local share info stored per profile for re-sharing
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ShareInfo {
-    gist_id: String,
     code: String,
+    /// GitHub username who owns the profiles repo
+    owner: String,
+    /// SHA of the file in the repo (needed for updates)
+    file_sha: Option<String>,
 }
 
-/// GitHub Gist API response
+/// GitHub Contents API response
 #[derive(Debug, Deserialize)]
-struct GistResponse {
-    id: String,
-    html_url: String,
-    files: std::collections::HashMap<String, GistFile>,
-}
-
-#[derive(Debug, Deserialize)]
-struct GistFile {
+struct ContentsResponse {
+    sha: Option<String>,
     content: Option<String>,
+    html_url: Option<String>,
+}
+
+/// GitHub repo check response
+#[derive(Debug, Deserialize)]
+struct RepoResponse {
+    full_name: Option<String>,
+}
+
+/// GitHub user response
+#[derive(Debug, Deserialize)]
+struct UserResponse {
+    login: String,
 }
 
 // ── Profile Code Encoding ──────────────────────────────────────────────────
 
-/// Convert a hex gist ID to a short profile code: "aa5a315d61ae..." -> "AA5A-315D-61AE"
-/// Takes the first 12 hex chars (48 bits of entropy = 281 trillion combinations)
-fn gist_id_to_code(gist_id: &str) -> String {
-    let hex: String = gist_id
-        .chars()
-        .filter(|c| c.is_ascii_hexdigit())
-        .take(12)
-        .collect::<String>()
-        .to_uppercase();
-    
+/// Generate a deterministic short code from profile content.
+/// Uses SHA-256 hash of the profile name + timestamp to get a unique code.
+fn generate_code(profile: &Profile) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(profile.name.as_bytes());
+    hasher.update(chrono::Utc::now().timestamp().to_le_bytes());
+    let hash = hasher.finalize();
+    let hex: String = hash
+        .iter()
+        .take(6)
+        .map(|b| format!("{:02X}", b))
+        .collect();
     // Format as XXXX-XXXX-XXXX
-    let mut parts = Vec::new();
-    for chunk in hex.as_bytes().chunks(4) {
-        parts.push(std::str::from_utf8(chunk).unwrap_or("????"));
-    }
-    parts.join("-")
+    let chars: Vec<char> = hex.chars().collect();
+    format!(
+        "{}-{}-{}",
+        chars[0..4].iter().collect::<String>(),
+        chars[4..8].iter().collect::<String>(),
+        chars[8..12].iter().collect::<String>()
+    )
 }
 
-/// Convert a profile code back to a search-friendly prefix.
-/// "AA5A-315D-61AE" -> "aa5a315d61ae"
-fn code_to_gist_prefix(code: &str) -> String {
-    code.replace('-', "").to_lowercase()
+/// Code to filename: "AA5A-315D-61AE" -> "aa5a315d61ae.json"
+fn code_to_filename(code: &str) -> String {
+    format!("{}.json", code.replace('-', "").to_lowercase())
 }
 
-/// Normalize user input: accept either a code, raw gist ID, or gist URL.
+/// Normalize user input: accept code, filename, or full URL
 fn normalize_code_input(input: &str) -> String {
     let trimmed = input.trim();
-    
-    // If it's a gist URL: extract the ID from the end
-    if trimmed.contains("gist.github.com") {
-        if let Some(id) = trimmed.rsplit('/').next() {
-            return id.to_string();
+
+    // If it's a GitHub URL, extract the filename
+    if trimmed.contains("github.com") || trimmed.contains("raw.githubusercontent.com") {
+        if let Some(name) = trimmed.rsplit('/').next() {
+            let name = name.trim_end_matches(".json");
+            return name.replace('-', "").to_uppercase();
         }
     }
-    
-    // If it looks like a code (contains dashes, short): convert to prefix
-    if trimmed.contains('-') && trimmed.len() <= 20 {
-        return code_to_gist_prefix(trimmed);
-    }
-    
-    // Otherwise treat as raw gist ID
-    trimmed.to_string()
+
+    // Strip dashes and normalize
+    trimmed.replace('-', "").to_uppercase()
 }
 
-// ── GitHub Gist API ────────────────────────────────────────────────────────
+/// Format a raw code string back to XXXX-XXXX-XXXX
+fn format_code(raw: &str) -> String {
+    let upper: String = raw.chars().filter(|c| c.is_ascii_alphanumeric()).take(12).collect();
+    if upper.len() >= 12 {
+        format!("{}-{}-{}", &upper[0..4], &upper[4..8], &upper[8..12])
+    } else {
+        upper
+    }
+}
 
-fn build_gist_client(token: &str) -> reqwest::Client {
+// ── GitHub API Helpers ─────────────────────────────────────────────────────
+
+fn build_client(token: &str) -> reqwest::Client {
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
         reqwest::header::ACCEPT,
@@ -103,23 +127,51 @@ fn build_gist_client(token: &str) -> reqwest::Client {
         .unwrap_or_default()
 }
 
-/// Create a new secret gist with the profile JSON.
-async fn create_gist(profile: &Profile, token: &str) -> Result<GistResponse> {
-    let client = build_gist_client(token);
-    let profile_json = serde_json::to_string_pretty(profile)?;
-    
+/// Get the authenticated user's GitHub username.
+async fn get_github_username(token: &str) -> Result<String> {
+    let client = build_client(token);
+    let resp = client.get("https://api.github.com/user").send().await?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(AppError::Other(format!(
+            "GitHub authentication failed ({}). Check your token in Settings. Error: {}",
+            status, text
+        )));
+    }
+
+    let user: UserResponse = resp.json().await?;
+    Ok(user.login)
+}
+
+/// Ensure the sts2mm-profiles repo exists. Creates it if not.
+async fn ensure_profiles_repo(token: &str, username: &str) -> Result<()> {
+    let client = build_client(token);
+
+    // Check if repo exists
+    let resp = client
+        .get(&format!(
+            "https://api.github.com/repos/{}/{}",
+            username, PROFILES_REPO
+        ))
+        .send()
+        .await?;
+
+    if resp.status().is_success() {
+        return Ok(());
+    }
+
+    // Create the repo
     let body = serde_json::json!({
-        "description": format!("STS2 Mod Manager - {} ({} mods)", profile.name, profile.mods.len()),
-        "public": false,
-        "files": {
-            "sts2mm-profile.json": {
-                "content": profile_json
-            }
-        }
+        "name": PROFILES_REPO,
+        "description": "Shared mod profiles for STS2 Mod Manager",
+        "public": true,
+        "auto_init": true  // Creates with a README so we have a branch to push to
     });
 
     let resp = client
-        .post("https://api.github.com/gists")
+        .post("https://api.github.com/user/repos")
         .json(&body)
         .send()
         .await?;
@@ -127,123 +179,123 @@ async fn create_gist(profile: &Profile, token: &str) -> Result<GistResponse> {
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        if status.as_u16() == 401 || status.as_u16() == 403 {
-            return Err(AppError::Other(format!(
-                "GitHub authentication failed ({}). Make sure you're using a Classic Personal Access Token with the 'gist' scope enabled. Fine-grained tokens do NOT support Gists. Error: {}",
-                status, text
-            )));
+
+        if status.as_u16() == 422 && text.contains("already exists") {
+            return Ok(()); // Race condition, it exists
         }
+
         return Err(AppError::Other(format!(
-            "Failed to create gist ({}): {}",
-            status, text
+            "Could not create '{}' repository ({}). You can create it manually on GitHub: go to github.com/new, name it '{}', make it public. Error: {}",
+            PROFILES_REPO, status, PROFILES_REPO, text
         )));
     }
 
-    Ok(resp.json().await?)
+    Ok(())
 }
 
-/// Update an existing gist with new profile data.
-async fn update_gist(gist_id: &str, profile: &Profile, token: &str) -> Result<GistResponse> {
-    let client = build_gist_client(token);
-    let profile_json = serde_json::to_string_pretty(profile)?;
-    
-    let body = serde_json::json!({
-        "description": format!("STS2 Mod Manager - {} ({} mods)", profile.name, profile.mods.len()),
-        "files": {
-            "sts2mm-profile.json": {
-                "content": profile_json
+/// Create or update a file in the profiles repo.
+async fn upsert_file(
+    token: &str,
+    username: &str,
+    filename: &str,
+    content: &str,
+    existing_sha: Option<&str>,
+    message: &str,
+) -> Result<(String, String)> {
+    let client = build_client(token);
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/contents/{}",
+        username, PROFILES_REPO, filename
+    );
+
+    // If we don't have the SHA, try to get it (needed for updates)
+    let sha = if let Some(s) = existing_sha {
+        Some(s.to_string())
+    } else {
+        let resp = client.get(&url).send().await;
+        if let Ok(resp) = resp {
+            if resp.status().is_success() {
+                let info: ContentsResponse = resp.json().await.unwrap_or(ContentsResponse {
+                    sha: None,
+                    content: None,
+                    html_url: None,
+                });
+                info.sha
+            } else {
+                None
             }
+        } else {
+            None
         }
+    };
+
+    let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, content);
+    let mut body = serde_json::json!({
+        "message": message,
+        "content": encoded,
     });
 
-    let resp = client
-        .patch(&format!("https://api.github.com/gists/{}", gist_id))
-        .json(&body)
-        .send()
-        .await?;
+    if let Some(sha) = &sha {
+        body["sha"] = serde_json::json!(sha);
+    }
+
+    let resp = client.put(&url).json(&body).send().await?;
 
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
         return Err(AppError::Other(format!(
-            "Failed to update gist ({}): {}",
+            "Failed to upload profile ({}): {}",
             status, text
         )));
     }
 
-    Ok(resp.json().await?)
+    let data: serde_json::Value = resp.json().await?;
+    let file_sha = data["content"]["sha"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+    let html_url = data["content"]["html_url"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+
+    Ok((file_sha, html_url))
 }
 
-/// Fetch a gist by ID (no auth needed for public/secret gists with direct ID).
-pub async fn fetch_gist(gist_id: &str) -> Result<Profile> {
+/// Fetch a profile from any user's profiles repo (public, no auth needed).
+pub async fn fetch_shared_profile(owner: &str, filename: &str) -> Result<Profile> {
+    // Use raw.githubusercontent.com for public access without auth
+    let url = format!(
+        "https://raw.githubusercontent.com/{}/{}/main/{}",
+        owner, PROFILES_REPO, filename
+    );
+
     let client = reqwest::Client::builder()
         .user_agent("sts2-mod-manager/0.1")
         .build()
         .unwrap_or_default();
-    
-    let resp = client
-        .get(&format!("https://api.github.com/gists/{}", gist_id))
-        .header("Accept", "application/vnd.github+json")
-        .send()
-        .await?;
+
+    let resp = client.get(&url).send().await?;
 
     if !resp.status().is_success() {
         let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
         return Err(AppError::Other(format!(
-            "Profile not found ({}): {}. Check the code and try again.",
-            status, text
+            "Profile not found ({}). Check the code and try again.",
+            status
         )));
     }
 
-    let gist: GistResponse = resp.json().await?;
-    
-    // Find the profile file
-    let content = gist
-        .files
-        .get("sts2mm-profile.json")
-        .and_then(|f| f.content.as_ref())
-        .ok_or_else(|| AppError::Other(
-            "This gist doesn't contain a valid STS2 profile. Make sure you have the right code.".to_string()
-        ))?;
-
-    let profile: Profile = serde_json::from_str(content)
+    let text = resp.text().await?;
+    let profile: Profile = serde_json::from_str(&text)
         .map_err(|e| AppError::Other(format!("Invalid profile data: {}", e)))?;
 
     Ok(profile)
 }
 
-/// Search user's gists to find one by code prefix (for resolving short codes).
-async fn find_gist_by_prefix(prefix: &str, token: &str) -> Result<String> {
-    let client = build_gist_client(token);
-    
-    // List user's gists and find one whose ID starts with the prefix
-    let resp = client
-        .get("https://api.github.com/gists?per_page=100")
-        .send()
-        .await?;
-    
-    if !resp.status().is_success() {
-        // If we can't list gists, try the prefix as a full gist ID directly
-        return Ok(prefix.to_string());
-    }
-    
-    let gists: Vec<GistResponse> = resp.json().await?;
-    
-    for gist in &gists {
-        if gist.id.starts_with(prefix) && gist.files.contains_key("sts2mm-profile.json") {
-            return Ok(gist.id.clone());
-        }
-    }
-    
-    // Not found in user's gists - try as full ID
-    Ok(prefix.to_string())
-}
-
 // ── Tauri Commands ──────────────────────────────────────────────────────────
 
-/// Share a profile by creating a GitHub Gist. Returns a short profile code.
-/// Requires a GitHub token to be set in Settings.
+/// Share a profile by uploading to a GitHub repo. Returns a short profile code.
 #[tauri::command]
 pub async fn share_profile(
     name: String,
@@ -252,7 +304,7 @@ pub async fn share_profile(
     let (profiles_path, token) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let token = s.github_token.clone().ok_or(
-            "GitHub token required to share profiles. Set a Classic Personal Access Token (with 'gist' scope) in Settings. Note: Fine-grained tokens do NOT support Gists."
+            "GitHub token required to share profiles. Set it in Settings."
         )?;
         (s.profiles_path.clone(), token)
     };
@@ -260,16 +312,38 @@ pub async fn share_profile(
     let profile =
         crate::profiles::load_profile(&name, &profiles_path).map_err(|e| e.to_string())?;
 
-    let gist = create_gist(&profile, &token)
+    // Get username
+    let username = get_github_username(&token)
         .await
         .map_err(|e| e.to_string())?;
 
-    let code = gist_id_to_code(&gist.id);
+    // Ensure repo exists
+    ensure_profiles_repo(&token, &username)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // Generate code and filename
+    let code = generate_code(&profile);
+    let filename = code_to_filename(&code);
+    let profile_json = serde_json::to_string_pretty(&profile).map_err(|e| e.to_string())?;
+
+    // Upload
+    let (file_sha, html_url) = upsert_file(
+        &token,
+        &username,
+        &filename,
+        &profile_json,
+        None,
+        &format!("Share profile: {} ({} mods)", profile.name, profile.mods.len()),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
 
     // Store share info locally for re-sharing
     let share_info = ShareInfo {
-        gist_id: gist.id.clone(),
         code: code.clone(),
+        owner: username.clone(),
+        file_sha: Some(file_sha),
     };
     let share_info_path = profiles_path.join(format!("{}.share", name));
     std::fs::write(
@@ -280,8 +354,9 @@ pub async fn share_profile(
 
     Ok(ShareResult {
         code,
-        gist_id: gist.id,
-        gist_url: gist.html_url,
+        owner: username,
+        file_path: filename,
+        url: html_url,
     })
 }
 
@@ -294,7 +369,7 @@ pub async fn reshare_profile(
     let (profiles_path, token) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let token = s.github_token.clone().ok_or(
-            "GitHub token required. Set a Classic Personal Access Token (with 'gist' scope) in Settings."
+            "GitHub token required. Set it in Settings."
         )?;
         (s.profiles_path.clone(), token)
     };
@@ -310,41 +385,57 @@ pub async fn reshare_profile(
     )
     .map_err(|e| e.to_string())?;
 
-    let gist = update_gist(&share_info.gist_id, &profile, &token)
-        .await
-        .map_err(|e| e.to_string())?;
+    let filename = code_to_filename(&share_info.code);
+    let profile_json = serde_json::to_string_pretty(&profile).map_err(|e| e.to_string())?;
+
+    let (file_sha, html_url) = upsert_file(
+        &token,
+        &share_info.owner,
+        &filename,
+        &profile_json,
+        share_info.file_sha.as_deref(),
+        &format!("Update profile: {} ({} mods)", profile.name, profile.mods.len()),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let owner = share_info.owner.clone();
+    let code = share_info.code.clone();
+
+    // Update local share info with new SHA
+    let updated_info = ShareInfo {
+        code: share_info.code,
+        owner: share_info.owner,
+        file_sha: Some(file_sha),
+    };
+    let _ = std::fs::write(
+        &share_info_path,
+        serde_json::to_string_pretty(&updated_info).unwrap(),
+    );
 
     Ok(ShareResult {
-        code: share_info.code,
-        gist_id: gist.id,
-        gist_url: gist.html_url,
+        code,
+        owner,
+        file_path: filename,
+        url: html_url,
     })
 }
 
-/// Fetch a shared profile by code/gist ID. Friends use this to preview before installing.
+/// Fetch a shared profile by code. The code format is "OWNER:CODE" where OWNER is
+/// the GitHub username and CODE is the profile code. Friends need both parts.
+/// Format: "username/AA5A-315D-61AE"
 #[tauri::command]
 pub async fn fetch_shared_profile_cmd(
     code: String,
-    state: tauri::State<'_, AppState>,
+    _state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Profile, String> {
-    let gist_id = normalize_code_input(&code);
-    
-    // If the input looks like a short prefix (from our code format), try to resolve
-    if gist_id.len() < 20 {
-        // Try fetching with optional token for better rate limits
-        let token = {
-            let s = state.lock().map_err(|e| e.to_string())?;
-            s.github_token.clone()
-        };
-        
-        if let Some(ref tok) = token {
-            if let Ok(full_id) = find_gist_by_prefix(&gist_id, tok).await {
-                return fetch_gist(&full_id).await.map_err(|e| e.to_string());
-            }
-        }
-    }
-    
-    fetch_gist(&gist_id).await.map_err(|e| e.to_string())
+    let (owner, profile_code) = parse_share_code(&code)
+        .map_err(|e| e.to_string())?;
+
+    let filename = code_to_filename(&profile_code);
+    fetch_shared_profile(&owner, &filename)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Install a shared profile from a code AND auto-subscribe for updates.
@@ -353,34 +444,23 @@ pub async fn install_shared_profile(
     code: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Profile, String> {
-    let gist_id = normalize_code_input(&code);
-    
-    // Resolve short codes
-    let resolved_id = if gist_id.len() < 20 {
-        let token = {
-            let s = state.lock().map_err(|e| e.to_string())?;
-            s.github_token.clone()
-        };
-        if let Some(ref tok) = token {
-            find_gist_by_prefix(&gist_id, tok).await.unwrap_or(gist_id.clone())
-        } else {
-            gist_id.clone()
-        }
-    } else {
-        gist_id.clone()
-    };
-    
-    let profile = fetch_gist(&resolved_id)
+    let (owner, profile_code) = parse_share_code(&code)
+        .map_err(|e| e.to_string())?;
+
+    let filename = code_to_filename(&profile_code);
+    let profile = fetch_shared_profile(&owner, &filename)
         .await
         .map_err(|e| e.to_string())?;
 
-    let (mods_path, disabled_path, profiles_path, config_path) = {
+    let (mods_path, disabled_path, profiles_path, config_path, cache_path, token) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let mods = s.mods_path.clone().ok_or("Game path not set")?;
         let disabled = s.disabled_mods_path.clone().ok_or("Game path not set")?;
         let profiles = s.profiles_path.clone();
         let config = s.config_path.clone();
-        (mods, disabled, profiles, config)
+        let cache = s.cache_path.clone();
+        let token = s.github_token.clone();
+        (mods, disabled, profiles, config, cache, token)
     };
 
     // Save the profile locally
@@ -390,11 +470,63 @@ pub async fn install_shared_profile(
     crate::profiles::apply_profile(&profile, &mods_path, &disabled_path)
         .map_err(|e| e.to_string())?;
 
+    // Try to download any mods we don't have locally
+    let local_mods = crate::mods::scan_mods(&mods_path);
+    let local_disabled = crate::mods::scan_disabled_mods(&disabled_path);
+    let local_names: std::collections::HashSet<String> = local_mods
+        .iter()
+        .chain(local_disabled.iter())
+        .map(|m| m.name.clone())
+        .collect();
+
+    let mod_sources_db = crate::mod_sources::load_sources(&config_path);
+
+    for pm in &profile.mods {
+        if local_names.contains(&pm.name) {
+            continue;
+        }
+
+        let github_repo = pm
+            .source
+            .as_ref()
+            .and_then(|s| s.strip_prefix("github:").map(|r| r.to_string()))
+            .or_else(|| {
+                mod_sources_db
+                    .mods
+                    .get(&pm.name)
+                    .and_then(|e| e.github_repo.clone())
+            });
+
+        if let Some(repo) = github_repo {
+            let parts: Vec<&str> = repo.splitn(2, '/').collect();
+            if parts.len() == 2 {
+                match crate::download::download_and_install_github_mod(
+                    parts[0],
+                    parts[1],
+                    None,
+                    &mods_path,
+                    &cache_path,
+                    token.as_deref(),
+                )
+                .await
+                {
+                    Ok(info) => {
+                        log::info!("Auto-downloaded mod '{}' for subscription", info.name);
+                    }
+                    Err(e) => {
+                        log::warn!("Could not auto-download '{}': {}", pm.name, e);
+                    }
+                }
+            }
+        }
+    }
+
     // Auto-subscribe for future updates
+    let share_key = format!("{}:{}", owner, profile_code);
     let now = chrono::Utc::now();
     let sub = crate::subscriptions::Subscription {
-        share_id: resolved_id.clone(),
-        share_url: format!("gist:{}", resolved_id),
+        share_id: share_key.clone(),
+        share_url: format!("{}/{}", owner, format_code(&profile_code)),
         profile_name: profile.name.clone(),
         curator: profile.created_by.clone(),
         last_synced_profile: profile.clone(),
@@ -402,8 +534,29 @@ pub async fn install_shared_profile(
         last_synced: now,
     };
     let mut db = crate::subscriptions::load_subscriptions(&config_path);
-    db.subscriptions.insert(resolved_id, sub);
+    db.subscriptions.insert(share_key, sub);
     let _ = crate::subscriptions::save_subscriptions(&db, &config_path);
 
     Ok(profile)
+}
+
+/// Parse a share code like "username/AA5A-315D-61AE" into (owner, code).
+fn parse_share_code(input: &str) -> Result<(String, String)> {
+    let trimmed = input.trim();
+
+    // Format: "username/AA5A-315D-61AE"
+    if let Some(idx) = trimmed.find('/') {
+        let owner = trimmed[..idx].to_string();
+        let code_raw = normalize_code_input(&trimmed[idx + 1..]);
+        if owner.is_empty() || code_raw.is_empty() {
+            return Err(AppError::Other(
+                "Invalid share code format. Expected: username/XXXX-XXXX-XXXX".to_string(),
+            ));
+        }
+        return Ok((owner, code_raw));
+    }
+
+    Err(AppError::Other(
+        "Invalid share code format. Expected: username/XXXX-XXXX-XXXX (the curator shares this code with you)".to_string(),
+    ))
 }

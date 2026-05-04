@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 use crate::profiles::Profile;
-use crate::sharing::fetch_gist;
+use crate::sharing::fetch_shared_profile;
 use crate::state::AppState;
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -213,7 +213,17 @@ pub async fn check_subscription_updates(
             None => continue,
         };
 
-        match fetch_gist(share_id).await {
+        // Parse share_id format: "owner:CODE" or just try as-is
+        let fetch_result = if let Some(idx) = share_id.find(':') {
+            let owner = &share_id[..idx];
+            let code = &share_id[idx + 1..];
+            let filename = format!("{}.json", code.to_lowercase());
+            fetch_shared_profile(owner, &filename).await
+        } else {
+            // Legacy format - try as direct ID
+            Err(crate::error::AppError::Other(format!("Invalid subscription ID: {}", share_id)))
+        };
+        match fetch_result {
             Ok(remote) => {
                 let (added, removed, updated) = diff_profiles(&sub.last_synced_profile, &remote);
                 let has_update = !added.is_empty() || !removed.is_empty() || !updated.is_empty();
@@ -263,9 +273,16 @@ pub async fn apply_subscription_update(
     };
 
     // Fetch the latest remote profile
-    let remote = fetch_gist(&share_id)
-        .await
-        .map_err(|e| e.to_string())?;
+    let remote = if let Some(idx) = share_id.find(':') {
+        let owner = &share_id[..idx];
+        let code = &share_id[idx + 1..];
+        let filename = format!("{}.json", code.to_lowercase());
+        fetch_shared_profile(owner, &filename)
+            .await
+            .map_err(|e| e.to_string())?
+    } else {
+        return Err(format!("Invalid subscription ID: {}", share_id));
+    };
 
     // Save the profile locally
     crate::profiles::save_profile(&remote, &profiles_path).map_err(|e| e.to_string())?;

@@ -85,8 +85,9 @@ export type QuickAddResult =
 
 export interface ShareResult {
   code: string;
-  gist_id: string;
-  gist_url: string;
+  owner: string;
+  file_path: string;
+  url: string;
 }
 
 export interface ModSourceEntry {

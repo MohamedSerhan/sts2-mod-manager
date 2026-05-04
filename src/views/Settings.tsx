@@ -212,8 +212,8 @@ export function SettingsView() {
           </Button>
         </div>
         <p className="text-xs text-text-dim">
-          Use a <strong>Classic</strong> Personal Access Token with the <strong>gist</strong> scope for profile sharing.
-          Fine-grained tokens do NOT support Gists. Also increases API rate limit to 5,000 req/hr.
+          Any token type works (classic or fine-grained). For sharing profiles, the token needs <strong>repo</strong> permission.
+          Also increases API rate limit to 5,000 req/hr.
         </p>
       </Card>
 

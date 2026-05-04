@@ -155,7 +155,7 @@ export function HomeView({ onGoToSettings }: { onGoToSettings: () => void }) {
               type="text"
               value={profileCode}
               onChange={(e) => setProfileCode(e.target.value)}
-              placeholder="e.g. AA5A-315D-61AE"
+              placeholder="e.g. username/AA5A-315D-61AE"
               className="w-full bg-background border border-border rounded-lg pl-11 pr-4 py-3 text-base text-text placeholder:text-text-dim focus:outline-none focus:ring-2 focus:ring-primary/50 font-mono tracking-wider"
               onKeyDown={(e) => e.key === 'Enter' && handleImportCode()}
               disabled={importing}

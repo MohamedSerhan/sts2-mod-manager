@@ -165,7 +165,7 @@ export function ProfilesView() {
   async function handleCopyCode() {
     if (!shareResult) return;
     try {
-      await navigator.clipboard.writeText(shareResult.code);
+      await navigator.clipboard.writeText(`${shareResult.owner}/${shareResult.code}`);
       setCopiedCode(true);
       setTimeout(() => setCopiedCode(false), 2000);
     } catch {
@@ -220,7 +220,7 @@ export function ProfilesView() {
               <input
                 type="text"
                 readOnly
-                value={shareResult.code}
+                value={`${shareResult.owner}/${shareResult.code}`}
                 className="flex-1 bg-background border border-border rounded-lg px-4 py-3 text-lg text-text font-mono font-bold text-center tracking-wider select-all focus:outline-none"
               />
               <Button size="sm" onClick={handleCopyCode}>
@@ -294,8 +294,8 @@ export function ProfilesView() {
             <input
               type="text"
               value={importCode}
-              onChange={(e) => setImportCode(e.target.value.toUpperCase())}
-              placeholder="XXXX-XXXX-XXXX"
+              onChange={(e) => setImportCode(e.target.value)}
+              placeholder="username/XXXX-XXXX-XXXX"
               className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-text font-mono tracking-wider placeholder:text-text-dim focus:outline-none focus:ring-2 focus:ring-primary/50"
               onKeyDown={(e) => e.key === 'Enter' && handleImportFromCode()}
               disabled={importingCode}

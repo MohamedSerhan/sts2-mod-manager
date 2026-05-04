@@ -439,6 +439,7 @@ pub async fn fetch_shared_profile_cmd(
 }
 
 /// Install a shared profile from a code AND auto-subscribe for updates.
+/// Downloads missing mods FIRST, then applies the profile (enable/disable).
 #[tauri::command]
 pub async fn install_shared_profile(
     code: String,
@@ -466,11 +467,7 @@ pub async fn install_shared_profile(
     // Save the profile locally
     crate::profiles::save_profile(&profile, &profiles_path).map_err(|e| e.to_string())?;
 
-    // Apply it
-    crate::profiles::apply_profile(&profile, &mods_path, &disabled_path)
-        .map_err(|e| e.to_string())?;
-
-    // Try to download any mods we don't have locally
+    // ── STEP 1: Download missing mods BEFORE applying the profile ──
     let local_mods = crate::mods::scan_mods(&mods_path);
     let local_disabled = crate::mods::scan_disabled_mods(&disabled_path);
     let local_names: std::collections::HashSet<String> = local_mods
@@ -480,16 +477,39 @@ pub async fn install_shared_profile(
         .collect();
 
     let mod_sources_db = crate::mod_sources::load_sources(&config_path);
+    let mut download_failures: Vec<String> = Vec::new();
 
     for pm in &profile.mods {
         if local_names.contains(&pm.name) {
-            continue;
+            continue; // Already have this mod locally
         }
 
+        // Try to find a GitHub repo from multiple sources:
+        // 1. Profile source field (e.g. "github:owner/repo")
+        // 2. Mod sources DB (auto-detected GitHub links)
+        // 3. Profile source field as a full GitHub URL
         let github_repo = pm
             .source
             .as_ref()
-            .and_then(|s| s.strip_prefix("github:").map(|r| r.to_string()))
+            .and_then(|s| {
+                // "github:owner/repo" format
+                if let Some(repo) = s.strip_prefix("github:") {
+                    return Some(repo.to_string());
+                }
+                // Full GitHub URL: "https://github.com/owner/repo"
+                if s.contains("github.com/") {
+                    let parts: Vec<&str> = s.split("github.com/").collect();
+                    if parts.len() > 1 {
+                        let repo_path = parts[1].trim_end_matches('/');
+                        // Take first two segments (owner/repo)
+                        let segs: Vec<&str> = repo_path.splitn(3, '/').collect();
+                        if segs.len() >= 2 {
+                            return Some(format!("{}/{}", segs[0], segs[1]));
+                        }
+                    }
+                }
+                None
+            })
             .or_else(|| {
                 mod_sources_db
                     .mods
@@ -511,17 +531,36 @@ pub async fn install_shared_profile(
                 .await
                 {
                     Ok(info) => {
-                        log::info!("Auto-downloaded mod '{}' for subscription", info.name);
+                        log::info!("Downloaded mod '{}' for shared profile", info.name);
                     }
                     Err(e) => {
-                        log::warn!("Could not auto-download '{}': {}", pm.name, e);
+                        log::warn!("Could not download '{}': {}", pm.name, e);
+                        download_failures.push(pm.name.clone());
                     }
                 }
+            } else {
+                download_failures.push(pm.name.clone());
             }
+        } else {
+            log::warn!("No download source for mod '{}' -- skipping (no GitHub link in profile or sources DB)", pm.name);
+            download_failures.push(pm.name.clone());
         }
     }
 
-    // Auto-subscribe for future updates
+    if !download_failures.is_empty() {
+        log::warn!(
+            "Could not download {} mods: {:?}. These need to be installed manually.",
+            download_failures.len(),
+            download_failures
+        );
+    }
+
+    // ── STEP 2: Apply profile AFTER downloads ──
+    // Now all downloadable mods are in mods_path, apply_profile can correctly enable/disable
+    crate::profiles::apply_profile(&profile, &mods_path, &disabled_path)
+        .map_err(|e| e.to_string())?;
+
+    // ── STEP 3: Auto-subscribe for future updates ──
     let share_key = format!("{}:{}", owner, profile_code);
     let now = chrono::Utc::now();
     let sub = crate::subscriptions::Subscription {

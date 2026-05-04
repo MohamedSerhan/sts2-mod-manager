@@ -97,22 +97,46 @@ pub fn delete_profile(name: &str, profiles_path: &Path) -> Result<()> {
 }
 
 /// Create a snapshot of currently installed (enabled) mods as a profile.
+/// Enriches source links with mod_sources DB so shared profiles include download info.
 pub fn snapshot_current(
     name: &str,
     mods_path: &Path,
     profiles_path: &Path,
 ) -> Result<Profile> {
+    snapshot_current_with_sources(name, mods_path, profiles_path, None)
+}
+
+/// Create a snapshot with optional source enrichment from config_path.
+pub fn snapshot_current_with_sources(
+    name: &str,
+    mods_path: &Path,
+    profiles_path: &Path,
+    config_path: Option<&Path>,
+) -> Result<Profile> {
     let installed = scan_mods(mods_path);
     let now = Utc::now();
 
+    // Load mod sources DB if config_path provided, to enrich profile with download links
+    let sources_db = config_path
+        .map(|p| crate::mod_sources::load_sources(p))
+        .unwrap_or_default();
+
     let profile_mods: Vec<ProfileMod> = installed
         .into_iter()
-        .map(|m| ProfileMod {
-            name: m.name,
-            version: m.version,
-            source: m.source,
-            hash: m.hash,
-            files: m.files,
+        .map(|m| {
+            // Try to enrich source with GitHub repo from mod_sources DB
+            let source = m.source.clone().or_else(|| {
+                sources_db.mods.get(&m.name)
+                    .and_then(|e| e.github_repo.as_ref())
+                    .map(|repo| format!("github:{}", repo))
+            });
+            ProfileMod {
+                name: m.name,
+                version: m.version,
+                source,
+                hash: m.hash,
+                files: m.files,
+            }
         })
         .collect();
 
@@ -205,7 +229,7 @@ pub fn create_profile(
 ) -> std::result::Result<Profile, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
-    snapshot_current(&name, mods_path, &s.profiles_path).map_err(|e| e.to_string())
+    snapshot_current_with_sources(&name, mods_path, &s.profiles_path, Some(&s.config_path)).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -240,7 +264,7 @@ pub fn snapshot_profile(
 ) -> std::result::Result<Profile, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
-    snapshot_current(&name, mods_path, &s.profiles_path).map_err(|e| e.to_string())
+    snapshot_current_with_sources(&name, mods_path, &s.profiles_path, Some(&s.config_path)).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

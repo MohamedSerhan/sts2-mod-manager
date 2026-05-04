@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
+import { listen } from '@tauri-apps/api/event';
 import { Home, LayoutDashboard, Package, Search, Layers, Settings, Play, ChevronRight, Wrench } from 'lucide-react';
 import { check, type Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
@@ -59,6 +60,18 @@ function AppInner() {
   const [appVersion, setAppVersion] = useState('');
 
   useEffect(() => { getVersion().then(setAppVersion).catch(() => {}); }, []);
+
+  // Listen for auto-installed mods from the Downloads watcher
+  useEffect(() => {
+    const unlisten1 = listen<{ mod_name: string; file_name: string }>('mod-auto-installed', (event) => {
+      toast.success(`Mod "${event.payload.mod_name}" auto-installed from ${event.payload.file_name}`);
+      refreshAll();
+    });
+    const unlisten2 = listen<{ file_name: string; error: string }>('mod-auto-install-failed', (event) => {
+      toast.error(`Failed to install ${event.payload.file_name}: ${event.payload.error}`);
+    });
+    return () => { unlisten1.then(f => f()); unlisten2.then(f => f()); };
+  }, []);
 
   // Check for app updates on mount, throttled to once per 24h
   useEffect(() => {

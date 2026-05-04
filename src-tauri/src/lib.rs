@@ -1,5 +1,6 @@
 mod backup;
 mod download;
+mod downloads_watcher;
 mod error;
 mod game;
 mod mod_sources;
@@ -13,6 +14,7 @@ mod subscriptions;
 mod updater;
 
 use state::create_app_state;
+use state::AppState;
 
 /// Set up logging to both stderr and a log file in the config directory.
 fn setup_logging(log_path: &std::path::Path) {
@@ -202,6 +204,14 @@ pub fn run() {
                     // Deep link events will be forwarded to the frontend
                     // The frontend handles NXM links via the handle_nxm_link command
                 });
+            }
+
+            // Start watching the Downloads folder for new mod zips
+            {
+                use tauri::Manager;
+                let handle = app.handle().clone();
+                let watcher_state = app.state::<AppState>().inner().clone();
+                downloads_watcher::start_downloads_watcher(handle, watcher_state);
             }
 
             Ok(())

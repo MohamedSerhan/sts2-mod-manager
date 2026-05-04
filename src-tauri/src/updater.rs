@@ -88,22 +88,24 @@ fn parse_owner_repo(full_name: &str) -> Option<(String, String)> {
 }
 
 /// Resolve the GitHub owner/repo for a mod, checking:
-/// 1. mod_sources.json (explicit link)
+/// 1. mod_sources.json (explicit link — only if manually set, not auto-detected)
 /// 2. ModInfo.source field (legacy github:owner/repo)
 fn resolve_github_repo(
     mod_info: &ModInfo,
     sources: &std::collections::HashMap<String, ModSourceEntry>,
 ) -> Option<(String, String)> {
-    // Check mod_sources.json first
+    // Check mod_sources.json first — skip auto-detected links
     if let Some(entry) = sources.get(&mod_info.name) {
-        if let Some(ref repo) = entry.github_repo {
-            if let Some(pair) = parse_owner_repo(repo) {
-                return Some(pair);
+        if !entry.github_auto_detected {
+            if let Some(ref repo) = entry.github_repo {
+                if let Some(pair) = parse_owner_repo(repo) {
+                    return Some(pair);
+                }
             }
         }
     }
 
-    // Fall back to legacy source field
+    // Fall back to legacy source field (these are from the mod author, trustworthy)
     if let Some(ref source) = mod_info.source {
         if let Some(pair) = parse_github_source(source) {
             return Some(pair);
@@ -398,6 +400,8 @@ pub struct ModAuditEntry {
     pub nexus_update_available: bool,
     /// Source type that flagged an update: "github", "nexus", or "both".
     pub update_source: Option<String>,
+    /// Whether the GitHub link was auto-detected (informational only, not used for updates).
+    pub github_auto_detected: bool,
 }
 
 /// Valid mod asset extensions for STS2 mods.
@@ -442,6 +446,12 @@ pub async fn audit_mod_versions(
         let source_entry = sources_db.mods.get(&m.name);
         let github_pair = resolve_github_repo(m, &sources_db.mods);
 
+        // Also get auto-detected GitHub repo for display (even though it's not used for updates)
+        let auto_detected_github = source_entry
+            .filter(|e| e.github_auto_detected && e.github_repo.is_some())
+            .and_then(|e| e.github_repo.clone());
+        let is_auto_detected = auto_detected_github.is_some() && github_pair.is_none();
+
         // Resolve Nexus info from sources DB or manifest
         let nexus_url = source_entry
             .and_then(|e| e.nexus_url.clone())
@@ -451,6 +461,7 @@ pub async fn audit_mod_versions(
 
         let has_github = github_pair.is_some();
         let has_nexus = nexus_mod_id.is_some();
+        let has_any_source = has_github || has_nexus || auto_detected_github.is_some() || nexus_url.is_some();
 
         // --- GitHub version check ---
         let mut github_repo_str: Option<String> = None;
@@ -565,7 +576,7 @@ pub async fn audit_mod_versions(
         };
 
         // If no source at all, still include in report
-        if !has_github && !has_nexus {
+        if !has_any_source {
             results.push(ModAuditEntry {
                 mod_name: m.name.clone(),
                 github_repo: None,
@@ -577,17 +588,21 @@ pub async fn audit_mod_versions(
                 asset_names: Vec::new(),
                 releases_scanned: 0,
                 error: None,
-                nexus_url: nexus_url.clone(),
+                nexus_url: None,
                 nexus_version: None,
                 nexus_update_available: false,
                 update_source: None,
+                github_auto_detected: false,
             });
             continue;
         }
 
+        // For display: use the verified GitHub repo, or fall back to auto-detected for informational display
+        let display_github = github_repo_str.clone().or(auto_detected_github);
+
         results.push(ModAuditEntry {
             mod_name: m.name.clone(),
-            github_repo: github_repo_str,
+            github_repo: display_github,
             installed_version: m.version.clone(),
             latest_release_tag,
             latest_release_with_assets_tag,
@@ -600,6 +615,7 @@ pub async fn audit_mod_versions(
             nexus_version,
             nexus_update_available,
             update_source,
+            github_auto_detected: is_auto_detected,
         });
     }
 

@@ -168,5 +168,6 @@ export interface ModAuditEntry {
   nexus_version: string | null;
   nexus_update_available: boolean;
   update_source: string | null;
+  github_auto_detected: boolean;
 }
 

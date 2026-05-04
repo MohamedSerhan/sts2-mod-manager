@@ -17,6 +17,10 @@ pub struct ModSourceEntry {
     /// GitHub owner/repo (e.g. "owner/repo")
     #[serde(skip_serializing_if = "Option::is_none")]
     pub github_repo: Option<String>,
+    /// Whether the GitHub link was auto-detected (vs manually set by user).
+    /// Auto-detected links are NOT used for update checking since they may be wrong.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub github_auto_detected: bool,
     /// Full Nexus Mods URL
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nexus_url: Option<String>,
@@ -30,6 +34,8 @@ pub struct ModSourceEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub installed_version: Option<String>,
 }
+
+fn is_false(v: &bool) -> bool { !*v }
 
 /// The entire mod sources database, keyed by mod name.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -246,6 +252,7 @@ pub fn set_mod_source(
     let existing = db.mods.entry(mod_name.clone()).or_default();
     if entry.github_repo.is_some() {
         existing.github_repo = entry.github_repo;
+        existing.github_auto_detected = false; // manually set by user
     }
     if entry.nexus_url.is_some() {
         existing.nexus_url = entry.nexus_url;
@@ -271,6 +278,7 @@ pub fn set_mod_sources_full(
 
     let mut entry = ModSourceEntry::default();
     entry.github_repo = github_repo;
+    entry.github_auto_detected = false; // manually set by user
 
     if let Some(ref nurl) = nexus_url {
         // Parse Nexus URL to extract game domain and mod ID
@@ -329,6 +337,7 @@ pub async fn find_github_from_nexus(
         let mut db = load_sources(&config_path);
         let entry = db.mods.entry(mod_name).or_default();
         entry.github_repo = Some(repo.clone());
+        entry.github_auto_detected = true;
         save_sources(&db, &config_path).map_err(|e| e.to_string())?;
         return Ok(Some(repo.clone()));
     }
@@ -362,6 +371,7 @@ pub async fn find_github_from_nexus(
                     let mut db = load_sources(&config_path);
                     let entry = db.mods.entry(mod_name).or_default();
                     entry.github_repo = Some(repo.clone());
+                    entry.github_auto_detected = true;
                     save_sources(&db, &config_path).map_err(|e| e.to_string())?;
                     return Ok(Some(repo));
                 }
@@ -690,6 +700,7 @@ pub async fn auto_detect_sources(
             if let Some(ref gh_url) = m.github_url {
                 if let Some(parsed) = parse_source_url(gh_url) {
                     entry.github_repo = parsed.github_repo;
+                    entry.github_auto_detected = true;
                     changed = true;
                 }
             }
@@ -699,6 +710,7 @@ pub async fn auto_detect_sources(
                     if src.starts_with("github:") || src.contains("github.com") {
                         if let Some(parsed) = parse_source_url(src) {
                             entry.github_repo = parsed.github_repo;
+                            entry.github_auto_detected = true;
                             changed = true;
                         }
                     }
@@ -747,6 +759,7 @@ pub async fn auto_detect_sources(
                     if let Some(repo) = extract_github_from_nexus(nkey, &game_domain, mod_id).await {
                         let entry_mut = db.mods.entry(m.name.clone()).or_default();
                         entry_mut.github_repo = Some(repo.clone());
+                        entry_mut.github_auto_detected = true;
                         let _ = save_sources(&db, &config_path);
 
                         matched.push(AutoDetectMatch {
@@ -879,6 +892,7 @@ pub async fn auto_detect_sources(
 
                 let entry = db.mods.entry(m.name.clone()).or_default();
                 entry.github_repo = Some(full_name.clone());
+                entry.github_auto_detected = true;
                 save_sources(&db, &config_path).map_err(|e| e.to_string())?;
 
                 matched.push(AutoDetectMatch {

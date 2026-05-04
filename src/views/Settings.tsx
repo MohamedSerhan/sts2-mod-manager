@@ -341,11 +341,13 @@ export function SettingsView() {
           <div className="space-y-1 max-h-96 overflow-y-auto">
             {auditResults.map((entry) => {
               const hasAnySource = entry.github_repo || entry.nexus_url;
+              // Don't treat auto-detected GitHub errors as real errors
+              const hasRealError = entry.error && !entry.github_auto_detected;
               return (
               <div
                 key={entry.mod_name}
                 className={`text-xs px-3 py-2 rounded-lg ${
-                  entry.error
+                  hasRealError
                     ? 'bg-red-500/10 text-red-400'
                     : entry.needs_update
                     ? 'bg-amber-500/10 text-amber-400'
@@ -357,7 +359,7 @@ export function SettingsView() {
                 <div className="flex items-center justify-between">
                   <span className="font-medium">{entry.mod_name}</span>
                   <span className="font-mono">
-                    {entry.error
+                    {hasRealError
                       ? 'ERROR'
                       : entry.needs_update
                       ? `${entry.installed_version} → ${
@@ -377,10 +379,15 @@ export function SettingsView() {
                       href={`https://github.com/${entry.github_repo}/releases`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-primary hover:underline"
+                      className={`inline-flex items-center gap-1 hover:underline ${
+                        entry.github_auto_detected ? 'text-text-dim' : 'text-primary'
+                      }`}
                     >
                       <ExternalLink size={10} />
                       {entry.github_repo}
+                      {entry.github_auto_detected && (
+                        <span className="text-text-dim opacity-60">(auto-detected, not used for updates)</span>
+                      )}
                     </a>
                   )}
                   {entry.nexus_url && (
@@ -395,8 +402,8 @@ export function SettingsView() {
                     </a>
                   )}
                 </div>
-                {/* GitHub-specific details */}
-                {entry.github_repo && (
+                {/* GitHub-specific details (only for manually-linked repos) */}
+                {entry.github_repo && !entry.github_auto_detected && (
                   <div className="text-text-dim mt-0.5">
                     {entry.latest_release_tag && entry.latest_release_with_assets_tag && entry.latest_release_tag !== entry.latest_release_with_assets_tag && (
                       <span className="text-amber-400">
@@ -414,7 +421,7 @@ export function SettingsView() {
                 {entry.asset_names.length > 0 && (
                   <div className="text-text-dim mt-0.5">Assets: {entry.asset_names.join(', ')}</div>
                 )}
-                {entry.error && <div className="mt-0.5">{entry.error}</div>}
+                {hasRealError && <div className="mt-0.5">{entry.error}</div>}
               </div>
               );
             })}
@@ -422,7 +429,7 @@ export function SettingsView() {
           <div className="text-xs text-text-dim border-t border-border pt-2">
             {auditResults.filter(r => r.needs_update).length} need updates &middot;
             {auditResults.filter(r => !r.github_repo && !r.nexus_url).length} unlinked &middot;
-            {auditResults.filter(r => r.error).length} errors &middot;
+            {auditResults.filter(r => r.error && !r.github_auto_detected).length} errors &middot;
             {auditResults.filter(r => (r.github_repo || r.nexus_url) && !r.needs_update && !r.error).length} up to date
           </div>
         </Card>

@@ -21,6 +21,12 @@ pub struct ModInfo {
     pub hash: Option<String>,
     pub dependencies: Vec<String>,
     pub size_bytes: u64,
+    /// Linked GitHub URL (e.g. "https://github.com/owner/repo")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub github_url: Option<String>,
+    /// Linked Nexus Mods URL
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nexus_url: Option<String>,
 }
 
 /// Raw manifest structure from STS2 mod JSON files.
@@ -161,6 +167,8 @@ fn parse_manifest(manifest_path: &Path, base_dir: &Path, enabled: bool) -> Optio
         hash: file_hash,
         dependencies: raw.dependencies,
         size_bytes,
+        github_url: None,
+        nexus_url: None,
     })
 }
 
@@ -199,6 +207,8 @@ fn dll_only_mod(dll_path: &Path, base_dir: &Path, enabled: bool) -> ModInfo {
         hash: hash_file(dll_path),
         dependencies: Vec::new(),
         size_bytes,
+        github_url: None,
+        nexus_url: None,
     }
 }
 
@@ -490,6 +500,8 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
                 hash: hash_file(zip_path),
                 dependencies: Vec::new(),
                 size_bytes,
+                github_url: None,
+                nexus_url: None,
             })
         }
     }
@@ -497,7 +509,7 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
 
 // ── Tauri Commands ──────────────────────────────────────────────────────────
 
-/// Get all installed mods (active + disabled).
+/// Get all installed mods (active + disabled), enriched with source links.
 #[tauri::command]
 pub fn get_installed_mods(state: tauri::State<'_, AppState>) -> std::result::Result<Vec<ModInfo>, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
@@ -509,6 +521,9 @@ pub fn get_installed_mods(state: tauri::State<'_, AppState>) -> std::result::Res
     if let Some(ref disabled_path) = s.disabled_mods_path {
         all_mods.extend(scan_disabled_mods(disabled_path));
     }
+
+    // Enrich with source metadata (GitHub/Nexus links)
+    crate::mod_sources::enrich_mods_with_sources(&mut all_mods, &s.config_path);
 
     Ok(all_mods)
 }

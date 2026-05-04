@@ -1,5 +1,21 @@
 import { useState } from 'react';
-import { Search, Upload, Link, Trash2, Package, RefreshCw, FolderOpen, ToggleLeft, ToggleRight, X } from 'lucide-react';
+import {
+  Search,
+  Upload,
+  Link,
+  Trash2,
+  Package,
+  RefreshCw,
+  FolderOpen,
+  ToggleLeft,
+  ToggleRight,
+  X,
+  GitBranch,
+  ExternalLink,
+  ChevronDown,
+  ChevronUp,
+  Save,
+} from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
@@ -15,6 +31,7 @@ import {
   enableAllMods,
   disableAllMods,
   openModsFolder,
+  setModSource,
 } from '../hooks/useTauri';
 
 export function ModsView() {
@@ -24,9 +41,14 @@ export function ModsView() {
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [quickAddUrl, setQuickAddUrl] = useState('');
   const [quickAdding, setQuickAdding] = useState(false);
+  const [expandedMod, setExpandedMod] = useState<string | null>(null);
+  const [editingSource, setEditingSource] = useState<string | null>(null);
+  const [sourceInput, setSourceInput] = useState('');
+  const [savingSource, setSavingSource] = useState(false);
 
   const enabledCount = mods.filter((m) => m.enabled).length;
   const disabledCount = mods.filter((m) => !m.enabled).length;
+  const linkedCount = mods.filter((m) => m.github_url || m.nexus_url).length;
 
   async function handleToggle(name: string, enable: boolean) {
     try {
@@ -113,6 +135,38 @@ export function ModsView() {
     }
   }
 
+  async function handleSaveSource(modName: string) {
+    if (!sourceInput.trim()) return;
+    try {
+      setSavingSource(true);
+      await setModSource(modName, sourceInput.trim());
+      await refreshMods();
+      toast.success(`Source linked for ${modName}`);
+      setEditingSource(null);
+      setSourceInput('');
+    } catch (e) {
+      toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSavingSource(false);
+    }
+  }
+
+  async function handleClearSource(modName: string) {
+    try {
+      await setModSource(modName, '');
+      await refreshMods();
+      toast.info(`Source link cleared for ${modName}`);
+    } catch (e) {
+      toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  function startEditSource(modName: string) {
+    setEditingSource(modName);
+    setSourceInput('');
+    setExpandedMod(modName);
+  }
+
   function formatBytes(bytes: number): string {
     if (bytes === 0) return '0 B';
     const k = 1024;
@@ -133,6 +187,11 @@ export function ModsView() {
           <h2 className="text-2xl font-bold text-text">Installed Mods</h2>
           <p className="text-sm text-text-muted mt-1">
             {enabledCount} active, {disabledCount} disabled
+            {linkedCount > 0 && (
+              <span className="text-green-400 ml-2">
+                ({linkedCount} linked for auto-updates)
+              </span>
+            )}
           </p>
         </div>
         <div className="flex gap-2">
@@ -227,50 +286,161 @@ export function ModsView() {
         </Card>
       ) : (
         <div className="space-y-2">
-          {filtered.map((mod) => (
-            <Card
-              key={mod.name}
-              className="flex items-center justify-between hover:bg-surface-hover transition-colors"
-            >
-              <div className="flex items-center gap-4 min-w-0">
-                <Toggle
-                  checked={mod.enabled}
-                  onChange={(checked) => handleToggle(mod.name, checked)}
-                />
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-text truncate">
-                      {mod.name}
-                    </span>
-                    <span className="text-xs text-text-dim">v{mod.version}</span>
-                    <Badge variant={getSourceVariant(mod.source)}>
-                      {mod.source || 'Local'}
-                    </Badge>
-                    {mod.size_bytes > 0 && (
-                      <span className="text-xs text-text-dim">{formatBytes(mod.size_bytes)}</span>
+          {filtered.map((mod) => {
+            const isExpanded = expandedMod === mod.name;
+            const hasLinks = mod.github_url || mod.nexus_url;
+
+            return (
+              <Card
+                key={mod.name}
+                className="hover:bg-surface-hover transition-colors"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4 min-w-0">
+                    <Toggle
+                      checked={mod.enabled}
+                      onChange={(checked) => handleToggle(mod.name, checked)}
+                    />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-medium text-text truncate">
+                          {mod.name}
+                        </span>
+                        <span className="text-xs text-text-dim">v{mod.version}</span>
+                        {/* Source badges - clickable links */}
+                        {mod.github_url ? (
+                          <a
+                            href={mod.github_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex"
+                            title={`View on GitHub: ${mod.github_url}`}
+                          >
+                            <Badge variant="github">
+                              <GitBranch size={10} className="mr-1" />
+                              GitHub
+                            </Badge>
+                          </a>
+                        ) : null}
+                        {mod.nexus_url ? (
+                          <a
+                            href={mod.nexus_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex"
+                            title={`View on Nexus: ${mod.nexus_url}`}
+                          >
+                            <Badge variant="nexus">Nexus</Badge>
+                          </a>
+                        ) : null}
+                        {!hasLinks && (
+                          <Badge variant={getSourceVariant(mod.source)}>
+                            {mod.source ? 'Local' : 'Unlinked'}
+                          </Badge>
+                        )}
+                        {mod.size_bytes > 0 && (
+                          <span className="text-xs text-text-dim">{formatBytes(mod.size_bytes)}</span>
+                        )}
+                      </div>
+                      {mod.description && (
+                        <p className="text-xs text-text-muted mt-0.5 truncate">
+                          {mod.description}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {/* Link source button */}
+                    <button
+                      onClick={() => isExpanded ? setExpandedMod(null) : startEditSource(mod.name)}
+                      className="p-1.5 rounded-md text-text-dim hover:text-primary hover:bg-primary/10 transition-colors"
+                      title="Link to GitHub/Nexus for auto-updates"
+                    >
+                      {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                    </button>
+                    <button
+                      onClick={() => handleDelete(mod.name)}
+                      className="p-1.5 rounded-md text-text-dim hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                      title="Delete mod"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Expanded: source linking panel */}
+                {isExpanded && (
+                  <div className="mt-3 pt-3 border-t border-border/50 space-y-2">
+                    <div className="flex items-center gap-2 text-xs text-text-dim">
+                      <span>{mod.files.length} file{mod.files.length !== 1 ? 's' : ''}</span>
+                      {mod.dependencies.length > 0 && (
+                        <>
+                          <span className="text-text-dim">|</span>
+                          <span>Depends on: {mod.dependencies.join(', ')}</span>
+                        </>
+                      )}
+                    </div>
+
+                    {/* Current links */}
+                    {hasLinks && (
+                      <div className="flex gap-3 items-center text-xs">
+                        {mod.github_url && (
+                          <a href={mod.github_url} target="_blank" rel="noopener noreferrer"
+                            className="flex items-center gap-1 text-blue-400 hover:underline">
+                            <GitBranch size={12} /> {mod.github_url.replace('https://github.com/', '')}
+                            <ExternalLink size={10} />
+                          </a>
+                        )}
+                        {mod.nexus_url && (
+                          <a href={mod.nexus_url} target="_blank" rel="noopener noreferrer"
+                            className="flex items-center gap-1 text-orange-400 hover:underline">
+                            Nexus <ExternalLink size={10} />
+                          </a>
+                        )}
+                        <button
+                          onClick={() => handleClearSource(mod.name)}
+                          className="text-text-dim hover:text-red-400 ml-auto"
+                          title="Remove source links"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Link source form */}
+                    {editingSource === mod.name ? (
+                      <div className="flex gap-2 items-center">
+                        <input
+                          type="text"
+                          value={sourceInput}
+                          onChange={(e) => setSourceInput(e.target.value)}
+                          placeholder="github:owner/repo, Nexus URL, or owner/repo"
+                          className="flex-1 bg-background border border-border rounded-lg px-3 py-1.5 text-xs text-text placeholder:text-text-dim focus:outline-none focus:ring-2 focus:ring-primary/50"
+                          onKeyDown={(e) => e.key === 'Enter' && handleSaveSource(mod.name)}
+                          disabled={savingSource}
+                          autoFocus
+                        />
+                        <Button size="sm" onClick={() => handleSaveSource(mod.name)} disabled={savingSource}>
+                          <Save size={12} />
+                          {savingSource ? 'Saving...' : 'Save'}
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => setEditingSource(null)}>
+                          <X size={12} />
+                        </Button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => startEditSource(mod.name)}
+                        className="text-xs text-primary hover:underline"
+                      >
+                        {hasLinks ? '+ Add another source link' : '+ Link to GitHub or Nexus for auto-updates'}
+                      </button>
                     )}
                   </div>
-                  {mod.description && (
-                    <p className="text-xs text-text-muted mt-0.5 truncate">
-                      {mod.description}
-                    </p>
-                  )}
-                  {mod.files.length > 0 && (
-                    <p className="text-xs text-text-dim mt-0.5">
-                      {mod.files.length} file{mod.files.length !== 1 ? 's' : ''}
-                    </p>
-                  )}
-                </div>
-              </div>
-              <button
-                onClick={() => handleDelete(mod.name)}
-                className="p-1.5 rounded-md text-text-dim hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                title="Delete mod"
-              >
-                <Trash2 size={16} />
-              </button>
-            </Card>
-          ))}
+                )}
+              </Card>
+            );
+          })}
         </div>
       )}
     </div>

@@ -2,12 +2,14 @@ mod backup;
 mod download;
 mod error;
 mod game;
+mod mod_sources;
 mod mods;
 mod nexus;
 mod profiles;
 mod quick_add;
 mod sharing;
 mod state;
+mod subscriptions;
 mod updater;
 
 use state::create_app_state;
@@ -91,6 +93,12 @@ pub fn run() {
             updater::update_mod,
             updater::update_all_mods,
             quick_add::quick_add_mod,
+            // Mod source linking
+            mod_sources::get_mod_sources,
+            mod_sources::set_mod_source,
+            mod_sources::set_mod_sources_full,
+            mod_sources::remove_mod_source,
+            mod_sources::auto_detect_sources,
             // Dependency resolution
             mods::check_mod_dependencies,
             mods::get_mod_dependents,
@@ -104,6 +112,12 @@ pub fn run() {
             sharing::reshare_profile,
             sharing::fetch_shared_profile_cmd,
             sharing::install_shared_profile,
+            // Subscriptions (friend sync)
+            subscriptions::subscribe_to_profile,
+            subscriptions::get_subscriptions,
+            subscriptions::unsubscribe,
+            subscriptions::check_subscription_updates,
+            subscriptions::apply_subscription_update,
         ])
         .setup(|app| {
             // Register deep link handler for nxm:// and sts2mm:// protocols

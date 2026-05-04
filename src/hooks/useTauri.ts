@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ModInfo, Profile, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo } from '../types';
+import type { ModInfo, Profile, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate } from '../types';
 
 // ── Game Detection & QOL ───────────────────────────────────────────────────
 
@@ -125,6 +125,32 @@ export async function quickAddMod(url: string): Promise<QuickAddResult> {
   return invoke('quick_add_mod', { url });
 }
 
+// ── Mod Source Linking ─────────────────────────────────────────────────────
+
+export async function getModSources(): Promise<Record<string, ModSourceEntry>> {
+  return invoke('get_mod_sources');
+}
+
+export async function setModSource(modName: string, sourceUrl: string): Promise<ModSourceEntry> {
+  return invoke('set_mod_source', { modName, sourceUrl });
+}
+
+export async function setModSourcesFull(
+  modName: string,
+  githubRepo: string | null,
+  nexusUrl: string | null,
+): Promise<ModSourceEntry> {
+  return invoke('set_mod_sources_full', { modName, githubRepo, nexusUrl });
+}
+
+export async function removeModSource(modName: string): Promise<boolean> {
+  return invoke('remove_mod_source', { modName });
+}
+
+export async function autoDetectSources(): Promise<AutoDetectResult> {
+  return invoke('auto_detect_sources');
+}
+
 // ── Sharing ────────────────────────────────────────────────────────────────
 
 export async function shareProfile(name: string): Promise<ShareResult> {
@@ -169,4 +195,22 @@ export async function restoreBackup(name: string): Promise<void> {
 
 export async function resetToVanilla(): Promise<void> {
   return invoke('reset_to_vanilla_cmd');
+}
+
+// ── Subscriptions (Friend Sync) ────────────────────────────────────────────
+
+export async function getSubscriptions(): Promise<Subscription[]> {
+  return invoke('get_subscriptions');
+}
+
+export async function unsubscribe(shareId: string): Promise<boolean> {
+  return invoke('unsubscribe', { shareId });
+}
+
+export async function checkSubscriptionUpdates(): Promise<SubscriptionUpdate[]> {
+  return invoke('check_subscription_updates');
+}
+
+export async function applySubscriptionUpdate(shareId: string): Promise<Profile> {
+  return invoke('apply_subscription_update', { shareId });
 }

@@ -8,6 +8,8 @@ export interface ModInfo {
   hash: string | null;
   dependencies: string[];
   size_bytes: number;
+  github_url: string | null;
+  nexus_url: string | null;
 }
 
 export interface Profile {
@@ -72,7 +74,8 @@ export interface ModUpdate {
   mod_name: string;
   current_version: string;
   latest_version: string;
-  source: string;
+  source_type: string;
+  source_id: string;
   download_url: string;
 }
 
@@ -84,6 +87,49 @@ export interface ShareResult {
   id: string;
   url: string;
   secret_token: string;
+}
+
+export interface ModSourceEntry {
+  github_repo: string | null;
+  nexus_url: string | null;
+  nexus_game_domain: string | null;
+  nexus_mod_id: number | null;
+}
+
+export interface AutoDetectResult {
+  matched: AutoDetectMatch[];
+  unmatched: string[];
+}
+
+export interface AutoDetectMatch {
+  mod_name: string;
+  github_repo: string;
+  confidence: string;
+}
+
+export interface Subscription {
+  share_id: string;
+  share_url: string;
+  profile_name: string;
+  curator: string | null;
+  last_checked: string;
+  last_synced: string;
+}
+
+export interface SubscriptionUpdate {
+  share_id: string;
+  profile_name: string;
+  has_update: boolean;
+  added_mods: string[];
+  removed_mods: string[];
+  updated_mods: ModVersionChange[];
+  remote_profile: Profile | null;
+}
+
+export interface ModVersionChange {
+  name: string;
+  old_version: string;
+  new_version: string;
 }
 
 export interface BackupInfo {

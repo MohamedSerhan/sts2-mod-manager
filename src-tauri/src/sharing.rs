@@ -170,6 +170,8 @@ pub async fn fetch_shared_profile_cmd(
         .map_err(|e| e.to_string())
 }
 
+/// Install a shared profile AND automatically subscribe to it for future updates.
+/// This is the flow friends use: click a link -> app opens -> install + subscribe.
 #[tauri::command]
 pub async fn install_shared_profile(
     id: String,
@@ -179,7 +181,7 @@ pub async fn install_shared_profile(
         .await
         .map_err(|e| e.to_string())?;
 
-    let (mods_path, disabled_path, profiles_path) = {
+    let (mods_path, disabled_path, profiles_path, config_path) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let mods = s
             .mods_path
@@ -190,7 +192,8 @@ pub async fn install_shared_profile(
             .clone()
             .ok_or_else(|| "Game path not set".to_string())?;
         let profiles = s.profiles_path.clone();
-        (mods, disabled, profiles)
+        let config = s.config_path.clone();
+        (mods, disabled, profiles, config)
     };
 
     // Save the profile locally
@@ -199,6 +202,22 @@ pub async fn install_shared_profile(
     // Apply it
     crate::profiles::apply_profile(&profile, &mods_path, &disabled_path)
         .map_err(|e| e.to_string())?;
+
+    // Auto-subscribe so the friend gets notified of future updates
+    let share_url = format!("{}/p/{}", DEFAULT_SHARING_URL, id);
+    let now = chrono::Utc::now();
+    let sub = crate::subscriptions::Subscription {
+        share_id: id.clone(),
+        share_url,
+        profile_name: profile.name.clone(),
+        curator: profile.created_by.clone(),
+        last_synced_profile: profile.clone(),
+        last_checked: now,
+        last_synced: now,
+    };
+    let mut db = crate::subscriptions::load_subscriptions(&config_path);
+    db.subscriptions.insert(id, sub);
+    let _ = crate::subscriptions::save_subscriptions(&db, &config_path);
 
     Ok(profile)
 }

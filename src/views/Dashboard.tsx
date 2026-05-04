@@ -1,24 +1,54 @@
 import { useState, useEffect } from 'react';
-import { Package, Layers, Gamepad2, ArrowUpCircle, FolderOpen, RefreshCw } from 'lucide-react';
+import {
+  Package,
+  Layers,
+  Gamepad2,
+  ArrowUpCircle,
+  FolderOpen,
+  RefreshCw,
+  Download,
+  Wand2,
+  Bell,
+  CheckCircle2,
+  Users,
+  ArrowRight,
+} from 'lucide-react';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
-import { checkForUpdates, openModsFolder } from '../hooks/useTauri';
-import type { ModUpdate } from '../types';
+import {
+  checkForUpdates,
+  updateMod,
+  updateAllMods,
+  openModsFolder,
+  autoDetectSources,
+  checkSubscriptionUpdates,
+  applySubscriptionUpdate,
+} from '../hooks/useTauri';
+import type { ModUpdate, SubscriptionUpdate } from '../types';
 
 export function DashboardView() {
   const { gameInfo, mods, refreshAll } = useApp();
   const toast = useToast();
   const [updates, setUpdates] = useState<ModUpdate[]>([]);
   const [checkingUpdates, setCheckingUpdates] = useState(false);
+  const [updatingMod, setUpdatingMod] = useState<string | null>(null);
+  const [updatingAll, setUpdatingAll] = useState(false);
+  const [detecting, setDetecting] = useState(false);
+  const [subUpdates, setSubUpdates] = useState<SubscriptionUpdate[]>([]);
+  const [_checkingSubs, setCheckingSubs] = useState(false);
+  const [applyingSub, setApplyingSub] = useState<string | null>(null);
 
   const enabledCount = mods.filter((m) => m.enabled).length;
   const disabledCount = mods.filter((m) => !m.enabled).length;
   const totalSize = mods.reduce((sum, m) => sum + m.size_bytes, 0);
+  const linkedCount = mods.filter((m) => m.github_url || m.nexus_url).length;
+  const unlinkedCount = mods.length - linkedCount;
 
   useEffect(() => {
     handleCheckUpdates();
+    handleCheckSubs();
   }, []);
 
   async function handleCheckUpdates() {
@@ -30,6 +60,84 @@ export function DashboardView() {
       // No game path set yet, or no network - that's fine
     } finally {
       setCheckingUpdates(false);
+    }
+  }
+
+  async function handleCheckSubs() {
+    try {
+      setCheckingSubs(true);
+      const u = await checkSubscriptionUpdates();
+      setSubUpdates(u.filter((s) => s.has_update));
+    } catch {
+      // No subscriptions or network issue
+    } finally {
+      setCheckingSubs(false);
+    }
+  }
+
+  async function handleUpdateMod(name: string) {
+    try {
+      setUpdatingMod(name);
+      await updateMod(name);
+      await refreshAll();
+      setUpdates((prev) => prev.filter((u) => u.mod_name !== name));
+      toast.success(`Updated: ${name}`);
+    } catch (e) {
+      toast.error(`Failed to update ${name}: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setUpdatingMod(null);
+    }
+  }
+
+  async function handleUpdateAll() {
+    try {
+      setUpdatingAll(true);
+      const results = await updateAllMods();
+      await refreshAll();
+      setUpdates([]);
+      toast.success(`Updated ${results.length} mod${results.length !== 1 ? 's' : ''}`);
+    } catch (e) {
+      toast.error(`Update failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setUpdatingAll(false);
+    }
+  }
+
+  async function handleAutoDetect() {
+    try {
+      setDetecting(true);
+      const result = await autoDetectSources();
+      await refreshAll();
+      if (result.matched.length > 0) {
+        toast.success(
+          `Linked ${result.matched.length} mod${result.matched.length !== 1 ? 's' : ''} to GitHub. ` +
+          (result.unmatched.length > 0
+            ? `${result.unmatched.length} could not be matched.`
+            : 'All mods are now linked!')
+        );
+      } else {
+        toast.info('No new matches found. Link mods manually in the Mods view.');
+      }
+      // Refresh updates after linking
+      handleCheckUpdates();
+    } catch (e) {
+      toast.error(`Auto-detect failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setDetecting(false);
+    }
+  }
+
+  async function handleApplySubUpdate(shareId: string) {
+    try {
+      setApplyingSub(shareId);
+      const profile = await applySubscriptionUpdate(shareId);
+      await refreshAll();
+      setSubUpdates((prev) => prev.filter((s) => s.share_id !== shareId));
+      toast.success(`Synced modpack "${profile.name}" - you're up to date!`);
+    } catch (e) {
+      toast.error(`Sync failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setApplyingSub(null);
     }
   }
 
@@ -83,6 +191,71 @@ export function DashboardView() {
         </Card>
       )}
 
+      {/* Subscription Updates Banner (for friends) */}
+      {subUpdates.length > 0 && (
+        <Card className="bg-purple-500/10 border-purple-500/30">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Users size={18} className="text-purple-400" />
+              <h3 className="text-sm font-semibold text-purple-400">
+                Modpack Update{subUpdates.length !== 1 ? 's' : ''} Available
+              </h3>
+            </div>
+          </div>
+          <div className="space-y-3">
+            {subUpdates.map((sub) => (
+              <div key={sub.share_id} className="bg-surface rounded-lg p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <p className="text-sm font-medium text-text">{sub.profile_name}</p>
+                    <p className="text-xs text-text-dim">
+                      {sub.added_mods.length > 0 && (
+                        <span className="text-green-400">+{sub.added_mods.length} new </span>
+                      )}
+                      {sub.updated_mods.length > 0 && (
+                        <span className="text-blue-400">{sub.updated_mods.length} updated </span>
+                      )}
+                      {sub.removed_mods.length > 0 && (
+                        <span className="text-red-400">-{sub.removed_mods.length} removed</span>
+                      )}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={() => handleApplySubUpdate(sub.share_id)}
+                    disabled={applyingSub === sub.share_id}
+                  >
+                    {applyingSub === sub.share_id ? (
+                      <RefreshCw size={14} className="animate-spin" />
+                    ) : (
+                      <Download size={14} />
+                    )}
+                    {applyingSub === sub.share_id ? 'Syncing...' : 'Apply Update'}
+                  </Button>
+                </div>
+                {/* Details */}
+                <div className="text-xs text-text-dim space-y-0.5">
+                  {sub.added_mods.length > 0 && (
+                    <p>New: {sub.added_mods.join(', ')}</p>
+                  )}
+                  {sub.updated_mods.length > 0 && (
+                    <p>
+                      Updated:{' '}
+                      {sub.updated_mods
+                        .map((m) => `${m.name} (${m.old_version} ${'\u2192'} ${m.new_version})`)
+                        .join(', ')}
+                    </p>
+                  )}
+                  {sub.removed_mods.length > 0 && (
+                    <p>Removed: {sub.removed_mods.join(', ')}</p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       {/* Stats Row */}
       <div className="grid grid-cols-4 gap-4">
         <Card className="flex items-center gap-4">
@@ -125,42 +298,118 @@ export function DashboardView() {
         </Card>
       </div>
 
-      {/* Updates Available */}
+      {/* Auto-detect Sources (curator tool) */}
+      {unlinkedCount > 0 && (
+        <Card className="bg-yellow-500/5 border-yellow-500/20">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Wand2 size={18} className="text-yellow-400" />
+              <div>
+                <p className="text-sm font-medium text-text">
+                  {unlinkedCount} mod{unlinkedCount !== 1 ? 's' : ''} not linked to a source
+                </p>
+                <p className="text-xs text-text-dim mt-0.5">
+                  Link mods to GitHub repos so updates are detected automatically.
+                  Auto-detect tries to match by name.
+                </p>
+              </div>
+            </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleAutoDetect}
+              disabled={detecting}
+            >
+              <Wand2 size={14} className={detecting ? 'animate-spin' : ''} />
+              {detecting ? 'Detecting...' : 'Auto-Detect'}
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {/* Mod Updates */}
       <Card>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <ArrowUpCircle size={18} className="text-text-muted" />
-            <h3 className="text-sm font-semibold text-text">Updates Available</h3>
+            <h3 className="text-sm font-semibold text-text">Mod Updates</h3>
+            {updates.length > 0 && (
+              <span className="text-xs text-primary bg-primary/10 px-2 py-0.5 rounded-full">
+                {updates.length}
+              </span>
+            )}
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleCheckUpdates}
-            disabled={checkingUpdates}
-          >
-            <RefreshCw size={14} className={checkingUpdates ? 'animate-spin' : ''} />
-            {checkingUpdates ? 'Checking...' : 'Check'}
-          </Button>
+          <div className="flex gap-2">
+            {updates.length > 0 && (
+              <Button
+                size="sm"
+                onClick={handleUpdateAll}
+                disabled={updatingAll}
+              >
+                <Download size={14} />
+                {updatingAll ? 'Updating...' : 'Update All'}
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleCheckUpdates}
+              disabled={checkingUpdates}
+            >
+              <RefreshCw size={14} className={checkingUpdates ? 'animate-spin' : ''} />
+              {checkingUpdates ? 'Checking...' : 'Check'}
+            </Button>
+          </div>
         </div>
         {updates.length > 0 ? (
           <div className="space-y-2">
             {updates.map((u) => (
               <div key={u.mod_name} className="flex items-center justify-between py-2 px-3 rounded-lg bg-surface-hover">
-                <div>
+                <div className="min-w-0">
                   <p className="text-sm font-medium text-text">{u.mod_name}</p>
-                  <p className="text-xs text-text-dim">
-                    {u.current_version} &rarr; {u.latest_version}
-                  </p>
+                  <div className="flex items-center gap-2 text-xs text-text-dim">
+                    <span>{u.current_version}</span>
+                    <ArrowRight size={10} />
+                    <span className="text-green-400">{u.latest_version}</span>
+                    <span className="text-text-dim">via {u.source_type}</span>
+                  </div>
                 </div>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => handleUpdateMod(u.mod_name)}
+                  disabled={updatingMod === u.mod_name || updatingAll}
+                >
+                  {updatingMod === u.mod_name ? (
+                    <RefreshCw size={14} className="animate-spin" />
+                  ) : (
+                    <Download size={14} />
+                  )}
+                  {updatingMod === u.mod_name ? 'Updating...' : 'Update'}
+                </Button>
               </div>
             ))}
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center py-8 text-text-dim">
-            <ArrowUpCircle size={32} className="mb-2 opacity-40" />
-            <p className="text-sm">
-              {checkingUpdates ? 'Checking for updates...' : 'All mods are up to date'}
-            </p>
+            {linkedCount > 0 ? (
+              <>
+                <CheckCircle2 size={32} className="mb-2 text-green-400/40" />
+                <p className="text-sm">
+                  {checkingUpdates ? 'Checking for updates...' : 'All mods are up to date'}
+                </p>
+              </>
+            ) : (
+              <>
+                <Bell size={32} className="mb-2 opacity-40" />
+                <p className="text-sm">
+                  {checkingUpdates ? 'Checking...' : 'Link mods to sources to enable update checking'}
+                </p>
+                <p className="text-xs mt-1">
+                  Go to the Mods tab and click a mod to link it to its GitHub page
+                </p>
+              </>
+            )}
           </div>
         )}
       </Card>

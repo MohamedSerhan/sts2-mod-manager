@@ -234,6 +234,8 @@ pub async fn download_and_install_github_mod(
             hash: None,
             dependencies: Vec::new(),
             size_bytes: 0,
+            github_url: Some(format!("https://github.com/{}/{}", owner, repo)),
+            nexus_url: None,
         })
     } else {
         Err(AppError::Other(format!(
@@ -260,7 +262,7 @@ pub async fn search_github_mods(
         .map_err(|e| e.to_string())
 }
 
-/// Download and install a mod from GitHub.
+/// Download and install a mod from GitHub, and auto-save the source link.
 #[tauri::command]
 pub async fn download_github_mod(
     owner: String,
@@ -268,15 +270,16 @@ pub async fn download_github_mod(
     tag: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ModInfo, String> {
-    let (mods_path, cache_path, token) = {
+    let (mods_path, cache_path, token, config_path) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
         let cache_path = s.cache_path.clone();
         let token = s.github_token.clone();
-        (mods_path, cache_path, token)
+        let config_path = s.config_path.clone();
+        (mods_path, cache_path, token, config_path)
     };
 
-    download_and_install_github_mod(
+    let mod_info = download_and_install_github_mod(
         &owner,
         &repo,
         tag.as_deref(),
@@ -285,7 +288,15 @@ pub async fn download_github_mod(
         token.as_deref(),
     )
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+
+    // Auto-save the GitHub source link so updates work later
+    let mut db = crate::mod_sources::load_sources(&config_path);
+    let entry = db.mods.entry(mod_info.name.clone()).or_default();
+    entry.github_repo = Some(format!("{}/{}", owner, repo));
+    let _ = crate::mod_sources::save_sources(&db, &config_path);
+
+    Ok(mod_info)
 }
 
 /// Download and install a mod from a direct URL.
@@ -333,6 +344,8 @@ pub async fn download_url_mod(
             hash: None,
             dependencies: Vec::new(),
             size_bytes: 0,
+            github_url: None,
+            nexus_url: None,
         })
     } else {
         Err(format!("Unsupported file type: {}", file_name))

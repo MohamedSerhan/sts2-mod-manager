@@ -301,17 +301,19 @@ pub fn remove_mod_source(
     Ok(true)
 }
 
-/// For a mod with a Nexus URL, try to find its GitHub repo by querying the Nexus API.
+/// For a mod with a Nexus URL, try to find its GitHub repo by:
+/// 1. Querying the Nexus API and extracting GitHub links from the description
+/// 2. Falling back to GitHub search using the mod name + Nexus author name
 /// Saves the result to the sources DB if found.
 #[tauri::command]
 pub async fn find_github_from_nexus(
     mod_name: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Option<String>, String> {
-    let (config_path, nexus_key) = {
+    let (config_path, nexus_key, github_token) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let key = s.nexus_api_key.clone().ok_or("Nexus API key not set. Add it in Settings.")?;
-        (s.config_path.clone(), key)
+        (s.config_path.clone(), key, s.github_token.clone())
     };
 
     let db = load_sources(&config_path);
@@ -320,6 +322,7 @@ pub async fn find_github_from_nexus(
     let game_domain = entry.nexus_game_domain.clone().unwrap_or_else(|| "slaythespire2".to_string());
     let mod_id = entry.nexus_mod_id.ok_or("No Nexus mod ID for this mod. Set a Nexus URL first.")?;
 
+    // Step 1: Try extracting from Nexus description
     let repo = extract_github_from_nexus(&nexus_key, &game_domain, mod_id).await;
 
     if let Some(ref repo) = repo {
@@ -327,47 +330,131 @@ pub async fn find_github_from_nexus(
         let entry = db.mods.entry(mod_name).or_default();
         entry.github_repo = Some(repo.clone());
         save_sources(&db, &config_path).map_err(|e| e.to_string())?;
+        return Ok(Some(repo.clone()));
     }
 
-    Ok(repo)
+    // Step 2: Fallback - get Nexus author name and search GitHub
+    let client = crate::nexus::NexusClient::new(&nexus_key);
+    if let Ok(info) = client.get_mod_info(&game_domain, mod_id).await {
+        let nexus_name = info.name.unwrap_or_default();
+        let author = info.author.unwrap_or_default();
+
+        // Try searching GitHub with mod name + author
+        let queries = vec![
+            format!("{} {}", nexus_name, author),
+            nexus_name.clone(),
+            mod_name.clone(),
+        ];
+
+        for query in queries {
+            if query.trim().is_empty() {
+                continue;
+            }
+            let search_query = format!("{} slay-the-spire-2 OR sts2 OR \"slay the spire 2\"", query);
+            let results = search_github_raw(&search_query, github_token.as_deref()).await;
+
+            // Find a result that matches by name similarity
+            let norm_name = query.to_lowercase().replace(' ', "").replace('-', "").replace('_', "");
+            for r in &results {
+                let norm_repo = r.name.to_lowercase().replace(' ', "").replace('-', "").replace('_', "");
+                if norm_repo.contains(&norm_name) || norm_name.contains(&norm_repo) {
+                    let repo = r.full_name.clone();
+                    let mut db = load_sources(&config_path);
+                    let entry = db.mods.entry(mod_name).or_default();
+                    entry.github_repo = Some(repo.clone());
+                    save_sources(&db, &config_path).map_err(|e| e.to_string())?;
+                    return Ok(Some(repo));
+                }
+            }
+        }
+    }
+
+    Ok(None)
 }
 
 // ── Nexus → GitHub Extraction ──────────────────────────────────────────────
 
 /// Fetch a Nexus mod's description via the API and extract any GitHub repo URL from it.
 /// Returns the "owner/repo" string if found.
+/// Handles HTML-encoded descriptions (Nexus returns BBCode/HTML in description fields).
 pub async fn extract_github_from_nexus(
     nexus_api_key: &str,
     game_domain: &str,
     mod_id: u64,
 ) -> Option<String> {
     let client = crate::nexus::NexusClient::new(nexus_api_key);
-    let info = client.get_mod_info(game_domain, mod_id).await.ok()?;
+    let info = match client.get_mod_info(game_domain, mod_id).await {
+        Ok(i) => i,
+        Err(e) => {
+            log::warn!("Nexus API call failed for {}/{}: {}", game_domain, mod_id, e);
+            return None;
+        }
+    };
 
-    // Search description, summary, and name for GitHub URLs
+    // Collect all text fields to search
     let mut texts = Vec::new();
     if let Some(ref desc) = info.description {
-        texts.push(desc.as_str());
+        texts.push(desc.clone());
+        // Also decode HTML entities and try again (Nexus often HTML-encodes descriptions)
+        let decoded = desc
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&#39;", "'")
+            .replace("&#x27;", "'")
+            .replace("&#x2F;", "/")
+            .replace("&#47;", "/")
+            .replace("&#x3A;", ":")
+            .replace("&#58;", ":")
+            .replace("&#x2E;", ".")
+            .replace("&#46;", ".")
+            .replace("%2F", "/")
+            .replace("%3A", ":");
+        if decoded != *desc {
+            texts.push(decoded);
+        }
     }
     if let Some(ref summary) = info.summary {
-        texts.push(summary.as_str());
+        texts.push(summary.clone());
+    }
+    // Also try the author field (some authors put their GitHub username there)
+    if let Some(ref author) = info.author {
+        texts.push(author.clone());
     }
 
     let re = regex::Regex::new(r#"github\.com/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"#).ok()?;
 
     for text in &texts {
-        if let Some(caps) = re.captures(text) {
-            let repo = caps.get(1)?.as_str().to_string();
-            // Strip trailing slashes, .git suffix, etc.
-            let repo = repo.trim_end_matches('/').trim_end_matches(".git").to_string();
-            // Validate it looks like owner/repo
-            let parts: Vec<&str> = repo.split('/').collect();
-            if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
-                return Some(repo);
+        // Also try matching inside href="..." attributes and [url=...] BBCode
+        // by searching the raw text
+        for caps in re.captures_iter(text) {
+            if let Some(m) = caps.get(1) {
+                let repo = m.as_str()
+                    .trim_end_matches('/')
+                    .trim_end_matches(".git")
+                    .to_string();
+                // Validate it looks like owner/repo (not owner/repo/something)
+                let parts: Vec<&str> = repo.split('/').collect();
+                if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
+                    // Skip common false positives
+                    if parts[1] != "issues" && parts[1] != "releases" && parts[1] != "wiki" {
+                        log::info!(
+                            "Found GitHub repo '{}' in Nexus description for mod {}",
+                            repo, mod_id
+                        );
+                        return Some(repo);
+                    }
+                }
             }
         }
     }
 
+    log::info!(
+        "No GitHub link found in Nexus description for mod {} (searched {} text fields)",
+        mod_id,
+        texts.len()
+    );
     None
 }
 

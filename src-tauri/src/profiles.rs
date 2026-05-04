@@ -422,58 +422,59 @@ pub async fn switch_profile(
 
         log::info!("Mod '{}' missing from disk -- attempting download", pm.name);
 
-        // Try GitHub source
-        let github_repo = pm.source.as_ref().and_then(|s| {
-            if let Some(repo) = s.strip_prefix("github:") {
-                return Some(repo.to_string());
-            }
-            if s.contains("github.com/") {
-                let parts: Vec<&str> = s.split("github.com/").collect();
-                if parts.len() > 1 {
-                    let repo_path = parts[1].trim_end_matches('/');
-                    let segs: Vec<&str> = repo_path.splitn(3, '/').collect();
-                    if segs.len() >= 2 {
-                        return Some(format!("{}/{}", segs[0], segs[1]));
-                    }
-                }
-            }
-            None
-        }).or_else(|| {
-            mod_sources_db.mods.get(&pm.name).and_then(|e| e.github_repo.clone())
-        });
-
         let mut downloaded = false;
 
-        if let Some(repo) = github_repo {
-            let parts: Vec<&str> = repo.splitn(2, '/').collect();
-            if parts.len() == 2 {
-                match crate::download::download_and_install_github_mod(
-                    parts[0], parts[1], None, &mods_path, &cache_path, token.as_deref(),
-                ).await {
-                    Ok(info) => {
-                        log::info!("Downloaded mod '{}' from GitHub", info.name);
-                        downloaded_count += 1;
-                        downloaded = true;
-                    }
-                    Err(e) => {
-                        log::warn!("GitHub download failed for '{}': {}", pm.name, e);
-                    }
+        // Prefer bundle_url -- the curator bundled it because the GitHub
+        // source may be wrong/unreliable (e.g., wrong game's repo)
+        if let Some(ref bundle_url) = pm.bundle_url {
+            log::info!("Downloading bundled mod '{}' from profiles repo", pm.name);
+            match crate::sharing::download_bundle(bundle_url, &pm.name, &mods_path).await {
+                Ok(_) => {
+                    log::info!("Installed bundled mod '{}'", pm.name);
+                    downloaded_count += 1;
+                    downloaded = true;
+                }
+                Err(e) => {
+                    log::warn!("Bundle download failed for '{}': {} -- trying GitHub fallback", pm.name, e);
                 }
             }
         }
 
-        // Try bundle_url as fallback
+        // Fallback: try GitHub source
         if !downloaded {
-            if let Some(ref bundle_url) = pm.bundle_url {
-                log::info!("Downloading bundled mod '{}' from bundle URL", pm.name);
-                match crate::sharing::download_bundle(bundle_url, &pm.name, &mods_path).await {
-                    Ok(_) => {
-                        log::info!("Installed bundled mod '{}'", pm.name);
-                        downloaded_count += 1;
-                        downloaded = true;
+            let github_repo = pm.source.as_ref().and_then(|s| {
+                if let Some(repo) = s.strip_prefix("github:") {
+                    return Some(repo.to_string());
+                }
+                if s.contains("github.com/") {
+                    let parts: Vec<&str> = s.split("github.com/").collect();
+                    if parts.len() > 1 {
+                        let repo_path = parts[1].trim_end_matches('/');
+                        let segs: Vec<&str> = repo_path.splitn(3, '/').collect();
+                        if segs.len() >= 2 {
+                            return Some(format!("{}/{}", segs[0], segs[1]));
+                        }
                     }
-                    Err(e) => {
-                        log::warn!("Bundle download failed for '{}': {}", pm.name, e);
+                }
+                None
+            }).or_else(|| {
+                mod_sources_db.mods.get(&pm.name).and_then(|e| e.github_repo.clone())
+            });
+
+            if let Some(repo) = github_repo {
+                let parts: Vec<&str> = repo.splitn(2, '/').collect();
+                if parts.len() == 2 {
+                    match crate::download::download_and_install_github_mod(
+                        parts[0], parts[1], None, &mods_path, &cache_path, token.as_deref(),
+                    ).await {
+                        Ok(info) => {
+                            log::info!("Downloaded mod '{}' from GitHub", info.name);
+                            downloaded_count += 1;
+                            downloaded = true;
+                        }
+                        Err(e) => {
+                            log::warn!("GitHub download also failed for '{}': {}", pm.name, e);
+                        }
                     }
                 }
             }

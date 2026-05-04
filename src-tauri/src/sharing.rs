@@ -769,24 +769,33 @@ pub async fn install_shared_profile(
             continue; // Already have this mod locally
         }
 
-        // Try to find a GitHub repo from multiple sources:
-        // 1. Profile source field (e.g. "github:owner/repo")
-        // 2. Mod sources DB (auto-detected GitHub links)
-        // 3. Profile source field as a full GitHub URL
+        // Prefer bundle_url over GitHub -- the curator bundled it because
+        // the GitHub source may be wrong/unreliable (e.g., wrong game's repo)
+        if let Some(ref bundle_url) = pm.bundle_url {
+            log::info!("Downloading bundled mod '{}' from profiles repo", pm.name);
+            match download_bundle(bundle_url, &pm.name, &mods_path).await {
+                Ok(_) => {
+                    log::info!("Installed bundled mod '{}'", pm.name);
+                    continue;
+                }
+                Err(e) => {
+                    log::warn!("Bundle download failed for '{}': {} -- trying GitHub fallback", pm.name, e);
+                }
+            }
+        }
+
+        // Fallback: try GitHub source
         let github_repo = pm
             .source
             .as_ref()
             .and_then(|s| {
-                // "github:owner/repo" format
                 if let Some(repo) = s.strip_prefix("github:") {
                     return Some(repo.to_string());
                 }
-                // Full GitHub URL: "https://github.com/owner/repo"
                 if s.contains("github.com/") {
                     let parts: Vec<&str> = s.split("github.com/").collect();
                     if parts.len() > 1 {
                         let repo_path = parts[1].trim_end_matches('/');
-                        // Take first two segments (owner/repo)
                         let segs: Vec<&str> = repo_path.splitn(3, '/').collect();
                         if segs.len() >= 2 {
                             return Some(format!("{}/{}", segs[0], segs[1]));
@@ -816,27 +825,12 @@ pub async fn install_shared_profile(
                 .await
                 {
                     Ok(info) => {
-                        log::info!("Downloaded mod '{}' for shared profile", info.name);
+                        log::info!("Downloaded mod '{}' from GitHub", info.name);
                         continue;
                     }
                     Err(e) => {
-                        log::warn!("GitHub download failed for '{}': {}", pm.name, e);
-                        // Fall through to try bundle_url
+                        log::warn!("GitHub download also failed for '{}': {}", pm.name, e);
                     }
-                }
-            }
-        }
-
-        // Try bundle_url (mod was bundled by curator into the profiles repo)
-        if let Some(ref bundle_url) = pm.bundle_url {
-            log::info!("Downloading bundled mod '{}' from profiles repo", pm.name);
-            match download_bundle(bundle_url, &pm.name, &mods_path).await {
-                Ok(_) => {
-                    log::info!("Installed bundled mod '{}'", pm.name);
-                    continue;
-                }
-                Err(e) => {
-                    log::warn!("Bundle download failed for '{}': {}", pm.name, e);
                 }
             }
         }

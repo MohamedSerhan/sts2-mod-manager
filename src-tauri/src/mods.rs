@@ -632,6 +632,82 @@ pub fn delete_mod_files(mod_name: &str, mods_path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Strip Nexus Mods filename suffixes.
+/// E.g. "STS2-Ritsu-281-0-0-46-1775500710" -> "STS2-Ritsu"
+/// "RelicsReminder-284-1-1-0-1775500710" -> "RelicsReminder"
+fn strip_nexus_suffix(stem: &str) -> String {
+    let bytes = stem.as_bytes();
+    let mut cut_pos = stem.len();
+
+    // Walk backwards stripping -digits groups
+    let mut pos = stem.len();
+    loop {
+        let digit_end = pos;
+        while pos > 0 && bytes[pos - 1].is_ascii_digit() {
+            pos -= 1;
+        }
+        if pos == digit_end {
+            break;
+        }
+        if pos > 0 && bytes[pos - 1] == b'-' {
+            cut_pos = pos - 1;
+            pos -= 1;
+        } else {
+            break;
+        }
+    }
+
+    if cut_pos > 0 && cut_pos < stem.len() {
+        stem[..cut_pos].to_string()
+    } else {
+        stem.to_string()
+    }
+}
+
+/// Peek inside a zip archive to find a mod manifest and extract the mod name.
+/// Returns the Id/PckName/Name from the first valid manifest found.
+fn peek_manifest_name(archive: &mut zip::ZipArchive<fs::File>) -> Option<String> {
+    for i in 0..archive.len() {
+        if let Ok(mut entry) = archive.by_index(i) {
+            let entry_name = entry.name().to_string();
+            if !entry_name.to_lowercase().ends_with(".json") {
+                continue;
+            }
+            if entry_name.starts_with("__MACOSX") || entry_name.starts_with("._") {
+                continue;
+            }
+            if entry_name.split('/').count() > 2 {
+                continue;
+            }
+            let mut buf = String::new();
+            if std::io::Read::read_to_string(&mut entry, &mut buf).is_ok() {
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&buf) {
+                    // Prefer Id (game uses this for dependency resolution), then PckName, then Name
+                    if let Some(id) = val.get("Id").or_else(|| val.get("id"))
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty())
+                    {
+                        return Some(id.to_string());
+                    }
+                    if let Some(pck) = val.get("PckName").or_else(|| val.get("pck_name"))
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty())
+                    {
+                        return Some(pck.to_string());
+                    }
+                    if let Some(name) = val.get("Name").or_else(|| val.get("name"))
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty())
+                    {
+                        return Some(name.to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Install a mod from a zip archive into the mods directory.
 pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo> {
     let file = fs::File::open(zip_path)?;
@@ -683,6 +759,32 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
         .to_string_lossy()
         .to_string();
 
+    // When files are at root and we need to wrap them in a subdirectory,
+    // try to determine the correct folder name from the mod manifest or
+    // DLL/PCK filenames rather than using the zip filename (which may
+    // include Nexus suffixes like "STS2-Ritsu-281-0-0-46-1775500710").
+    let wrap_folder_name = if all_at_root && relevant_entries.len() > 1 {
+        // Strategy 1: Peek at manifest JSON inside the zip for mod name/id
+        let manifest_name = peek_manifest_name(&mut archive);
+
+        // Strategy 2: Use the DLL/PCK filename stem (most reliable for game dependency resolution)
+        let dll_stem = relevant_entries.iter()
+            .find(|n| {
+                let ext = Path::new(n).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                ext == "dll" || ext == "pck"
+            })
+            .and_then(|n| Path::new(n).file_stem())
+            .map(|s| s.to_string_lossy().to_string());
+
+        // Strategy 3: Strip Nexus suffixes from the zip stem
+        let clean_stem = strip_nexus_suffix(&zip_stem);
+
+        // Prefer DLL stem (what the game actually loads), then manifest name, then cleaned zip stem
+        dll_stem.or(manifest_name).unwrap_or(clean_stem)
+    } else {
+        zip_stem.clone()
+    };
+
     let mut extracted_files = Vec::new();
     let mut manifest: Option<ModInfo> = None;
 
@@ -709,12 +811,12 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
             // Keep the subdirectory structure as-is (e.g., ModName/ModName.dll)
             name.clone()
         } else if all_at_root {
-            // Files at root: wrap in a subdirectory named after the zip
+            // Files at root: wrap in a subdirectory named after the mod
             // Only if there are multiple files; single file stays flat
             if relevant_entries.len() == 1 {
                 name.clone()
             } else {
-                format!("{}/{}", zip_stem, name)
+                format!("{}/{}", wrap_folder_name, name)
             }
         } else {
             // Multiple top-level dirs or mixed: preserve as-is

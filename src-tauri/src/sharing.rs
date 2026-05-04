@@ -483,12 +483,31 @@ pub async fn share_profile(
                     log::info!("Validating GitHub source for '{}': {}", pm.name, repo_path);
                     match crate::download::fetch_latest_release(parts[0], parts[1], Some(&token)).await {
                         Ok(release) => {
-                            // Check if release has a .zip asset
                             let has_zip = release.assets.iter().any(|a| a.name.ends_with(".zip"));
                             let has_dll = release.assets.iter().any(|a| a.name.ends_with(".dll"));
                             if has_zip || has_dll {
-                                log::info!("GitHub source valid for '{}': {} ({} assets)", pm.name, release.tag_name, release.assets.len());
-                                needs_bundle = false;
+                                // Extra check: if mod had .pck files locally, verify GitHub
+                                // release can provide them. Many STS2 mods need .pck resources.
+                                let local_has_pck = pm.files.iter().any(|f| f.ends_with(".pck"));
+                                if local_has_pck && has_zip {
+                                    // Download and check if zip contains .pck
+                                    // For now, trust GitHub if it has a zip -- but always bundle
+                                    // as fallback too so friends have the complete mod
+                                    log::info!("Mod '{}' has .pck files -- bundling as backup alongside GitHub source", pm.name);
+                                    // Keep GitHub source AND also bundle
+                                    match zip_mod_files(&pm.name, &pm.files, &mods_path) {
+                                        Ok(zip_data) => {
+                                            if let Ok(url) = upload_mod_bundle(&token, &username, &pm.name, &zip_data).await {
+                                                pm.bundle_url = Some(url);
+                                            }
+                                        }
+                                        Err(_) => {}
+                                    }
+                                    needs_bundle = false;
+                                } else {
+                                    log::info!("GitHub source valid for '{}': {} ({} assets)", pm.name, release.tag_name, release.assets.len());
+                                    needs_bundle = false;
+                                }
                             } else {
                                 log::warn!("GitHub release for '{}' has no .zip/.dll assets ({}): {:?}",
                                     pm.name, release.tag_name,

@@ -326,9 +326,9 @@ export function HomeView({ onGoToSettings }: { onGoToSettings: () => void }) {
                 </p>
                 <div className="flex items-center gap-1.5 mt-1">
                   <code className="text-xs font-mono text-primary bg-primary/10 px-2 py-0.5 rounded select-all">
-                    {sub.share_id}
+                    {sub.share_id.replace(':', '/')}
                   </code>
-                  <CopyCodeButton code={sub.share_id} />
+                  <CopyCodeButton code={sub.share_id.replace(':', '/')} />
                 </div>
               </div>
               <div className="flex items-center gap-2">

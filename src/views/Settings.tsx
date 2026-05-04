@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
-import { FolderSearch, Key, FolderOpen, RefreshCw, ClipboardCheck } from 'lucide-react';
+import { FolderSearch, Key, FolderOpen, RefreshCw, ClipboardCheck, ExternalLink } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
@@ -339,7 +339,9 @@ export function SettingsView() {
             <Button variant="ghost" size="sm" onClick={() => setAuditResults(null)}>Close</Button>
           </div>
           <div className="space-y-1 max-h-96 overflow-y-auto">
-            {auditResults.map((entry) => (
+            {auditResults.map((entry) => {
+              const hasAnySource = entry.github_repo || entry.nexus_url;
+              return (
               <div
                 key={entry.mod_name}
                 className={`text-xs px-3 py-2 rounded-lg ${
@@ -347,7 +349,7 @@ export function SettingsView() {
                     ? 'bg-red-500/10 text-red-400'
                     : entry.needs_update
                     ? 'bg-amber-500/10 text-amber-400'
-                    : !entry.github_repo
+                    : !hasAnySource
                     ? 'bg-surface text-text-dim'
                     : 'bg-green-500/10 text-green-400'
                 }`}
@@ -358,22 +360,51 @@ export function SettingsView() {
                     {entry.error
                       ? 'ERROR'
                       : entry.needs_update
-                      ? `${entry.installed_version} -> ${entry.latest_release_with_assets_tag}`
-                      : !entry.github_repo
+                      ? `${entry.installed_version} → ${
+                          entry.update_source === 'nexus' || (!entry.latest_release_with_assets_tag && entry.nexus_version)
+                            ? entry.nexus_version
+                            : entry.latest_release_with_assets_tag
+                        } (${entry.update_source || 'unknown'})`
+                      : !hasAnySource
                       ? 'No source linked'
                       : `${entry.installed_version} (latest)`}
                   </span>
                 </div>
+                {/* Source links row */}
+                <div className="flex items-center gap-3 mt-1">
+                  {entry.github_repo && (
+                    <a
+                      href={`https://github.com/${entry.github_repo}/releases`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-primary hover:underline"
+                    >
+                      <ExternalLink size={10} />
+                      {entry.github_repo}
+                    </a>
+                  )}
+                  {entry.nexus_url && (
+                    <a
+                      href={entry.nexus_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-primary hover:underline"
+                    >
+                      <ExternalLink size={10} />
+                      Nexus{entry.nexus_version ? ` (v${entry.nexus_version})` : ''}
+                    </a>
+                  )}
+                </div>
+                {/* GitHub-specific details */}
                 {entry.github_repo && (
                   <div className="text-text-dim mt-0.5">
-                    {entry.github_repo}
                     {entry.latest_release_tag && entry.latest_release_with_assets_tag && entry.latest_release_tag !== entry.latest_release_with_assets_tag && (
-                      <span className="ml-2 text-amber-400">
-                        (latest tag {entry.latest_release_tag} has no files, using {entry.latest_release_with_assets_tag})
+                      <span className="text-amber-400">
+                        latest tag {entry.latest_release_tag} has no files, using {entry.latest_release_with_assets_tag}
                       </span>
                     )}
                     {!entry.latest_has_assets && entry.latest_release_tag && !entry.latest_release_with_assets_tag && (
-                      <span className="ml-2 text-red-400">(no releases with downloadable files found)</span>
+                      <span className="text-red-400">(no releases with downloadable files found)</span>
                     )}
                     {entry.releases_scanned > 1 && (
                       <span className="ml-2">({entry.releases_scanned} releases scanned)</span>
@@ -385,13 +416,14 @@ export function SettingsView() {
                 )}
                 {entry.error && <div className="mt-0.5">{entry.error}</div>}
               </div>
-            ))}
+              );
+            })}
           </div>
           <div className="text-xs text-text-dim border-t border-border pt-2">
             {auditResults.filter(r => r.needs_update).length} need updates &middot;
-            {auditResults.filter(r => !r.github_repo).length} unlinked &middot;
+            {auditResults.filter(r => !r.github_repo && !r.nexus_url).length} unlinked &middot;
             {auditResults.filter(r => r.error).length} errors &middot;
-            {auditResults.filter(r => r.github_repo && !r.needs_update && !r.error).length} up to date
+            {auditResults.filter(r => (r.github_repo || r.nexus_url) && !r.needs_update && !r.error).length} up to date
           </div>
         </Card>
       )}

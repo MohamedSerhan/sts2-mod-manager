@@ -6,6 +6,49 @@ use crate::mod_sources::{load_sources, save_sources, update_installed_version, M
 use crate::mods::{scan_mods, ModInfo};
 use crate::state::AppState;
 
+// ── Version Comparison ─────────────────────────────────────────────────────
+
+/// Try to parse a version string into a semver::Version.
+/// Handles common variants: "1.2.3", "v1.2.3", "1.2", "1".
+fn parse_version(v: &str) -> Option<semver::Version> {
+    let stripped = v.trim().trim_start_matches('v');
+    // Try direct parse first
+    if let Ok(ver) = semver::Version::parse(stripped) {
+        return Some(ver);
+    }
+    // Try adding .0 suffixes for partial versions like "1.2" or "1"
+    let parts: Vec<&str> = stripped.split('.').collect();
+    match parts.len() {
+        1 => semver::Version::parse(&format!("{}.0.0", stripped)).ok(),
+        2 => semver::Version::parse(&format!("{}.0", stripped)).ok(),
+        _ => None,
+    }
+}
+
+/// Check if a tag looks like a valid version (not something like "dev-build" or "nightly").
+fn is_version_tag(tag: &str) -> bool {
+    parse_version(tag).is_some()
+}
+
+/// Compare two version strings. Returns:
+/// - Some(Ordering::Less) if current < latest (update available)
+/// - Some(Ordering::Equal) if they match
+/// - Some(Ordering::Greater) if current > latest (would be a downgrade)
+/// - None if either version can't be parsed
+fn compare_versions(current: &str, latest: &str) -> Option<std::cmp::Ordering> {
+    let cur = parse_version(current)?;
+    let lat = parse_version(latest)?;
+    Some(cur.cmp(&lat))
+}
+
+/// Returns true if `latest` is actually newer than `current` (not equal, not a downgrade).
+fn is_newer_version(current: &str, latest: &str) -> bool {
+    match compare_versions(current, latest) {
+        Some(std::cmp::Ordering::Less) => true,
+        _ => false,
+    }
+}
+
 // ── Types ───────────────────────────────────────────────────────────────────
 
 /// Describes an available update for an installed mod.
@@ -120,7 +163,15 @@ pub async fn check_all_updates(
             continue;
         }
 
-        // Strip leading 'v' for comparison (e.g. "v1.2.0" -> "1.2.0")
+        // Skip non-version tags like "dev-build", "nightly", etc.
+        if !is_version_tag(&release.tag_name) {
+            log::info!(
+                "Skipping update for {} ({}/{}): tag '{}' is not a valid version",
+                m.name, owner, repo, release.tag_name
+            );
+            continue;
+        }
+
         let latest = release.tag_name.trim_start_matches('v');
         let current = m.version.trim_start_matches('v');
 
@@ -131,8 +182,17 @@ pub async fn check_all_updates(
             .map(|iv| iv.trim_start_matches('v') == latest)
             .unwrap_or(false);
 
-        // Skip if: installed version matches, OR manifest version matches, OR version is unknown
+        // Skip if versions match exactly, or version is unknown
         if installed_ver_matches || latest == current || current == "unknown" || current == "0.0.0" {
+            continue;
+        }
+
+        // Use semver comparison to prevent downgrades
+        if !is_newer_version(current, latest) {
+            log::info!(
+                "Skipping update for {} ({}/{}): installed {} >= latest {}",
+                m.name, owner, repo, current, latest
+            );
             continue;
         }
 
@@ -330,6 +390,14 @@ pub struct ModAuditEntry {
     pub releases_scanned: u32,
     /// Any error encountered during the audit.
     pub error: Option<String>,
+    /// Nexus Mods URL if linked.
+    pub nexus_url: Option<String>,
+    /// Latest version reported by Nexus Mods API.
+    pub nexus_version: Option<String>,
+    /// Whether there's a newer version on Nexus vs installed.
+    pub nexus_update_available: bool,
+    /// Source type that flagged an update: "github", "nexus", or "both".
+    pub update_source: Option<String>,
 }
 
 /// Valid mod asset extensions for STS2 mods.
@@ -364,126 +432,174 @@ pub async fn audit_mod_versions(
     let sources_db = load_sources(&config_path);
     let mut results: Vec<ModAuditEntry> = Vec::new();
 
+    // Collect Nexus API key for Nexus version checking
+    let nexus_api_key = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        s.nexus_api_key.clone()
+    };
+
     for m in &all_mods {
-        let (owner, repo) = match resolve_github_repo(m, &sources_db.mods) {
-            Some(pair) => pair,
-            None => {
-                // No GitHub source — include in report but skip version check
-                results.push(ModAuditEntry {
-                    mod_name: m.name.clone(),
-                    github_repo: None,
-                    installed_version: m.version.clone(),
-                    latest_release_tag: None,
-                    latest_release_with_assets_tag: None,
-                    latest_has_assets: false,
-                    needs_update: false,
-                    asset_names: Vec::new(),
-                    releases_scanned: 0,
-                    error: None,
-                });
-                continue;
-            }
-        };
+        let source_entry = sources_db.mods.get(&m.name);
+        let github_pair = resolve_github_repo(m, &sources_db.mods);
 
-        let full_name = format!("{}/{}", owner, repo);
+        // Resolve Nexus info from sources DB or manifest
+        let nexus_url = source_entry
+            .and_then(|e| e.nexus_url.clone())
+            .or_else(|| m.nexus_url.clone());
+        let nexus_game_domain = source_entry.and_then(|e| e.nexus_game_domain.clone());
+        let nexus_mod_id = source_entry.and_then(|e| e.nexus_mod_id);
 
-        // Fetch latest release first (the /releases/latest endpoint)
-        let latest_release = match fetch_latest_release(&owner, &repo, token.as_deref()).await {
-            Ok(r) => Some(r),
-            Err(e) => {
-                results.push(ModAuditEntry {
-                    mod_name: m.name.clone(),
-                    github_repo: Some(full_name),
-                    installed_version: m.version.clone(),
-                    latest_release_tag: None,
-                    latest_release_with_assets_tag: None,
-                    latest_has_assets: false,
-                    needs_update: false,
-                    asset_names: Vec::new(),
-                    releases_scanned: 0,
-                    error: Some(format!("Failed to fetch latest release: {}", e)),
-                });
-                continue;
-            }
-        };
+        let has_github = github_pair.is_some();
+        let has_nexus = nexus_mod_id.is_some();
 
-        let latest_tag = latest_release.as_ref().map(|r| r.tag_name.clone());
-        let latest_has_mod_assets = latest_release
-            .as_ref()
-            .map(|r| r.assets.iter().any(|a| is_mod_asset(&a.name)))
-            .unwrap_or(false);
-
-        // Now scan paginated releases to find the most recent one WITH downloadable assets
-        let mut best_release_with_assets: Option<crate::download::GitHubRelease> = None;
+        // --- GitHub version check ---
+        let mut github_repo_str: Option<String> = None;
+        let mut latest_release_tag: Option<String> = None;
+        let mut latest_release_with_assets_tag: Option<String> = None;
+        let mut latest_has_mod_assets = false;
+        let mut github_needs_update = false;
+        let mut asset_names: Vec<String> = Vec::new();
         let mut total_scanned: u32 = 0;
-        let max_pages: u32 = 3; // Scan up to 3 pages (90 releases)
-        let per_page: u32 = 30;
+        let mut github_error: Option<String> = None;
 
-        'outer: for page in 1..=max_pages {
-            let releases = match fetch_releases(&owner, &repo, page, per_page, token.as_deref()).await {
-                Ok(r) => r,
-                Err(_) => break,
+        if let Some((owner, repo)) = github_pair {
+            let full_name = format!("{}/{}", owner, repo);
+            github_repo_str = Some(full_name.clone());
+
+            match fetch_latest_release(&owner, &repo, token.as_deref()).await {
+                Ok(r) => {
+                    latest_release_tag = Some(r.tag_name.clone());
+                    latest_has_mod_assets = r.assets.iter().any(|a| is_mod_asset(&a.name));
+                }
+                Err(e) => {
+                    github_error = Some(format!("Failed to fetch latest release: {}", e));
+                }
             };
 
-            if releases.is_empty() {
-                break;
-            }
+            if github_error.is_none() {
+                // Scan paginated releases for first one with assets AND a valid version tag
+                let max_pages: u32 = 3;
+                let per_page: u32 = 30;
 
-            for release in &releases {
-                total_scanned += 1;
-                if release.assets.iter().any(|a| is_mod_asset(&a.name)) {
-                    best_release_with_assets = Some(release.clone());
-                    break 'outer;
+                'outer: for page in 1..=max_pages {
+                    let releases = match fetch_releases(&owner, &repo, page, per_page, token.as_deref()).await {
+                        Ok(r) => r,
+                        Err(_) => break,
+                    };
+                    if releases.is_empty() { break; }
+
+                    for release in &releases {
+                        total_scanned += 1;
+                        // Skip non-version tags (e.g. "dev-build", "nightly")
+                        if !is_version_tag(&release.tag_name) {
+                            continue;
+                        }
+                        if release.assets.iter().any(|a| is_mod_asset(&a.name)) {
+                            latest_release_with_assets_tag = Some(release.tag_name.clone());
+                            asset_names = release.assets.iter()
+                                .filter(|a| is_mod_asset(&a.name))
+                                .map(|a| a.name.clone())
+                                .collect();
+                            break 'outer;
+                        }
+                    }
+                }
+
+                // Determine if a GitHub update is needed using semver
+                if let Some(ref assets_tag) = latest_release_with_assets_tag {
+                    let latest_ver = assets_tag.trim_start_matches('v');
+                    let current_ver = m.version.trim_start_matches('v');
+
+                    let installed_ver_matches = sources_db
+                        .mods
+                        .get(&m.name)
+                        .and_then(|e| e.installed_version.as_deref())
+                        .map(|iv| iv.trim_start_matches('v') == latest_ver)
+                        .unwrap_or(false);
+
+                    if !installed_ver_matches
+                        && current_ver != "unknown"
+                        && current_ver != "0.0.0"
+                    {
+                        // Use semver comparison — only flag if latest > current
+                        github_needs_update = is_newer_version(current_ver, latest_ver);
+                    }
                 }
             }
         }
 
-        let with_assets_tag = best_release_with_assets
-            .as_ref()
-            .map(|r| r.tag_name.clone());
-        let asset_names: Vec<String> = best_release_with_assets
-            .as_ref()
-            .map(|r| {
-                r.assets
-                    .iter()
-                    .filter(|a| is_mod_asset(&a.name))
-                    .map(|a| a.name.clone())
-                    .collect()
-            })
-            .unwrap_or_default();
+        // --- Nexus version check ---
+        let mut nexus_version: Option<String> = None;
+        let mut nexus_update_available = false;
 
-        // Determine if an update is needed
-        let needs_update = if let Some(ref release) = best_release_with_assets {
-            let latest_ver = release.tag_name.trim_start_matches('v');
-            let current_ver = m.version.trim_start_matches('v');
+        if let (Some(ref domain), Some(mod_id)) = (nexus_game_domain, nexus_mod_id) {
+            if let Some(ref nkey) = nexus_api_key {
+                let client = crate::nexus::NexusClient::new(nkey);
+                match client.get_mod_info(domain, mod_id).await {
+                    Ok(info) => {
+                        if let Some(ref nv) = info.version {
+                            nexus_version = Some(nv.clone());
+                            let current_ver = m.version.trim_start_matches('v');
+                            let nexus_ver = nv.trim_start_matches('v');
+                            if current_ver != "unknown" && current_ver != "0.0.0" {
+                                nexus_update_available = is_newer_version(current_ver, nexus_ver);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("Nexus API check failed for {} (mod {}): {}", m.name, mod_id, e);
+                    }
+                }
+            }
+        }
 
-            // Also check installed_version from mod_sources.json
-            let installed_ver_matches = sources_db
-                .mods
-                .get(&m.name)
-                .and_then(|e| e.installed_version.as_deref())
-                .map(|iv| iv.trim_start_matches('v') == latest_ver)
-                .unwrap_or(false);
-
-            !installed_ver_matches
-                && latest_ver != current_ver
-                && current_ver != "unknown"
-                && current_ver != "0.0.0"
+        let needs_update = github_needs_update || nexus_update_available;
+        let update_source = if github_needs_update && nexus_update_available {
+            Some("both".to_string())
+        } else if github_needs_update {
+            Some("github".to_string())
+        } else if nexus_update_available {
+            Some("nexus".to_string())
         } else {
-            false
+            None
         };
+
+        // If no source at all, still include in report
+        if !has_github && !has_nexus {
+            results.push(ModAuditEntry {
+                mod_name: m.name.clone(),
+                github_repo: None,
+                installed_version: m.version.clone(),
+                latest_release_tag: None,
+                latest_release_with_assets_tag: None,
+                latest_has_assets: false,
+                needs_update: false,
+                asset_names: Vec::new(),
+                releases_scanned: 0,
+                error: None,
+                nexus_url: nexus_url.clone(),
+                nexus_version: None,
+                nexus_update_available: false,
+                update_source: None,
+            });
+            continue;
+        }
 
         results.push(ModAuditEntry {
             mod_name: m.name.clone(),
-            github_repo: Some(full_name),
+            github_repo: github_repo_str,
             installed_version: m.version.clone(),
-            latest_release_tag: latest_tag,
-            latest_release_with_assets_tag: with_assets_tag,
+            latest_release_tag,
+            latest_release_with_assets_tag,
             latest_has_assets: latest_has_mod_assets,
             needs_update,
             asset_names,
             releases_scanned: total_scanned,
-            error: None,
+            error: github_error,
+            nexus_url,
+            nexus_version,
+            nexus_update_available,
+            update_source,
         });
     }
 

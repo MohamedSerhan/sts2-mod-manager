@@ -164,5 +164,9 @@ export interface ModAuditEntry {
   asset_names: string[];
   releases_scanned: number;
   error: string | null;
+  nexus_url: string | null;
+  nexus_version: string | null;
+  nexus_update_available: boolean;
+  update_source: string | null;
 }
 

@@ -63,8 +63,13 @@ function AppInner() {
 
   // Listen for auto-installed mods from the Downloads watcher
   useEffect(() => {
-    const unlisten1 = listen<{ mod_name: string; file_name: string }>('mod-auto-installed', (event) => {
-      toast.success(`Mod "${event.payload.mod_name}" auto-installed from ${event.payload.file_name}`);
+    const unlisten1 = listen<{ mod_name: string; file_name: string; replaced: string | null }>('mod-auto-installed', (event) => {
+      const { mod_name, file_name, replaced } = event.payload;
+      if (replaced) {
+        toast.success(`Updated "${replaced}" → "${mod_name}" from ${file_name}`);
+      } else {
+        toast.success(`Mod "${mod_name}" auto-installed from ${file_name}`);
+      }
       refreshAll();
     });
     const unlisten2 = listen<{ file_name: string; error: string }>('mod-auto-install-failed', (event) => {

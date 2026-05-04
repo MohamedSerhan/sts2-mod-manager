@@ -1,10 +1,12 @@
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
-use crate::mods::install_mod_from_zip;
+use crate::mod_sources::{load_sources, save_sources};
+use crate::mods::{install_mod_from_zip, scan_mods, scan_disabled_mods, ModInfo};
 use crate::state::AppState;
 
 /// Payload emitted to the frontend when a mod is auto-installed from Downloads.
@@ -12,6 +14,8 @@ use crate::state::AppState;
 pub struct ModAutoInstalled {
     pub mod_name: String,
     pub file_name: String,
+    /// If this was an update to an existing mod, the old name
+    pub replaced: Option<String>,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -53,8 +57,7 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
         }
 
         // Track recently processed files to avoid duplicates (notify can fire multiple events)
-        let mut recent: std::collections::HashMap<PathBuf, Instant> =
-            std::collections::HashMap::new();
+        let mut recent: HashMap<PathBuf, Instant> = HashMap::new();
 
         loop {
             match rx.recv() {
@@ -103,18 +106,44 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
 
                         recent.insert(path.clone(), Instant::now());
 
-                        let mods_path = {
+                        let (mods_path, disabled_path, config_path) = {
                             let s = match state.lock() {
                                 Ok(s) => s,
                                 Err(_) => continue,
                             };
-                            match s.mods_path.clone() {
+                            let mp = match s.mods_path.clone() {
                                 Some(p) => p,
                                 None => continue,
-                            }
+                            };
+                            let dp = s.disabled_mods_path.clone();
+                            let cp = s.config_path.clone();
+                            (mp, dp, cp)
                         };
 
                         log::info!("Downloads watcher: detected mod zip {:?}", path);
+
+                        // Peek at the incoming zip to identify the mod
+                        let incoming_identity = peek_zip_identity(path);
+
+                        // Find existing mod that matches
+                        let existing_mod = find_existing_mod(
+                            &incoming_identity,
+                            &mods_path,
+                            disabled_path.as_deref(),
+                        );
+
+                        // If we found an existing mod, remove old files first
+                        let replaced_name = if let Some(ref existing) = existing_mod {
+                            log::info!(
+                                "Downloads watcher: updating existing mod '{}' (folder: {:?})",
+                                existing.name,
+                                existing.folder_name
+                            );
+                            remove_existing_mod_files(existing, &mods_path, disabled_path.as_deref());
+                            Some(existing.name.clone())
+                        } else {
+                            None
+                        };
 
                         match install_mod_from_zip(path, &mods_path) {
                             Ok(mod_info) => {
@@ -124,10 +153,18 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                     .to_string_lossy()
                                     .to_string();
 
+                                // Transfer mod_sources entry from old name to new name
+                                if let Some(ref old_name) = replaced_name {
+                                    if old_name != &mod_info.name {
+                                        transfer_mod_sources(old_name, &mod_info.name, &config_path);
+                                    }
+                                }
+
                                 log::info!(
-                                    "Auto-installed mod '{}' from {}",
+                                    "Auto-installed mod '{}' from {} (replaced: {:?})",
                                     mod_info.name,
-                                    file_name
+                                    file_name,
+                                    replaced_name
                                 );
 
                                 let _ = app.emit(
@@ -135,6 +172,7 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                     ModAutoInstalled {
                                         mod_name: mod_info.name,
                                         file_name,
+                                        replaced: replaced_name,
                                     },
                                 );
                             }
@@ -177,8 +215,222 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
     });
 }
 
+/// Identity extracted from an incoming zip's manifest.
+struct ZipIdentity {
+    name: Option<String>,
+    mod_id: Option<String>,
+    folder_name: Option<String>,
+}
+
+/// Peek inside a zip to extract mod identity from its manifest JSON.
+fn peek_zip_identity(zip_path: &Path) -> ZipIdentity {
+    let file = match std::fs::File::open(zip_path) {
+        Ok(f) => f,
+        Err(_) => return ZipIdentity { name: None, mod_id: None, folder_name: None },
+    };
+    let mut archive = match zip::ZipArchive::new(file) {
+        Ok(a) => a,
+        Err(_) => return ZipIdentity { name: None, mod_id: None, folder_name: None },
+    };
+
+    // Also extract the folder name from the zip structure
+    let mut top_dir: Option<String> = None;
+    let mut top_dirs = std::collections::HashSet::new();
+    for i in 0..archive.len() {
+        if let Ok(entry) = archive.by_index(i) {
+            let name = entry.name().to_string();
+            if name.contains('/') {
+                if let Some(first) = name.split('/').next() {
+                    top_dirs.insert(first.to_string());
+                }
+            }
+        }
+    }
+    if top_dirs.len() == 1 {
+        top_dir = top_dirs.into_iter().next();
+    }
+
+    for i in 0..archive.len() {
+        if let Ok(mut entry) = archive.by_index(i) {
+            let entry_name = entry.name().to_string();
+            if !entry_name.to_lowercase().ends_with(".json") {
+                continue;
+            }
+            // Skip deep paths, macOS junk
+            if entry_name.starts_with("__MACOSX") || entry_name.starts_with("._") {
+                continue;
+            }
+            if entry_name.split('/').count() > 2 {
+                continue;
+            }
+            // Try to read and parse
+            let mut buf = String::new();
+            if std::io::Read::read_to_string(&mut entry, &mut buf).is_ok() {
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&buf) {
+                    let mod_name = val.get("Name")
+                        .or_else(|| val.get("name"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    let mod_id = val.get("Id")
+                        .or_else(|| val.get("id"))
+                        .or_else(|| val.get("ModId"))
+                        .or_else(|| val.get("mod_id"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+
+                    if mod_name.is_some() || mod_id.is_some() {
+                        return ZipIdentity {
+                            name: mod_name,
+                            mod_id,
+                            folder_name: top_dir,
+                        };
+                    }
+                }
+            }
+        }
+    }
+
+    // No manifest found, use zip structure
+    let zip_stem = zip_path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
+    ZipIdentity {
+        name: None,
+        mod_id: None,
+        folder_name: top_dir.or(Some(zip_stem)),
+    }
+}
+
+/// Find an existing installed mod that matches the incoming zip identity.
+fn find_existing_mod(
+    identity: &ZipIdentity,
+    mods_path: &Path,
+    disabled_path: Option<&Path>,
+) -> Option<ModInfo> {
+    let mut all_mods = scan_mods(mods_path);
+    if let Some(dp) = disabled_path {
+        all_mods.extend(scan_disabled_mods(dp));
+    }
+
+    // Try matching by mod_id first (most reliable)
+    if let Some(ref incoming_id) = identity.mod_id {
+        let lower_id = incoming_id.to_lowercase();
+        for m in &all_mods {
+            if let Some(ref mid) = m.mod_id {
+                if mid.to_lowercase() == lower_id {
+                    return Some(m.clone());
+                }
+            }
+        }
+    }
+
+    // Try matching by name (case-insensitive, ignoring common suffixes like "Lite")
+    if let Some(ref incoming_name) = identity.name {
+        let normalized = normalize_mod_name(incoming_name);
+        for m in &all_mods {
+            if normalize_mod_name(&m.name) == normalized {
+                return Some(m.clone());
+            }
+        }
+        // Also try substring match (e.g., "BetterSpire2" matches "BetterSpire2 Lite")
+        for m in &all_mods {
+            let existing_norm = normalize_mod_name(&m.name);
+            if existing_norm.contains(&normalized) || normalized.contains(&existing_norm) {
+                return Some(m.clone());
+            }
+        }
+    }
+
+    // Try matching by folder name
+    if let Some(ref incoming_folder) = identity.folder_name {
+        let lower_folder = incoming_folder.to_lowercase();
+        for m in &all_mods {
+            if let Some(ref folder) = m.folder_name {
+                if folder.to_lowercase() == lower_folder {
+                    return Some(m.clone());
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Normalize a mod name for fuzzy matching: lowercase, strip common suffixes/prefixes.
+fn normalize_mod_name(name: &str) -> String {
+    name.to_lowercase()
+        .replace(" lite", "")
+        .replace(" full", "")
+        .replace(" plus", "")
+        .replace(" pro", "")
+        .trim()
+        .to_string()
+}
+
+/// Remove an existing mod's files from disk (both enabled and disabled paths).
+fn remove_existing_mod_files(
+    existing: &ModInfo,
+    mods_path: &Path,
+    disabled_path: Option<&Path>,
+) {
+    // Determine the folder name to look for
+    let folder = existing
+        .folder_name
+        .as_deref()
+        .unwrap_or(&existing.name);
+
+    // Try removing from mods path
+    let mod_dir = mods_path.join(folder);
+    if mod_dir.exists() {
+        log::info!("Removing old mod directory: {:?}", mod_dir);
+        let _ = std::fs::remove_dir_all(&mod_dir);
+    }
+
+    // Also remove any top-level manifest/files
+    for file in &existing.files {
+        let p = mods_path.join(file);
+        if p.exists() {
+            let _ = std::fs::remove_file(&p);
+        }
+    }
+
+    // Try removing from disabled path
+    if let Some(dp) = disabled_path {
+        let disabled_dir = dp.join(folder);
+        if disabled_dir.exists() {
+            log::info!("Removing old disabled mod directory: {:?}", disabled_dir);
+            let _ = std::fs::remove_dir_all(&disabled_dir);
+        }
+        for file in &existing.files {
+            let p = dp.join(file);
+            if p.exists() {
+                let _ = std::fs::remove_file(&p);
+            }
+        }
+    }
+}
+
+/// Transfer mod_sources entry from old mod name to new mod name.
+fn transfer_mod_sources(old_name: &str, new_name: &str, config_path: &Path) {
+    let mut db = load_sources(config_path);
+    if let Some(entry) = db.mods.remove(old_name) {
+        log::info!(
+            "Transferring mod sources from '{}' to '{}'",
+            old_name,
+            new_name
+        );
+        db.mods.insert(new_name.to_string(), entry);
+        if let Err(e) = save_sources(&db, config_path) {
+            log::error!("Failed to save mod sources after transfer: {}", e);
+        }
+    }
+}
+
 /// Quick check: does the zip contain at least one .dll, .pck, or mod .json file?
-fn looks_like_mod_zip(path: &PathBuf) -> bool {
+fn looks_like_mod_zip(path: &Path) -> bool {
     let file = match std::fs::File::open(path) {
         Ok(f) => f,
         Err(_) => return false,

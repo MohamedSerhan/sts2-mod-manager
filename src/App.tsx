@@ -197,14 +197,12 @@ function AppInner() {
             <Play size={16} />
             {activeProfile ? `Launch STS2 (${activeProfile})` : 'Launch STS2'}
           </button>
-          {advancedMode && (
-            <button
-              onClick={handleLaunchVanilla}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-surface-hover hover:bg-yellow-600/20 text-text-muted text-xs font-medium transition-colors border border-border"
-            >
-              Launch Vanilla (no mods)
-            </button>
-          )}
+          <button
+            onClick={handleLaunchVanilla}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-surface-hover hover:bg-yellow-600/20 text-text-muted text-xs font-medium transition-colors border border-border"
+          >
+            Launch Vanilla (no mods)
+          </button>
         </div>
 
         {/* Status bar */}

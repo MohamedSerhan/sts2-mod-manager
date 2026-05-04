@@ -533,9 +533,23 @@ pub async fn switch_profile(
         .into_iter()
         .chain(scan_disabled_mods(&disabled_path).into_iter())
         .collect();
-    let final_names: std::collections::HashSet<String> = final_on_disk.iter().map(|m| m.name.clone()).collect();
+    // Build comprehensive identifier set (name, folder_name, mod_id)
+    let mut final_identifiers: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for m in &final_on_disk {
+        final_identifiers.insert(m.name.clone());
+        if let Some(ref folder) = m.folder_name {
+            final_identifiers.insert(folder.clone());
+        }
+        if let Some(ref id) = m.mod_id {
+            final_identifiers.insert(id.clone());
+        }
+    }
     let still_missing: Vec<String> = profile.mods.iter()
-        .filter(|pm| !final_names.contains(&pm.name))
+        .filter(|pm| {
+            !final_identifiers.contains(&pm.name)
+                && !pm.folder_name.as_ref().map_or(false, |f| final_identifiers.contains(f))
+                && !pm.mod_id.as_ref().map_or(false, |id| final_identifiers.contains(id))
+        })
         .map(|pm| pm.name.clone())
         .collect();
 

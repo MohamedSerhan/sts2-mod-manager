@@ -365,22 +365,73 @@ async fn upload_mod_bundle(
     Ok(download_url)
 }
 /// Download a bundled mod zip from a URL and extract into mods_path.
+/// Uses the GitHub API (not raw.githubusercontent.com) to avoid CDN caching issues.
 pub async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::Path) -> Result<()> {
     let client = reqwest::Client::builder()
         .user_agent("sts2-mod-manager/0.1")
         .build()
         .unwrap_or_default();
 
-    let resp = client.get(url).send().await?;
-    if !resp.status().is_success() {
-        return Err(AppError::Other(format!(
-            "Failed to download bundle for '{}': {}",
-            mod_name,
-            resp.status()
-        )));
-    }
+    // Parse the raw.githubusercontent.com URL to extract owner/repo/path
+    // Format: https://raw.githubusercontent.com/OWNER/REPO/main/PATH
+    let bytes = if url.contains("raw.githubusercontent.com") {
+        // Use GitHub API to avoid CDN caching issues
+        let parts: Vec<&str> = url
+            .trim_start_matches("https://raw.githubusercontent.com/")
+            .splitn(4, '/')
+            .collect();
+        if parts.len() >= 4 {
+            let (owner, repo, _branch, path) = (parts[0], parts[1], parts[2], parts[3]);
+            let api_url = format!(
+                "https://api.github.com/repos/{}/{}/contents/{}",
+                owner, repo, path
+            );
+            log::info!("Downloading bundle '{}' via GitHub API: {}", mod_name, api_url);
 
-    let bytes = resp.bytes().await?;
+            let resp = client
+                .get(&api_url)
+                .header("Accept", "application/vnd.github.raw+json")
+                .send()
+                .await?;
+
+            if !resp.status().is_success() {
+                // Fallback to direct URL if API fails
+                log::warn!("GitHub API download failed for '{}' ({}), falling back to direct URL", mod_name, resp.status());
+                let resp2 = client.get(url).send().await?;
+                if !resp2.status().is_success() {
+                    return Err(AppError::Other(format!(
+                        "Failed to download bundle for '{}': {}",
+                        mod_name, resp2.status()
+                    )));
+                }
+                resp2.bytes().await?
+            } else {
+                resp.bytes().await?
+            }
+        } else {
+            // Can't parse URL, use direct download
+            let resp = client.get(url).send().await?;
+            if !resp.status().is_success() {
+                return Err(AppError::Other(format!(
+                    "Failed to download bundle for '{}': {}",
+                    mod_name, resp.status()
+                )));
+            }
+            resp.bytes().await?
+        }
+    } else {
+        // Non-GitHub URL, use direct download
+        let resp = client.get(url).send().await?;
+        if !resp.status().is_success() {
+            return Err(AppError::Other(format!(
+                "Failed to download bundle for '{}': {}",
+                mod_name, resp.status()
+            )));
+        }
+        resp.bytes().await?
+    };
+
+    log::info!("Downloaded bundle for '{}': {} bytes", mod_name, bytes.len());
     let cursor = std::io::Cursor::new(bytes);
     let mut archive = zip::ZipArchive::new(cursor)
         .map_err(|e| AppError::Other(format!("Invalid bundle zip for '{}': {}", mod_name, e)))?;

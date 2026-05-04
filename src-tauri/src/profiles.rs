@@ -18,6 +18,10 @@ pub struct ProfileMod {
     pub source: Option<String>,
     pub hash: Option<String>,
     pub files: Vec<String>,
+    /// Direct download URL for mods bundled in the curator's profiles repo.
+    /// Set automatically when sharing for mods without a GitHub source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle_url: Option<String>,
 }
 
 /// A saved profile capturing a snapshot of installed/enabled mods.
@@ -136,6 +140,7 @@ pub fn snapshot_current_with_sources(
                 source,
                 hash: m.hash,
                 files: m.files,
+                bundle_url: None,
             }
         })
         .collect();

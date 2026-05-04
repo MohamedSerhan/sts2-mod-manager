@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::io::Write;
 
 use crate::error::{AppError, Result};
 use crate::profiles::Profile;
@@ -263,6 +264,147 @@ async fn upsert_file(
     Ok((file_sha, html_url))
 }
 
+/// Zip a mod's files into an in-memory buffer.
+fn zip_mod_files(mod_name: &str, files: &[String], mods_path: &std::path::Path) -> Result<Vec<u8>> {
+    let buf = std::io::Cursor::new(Vec::new());
+    let mut zip_writer = zip::ZipWriter::new(buf);
+
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    for file_rel in files {
+        let normalized = file_rel.replace('\\', "/");
+        let file_path = mods_path.join(&normalized);
+
+        if file_path.is_file() {
+            zip_writer.start_file(&normalized, options)
+                .map_err(|e| AppError::Other(format!("Zip error for '{}': {}", mod_name, e)))?;
+            let data = std::fs::read(&file_path)
+                .map_err(|e| AppError::Other(format!("Read error for '{}': {}", file_path.display(), e)))?;
+            zip_writer.write_all(&data)
+                .map_err(|e| AppError::Other(format!("Zip write error: {}", e)))?;
+        } else if file_path.is_dir() {
+            // For directory entries, add all files within
+            if let Ok(entries) = std::fs::read_dir(&file_path) {
+                for entry in entries.flatten() {
+                    if entry.path().is_file() {
+                        let entry_rel = format!("{}/{}", normalized, entry.file_name().to_string_lossy());
+                        zip_writer.start_file(&entry_rel, options)
+                            .map_err(|e| AppError::Other(format!("Zip error: {}", e)))?;
+                        let data = std::fs::read(entry.path())
+                            .map_err(|e| AppError::Other(format!("Read error: {}", e)))?;
+                        zip_writer.write_all(&data)
+                            .map_err(|e| AppError::Other(format!("Zip write error: {}", e)))?;
+                    }
+                }
+            }
+        }
+    }
+
+    let cursor = zip_writer.finish()
+        .map_err(|e| AppError::Other(format!("Zip finalize error: {}", e)))?;
+    Ok(cursor.into_inner())
+}
+
+/// Upload a binary file (mod zip) to the profiles repo using base64 encoding.
+async fn upload_mod_bundle(
+    token: &str,
+    username: &str,
+    mod_name: &str,
+    zip_data: &[u8],
+) -> Result<String> {
+    let client = build_client(token);
+    let safe_name = mod_name
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect::<String>();
+    let filename = format!("mods/{}.zip", safe_name);
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/contents/{}",
+        username, PROFILES_REPO, filename
+    );
+
+    // Check if file already exists (get SHA for update)
+    let existing_sha = {
+        let resp = client.get(&url).send().await;
+        if let Ok(resp) = resp {
+            if resp.status().is_success() {
+                let info: ContentsResponse = resp.json().await.unwrap_or(ContentsResponse {
+                    sha: None, content: None, html_url: None,
+                });
+                info.sha
+            } else { None }
+        } else { None }
+    };
+
+    let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, zip_data);
+    let mut body = serde_json::json!({
+        "message": format!("Bundle mod: {}", mod_name),
+        "content": encoded,
+    });
+    if let Some(sha) = &existing_sha {
+        body["sha"] = serde_json::json!(sha);
+    }
+
+    let resp = client.put(&url).json(&body).send().await?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(AppError::Other(format!(
+            "Failed to upload mod bundle '{}' ({}): {}",
+            mod_name, status, text
+        )));
+    }
+
+    // Return the raw download URL
+    let download_url = format!(
+        "https://raw.githubusercontent.com/{}/{}/main/{}",
+        username, PROFILES_REPO, filename
+    );
+    Ok(download_url)
+}
+/// Download a bundled mod zip from a URL and extract into mods_path.
+async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::Path) -> Result<()> {
+    let client = reqwest::Client::builder()
+        .user_agent("sts2-mod-manager/0.1")
+        .build()
+        .unwrap_or_default();
+
+    let resp = client.get(url).send().await?;
+    if !resp.status().is_success() {
+        return Err(AppError::Other(format!(
+            "Failed to download bundle for '{}': {}",
+            mod_name,
+            resp.status()
+        )));
+    }
+
+    let bytes = resp.bytes().await?;
+    let cursor = std::io::Cursor::new(bytes);
+    let mut archive = zip::ZipArchive::new(cursor)
+        .map_err(|e| AppError::Other(format!("Invalid bundle zip for '{}': {}", mod_name, e)))?;
+
+    for i in 0..archive.len() {
+        let mut file = archive
+            .by_index(i)
+            .map_err(|e| AppError::Other(e.to_string()))?;
+        let Some(outpath) = file.enclosed_name().map(|p| mods_path.join(p)) else {
+            continue;
+        };
+        if file.name().ends_with('/') {
+            std::fs::create_dir_all(&outpath)?;
+        } else {
+            if let Some(parent) = outpath.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let mut outfile = std::fs::File::create(&outpath)?;
+            std::io::copy(&mut file, &mut outfile)?;
+        }
+    }
+    Ok(())
+}
+
 /// Fetch a profile from any user's profiles repo (public, no auth needed).
 pub async fn fetch_shared_profile(owner: &str, filename: &str) -> Result<Profile> {
     // Use raw.githubusercontent.com for public access without auth
@@ -296,20 +438,22 @@ pub async fn fetch_shared_profile(owner: &str, filename: &str) -> Result<Profile
 // ── Tauri Commands ──────────────────────────────────────────────────────────
 
 /// Share a profile by uploading to a GitHub repo. Returns a short profile code.
+/// For mods without a GitHub source, bundles the actual mod files as zips.
 #[tauri::command]
 pub async fn share_profile(
     name: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ShareResult, String> {
-    let (profiles_path, token) = {
+    let (profiles_path, mods_path, config_path, token) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let token = s.github_token.clone().ok_or(
             "GitHub token required to share profiles. Set it in Settings."
         )?;
-        (s.profiles_path.clone(), token)
+        let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
+        (s.profiles_path.clone(), mods_path, s.config_path.clone(), token)
     };
 
-    let profile =
+    let mut profile =
         crate::profiles::load_profile(&name, &profiles_path).map_err(|e| e.to_string())?;
 
     // Get username
@@ -322,12 +466,41 @@ pub async fn share_profile(
         .await
         .map_err(|e| e.to_string())?;
 
+    // Load mod sources to check which mods have GitHub links
+    let sources_db = crate::mod_sources::load_sources(&config_path);
+
+    // Bundle mods without GitHub sources
+    for pm in &mut profile.mods {
+        let has_github = pm.source.as_ref().map_or(false, |s| s.starts_with("github:"))
+            || sources_db.mods.get(&pm.name).and_then(|e| e.github_repo.as_ref()).is_some();
+
+        if !has_github && !pm.files.is_empty() {
+            log::info!("Bundling mod '{}' (no GitHub source, {} files)", pm.name, pm.files.len());
+            match zip_mod_files(&pm.name, &pm.files, &mods_path) {
+                Ok(zip_data) => {
+                    match upload_mod_bundle(&token, &username, &pm.name, &zip_data).await {
+                        Ok(url) => {
+                            pm.bundle_url = Some(url);
+                            log::info!("Bundled mod '{}' successfully", pm.name);
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to bundle mod '{}': {}", pm.name, e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Failed to zip mod '{}': {}", pm.name, e);
+                }
+            }
+        }
+    }
+
     // Generate code and filename
     let code = generate_code(&profile);
     let filename = code_to_filename(&code);
     let profile_json = serde_json::to_string_pretty(&profile).map_err(|e| e.to_string())?;
 
-    // Upload
+    // Upload profile JSON
     let (file_sha, html_url) = upsert_file(
         &token,
         &username,
@@ -361,20 +534,22 @@ pub async fn share_profile(
 }
 
 /// Re-share (update) an already-shared profile. Same code, updated content.
+/// Re-bundles mods without GitHub sources.
 #[tauri::command]
 pub async fn reshare_profile(
     name: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ShareResult, String> {
-    let (profiles_path, token) = {
+    let (profiles_path, mods_path, config_path, token) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let token = s.github_token.clone().ok_or(
             "GitHub token required. Set it in Settings."
         )?;
-        (s.profiles_path.clone(), token)
+        let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
+        (s.profiles_path.clone(), mods_path, s.config_path.clone(), token)
     };
 
-    let profile =
+    let mut profile =
         crate::profiles::load_profile(&name, &profiles_path).map_err(|e| e.to_string())?;
 
     // Load existing share info
@@ -384,6 +559,34 @@ pub async fn reshare_profile(
             .map_err(|_| "Profile has not been shared yet. Use 'Share' first.".to_string())?,
     )
     .map_err(|e| e.to_string())?;
+
+    // Load mod sources to check which mods have GitHub links
+    let sources_db = crate::mod_sources::load_sources(&config_path);
+
+    // Bundle mods without GitHub sources
+    for pm in &mut profile.mods {
+        let has_github = pm.source.as_ref().map_or(false, |s| s.starts_with("github:"))
+            || sources_db.mods.get(&pm.name).and_then(|e| e.github_repo.as_ref()).is_some();
+
+        if !has_github && !pm.files.is_empty() {
+            log::info!("Re-bundling mod '{}' (no GitHub source)", pm.name);
+            match zip_mod_files(&pm.name, &pm.files, &mods_path) {
+                Ok(zip_data) => {
+                    match upload_mod_bundle(&token, &share_info.owner, &pm.name, &zip_data).await {
+                        Ok(url) => {
+                            pm.bundle_url = Some(url);
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to bundle mod '{}': {}", pm.name, e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Failed to zip mod '{}': {}", pm.name, e);
+                }
+            }
+        }
+    }
 
     let filename = code_to_filename(&share_info.code);
     let profile_json = serde_json::to_string_pretty(&profile).map_err(|e| e.to_string())?;
@@ -532,19 +735,32 @@ pub async fn install_shared_profile(
                 {
                     Ok(info) => {
                         log::info!("Downloaded mod '{}' for shared profile", info.name);
+                        continue;
                     }
                     Err(e) => {
-                        log::warn!("Could not download '{}': {}", pm.name, e);
-                        download_failures.push(pm.name.clone());
+                        log::warn!("GitHub download failed for '{}': {}", pm.name, e);
+                        // Fall through to try bundle_url
                     }
                 }
-            } else {
-                download_failures.push(pm.name.clone());
             }
-        } else {
-            log::warn!("No download source for mod '{}' -- skipping (no GitHub link in profile or sources DB)", pm.name);
-            download_failures.push(pm.name.clone());
         }
+
+        // Try bundle_url (mod was bundled by curator into the profiles repo)
+        if let Some(ref bundle_url) = pm.bundle_url {
+            log::info!("Downloading bundled mod '{}' from profiles repo", pm.name);
+            match download_bundle(bundle_url, &pm.name, &mods_path).await {
+                Ok(_) => {
+                    log::info!("Installed bundled mod '{}'", pm.name);
+                    continue;
+                }
+                Err(e) => {
+                    log::warn!("Bundle download failed for '{}': {}", pm.name, e);
+                }
+            }
+        }
+
+        log::warn!("No download source for mod '{}' -- skipping", pm.name);
+        download_failures.push(pm.name.clone());
     }
 
     if !download_failures.is_empty() {

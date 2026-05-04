@@ -27,6 +27,7 @@ export interface ProfileMod {
   source: string | null;
   hash: string | null;
   files: string[];
+  bundle_url: string | null;
 }
 
 export interface GameInfo {

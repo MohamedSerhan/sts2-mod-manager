@@ -466,84 +466,34 @@ pub async fn share_profile(
         .await
         .map_err(|e| e.to_string())?;
 
-    // For each mod, validate GitHub source has a downloadable release.
-    // If not, bundle the mod files directly.
+    // Bundle ALL mods to guarantee version matching.
+    // Friends get the exact same files the curator has installed.
+    // GitHub sources are kept as metadata but bundles are preferred during install.
     for pm in &mut profile.mods {
         if pm.files.is_empty() {
+            log::info!("Skipping '{}' -- no files to bundle", pm.name);
             continue;
         }
 
-        let mut needs_bundle = true;
-
-        // Check if GitHub source has a valid downloadable .zip release
-        if let Some(ref source) = pm.source {
-            if let Some(repo_path) = source.strip_prefix("github:") {
-                let parts: Vec<&str> = repo_path.splitn(2, '/').collect();
-                if parts.len() == 2 {
-                    log::info!("Validating GitHub source for '{}': {}", pm.name, repo_path);
-                    match crate::download::fetch_latest_release(parts[0], parts[1], Some(&token)).await {
-                        Ok(release) => {
-                            let has_zip = release.assets.iter().any(|a| a.name.ends_with(".zip"));
-                            let has_dll = release.assets.iter().any(|a| a.name.ends_with(".dll"));
-                            if has_zip || has_dll {
-                                // Extra check: if mod had .pck files locally, verify GitHub
-                                // release can provide them. Many STS2 mods need .pck resources.
-                                let local_has_pck = pm.files.iter().any(|f| f.ends_with(".pck"));
-                                if local_has_pck && has_zip {
-                                    // Download and check if zip contains .pck
-                                    // For now, trust GitHub if it has a zip -- but always bundle
-                                    // as fallback too so friends have the complete mod
-                                    log::info!("Mod '{}' has .pck files -- bundling as backup alongside GitHub source", pm.name);
-                                    // Keep GitHub source AND also bundle
-                                    match zip_mod_files(&pm.name, &pm.files, &mods_path) {
-                                        Ok(zip_data) => {
-                                            if let Ok(url) = upload_mod_bundle(&token, &username, &pm.name, &zip_data).await {
-                                                pm.bundle_url = Some(url);
-                                            }
-                                        }
-                                        Err(_) => {}
-                                    }
-                                    needs_bundle = false;
-                                } else {
-                                    log::info!("GitHub source valid for '{}': {} ({} assets)", pm.name, release.tag_name, release.assets.len());
-                                    needs_bundle = false;
-                                }
-                            } else {
-                                log::warn!("GitHub release for '{}' has no .zip/.dll assets ({}): {:?}",
-                                    pm.name, release.tag_name,
-                                    release.assets.iter().map(|a| &a.name).collect::<Vec<_>>());
-                            }
-                        }
-                        Err(e) => {
-                            log::warn!("GitHub source invalid for '{}' ({}): {}", pm.name, repo_path, e);
+        log::info!("Bundling mod '{}' ({} files)", pm.name, pm.files.len());
+        match zip_mod_files(&pm.name, &pm.files, &mods_path) {
+            Ok(zip_data) => {
+                match upload_mod_bundle(&token, &username, &pm.name, &zip_data).await {
+                    Ok(url) => {
+                        pm.bundle_url = Some(url);
+                        log::info!("Bundled mod '{}' successfully ({} bytes)", pm.name, zip_data.len());
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to upload bundle for '{}': {}", pm.name, e);
+                        // If bundling fails and there's no GitHub source either, this mod won't be downloadable
+                        if pm.source.is_none() {
+                            log::error!("Mod '{}' has no bundle AND no GitHub source -- friends won't be able to download it", pm.name);
                         }
                     }
                 }
             }
-        }
-
-        if needs_bundle {
-            log::info!("Bundling mod '{}' ({} files)", pm.name, pm.files.len());
-            // Clear invalid GitHub source so friends don't waste time trying it
-            if pm.source.as_ref().map_or(false, |s| s.starts_with("github:")) {
-                log::info!("Clearing invalid GitHub source for '{}'", pm.name);
-                pm.source = None;
-            }
-            match zip_mod_files(&pm.name, &pm.files, &mods_path) {
-                Ok(zip_data) => {
-                    match upload_mod_bundle(&token, &username, &pm.name, &zip_data).await {
-                        Ok(url) => {
-                            pm.bundle_url = Some(url);
-                            log::info!("Bundled mod '{}' successfully", pm.name);
-                        }
-                        Err(e) => {
-                            log::warn!("Failed to upload bundle for '{}': {}", pm.name, e);
-                        }
-                    }
-                }
-                Err(e) => {
-                    log::warn!("Failed to zip mod '{}': {}", pm.name, e);
-                }
+            Err(e) => {
+                log::warn!("Failed to zip mod '{}': {}", pm.name, e);
             }
         }
     }
@@ -618,50 +568,27 @@ pub async fn reshare_profile(
     )
     .map_err(|e| e.to_string())?;
 
-    // Validate GitHub sources and bundle mods that can't be downloaded
+    // Bundle ALL mods to guarantee version matching (same as share_profile).
     for pm in &mut profile.mods {
         if pm.files.is_empty() {
             continue;
         }
 
-        let mut needs_bundle = true;
-
-        if let Some(ref source) = pm.source {
-            if let Some(repo_path) = source.strip_prefix("github:") {
-                let parts: Vec<&str> = repo_path.splitn(2, '/').collect();
-                if parts.len() == 2 {
-                    match crate::download::fetch_latest_release(parts[0], parts[1], Some(&token)).await {
-                        Ok(release) => {
-                            let has_zip = release.assets.iter().any(|a| a.name.ends_with(".zip"));
-                            let has_dll = release.assets.iter().any(|a| a.name.ends_with(".dll"));
-                            if has_zip || has_dll {
-                                needs_bundle = false;
-                            }
-                        }
-                        Err(_) => {}
+        log::info!("Re-bundling mod '{}' ({} files)", pm.name, pm.files.len());
+        match zip_mod_files(&pm.name, &pm.files, &mods_path) {
+            Ok(zip_data) => {
+                match upload_mod_bundle(&token, &share_info.owner, &pm.name, &zip_data).await {
+                    Ok(url) => {
+                        pm.bundle_url = Some(url);
+                        log::info!("Re-bundled mod '{}' successfully ({} bytes)", pm.name, zip_data.len());
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to upload bundle for '{}': {}", pm.name, e);
                     }
                 }
             }
-        }
-
-        if needs_bundle {
-            if pm.source.as_ref().map_or(false, |s| s.starts_with("github:")) {
-                pm.source = None;
-            }
-            match zip_mod_files(&pm.name, &pm.files, &mods_path) {
-                Ok(zip_data) => {
-                    match upload_mod_bundle(&token, &share_info.owner, &pm.name, &zip_data).await {
-                        Ok(url) => {
-                            pm.bundle_url = Some(url);
-                        }
-                        Err(e) => {
-                            log::warn!("Failed to upload bundle for '{}': {}", pm.name, e);
-                        }
-                    }
-                }
-                Err(e) => {
-                    log::warn!("Failed to zip mod '{}': {}", pm.name, e);
-                }
+            Err(e) => {
+                log::warn!("Failed to zip mod '{}': {}", pm.name, e);
             }
         }
     }

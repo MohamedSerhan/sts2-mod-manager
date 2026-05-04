@@ -10,6 +10,8 @@ import {
   Settings,
   Trash2,
   Play,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
@@ -27,6 +29,25 @@ import {
   switchProfile,
 } from '../hooks/useTauri';
 import type { SubscriptionUpdate, Subscription } from '../types';
+
+function CopyCodeButton({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        navigator.clipboard.writeText(code).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        }).catch(() => {});
+      }}
+      className="text-text-dim hover:text-text transition-colors"
+      title="Copy share code"
+    >
+      {copied ? <Check size={12} /> : <Copy size={12} />}
+    </button>
+  );
+}
 
 export function HomeView({ onGoToSettings }: { onGoToSettings: () => void }) {
   const { gameInfo, mods, refreshAll, refreshMods } = useApp();
@@ -303,6 +324,12 @@ export function HomeView({ onGoToSettings }: { onGoToSettings: () => void }) {
                   {sub.curator && <span>By {sub.curator} &middot; </span>}
                   Last synced: {new Date(sub.last_synced).toLocaleDateString()}
                 </p>
+                <div className="flex items-center gap-1.5 mt-1">
+                  <code className="text-xs font-mono text-primary bg-primary/10 px-2 py-0.5 rounded select-all">
+                    {sub.share_id}
+                  </code>
+                  <CopyCodeButton code={sub.share_id} />
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <Button

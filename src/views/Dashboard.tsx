@@ -158,11 +158,11 @@ export function DashboardView() {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-8 space-y-8">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-text">Dashboard</h2>
-          <p className="text-sm text-text-muted mt-1">Overview of your mod setup</p>
+          <p className="text-sm text-text-muted mt-1.5">Overview of your mod setup</p>
         </div>
         <div className="flex gap-2">
           <Button variant="secondary" size="sm" onClick={handleOpenFolder}>
@@ -257,41 +257,41 @@ export function DashboardView() {
       )}
 
       {/* Stats Row */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="flex items-center gap-4">
-          <div className="p-2.5 rounded-lg bg-surface-hover text-primary">
-            <Package size={22} />
+          <div className="p-3 rounded-xl bg-surface-hover text-primary">
+            <Package size={24} />
           </div>
           <div>
-            <p className="text-xs text-text-muted">Active Mods</p>
-            <p className="text-lg font-semibold text-text">{enabledCount}</p>
+            <p className="text-sm text-text-muted">Active Mods</p>
+            <p className="text-2xl font-semibold text-text">{enabledCount}</p>
           </div>
         </Card>
         <Card className="flex items-center gap-4">
-          <div className="p-2.5 rounded-lg bg-surface-hover text-yellow-400">
-            <Package size={22} />
+          <div className="p-3 rounded-xl bg-surface-hover text-yellow-400">
+            <Package size={24} />
           </div>
           <div>
-            <p className="text-xs text-text-muted">Disabled</p>
-            <p className="text-lg font-semibold text-text">{disabledCount}</p>
+            <p className="text-sm text-text-muted">Disabled</p>
+            <p className="text-2xl font-semibold text-text">{disabledCount}</p>
           </div>
         </Card>
         <Card className="flex items-center gap-4">
-          <div className="p-2.5 rounded-lg bg-surface-hover text-green-400">
-            <Layers size={22} />
+          <div className="p-3 rounded-xl bg-surface-hover text-green-400">
+            <Layers size={24} />
           </div>
           <div>
-            <p className="text-xs text-text-muted">Total Size</p>
-            <p className="text-lg font-semibold text-text">{formatBytes(totalSize)}</p>
+            <p className="text-sm text-text-muted">Total Size</p>
+            <p className="text-2xl font-semibold text-text">{formatBytes(totalSize)}</p>
           </div>
         </Card>
         <Card className="flex items-center gap-4">
-          <div className="p-2.5 rounded-lg bg-surface-hover text-blue-400">
-            <Gamepad2 size={22} />
+          <div className="p-3 rounded-xl bg-surface-hover text-blue-400">
+            <Gamepad2 size={24} />
           </div>
           <div>
-            <p className="text-xs text-text-muted">Game Path</p>
-            <p className="text-xs font-medium text-text truncate max-w-[140px]" title={gameInfo?.game_path || 'Not set'}>
+            <p className="text-sm text-text-muted">Game Path</p>
+            <p className="text-sm font-medium text-text truncate max-w-[160px]" title={gameInfo?.game_path || 'Not set'}>
               {gameInfo?.valid ? 'Configured' : 'Not set'}
             </p>
           </div>
@@ -329,10 +329,10 @@ export function DashboardView() {
 
       {/* Mod Updates */}
       <Card>
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <ArrowUpCircle size={18} className="text-text-muted" />
-            <h3 className="text-sm font-semibold text-text">Mod Updates</h3>
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-3">
+            <ArrowUpCircle size={20} className="text-text-muted" />
+            <h3 className="text-base font-semibold text-text">Mod Updates</h3>
             {updates.length > 0 && (
               <span className="text-xs text-primary bg-primary/10 px-2 py-0.5 rounded-full">
                 {updates.length}
@@ -364,7 +364,7 @@ export function DashboardView() {
         {updates.length > 0 ? (
           <div className="space-y-2">
             {updates.map((u) => (
-              <div key={u.mod_name} className="flex items-center justify-between py-2 px-3 rounded-lg bg-surface-hover">
+              <div key={u.mod_name} className="flex items-center justify-between py-3 px-4 rounded-xl bg-surface-hover">
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-text">{u.mod_name}</p>
                   <div className="flex items-center gap-2 text-xs text-text-dim">
@@ -391,7 +391,7 @@ export function DashboardView() {
             ))}
           </div>
         ) : (
-          <div className="flex flex-col items-center justify-center py-8 text-text-dim">
+          <div className="flex flex-col items-center justify-center py-12 text-text-dim">
             {linkedCount > 0 ? (
               <>
                 <CheckCircle2 size={32} className="mb-2 text-green-400/40" />

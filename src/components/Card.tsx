@@ -9,8 +9,8 @@ export function Card({ className, noPadding, children, ...props }: CardProps) {
   return (
     <div
       className={cn(
-        'bg-surface border border-border rounded-lg',
-        !noPadding && 'p-4',
+        'bg-surface border border-border rounded-xl',
+        !noPadding && 'p-5',
         className,
       )}
       {...props}

@@ -60,7 +60,6 @@ function AppInner() {
     try {
       localStorage.setItem('sts2mm-advanced-mode', String(next));
     } catch { /* ignore */ }
-    // If switching to simple and on an advanced-only view, go home
     if (!next && !['home', 'mods', 'settings'].includes(activeView)) {
       setActiveView('home');
     }
@@ -139,29 +138,30 @@ function AppInner() {
     <div className="flex h-screen w-screen overflow-hidden relative">
       {/* Drag-and-drop overlay */}
       {dragOver && (
-        <div className="absolute inset-0 z-30 bg-primary/10 border-2 border-dashed border-primary rounded-lg flex items-center justify-center">
+        <div className="absolute inset-0 z-30 bg-primary/10 border-2 border-dashed border-primary rounded-xl flex items-center justify-center">
           <div className="text-center">
-            <Package size={48} className="mx-auto mb-2 text-primary" />
+            <Package size={48} className="mx-auto mb-3 text-primary" />
             <p className="text-lg font-semibold text-primary">Drop .zip to install mod</p>
           </div>
         </div>
       )}
 
       {/* Sidebar */}
-      <nav className="w-[220px] flex-shrink-0 bg-surface border-r border-border flex flex-col">
-        <div className="p-4 border-b border-border">
-          <h1 className="text-lg font-bold text-text">STS2 Mod Manager</h1>
-          <p className="text-xs text-text-dim mt-0.5">v0.1.0</p>
+      <nav className="w-[240px] flex-shrink-0 bg-surface border-r border-border flex flex-col">
+        <div className="px-5 py-5 border-b border-border">
+          <h1 className="text-lg font-bold text-text tracking-tight">STS2 Mod Manager</h1>
+          <p className="text-xs text-text-dim mt-1">v0.1.0</p>
         </div>
-        <div className="flex-1 py-2">
+
+        <div className="flex-1 py-3 px-2">
           {navItems.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               onClick={() => setActiveView(id)}
               className={cn(
-                'w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors',
+                'w-full flex items-center gap-3 px-4 py-3 text-sm rounded-lg mb-0.5 transition-colors',
                 activeView === id
-                  ? 'bg-primary/10 text-primary border-r-2 border-primary'
+                  ? 'bg-primary/10 text-primary font-medium'
                   : 'text-text-muted hover:bg-surface-hover hover:text-text'
               )}
             >
@@ -176,7 +176,7 @@ function AppInner() {
           <button
             onClick={toggleAdvancedMode}
             className={cn(
-              'w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors',
+              'w-full flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-medium transition-colors',
               advancedMode
                 ? 'bg-primary/10 text-primary border border-primary/30'
                 : 'text-text-dim hover:text-text hover:bg-surface-hover border border-transparent'
@@ -189,10 +189,10 @@ function AppInner() {
         </div>
 
         {/* Launch Game Buttons */}
-        <div className="px-3 pb-2 space-y-1">
+        <div className="px-3 pb-3 space-y-1.5">
           <button
             onClick={handleLaunchGame}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-medium transition-colors"
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold transition-colors shadow-lg shadow-green-600/20"
           >
             <Play size={16} />
             {activeProfile ? `Launch STS2 (${activeProfile})` : 'Launch STS2'}
@@ -200,7 +200,7 @@ function AppInner() {
           {advancedMode && (
             <button
               onClick={handleLaunchVanilla}
-              className="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg bg-surface-hover hover:bg-yellow-600/20 text-text-muted text-xs font-medium transition-colors border border-border"
+              className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-surface-hover hover:bg-yellow-600/20 text-text-muted text-xs font-medium transition-colors border border-border"
             >
               Launch Vanilla (no mods)
             </button>
@@ -208,16 +208,16 @@ function AppInner() {
         </div>
 
         {/* Status bar */}
-        <div className="p-3 border-t border-border text-xs text-text-dim space-y-1">
-          <div className="flex items-center gap-1.5">
+        <div className="px-4 py-3 border-t border-border text-xs text-text-dim space-y-1.5">
+          <div className="flex items-center gap-2">
             <div className={cn(
               'w-2 h-2 rounded-full',
               gameInfo?.valid ? 'bg-green-500' : 'bg-red-500'
             )} />
-            {gameInfo?.valid ? 'Game detected' : 'Game not detected'}
+            <span>{gameInfo?.valid ? 'Game detected' : 'Game not detected'}</span>
           </div>
           {gameInfo?.valid && (
-            <div className="text-text-dim pl-3.5">
+            <div className="pl-4 text-text-dim">
               {enabledCount} active / {totalCount} total mods
             </div>
           )}

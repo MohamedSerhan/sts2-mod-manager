@@ -46,10 +46,10 @@ export function BrowseView() {
   }
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="p-8 space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-text">Browse Mods</h2>
-        <p className="text-sm text-text-muted mt-1">
+        <p className="text-sm text-text-muted mt-1.5">
           Search GitHub for STS2 mods
         </p>
       </div>
@@ -65,14 +65,14 @@ export function BrowseView() {
         <div className="relative flex-1">
           <Search
             size={16}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-text-dim"
+            className="absolute left-4 top-1/2 -translate-y-1/2 text-text-dim"
           />
           <input
             type="text"
             placeholder="Search for mods..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="w-full bg-surface border border-border rounded-lg pl-9 pr-3 py-2 text-sm text-text placeholder:text-text-dim focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-colors"
+            className="w-full bg-surface border border-border rounded-lg pl-11 pr-4 py-3 text-sm text-text placeholder:text-text-dim focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-colors"
           />
         </div>
         <Button type="submit" disabled={loading}>
@@ -82,7 +82,7 @@ export function BrowseView() {
 
       {/* Results */}
       {results.length > 0 ? (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {results.map((repo) => (
             <Card key={repo.full_name} className="flex flex-col justify-between">
               <div>
@@ -129,12 +129,12 @@ export function BrowseView() {
         </div>
       ) : (
         !loading && (
-          <Card className="flex flex-col items-center justify-center py-12">
-            <Search size={40} className="text-text-dim opacity-40 mb-3" />
-            <p className="text-sm text-text-dim">
+          <Card className="flex flex-col items-center justify-center py-16">
+            <Search size={44} className="text-text-dim opacity-40 mb-4" />
+            <p className="text-base text-text-dim">
               Search for mods to get started
             </p>
-            <p className="text-xs text-text-dim mt-1">
+            <p className="text-sm text-text-dim mt-1.5">
               Try searching for game-related keywords
             </p>
           </Card>

@@ -107,18 +107,18 @@ export function SettingsView() {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-8 space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-text">Settings</h2>
-        <p className="text-sm text-text-muted mt-1">
+        <p className="text-sm text-text-muted mt-1.5">
           Configure your mod manager
         </p>
       </div>
 
       {/* Game Path */}
-      <Card className="space-y-3">
-        <h3 className="text-sm font-semibold text-text flex items-center gap-2">
-          <FolderSearch size={16} />
+      <Card className="space-y-4">
+        <h3 className="text-base font-semibold text-text flex items-center gap-2">
+          <FolderSearch size={18} />
           Game Path
         </h3>
         <div className="flex gap-2">
@@ -155,9 +155,9 @@ export function SettingsView() {
       </Card>
 
       {/* Nexus API Key */}
-      <Card className="space-y-3">
-        <h3 className="text-sm font-semibold text-text flex items-center gap-2">
-          <Key size={16} />
+      <Card className="space-y-4">
+        <h3 className="text-base font-semibold text-text flex items-center gap-2">
+          <Key size={18} />
           Nexus Mods API Key
           {nexusKeySaved && (
             <span className="text-xs text-green-400 font-normal ml-2">Saved</span>
@@ -188,9 +188,9 @@ export function SettingsView() {
       </Card>
 
       {/* GitHub Token */}
-      <Card className="space-y-3">
-        <h3 className="text-sm font-semibold text-text flex items-center gap-2">
-          <Key size={16} />
+      <Card className="space-y-4">
+        <h3 className="text-base font-semibold text-text flex items-center gap-2">
+          <Key size={18} />
           GitHub Token
           <span className="text-xs text-text-dim font-normal">(optional)</span>
           {githubTokenSaved && (
@@ -218,9 +218,9 @@ export function SettingsView() {
       </Card>
 
       {/* Quick Actions */}
-      <Card className="space-y-3">
-        <h3 className="text-sm font-semibold text-text flex items-center gap-2">
-          <FolderOpen size={16} />
+      <Card className="space-y-4">
+        <h3 className="text-base font-semibold text-text flex items-center gap-2">
+          <FolderOpen size={18} />
           Quick Actions
         </h3>
         <div className="flex gap-2 flex-wrap">
@@ -234,8 +234,8 @@ export function SettingsView() {
       </Card>
 
       {/* Protocol Handlers */}
-      <Card className="space-y-3">
-        <h3 className="text-sm font-semibold text-text">Protocol Handlers</h3>
+      <Card className="space-y-4">
+        <h3 className="text-base font-semibold text-text">Protocol Handlers</h3>
         <div className="space-y-2">
           <div className="flex items-center justify-between py-1">
             <div>
@@ -259,8 +259,8 @@ export function SettingsView() {
       </Card>
 
       {/* About */}
-      <Card className="space-y-2">
-        <h3 className="text-sm font-semibold text-text">About</h3>
+      <Card className="space-y-3">
+        <h3 className="text-base font-semibold text-text">About</h3>
         <div className="text-xs text-text-dim space-y-1">
           <p>STS2 Mod Manager v0.1.0</p>
           <p>Built with Tauri 2 + React + Rust</p>

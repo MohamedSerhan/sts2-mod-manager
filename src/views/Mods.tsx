@@ -182,12 +182,12 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
   );
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="p-8 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-text">{advancedMode ? 'Installed Mods' : 'My Mods'}</h2>
-          <p className="text-sm text-text-muted mt-1">
+          <p className="text-sm text-text-muted mt-1.5">
             {enabledCount} active, {disabledCount} disabled
             {advancedMode && linkedCount > 0 && (
               <span className="text-green-400 ml-2">
@@ -222,9 +222,9 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
 
       {/* Quick Add URL Form (advanced only) */}
       {advancedMode && showQuickAdd && (
-        <Card className="flex gap-2 items-end">
+        <Card className="flex gap-3 items-end">
           <div className="flex-1">
-            <label className="text-xs text-text-muted block mb-1">
+            <label className="text-sm text-text-muted block mb-1.5">
               GitHub URL, Nexus URL, or github:owner/repo
             </label>
             <input
@@ -232,7 +232,7 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
               value={quickAddUrl}
               onChange={(e) => setQuickAddUrl(e.target.value)}
               placeholder="https://github.com/user/mod or nexus:slaythefire2/mods/123"
-              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-text placeholder:text-text-dim focus:outline-none focus:ring-2 focus:ring-primary/50"
+              className="w-full bg-background border border-border rounded-lg px-4 py-2.5 text-sm text-text placeholder:text-text-dim focus:outline-none focus:ring-2 focus:ring-primary/50"
               onKeyDown={(e) => e.key === 'Enter' && handleQuickAdd()}
               disabled={quickAdding}
             />
@@ -247,22 +247,22 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
       )}
 
       {/* Search / Filter + Bulk Actions */}
-      <div className="flex gap-2">
+      <div className="flex gap-3">
         <div className="relative flex-1">
           <Search
             size={16}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-text-dim"
+            className="absolute left-4 top-1/2 -translate-y-1/2 text-text-dim"
           />
           <input
             type="text"
             placeholder="Search mods..."
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            className="w-full bg-surface border border-border rounded-lg pl-9 pr-3 py-2 text-sm text-text placeholder:text-text-dim focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-colors"
+            className="w-full bg-surface border border-border rounded-lg pl-11 pr-4 py-3 text-sm text-text placeholder:text-text-dim focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-colors"
           />
         </div>
         {mods.length > 0 && (
-          <div className="flex gap-1">
+          <div className="flex gap-1.5">
             <Button variant="ghost" size="sm" onClick={handleEnableAll} title="Enable all mods">
               <ToggleRight size={14} />
               Enable All
@@ -277,14 +277,14 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
 
       {/* Mod List */}
       {filtered.length === 0 ? (
-        <Card className="flex flex-col items-center justify-center py-12">
-          <Package size={40} className="text-text-dim opacity-40 mb-3" />
-          <p className="text-sm text-text-dim">
+        <Card className="flex flex-col items-center justify-center py-16">
+          <Package size={44} className="text-text-dim opacity-40 mb-4" />
+          <p className="text-base text-text-dim">
             {mods.length === 0
               ? 'No mods installed yet'
               : 'No mods match your filter'}
           </p>
-          <p className="text-xs text-text-dim mt-1">
+          <p className="text-sm text-text-dim mt-1.5">
             {mods.length === 0
               ? 'Import a .zip, use Quick Add, or browse GitHub mods'
               : 'Try a different search term'}
@@ -307,12 +307,12 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
                       checked={mod.enabled}
                       onChange={(checked) => handleToggle(mod.name, checked)}
                     />
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2.5 flex-wrap">
                         <span className="text-sm font-medium text-text truncate">
                           {mod.name}
                         </span>
-                        <span className="text-xs text-text-dim">v{mod.version}</span>
+                        <span className="text-sm text-text-dim">v{mod.version}</span>
                         {/* Source badges (advanced only) */}
                         {advancedMode && mod.github_url ? (
                           <a
@@ -349,17 +349,17 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
                         )}
                       </div>
                       {mod.description && (
-                        <p className="text-xs text-text-muted mt-0.5 truncate">
+                        <p className="text-sm text-text-muted mt-1 truncate">
                           {mod.description}
                         </p>
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1.5 ml-4 shrink-0">
                     {advancedMode && (
                       <button
                         onClick={() => isExpanded ? setExpandedMod(null) : startEditSource(mod.name)}
-                        className="p-1.5 rounded-md text-text-dim hover:text-primary hover:bg-primary/10 transition-colors"
+                        className="p-2 rounded-lg text-text-dim hover:text-primary hover:bg-primary/10 transition-colors"
                         title="Link to GitHub/Nexus for auto-updates"
                       >
                         {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
@@ -368,7 +368,7 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
                     {advancedMode && (
                       <button
                         onClick={() => handleDelete(mod.name)}
-                        className="p-1.5 rounded-md text-text-dim hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                        className="p-2 rounded-lg text-text-dim hover:text-red-400 hover:bg-red-500/10 transition-colors"
                         title="Delete mod"
                       >
                         <Trash2 size={16} />
@@ -379,8 +379,8 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
 
                 {/* Expanded: source linking panel (advanced only) */}
                 {advancedMode && isExpanded && (
-                  <div className="mt-3 pt-3 border-t border-border/50 space-y-2">
-                    <div className="flex items-center gap-2 text-xs text-text-dim">
+                  <div className="mt-4 pt-4 border-t border-border/50 space-y-3">
+                    <div className="flex items-center gap-3 text-sm text-text-dim">
                       <span>{mod.files.length} file{mod.files.length !== 1 ? 's' : ''}</span>
                       {mod.dependencies.length > 0 && (
                         <>
@@ -420,18 +420,18 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
 
                     {/* Current links */}
                     {hasLinks && (
-                      <div className="flex gap-3 items-center text-xs">
+                      <div className="flex gap-4 items-center text-sm">
                         {mod.github_url && (
                           <a href={mod.github_url} target="_blank" rel="noopener noreferrer"
-                            className="flex items-center gap-1 text-blue-400 hover:underline">
-                            <GitBranch size={12} /> {mod.github_url.replace('https://github.com/', '')}
-                            <ExternalLink size={10} />
+                            className="flex items-center gap-1.5 text-blue-400 hover:underline">
+                            <GitBranch size={14} /> {mod.github_url.replace('https://github.com/', '')}
+                            <ExternalLink size={12} />
                           </a>
                         )}
                         {mod.nexus_url && (
                           <a href={mod.nexus_url} target="_blank" rel="noopener noreferrer"
-                            className="flex items-center gap-1 text-orange-400 hover:underline">
-                            Nexus <ExternalLink size={10} />
+                            className="flex items-center gap-1.5 text-orange-400 hover:underline">
+                            Nexus <ExternalLink size={12} />
                           </a>
                         )}
                         <button
@@ -439,7 +439,7 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
                           className="text-text-dim hover:text-red-400 ml-auto"
                           title="Remove source links"
                         >
-                          <X size={12} />
+                          <X size={14} />
                         </button>
                       </div>
                     )}
@@ -452,7 +452,7 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
                           value={sourceInput}
                           onChange={(e) => setSourceInput(e.target.value)}
                           placeholder="github:owner/repo, Nexus URL, or owner/repo"
-                          className="flex-1 bg-background border border-border rounded-lg px-3 py-1.5 text-xs text-text placeholder:text-text-dim focus:outline-none focus:ring-2 focus:ring-primary/50"
+                          className="flex-1 bg-background border border-border rounded-lg px-4 py-2 text-sm text-text placeholder:text-text-dim focus:outline-none focus:ring-2 focus:ring-primary/50"
                           onKeyDown={(e) => e.key === 'Enter' && handleSaveSource(mod.name)}
                           disabled={savingSource}
                           autoFocus
@@ -468,7 +468,7 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
                     ) : (
                       <button
                         onClick={() => startEditSource(mod.name)}
-                        className="text-xs text-primary hover:underline"
+                        className="text-sm text-primary hover:underline"
                       >
                         {hasLinks ? '+ Add another source link' : '+ Link to GitHub or Nexus for auto-updates'}
                       </button>

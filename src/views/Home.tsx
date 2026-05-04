@@ -105,11 +105,11 @@ export function HomeView({ onGoToSettings }: { onGoToSettings: () => void }) {
   const disabledMods = mods.filter((m) => !m.enabled);
 
   return (
-    <div className="p-6 space-y-6 max-w-3xl mx-auto">
+    <div className="p-8 space-y-8 max-w-4xl mx-auto">
       {/* Welcome Header */}
-      <div className="text-center pt-4 pb-2">
-        <h2 className="text-3xl font-bold text-text">STS2 Mod Manager</h2>
-        <p className="text-sm text-text-muted mt-2">
+      <div className="text-center pt-6 pb-4">
+        <h2 className="text-4xl font-bold text-text tracking-tight">STS2 Mod Manager</h2>
+        <p className="text-base text-text-muted mt-3">
           Get set up with mods in seconds
         </p>
       </div>
@@ -117,11 +117,11 @@ export function HomeView({ onGoToSettings }: { onGoToSettings: () => void }) {
       {/* Game not detected warning */}
       {!gameInfo?.valid && (
         <Card className="bg-red-500/10 border-red-500/30">
-          <div className="flex items-center gap-3">
-            <Gamepad2 size={20} className="text-red-400" />
+          <div className="flex items-center gap-4">
+            <Gamepad2 size={24} className="text-red-400 shrink-0" />
             <div className="flex-1">
               <p className="text-sm font-medium text-red-400">Game Not Detected</p>
-              <p className="text-xs text-text-dim mt-0.5">
+              <p className="text-sm text-text-dim mt-1">
                 Slay the Spire 2 wasn't found automatically. Click Settings to set the path.
               </p>
             </div>
@@ -134,33 +134,35 @@ export function HomeView({ onGoToSettings }: { onGoToSettings: () => void }) {
       )}
 
       {/* Step 1: Enter Profile Code */}
-      <Card className="space-y-3">
-        <div className="flex items-center gap-2">
-          <div className="flex items-center justify-center w-7 h-7 rounded-full bg-primary/20 text-primary text-sm font-bold">
+      <Card className="space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center justify-center w-9 h-9 rounded-full bg-primary/20 text-primary text-base font-bold">
             1
           </div>
-          <h3 className="text-sm font-semibold text-text">
-            {subscriptions.length > 0 ? 'Import Another Modpack' : 'Enter Modpack Code'}
-          </h3>
+          <div>
+            <h3 className="text-base font-semibold text-text">
+              {subscriptions.length > 0 ? 'Import Another Modpack' : 'Enter Modpack Code'}
+            </h3>
+            <p className="text-sm text-text-dim mt-0.5">
+              Got a code from a friend? Paste it below to install their modpack instantly.
+            </p>
+          </div>
         </div>
-        <p className="text-xs text-text-dim pl-9">
-          Got a code from a friend? Paste it below to install their modpack instantly.
-        </p>
-        <div className="flex gap-2 pl-9">
+        <div className="flex gap-3 pl-12">
           <div className="relative flex-1">
-            <Clipboard size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-dim" />
+            <Clipboard size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-text-dim" />
             <input
               type="text"
               value={profileCode}
               onChange={(e) => setProfileCode(e.target.value)}
               placeholder="e.g. AA5A-315D-61AE"
-              className="w-full bg-background border border-border rounded-lg pl-9 pr-3 py-2.5 text-sm text-text placeholder:text-text-dim focus:outline-none focus:ring-2 focus:ring-primary/50 font-mono tracking-wider"
+              className="w-full bg-background border border-border rounded-lg pl-11 pr-4 py-3 text-base text-text placeholder:text-text-dim focus:outline-none focus:ring-2 focus:ring-primary/50 font-mono tracking-wider"
               onKeyDown={(e) => e.key === 'Enter' && handleImportCode()}
               disabled={importing}
             />
           </div>
-          <Button onClick={handleImportCode} disabled={importing || !profileCode.trim()}>
-            <Download size={14} />
+          <Button onClick={handleImportCode} disabled={importing || !profileCode.trim()} size="lg">
+            <Download size={16} />
             {importing ? 'Installing...' : 'Install'}
           </Button>
         </div>
@@ -168,19 +170,19 @@ export function HomeView({ onGoToSettings }: { onGoToSettings: () => void }) {
 
       {/* Subscription Updates */}
       {subUpdates.length > 0 && (
-        <Card className="bg-purple-500/10 border-purple-500/30 space-y-3">
-          <div className="flex items-center gap-2">
-            <Users size={18} className="text-purple-400" />
-            <h3 className="text-sm font-semibold text-purple-400">
+        <Card className="bg-purple-500/10 border-purple-500/30 space-y-4">
+          <div className="flex items-center gap-3">
+            <Users size={20} className="text-purple-400" />
+            <h3 className="text-base font-semibold text-purple-400">
               Modpack Update{subUpdates.length !== 1 ? 's' : ''} Available
             </h3>
           </div>
           {subUpdates.map((sub) => (
-            <div key={sub.share_id} className="bg-surface rounded-lg p-3">
+            <div key={sub.share_id} className="bg-surface rounded-xl p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium text-text">{sub.profile_name}</p>
-                  <p className="text-xs text-text-dim mt-0.5">
+                  <p className="text-sm text-text-dim mt-1">
                     {sub.added_mods.length > 0 && (
                       <span className="text-green-400">+{sub.added_mods.length} new </span>
                     )}
@@ -193,7 +195,7 @@ export function HomeView({ onGoToSettings }: { onGoToSettings: () => void }) {
                   </p>
                 </div>
                 <Button
-                  size="sm"
+                  size="md"
                   onClick={() => handleApplySubUpdate(sub.share_id)}
                   disabled={applyingSub === sub.share_id}
                 >
@@ -205,7 +207,7 @@ export function HomeView({ onGoToSettings }: { onGoToSettings: () => void }) {
                   {applyingSub === sub.share_id ? 'Syncing...' : 'Update'}
                 </Button>
               </div>
-              <div className="text-xs text-text-dim mt-1 space-y-0.5">
+              <div className="text-sm text-text-dim mt-2 space-y-0.5">
                 {sub.added_mods.length > 0 && <p>New: {sub.added_mods.join(', ')}</p>}
                 {sub.updated_mods.length > 0 && (
                   <p>Updated: {sub.updated_mods.map((m) => `${m.name} (${m.old_version} ${'\u2192'} ${m.new_version})`).join(', ')}</p>
@@ -219,73 +221,78 @@ export function HomeView({ onGoToSettings }: { onGoToSettings: () => void }) {
 
       {/* Subscribed Modpacks */}
       {subscriptions.length > 0 && subUpdates.length === 0 && (
-        <Card className="space-y-2">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 size={18} className="text-green-400" />
-            <h3 className="text-sm font-semibold text-text">Your Modpacks</h3>
-            <span className="text-xs text-text-dim">(auto-synced)</span>
+        <Card className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <CheckCircle2 size={20} className="text-green-400" />
+              <h3 className="text-base font-semibold text-text">Your Modpacks</h3>
+              <span className="text-sm text-text-dim">(auto-synced)</span>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => checkSubs(true)} disabled={checking}>
+              <RefreshCw size={14} className={checking ? 'animate-spin' : ''} />
+              {checking ? 'Checking...' : 'Check for Updates'}
+            </Button>
           </div>
-          <Button variant="ghost" size="sm" onClick={() => checkSubs(true)} disabled={checking}>
-            <RefreshCw size={14} className={checking ? 'animate-spin' : ''} />
-            {checking ? 'Checking...' : 'Check for Updates'}
-          </Button>
           {subscriptions.map((sub) => (
-            <div key={sub.share_id} className="flex items-center justify-between py-1.5 px-3 rounded-lg bg-surface-hover">
+            <div key={sub.share_id} className="flex items-center justify-between py-3 px-4 rounded-xl bg-surface-hover">
               <div>
-                <p className="text-sm text-text">{sub.profile_name}</p>
-                <p className="text-xs text-text-dim">
+                <p className="text-sm font-medium text-text">{sub.profile_name}</p>
+                <p className="text-sm text-text-dim mt-0.5">
                   Last synced: {new Date(sub.last_synced).toLocaleDateString()}
                 </p>
               </div>
-              <span className="text-xs text-green-400">Up to date</span>
+              <span className="text-sm text-green-400 font-medium">Up to date</span>
             </div>
           ))}
         </Card>
       )}
 
       {/* Step 2: Your Mods */}
-      <Card className="space-y-3">
+      <Card className="space-y-4">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="flex items-center justify-center w-7 h-7 rounded-full bg-primary/20 text-primary text-sm font-bold">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center justify-center w-9 h-9 rounded-full bg-primary/20 text-primary text-base font-bold">
               2
             </div>
-            <h3 className="text-sm font-semibold text-text">Your Mods</h3>
-            <span className="text-xs text-text-dim">
-              {enabledMods.length} active{disabledMods.length > 0 ? `, ${disabledMods.length} disabled` : ''}
-            </span>
+            <div>
+              <h3 className="text-base font-semibold text-text">Your Mods</h3>
+              <p className="text-sm text-text-dim mt-0.5">
+                {enabledMods.length} active{disabledMods.length > 0 ? `, ${disabledMods.length} disabled` : ''}
+              </p>
+            </div>
           </div>
           <Button variant="ghost" size="sm" onClick={() => refreshMods()}>
             <RefreshCw size={14} />
+            Refresh
           </Button>
         </div>
 
         {mods.length === 0 ? (
-          <div className="flex flex-col items-center py-8 text-text-dim">
-            <Package size={32} className="mb-2 opacity-40" />
-            <p className="text-sm">No mods installed yet</p>
-            <p className="text-xs mt-1">Enter a modpack code above to get started</p>
+          <div className="flex flex-col items-center py-12 text-text-dim">
+            <Package size={40} className="mb-3 opacity-40" />
+            <p className="text-base">No mods installed yet</p>
+            <p className="text-sm mt-1">Enter a modpack code above to get started</p>
           </div>
         ) : (
-          <div className="space-y-1 max-h-[400px] overflow-y-auto">
+          <div className="space-y-1">
             {mods.map((mod) => (
               <div
                 key={mod.name}
-                className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-surface-hover transition-colors"
+                className="flex items-center justify-between py-3 px-4 rounded-xl hover:bg-surface-hover transition-colors"
               >
-                <div className="flex items-center gap-3 min-w-0">
+                <div className="flex items-center gap-4 min-w-0">
                   <Toggle
                     checked={mod.enabled}
                     onChange={(checked) => handleToggle(mod.name, checked)}
                   />
                   <div className="min-w-0">
-                    <span className="text-sm text-text truncate block">{mod.name}</span>
+                    <span className="text-sm font-medium text-text truncate block">{mod.name}</span>
                     {mod.description && (
-                      <span className="text-xs text-text-dim truncate block">{mod.description}</span>
+                      <span className="text-sm text-text-dim truncate block mt-0.5">{mod.description}</span>
                     )}
                   </div>
                 </div>
-                <span className="text-xs text-text-dim whitespace-nowrap ml-2">v{mod.version}</span>
+                <span className="text-sm text-text-dim whitespace-nowrap ml-3">v{mod.version}</span>
               </div>
             ))}
           </div>
@@ -293,22 +300,24 @@ export function HomeView({ onGoToSettings }: { onGoToSettings: () => void }) {
       </Card>
 
       {/* Step 3: Launch */}
-      <Card className="space-y-3">
-        <div className="flex items-center gap-2">
-          <div className="flex items-center justify-center w-7 h-7 rounded-full bg-primary/20 text-primary text-sm font-bold">
+      <Card className="space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center justify-center w-9 h-9 rounded-full bg-primary/20 text-primary text-base font-bold">
             3
           </div>
-          <h3 className="text-sm font-semibold text-text">Launch the game</h3>
+          <div>
+            <h3 className="text-base font-semibold text-text">Launch the game</h3>
+            <p className="text-sm text-text-dim mt-0.5">
+              Use the green "Launch STS2" button in the sidebar to start the game with your mods.
+            </p>
+          </div>
         </div>
-        <p className="text-xs text-text-dim pl-9">
-          Use the green "Launch STS2" button in the sidebar to start the game with your mods.
-        </p>
       </Card>
 
       {/* Help text */}
-      <div className="text-center text-xs text-text-dim pt-2 pb-4 space-y-1">
+      <div className="text-center text-sm text-text-dim pt-2 pb-6 space-y-2">
         <p>Need to change the game path or add API keys?</p>
-        <button onClick={onGoToSettings} className="text-primary hover:underline">
+        <button onClick={onGoToSettings} className="text-primary hover:underline font-medium">
           Open Settings
         </button>
       </div>

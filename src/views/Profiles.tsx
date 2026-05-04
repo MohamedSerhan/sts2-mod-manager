@@ -194,7 +194,7 @@ export function ProfilesView() {
   }
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="p-8 space-y-6">
       {/* Share Result Modal */}
       {shareResult && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50">
@@ -240,7 +240,7 @@ export function ProfilesView() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-text">Profiles</h2>
-          <p className="text-sm text-text-muted mt-1">
+          <p className="text-sm text-text-muted mt-1.5">
             Manage mod configurations and share with friends
           </p>
         </div>
@@ -398,10 +398,10 @@ export function ProfilesView() {
           </Button>
         </Card>
       ) : profiles.length === 0 ? (
-        <Card className="flex flex-col items-center justify-center py-12">
-          <Layers size={40} className="text-text-dim opacity-40 mb-3" />
-          <p className="text-sm text-text-dim">No profiles yet</p>
-          <p className="text-xs text-text-dim mt-1">
+        <Card className="flex flex-col items-center justify-center py-16">
+          <Layers size={44} className="text-text-dim opacity-40 mb-4" />
+          <p className="text-base text-text-dim">No profiles yet</p>
+          <p className="text-sm text-text-dim mt-1.5">
             Create a profile to save your mod configuration, or import a code from a friend
           </p>
         </Card>

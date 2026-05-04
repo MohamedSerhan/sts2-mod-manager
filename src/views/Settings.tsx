@@ -303,7 +303,7 @@ export function SettingsView() {
             disabled={checkingUpdate}
           >
             <RefreshCw size={14} className={checkingUpdate ? 'animate-spin' : ''} />
-            {checkingUpdate ? 'Checking...' : 'Check for Updates'}
+            {checkingUpdate ? 'Checking...' : 'Check for Mod Manager Updates'}
           </Button>
         </div>
       </Card>

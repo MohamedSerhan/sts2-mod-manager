@@ -121,17 +121,35 @@ pub fn load_profile(name: &str, profiles_path: &Path) -> Result<Profile> {
     Ok(profile)
 }
 
-/// Delete a profile.
+/// Delete a profile (both .json and .share files).
 pub fn delete_profile(name: &str, profiles_path: &Path) -> Result<()> {
     let file_name = sanitize_filename(name);
-    let path = profiles_path.join(format!("{}.json", file_name));
-    if !path.exists() {
+    let json_path = profiles_path.join(format!("{}.json", file_name));
+    let share_path = profiles_path.join(format!("{}.share", file_name));
+    // Also try with the raw name (spaces preserved) for .share files
+    let share_path_raw = profiles_path.join(format!("{}.share", name));
+
+    let mut deleted_any = false;
+
+    if json_path.exists() {
+        fs::remove_file(&json_path)?;
+        deleted_any = true;
+    }
+    if share_path.exists() {
+        fs::remove_file(&share_path)?;
+        deleted_any = true;
+    }
+    if share_path_raw.exists() && share_path_raw != share_path {
+        fs::remove_file(&share_path_raw)?;
+        deleted_any = true;
+    }
+
+    if !deleted_any {
         return Err(AppError::InvalidProfile(format!(
             "Profile '{}' not found",
             name
         )));
     }
-    fs::remove_file(&path)?;
     Ok(())
 }
 

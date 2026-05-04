@@ -168,14 +168,26 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                 }
 
                                 // Update installed_version in mod_sources so the audit
-                                // knows we just installed this version (mod manifests
-                                // don't always reflect the actual version from Nexus)
-                                if mod_info.version != "unknown" && mod_info.version != "0.0.0" {
-                                    crate::mod_sources::update_installed_version(
-                                        &mod_info.name,
-                                        &mod_info.version,
-                                        &config_path,
-                                    );
+                                // knows we just installed this version.
+                                // First try to get the real version from Nexus API (mod
+                                // manifests often have stale version strings). Fall back
+                                // to the manifest version if Nexus isn't available.
+                                {
+                                    let nexus_ver = fetch_nexus_version_blocking(&mod_info.name, &config_path, &state);
+                                    let version_to_store = nexus_ver
+                                        .unwrap_or_else(|| mod_info.version.clone());
+                                    if version_to_store != "unknown" && version_to_store != "0.0.0" {
+                                        crate::mod_sources::update_installed_version(
+                                            &mod_info.name,
+                                            &version_to_store,
+                                            &config_path,
+                                        );
+                                        log::info!(
+                                            "Stored installed_version '{}' for '{}'",
+                                            version_to_store,
+                                            mod_info.name
+                                        );
+                                    }
                                 }
 
                                 log::info!(
@@ -517,6 +529,50 @@ fn transfer_mod_sources(old_name: &str, new_name: &str, config_path: &Path) {
         if let Err(e) = save_sources(&db, config_path) {
             log::error!("Failed to save mod sources after transfer: {}", e);
         }
+    }
+}
+
+/// Query the Nexus API (blocking) for the current version of a mod.
+/// Returns None if the mod has no Nexus source or if the API call fails.
+fn fetch_nexus_version_blocking(
+    mod_name: &str,
+    config_path: &Path,
+    state: &AppState,
+) -> Option<String> {
+    let db = load_sources(config_path);
+    let entry = db.mods.get(mod_name)?;
+    let domain = entry.nexus_game_domain.as_ref()?;
+    let mod_id = entry.nexus_mod_id?;
+
+    let api_key = {
+        let s = state.lock().ok()?;
+        s.nexus_api_key.clone()?
+    };
+
+    // Build a simple blocking HTTP request to the Nexus API
+    let url = format!(
+        "https://api.nexusmods.com/v1/games/{}/mods/{}.json",
+        domain, mod_id
+    );
+
+    let client = reqwest::blocking::Client::new();
+    let resp = client
+        .get(&url)
+        .header("apikey", &api_key)
+        .header("accept", "application/json")
+        .header("user-agent", "sts2-mod-manager/0.1")
+        .send()
+        .ok()?
+        .error_for_status()
+        .ok()?;
+
+    let info: serde_json::Value = resp.json().ok()?;
+    let version = info.get("version")?.as_str()?.to_string();
+
+    if version.is_empty() {
+        None
+    } else {
+        Some(version)
     }
 }
 

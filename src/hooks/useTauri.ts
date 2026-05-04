@@ -151,6 +151,10 @@ export async function autoDetectSources(): Promise<AutoDetectResult> {
   return invoke('auto_detect_sources');
 }
 
+export async function findGithubFromNexus(modName: string): Promise<string | null> {
+  return invoke('find_github_from_nexus', { modName });
+}
+
 // ── Sharing ────────────────────────────────────────────────────────────────
 
 export async function shareProfile(name: string): Promise<ShareResult> {

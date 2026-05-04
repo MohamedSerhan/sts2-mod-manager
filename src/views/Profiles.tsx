@@ -46,7 +46,7 @@ export function ProfilesView() {
   const [sharingProfile, setSharingProfile] = useState<string | null>(null);
   const [shareResult, setShareResult] = useState<ShareResult | null>(null);
   const [copiedCode, setCopiedCode] = useState(false);
-  const { refreshAll } = useApp();
+  const { refreshAll, setActiveProfile, activeProfile } = useApp();
   const toastCtx = useToast();
 
   useEffect(() => {
@@ -94,6 +94,7 @@ export function ProfilesView() {
   async function handleSwitch(name: string) {
     try {
       await switchProfile(name);
+      setActiveProfile(name);
       await refreshAll();
       await loadProfiles();
       toastCtx.success(`Switched to profile "${name}"`);
@@ -409,11 +410,14 @@ export function ProfilesView() {
           {profiles.map((profile) => (
             <Card
               key={profile.name}
-              className="flex items-center justify-between hover:bg-surface-hover transition-colors"
+              className={`flex items-center justify-between hover:bg-surface-hover transition-colors ${activeProfile === profile.name ? 'border-green-500/50 bg-green-500/5' : ''}`}
             >
               <div className="min-w-0">
-                <h3 className="text-sm font-semibold text-text">
+                <h3 className="text-sm font-semibold text-text flex items-center gap-2">
                   {profile.name}
+                  {activeProfile === profile.name && (
+                    <span className="text-[10px] font-normal bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded">ACTIVE</span>
+                  )}
                 </h3>
                 <div className="flex items-center gap-3 mt-1 text-xs text-text-dim">
                   <span>

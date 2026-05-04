@@ -50,6 +50,18 @@ pub fn run() {
         }
     }
 
+    // Check if vanilla mode flag was left from a previous session
+    if let Ok(s) = app_state.lock() {
+        let flag_path = s.config_path.join(".vanilla_mode");
+        if flag_path.exists() {
+            drop(s);
+            if let Ok(mut s) = app_state.lock() {
+                s.vanilla_mode = true;
+                log::info!("Vanilla mode flag detected from previous session - will restore mods on next launch.");
+            }
+        }
+    }
+
     tauri::Builder::default()
         .manage(app_state)
         .plugin(tauri_plugin_opener::init())
@@ -66,6 +78,8 @@ pub fn run() {
             game::launch_game,
             game::launch_vanilla,
             game::set_github_token,
+            game::get_active_profile,
+            game::set_active_profile,
             // Mod management
             mods::get_installed_mods,
             mods::toggle_mod,
@@ -100,6 +114,7 @@ pub fn run() {
             mod_sources::set_mod_sources_full,
             mod_sources::remove_mod_source,
             mod_sources::auto_detect_sources,
+            mod_sources::find_github_from_nexus,
             // Dependency resolution
             mods::check_mod_dependencies,
             mods::get_mod_dependents,

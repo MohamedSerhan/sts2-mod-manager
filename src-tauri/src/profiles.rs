@@ -216,10 +216,11 @@ pub fn switch_profile(
     name: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<bool, String> {
-    let s = state.lock().map_err(|e| e.to_string())?;
+    let mut s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?.clone();
     let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?.clone();
     let profile = load_profile(&name, &s.profiles_path).map_err(|e| e.to_string())?;
+    s.active_profile = Some(name);
     drop(s); // Release lock before applying
     apply_profile(&profile, &mods_path, &disabled_path).map_err(|e| e.to_string())?;
     Ok(true)

@@ -32,7 +32,7 @@ export default function App() {
 
 function AppInner() {
   const [activeView, setActiveView] = useState<View>('dashboard');
-  const { gameInfo, mods, refreshAll } = useApp();
+  const { gameInfo, mods, refreshAll, activeProfile } = useApp();
   const toast = useToast();
   const [dragOver, setDragOver] = useState(false);
 
@@ -43,6 +43,8 @@ function AppInner() {
     try {
       await launchGame();
       toast.success('Launching STS2 via Steam (auto-backup created)...');
+      // Refresh after a short delay so UI shows mods re-enabled if recovering from vanilla
+      setTimeout(() => refreshAll(), 1000);
     } catch (e) {
       toast.error(`Failed to launch game: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -147,7 +149,7 @@ function AppInner() {
             className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-medium transition-colors"
           >
             <Play size={16} />
-            Launch STS2
+            {activeProfile ? `Launch STS2 (${activeProfile})` : 'Launch STS2'}
           </button>
           <button
             onClick={handleLaunchVanilla}

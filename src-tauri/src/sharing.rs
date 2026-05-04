@@ -127,6 +127,12 @@ async fn create_gist(profile: &Profile, token: &str) -> Result<GistResponse> {
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
+        if status.as_u16() == 401 || status.as_u16() == 403 {
+            return Err(AppError::Other(format!(
+                "GitHub authentication failed ({}). Make sure you're using a Classic Personal Access Token with the 'gist' scope enabled. Fine-grained tokens do NOT support Gists. Error: {}",
+                status, text
+            )));
+        }
         return Err(AppError::Other(format!(
             "Failed to create gist ({}): {}",
             status, text
@@ -246,7 +252,7 @@ pub async fn share_profile(
     let (profiles_path, token) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let token = s.github_token.clone().ok_or(
-            "GitHub token required to share profiles. Set it in Settings -> GitHub Token."
+            "GitHub token required to share profiles. Set a Classic Personal Access Token (with 'gist' scope) in Settings. Note: Fine-grained tokens do NOT support Gists."
         )?;
         (s.profiles_path.clone(), token)
     };
@@ -288,7 +294,7 @@ pub async fn reshare_profile(
     let (profiles_path, token) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let token = s.github_token.clone().ok_or(
-            "GitHub token required. Set it in Settings -> GitHub Token."
+            "GitHub token required. Set a Classic Personal Access Token (with 'gist' scope) in Settings."
         )?;
         (s.profiles_path.clone(), token)
     };

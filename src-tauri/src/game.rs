@@ -261,12 +261,26 @@ pub fn open_game_folder(state: tauri::State<'_, AppState>) -> std::result::Resul
 }
 
 /// Launch STS2 via Steam with optional auto-backup.
+/// If vanilla_mode was active (from a previous Launch Vanilla), restore mods first.
 #[tauri::command]
 pub fn launch_game(
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<bool, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+
+    // If we were in vanilla mode, restore all mods first
+    if s.vanilla_mode {
+        if let (Some(ref mods_path), Some(ref disabled_path)) = (s.mods_path.clone(), s.disabled_mods_path.clone()) {
+            log::info!("Restoring mods from vanilla mode before launch");
+            restore_all_from_disabled(disabled_path, mods_path);
+        }
+        s.vanilla_mode = false;
+        // Persist the flag reset
+        let flag_path = s.config_path.join(".vanilla_mode");
+        let _ = std::fs::remove_file(&flag_path);
+    }
+
     // Auto-backup before launch
-    let s = state.lock().map_err(|e| e.to_string())?;
     if let Some(ref mods_path) = s.mods_path {
         let backup_dir = s.config_path.join("backups");
         let _ = std::fs::create_dir_all(&backup_dir);
@@ -282,26 +296,70 @@ pub fn launch_game(
     Ok(true)
 }
 
-/// Launch STS2 in vanilla mode (disable all mods, launch, re-enable on next app start).
+/// Launch STS2 in vanilla mode (disable all mods temporarily).
+/// Mods will be automatically restored on the next normal launch.
 #[tauri::command]
 pub fn launch_vanilla(
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<bool, String> {
-    let s = state.lock().map_err(|e| e.to_string())?;
-    let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
-    let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?.clone();
+    let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?.clone();
 
     // Auto-backup
     let backup_dir = s.config_path.join("backups");
     let _ = std::fs::create_dir_all(&backup_dir);
-    let _ = crate::backup::create_backup(mods_path, &backup_dir);
+    let _ = crate::backup::create_backup(&mods_path, &backup_dir);
 
     // Move all mods to disabled
-    crate::backup::reset_to_vanilla(mods_path, disabled_path).map_err(|e| e.to_string())?;
+    crate::backup::reset_to_vanilla(&mods_path, &disabled_path).map_err(|e| e.to_string())?;
+
+    // Set vanilla mode flag so next launch_game restores mods
+    s.vanilla_mode = true;
+    let flag_path = s.config_path.join(".vanilla_mode");
+    let _ = std::fs::write(&flag_path, "1");
     drop(s);
 
     // Launch
     open::that_in_background("steam://rungameid/2868840");
+    Ok(true)
+}
+
+/// Move all files/dirs from disabled back to mods (restore from vanilla).
+fn restore_all_from_disabled(disabled_path: &std::path::Path, mods_path: &std::path::Path) {
+    let _ = std::fs::create_dir_all(mods_path);
+    if let Ok(entries) = std::fs::read_dir(disabled_path) {
+        for entry in entries.flatten() {
+            let src = entry.path();
+            let dest = mods_path.join(entry.file_name());
+            if src.is_dir() {
+                let _ = crate::mods::move_directory(&src, &dest);
+            } else {
+                let _ = std::fs::rename(&src, &dest).or_else(|_| {
+                    std::fs::copy(&src, &dest).and_then(|_| std::fs::remove_file(&src))
+                });
+            }
+        }
+    }
+}
+
+/// Get the active profile name.
+#[tauri::command]
+pub fn get_active_profile(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Option<String>, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    Ok(s.active_profile.clone())
+}
+
+/// Set the active profile name.
+#[tauri::command]
+pub fn set_active_profile(
+    name: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.active_profile = name;
     Ok(true)
 }
 

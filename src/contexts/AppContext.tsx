@@ -1,14 +1,17 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
 import { getGameInfo, getInstalledMods } from '../hooks/useTauri';
+import { invoke } from '@tauri-apps/api/core';
 import type { GameInfo, ModInfo } from '../types';
 
 interface AppContextType {
   gameInfo: GameInfo | null;
   mods: ModInfo[];
   loading: boolean;
+  activeProfile: string | null;
   refreshGameInfo: () => Promise<void>;
   refreshMods: () => Promise<void>;
   refreshAll: () => Promise<void>;
+  setActiveProfile: (name: string | null) => void;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -17,6 +20,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [gameInfo, setGameInfo] = useState<GameInfo | null>(null);
   const [mods, setMods] = useState<ModInfo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeProfile, setActiveProfileState] = useState<string | null>(null);
 
   const refreshGameInfo = useCallback(async () => {
     try {
@@ -39,15 +43,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const refreshAll = useCallback(async () => {
     setLoading(true);
     await Promise.all([refreshGameInfo(), refreshMods()]);
+    // Load active profile and vanilla mode state from backend
+    try {
+      const profile = await invoke<string | null>('get_active_profile');
+      setActiveProfileState(profile);
+    } catch { /* ignore */ }
     setLoading(false);
   }, [refreshGameInfo, refreshMods]);
+
+  const setActiveProfile = useCallback((name: string | null) => {
+    setActiveProfileState(name);
+    invoke('set_active_profile', { name }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     refreshAll();
   }, [refreshAll]);
 
   return (
-    <AppContext.Provider value={{ gameInfo, mods, loading, refreshGameInfo, refreshMods, refreshAll }}>
+    <AppContext.Provider value={{ gameInfo, mods, loading, activeProfile, refreshGameInfo, refreshMods, refreshAll, setActiveProfile }}>
       {children}
     </AppContext.Provider>
   );

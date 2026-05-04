@@ -483,8 +483,8 @@ fn move_mod_files(mod_name: &str, src: &Path, dest: &Path) -> Result<()> {
     let sub_dir = src.join(mod_name);
     if sub_dir.is_dir() {
         let dest_dir = dest.join(mod_name);
-        move_dir_recursive(&sub_dir, &dest_dir)?;
-        fs::remove_dir_all(&sub_dir)?;
+        move_directory(&sub_dir, &dest_dir)?;
+        let _ = fs::remove_dir_all(&sub_dir);
         found = true;
     } else if !found {
         // Try finding a subdirectory by normalized name
@@ -495,8 +495,8 @@ fn move_mod_files(mod_name: &str, src: &Path, dest: &Path) -> Result<()> {
                     let dir_name = entry.file_name().to_string_lossy().to_string();
                     if normalize_name(&dir_name) == normalized_mod {
                         let dest_dir = dest.join(&dir_name);
-                        move_dir_recursive(&path, &dest_dir)?;
-                        fs::remove_dir_all(&path)?;
+                        move_directory(&path, &dest_dir)?;
+                        let _ = fs::remove_dir_all(&path);
                         found = true;
                         break;
                     }
@@ -516,20 +516,22 @@ fn move_mod_files(mod_name: &str, src: &Path, dest: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Recursively copy a directory.
-fn move_dir_recursive(src: &Path, dest: &Path) -> io::Result<()> {
+/// Recursively move a directory (copy + delete source).
+pub fn move_directory(src: &Path, dest: &Path) -> io::Result<()> {
     fs::create_dir_all(dest)?;
     for entry in fs::read_dir(src)?.flatten() {
         let src_path = entry.path();
         let dest_path = dest.join(entry.file_name());
         if src_path.is_dir() {
-            move_dir_recursive(&src_path, &dest_path)?;
+            move_directory(&src_path, &dest_path)?;
         } else {
             fs::rename(&src_path, &dest_path).or_else(|_| {
-                fs::copy(&src_path, &dest_path).map(|_| ())
+                fs::copy(&src_path, &dest_path).and_then(|_| fs::remove_file(&src_path))
             })?;
         }
     }
+    // Remove the now-empty source directory
+    let _ = fs::remove_dir(src);
     Ok(())
 }
 
@@ -716,22 +718,40 @@ pub fn delete_mod_cmd(name: String, state: tauri::State<'_, AppState>) -> std::r
 }
 
 /// Enable all currently disabled mods.
+/// Uses direct filesystem iteration instead of scan-then-move for reliability.
 #[tauri::command]
 pub fn enable_all_mods(state: tauri::State<'_, AppState>) -> std::result::Result<bool, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
-    let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
-    let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
+    let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?.clone();
+    let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?.clone();
+    drop(s);
 
-    let disabled = scan_disabled_mods(disabled_path);
+    let _ = fs::create_dir_all(&mods_path);
     let mut errors = Vec::new();
-    for m in &disabled {
-        if let Err(e) = move_mod_by_info(m, disabled_path, mods_path) {
-            // Fallback: try name-based move
-            if let Err(e2) = move_mod_files(&m.name, disabled_path, mods_path) {
-                errors.push(format!("{}: {}, {}", m.name, e, e2));
+
+    if let Ok(entries) = fs::read_dir(&disabled_path) {
+        for entry in entries.flatten() {
+            let src = entry.path();
+            let dest = mods_path.join(entry.file_name());
+            let name = entry.file_name().to_string_lossy().to_string();
+
+            let result = if src.is_dir() {
+                move_directory(&src, &dest).and_then(|_| {
+                    let _ = fs::remove_dir_all(&src);
+                    Ok(())
+                })
+            } else {
+                fs::rename(&src, &dest).or_else(|_| {
+                    fs::copy(&src, &dest).and_then(|_| fs::remove_file(&src))
+                }).map(|_| ())
+            };
+
+            if let Err(e) = result {
+                errors.push(format!("{}: {}", name, e));
             }
         }
     }
+
     if !errors.is_empty() {
         log::warn!("Some mods failed to enable: {:?}", errors);
     }
@@ -739,22 +759,40 @@ pub fn enable_all_mods(state: tauri::State<'_, AppState>) -> std::result::Result
 }
 
 /// Disable all currently enabled mods.
+/// Uses direct filesystem iteration instead of scan-then-move for reliability.
 #[tauri::command]
 pub fn disable_all_mods(state: tauri::State<'_, AppState>) -> std::result::Result<bool, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
-    let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
-    let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
+    let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?.clone();
+    let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?.clone();
+    drop(s);
 
-    let enabled = scan_mods(mods_path);
+    let _ = fs::create_dir_all(&disabled_path);
     let mut errors = Vec::new();
-    for m in &enabled {
-        if let Err(e) = move_mod_by_info(m, mods_path, disabled_path) {
-            // Fallback: try name-based move
-            if let Err(e2) = move_mod_files(&m.name, mods_path, disabled_path) {
-                errors.push(format!("{}: {}, {}", m.name, e, e2));
+
+    if let Ok(entries) = fs::read_dir(&mods_path) {
+        for entry in entries.flatten() {
+            let src = entry.path();
+            let dest = disabled_path.join(entry.file_name());
+            let name = entry.file_name().to_string_lossy().to_string();
+
+            let result = if src.is_dir() {
+                move_directory(&src, &dest).and_then(|_| {
+                    let _ = fs::remove_dir_all(&src);
+                    Ok(())
+                })
+            } else {
+                fs::rename(&src, &dest).or_else(|_| {
+                    fs::copy(&src, &dest).and_then(|_| fs::remove_file(&src))
+                }).map(|_| ())
+            };
+
+            if let Err(e) = result {
+                errors.push(format!("{}: {}", name, e));
             }
         }
     }
+
     if !errors.is_empty() {
         log::warn!("Some mods failed to disable: {:?}", errors);
     }

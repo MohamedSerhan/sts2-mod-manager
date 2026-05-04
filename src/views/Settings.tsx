@@ -194,7 +194,8 @@ export function SettingsView() {
           </Button>
         </div>
         <p className="text-xs text-text-dim">
-          Increases GitHub API rate limit from 60 to 5,000 requests/hour for mod searches.
+          Use a <strong>Classic</strong> Personal Access Token with the <strong>gist</strong> scope for profile sharing.
+          Fine-grained tokens do NOT support Gists. Also increases API rate limit to 5,000 req/hr.
         </p>
       </Card>
 

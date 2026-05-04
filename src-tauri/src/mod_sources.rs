@@ -301,6 +301,76 @@ pub fn remove_mod_source(
     Ok(true)
 }
 
+/// For a mod with a Nexus URL, try to find its GitHub repo by querying the Nexus API.
+/// Saves the result to the sources DB if found.
+#[tauri::command]
+pub async fn find_github_from_nexus(
+    mod_name: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Option<String>, String> {
+    let (config_path, nexus_key) = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        let key = s.nexus_api_key.clone().ok_or("Nexus API key not set. Add it in Settings.")?;
+        (s.config_path.clone(), key)
+    };
+
+    let db = load_sources(&config_path);
+    let entry = db.mods.get(&mod_name).ok_or(format!("No source entry for '{}'", mod_name))?;
+
+    let game_domain = entry.nexus_game_domain.clone().unwrap_or_else(|| "slaythespire2".to_string());
+    let mod_id = entry.nexus_mod_id.ok_or("No Nexus mod ID for this mod. Set a Nexus URL first.")?;
+
+    let repo = extract_github_from_nexus(&nexus_key, &game_domain, mod_id).await;
+
+    if let Some(ref repo) = repo {
+        let mut db = load_sources(&config_path);
+        let entry = db.mods.entry(mod_name).or_default();
+        entry.github_repo = Some(repo.clone());
+        save_sources(&db, &config_path).map_err(|e| e.to_string())?;
+    }
+
+    Ok(repo)
+}
+
+// ── Nexus → GitHub Extraction ──────────────────────────────────────────────
+
+/// Fetch a Nexus mod's description via the API and extract any GitHub repo URL from it.
+/// Returns the "owner/repo" string if found.
+pub async fn extract_github_from_nexus(
+    nexus_api_key: &str,
+    game_domain: &str,
+    mod_id: u64,
+) -> Option<String> {
+    let client = crate::nexus::NexusClient::new(nexus_api_key);
+    let info = client.get_mod_info(game_domain, mod_id).await.ok()?;
+
+    // Search description, summary, and name for GitHub URLs
+    let mut texts = Vec::new();
+    if let Some(ref desc) = info.description {
+        texts.push(desc.as_str());
+    }
+    if let Some(ref summary) = info.summary {
+        texts.push(summary.as_str());
+    }
+
+    let re = regex::Regex::new(r#"github\.com/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"#).ok()?;
+
+    for text in &texts {
+        if let Some(caps) = re.captures(text) {
+            let repo = caps.get(1)?.as_str().to_string();
+            // Strip trailing slashes, .git suffix, etc.
+            let repo = repo.trim_end_matches('/').trim_end_matches(".git").to_string();
+            // Validate it looks like owner/repo
+            let parts: Vec<&str> = repo.split('/').collect();
+            if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
+                return Some(repo);
+            }
+        }
+    }
+
+    None
+}
+
 // ── GitHub Search (raw, without STS2 qualifiers) ───────────────────────────
 
 /// Response type for GitHub search API.
@@ -563,6 +633,43 @@ pub async fn auto_detect_sources(
 
         if changed {
             let _ = save_sources(&db, &config_path);
+        }
+    }
+
+    // Phase 0.5: For mods with a Nexus URL but no GitHub URL, query the Nexus API
+    // to extract GitHub links from the mod description.
+    {
+        let nexus_api_key = {
+            let s = state.lock().map_err(|e| e.to_string())?;
+            s.nexus_api_key.clone()
+        };
+        if let Some(ref nkey) = nexus_api_key {
+            for m in &installed {
+                let entry = db.mods.get(&m.name);
+                let has_github = entry.map(|e| e.github_repo.is_some()).unwrap_or(false);
+                let has_nexus = entry.map(|e| e.nexus_mod_id.is_some()).unwrap_or(false);
+
+                if !has_github && has_nexus {
+                    let entry_ref = db.mods.get(&m.name).unwrap();
+                    let game_domain = entry_ref.nexus_game_domain.clone().unwrap_or_else(|| "slaythespire2".to_string());
+                    let mod_id = entry_ref.nexus_mod_id.unwrap();
+
+                    // Rate limit
+                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+                    if let Some(repo) = extract_github_from_nexus(nkey, &game_domain, mod_id).await {
+                        let entry_mut = db.mods.entry(m.name.clone()).or_default();
+                        entry_mut.github_repo = Some(repo.clone());
+                        let _ = save_sources(&db, &config_path);
+
+                        matched.push(AutoDetectMatch {
+                            mod_name: m.name.clone(),
+                            github_repo: repo,
+                            confidence: "high (nexus description)".to_string(),
+                        });
+                    }
+                }
+            }
         }
     }
 

@@ -32,6 +32,7 @@ import {
   disableAllMods,
   openModsFolder,
   setModSource,
+  findGithubFromNexus,
 } from '../hooks/useTauri';
 
 export function ModsView() {
@@ -45,6 +46,7 @@ export function ModsView() {
   const [editingSource, setEditingSource] = useState<string | null>(null);
   const [sourceInput, setSourceInput] = useState('');
   const [savingSource, setSavingSource] = useState(false);
+  const [findingGithub, setFindingGithub] = useState<string | null>(null);
 
   const enabledCount = mods.filter((m) => m.enabled).length;
   const disabledCount = mods.filter((m) => !m.enabled).length;
@@ -380,6 +382,34 @@ export function ModsView() {
                         </>
                       )}
                     </div>
+
+                    {/* Find GitHub from Nexus button */}
+                    {mod.nexus_url && !mod.github_url && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={async () => {
+                          try {
+                            setFindingGithub(mod.name);
+                            const repo = await findGithubFromNexus(mod.name);
+                            if (repo) {
+                              await refreshMods();
+                              toast.success(`Found GitHub repo for ${mod.name}: ${repo}`);
+                            } else {
+                              toast.info(`No GitHub link found in Nexus description for ${mod.name}`);
+                            }
+                          } catch (e) {
+                            toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+                          } finally {
+                            setFindingGithub(null);
+                          }
+                        }}
+                        disabled={findingGithub === mod.name}
+                      >
+                        <GitBranch size={12} />
+                        {findingGithub === mod.name ? 'Searching Nexus...' : 'Find GitHub from Nexus'}
+                      </Button>
+                    )}
 
                     {/* Current links */}
                     {hasLinks && (

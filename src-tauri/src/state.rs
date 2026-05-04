@@ -19,6 +19,10 @@ pub struct AppStateInner {
     pub nexus_api_key: Option<String>,
     /// GitHub personal access token
     pub github_token: Option<String>,
+    /// Flag: mods were disabled for vanilla launch and should be restored on next normal launch
+    pub vanilla_mode: bool,
+    /// Name of the currently active profile
+    pub active_profile: Option<String>,
 }
 
 pub type AppState = Arc<Mutex<AppStateInner>>;
@@ -49,6 +53,8 @@ impl AppStateInner {
             profiles_path,
             nexus_api_key: None,
             github_token: None,
+            vanilla_mode: false,
+            active_profile: None,
         }
     }
 

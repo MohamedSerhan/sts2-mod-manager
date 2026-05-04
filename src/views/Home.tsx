@@ -30,6 +30,19 @@ import {
 } from '../hooks/useTauri';
 import type { SubscriptionUpdate, Subscription } from '../types';
 
+/** Format a raw share_id (e.g. "MohamedSerhan:C56BDDA5C6C1") into "MohamedSerhan/C56B-DDA5-C6C1" */
+function formatShareCode(shareId: string): string {
+  const sep = shareId.includes(':') ? ':' : '/';
+  const idx = shareId.indexOf(sep);
+  if (idx === -1) return shareId;
+  const owner = shareId.slice(0, idx);
+  const raw = shareId.slice(idx + 1).replace(/-/g, '');
+  const code = raw.length >= 12
+    ? `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}`
+    : raw;
+  return `${owner}/${code}`;
+}
+
 function CopyCodeButton({ code }: { code: string }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -326,9 +339,9 @@ export function HomeView({ onGoToSettings }: { onGoToSettings: () => void }) {
                 </p>
                 <div className="flex items-center gap-1.5 mt-1">
                   <code className="text-xs font-mono text-primary bg-primary/10 px-2 py-0.5 rounded select-all">
-                    {sub.share_id.replace(':', '/')}
+                    {formatShareCode(sub.share_id)}
                   </code>
-                  <CopyCodeButton code={sub.share_id.replace(':', '/')} />
+                  <CopyCodeButton code={formatShareCode(sub.share_id)} />
                 </div>
               </div>
               <div className="flex items-center gap-2">

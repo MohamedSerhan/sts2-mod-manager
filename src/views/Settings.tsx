@@ -12,6 +12,7 @@ import {
   setGithubToken,
   openGameFolder,
   openModsFolder,
+  getApiKeyStatus,
 } from '../hooks/useTauri';
 
 export function SettingsView() {
@@ -20,13 +21,22 @@ export function SettingsView() {
   const [gamePath, setGamePathValue] = useState('');
   const [nexusKey, setNexusKey] = useState('');
   const [githubToken, setGithubTokenValue] = useState('');
+  const [nexusKeySaved, setNexusKeySaved] = useState(false);
+  const [githubTokenSaved, setGithubTokenSaved] = useState(false);
 
-  // Load current game path on mount
+  // Load current game path and key status on mount
   useEffect(() => {
     if (gameInfo?.game_path) {
       setGamePathValue(gameInfo.game_path);
     }
   }, [gameInfo?.game_path]);
+
+  useEffect(() => {
+    getApiKeyStatus().then((status) => {
+      setNexusKeySaved(status.nexus_api_key_set);
+      setGithubTokenSaved(status.github_token_set);
+    }).catch(() => {});
+  }, []);
 
   async function handleDetectGame() {
     try {
@@ -62,6 +72,7 @@ export function SettingsView() {
       await setNexusApiKey(nexusKey.trim());
       toast.success('Nexus API key saved.');
       setNexusKey('');
+      setNexusKeySaved(true);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     }
@@ -73,6 +84,7 @@ export function SettingsView() {
       await setGithubToken(githubToken.trim());
       toast.success('GitHub token saved.');
       setGithubTokenValue('');
+      setGithubTokenSaved(true);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     }
@@ -147,12 +159,15 @@ export function SettingsView() {
         <h3 className="text-sm font-semibold text-text flex items-center gap-2">
           <Key size={16} />
           Nexus Mods API Key
+          {nexusKeySaved && (
+            <span className="text-xs text-green-400 font-normal ml-2">Saved</span>
+          )}
         </h3>
         <div className="flex gap-2">
           <div className="flex-1">
             <Input
               type="password"
-              placeholder="Enter your Nexus API key"
+              placeholder={nexusKeySaved ? '••••••••••••••••  (already saved, enter new value to replace)' : 'Enter your Nexus API key'}
               value={nexusKey}
               onChange={(e) => setNexusKey(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSaveNexusKey()}
@@ -178,12 +193,15 @@ export function SettingsView() {
           <Key size={16} />
           GitHub Token
           <span className="text-xs text-text-dim font-normal">(optional)</span>
+          {githubTokenSaved && (
+            <span className="text-xs text-green-400 font-normal ml-2">Saved</span>
+          )}
         </h3>
         <div className="flex gap-2">
           <div className="flex-1">
             <Input
               type="password"
-              placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+              placeholder={githubTokenSaved ? '••••••••••••••••  (already saved, enter new value to replace)' : 'ghp_xxxxxxxxxxxxxxxxxxxx'}
               value={githubToken}
               onChange={(e) => setGithubTokenValue(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSaveGithubToken()}

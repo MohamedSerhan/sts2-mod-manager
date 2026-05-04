@@ -378,3 +378,21 @@ pub fn set_github_token(
 
     Ok(true)
 }
+
+/// Check which API keys are configured (without exposing their values).
+#[tauri::command]
+pub fn get_api_key_status(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<ApiKeyStatus, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    Ok(ApiKeyStatus {
+        nexus_api_key_set: s.nexus_api_key.is_some(),
+        github_token_set: s.github_token.is_some(),
+    })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApiKeyStatus {
+    pub nexus_api_key_set: bool,
+    pub github_token_set: bool,
+}

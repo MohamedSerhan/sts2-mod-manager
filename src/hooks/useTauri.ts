@@ -31,6 +31,10 @@ export async function setGithubToken(token: string): Promise<boolean> {
   return invoke('set_github_token', { token });
 }
 
+export async function getApiKeyStatus(): Promise<{ nexus_api_key_set: boolean; github_token_set: boolean }> {
+  return invoke('get_api_key_status');
+}
+
 // ── Mod Management ─────────────────────────────────────────────────────────
 
 export async function getInstalledMods(): Promise<ModInfo[]> {

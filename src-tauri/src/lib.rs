@@ -78,6 +78,7 @@ pub fn run() {
             game::launch_game,
             game::launch_vanilla,
             game::set_github_token,
+            game::get_api_key_status,
             game::get_active_profile,
             game::set_active_profile,
             // Mod management

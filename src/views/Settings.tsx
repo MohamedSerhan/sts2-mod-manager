@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { getVersion } from '@tauri-apps/api/app';
 import { FolderSearch, Key, FolderOpen, RefreshCw } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { check } from '@tauri-apps/plugin-updater';
@@ -28,6 +29,9 @@ export function SettingsView() {
   const [githubToken, setGithubTokenValue] = useState('');
   const [nexusKeySaved, setNexusKeySaved] = useState(false);
   const [githubTokenSaved, setGithubTokenSaved] = useState(false);
+  const [appVersion, setAppVersion] = useState('');
+
+  useEffect(() => { getVersion().then(setAppVersion).catch(() => {}); }, []);
 
   // Load current game path and key status on mount
   useEffect(() => {
@@ -333,7 +337,7 @@ export function SettingsView() {
       <Card className="space-y-3">
         <h3 className="text-base font-semibold text-text">About</h3>
         <div className="text-xs text-text-dim space-y-1">
-          <p>STS2 Mod Manager v0.4.0</p>
+          <p>STS2 Mod Manager v{appVersion}</p>
           <p>Built with Tauri 2 + React + Rust</p>
           <p>Manage your Slay the Spire 2 mods with ease.</p>
         </div>

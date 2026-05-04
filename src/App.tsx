@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { getVersion } from '@tauri-apps/api/app';
 import { Home, LayoutDashboard, Package, Search, Layers, Settings, Play, ChevronRight, Wrench } from 'lucide-react';
 import { check, type Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
@@ -55,6 +56,9 @@ function AppInner() {
   const [appUpdate, setAppUpdate] = useState<Update | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
   const [updateInstalling, setUpdateInstalling] = useState(false);
+  const [appVersion, setAppVersion] = useState('');
+
+  useEffect(() => { getVersion().then(setAppVersion).catch(() => {}); }, []);
 
   // Check for app updates on mount, throttled to once per 24h
   useEffect(() => {
@@ -187,7 +191,7 @@ function AppInner() {
       <nav className="w-[240px] flex-shrink-0 bg-surface border-r border-border flex flex-col">
         <div className="px-5 py-5 border-b border-border">
           <h1 className="text-lg font-bold text-text tracking-tight">STS2 Mod Manager</h1>
-          <p className="text-xs text-text-dim mt-1">v0.4.0</p>
+          {appVersion && <p className="text-xs text-text-dim mt-1">v{appVersion}</p>}
         </div>
 
         <div className="flex-1 py-3 px-2">

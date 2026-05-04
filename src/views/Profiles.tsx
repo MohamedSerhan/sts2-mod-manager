@@ -46,6 +46,7 @@ export function ProfilesView() {
   const [sharingProfile, setSharingProfile] = useState<string | null>(null);
   const [shareResult, setShareResult] = useState<ShareResult | null>(null);
   const [copiedCode, setCopiedCode] = useState(false);
+  const [switchingProfile, setSwitchingProfile] = useState<string | null>(null);
   const { refreshAll, setActiveProfile, activeProfile } = useApp();
   const toastCtx = useToast();
 
@@ -93,6 +94,7 @@ export function ProfilesView() {
 
   async function handleSwitch(name: string) {
     try {
+      setSwitchingProfile(name);
       const result = await switchProfile(name);
       setActiveProfile(name);
       await refreshAll();
@@ -114,6 +116,8 @@ export function ProfilesView() {
       }
     } catch (e) {
       toastCtx.error(`Failed to switch: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSwitchingProfile(null);
     }
   }
 
@@ -209,6 +213,24 @@ export function ProfilesView() {
 
   return (
     <div className="p-8 space-y-6">
+      {/* Switching Profile Overlay */}
+      {switchingProfile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <Card className="max-w-sm w-full mx-4 text-center space-y-4">
+            <RefreshCw size={32} className="animate-spin text-primary mx-auto" />
+            <h3 className="text-base font-semibold text-text">
+              Activating "{switchingProfile}"
+            </h3>
+            <p className="text-sm text-text-muted">
+              Fetching profile data and downloading missing mods...
+            </p>
+            <p className="text-xs text-text-dim">
+              This may take a minute depending on the number of mods.
+            </p>
+          </Card>
+        </div>
+      )}
+
       {/* Share Result Modal */}
       {shareResult && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50">
@@ -455,8 +477,13 @@ export function ProfilesView() {
                   size="sm"
                   onClick={() => handleSwitch(profile.name)}
                   title="Activate profile (enable these mods)"
+                  disabled={switchingProfile !== null}
                 >
-                  <Play size={14} />
+                  {switchingProfile === profile.name ? (
+                    <RefreshCw size={14} className="animate-spin" />
+                  ) : (
+                    <Play size={14} />
+                  )}
                 </Button>
                 <Button
                   variant="ghost"

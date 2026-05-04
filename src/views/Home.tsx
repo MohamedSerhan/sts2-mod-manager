@@ -120,6 +120,24 @@ export function HomeView({ onGoToSettings }: { onGoToSettings: () => void }) {
 
   return (
     <div className="p-8 space-y-8 max-w-4xl mx-auto">
+      {/* Importing Overlay */}
+      {importing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <Card className="max-w-sm w-full mx-4 text-center space-y-4">
+            <RefreshCw size={32} className="animate-spin text-primary mx-auto" />
+            <h3 className="text-base font-semibold text-text">
+              Installing Modpack
+            </h3>
+            <p className="text-sm text-text-muted">
+              Downloading mods and setting up your profile...
+            </p>
+            <p className="text-xs text-text-dim">
+              This may take a few minutes for large modpacks.
+            </p>
+          </Card>
+        </div>
+      )}
+
       {/* Welcome Header */}
       <div className="text-center pt-6 pb-4">
         <h2 className="text-4xl font-bold text-text tracking-tight">STS2 Mod Manager</h2>

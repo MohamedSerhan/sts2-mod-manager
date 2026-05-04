@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
-import { FolderSearch, Key, FolderOpen, RefreshCw, ClipboardCheck, ExternalLink } from 'lucide-react';
+import { FolderSearch, Key, FolderOpen, RefreshCw, ClipboardCheck, ExternalLink, Download } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
@@ -399,6 +399,17 @@ export function SettingsView() {
                     >
                       <ExternalLink size={10} />
                       Nexus{entry.nexus_version ? ` (v${entry.nexus_version})` : ''}
+                    </a>
+                  )}
+                  {entry.nexus_update_available && entry.nexus_url && (
+                    <a
+                      href={`${entry.nexus_url}?tab=files`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 transition-colors font-medium"
+                    >
+                      <Download size={10} />
+                      Download latest from Nexus
                     </a>
                   )}
                 </div>

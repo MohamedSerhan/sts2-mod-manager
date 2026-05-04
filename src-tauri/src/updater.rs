@@ -600,6 +600,14 @@ pub async fn audit_mod_versions(
         // For display: use the verified GitHub repo, or fall back to auto-detected for informational display
         let display_github = github_repo_str.clone().or(auto_detected_github);
 
+        // If GitHub errored (e.g. 404) but we have Nexus data, suppress the GitHub error —
+        // the Nexus check is the authority. Also mark as auto-detected so UI treats it as informational.
+        let (final_error, final_auto_detected) = if github_error.is_some() && (nexus_url.is_some() || nexus_version.is_some()) {
+            (None, true) // suppress error, mark GitHub as informational
+        } else {
+            (github_error, is_auto_detected)
+        };
+
         results.push(ModAuditEntry {
             mod_name: m.name.clone(),
             github_repo: display_github,
@@ -610,12 +618,12 @@ pub async fn audit_mod_versions(
             needs_update,
             asset_names,
             releases_scanned: total_scanned,
-            error: github_error,
+            error: final_error,
             nexus_url,
             nexus_version,
             nexus_update_available,
             update_source,
-            github_auto_detected: is_auto_detected,
+            github_auto_detected: final_auto_detected,
         });
     }
 

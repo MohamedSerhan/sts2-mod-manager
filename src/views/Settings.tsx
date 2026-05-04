@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
-import { FolderSearch, Key, FolderOpen, RefreshCw } from 'lucide-react';
+import { FolderSearch, Key, FolderOpen, RefreshCw, ClipboardCheck } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
@@ -19,7 +19,9 @@ import {
   getApiKeyStatus,
   openLogFile,
   getLogPath,
+  auditModVersions,
 } from '../hooks/useTauri';
+import type { ModAuditEntry } from '../types';
 
 export function SettingsView() {
   const { gameInfo, refreshAll } = useApp();
@@ -30,6 +32,8 @@ export function SettingsView() {
   const [nexusKeySaved, setNexusKeySaved] = useState(false);
   const [githubTokenSaved, setGithubTokenSaved] = useState(false);
   const [appVersion, setAppVersion] = useState('');
+  const [auditing, setAuditing] = useState(false);
+  const [auditResults, setAuditResults] = useState<ModAuditEntry[] | null>(null);
 
   useEffect(() => { getVersion().then(setAppVersion).catch(() => {}); }, []);
 
@@ -305,8 +309,92 @@ export function SettingsView() {
             <RefreshCw size={14} className={checkingUpdate ? 'animate-spin' : ''} />
             {checkingUpdate ? 'Checking...' : 'Check for Mod Manager Updates'}
           </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={async () => {
+              try {
+                setAuditing(true);
+                const results = await auditModVersions();
+                setAuditResults(results);
+              } catch (e) {
+                toast.error(`Audit failed: ${e instanceof Error ? e.message : String(e)}`);
+              } finally {
+                setAuditing(false);
+              }
+            }}
+            disabled={auditing}
+          >
+            <ClipboardCheck size={14} className={auditing ? 'animate-pulse' : ''} />
+            {auditing ? 'Auditing...' : 'Audit Mod Versions'}
+          </Button>
         </div>
       </Card>
+
+      {/* Mod Version Audit */}
+      {auditResults && (
+        <Card className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-base font-semibold text-text">Mod Version Audit</h3>
+            <Button variant="ghost" size="sm" onClick={() => setAuditResults(null)}>Close</Button>
+          </div>
+          <div className="space-y-1 max-h-96 overflow-y-auto">
+            {auditResults.map((entry) => (
+              <div
+                key={entry.mod_name}
+                className={`text-xs px-3 py-2 rounded-lg ${
+                  entry.error
+                    ? 'bg-red-500/10 text-red-400'
+                    : entry.needs_update
+                    ? 'bg-amber-500/10 text-amber-400'
+                    : !entry.github_repo
+                    ? 'bg-surface text-text-dim'
+                    : 'bg-green-500/10 text-green-400'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">{entry.mod_name}</span>
+                  <span className="font-mono">
+                    {entry.error
+                      ? 'ERROR'
+                      : entry.needs_update
+                      ? `${entry.installed_version} -> ${entry.latest_release_with_assets_tag}`
+                      : !entry.github_repo
+                      ? 'No source linked'
+                      : `${entry.installed_version} (latest)`}
+                  </span>
+                </div>
+                {entry.github_repo && (
+                  <div className="text-text-dim mt-0.5">
+                    {entry.github_repo}
+                    {entry.latest_release_tag && entry.latest_release_with_assets_tag && entry.latest_release_tag !== entry.latest_release_with_assets_tag && (
+                      <span className="ml-2 text-amber-400">
+                        (latest tag {entry.latest_release_tag} has no files, using {entry.latest_release_with_assets_tag})
+                      </span>
+                    )}
+                    {!entry.latest_has_assets && entry.latest_release_tag && !entry.latest_release_with_assets_tag && (
+                      <span className="ml-2 text-red-400">(no releases with downloadable files found)</span>
+                    )}
+                    {entry.releases_scanned > 1 && (
+                      <span className="ml-2">({entry.releases_scanned} releases scanned)</span>
+                    )}
+                  </div>
+                )}
+                {entry.asset_names.length > 0 && (
+                  <div className="text-text-dim mt-0.5">Assets: {entry.asset_names.join(', ')}</div>
+                )}
+                {entry.error && <div className="mt-0.5">{entry.error}</div>}
+              </div>
+            ))}
+          </div>
+          <div className="text-xs text-text-dim border-t border-border pt-2">
+            {auditResults.filter(r => r.needs_update).length} need updates &middot;
+            {auditResults.filter(r => !r.github_repo).length} unlinked &middot;
+            {auditResults.filter(r => r.error).length} errors &middot;
+            {auditResults.filter(r => r.github_repo && !r.needs_update && !r.error).length} up to date
+          </div>
+        </Card>
+      )}
 
       {/* Protocol Handlers */}
       <Card className="space-y-4">

@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ModInfo, Profile, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult } from '../types';
+import type { ModInfo, Profile, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, ModAuditEntry } from '../types';
 
 // ── Game Detection & QOL ───────────────────────────────────────────────────
 
@@ -142,6 +142,10 @@ export async function updateMod(name: string): Promise<ModInfo> {
 
 export async function updateAllMods(): Promise<ModInfo[]> {
   return invoke('update_all_mods');
+}
+
+export async function auditModVersions(): Promise<ModAuditEntry[]> {
+  return invoke('audit_mod_versions');
 }
 
 export async function quickAddMod(url: string): Promise<QuickAddResult> {

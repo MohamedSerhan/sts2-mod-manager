@@ -161,6 +161,7 @@ pub fn run() {
             updater::check_for_updates,
             updater::update_mod,
             updater::update_all_mods,
+            updater::audit_mod_versions,
             quick_add::quick_add_mod,
             // Mod source linking
             mod_sources::get_mod_sources,

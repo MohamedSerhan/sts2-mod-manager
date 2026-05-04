@@ -153,3 +153,16 @@ export interface BackupInfo {
   size_bytes: number;
 }
 
+export interface ModAuditEntry {
+  mod_name: string;
+  github_repo: string | null;
+  installed_version: string;
+  latest_release_tag: string | null;
+  latest_release_with_assets_tag: string | null;
+  latest_has_assets: boolean;
+  needs_update: boolean;
+  asset_names: string[];
+  releases_scanned: number;
+  error: string | null;
+}
+

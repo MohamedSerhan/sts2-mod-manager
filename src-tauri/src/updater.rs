@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::download::{download_and_install_github_mod, fetch_latest_release};
+use crate::download::{download_and_install_github_mod, fetch_latest_release, fetch_releases};
 use crate::error::Result;
 use crate::mod_sources::{load_sources, save_sources, update_installed_version, ModSourceEntry};
 use crate::mods::{scan_mods, ModInfo};
@@ -303,6 +303,188 @@ pub async fn update_all_mods(
                 log::error!("Failed to update mod '{}': {}", update.mod_name, e);
             }
         }
+    }
+
+    Ok(results)
+}
+
+// ── Audit ───────────────────────────────────────────────────────────────────
+
+/// Detailed audit entry for a single mod's version status.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModAuditEntry {
+    pub mod_name: String,
+    pub github_repo: Option<String>,
+    pub installed_version: String,
+    /// The tag from /releases/latest (may have no assets).
+    pub latest_release_tag: Option<String>,
+    /// The tag of the most recent release that has downloadable assets.
+    pub latest_release_with_assets_tag: Option<String>,
+    /// Whether the latest release (by tag) has downloadable assets.
+    pub latest_has_assets: bool,
+    /// Whether the mod needs updating (installed version != latest release with assets).
+    pub needs_update: bool,
+    /// Asset file names from the latest release with assets.
+    pub asset_names: Vec<String>,
+    /// Number of releases scanned to find one with assets.
+    pub releases_scanned: u32,
+    /// Any error encountered during the audit.
+    pub error: Option<String>,
+}
+
+/// Valid mod asset extensions for STS2 mods.
+fn is_mod_asset(name: &str) -> bool {
+    name.ends_with(".zip") || name.ends_with(".dll") || name.ends_with(".pck")
+}
+
+/// Audit all installed mods against their latest GitHub releases.
+/// For each mod with a GitHub source, fetches releases (paginated) to find
+/// the most recent release that actually has downloadable mod files (.zip, .dll, .pck).
+/// This validates that the update-checking logic correctly skips empty releases.
+#[tauri::command]
+pub async fn audit_mod_versions(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<ModAuditEntry>, String> {
+    let (mods_path, disabled_path, config_path, token) = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
+        let disabled_path = s.disabled_mods_path.clone();
+        let config_path = s.config_path.clone();
+        let token = s.github_token.clone();
+        (mods_path, disabled_path, config_path, token)
+    };
+
+    // Scan both enabled and disabled mods
+    let mut all_mods = scan_mods(&mods_path);
+    if let Some(ref dp) = disabled_path {
+        let disabled = scan_mods(dp);
+        all_mods.extend(disabled);
+    }
+
+    let sources_db = load_sources(&config_path);
+    let mut results: Vec<ModAuditEntry> = Vec::new();
+
+    for m in &all_mods {
+        let (owner, repo) = match resolve_github_repo(m, &sources_db.mods) {
+            Some(pair) => pair,
+            None => {
+                // No GitHub source — include in report but skip version check
+                results.push(ModAuditEntry {
+                    mod_name: m.name.clone(),
+                    github_repo: None,
+                    installed_version: m.version.clone(),
+                    latest_release_tag: None,
+                    latest_release_with_assets_tag: None,
+                    latest_has_assets: false,
+                    needs_update: false,
+                    asset_names: Vec::new(),
+                    releases_scanned: 0,
+                    error: None,
+                });
+                continue;
+            }
+        };
+
+        let full_name = format!("{}/{}", owner, repo);
+
+        // Fetch latest release first (the /releases/latest endpoint)
+        let latest_release = match fetch_latest_release(&owner, &repo, token.as_deref()).await {
+            Ok(r) => Some(r),
+            Err(e) => {
+                results.push(ModAuditEntry {
+                    mod_name: m.name.clone(),
+                    github_repo: Some(full_name),
+                    installed_version: m.version.clone(),
+                    latest_release_tag: None,
+                    latest_release_with_assets_tag: None,
+                    latest_has_assets: false,
+                    needs_update: false,
+                    asset_names: Vec::new(),
+                    releases_scanned: 0,
+                    error: Some(format!("Failed to fetch latest release: {}", e)),
+                });
+                continue;
+            }
+        };
+
+        let latest_tag = latest_release.as_ref().map(|r| r.tag_name.clone());
+        let latest_has_mod_assets = latest_release
+            .as_ref()
+            .map(|r| r.assets.iter().any(|a| is_mod_asset(&a.name)))
+            .unwrap_or(false);
+
+        // Now scan paginated releases to find the most recent one WITH downloadable assets
+        let mut best_release_with_assets: Option<crate::download::GitHubRelease> = None;
+        let mut total_scanned: u32 = 0;
+        let max_pages: u32 = 3; // Scan up to 3 pages (90 releases)
+        let per_page: u32 = 30;
+
+        'outer: for page in 1..=max_pages {
+            let releases = match fetch_releases(&owner, &repo, page, per_page, token.as_deref()).await {
+                Ok(r) => r,
+                Err(_) => break,
+            };
+
+            if releases.is_empty() {
+                break;
+            }
+
+            for release in &releases {
+                total_scanned += 1;
+                if release.assets.iter().any(|a| is_mod_asset(&a.name)) {
+                    best_release_with_assets = Some(release.clone());
+                    break 'outer;
+                }
+            }
+        }
+
+        let with_assets_tag = best_release_with_assets
+            .as_ref()
+            .map(|r| r.tag_name.clone());
+        let asset_names: Vec<String> = best_release_with_assets
+            .as_ref()
+            .map(|r| {
+                r.assets
+                    .iter()
+                    .filter(|a| is_mod_asset(&a.name))
+                    .map(|a| a.name.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // Determine if an update is needed
+        let needs_update = if let Some(ref release) = best_release_with_assets {
+            let latest_ver = release.tag_name.trim_start_matches('v');
+            let current_ver = m.version.trim_start_matches('v');
+
+            // Also check installed_version from mod_sources.json
+            let installed_ver_matches = sources_db
+                .mods
+                .get(&m.name)
+                .and_then(|e| e.installed_version.as_deref())
+                .map(|iv| iv.trim_start_matches('v') == latest_ver)
+                .unwrap_or(false);
+
+            !installed_ver_matches
+                && latest_ver != current_ver
+                && current_ver != "unknown"
+                && current_ver != "0.0.0"
+        } else {
+            false
+        };
+
+        results.push(ModAuditEntry {
+            mod_name: m.name.clone(),
+            github_repo: Some(full_name),
+            installed_version: m.version.clone(),
+            latest_release_tag: latest_tag,
+            latest_release_with_assets_tag: with_assets_tag,
+            latest_has_assets: latest_has_mod_assets,
+            needs_update,
+            asset_names,
+            releases_scanned: total_scanned,
+            error: None,
+        });
     }
 
     Ok(results)

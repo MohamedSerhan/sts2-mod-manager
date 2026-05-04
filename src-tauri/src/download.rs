@@ -92,6 +92,33 @@ pub async fn fetch_latest_release(
     Ok(release)
 }
 
+/// Fetch multiple releases from a GitHub repository (paginated).
+/// Returns up to `per_page` releases from the given page.
+pub async fn fetch_releases(
+    owner: &str,
+    repo: &str,
+    page: u32,
+    per_page: u32,
+    token: Option<&str>,
+) -> Result<Vec<GitHubRelease>> {
+    let client = build_client(token);
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/releases",
+        owner, repo
+    );
+    let resp = client
+        .get(&url)
+        .query(&[
+            ("page", page.to_string()),
+            ("per_page", per_page.to_string()),
+        ])
+        .send()
+        .await?
+        .error_for_status()?;
+    let releases: Vec<GitHubRelease> = resp.json().await?;
+    Ok(releases)
+}
+
 /// Fetch a specific tagged release.
 pub async fn fetch_release_by_tag(
     owner: &str,

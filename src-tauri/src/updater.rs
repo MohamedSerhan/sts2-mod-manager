@@ -550,7 +550,20 @@ pub async fn audit_mod_versions(
                     Ok(info) => {
                         if let Some(ref nv) = info.version {
                             nexus_version = Some(nv.clone());
-                            let current_ver = m.version.trim_start_matches('v');
+                            // Use the best known version: check mod_sources installed_version
+                            // first (tracks what was actually downloaded), then fall back to
+                            // the manifest version on disk (which mod authors don't always update).
+                            let sources_ver = source_entry
+                                .and_then(|e| e.installed_version.as_deref())
+                                .unwrap_or("");
+                            let manifest_ver = m.version.trim_start_matches('v');
+                            let current_ver = if !sources_ver.is_empty() {
+                                // Use whichever is higher: sources DB or manifest
+                                let sv = sources_ver.trim_start_matches('v');
+                                if is_newer_version(manifest_ver, sv) { sv } else { manifest_ver }
+                            } else {
+                                manifest_ver
+                            };
                             let nexus_ver = nv.trim_start_matches('v');
                             if current_ver != "unknown" && current_ver != "0.0.0" {
                                 nexus_update_available = is_newer_version(current_ver, nexus_ver);

@@ -167,6 +167,17 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                     }
                                 }
 
+                                // Update installed_version in mod_sources so the audit
+                                // knows we just installed this version (mod manifests
+                                // don't always reflect the actual version from Nexus)
+                                if mod_info.version != "unknown" && mod_info.version != "0.0.0" {
+                                    crate::mod_sources::update_installed_version(
+                                        &mod_info.name,
+                                        &mod_info.version,
+                                        &config_path,
+                                    );
+                                }
+
                                 log::info!(
                                     "Auto-installed mod '{}' from {} (replaced: {:?})",
                                     mod_info.name,

@@ -31,6 +31,7 @@ export function HomeView({ onGoToSettings }: { onGoToSettings: () => void }) {
   const [subUpdates, setSubUpdates] = useState<SubscriptionUpdate[]>([]);
   const [applyingSub, setApplyingSub] = useState<string | null>(null);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
+  const [checking, setChecking] = useState(false);
 
   useEffect(() => {
     loadSubscriptions();
@@ -44,11 +45,20 @@ export function HomeView({ onGoToSettings }: { onGoToSettings: () => void }) {
     } catch { /* ignore */ }
   }
 
-  async function checkSubs() {
+  async function checkSubs(showToast = false) {
     try {
+      setChecking(true);
       const u = await checkSubscriptionUpdates();
-      setSubUpdates(u.filter((s) => s.has_update));
-    } catch { /* ignore */ }
+      const updates = u.filter((s) => s.has_update);
+      setSubUpdates(updates);
+      if (showToast && updates.length === 0) {
+        toast.success('All modpacks are up to date!');
+      }
+    } catch (e) {
+      if (showToast) toast.error(`Check failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setChecking(false);
+    }
   }
 
   async function handleImportCode() {
@@ -215,6 +225,10 @@ export function HomeView({ onGoToSettings }: { onGoToSettings: () => void }) {
             <h3 className="text-sm font-semibold text-text">Your Modpacks</h3>
             <span className="text-xs text-text-dim">(auto-synced)</span>
           </div>
+          <Button variant="ghost" size="sm" onClick={() => checkSubs(true)} disabled={checking}>
+            <RefreshCw size={14} className={checking ? 'animate-spin' : ''} />
+            {checking ? 'Checking...' : 'Check for Updates'}
+          </Button>
           {subscriptions.map((sub) => (
             <div key={sub.share_id} className="flex items-center justify-between py-1.5 px-3 rounded-lg bg-surface-hover">
               <div>

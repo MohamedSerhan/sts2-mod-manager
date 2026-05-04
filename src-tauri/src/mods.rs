@@ -715,43 +715,58 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
 
     let _ = fs::create_dir_all(mods_path);
 
-    // First pass: figure out if we should strip a top-level directory.
-    // If every file in the zip shares a single top-level prefix that is also the
-    // zip file's stem, strip it so we don't get mods_path/ModName/ModName/*.
-    // Otherwise, if files are already at the root or there are multiple top-level
-    // directories, preserve the structure as-is inside a subdirectory named after
-    // the zip stem.
+    // First pass: figure out the zip structure using mod-relevant files
+    // (.dll, .json, .pck) to determine extraction strategy.
+    // NOTE: We extract ALL files from the zip, not just these — mods may
+    // include .xml, .cfg, resource files, dependency DLLs in subfolders, etc.
     let mut relevant_entries: Vec<String> = Vec::new();
+    let mut all_entries: Vec<String> = Vec::new();
     let mut top_dirs: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut all_top_dirs: std::collections::HashSet<String> = std::collections::HashSet::new();
     for i in 0..archive.len() {
         let entry = archive.by_index(i)?;
         let name = entry.name().to_string();
         if entry.is_dir() || name.starts_with("__MACOSX") || name.starts_with("._") {
             continue;
         }
+        all_entries.push(name.clone());
+        // Track top-level dirs for ALL files
+        if let Some(first) = name.split('/').next() {
+            if name.contains('/') {
+                all_top_dirs.insert(first.to_string());
+            }
+        }
         let ext = Path::new(&name)
             .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("")
             .to_lowercase();
-        if !["dll", "json", "pck"].contains(&ext.as_str()) {
-            continue;
-        }
-        relevant_entries.push(name.clone());
-        // Collect the first path component
-        if let Some(first) = name.split('/').next() {
-            if name.contains('/') {
-                top_dirs.insert(first.to_string());
+        if ["dll", "json", "pck"].contains(&ext.as_str()) {
+            relevant_entries.push(name.clone());
+            // Collect the first path component for mod files
+            if let Some(first) = name.split('/').next() {
+                if name.contains('/') {
+                    top_dirs.insert(first.to_string());
+                }
             }
         }
     }
 
-    // Determine extraction strategy:
-    // - If all files share exactly one top-level directory, preserve that subdirectory
-    // - If files are at root (no subdirectory), put them in a subdir named after the zip
+    // Determine extraction strategy based on mod-relevant files:
+    // - If mod files share exactly one top-level directory, preserve that subdirectory
+    // - If mod files are at root (no subdirectory), put them in a subdir
     // - If there are multiple top-level dirs, extract as-is
-    let has_single_subdir = top_dirs.len() == 1;
+    let has_single_subdir = top_dirs.len() == 1 || (top_dirs.is_empty() && all_top_dirs.len() == 1);
     let all_at_root = relevant_entries.iter().all(|n| !n.contains('/'));
+    
+    // Use the all_top_dirs single dir if mod files are at root but other files aren't
+    let effective_single_subdir = if top_dirs.len() == 1 {
+        top_dirs.iter().next().cloned()
+    } else if all_top_dirs.len() == 1 {
+        all_top_dirs.iter().next().cloned()
+    } else {
+        None
+    };
 
     let zip_stem = zip_path
         .file_stem()
@@ -763,7 +778,7 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
     // try to determine the correct folder name from the mod manifest or
     // DLL/PCK filenames rather than using the zip filename (which may
     // include Nexus suffixes like "STS2-Ritsu-281-0-0-46-1775500710").
-    let wrap_folder_name = if all_at_root && relevant_entries.len() > 1 {
+    let wrap_folder_name = if all_at_root && all_entries.len() > 1 {
         // Strategy 1: Peek at manifest JSON inside the zip for mod name/id
         let manifest_name = peek_manifest_name(&mut archive);
 
@@ -802,18 +817,19 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
             .unwrap_or("")
             .to_lowercase();
 
-        if !["dll", "json", "pck"].contains(&ext.as_str()) {
-            continue;
-        }
+        // Extract ALL files, not just .dll/.json/.pck — mods may include
+        // .xml configs, .deps.json, additional DLLs in subfolders, resources, etc.
+        // The ReflectionTypeLoadException in .NET mods is often caused by
+        // missing dependency files that were filtered out.
 
         // Determine the relative path to extract to
         let rel_path = if has_single_subdir {
             // Keep the subdirectory structure as-is (e.g., ModName/ModName.dll)
             name.clone()
         } else if all_at_root {
-            // Files at root: wrap in a subdirectory named after the mod
+            // Mod files are at root: wrap in a subdirectory named after the mod
             // Only if there are multiple files; single file stays flat
-            if relevant_entries.len() == 1 {
+            if all_entries.len() == 1 {
                 name.clone()
             } else {
                 format!("{}/{}", wrap_folder_name, name)

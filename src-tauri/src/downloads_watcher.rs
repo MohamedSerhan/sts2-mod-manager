@@ -185,6 +185,15 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                     }
                                 }
 
+                                // If the user just queued this mod via Quick Add (Nexus),
+                                // attach the Nexus URL to the mod's source entry now.
+                                attach_pending_nexus_source(
+                                    &mod_info.name,
+                                    &file_name,
+                                    &config_path,
+                                    &state,
+                                );
+
                                 // Update installed_version in mod_sources so the audit
                                 // knows we just installed this version.
                                 // First try to get the real version from Nexus API (mod
@@ -591,6 +600,63 @@ fn fetch_nexus_version_blocking(
         None
     } else {
         Some(version)
+    }
+}
+
+/// If the user recently queued a Nexus mod via Quick Add and this download
+/// matches it (by mod_id in the filename or fuzzy name match), attach the
+/// Nexus URL to the mod's source entry and consume the pending hint.
+fn attach_pending_nexus_source(
+    installed_name: &str,
+    file_name: &str,
+    config_path: &Path,
+    state: &AppState,
+) {
+    let consumed = {
+        let mut s = match state.lock() {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        // Drop entries older than 30 minutes before searching.
+        s.pending_nexus_installs.retain(|p| {
+            Instant::now().duration_since(p.queued_at) < Duration::from_secs(30 * 60)
+        });
+
+        let stem_lower = file_name.to_lowercase();
+        let installed_norm = normalize_mod_name(installed_name);
+
+        let idx = s.pending_nexus_installs.iter().position(|p| {
+            // Nexus filenames look like "ModName-{mod_id}-{version}-...zip"
+            let id_marker = format!("-{}-", p.mod_id);
+            if stem_lower.contains(&id_marker) {
+                return true;
+            }
+            let p_norm = normalize_mod_name(&p.mod_name);
+            !p_norm.is_empty()
+                && (installed_norm.contains(&p_norm) || p_norm.contains(&installed_norm))
+        });
+
+        idx.map(|i| s.pending_nexus_installs.remove(i))
+    };
+
+    let Some(pending) = consumed else { return };
+
+    let mut db = crate::mod_sources::load_sources(config_path);
+    let entry = db.mods.entry(installed_name.to_string()).or_default();
+    entry.nexus_url = Some(pending.nexus_url);
+    entry.nexus_game_domain = Some(pending.game_domain);
+    entry.nexus_mod_id = Some(pending.mod_id);
+    match crate::mod_sources::save_sources(&db, config_path) {
+        Ok(_) => log::info!(
+            "Auto-attached Nexus source to '{}' (mod_id {})",
+            installed_name,
+            pending.mod_id
+        ),
+        Err(e) => log::warn!(
+            "Failed to persist auto-attached Nexus source for '{}': {}",
+            installed_name,
+            e
+        ),
     }
 }
 

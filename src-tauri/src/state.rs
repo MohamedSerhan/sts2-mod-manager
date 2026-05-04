@@ -1,5 +1,18 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
+
+/// A Nexus mod that the user has just queued for download via Quick Add.
+/// The downloads watcher uses this hint to attach the Nexus URL to the
+/// resulting mod once the user clicks "Mod Manager Download" on Nexus.
+#[derive(Debug, Clone)]
+pub struct PendingNexusInstall {
+    pub mod_name: String,
+    pub nexus_url: String,
+    pub game_domain: String,
+    pub mod_id: u64,
+    pub queued_at: Instant,
+}
 
 #[derive(Debug, Clone)]
 pub struct AppStateInner {
@@ -23,6 +36,9 @@ pub struct AppStateInner {
     pub vanilla_mode: bool,
     /// Name of the currently active profile
     pub active_profile: Option<String>,
+    /// Nexus mods queued by Quick Add but not yet downloaded. Consumed by the
+    /// downloads watcher to attach Nexus URLs to auto-installed mods.
+    pub pending_nexus_installs: Vec<PendingNexusInstall>,
 }
 
 pub type AppState = Arc<Mutex<AppStateInner>>;
@@ -55,6 +71,7 @@ impl AppStateInner {
             github_token: None,
             vanilla_mode: false,
             active_profile: None,
+            pending_nexus_installs: Vec::new(),
         }
     }
 

@@ -1,10 +1,13 @@
+use std::time::Instant;
+
 use serde::{Deserialize, Serialize};
 
 use crate::download::download_and_install_github_mod;
 use crate::error::{AppError, Result};
+use crate::mod_sources::{load_sources, save_sources};
 use crate::mods::ModInfo;
 use crate::nexus::{NexusClient, NexusModInfo};
-use crate::state::AppState;
+use crate::state::{AppState, PendingNexusInstall};
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -134,12 +137,13 @@ pub async fn quick_add_mod(
 ) -> std::result::Result<QuickAddResult, String> {
     // Try GitHub first
     if let Ok((owner, repo)) = resolve_github_url(&url) {
-        let (mods_path, cache_path, token) = {
+        let (mods_path, cache_path, token, config_path) = {
             let s = state.lock().map_err(|e| e.to_string())?;
             let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
             let cache_path = s.cache_path.clone();
             let token = s.github_token.clone();
-            (mods_path, cache_path, token)
+            let config_path = s.config_path.clone();
+            (mods_path, cache_path, token, config_path)
         };
 
         let mod_info = download_and_install_github_mod(
@@ -152,6 +156,16 @@ pub async fn quick_add_mod(
         )
         .await
         .map_err(|e| e.to_string())?;
+
+        // Persist the GitHub source so the mod shows the link in audit/UI.
+        // The user gave us this URL explicitly, so it's not auto-detected.
+        let mut db = load_sources(&config_path);
+        let entry = db.mods.entry(mod_info.name.clone()).or_default();
+        entry.github_repo = Some(format!("{}/{}", owner, repo));
+        entry.github_auto_detected = false;
+        if let Err(e) = save_sources(&db, &config_path) {
+            log::warn!("Quick add: failed to persist GitHub source for '{}': {}", mod_info.name, e);
+        }
 
         return Ok(QuickAddResult::GithubInstalled { mod_info });
     }
@@ -170,6 +184,27 @@ pub async fn quick_add_mod(
             .get_mod_info(&game_domain, mod_id)
             .await
             .map_err(|e| e.to_string())?;
+
+        // Stash a hint so the downloads watcher can attach the Nexus URL when
+        // the user clicks "Mod Manager Download" on Nexus and the zip lands
+        // in their Downloads folder.
+        {
+            let mut s = state.lock().map_err(|e| e.to_string())?;
+            // Drop any stale pending entries (older than 30 minutes) and any
+            // for the same mod_id (latest Quick Add wins).
+            let now = Instant::now();
+            s.pending_nexus_installs.retain(|p| {
+                p.mod_id != mod_id
+                    && now.duration_since(p.queued_at) < std::time::Duration::from_secs(30 * 60)
+            });
+            s.pending_nexus_installs.push(PendingNexusInstall {
+                mod_name: nexus_info.name.clone().unwrap_or_default(),
+                nexus_url: format!("https://www.nexusmods.com/{}/mods/{}", game_domain, mod_id),
+                game_domain: game_domain.clone(),
+                mod_id,
+                queued_at: now,
+            });
+        }
 
         return Ok(QuickAddResult::NexusInfo { nexus_info });
     }

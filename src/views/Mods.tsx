@@ -17,6 +17,7 @@ import {
   Save,
 } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { Toggle } from '../components/Toggle';
@@ -92,14 +93,23 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
 
   async function handleQuickAdd() {
     if (!quickAddUrl.trim()) return;
+    const input = quickAddUrl.trim();
     try {
       setQuickAdding(true);
-      const result = await quickAddMod(quickAddUrl.trim());
+      const result = await quickAddMod(input);
       if (result.type === 'github_installed') {
         await refreshAll();
         toast.success(`Installed: ${result.mod_info.name}`);
       } else {
-        toast.info(`Found Nexus mod: ${result.nexus_info.name || 'Unknown'}. Use "Download with Mod Manager" on Nexus.`);
+        const filesUrl = nexusFilesUrl(input);
+        if (filesUrl) {
+          await openUrl(filesUrl);
+          toast.info(
+            `Opened ${result.nexus_info.name || 'Nexus mod'}. Click "Mod Manager Download" — it'll auto-install when the file lands in Downloads.`
+          );
+        } else {
+          toast.info(`Found Nexus mod: ${result.nexus_info.name || 'Unknown'}. Open it on Nexus and click "Mod Manager Download".`);
+        }
       }
       setQuickAddUrl('');
       setShowQuickAdd(false);
@@ -108,6 +118,23 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
     } finally {
       setQuickAdding(false);
     }
+  }
+
+  function nexusFilesUrl(input: string): string | null {
+    try {
+      const u = new URL(input);
+      if (u.host.includes('nexusmods.com')) {
+        const parts = u.pathname.split('/').filter(Boolean);
+        if (parts.length >= 3 && parts[1] === 'mods') {
+          return `https://www.nexusmods.com/${parts[0]}/mods/${parts[2]}?tab=files`;
+        }
+      }
+    } catch {
+      // not a full URL — fall through to shorthand
+    }
+    const m = input.match(/^nexus:([^/]+)\/mods\/(\d+)/);
+    if (m) return `https://www.nexusmods.com/${m[1]}/mods/${m[2]}?tab=files`;
+    return null;
   }
 
   async function handleEnableAll() {

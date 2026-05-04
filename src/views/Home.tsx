@@ -20,6 +20,7 @@ import {
   applySubscriptionUpdate,
   toggleMod,
   getSubscriptions,
+  getInstalledMods,
 } from '../hooks/useTauri';
 import type { SubscriptionUpdate, Subscription } from '../types';
 
@@ -69,7 +70,20 @@ export function HomeView({ onGoToSettings }: { onGoToSettings: () => void }) {
       const profile = await installSharedProfile(code);
       await refreshAll();
       await loadSubscriptions();
-      toast.success(`Installed modpack "${profile.name}" with ${profile.mods.length} mods!`);
+      
+      // Check how many mods are actually installed vs expected
+      const installedMods = await getInstalledMods();
+      const installedNames = new Set(installedMods.map(m => m.name));
+      const missing = profile.mods.filter(m => !installedNames.has(m.name));
+      
+      if (missing.length > 0) {
+        toast.info(
+          `Installed ${profile.mods.length - missing.length}/${profile.mods.length} mods. ` +
+          `Missing: ${missing.map(m => m.name).join(', ')}. These need to be installed manually.`
+        );
+      } else {
+        toast.success(`Installed modpack "${profile.name}" with ${profile.mods.length} mods!`);
+      }
       setProfileCode('');
     } catch (e) {
       toast.error(`Failed to import: ${e instanceof Error ? e.message : String(e)}`);

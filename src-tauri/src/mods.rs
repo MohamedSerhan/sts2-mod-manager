@@ -402,6 +402,7 @@ fn normalize_name(name: &str) -> String {
 }
 
 /// Move mod files using the actual file list from ModInfo.
+/// Handles destination conflicts by removing existing files before moving.
 pub fn move_mod_by_info(mod_info: &ModInfo, src: &Path, dest: &Path) -> Result<()> {
     let _ = fs::create_dir_all(dest);
 
@@ -414,12 +415,25 @@ pub fn move_mod_by_info(mod_info: &ModInfo, src: &Path, dest: &Path) -> Result<(
         let dest_file = dest.join(&normalized);
 
         if !src_file.exists() {
+            // If the file is already at the destination, count it as moved
+            if dest_file.exists() {
+                moved_any = true;
+            }
             continue;
         }
 
         // Ensure parent directories exist for subdirectory mods
         if let Some(parent) = dest_file.parent() {
             let _ = fs::create_dir_all(parent);
+        }
+
+        // Remove destination file if it already exists (handles partial previous moves)
+        if dest_file.exists() {
+            if dest_file.is_dir() {
+                let _ = fs::remove_dir_all(&dest_file);
+            } else {
+                let _ = fs::remove_file(&dest_file);
+            }
         }
 
         fs::rename(&src_file, &dest_file).or_else(|_| {
@@ -435,7 +449,6 @@ pub fn move_mod_by_info(mod_info: &ModInfo, src: &Path, dest: &Path) -> Result<(
             if !parent_rel.as_os_str().is_empty() {
                 let parent_dir = src.join(parent_rel);
                 if parent_dir.is_dir() {
-                    // Only remove if empty
                     let _ = fs::remove_dir(&parent_dir);
                 }
             }
@@ -473,6 +486,14 @@ fn move_mod_files(mod_name: &str, src: &Path, dest: &Path) -> Result<()> {
             // Exact match or normalized (case-insensitive, no spaces) match
             if fstem == mod_name || normalize_name(&fstem) == normalized_mod {
                 let dest_file = dest.join(&fname);
+                // Remove destination if it already exists (handles stale/partial state)
+                if dest_file.exists() {
+                    if dest_file.is_dir() {
+                        let _ = fs::remove_dir_all(&dest_file);
+                    } else {
+                        let _ = fs::remove_file(&dest_file);
+                    }
+                }
                 fs::rename(entry.path(), &dest_file)?;
                 found = true;
             }
@@ -578,6 +599,50 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
 
     let _ = fs::create_dir_all(mods_path);
 
+    // First pass: figure out if we should strip a top-level directory.
+    // If every file in the zip shares a single top-level prefix that is also the
+    // zip file's stem, strip it so we don't get mods_path/ModName/ModName/*.
+    // Otherwise, if files are already at the root or there are multiple top-level
+    // directories, preserve the structure as-is inside a subdirectory named after
+    // the zip stem.
+    let mut relevant_entries: Vec<String> = Vec::new();
+    let mut top_dirs: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for i in 0..archive.len() {
+        let entry = archive.by_index(i)?;
+        let name = entry.name().to_string();
+        if entry.is_dir() || name.starts_with("__MACOSX") || name.starts_with("._") {
+            continue;
+        }
+        let ext = Path::new(&name)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        if !["dll", "json", "pck"].contains(&ext.as_str()) {
+            continue;
+        }
+        relevant_entries.push(name.clone());
+        // Collect the first path component
+        if let Some(first) = name.split('/').next() {
+            if name.contains('/') {
+                top_dirs.insert(first.to_string());
+            }
+        }
+    }
+
+    // Determine extraction strategy:
+    // - If all files share exactly one top-level directory, preserve that subdirectory
+    // - If files are at root (no subdirectory), put them in a subdir named after the zip
+    // - If there are multiple top-level dirs, extract as-is
+    let has_single_subdir = top_dirs.len() == 1;
+    let all_at_root = relevant_entries.iter().all(|n| !n.contains('/'));
+
+    let zip_stem = zip_path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
     let mut extracted_files = Vec::new();
     let mut manifest: Option<ModInfo> = None;
 
@@ -585,12 +650,10 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
         let mut entry = archive.by_index(i)?;
         let name = entry.name().to_string();
 
-        // Skip directories and __MACOSX junk
-        if entry.is_dir() || name.starts_with("__MACOSX") {
+        if entry.is_dir() || name.starts_with("__MACOSX") || name.starts_with("._") {
             continue;
         }
 
-        // We only care about .dll, .json, and .pck files for STS2 mods
         let ext = Path::new(&name)
             .extension()
             .and_then(|e| e.to_str())
@@ -601,17 +664,34 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
             continue;
         }
 
-        // Flatten path: extract only the file name part into mods/
-        let file_name = Path::new(&name)
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
-        let dest_path = mods_path.join(&file_name);
+        // Determine the relative path to extract to
+        let rel_path = if has_single_subdir {
+            // Keep the subdirectory structure as-is (e.g., ModName/ModName.dll)
+            name.clone()
+        } else if all_at_root {
+            // Files at root: wrap in a subdirectory named after the zip
+            // Only if there are multiple files; single file stays flat
+            if relevant_entries.len() == 1 {
+                name.clone()
+            } else {
+                format!("{}/{}", zip_stem, name)
+            }
+        } else {
+            // Multiple top-level dirs or mixed: preserve as-is
+            name.clone()
+        };
 
+        let dest_path = mods_path.join(&rel_path);
+
+        // Ensure parent directory exists
+        if let Some(parent) = dest_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+
+        // Overwrite if file already exists
         let mut outfile = fs::File::create(&dest_path)?;
         io::copy(&mut entry, &mut outfile)?;
-        extracted_files.push(file_name.clone());
+        extracted_files.push(rel_path.clone());
 
         // If it's a json, try parsing as manifest
         if ext == "json" && manifest.is_none() {
@@ -628,12 +708,7 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
             Ok(m)
         }
         None => {
-            // No manifest found, create a minimal ModInfo from the zip name
-            let mod_name = zip_path
-                .file_stem()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
+            let mod_name = zip_stem;
             Ok(ModInfo {
                 name: mod_name,
                 version: "unknown".to_string(),
@@ -813,6 +888,15 @@ pub fn enable_all_mods(state: tauri::State<'_, AppState>) -> std::result::Result
             let dest = mods_path.join(entry.file_name());
             let name = entry.file_name().to_string_lossy().to_string();
 
+            // Remove destination if it already exists (handles stale/partial state)
+            if dest.exists() {
+                if dest.is_dir() {
+                    let _ = fs::remove_dir_all(&dest);
+                } else {
+                    let _ = fs::remove_file(&dest);
+                }
+            }
+
             let result = if src.is_dir() {
                 move_directory(&src, &dest).and_then(|_| {
                     let _ = fs::remove_dir_all(&src);
@@ -853,6 +937,15 @@ pub fn disable_all_mods(state: tauri::State<'_, AppState>) -> std::result::Resul
             let src = entry.path();
             let dest = disabled_path.join(entry.file_name());
             let name = entry.file_name().to_string_lossy().to_string();
+
+            // Remove destination if it already exists (handles stale/partial state)
+            if dest.exists() {
+                if dest.is_dir() {
+                    let _ = fs::remove_dir_all(&dest);
+                } else {
+                    let _ = fs::remove_file(&dest);
+                }
+            }
 
             let result = if src.is_dir() {
                 move_directory(&src, &dest).and_then(|_| {

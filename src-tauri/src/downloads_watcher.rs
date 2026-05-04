@@ -124,6 +124,13 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
 
                         // Peek at the incoming zip to identify the mod
                         let incoming_identity = peek_zip_identity(path);
+                        log::info!(
+                            "Downloads watcher: zip identity — name: {:?}, mod_id: {:?}, folder: {:?}, clean_stem: {:?}",
+                            incoming_identity.name,
+                            incoming_identity.mod_id,
+                            incoming_identity.folder_name,
+                            incoming_identity.zip_stem_clean
+                        );
 
                         // Find existing mod that matches
                         let existing_mod = find_existing_mod(
@@ -220,17 +227,19 @@ struct ZipIdentity {
     name: Option<String>,
     mod_id: Option<String>,
     folder_name: Option<String>,
+    /// The zip file stem, cleaned of Nexus suffixes (e.g. "RelicsReminder" from "RelicsReminder-284-1-1-0-1775500710.zip")
+    zip_stem_clean: Option<String>,
 }
 
 /// Peek inside a zip to extract mod identity from its manifest JSON.
 fn peek_zip_identity(zip_path: &Path) -> ZipIdentity {
     let file = match std::fs::File::open(zip_path) {
         Ok(f) => f,
-        Err(_) => return ZipIdentity { name: None, mod_id: None, folder_name: None },
+        Err(_) => return ZipIdentity { name: None, mod_id: None, folder_name: None, zip_stem_clean: None },
     };
     let mut archive = match zip::ZipArchive::new(file) {
         Ok(a) => a,
-        Err(_) => return ZipIdentity { name: None, mod_id: None, folder_name: None },
+        Err(_) => return ZipIdentity { name: None, mod_id: None, folder_name: None, zip_stem_clean: None },
     };
 
     // Also extract the folder name from the zip structure
@@ -279,10 +288,16 @@ fn peek_zip_identity(zip_path: &Path) -> ZipIdentity {
                         .map(|s| s.to_string());
 
                     if mod_name.is_some() || mod_id.is_some() {
+                        let zip_stem = zip_path
+                            .file_stem()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string();
                         return ZipIdentity {
                             name: mod_name,
                             mod_id,
                             folder_name: top_dir,
+                            zip_stem_clean: Some(strip_nexus_suffix(&zip_stem)),
                         };
                     }
                 }
@@ -296,11 +311,13 @@ fn peek_zip_identity(zip_path: &Path) -> ZipIdentity {
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
+    let clean_stem = strip_nexus_suffix(&zip_stem);
 
     ZipIdentity {
         name: None,
         mod_id: None,
         folder_name: top_dir.or(Some(zip_stem)),
+        zip_stem_clean: Some(clean_stem),
     }
 }
 
@@ -356,6 +373,32 @@ fn find_existing_mod(
         }
     }
 
+    // Try matching by cleaned zip filename (strips Nexus suffixes like -284-1-1-0-1775500710)
+    if let Some(ref clean_stem) = identity.zip_stem_clean {
+        let lower_stem = clean_stem.to_lowercase();
+        // Exact match against folder name or mod name (without spaces)
+        for m in &all_mods {
+            let name_nospace = m.name.to_lowercase().replace(' ', "");
+            if name_nospace == lower_stem {
+                return Some(m.clone());
+            }
+            if let Some(ref folder) = m.folder_name {
+                if folder.to_lowercase().replace(' ', "") == lower_stem {
+                    return Some(m.clone());
+                }
+            }
+        }
+        // Substring/contains match
+        for m in &all_mods {
+            let name_nospace = m.name.to_lowercase().replace(' ', "");
+            if name_nospace.contains(&lower_stem) || lower_stem.contains(&name_nospace) {
+                if !lower_stem.is_empty() && lower_stem.len() >= 4 {
+                    return Some(m.clone());
+                }
+            }
+        }
+    }
+
     None
 }
 
@@ -368,6 +411,43 @@ fn normalize_mod_name(name: &str) -> String {
         .replace(" pro", "")
         .trim()
         .to_string()
+}
+
+/// Strip Nexus Mods filename suffixes.
+/// E.g. "RelicsReminder-284-1-1-0-1775500710" -> "RelicsReminder"
+/// Pattern: ModName followed by -digits repeated (mod ID, version parts, file ID)
+fn strip_nexus_suffix(stem: &str) -> String {
+    // Find the first dash followed by only digits-and-dashes until the end
+    // Walk from the end backwards to find where the numeric suffix starts
+    let bytes = stem.as_bytes();
+    let mut cut_pos = stem.len();
+
+    // Try to find the pattern: -digits(-digits)*$ at the end
+    let mut pos = stem.len();
+    loop {
+        // Skip digits backwards
+        let digit_end = pos;
+        while pos > 0 && bytes[pos - 1].is_ascii_digit() {
+            pos -= 1;
+        }
+        if pos == digit_end {
+            // No digits found
+            break;
+        }
+        // Check for dash before the digits
+        if pos > 0 && bytes[pos - 1] == b'-' {
+            cut_pos = pos - 1;
+            pos -= 1;
+        } else {
+            break;
+        }
+    }
+
+    if cut_pos > 0 && cut_pos < stem.len() {
+        stem[..cut_pos].to_string()
+    } else {
+        stem.to_string()
+    }
 }
 
 /// Remove an existing mod's files from disk (both enabled and disabled paths).

@@ -164,7 +164,7 @@ function AppInner() {
       <nav className="w-[240px] flex-shrink-0 bg-surface border-r border-border flex flex-col">
         <div className="px-5 py-5 border-b border-border">
           <h1 className="text-lg font-bold text-text tracking-tight">STS2 Mod Manager</h1>
-          <p className="text-xs text-text-dim mt-1">v0.2.0</p>
+          <p className="text-xs text-text-dim mt-1">v0.3.0</p>
         </div>
 
         <div className="flex-1 py-3 px-2">

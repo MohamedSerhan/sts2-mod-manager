@@ -755,18 +755,29 @@ pub async fn install_shared_profile(
     // ── STEP 1: Download missing mods BEFORE applying the profile ──
     let local_mods = crate::mods::scan_mods(&mods_path);
     let local_disabled = crate::mods::scan_disabled_mods(&disabled_path);
-    let local_names: std::collections::HashSet<String> = local_mods
-        .iter()
-        .chain(local_disabled.iter())
-        .map(|m| m.name.clone())
-        .collect();
+    // Build lookup sets by name, folder_name, and mod_id for robust matching
+    let mut local_identifiers: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for m in local_mods.iter().chain(local_disabled.iter()) {
+        local_identifiers.insert(m.name.clone());
+        if let Some(ref folder) = m.folder_name {
+            local_identifiers.insert(folder.clone());
+        }
+        if let Some(ref id) = m.mod_id {
+            local_identifiers.insert(id.clone());
+        }
+    }
 
     let mod_sources_db = crate::mod_sources::load_sources(&config_path);
     let mut download_failures: Vec<String> = Vec::new();
 
     for pm in &profile.mods {
-        if local_names.contains(&pm.name) {
-            continue; // Already have this mod locally
+        // Check if mod exists by name, folder_name, or mod_id
+        let already_exists = local_identifiers.contains(&pm.name)
+            || pm.folder_name.as_ref().map_or(false, |f| local_identifiers.contains(f))
+            || pm.mod_id.as_ref().map_or(false, |id| local_identifiers.contains(id));
+        if already_exists {
+            log::info!("Mod '{}' already on disk (matched by name/folder/id)", pm.name);
+            continue;
         }
 
         // Prefer bundle_url over GitHub -- the curator bundled it because

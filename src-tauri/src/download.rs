@@ -236,6 +236,8 @@ pub async fn download_and_install_github_mod(
             size_bytes: 0,
             github_url: Some(format!("https://github.com/{}/{}", owner, repo)),
             nexus_url: None,
+            folder_name: None,
+            mod_id: None,
         })
     } else {
         Err(AppError::Other(format!(
@@ -334,8 +336,9 @@ pub async fn download_url_mod(
     } else if dest.extension().and_then(|e| e.to_str()) == Some("dll") {
         let dest_path = mods_path.join(&file_name);
         std::fs::copy(&dest, &dest_path).map_err(|e| e.to_string())?;
+        let mod_name = file_name.trim_end_matches(".dll").to_string();
         Ok(ModInfo {
-            name: file_name.trim_end_matches(".dll").to_string(),
+            name: mod_name.clone(),
             version: "unknown".to_string(),
             description: String::new(),
             enabled: true,
@@ -344,6 +347,8 @@ pub async fn download_url_mod(
             hash: None,
             dependencies: Vec::new(),
             size_bytes: 0,
+            folder_name: Some(mod_name),
+            mod_id: None,
             github_url: None,
             nexus_url: None,
         })

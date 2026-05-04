@@ -21,6 +21,13 @@ pub struct ModInfo {
     pub hash: Option<String>,
     pub dependencies: Vec<String>,
     pub size_bytes: u64,
+    /// The actual folder name on disk (e.g. "STS2-RitsuLib", "DamageMeter")
+    /// This may differ from the manifest `name` field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder_name: Option<String>,
+    /// The mod's `id` field from the manifest (used by the game for dependency resolution)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mod_id: Option<String>,
     /// Linked GitHub URL (e.g. "https://github.com/owner/repo")
     #[serde(skip_serializing_if = "Option::is_none")]
     pub github_url: Option<String>,
@@ -43,6 +50,12 @@ struct RawManifest {
     dependencies: Vec<String>,
     #[serde(alias = "Source")]
     source: Option<String>,
+    /// Mod's unique ID (used by game for dependency resolution)
+    #[serde(alias = "Id", alias = "ID")]
+    id: Option<String>,
+    /// PCK resource name
+    #[serde(alias = "PckName", alias = "pck_name")]
+    pck_name: Option<String>,
     /// Additional fields that might contain URLs
     #[serde(alias = "Homepage", alias = "homepage")]
     homepage: Option<String>,
@@ -62,6 +75,8 @@ impl Default for RawManifest {
             description: String::new(),
             dependencies: Vec::new(),
             source: None,
+            id: None,
+            pck_name: None,
             homepage: None,
             repository: None,
             url: None,
@@ -160,6 +175,19 @@ fn parse_manifest(manifest_path: &Path, base_dir: &Path, enabled: bool) -> Optio
         raw.name
     };
 
+    // Determine the folder name on disk
+    let folder_name = if manifest_path.parent() == Some(base_dir) {
+        // Top-level manifest: folder_name is the json stem
+        manifest_path.file_stem().map(|s| s.to_string_lossy().to_string())
+    } else {
+        // Subdirectory manifest: folder_name is the immediate parent dir name
+        manifest_path.parent()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().to_string())
+    };
+
+    let mod_id = raw.id.clone().or_else(|| raw.pck_name.clone());
+
     let files = collect_mod_files(manifest_path, base_dir);
     let dll_path = manifest_path.with_extension("dll");
     let file_hash = if dll_path.exists() {
@@ -229,6 +257,8 @@ fn parse_manifest(manifest_path: &Path, base_dir: &Path, enabled: bool) -> Optio
         hash: file_hash,
         dependencies: raw.dependencies,
         size_bytes,
+        folder_name,
+        mod_id,
         github_url,
         nexus_url,
     })
@@ -241,6 +271,14 @@ fn dll_only_mod(dll_path: &Path, base_dir: &Path, enabled: bool) -> ModInfo {
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
+
+    let folder_name = if dll_path.parent() == Some(base_dir) {
+        Some(name.clone())
+    } else {
+        dll_path.parent()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().to_string())
+    };
 
     let file_name = if let Ok(rel) = dll_path.strip_prefix(base_dir) {
         rel.to_string_lossy().to_string()
@@ -269,6 +307,8 @@ fn dll_only_mod(dll_path: &Path, base_dir: &Path, enabled: bool) -> ModInfo {
         hash: hash_file(dll_path),
         dependencies: Vec::new(),
         size_bytes,
+        folder_name,
+        mod_id: None,
         github_url: None,
         nexus_url: None,
     }
@@ -710,7 +750,7 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
         None => {
             let mod_name = zip_stem;
             Ok(ModInfo {
-                name: mod_name,
+                name: mod_name.clone(),
                 version: "unknown".to_string(),
                 description: String::new(),
                 enabled: true,
@@ -719,6 +759,8 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
                 hash: hash_file(zip_path),
                 dependencies: Vec::new(),
                 size_bytes,
+                folder_name: Some(mod_name),
+                mod_id: None,
                 github_url: None,
                 nexus_url: None,
             })

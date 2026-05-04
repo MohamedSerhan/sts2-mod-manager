@@ -18,6 +18,12 @@ pub struct ProfileMod {
     pub source: Option<String>,
     pub hash: Option<String>,
     pub files: Vec<String>,
+    /// The actual folder name on disk (for matching mods across installs)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder_name: Option<String>,
+    /// The mod's `id` from manifest (used by game for dependency resolution)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mod_id: Option<String>,
     /// Whether this mod should be enabled when the profile is applied.
     /// Defaults to true for backwards compatibility with older profiles.
     #[serde(default = "default_enabled")]
@@ -199,6 +205,8 @@ pub fn snapshot_current_with_sources(
             source,
             hash: m.hash,
             files: m.files,
+            folder_name: m.folder_name,
+            mod_id: m.mod_id,
             enabled: true,
             bundle_url: None,
         });
@@ -217,6 +225,8 @@ pub fn snapshot_current_with_sources(
             source,
             hash: m.hash,
             files: m.files,
+            folder_name: m.folder_name,
+            mod_id: m.mod_id,
             enabled: false,
             bundle_url: None,
         });
@@ -409,15 +419,28 @@ pub async fn switch_profile(
         .into_iter()
         .chain(scan_disabled_mods(&disabled_path).into_iter())
         .collect();
-    let on_disk_names: std::collections::HashSet<String> = all_on_disk.iter().map(|m| m.name.clone()).collect();
+    // Build lookup sets by name, folder_name, and mod_id for robust matching
+    let mut on_disk_identifiers: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for m in &all_on_disk {
+        on_disk_identifiers.insert(m.name.clone());
+        if let Some(ref folder) = m.folder_name {
+            on_disk_identifiers.insert(folder.clone());
+        }
+        if let Some(ref id) = m.mod_id {
+            on_disk_identifiers.insert(id.clone());
+        }
+    }
 
     let mod_sources_db = crate::mod_sources::load_sources(&config_path);
     let mut downloaded_count = 0u32;
     let mut download_failures: Vec<String> = Vec::new();
 
     for pm in &profile.mods {
-        if on_disk_names.contains(&pm.name) {
-            continue; // Already have this mod locally
+        let already_exists = on_disk_identifiers.contains(&pm.name)
+            || pm.folder_name.as_ref().map_or(false, |f| on_disk_identifiers.contains(f))
+            || pm.mod_id.as_ref().map_or(false, |id| on_disk_identifiers.contains(id));
+        if already_exists {
+            continue;
         }
 
         log::info!("Mod '{}' missing from disk -- attempting download", pm.name);

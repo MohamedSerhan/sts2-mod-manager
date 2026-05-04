@@ -10,6 +10,8 @@ export interface ModInfo {
   size_bytes: number;
   github_url: string | null;
   nexus_url: string | null;
+  folder_name: string | null;
+  mod_id: string | null;
 }
 
 export interface Profile {
@@ -29,6 +31,8 @@ export interface ProfileMod {
   files: string[];
   enabled: boolean;
   bundle_url: string | null;
+  folder_name: string | null;
+  mod_id: string | null;
 }
 
 export interface SwitchProfileResult {

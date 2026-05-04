@@ -35,7 +35,7 @@ import {
   findGithubFromNexus,
 } from '../hooks/useTauri';
 
-export function ModsView() {
+export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
   const { mods, refreshMods, refreshAll } = useApp();
   const toast = useToast();
   const [filter, setFilter] = useState('');
@@ -186,10 +186,10 @@ export function ModsView() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-text">Installed Mods</h2>
+          <h2 className="text-2xl font-bold text-text">{advancedMode ? 'Installed Mods' : 'My Mods'}</h2>
           <p className="text-sm text-text-muted mt-1">
             {enabledCount} active, {disabledCount} disabled
-            {linkedCount > 0 && (
+            {advancedMode && linkedCount > 0 && (
               <span className="text-green-400 ml-2">
                 ({linkedCount} linked for auto-updates)
               </span>
@@ -201,14 +201,18 @@ export function ModsView() {
             <FolderOpen size={14} />
             Open Folder
           </Button>
-          <Button variant="secondary" size="sm" onClick={handleImportFile}>
-            <Upload size={14} />
-            Import Mod
-          </Button>
-          <Button variant="secondary" size="sm" onClick={() => setShowQuickAdd(!showQuickAdd)}>
-            <Link size={14} />
-            Quick Add URL
-          </Button>
+          {advancedMode && (
+            <>
+              <Button variant="secondary" size="sm" onClick={handleImportFile}>
+                <Upload size={14} />
+                Import Mod
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => setShowQuickAdd(!showQuickAdd)}>
+                <Link size={14} />
+                Quick Add URL
+              </Button>
+            </>
+          )}
           <Button variant="secondary" size="sm" onClick={() => refreshMods()}>
             <RefreshCw size={14} />
             Refresh
@@ -216,8 +220,8 @@ export function ModsView() {
         </div>
       </div>
 
-      {/* Quick Add URL Form */}
-      {showQuickAdd && (
+      {/* Quick Add URL Form (advanced only) */}
+      {advancedMode && showQuickAdd && (
         <Card className="flex gap-2 items-end">
           <div className="flex-1">
             <label className="text-xs text-text-muted block mb-1">
@@ -309,8 +313,8 @@ export function ModsView() {
                           {mod.name}
                         </span>
                         <span className="text-xs text-text-dim">v{mod.version}</span>
-                        {/* Source badges - clickable links */}
-                        {mod.github_url ? (
+                        {/* Source badges (advanced only) */}
+                        {advancedMode && mod.github_url ? (
                           <a
                             href={mod.github_url}
                             target="_blank"
@@ -324,7 +328,7 @@ export function ModsView() {
                             </Badge>
                           </a>
                         ) : null}
-                        {mod.nexus_url ? (
+                        {advancedMode && mod.nexus_url ? (
                           <a
                             href={mod.nexus_url}
                             target="_blank"
@@ -335,7 +339,7 @@ export function ModsView() {
                             <Badge variant="nexus">Nexus</Badge>
                           </a>
                         ) : null}
-                        {!hasLinks && (
+                        {advancedMode && !hasLinks && (
                           <Badge variant={getSourceVariant(mod.source)}>
                             {mod.source ? 'Local' : 'Unlinked'}
                           </Badge>
@@ -352,26 +356,29 @@ export function ModsView() {
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
-                    {/* Link source button */}
-                    <button
-                      onClick={() => isExpanded ? setExpandedMod(null) : startEditSource(mod.name)}
-                      className="p-1.5 rounded-md text-text-dim hover:text-primary hover:bg-primary/10 transition-colors"
-                      title="Link to GitHub/Nexus for auto-updates"
-                    >
-                      {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                    </button>
-                    <button
-                      onClick={() => handleDelete(mod.name)}
-                      className="p-1.5 rounded-md text-text-dim hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                      title="Delete mod"
-                    >
-                      <Trash2 size={16} />
-                    </button>
+                    {advancedMode && (
+                      <button
+                        onClick={() => isExpanded ? setExpandedMod(null) : startEditSource(mod.name)}
+                        className="p-1.5 rounded-md text-text-dim hover:text-primary hover:bg-primary/10 transition-colors"
+                        title="Link to GitHub/Nexus for auto-updates"
+                      >
+                        {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                      </button>
+                    )}
+                    {advancedMode && (
+                      <button
+                        onClick={() => handleDelete(mod.name)}
+                        className="p-1.5 rounded-md text-text-dim hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                        title="Delete mod"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                {/* Expanded: source linking panel */}
-                {isExpanded && (
+                {/* Expanded: source linking panel (advanced only) */}
+                {advancedMode && isExpanded && (
                   <div className="mt-3 pt-3 border-t border-border/50 space-y-2">
                     <div className="flex items-center gap-2 text-xs text-text-dim">
                       <span>{mod.files.length} file{mod.files.length !== 1 ? 's' : ''}</span>

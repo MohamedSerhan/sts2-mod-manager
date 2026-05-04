@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { LayoutDashboard, Package, Search, Layers, Settings, Play } from 'lucide-react';
+import { Home, LayoutDashboard, Package, Search, Layers, Settings, Play, ChevronRight, Wrench } from 'lucide-react';
 import { cn } from './lib/utils';
 import { ToastProvider, useToast } from './contexts/ToastContext';
 import { AppProvider, useApp } from './contexts/AppContext';
+import { HomeView } from './views/Home';
 import { DashboardView } from './views/Dashboard';
 import { ModsView } from './views/Mods';
 import { BrowseView } from './views/Browse';
@@ -10,9 +11,16 @@ import { ProfilesView } from './views/Profiles';
 import { SettingsView } from './views/Settings';
 import { launchGame, launchVanilla, installModFromFile } from './hooks/useTauri';
 
-type View = 'dashboard' | 'mods' | 'browse' | 'profiles' | 'settings';
+type View = 'home' | 'dashboard' | 'mods' | 'browse' | 'profiles' | 'settings';
 
-const NAV_ITEMS: { id: View; label: string; icon: typeof LayoutDashboard }[] = [
+const SIMPLE_NAV: { id: View; label: string; icon: typeof Home }[] = [
+  { id: 'home', label: 'Home', icon: Home },
+  { id: 'mods', label: 'My Mods', icon: Package },
+  { id: 'settings', label: 'Settings', icon: Settings },
+];
+
+const ADVANCED_NAV: { id: View; label: string; icon: typeof LayoutDashboard }[] = [
+  { id: 'home', label: 'Home', icon: Home },
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'mods', label: 'Mods', icon: Package },
   { id: 'browse', label: 'Browse', icon: Search },
@@ -31,7 +39,14 @@ export default function App() {
 }
 
 function AppInner() {
-  const [activeView, setActiveView] = useState<View>('dashboard');
+  const [activeView, setActiveView] = useState<View>('home');
+  const [advancedMode, setAdvancedMode] = useState(() => {
+    try {
+      return localStorage.getItem('sts2mm-advanced-mode') === 'true';
+    } catch {
+      return false;
+    }
+  });
   const { gameInfo, mods, refreshAll, activeProfile } = useApp();
   const toast = useToast();
   const [dragOver, setDragOver] = useState(false);
@@ -39,11 +54,22 @@ function AppInner() {
   const enabledCount = mods.filter((m) => m.enabled).length;
   const totalCount = mods.length;
 
+  function toggleAdvancedMode() {
+    const next = !advancedMode;
+    setAdvancedMode(next);
+    try {
+      localStorage.setItem('sts2mm-advanced-mode', String(next));
+    } catch { /* ignore */ }
+    // If switching to simple and on an advanced-only view, go home
+    if (!next && !['home', 'mods', 'settings'].includes(activeView)) {
+      setActiveView('home');
+    }
+  }
+
   async function handleLaunchGame() {
     try {
       await launchGame();
       toast.success('Launching STS2 via Steam (auto-backup created)...');
-      // Refresh after a short delay so UI shows mods re-enabled if recovering from vanilla
       setTimeout(() => refreshAll(), 1000);
     } catch (e) {
       toast.error(`Failed to launch game: ${e instanceof Error ? e.message : String(e)}`);
@@ -107,6 +133,8 @@ function AppInner() {
     };
   }, [refreshAll, toast]);
 
+  const navItems = advancedMode ? ADVANCED_NAV : SIMPLE_NAV;
+
   return (
     <div className="flex h-screen w-screen overflow-hidden relative">
       {/* Drag-and-drop overlay */}
@@ -126,7 +154,7 @@ function AppInner() {
           <p className="text-xs text-text-dim mt-0.5">v0.1.0</p>
         </div>
         <div className="flex-1 py-2">
-          {NAV_ITEMS.map(({ id, label, icon: Icon }) => (
+          {navItems.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               onClick={() => setActiveView(id)}
@@ -142,6 +170,24 @@ function AppInner() {
             </button>
           ))}
         </div>
+
+        {/* Advanced Mode Toggle */}
+        <div className="px-3 pb-2">
+          <button
+            onClick={toggleAdvancedMode}
+            className={cn(
+              'w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors',
+              advancedMode
+                ? 'bg-primary/10 text-primary border border-primary/30'
+                : 'text-text-dim hover:text-text hover:bg-surface-hover border border-transparent'
+            )}
+          >
+            <Wrench size={14} />
+            <span className="flex-1 text-left">Advanced Mode</span>
+            <ChevronRight size={12} className={cn('transition-transform', advancedMode && 'rotate-90')} />
+          </button>
+        </div>
+
         {/* Launch Game Buttons */}
         <div className="px-3 pb-2 space-y-1">
           <button
@@ -151,14 +197,17 @@ function AppInner() {
             <Play size={16} />
             {activeProfile ? `Launch STS2 (${activeProfile})` : 'Launch STS2'}
           </button>
-          <button
-            onClick={handleLaunchVanilla}
-            className="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg bg-surface-hover hover:bg-yellow-600/20 text-text-muted text-xs font-medium transition-colors border border-border"
-          >
-            Launch Vanilla (no mods)
-          </button>
+          {advancedMode && (
+            <button
+              onClick={handleLaunchVanilla}
+              className="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg bg-surface-hover hover:bg-yellow-600/20 text-text-muted text-xs font-medium transition-colors border border-border"
+            >
+              Launch Vanilla (no mods)
+            </button>
+          )}
         </div>
-        {/* Status bar at bottom of sidebar */}
+
+        {/* Status bar */}
         <div className="p-3 border-t border-border text-xs text-text-dim space-y-1">
           <div className="flex items-center gap-1.5">
             <div className={cn(
@@ -177,8 +226,9 @@ function AppInner() {
 
       {/* Main Content */}
       <main className="flex-1 overflow-auto bg-background">
+        {activeView === 'home' && <HomeView onGoToSettings={() => setActiveView('settings')} />}
         {activeView === 'dashboard' && <DashboardView />}
-        {activeView === 'mods' && <ModsView />}
+        {activeView === 'mods' && <ModsView advancedMode={advancedMode} />}
         {activeView === 'browse' && <BrowseView />}
         {activeView === 'profiles' && <ProfilesView />}
         {activeView === 'settings' && <SettingsView />}

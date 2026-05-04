@@ -14,6 +14,7 @@ import {
   X,
   Key,
   Files,
+  AlertTriangle,
 } from 'lucide-react';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
@@ -32,7 +33,9 @@ import {
   reshareProfile,
   installSharedProfile,
   getShareInfo,
+  getProfileDrift,
 } from '../hooks/useTauri';
+import type { ProfileDrift } from '../hooks/useTauri';
 import type { Profile, ShareResult } from '../types';
 
 export function ProfilesView() {
@@ -51,6 +54,7 @@ export function ProfilesView() {
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedProfileCode, setCopiedProfileCode] = useState<string | null>(null);
   const [shareInfoMap, setShareInfoMap] = useState<Record<string, ShareResult>>({});
+  const [driftMap, setDriftMap] = useState<Record<string, ProfileDrift>>({});
   const [switchingProfile, setSwitchingProfile] = useState<string | null>(null);
   const { refreshAll, setActiveProfile, activeProfile } = useApp();
   const toastCtx = useToast();
@@ -59,7 +63,7 @@ export function ProfilesView() {
     loadProfiles();
   }, []);
 
-  // Load share info for all profiles
+  // Load share info and drift for all profiles
   useEffect(() => {
     if (profiles.length === 0) return;
     const loadShareInfos = async () => {
@@ -73,6 +77,19 @@ export function ProfilesView() {
       setShareInfoMap(map);
     };
     loadShareInfos();
+
+    // Load drift for all profiles
+    const loadDrift = async () => {
+      const map: Record<string, ProfileDrift> = {};
+      for (const p of profiles) {
+        try {
+          const drift = await getProfileDrift(p.name);
+          if (drift.has_drift) map[p.name] = drift;
+        } catch { /* ignore */ }
+      }
+      setDriftMap(map);
+    };
+    loadDrift();
   }, [profiles]);
 
   async function loadProfiles() {
@@ -524,6 +541,26 @@ export function ProfilesView() {
                     >
                       {copiedProfileCode === profile.name ? <Check size={12} /> : <Copy size={12} />}
                     </button>
+                  </div>
+                )}
+                {driftMap[profile.name] && (
+                  <div className="flex items-center gap-2 mt-1.5 text-xs text-amber-400 bg-amber-500/10 rounded px-2 py-1">
+                    <AlertTriangle size={12} className="flex-shrink-0" />
+                    <span>
+                      Out of sync
+                      {driftMap[profile.name].added.length > 0 && (
+                        <> &middot; {driftMap[profile.name].added.length} new mod{driftMap[profile.name].added.length > 1 ? 's' : ''}</>
+                      )}
+                      {driftMap[profile.name].removed.length > 0 && (
+                        <> &middot; {driftMap[profile.name].removed.length} removed</>
+                      )}
+                      {driftMap[profile.name].toggled.length > 0 && (
+                        <> &middot; {driftMap[profile.name].toggled.length} toggled</>
+                      )}
+                      {shareInfoMap[profile.name] && (
+                        <> &mdash; re-share to update subscribers</>
+                      )}
+                    </span>
                   </div>
                 )}
               </div>

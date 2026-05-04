@@ -144,6 +144,7 @@ pub fn run() {
             profiles::snapshot_profile,
             profiles::export_profile_cmd,
             profiles::import_profile_cmd,
+            profiles::get_profile_drift,
             // Curator workflow
             updater::check_for_updates,
             updater::update_mod,

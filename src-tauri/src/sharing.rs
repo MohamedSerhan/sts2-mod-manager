@@ -489,20 +489,28 @@ pub async fn fetch_shared_profile(owner: &str, filename: &str) -> Result<Profile
 // ── Tauri Commands ──────────────────────────────────────────────────────────
 
 /// Share a profile by uploading to a GitHub repo. Returns a short profile code.
-/// For mods without a GitHub source, bundles the actual mod files as zips.
+/// If already shared, reuses the existing code (delegates to reshare logic).
 #[tauri::command]
 pub async fn share_profile(
     name: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ShareResult, String> {
-    let (profiles_path, mods_path, config_path, token) = {
+    let (profiles_path, mods_path, disabled_path, config_path, token) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let token = s.github_token.clone().ok_or(
             "GitHub token required to share profiles. Set it in Settings."
         )?;
         let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
-        (s.profiles_path.clone(), mods_path, s.config_path.clone(), token)
+        let disabled_path = s.disabled_mods_path.clone().ok_or("Game path not set")?;
+        (s.profiles_path.clone(), mods_path, disabled_path, s.config_path.clone(), token)
     };
+
+    // If already shared, reuse the existing code (same as reshare)
+    let share_info_path = profiles_path.join(format!("{}.share", name));
+    if share_info_path.exists() {
+        log::info!("Profile '{}' already shared, reusing code via reshare", name);
+        return reshare_profile(name, state).await;
+    }
 
     let mut profile =
         crate::profiles::load_profile(&name, &profiles_path).map_err(|e| e.to_string())?;
@@ -626,18 +634,20 @@ pub fn get_share_info(
 
 /// Re-share (update) an already-shared profile. Same code, updated content.
 /// Re-snapshots the current mods from disk so removed mods are excluded.
+/// Preserves original created_at and sets created_by to the GitHub username.
 #[tauri::command]
 pub async fn reshare_profile(
     name: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ShareResult, String> {
-    let (profiles_path, mods_path, config_path, token) = {
+    let (profiles_path, mods_path, disabled_path, config_path, token) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let token = s.github_token.clone().ok_or(
             "GitHub token required. Set it in Settings."
         )?;
         let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
-        (s.profiles_path.clone(), mods_path, s.config_path.clone(), token)
+        let disabled_path = s.disabled_mods_path.clone().ok_or("Game path not set")?;
+        (s.profiles_path.clone(), mods_path, disabled_path, s.config_path.clone(), token)
     };
 
     // Load existing share info
@@ -648,11 +658,20 @@ pub async fn reshare_profile(
     )
     .map_err(|e| e.to_string())?;
 
+    // Load the existing profile to preserve created_at
+    let old_profile = crate::profiles::load_profile(&name, &profiles_path).ok();
+
     // Re-snapshot current mods from disk so removed mods are excluded
-    // and newly added mods are included.
-    let mut profile = crate::profiles::snapshot_current_with_sources(
-        &name, &mods_path, &profiles_path, Some(&config_path),
+    // and newly added mods are included. Use explicit disabled path from state.
+    let mut profile = crate::profiles::snapshot_current_with_paths(
+        &name, &mods_path, &disabled_path, &profiles_path, Some(&config_path),
     ).map_err(|e| e.to_string())?;
+
+    // Preserve original metadata
+    if let Some(ref old) = old_profile {
+        profile.created_at = old.created_at;
+    }
+    profile.created_by = Some(share_info.owner.clone());
     log::info!("Re-snapshot profile '{}': {} mods from disk", name, profile.mods.len());
 
     // Bundle ALL mods to guarantee version matching (same as share_profile).

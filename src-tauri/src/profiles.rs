@@ -177,12 +177,33 @@ pub fn snapshot_current_with_sources(
     profiles_path: &Path,
     config_path: Option<&Path>,
 ) -> Result<Profile> {
-    let enabled_mods = scan_mods(mods_path);
-    // Also get the disabled mods path (sibling of mods_path)
+    // Derive disabled path as sibling of mods_path (consistent with state.rs)
     let disabled_path = mods_path.parent()
-        .map(|p| p.join("mods_disabled"))
-        .unwrap_or_else(|| mods_path.with_file_name("mods_disabled"));
-    let disabled_mods = scan_disabled_mods(&disabled_path);
+        .unwrap_or(mods_path)
+        .join("mods_disabled");
+    snapshot_current_inner(name, mods_path, &disabled_path, profiles_path, config_path)
+}
+
+/// Create a snapshot with an explicit disabled mods path.
+pub fn snapshot_current_with_paths(
+    name: &str,
+    mods_path: &Path,
+    disabled_path: &Path,
+    profiles_path: &Path,
+    config_path: Option<&Path>,
+) -> Result<Profile> {
+    snapshot_current_inner(name, mods_path, disabled_path, profiles_path, config_path)
+}
+
+fn snapshot_current_inner(
+    name: &str,
+    mods_path: &Path,
+    disabled_path: &Path,
+    profiles_path: &Path,
+    config_path: Option<&Path>,
+) -> Result<Profile> {
+    let enabled_mods = scan_mods(mods_path);
+    let disabled_mods = scan_disabled_mods(disabled_path);
     let now = Utc::now();
 
     // Load mod sources DB if config_path provided, to enrich profile with download links
@@ -336,7 +357,23 @@ pub fn delete_profile_cmd(
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<bool, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
+    let config_path = s.config_path.clone();
     delete_profile(&name, &s.profiles_path).map_err(|e| e.to_string())?;
+    drop(s);
+
+    // Also clean up any matching subscription
+    let mut db = crate::subscriptions::load_subscriptions(&config_path);
+    let to_remove: Vec<String> = db.subscriptions.iter()
+        .filter(|(_, sub)| sub.profile_name == name)
+        .map(|(id, _)| id.clone())
+        .collect();
+    for id in &to_remove {
+        db.subscriptions.remove(id);
+    }
+    if !to_remove.is_empty() {
+        let _ = crate::subscriptions::save_subscriptions(&db, &config_path);
+        log::info!("Cleaned up {} subscription(s) for deleted profile '{}'", to_remove.len(), name);
+    }
     Ok(true)
 }
 
@@ -601,4 +638,97 @@ pub fn import_profile_cmd(
 ) -> std::result::Result<Profile, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     import_profile(&json, &s.profiles_path).map_err(|e| e.to_string())
+}
+
+// ── Profile drift detection ────────────────────────────────────────────────
+
+/// Describes the difference between installed mods and a saved profile.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProfileDrift {
+    /// Mods installed on disk but NOT in the profile
+    pub added: Vec<String>,
+    /// Mods in the profile but NOT installed on disk
+    pub removed: Vec<String>,
+    /// Mods whose enabled/disabled state differs from the profile
+    pub toggled: Vec<String>,
+    /// True when there is any difference at all
+    pub has_drift: bool,
+}
+
+/// Helper: canonical identifier for a mod (prefer mod_id > folder_name > name).
+fn mod_key(name: &str, folder_name: Option<&str>, mod_id: Option<&str>) -> String {
+    mod_id
+        .or(folder_name)
+        .unwrap_or(name)
+        .to_lowercase()
+}
+
+#[tauri::command]
+pub fn get_profile_drift(
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<ProfileDrift, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
+    let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
+
+    let profile = load_profile(&name, &s.profiles_path).map_err(|e| e.to_string())?;
+
+    // Build a map of profile mods: key -> enabled
+    let mut profile_map: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+    for pm in &profile.mods {
+        let key = mod_key(&pm.name, pm.folder_name.as_deref(), pm.mod_id.as_deref());
+        profile_map.insert(key, pm.enabled);
+    }
+
+    // Build a map of installed mods: key -> (display_name, enabled)
+    let enabled_mods = crate::mods::scan_mods(mods_path);
+    let disabled_mods = crate::mods::scan_disabled_mods(disabled_path);
+
+    let mut installed_map: std::collections::HashMap<String, (String, bool)> = std::collections::HashMap::new();
+    for m in &enabled_mods {
+        let key = mod_key(&m.name, m.folder_name.as_deref(), m.mod_id.as_deref());
+        installed_map.insert(key, (m.name.clone(), true));
+    }
+    for m in &disabled_mods {
+        let key = mod_key(&m.name, m.folder_name.as_deref(), m.mod_id.as_deref());
+        installed_map.insert(key, (m.name.clone(), false));
+    }
+
+    let mut added = Vec::new();
+    let mut removed = Vec::new();
+    let mut toggled = Vec::new();
+
+    // Mods installed but not in profile
+    for (key, (display_name, _)) in &installed_map {
+        if !profile_map.contains_key(key) {
+            added.push(display_name.clone());
+        }
+    }
+
+    // Mods in profile but not installed
+    for pm in &profile.mods {
+        let key = mod_key(&pm.name, pm.folder_name.as_deref(), pm.mod_id.as_deref());
+        if !installed_map.contains_key(&key) {
+            removed.push(pm.name.clone());
+        }
+    }
+
+    // Mods whose enabled state differs
+    for (key, profile_enabled) in &profile_map {
+        if let Some((display_name, installed_enabled)) = installed_map.get(key) {
+            if profile_enabled != installed_enabled {
+                toggled.push(display_name.clone());
+            }
+        }
+    }
+
+    let has_drift = !added.is_empty() || !removed.is_empty() || !toggled.is_empty();
+
+    Ok(ProfileDrift {
+        added,
+        removed,
+        toggled,
+        has_drift,
+    })
 }

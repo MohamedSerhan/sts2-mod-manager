@@ -119,6 +119,17 @@ export async function importProfile(json: string): Promise<Profile> {
   return invoke('import_profile_cmd', { json });
 }
 
+export interface ProfileDrift {
+  added: string[];
+  removed: string[];
+  toggled: string[];
+  has_drift: boolean;
+}
+
+export async function getProfileDrift(name: string): Promise<ProfileDrift> {
+  return invoke('get_profile_drift', { name });
+}
+
 // ── Curator Workflow ───────────────────────────────────────────────────────
 
 export async function checkForUpdates(): Promise<ModUpdate[]> {

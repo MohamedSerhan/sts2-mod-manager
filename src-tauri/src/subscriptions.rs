@@ -253,8 +253,8 @@ pub async fn check_subscription_updates(
     Ok(results)
 }
 
-/// Apply a subscription update: download the remote profile and sync mods.
-/// This is the one-click "Apply update" for friends.
+/// Apply a subscription update: download missing mods first, then sync.
+/// Mirrors the robust logic from switch_profile / install_shared_profile.
 #[tauri::command]
 pub async fn apply_subscription_update(
     share_id: String,
@@ -287,64 +287,95 @@ pub async fn apply_subscription_update(
     // Save the profile locally
     crate::profiles::save_profile(&remote, &profiles_path).map_err(|e| e.to_string())?;
 
-    // Apply the profile (enable/disable mods to match)
-    crate::profiles::apply_profile(&remote, &mods_path, &disabled_path)
-        .map_err(|e| e.to_string())?;
-
-    // Try to download any mods from the profile that we don't have locally
+    // ── STEP 1: Download missing mods BEFORE applying the profile ──
     let local_mods = crate::mods::scan_mods(&mods_path);
     let local_disabled = crate::mods::scan_disabled_mods(&disabled_path);
-    let local_names: std::collections::HashSet<String> = local_mods
-        .iter()
-        .chain(local_disabled.iter())
-        .map(|m| m.name.clone())
-        .collect();
+    // Build comprehensive identifier set (name, folder_name, mod_id)
+    let mut local_identifiers: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for m in local_mods.iter().chain(local_disabled.iter()) {
+        local_identifiers.insert(m.name.clone());
+        if let Some(ref folder) = m.folder_name {
+            local_identifiers.insert(folder.clone());
+        }
+        if let Some(ref id) = m.mod_id {
+            local_identifiers.insert(id.clone());
+        }
+    }
 
     let mod_sources_db = crate::mod_sources::load_sources(&config_path);
 
     for pm in &remote.mods {
-        if local_names.contains(&pm.name) {
-            continue; // Already have it
+        // Check if mod exists by name, folder_name, or mod_id
+        let already_exists = local_identifiers.contains(&pm.name)
+            || pm.folder_name.as_ref().map_or(false, |f| local_identifiers.contains(f))
+            || pm.mod_id.as_ref().map_or(false, |id| local_identifiers.contains(id));
+        if already_exists {
+            continue;
         }
 
-        // Try to download from source
-        let github_repo = pm
-            .source
-            .as_ref()
-            .and_then(|s| {
-                s.strip_prefix("github:")
-                    .map(|r| r.to_string())
-            })
-            .or_else(|| {
-                mod_sources_db
-                    .mods
-                    .get(&pm.name)
-                    .and_then(|e| e.github_repo.clone())
+        log::info!("Subscription update: mod '{}' missing, downloading", pm.name);
+        let mut downloaded = false;
+
+        // Prefer bundle_url (curator's bundled copy)
+        if let Some(ref bundle_url) = pm.bundle_url {
+            match crate::sharing::download_bundle(bundle_url, &pm.name, &mods_path).await {
+                Ok(_) => {
+                    log::info!("Installed bundled mod '{}' from subscription update", pm.name);
+                    downloaded = true;
+                }
+                Err(e) => {
+                    log::warn!("Bundle download failed for '{}': {} -- trying GitHub fallback", pm.name, e);
+                }
+            }
+        }
+
+        // Fallback: try GitHub source
+        if !downloaded {
+            let github_repo = pm.source.as_ref().and_then(|s| {
+                if let Some(repo) = s.strip_prefix("github:") {
+                    return Some(repo.to_string());
+                }
+                if s.contains("github.com/") {
+                    let parts: Vec<&str> = s.split("github.com/").collect();
+                    if parts.len() > 1 {
+                        let repo_path = parts[1].trim_end_matches('/');
+                        let segs: Vec<&str> = repo_path.splitn(3, '/').collect();
+                        if segs.len() >= 2 {
+                            return Some(format!("{}/{}", segs[0], segs[1]));
+                        }
+                    }
+                }
+                None
+            }).or_else(|| {
+                mod_sources_db.mods.get(&pm.name).and_then(|e| e.github_repo.clone())
             });
 
-        if let Some(repo) = github_repo {
-            let parts: Vec<&str> = repo.splitn(2, '/').collect();
-            if parts.len() == 2 {
-                match crate::download::download_and_install_github_mod(
-                    parts[0],
-                    parts[1],
-                    None,
-                    &mods_path,
-                    &cache_path,
-                    token.as_deref(),
-                )
-                .await
-                {
-                    Ok(info) => {
-                        log::info!("Auto-downloaded mod '{}' for subscription", info.name);
-                    }
-                    Err(e) => {
-                        log::warn!("Could not auto-download '{}': {}", pm.name, e);
+            if let Some(repo) = github_repo {
+                let parts: Vec<&str> = repo.splitn(2, '/').collect();
+                if parts.len() == 2 {
+                    match crate::download::download_and_install_github_mod(
+                        parts[0], parts[1], None, &mods_path, &cache_path, token.as_deref(),
+                    ).await {
+                        Ok(info) => {
+                            log::info!("Downloaded mod '{}' from GitHub for subscription", info.name);
+                            downloaded = true;
+                        }
+                        Err(e) => {
+                            log::warn!("GitHub download also failed for '{}': {}", pm.name, e);
+                        }
                     }
                 }
             }
         }
+
+        if !downloaded {
+            log::warn!("No download source for mod '{}' in subscription update", pm.name);
+        }
     }
+
+    // ── STEP 2: Apply profile AFTER downloads ──
+    crate::profiles::apply_profile(&remote, &mods_path, &disabled_path)
+        .map_err(|e| e.to_string())?;
 
     // Update subscription record
     let mut db = load_subscriptions(&config_path);

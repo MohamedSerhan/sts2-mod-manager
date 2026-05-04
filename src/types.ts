@@ -84,9 +84,9 @@ export type QuickAddResult =
   | { type: 'nexus_info'; nexus_info: NexusModInfo };
 
 export interface ShareResult {
-  id: string;
-  url: string;
-  secret_token: string;
+  code: string;
+  gist_id: string;
+  gist_url: string;
 }
 
 export interface ModSourceEntry {

@@ -9,10 +9,10 @@ import {
   Layers,
   Share2,
   RefreshCw,
-  Link,
   Copy,
   Check,
   X,
+  Key,
 } from 'lucide-react';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
@@ -40,12 +40,12 @@ export function ProfilesView() {
   const [showCreate, setShowCreate] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [importJson, setImportJson] = useState('');
-  const [showImportLink, setShowImportLink] = useState(false);
-  const [importLink, setImportLink] = useState('');
-  const [importingLink, setImportingLink] = useState(false);
+  const [showImportCode, setShowImportCode] = useState(false);
+  const [importCode, setImportCode] = useState('');
+  const [importingCode, setImportingCode] = useState(false);
   const [sharingProfile, setSharingProfile] = useState<string | null>(null);
   const [shareResult, setShareResult] = useState<ShareResult | null>(null);
-  const [copiedUrl, setCopiedUrl] = useState(false);
+  const [copiedCode, setCopiedCode] = useState(false);
   const { refreshAll } = useApp();
   const toastCtx = useToast();
 
@@ -73,8 +73,9 @@ export function ProfilesView() {
       setProfiles((prev) => [...prev, profile]);
       setNewName('');
       setShowCreate(false);
+      toastCtx.success(`Profile "${profile.name}" created`);
     } catch (e) {
-      console.error('Failed to create profile:', e);
+      toastCtx.error(`Failed to create profile: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -84,17 +85,20 @@ export function ProfilesView() {
     try {
       const profile = await snapshotProfile(name.trim());
       setProfiles((prev) => [...prev, profile]);
+      toastCtx.success(`Snapshot "${profile.name}" created with ${profile.mods.length} mods`);
     } catch (e) {
-      console.error('Failed to snapshot profile:', e);
+      toastCtx.error(`Failed to snapshot: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
   async function handleSwitch(name: string) {
     try {
       await switchProfile(name);
+      await refreshAll();
       await loadProfiles();
+      toastCtx.success(`Switched to profile "${name}"`);
     } catch (e) {
-      console.error('Failed to switch profile:', e);
+      toastCtx.error(`Failed to switch: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -104,7 +108,7 @@ export function ProfilesView() {
       await navigator.clipboard.writeText(json);
       toastCtx.success('Profile JSON copied to clipboard!');
     } catch (e) {
-      console.error('Failed to export profile:', e);
+      toastCtx.error(`Failed to export: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -113,8 +117,9 @@ export function ProfilesView() {
     try {
       await deleteProfile(name);
       setProfiles((prev) => prev.filter((p) => p.name !== name));
+      toastCtx.success(`Profile "${name}" deleted`);
     } catch (e) {
-      console.error('Failed to delete profile:', e);
+      toastCtx.error(`Failed to delete: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -125,8 +130,9 @@ export function ProfilesView() {
       setProfiles((prev) => [...prev, profile]);
       setImportJson('');
       setShowImport(false);
+      toastCtx.success(`Imported profile "${profile.name}"`);
     } catch (e) {
-      console.error('Failed to import profile:', e);
+      toastCtx.error(`Failed to import: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -135,7 +141,7 @@ export function ProfilesView() {
       setSharingProfile(name);
       const result = await shareProfile(name);
       setShareResult(result);
-      setCopiedUrl(false);
+      setCopiedCode(false);
     } catch (e) {
       toastCtx.error(`Failed to share: ${e instanceof Error ? e.message : String(e)}`);
       setSharingProfile(null);
@@ -147,57 +153,42 @@ export function ProfilesView() {
       setSharingProfile(name);
       const result = await reshareProfile(name);
       setShareResult(result);
-      setCopiedUrl(false);
+      setCopiedCode(false);
+      toastCtx.success('Profile re-shared! Same code, updated content.');
     } catch (e) {
       toastCtx.error(`Failed to re-share: ${e instanceof Error ? e.message : String(e)}`);
       setSharingProfile(null);
     }
   }
 
-  async function handleCopyShareUrl() {
+  async function handleCopyCode() {
     if (!shareResult) return;
     try {
-      await navigator.clipboard.writeText(shareResult.url);
-      setCopiedUrl(true);
-      setTimeout(() => setCopiedUrl(false), 2000);
-    } catch (e) {
-      console.error('Failed to copy URL:', e);
+      await navigator.clipboard.writeText(shareResult.code);
+      setCopiedCode(true);
+      setTimeout(() => setCopiedCode(false), 2000);
+    } catch {
+      // fallback: select the input
+      toastCtx.info('Select the code and copy manually');
     }
   }
 
-  function extractShareId(input: string): string {
-    const trimmed = input.trim();
-    // Strip URL prefix if present
-    const prefix = 'https://sts2mm.dev/p/';
-    if (trimmed.startsWith(prefix)) {
-      return trimmed.slice(prefix.length).split('/')[0].split('?')[0];
-    }
-    // Also handle bare URLs without https://
-    const barePrefix = 'sts2mm.dev/p/';
-    if (trimmed.startsWith(barePrefix)) {
-      return trimmed.slice(barePrefix.length).split('/')[0].split('?')[0];
-    }
-    // Assume it's a raw ID
-    return trimmed;
-  }
-
-  async function handleImportFromLink() {
-    if (!importLink.trim()) return;
-    const id = extractShareId(importLink);
-    if (!id) return;
+  async function handleImportFromCode() {
+    const code = importCode.trim();
+    if (!code) return;
 
     try {
-      setImportingLink(true);
-      const profile = await installSharedProfile(id);
+      setImportingCode(true);
+      const profile = await installSharedProfile(code);
       setProfiles((prev) => [...prev, profile]);
-      setImportLink('');
-      setShowImportLink(false);
+      setImportCode('');
+      setShowImportCode(false);
       await refreshAll();
-      toastCtx.success(`Imported profile "${profile.name}" successfully!`);
+      toastCtx.success(`Imported modpack "${profile.name}" - ${profile.mods.length} mods. You're now subscribed for updates!`);
     } catch (e) {
       toastCtx.error(`Failed to import: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
-      setImportingLink(false);
+      setImportingCode(false);
     }
   }
 
@@ -206,7 +197,7 @@ export function ProfilesView() {
       {/* Share Result Modal */}
       {shareResult && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50">
-          <Card className="max-w-md w-full mx-4 space-y-3">
+          <Card className="max-w-md w-full mx-4 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-text">
                 Profile Shared!
@@ -222,23 +213,24 @@ export function ProfilesView() {
               </button>
             </div>
             <p className="text-xs text-text-muted">
-              Share this link with others so they can import your profile:
+              Send this code to your friends. They enter it in "Import Code" to get your modpack:
             </p>
             <div className="flex items-center gap-2">
               <input
                 type="text"
                 readOnly
-                value={shareResult.url}
-                className="flex-1 bg-background border border-border rounded-lg px-3 py-2 text-sm text-text font-mono select-all focus:outline-none"
+                value={shareResult.code}
+                className="flex-1 bg-background border border-border rounded-lg px-4 py-3 text-lg text-text font-mono font-bold text-center tracking-wider select-all focus:outline-none"
               />
-              <Button size="sm" onClick={handleCopyShareUrl}>
-                {copiedUrl ? <Check size={14} /> : <Copy size={14} />}
-                {copiedUrl ? 'Copied' : 'Copy'}
+              <Button size="sm" onClick={handleCopyCode}>
+                {copiedCode ? <Check size={14} /> : <Copy size={14} />}
+                {copiedCode ? 'Copied' : 'Copy'}
               </Button>
             </div>
-            <p className="text-xs text-text-dim">
-              Keep the secret token safe if you want to update this share later.
-            </p>
+            <div className="text-xs text-text-dim space-y-1">
+              <p>When you update your mods and re-share, the code stays the same.</p>
+              <p>Your friends will see "Update available" on their Dashboard.</p>
+            </div>
           </Card>
         </div>
       )}
@@ -248,7 +240,7 @@ export function ProfilesView() {
         <div>
           <h2 className="text-2xl font-bold text-text">Profiles</h2>
           <p className="text-sm text-text-muted mt-1">
-            Manage mod configurations
+            Manage mod configurations and share with friends
           </p>
         </div>
         <div className="flex gap-2">
@@ -256,68 +248,74 @@ export function ProfilesView() {
             variant="secondary"
             size="sm"
             onClick={() => {
-              setShowImportLink(!showImportLink);
+              setShowImportCode(!showImportCode);
               setShowImport(false);
+              setShowCreate(false);
             }}
           >
-            <Link size={14} />
-            Import from Link
+            <Key size={14} />
+            Import Code
           </Button>
           <Button
             variant="secondary"
             size="sm"
             onClick={() => {
               setShowImport(!showImport);
-              setShowImportLink(false);
+              setShowImportCode(false);
+              setShowCreate(false);
             }}
           >
             <Upload size={14} />
-            Import
+            Import JSON
           </Button>
           <Button variant="secondary" size="sm" onClick={handleSnapshot}>
             <Camera size={14} />
             Snapshot Current
           </Button>
-          <Button size="sm" onClick={() => setShowCreate(!showCreate)}>
+          <Button size="sm" onClick={() => {
+            setShowCreate(!showCreate);
+            setShowImport(false);
+            setShowImportCode(false);
+          }}>
             <Plus size={14} />
             New Profile
           </Button>
         </div>
       </div>
 
-      {/* Import from Link Form */}
-      {showImportLink && (
+      {/* Import Code Form */}
+      {showImportCode && (
         <Card className="flex gap-2 items-end">
           <div className="flex-1">
             <label className="text-xs text-text-muted block mb-1">
-              Profile Link or ID
+              Profile Code (from a friend)
             </label>
             <input
               type="text"
-              value={importLink}
-              onChange={(e) => setImportLink(e.target.value)}
-              placeholder="https://sts2mm.dev/p/abc123 or just abc123"
-              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-text placeholder:text-text-dim focus:outline-none focus:ring-2 focus:ring-primary/50"
-              onKeyDown={(e) => e.key === 'Enter' && handleImportFromLink()}
-              disabled={importingLink}
+              value={importCode}
+              onChange={(e) => setImportCode(e.target.value.toUpperCase())}
+              placeholder="XXXX-XXXX-XXXX"
+              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-text font-mono tracking-wider placeholder:text-text-dim focus:outline-none focus:ring-2 focus:ring-primary/50"
+              onKeyDown={(e) => e.key === 'Enter' && handleImportFromCode()}
+              disabled={importingCode}
             />
           </div>
           <Button
             size="sm"
-            onClick={handleImportFromLink}
-            disabled={importingLink}
+            onClick={handleImportFromCode}
+            disabled={importingCode}
           >
-            {importingLink ? (
+            {importingCode ? (
               <RefreshCw size={14} className="animate-spin" />
             ) : (
               <Download size={14} />
             )}
-            {importingLink ? 'Importing...' : 'Import'}
+            {importingCode ? 'Importing...' : 'Import'}
           </Button>
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setShowImportLink(false)}
+            onClick={() => setShowImportCode(false)}
           >
             Cancel
           </Button>
@@ -353,7 +351,7 @@ export function ProfilesView() {
         </Card>
       )}
 
-      {/* Import Profile Form */}
+      {/* Import Profile JSON Form */}
       {showImport && (
         <Card className="space-y-2">
           <label className="text-xs text-text-muted block">
@@ -403,7 +401,7 @@ export function ProfilesView() {
           <Layers size={40} className="text-text-dim opacity-40 mb-3" />
           <p className="text-sm text-text-dim">No profiles yet</p>
           <p className="text-xs text-text-dim mt-1">
-            Create a profile to save your mod configuration
+            Create a profile to save your mod configuration, or import a code from a friend
           </p>
         </Card>
       ) : (
@@ -422,10 +420,13 @@ export function ProfilesView() {
                     {profile.mods.length} mod
                     {profile.mods.length !== 1 ? 's' : ''}
                   </span>
-                  <span>{profile.game_version}</span>
+                  {profile.game_version && <span>{profile.game_version}</span>}
                   <span>
                     {new Date(profile.created_at).toLocaleDateString()}
                   </span>
+                  {profile.created_by && (
+                    <span className="text-primary">by {profile.created_by}</span>
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-1">
@@ -433,7 +434,7 @@ export function ProfilesView() {
                   variant="ghost"
                   size="sm"
                   onClick={() => handleSwitch(profile.name)}
-                  title="Activate profile"
+                  title="Activate profile (enable these mods)"
                 >
                   <Play size={14} />
                 </Button>
@@ -441,7 +442,7 @@ export function ProfilesView() {
                   variant="ghost"
                   size="sm"
                   onClick={() => handleShare(profile.name)}
-                  title="Share profile"
+                  title="Share profile (get a code for friends)"
                   disabled={sharingProfile === profile.name}
                 >
                   {sharingProfile === profile.name ? (
@@ -454,7 +455,7 @@ export function ProfilesView() {
                   variant="ghost"
                   size="sm"
                   onClick={() => handleReshare(profile.name)}
-                  title="Re-share (update existing share)"
+                  title="Re-share (update for friends, same code)"
                   disabled={sharingProfile === profile.name}
                 >
                   <RefreshCw size={14} />
@@ -463,7 +464,7 @@ export function ProfilesView() {
                   variant="ghost"
                   size="sm"
                   onClick={() => handleExport(profile.name)}
-                  title="Export profile"
+                  title="Export as JSON"
                 >
                   <Download size={14} />
                 </Button>

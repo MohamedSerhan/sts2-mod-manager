@@ -4,7 +4,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::download::{fetch_latest_release, search_github_repos};
+use crate::download::{fetch_latest_release, GitHubRepo};
 use crate::error::Result;
 use crate::mods::ModInfo;
 use crate::state::AppState;
@@ -26,6 +26,9 @@ pub struct ModSourceEntry {
     /// Nexus mod ID
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nexus_mod_id: Option<u64>,
+    /// Tracks the version (release tag) that was last installed via the updater
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub installed_version: Option<String>,
 }
 
 /// The entire mod sources database, keyed by mod name.
@@ -72,19 +75,35 @@ pub fn save_sources(db: &ModSourcesDb, config_path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Update just the installed_version for a mod in mod_sources.json.
+pub fn update_installed_version(mod_name: &str, version: &str, config_path: &Path) {
+    let mut db = load_sources(config_path);
+    let entry = db.mods.entry(mod_name.to_string()).or_default();
+    entry.installed_version = Some(version.to_string());
+    if let Err(e) = save_sources(&db, config_path) {
+        log::error!("Failed to save installed_version for '{}': {}", mod_name, e);
+    }
+}
+
 // ── Core Logic ──────────────────────────────────────────────────────────────
 
 /// Merge source metadata into ModInfo structs.
 /// This enriches scanned mods with their linked GitHub/Nexus URLs.
+/// Only overwrites URLs that are not already set from the manifest.
 pub fn enrich_mods_with_sources(mods: &mut [ModInfo], config_path: &Path) {
     let db = load_sources(config_path);
     for m in mods.iter_mut() {
         if let Some(entry) = db.mods.get(&m.name) {
-            m.github_url = entry
-                .github_repo
-                .as_ref()
-                .map(|r| format!("https://github.com/{}", r));
-            m.nexus_url = entry.nexus_url.clone();
+            // Only set from sources DB if not already extracted from manifest
+            if m.github_url.is_none() {
+                m.github_url = entry
+                    .github_repo
+                    .as_ref()
+                    .map(|r| format!("https://github.com/{}", r));
+            }
+            if m.nexus_url.is_none() {
+                m.nexus_url = entry.nexus_url.clone();
+            }
         }
         // Also try to infer from the legacy `source` field if no explicit link
         if m.github_url.is_none() {
@@ -282,8 +301,208 @@ pub fn remove_mod_source(
     Ok(true)
 }
 
+// ── GitHub Search (raw, without STS2 qualifiers) ───────────────────────────
+
+/// Response type for GitHub search API.
+#[derive(Debug, Deserialize)]
+struct GHSearchResponse {
+    items: Vec<GitHubRepo>,
+}
+
+/// Search GitHub repositories with an arbitrary query string (no STS2 qualifiers appended).
+async fn search_github_raw(query: &str, token: Option<&str>) -> Vec<GitHubRepo> {
+    let mut headers = reqwest::header::HeaderMap::new();
+    if let Ok(v) = "application/vnd.github+json".parse() {
+        headers.insert(reqwest::header::ACCEPT, v);
+    }
+    if let Ok(v) = "sts2-mod-manager/0.1".parse() {
+        headers.insert(reqwest::header::USER_AGENT, v);
+    }
+    if let Some(tok) = token {
+        if let Ok(val) = format!("Bearer {}", tok).parse() {
+            headers.insert(reqwest::header::AUTHORIZATION, val);
+        }
+    }
+    let client = reqwest::Client::builder()
+        .default_headers(headers)
+        .build()
+        .unwrap_or_default();
+
+    let resp = client
+        .get("https://api.github.com/search/repositories")
+        .query(&[
+            ("q", query),
+            ("sort", "updated"),
+            ("per_page", "30"),
+        ])
+        .send()
+        .await;
+
+    match resp {
+        Ok(r) => match r.error_for_status() {
+            Ok(r) => r.json::<GHSearchResponse>().await.map(|s| s.items).unwrap_or_default(),
+            Err(_) => Vec::new(),
+        },
+        Err(_) => Vec::new(),
+    }
+}
+
+// ── Normalization Helpers ───────────────────────────────────────────────────
+
+/// Normalize a name by lowercasing and stripping separators.
+fn normalize(s: &str) -> String {
+    s.to_lowercase()
+        .replace(' ', "")
+        .replace('-', "")
+        .replace('_', "")
+}
+
+/// Strip common STS2 prefixes/suffixes from a mod name for broader matching.
+fn strip_sts2_affixes(name: &str) -> Option<String> {
+    let lower = name.to_lowercase();
+    let prefixes = ["sts2", "sts2-", "sts2_", "slay the spire 2 ", "slaythe spire2"];
+    let suffixes = [" sts2", "-sts2", "_sts2", " for sts2", " for slay the spire 2"];
+
+    let mut stripped = lower.clone();
+    for p in &prefixes {
+        if let Some(rest) = stripped.strip_prefix(p) {
+            stripped = rest.trim().to_string();
+            break;
+        }
+    }
+    for s in &suffixes {
+        if let Some(rest) = stripped.strip_suffix(s) {
+            stripped = rest.trim().to_string();
+            break;
+        }
+    }
+    let stripped = stripped.trim().to_string();
+    if stripped != lower && !stripped.is_empty() {
+        Some(stripped)
+    } else {
+        None
+    }
+}
+
+/// Extract the folder name from a mod's files list (first path component of a subdirectory mod).
+fn extract_folder_name(m: &ModInfo) -> Option<String> {
+    for f in &m.files {
+        if let Some(idx) = f.find('/') {
+            let folder = &f[..idx];
+            if !folder.is_empty() && folder != "." {
+                return Some(folder.to_string());
+            }
+        }
+        if let Some(idx) = f.find('\\') {
+            let folder = &f[..idx];
+            if !folder.is_empty() && folder != "." {
+                return Some(folder.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Extract the author name from a mod's source field if it looks like "github:owner/repo".
+fn extract_author(m: &ModInfo) -> Option<String> {
+    if let Some(ref src) = m.source {
+        if let Some(rest) = src.strip_prefix("github:") {
+            let parts: Vec<&str> = rest.splitn(2, '/').collect();
+            if !parts.is_empty() && !parts[0].is_empty() {
+                return Some(parts[0].to_string());
+            }
+        }
+        if let Some(rest) = src.strip_prefix("https://github.com/") {
+            let parts: Vec<&str> = rest.splitn(2, '/').collect();
+            if !parts.is_empty() && !parts[0].is_empty() {
+                return Some(parts[0].to_string());
+            }
+        }
+    }
+    None
+}
+
+// ── Matching / Scoring ──────────────────────────────────────────────────────
+
+/// Score a candidate repo against a mod. Higher is better; 0 = no match.
+fn score_repo(repo: &GitHubRepo, mod_name: &str, folder_name: Option<&str>) -> u32 {
+    let norm_mod = normalize(mod_name);
+    let norm_repo = normalize(&repo.name);
+    let desc_lower = repo
+        .description
+        .as_deref()
+        .unwrap_or("")
+        .to_lowercase();
+
+    // Exact normalized name match → highest score
+    if norm_repo == norm_mod {
+        return 100;
+    }
+
+    // Folder name exact match
+    if let Some(folder) = folder_name {
+        if normalize(folder) == norm_repo {
+            return 95;
+        }
+    }
+
+    // Repo name contains mod name or vice versa (normalized)
+    if norm_repo.contains(&norm_mod) || norm_mod.contains(&norm_repo) {
+        // Prefer closer length matches
+        let len_ratio = norm_mod.len().min(norm_repo.len()) as f64
+            / norm_mod.len().max(norm_repo.len()) as f64;
+        return 60 + (len_ratio * 30.0) as u32;
+    }
+
+    // Stripped name (without STS2 affixes) matches repo
+    if let Some(stripped) = strip_sts2_affixes(mod_name) {
+        let norm_stripped = normalize(&stripped);
+        if norm_repo == norm_stripped {
+            return 90;
+        }
+        if norm_repo.contains(&norm_stripped) || norm_stripped.contains(&norm_repo) {
+            return 70;
+        }
+    }
+
+    // Description mentions the mod name
+    let name_lower = mod_name.to_lowercase();
+    if desc_lower.contains(&name_lower) {
+        return 50;
+    }
+
+    // Description mentions individual significant words from the mod name
+    let words: Vec<&str> = mod_name
+        .split(|c: char| c == ' ' || c == '-' || c == '_')
+        .filter(|w| w.len() > 2)
+        .collect();
+    if words.len() >= 2 {
+        let word_matches = words
+            .iter()
+            .filter(|w| {
+                let wl = w.to_lowercase();
+                norm_repo.contains(&normalize(&wl)) || desc_lower.contains(&wl)
+            })
+            .count();
+        if word_matches == words.len() {
+            return 45;
+        }
+    }
+
+    0
+}
+
+/// Represents a candidate match with its score.
+struct Candidate {
+    repo: GitHubRepo,
+    score: u32,
+}
+
+// ── Main Auto-Detect ────────────────────────────────────────────────────────
+
 /// Auto-detect GitHub sources for mods that don't have one linked.
-/// Searches GitHub for each unlinked mod name and picks the best match.
+/// Searches GitHub for each unlinked mod name using multiple query strategies
+/// and picks the best match via fuzzy scoring.
 #[tauri::command]
 pub async fn auto_detect_sources(
     state: tauri::State<'_, AppState>,
@@ -302,93 +521,184 @@ pub async fn auto_detect_sources(
     let mut matched = Vec::new();
     let mut unmatched = Vec::new();
 
+    // Phase 0: Save any manifest-extracted URLs to the sources DB.
+    // parse_manifest may have found github/nexus URLs in the mod's JSON,
+    // but those are only in ModInfo, not persisted yet.
     for m in &installed {
-        // Skip mods that already have a GitHub source
+        let entry = db.mods.entry(m.name.clone()).or_default();
+        let mut changed = false;
+
+        // Save manifest-extracted GitHub URL
+        if entry.github_repo.is_none() {
+            if let Some(ref gh_url) = m.github_url {
+                if let Some(parsed) = parse_source_url(gh_url) {
+                    entry.github_repo = parsed.github_repo;
+                    changed = true;
+                }
+            }
+            // Also check the source field
+            if entry.github_repo.is_none() {
+                if let Some(ref src) = m.source {
+                    if src.starts_with("github:") || src.contains("github.com") {
+                        if let Some(parsed) = parse_source_url(src) {
+                            entry.github_repo = parsed.github_repo;
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Save manifest-extracted Nexus URL
+        if entry.nexus_url.is_none() {
+            if let Some(ref nx_url) = m.nexus_url {
+                if let Some(parsed) = parse_source_url(nx_url) {
+                    entry.nexus_url = parsed.nexus_url;
+                    entry.nexus_game_domain = parsed.nexus_game_domain;
+                    entry.nexus_mod_id = parsed.nexus_mod_id;
+                    changed = true;
+                }
+            }
+        }
+
+        if changed {
+            let _ = save_sources(&db, &config_path);
+        }
+    }
+
+    for m in &installed {
+        // Skip mods that already have a GitHub source (either from DB or just saved from manifest)
         if let Some(entry) = db.mods.get(&m.name) {
             if entry.github_repo.is_some() {
                 continue;
             }
         }
-        // Also skip if the mod's own source field has GitHub info
-        if let Some(ref src) = m.source {
-            if src.starts_with("github:") || src.contains("github.com") {
-                continue;
+
+        let folder_name = extract_folder_name(m);
+        let author = extract_author(m);
+
+        // Build a list of search queries to try (in order of specificity)
+        let mut queries: Vec<String> = Vec::new();
+
+        // 1. Just the mod name (hyphenated) – many STS2 mods don't mention "sts2" in repo name
+        let name_hyphenated = m.name.replace(' ', "-");
+        queries.push(name_hyphenated.clone());
+
+        // 2. Mod name + STS2 qualifier (the original approach)
+        queries.push(format!(
+            "{} slay-the-spire-2 OR sts2 OR \"slay the spire 2\"",
+            name_hyphenated
+        ));
+
+        // 3. If the folder name differs from the mod name, search that too
+        if let Some(ref folder) = folder_name {
+            let folder_norm = normalize(folder);
+            if folder_norm != normalize(&m.name) {
+                queries.push(folder.replace(' ', "-"));
             }
         }
 
-        // Search GitHub for this mod
-        let search_query = m.name.replace(' ', "-");
-        match search_github_repos(&search_query, token.as_deref()).await {
-            Ok(repos) => {
-                // Look for an exact or close name match
-                let name_lower = m.name.to_lowercase().replace(' ', "").replace('-', "").replace('_', "");
-
-                let best = repos.iter().find(|r| {
-                    let repo_lower = r.name.to_lowercase().replace(' ', "").replace('-', "").replace('_', "");
-                    repo_lower == name_lower
-                });
-
-                if let Some(repo) = best {
-                    // Verify it has releases
-                    let has_release = fetch_latest_release(
-                        &repo.owner.login,
-                        &repo.name,
-                        token.as_deref(),
-                    )
-                    .await
-                    .is_ok();
-
-                    if has_release {
-                        let full_name = repo.full_name.clone();
-                        let entry = db.mods.entry(m.name.clone()).or_default();
-                        entry.github_repo = Some(full_name.clone());
-                        save_sources(&db, &config_path).map_err(|e| e.to_string())?;
-
-                        matched.push(AutoDetectMatch {
-                            mod_name: m.name.clone(),
-                            github_repo: full_name,
-                            confidence: "high".to_string(),
-                        });
-                        continue;
-                    }
-                }
-
-                // Try partial match: first repo that has releases
-                let partial = repos.iter().find(|r| {
-                    let repo_lower = r.name.to_lowercase();
-                    let desc_lower = r.description.as_deref().unwrap_or("").to_lowercase();
-                    repo_lower.contains(&name_lower) || desc_lower.contains(&name_lower)
-                });
-
-                if let Some(repo) = partial {
-                    let has_release = fetch_latest_release(
-                        &repo.owner.login,
-                        &repo.name,
-                        token.as_deref(),
-                    )
-                    .await
-                    .is_ok();
-
-                    if has_release {
-                        let full_name = repo.full_name.clone();
-                        let entry = db.mods.entry(m.name.clone()).or_default();
-                        entry.github_repo = Some(full_name.clone());
-                        save_sources(&db, &config_path).map_err(|e| e.to_string())?;
-
-                        matched.push(AutoDetectMatch {
-                            mod_name: m.name.clone(),
-                            github_repo: full_name,
-                            confidence: "medium".to_string(),
-                        });
-                        continue;
-                    }
-                }
-
-                unmatched.push(m.name.clone());
+        // 4. Stripped name (without STS2 prefixes/suffixes)
+        if let Some(stripped) = strip_sts2_affixes(&m.name) {
+            let stripped_q = stripped.replace(' ', "-");
+            if !queries.contains(&stripped_q) {
+                queries.push(stripped_q);
             }
-            Err(_) => {
-                unmatched.push(m.name.clone());
+        }
+
+        // 5. If we know the author, search "author/mod-name"
+        if let Some(ref auth) = author {
+            queries.push(format!("{} {}", auth, name_hyphenated));
+        }
+
+        // 6. If the mod name has multiple words, try individual significant words + sts2
+        let words: Vec<&str> = m
+            .name
+            .split(|c: char| c == ' ' || c == '-' || c == '_')
+            .filter(|w| w.len() > 2)
+            .collect();
+        if words.len() >= 2 {
+            for w in &words {
+                let wq = format!("{} sts2", w);
+                if !queries.contains(&wq) {
+                    queries.push(wq);
+                }
             }
+        }
+
+        // De-duplicate queries (case-insensitive)
+        let mut seen = std::collections::HashSet::new();
+        queries.retain(|q| seen.insert(q.to_lowercase()));
+
+        // Search GitHub with each query and collect all unique candidates
+        let mut candidates: Vec<Candidate> = Vec::new();
+        let mut seen_repos = std::collections::HashSet::new();
+
+        for query in &queries {
+            // Rate-limit: 100ms delay between API calls
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+            let repos = search_github_raw(query, token.as_deref()).await;
+            for repo in repos {
+                if seen_repos.contains(&repo.full_name) {
+                    continue;
+                }
+                let sc = score_repo(&repo, &m.name, folder_name.as_deref());
+                if sc > 0 {
+                    seen_repos.insert(repo.full_name.clone());
+                    candidates.push(Candidate { repo, score: sc });
+                }
+            }
+
+            // If we already have a high-confidence match, stop searching
+            if candidates.iter().any(|c| c.score >= 90) {
+                break;
+            }
+        }
+
+        // Sort candidates by score descending
+        candidates.sort_by(|a, b| b.score.cmp(&a.score));
+
+        // Try candidates in score order, verify they have releases
+        let mut found = false;
+        for candidate in &candidates {
+            // Rate-limit before release check
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+            let has_release = fetch_latest_release(
+                &candidate.repo.owner.login,
+                &candidate.repo.name,
+                token.as_deref(),
+            )
+            .await
+            .is_ok();
+
+            if has_release {
+                let full_name = candidate.repo.full_name.clone();
+                let confidence = if candidate.score >= 90 {
+                    "high"
+                } else if candidate.score >= 50 {
+                    "medium"
+                } else {
+                    "low"
+                };
+
+                let entry = db.mods.entry(m.name.clone()).or_default();
+                entry.github_repo = Some(full_name.clone());
+                save_sources(&db, &config_path).map_err(|e| e.to_string())?;
+
+                matched.push(AutoDetectMatch {
+                    mod_name: m.name.clone(),
+                    github_repo: full_name,
+                    confidence: confidence.to_string(),
+                });
+                found = true;
+                break;
+            }
+        }
+
+        if !found {
+            unmatched.push(m.name.clone());
         }
     }
 

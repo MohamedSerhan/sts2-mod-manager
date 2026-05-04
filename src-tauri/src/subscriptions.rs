@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 use crate::profiles::Profile;
-use crate::sharing::fetch_shared_profile;
+use crate::sharing::fetch_gist;
 use crate::state::AppState;
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -213,7 +213,7 @@ pub async fn check_subscription_updates(
             None => continue,
         };
 
-        match fetch_shared_profile(share_id, None).await {
+        match fetch_gist(share_id).await {
             Ok(remote) => {
                 let (added, removed, updated) = diff_profiles(&sub.last_synced_profile, &remote);
                 let has_update = !added.is_empty() || !removed.is_empty() || !updated.is_empty();
@@ -263,7 +263,7 @@ pub async fn apply_subscription_update(
     };
 
     // Fetch the latest remote profile
-    let remote = fetch_shared_profile(&share_id, None)
+    let remote = fetch_gist(&share_id)
         .await
         .map_err(|e| e.to_string())?;
 

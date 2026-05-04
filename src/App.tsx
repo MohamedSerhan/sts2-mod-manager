@@ -8,7 +8,7 @@ import { ModsView } from './views/Mods';
 import { BrowseView } from './views/Browse';
 import { ProfilesView } from './views/Profiles';
 import { SettingsView } from './views/Settings';
-import { launchGame, installModFromFile } from './hooks/useTauri';
+import { launchGame, launchVanilla, installModFromFile } from './hooks/useTauri';
 
 type View = 'dashboard' | 'mods' | 'browse' | 'profiles' | 'settings';
 
@@ -42,9 +42,19 @@ function AppInner() {
   async function handleLaunchGame() {
     try {
       await launchGame();
-      toast.success('Launching STS2 via Steam...');
+      toast.success('Launching STS2 via Steam (auto-backup created)...');
     } catch (e) {
       toast.error(`Failed to launch game: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  async function handleLaunchVanilla() {
+    try {
+      await launchVanilla();
+      toast.success('Launching STS2 in vanilla mode (all mods disabled, backup created)...');
+      await refreshAll();
+    } catch (e) {
+      toast.error(`Failed to launch: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -130,14 +140,20 @@ function AppInner() {
             </button>
           ))}
         </div>
-        {/* Launch Game Button */}
-        <div className="px-3 pb-2">
+        {/* Launch Game Buttons */}
+        <div className="px-3 pb-2 space-y-1">
           <button
             onClick={handleLaunchGame}
             className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-medium transition-colors"
           >
             <Play size={16} />
             Launch STS2
+          </button>
+          <button
+            onClick={handleLaunchVanilla}
+            className="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg bg-surface-hover hover:bg-yellow-600/20 text-text-muted text-xs font-medium transition-colors border border-border"
+          >
+            Launch Vanilla (no mods)
           </button>
         </div>
         {/* Status bar at bottom of sidebar */}

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::download::{download_and_install_github_mod, fetch_latest_release};
 use crate::error::Result;
-use crate::mod_sources::{load_sources, save_sources, ModSourceEntry};
+use crate::mod_sources::{load_sources, save_sources, update_installed_version, ModSourceEntry};
 use crate::mods::{scan_mods, ModInfo};
 use crate::state::AppState;
 
@@ -112,22 +112,32 @@ pub async fn check_all_updates(
         let latest = release.tag_name.trim_start_matches('v');
         let current = m.version.trim_start_matches('v');
 
-        if latest != current && current != "unknown" {
-            let download_url = release
-                .assets
-                .first()
-                .map(|a| a.browser_download_url.clone())
-                .unwrap_or_else(|| release.html_url.clone());
+        // Check if the installed_version in mod_sources.json matches latest
+        let installed_ver_matches = sources
+            .get(&m.name)
+            .and_then(|e| e.installed_version.as_deref())
+            .map(|iv| iv.trim_start_matches('v') == latest)
+            .unwrap_or(false);
 
-            updates.push(ModUpdate {
-                mod_name: m.name.clone(),
-                current_version: m.version.clone(),
-                latest_version: release.tag_name.clone(),
-                source_type: "github".to_string(),
-                source_id: format!("{}/{}", owner, repo),
-                download_url,
-            });
+        // Skip if: installed version matches, OR manifest version matches, OR version is unknown
+        if installed_ver_matches || latest == current || current == "unknown" || current == "0.0.0" {
+            continue;
         }
+
+        let download_url = release
+            .assets
+            .first()
+            .map(|a| a.browser_download_url.clone())
+            .unwrap_or_else(|| release.html_url.clone());
+
+        updates.push(ModUpdate {
+            mod_name: m.name.clone(),
+            current_version: m.version.clone(),
+            latest_version: release.tag_name.clone(),
+            source_type: "github".to_string(),
+            source_id: format!("{}/{}", owner, repo),
+            download_url,
+        });
     }
 
     Ok(updates)
@@ -181,9 +191,23 @@ pub async fn update_mod(
     let (owner, repo) = resolve_github_repo(mod_info, &sources_db.mods)
         .ok_or_else(|| format!("Mod '{}' has no GitHub source linked. Link one in the Mods view.", name))?;
 
-    download_and_install_github_mod(&owner, &repo, None, &mods_path, &cache_path, token.as_deref())
+    let release = fetch_latest_release(&owner, &repo, token.as_deref())
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    let tag = release.tag_name.clone();
+
+    let info = download_and_install_github_mod(&owner, &repo, None, &mods_path, &cache_path, token.as_deref())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // Record the installed version so future checks know this is up-to-date.
+    // Save under both the original name AND the manifest name (they may differ).
+    update_installed_version(&name, &tag, &config_path);
+    if info.name != name {
+        update_installed_version(&info.name, &tag, &config_path);
+    }
+
+    Ok(info)
 }
 
 /// Update all mods that have available GitHub updates.
@@ -224,10 +248,11 @@ pub async fn update_all_mods(
         .await
         {
             Ok(info) => {
-                // Update the source link
+                // Update the source link and record installed version
                 let mut db = load_sources(&config_path);
                 let entry = db.mods.entry(info.name.clone()).or_default();
                 entry.github_repo = Some(format!("{}/{}", owner, repo));
+                entry.installed_version = Some(update.latest_version.clone());
                 let _ = save_sources(&db, &config_path);
                 results.push(info);
             }

@@ -161,12 +161,16 @@ export async function reshareProfile(name: string): Promise<ShareResult> {
   return invoke('reshare_profile', { name });
 }
 
-export async function fetchSharedProfile(id: string): Promise<Profile> {
-  return invoke('fetch_shared_profile_cmd', { id });
+export async function fetchSharedProfile(code: string): Promise<Profile> {
+  return invoke('fetch_shared_profile_cmd', { code });
 }
 
-export async function installSharedProfile(id: string): Promise<Profile> {
-  return invoke('install_shared_profile', { id });
+export async function installSharedProfile(code: string): Promise<Profile> {
+  return invoke('install_shared_profile', { code });
+}
+
+export async function launchVanilla(): Promise<boolean> {
+  return invoke('launch_vanilla');
 }
 
 // ── Dependency Resolution ──────────────────────────────────────────────────

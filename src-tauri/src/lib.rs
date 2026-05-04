@@ -64,6 +64,7 @@ pub fn run() {
             game::open_mods_folder,
             game::open_game_folder,
             game::launch_game,
+            game::launch_vanilla,
             game::set_github_token,
             // Mod management
             mods::get_installed_mods,

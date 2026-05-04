@@ -260,10 +260,47 @@ pub fn open_game_folder(state: tauri::State<'_, AppState>) -> std::result::Resul
     Err("Game folder not found. Set the game path in Settings.".to_string())
 }
 
-/// Launch STS2 via Steam.
+/// Launch STS2 via Steam with optional auto-backup.
 #[tauri::command]
-pub fn launch_game() -> std::result::Result<bool, String> {
+pub fn launch_game(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
+    // Auto-backup before launch
+    let s = state.lock().map_err(|e| e.to_string())?;
+    if let Some(ref mods_path) = s.mods_path {
+        let backup_dir = s.config_path.join("backups");
+        let _ = std::fs::create_dir_all(&backup_dir);
+        match crate::backup::create_backup(mods_path, &backup_dir) {
+            Ok(name) => log::info!("Pre-launch backup created: {}", name),
+            Err(e) => log::warn!("Failed to create pre-launch backup: {}", e),
+        }
+    }
+    drop(s);
+
     // STS2 Steam App ID: 2868840
+    open::that_in_background("steam://rungameid/2868840");
+    Ok(true)
+}
+
+/// Launch STS2 in vanilla mode (disable all mods, launch, re-enable on next app start).
+#[tauri::command]
+pub fn launch_vanilla(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
+    let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
+
+    // Auto-backup
+    let backup_dir = s.config_path.join("backups");
+    let _ = std::fs::create_dir_all(&backup_dir);
+    let _ = crate::backup::create_backup(mods_path, &backup_dir);
+
+    // Move all mods to disabled
+    crate::backup::reset_to_vanilla(mods_path, disabled_path).map_err(|e| e.to_string())?;
+    drop(s);
+
+    // Launch
     open::that_in_background("steam://rungameid/2868840");
     Ok(true)
 }

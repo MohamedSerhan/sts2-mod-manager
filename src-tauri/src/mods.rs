@@ -43,6 +43,15 @@ struct RawManifest {
     dependencies: Vec<String>,
     #[serde(alias = "Source")]
     source: Option<String>,
+    /// Additional fields that might contain URLs
+    #[serde(alias = "Homepage", alias = "homepage")]
+    homepage: Option<String>,
+    #[serde(alias = "Repository", alias = "repository", alias = "Repo", alias = "repo")]
+    repository: Option<String>,
+    #[serde(alias = "Url", alias = "url", alias = "URL")]
+    url: Option<String>,
+    #[serde(alias = "Author", alias = "author")]
+    author: Option<String>,
 }
 
 impl Default for RawManifest {
@@ -53,6 +62,10 @@ impl Default for RawManifest {
             description: String::new(),
             dependencies: Vec::new(),
             source: None,
+            homepage: None,
+            repository: None,
+            url: None,
+            author: None,
         }
     }
 }
@@ -157,6 +170,55 @@ fn parse_manifest(manifest_path: &Path, base_dir: &Path, enabled: bool) -> Optio
 
     let size_bytes = calculate_mod_size(base_dir, &files);
 
+    // Try to extract GitHub/Nexus URLs from manifest fields
+    let all_urls: Vec<&str> = [
+        raw.source.as_deref(),
+        raw.homepage.as_deref(),
+        raw.repository.as_deref(),
+        raw.url.as_deref(),
+    ]
+    .iter()
+    .filter_map(|u| *u)
+    .collect();
+
+    let mut github_url = None;
+    let mut nexus_url = None;
+    for u in &all_urls {
+        if u.contains("github.com/") && github_url.is_none() {
+            github_url = Some(u.to_string());
+        } else if u.starts_with("github:") && github_url.is_none() {
+            let repo = u.strip_prefix("github:").unwrap_or("");
+            if !repo.is_empty() {
+                github_url = Some(format!("https://github.com/{}", repo));
+            }
+        }
+        if u.contains("nexusmods.com/") && nexus_url.is_none() {
+            nexus_url = Some(u.to_string());
+        }
+    }
+
+    // If we still don't have URLs, try scanning the raw JSON for any URL-like strings
+    if github_url.is_none() || nexus_url.is_none() {
+        // Look for URLs anywhere in the raw JSON content
+        for cap in regex::Regex::new(r#"https?://[^\s",}]+"#)
+            .ok()
+            .iter()
+            .flat_map(|re| re.find_iter(&content))
+        {
+            let url_str = cap.as_str();
+            if github_url.is_none() && url_str.contains("github.com/") {
+                // Clean up trailing slashes, .git suffix
+                let clean = url_str
+                    .trim_end_matches('/')
+                    .trim_end_matches(".git");
+                github_url = Some(clean.to_string());
+            }
+            if nexus_url.is_none() && url_str.contains("nexusmods.com/") {
+                nexus_url = Some(url_str.to_string());
+            }
+        }
+    }
+
     Some(ModInfo {
         name,
         version: raw.version,
@@ -167,8 +229,8 @@ fn parse_manifest(manifest_path: &Path, base_dir: &Path, enabled: bool) -> Optio
         hash: file_hash,
         dependencies: raw.dependencies,
         size_bytes,
-        github_url: None,
-        nexus_url: None,
+        github_url,
+        nexus_url,
     })
 }
 
@@ -331,13 +393,75 @@ pub fn disable_mod(mod_name: &str, mods_path: &Path, disabled_path: &Path) -> Re
     move_mod_files(mod_name, mods_path, disabled_path)
 }
 
+/// Normalize a name for fuzzy matching: lowercase and strip spaces/hyphens/underscores.
+fn normalize_name(name: &str) -> String {
+    name.chars()
+        .filter(|c| !c.is_whitespace() && *c != '-' && *c != '_')
+        .flat_map(|c| c.to_lowercase())
+        .collect()
+}
+
+/// Move mod files using the actual file list from ModInfo.
+fn move_mod_by_info(mod_info: &ModInfo, src: &Path, dest: &Path) -> Result<()> {
+    let _ = fs::create_dir_all(dest);
+
+    let mut moved_any = false;
+
+    for file_rel in &mod_info.files {
+        // Normalize path separators for cross-platform compatibility
+        let normalized = file_rel.replace('\\', "/");
+        let src_file = src.join(&normalized);
+        let dest_file = dest.join(&normalized);
+
+        if !src_file.exists() {
+            continue;
+        }
+
+        // Ensure parent directories exist for subdirectory mods
+        if let Some(parent) = dest_file.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+
+        fs::rename(&src_file, &dest_file).or_else(|_| {
+            fs::copy(&src_file, &dest_file).and_then(|_| fs::remove_file(&src_file))
+        })?;
+        moved_any = true;
+    }
+
+    // Clean up empty subdirectories left behind in src
+    for file_rel in &mod_info.files {
+        let rel_path = Path::new(file_rel);
+        if let Some(parent_rel) = rel_path.parent() {
+            if !parent_rel.as_os_str().is_empty() {
+                let parent_dir = src.join(parent_rel);
+                if parent_dir.is_dir() {
+                    // Only remove if empty
+                    let _ = fs::remove_dir(&parent_dir);
+                }
+            }
+        }
+    }
+
+    if !moved_any {
+        return Err(AppError::ModNotFound(format!(
+            "No files found for mod '{}' in {}",
+            mod_info.name,
+            src.display()
+        )));
+    }
+
+    Ok(())
+}
+
 /// Move all files associated with a mod between two directories.
+/// Uses name matching with fallback to fuzzy (case-insensitive, no-spaces) comparison.
 fn move_mod_files(mod_name: &str, src: &Path, dest: &Path) -> Result<()> {
     let _ = fs::create_dir_all(dest);
 
     let mut found = false;
+    let normalized_mod = normalize_name(mod_name);
 
-    // Move files matching the mod name (same stem)
+    // Move files matching the mod name (same stem) - exact or fuzzy
     if let Ok(entries) = fs::read_dir(src) {
         for entry in entries.flatten() {
             let fname = entry.file_name().to_string_lossy().to_string();
@@ -346,7 +470,8 @@ fn move_mod_files(mod_name: &str, src: &Path, dest: &Path) -> Result<()> {
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string();
-            if fstem == mod_name {
+            // Exact match or normalized (case-insensitive, no spaces) match
+            if fstem == mod_name || normalize_name(&fstem) == normalized_mod {
                 let dest_file = dest.join(&fname);
                 fs::rename(entry.path(), &dest_file)?;
                 found = true;
@@ -354,13 +479,30 @@ fn move_mod_files(mod_name: &str, src: &Path, dest: &Path) -> Result<()> {
         }
     }
 
-    // Also check for a subdirectory with the mod name
+    // Also check for a subdirectory with the mod name (exact or normalized)
     let sub_dir = src.join(mod_name);
     if sub_dir.is_dir() {
         let dest_dir = dest.join(mod_name);
         move_dir_recursive(&sub_dir, &dest_dir)?;
         fs::remove_dir_all(&sub_dir)?;
         found = true;
+    } else if !found {
+        // Try finding a subdirectory by normalized name
+        if let Ok(entries) = fs::read_dir(src) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    let dir_name = entry.file_name().to_string_lossy().to_string();
+                    if normalize_name(&dir_name) == normalized_mod {
+                        let dest_dir = dest.join(&dir_name);
+                        move_dir_recursive(&path, &dest_dir)?;
+                        fs::remove_dir_all(&path)?;
+                        found = true;
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     if !found {
@@ -535,10 +677,25 @@ pub fn toggle_mod(name: String, enable: bool, state: tauri::State<'_, AppState>)
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
     let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
 
-    if enable {
-        enable_mod(&name, mods_path, disabled_path).map_err(|e| e.to_string())?;
+    let (src, dest) = if enable {
+        (disabled_path.as_path(), mods_path.as_path())
     } else {
-        disable_mod(&name, mods_path, disabled_path).map_err(|e| e.to_string())?;
+        (mods_path.as_path(), disabled_path.as_path())
+    };
+
+    // First try the simple name-based move
+    match move_mod_files(&name, src, dest) {
+        Ok(()) => return Ok(true),
+        Err(_) => {
+            // Fallback: scan for actual ModInfo and use file list
+            let mods_in_src = scan_mods_inner(src, enable);
+            let mod_info = mods_in_src.iter().find(|m| m.name == name);
+            if let Some(info) = mod_info {
+                move_mod_by_info(info, src, dest).map_err(|e| e.to_string())?;
+            } else {
+                return Err(format!("No files found for mod '{}' in {}", name, src.display()));
+            }
+        }
     }
 
     Ok(true)
@@ -566,8 +723,17 @@ pub fn enable_all_mods(state: tauri::State<'_, AppState>) -> std::result::Result
     let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
 
     let disabled = scan_disabled_mods(disabled_path);
+    let mut errors = Vec::new();
     for m in &disabled {
-        let _ = enable_mod(&m.name, mods_path, disabled_path);
+        if let Err(e) = move_mod_by_info(m, disabled_path, mods_path) {
+            // Fallback: try name-based move
+            if let Err(e2) = move_mod_files(&m.name, disabled_path, mods_path) {
+                errors.push(format!("{}: {}, {}", m.name, e, e2));
+            }
+        }
+    }
+    if !errors.is_empty() {
+        log::warn!("Some mods failed to enable: {:?}", errors);
     }
     Ok(true)
 }
@@ -580,8 +746,17 @@ pub fn disable_all_mods(state: tauri::State<'_, AppState>) -> std::result::Resul
     let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
 
     let enabled = scan_mods(mods_path);
+    let mut errors = Vec::new();
     for m in &enabled {
-        let _ = disable_mod(&m.name, mods_path, disabled_path);
+        if let Err(e) = move_mod_by_info(m, mods_path, disabled_path) {
+            // Fallback: try name-based move
+            if let Err(e2) = move_mod_files(&m.name, mods_path, disabled_path) {
+                errors.push(format!("{}: {}, {}", m.name, e, e2));
+            }
+        }
+    }
+    if !errors.is_empty() {
+        log::warn!("Some mods failed to disable: {:?}", errors);
     }
     Ok(true)
 }

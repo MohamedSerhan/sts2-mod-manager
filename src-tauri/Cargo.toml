@@ -28,7 +28,7 @@ dirs = "5"
 url = "2"
 thiserror = "2"
 log = "0.4"
-env_logger = "0.11"
+fern = { version = "0.7", features = ["date-based"] }
 walkdir = "2"
 notify = "7"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }

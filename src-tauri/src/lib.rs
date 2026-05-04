@@ -14,9 +14,43 @@ mod updater;
 
 use state::create_app_state;
 
+/// Set up logging to both stderr and a log file in the config directory.
+fn setup_logging(log_path: &std::path::Path) {
+    let _ = std::fs::create_dir_all(log_path.parent().unwrap_or(log_path));
+
+    let log_file = fern::log_file(log_path).unwrap_or_else(|e| {
+        eprintln!("Failed to open log file {:?}: {}", log_path, e);
+        // Fallback: write to a temp file
+        let tmp = std::env::temp_dir().join("sts2mm.log");
+        fern::log_file(&tmp).expect("Failed to create any log file")
+    });
+
+    fern::Dispatch::new()
+        .format(|out, message, record| {
+            out.finish(format_args!(
+                "[{} {} {}] {}",
+                chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+                record.level(),
+                record.target(),
+                message
+            ))
+        })
+        .level(log::LevelFilter::Info)
+        .level_for("reqwest", log::LevelFilter::Warn)
+        .level_for("hyper", log::LevelFilter::Warn)
+        .level_for("tao", log::LevelFilter::Warn)
+        .chain(std::io::stderr())
+        .chain(log_file)
+        .apply()
+        .unwrap_or_else(|e| eprintln!("Logger setup failed: {}", e));
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    env_logger::init();
+    let config_dir = dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("sts2-mod-manager");
+    setup_logging(&config_dir.join("sts2mm.log"));
 
     let app_state = create_app_state();
 
@@ -81,6 +115,8 @@ pub fn run() {
             game::get_api_key_status,
             game::get_active_profile,
             game::set_active_profile,
+            game::get_log_path,
+            game::open_log_file,
             // Mod management
             mods::get_installed_mods,
             mods::toggle_mod,

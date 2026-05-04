@@ -13,6 +13,8 @@ import {
   openGameFolder,
   openModsFolder,
   getApiKeyStatus,
+  openLogFile,
+  getLogPath,
 } from '../hooks/useTauri';
 
 export function SettingsView() {
@@ -229,6 +231,16 @@ export function SettingsView() {
           </Button>
           <Button variant="secondary" size="sm" onClick={handleOpenModsFolder}>
             Open Mods Folder
+          </Button>
+          <Button variant="secondary" size="sm" onClick={async () => {
+            try {
+              await openLogFile();
+            } catch {
+              const path = await getLogPath().catch(() => 'unknown');
+              toast.error(`Log file not found at: ${path}`);
+            }
+          }}>
+            View Logs
           </Button>
         </div>
       </Card>

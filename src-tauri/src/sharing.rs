@@ -565,6 +565,11 @@ pub async fn share_profile(
     .await
     .map_err(|e| e.to_string())?;
 
+    // Save the enriched profile back to local JSON (with bundle_urls)
+    // This is critical: switch_profile loads local JSON, which needs bundle_urls
+    crate::profiles::save_profile(&profile, &profiles_path).map_err(|e| e.to_string())?;
+    log::info!("Saved enriched profile '{}' with bundle_urls to local JSON", name);
+
     // Store share info locally for re-sharing
     let share_info = ShareInfo {
         code: code.clone(),
@@ -674,6 +679,10 @@ pub async fn reshare_profile(
     )
     .await
     .map_err(|e| e.to_string())?;
+
+    // Save enriched profile back to local JSON (with bundle_urls)
+    crate::profiles::save_profile(&profile, &profiles_path).map_err(|e| e.to_string())?;
+    log::info!("Saved re-shared enriched profile '{}' to local JSON", name);
 
     let owner = share_info.owner.clone();
     let code = share_info.code.clone();

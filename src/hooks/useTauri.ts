@@ -226,3 +226,13 @@ export async function checkSubscriptionUpdates(): Promise<SubscriptionUpdate[]> 
 export async function applySubscriptionUpdate(shareId: string): Promise<Profile> {
   return invoke('apply_subscription_update', { shareId });
 }
+
+// ── Logging ────────────────────────────────────────────────────────────────
+
+export async function getLogPath(): Promise<string> {
+  return invoke('get_log_path');
+}
+
+export async function openLogFile(): Promise<boolean> {
+  return invoke('open_log_file');
+}

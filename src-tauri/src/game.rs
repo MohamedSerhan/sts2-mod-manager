@@ -396,3 +396,28 @@ pub struct ApiKeyStatus {
     pub nexus_api_key_set: bool,
     pub github_token_set: bool,
 }
+
+/// Get the path to the log file.
+#[tauri::command]
+pub fn get_log_path(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<String, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let log_path = s.config_path.join("sts2mm.log");
+    Ok(log_path.to_string_lossy().to_string())
+}
+
+/// Open the log file in the system's default text editor / file explorer.
+#[tauri::command]
+pub fn open_log_file(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let log_path = s.config_path.join("sts2mm.log");
+    if log_path.exists() {
+        open::that_in_background(&log_path);
+        Ok(true)
+    } else {
+        Err("Log file not found".to_string())
+    }
+}

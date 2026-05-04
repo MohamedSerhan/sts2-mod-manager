@@ -2,30 +2,18 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    // Fix white/blank screen and EGL crashes on Linux
-    // WebKitGTK GPU acceleration fails on many setups:
-    // - CachyOS/Arch: "Could not create default EGL display: EGL_BAD_PARAMETER"
-    // - NVIDIA proprietary drivers: compositing failures
-    // - Wayland with some GPU combos: blank window
-    #[cfg(target_os = "linux")]
-    {
-        // Disable GPU compositing (fixes white screen)
-        if std::env::var("WEBKIT_DISABLE_COMPOSITING_MODE").is_err() {
-            std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
-        }
-        // Disable DMA-BUF renderer (fixes some NVIDIA issues)
-        if std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER").is_err() {
-            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
-        }
-        // Force software rendering for WebKitGTK (fixes EGL_BAD_PARAMETER crash)
-        if std::env::var("WEBKIT_HARDWARE_ACCELERATION_POLICY").is_err() {
-            std::env::set_var("WEBKIT_HARDWARE_ACCELERATION_POLICY", "NEVER");
-        }
-        // Use software GL if EGL is broken
-        if std::env::var("LIBGL_ALWAYS_SOFTWARE").is_err() {
-            std::env::set_var("LIBGL_ALWAYS_SOFTWARE", "1");
-        }
-    }
+    // Known issue: AppImage builds show a blank white screen on Arch-based Linux
+    // (CachyOS, Manjaro, EndeavourOS) due to a Tauri framework bug where WebKit's
+    // GPU subprocess fails EGL init through the AppImage FUSE layer.
+    // See: https://github.com/tauri-apps/tauri/pull/12491
+    //
+    // Environment variable workarounds (WEBKIT_DISABLE_COMPOSITING_MODE,
+    // LIBGL_ALWAYS_SOFTWARE, etc.) do NOT fix this -- the issue is in how
+    // AppImage propagates library paths to WebKit subprocesses.
+    //
+    // Workaround for Arch users: install from .rpm package instead of AppImage:
+    //   bsdtar -C /tmp/rpm-extract -xf sts2-mod-manager.rpm
+    //   sudo cp /tmp/rpm-extract/usr/bin/sts2-mod-manager /usr/local/bin/
 
     sts2_mod_manager_lib::run()
 }

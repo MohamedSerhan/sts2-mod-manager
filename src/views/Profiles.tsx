@@ -212,6 +212,7 @@ export function ProfilesView() {
       setShareResult(result);
       setShareInfoMap((prev) => ({ ...prev, [name]: result }));
       setCopiedCode(false);
+      await loadProfiles();
     } catch (e) {
       toastCtx.error(`Failed to share: ${e instanceof Error ? e.message : String(e)}`);
       setSharingProfile(null);
@@ -225,6 +226,7 @@ export function ProfilesView() {
       setShareResult(result);
       setShareInfoMap((prev) => ({ ...prev, [name]: result }));
       setCopiedCode(false);
+      await loadProfiles();
       toastCtx.success('Profile re-shared! Same code, updated content.');
     } catch (e) {
       toastCtx.error(`Failed to re-share: ${e instanceof Error ? e.message : String(e)}`);

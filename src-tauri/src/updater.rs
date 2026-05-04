@@ -108,6 +108,18 @@ pub async fn check_all_updates(
             }
         };
 
+        // Skip releases with no downloadable assets (author published tag without uploading files)
+        let has_downloadable_asset = release.assets.iter().any(|a| {
+            a.name.ends_with(".zip") || a.name.ends_with(".dll") || a.name.ends_with(".pck")
+        });
+        if !has_downloadable_asset {
+            log::info!(
+                "Skipping update for {} ({}/{}): release {} has no downloadable assets",
+                m.name, owner, repo, release.tag_name
+            );
+            continue;
+        }
+
         // Strip leading 'v' for comparison (e.g. "v1.2.0" -> "1.2.0")
         let latest = release.tag_name.trim_start_matches('v');
         let current = m.version.trim_start_matches('v');

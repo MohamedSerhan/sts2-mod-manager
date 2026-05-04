@@ -148,6 +148,10 @@ export async function auditModVersions(): Promise<ModAuditEntry[]> {
   return invoke('audit_mod_versions');
 }
 
+export async function repairModFolders(): Promise<{ old_folder: string; new_folder: string; mod_name: string }[]> {
+  return invoke('repair_mod_folders');
+}
+
 export async function quickAddMod(url: string): Promise<QuickAddResult> {
   return invoke('quick_add_mod', { url });
 }

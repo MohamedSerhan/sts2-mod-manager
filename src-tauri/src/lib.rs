@@ -175,6 +175,7 @@ pub fn run() {
             // Dependency resolution
             mods::check_mod_dependencies,
             mods::get_mod_dependents,
+            mods::repair_mod_folders,
             // Backup & safety
             backup::create_backup_cmd,
             backup::list_backups_cmd,

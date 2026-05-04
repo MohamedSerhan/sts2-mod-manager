@@ -20,6 +20,7 @@ import {
   openLogFile,
   getLogPath,
   auditModVersions,
+  repairModFolders,
 } from '../hooks/useTauri';
 import type { ModAuditEntry } from '../types';
 
@@ -327,6 +328,29 @@ export function SettingsView() {
           >
             <ClipboardCheck size={14} className={auditing ? 'animate-pulse' : ''} />
             {auditing ? 'Auditing...' : 'Audit Mod Versions'}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={async () => {
+              try {
+                const repairs = await repairModFolders();
+                await refreshAll();
+                if (repairs.length === 0) {
+                  toast.success('All mod folders are correctly named — nothing to repair.');
+                } else {
+                  toast.success(
+                    `Repaired ${repairs.length} folder${repairs.length !== 1 ? 's' : ''}: ` +
+                    repairs.map(r => `${r.old_folder} → ${r.new_folder}`).join(', ')
+                  );
+                }
+              } catch (e) {
+                toast.error(`Repair failed: ${e instanceof Error ? e.message : String(e)}`);
+              }
+            }}
+          >
+            <RefreshCw size={14} />
+            Repair Mod Folders
           </Button>
         </div>
       </Card>

@@ -368,14 +368,21 @@ pub fn get_active_profile(
     Ok(s.active_profile.clone())
 }
 
-/// Set the active profile name.
+/// Set the active profile name (also persists to disk).
 #[tauri::command]
 pub fn set_active_profile(
     name: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<bool, String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    s.active_profile = name;
+    s.active_profile = name.clone();
+    // Persist to disk so it survives app restarts
+    let path = s.config_path.join("active_profile.txt");
+    if let Some(ref n) = name {
+        let _ = std::fs::write(&path, n);
+    } else {
+        let _ = std::fs::remove_file(&path);
+    }
     Ok(true)
 }
 

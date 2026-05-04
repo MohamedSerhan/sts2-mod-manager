@@ -96,6 +96,18 @@ pub fn run() {
         }
     }
 
+    // Restore active profile from previous session
+    if let Ok(mut s) = app_state.lock() {
+        let profile_file = s.config_path.join("active_profile.txt");
+        if let Ok(name) = std::fs::read_to_string(&profile_file) {
+            let name = name.trim().to_string();
+            if !name.is_empty() {
+                log::info!("Restored active profile from previous session: {}", name);
+                s.active_profile = Some(name);
+            }
+        }
+    }
+
     tauri::Builder::default()
         .manage(app_state)
         .plugin(tauri_plugin_opener::init())

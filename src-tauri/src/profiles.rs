@@ -459,6 +459,7 @@ pub async fn switch_profile(
         // Update active profile even if empty
         let mut s = state.lock().map_err(|e| e.to_string())?;
         s.active_profile = Some(name.clone());
+        let _ = std::fs::write(s.config_path.join("active_profile.txt"), &name);
         return Ok(SwitchProfileResult {
             applied: true,
             missing_mods: vec![],
@@ -590,9 +591,10 @@ pub async fn switch_profile(
         .map(|pm| pm.name.clone())
         .collect();
 
-    // Update active profile
+    // Update active profile (also persist to disk)
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.active_profile = Some(name.clone());
+    let _ = std::fs::write(s.config_path.join("active_profile.txt"), &name);
 
     Ok(SwitchProfileResult {
         applied: true,

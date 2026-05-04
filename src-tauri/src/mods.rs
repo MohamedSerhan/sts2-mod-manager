@@ -402,7 +402,7 @@ fn normalize_name(name: &str) -> String {
 }
 
 /// Move mod files using the actual file list from ModInfo.
-fn move_mod_by_info(mod_info: &ModInfo, src: &Path, dest: &Path) -> Result<()> {
+pub fn move_mod_by_info(mod_info: &ModInfo, src: &Path, dest: &Path) -> Result<()> {
     let _ = fs::create_dir_all(dest);
 
     let mut moved_any = false;
@@ -707,13 +707,91 @@ pub fn toggle_mod(name: String, enable: bool, state: tauri::State<'_, AppState>)
 #[tauri::command]
 pub fn delete_mod_cmd(name: String, state: tauri::State<'_, AppState>) -> std::result::Result<bool, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
-    let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
-    let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
+    let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?.clone();
+    let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?.clone();
+    drop(s);
 
-    // Try removing from both enabled and disabled dirs
-    let _ = delete_mod_files(&name, mods_path);
-    let _ = delete_mod_files(&name, disabled_path);
+    // Scan to find the mod by its manifest name and get its actual file paths
+    let all_mods: Vec<ModInfo> = scan_mods(&mods_path)
+        .into_iter()
+        .chain(scan_disabled_mods(&disabled_path).into_iter())
+        .collect();
 
+    if let Some(info) = all_mods.iter().find(|m| m.name == name) {
+        let base_path = if info.enabled { &mods_path } else { &disabled_path };
+
+        // Collect parent dirs to clean up later
+        let mut parent_dirs = std::collections::HashSet::new();
+
+        // Delete each file the mod owns
+        for file_rel in &info.files {
+            let normalized = file_rel.replace('\\', "/");
+            let file_path = base_path.join(&normalized);
+            if file_path.is_dir() {
+                let _ = fs::remove_dir_all(&file_path);
+            } else if file_path.exists() {
+                let _ = fs::remove_file(&file_path);
+            }
+            // Track parent directory for cleanup
+            if let Some(parent_rel) = Path::new(&normalized).parent() {
+                if !parent_rel.as_os_str().is_empty() {
+                    parent_dirs.insert(base_path.join(parent_rel));
+                }
+            }
+        }
+
+        // Remove empty parent directories (subdirectory mods)
+        for dir in &parent_dirs {
+            if dir.is_dir() {
+                // Only remove if empty
+                if fs::read_dir(dir).map(|mut d| d.next().is_none()).unwrap_or(false) {
+                    let _ = fs::remove_dir(dir);
+                }
+            }
+        }
+
+        log::info!("Deleted mod '{}' ({} files)", name, info.files.len());
+        return Ok(true);
+    }
+
+    // Fallback: fuzzy name match directly on filesystem
+    let norm = normalize_name(&name);
+    let mut found = false;
+    for search_path in [&mods_path, &disabled_path] {
+        // Check for exact-name subdirectory
+        let sub_dir = search_path.join(&name);
+        if sub_dir.is_dir() {
+            let _ = fs::remove_dir_all(&sub_dir);
+            found = true;
+            continue;
+        }
+
+        // Iterate filesystem entries with fuzzy matching
+        if let Ok(entries) = fs::read_dir(search_path) {
+            for entry in entries.flatten() {
+                let entry_name = entry.file_name().to_string_lossy().to_string();
+                let fstem = Path::new(&entry_name)
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+
+                if fstem == name || normalize_name(&fstem) == norm || normalize_name(&entry_name) == norm {
+                    if entry.path().is_dir() {
+                        let _ = fs::remove_dir_all(entry.path());
+                    } else {
+                        let _ = fs::remove_file(entry.path());
+                    }
+                    found = true;
+                }
+            }
+        }
+    }
+
+    if !found {
+        return Err(format!("Could not find files for mod '{}' to delete", name));
+    }
+    log::info!("Deleted mod '{}' via fallback matching", name);
     Ok(true)
 }
 

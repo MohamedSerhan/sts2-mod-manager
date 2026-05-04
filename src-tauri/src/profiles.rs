@@ -130,6 +130,7 @@ pub fn snapshot_current(
 }
 
 /// Apply a profile: enable only the mods listed, disable everything else.
+/// Uses move_mod_by_info (actual file list) with fallback to name-based matching.
 pub fn apply_profile(
     profile: &Profile,
     mods_path: &Path,
@@ -142,7 +143,10 @@ pub fn apply_profile(
     let current_enabled = scan_mods(mods_path);
     for m in &current_enabled {
         if !profile_mod_names.contains(&m.name) {
-            let _ = crate::mods::disable_mod(&m.name, mods_path, disabled_path);
+            // Try file-list-based move first, fall back to name-based
+            if crate::mods::move_mod_by_info(m, mods_path, disabled_path).is_err() {
+                let _ = crate::mods::disable_mod(&m.name, mods_path, disabled_path);
+            }
         }
     }
 
@@ -150,7 +154,10 @@ pub fn apply_profile(
     let current_disabled = scan_disabled_mods(disabled_path);
     for m in &current_disabled {
         if profile_mod_names.contains(&m.name) {
-            let _ = crate::mods::enable_mod(&m.name, mods_path, disabled_path);
+            // Try file-list-based move first, fall back to name-based
+            if crate::mods::move_mod_by_info(m, disabled_path, mods_path).is_err() {
+                let _ = crate::mods::enable_mod(&m.name, mods_path, disabled_path);
+            }
         }
     }
 

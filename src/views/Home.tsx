@@ -274,25 +274,23 @@ export function HomeView({ onGoToSettings }: { onGoToSettings: () => void }) {
             <p className="text-sm mt-1">Enter a modpack code above to get started</p>
           </div>
         ) : (
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             {mods.map((mod) => (
               <div
                 key={mod.name}
-                className="flex items-center justify-between py-3 px-4 rounded-xl hover:bg-surface-hover transition-colors"
+                className="flex items-center gap-4 py-3 px-4 rounded-xl hover:bg-surface-hover transition-colors"
               >
-                <div className="flex items-center gap-4 min-w-0">
-                  <Toggle
-                    checked={mod.enabled}
-                    onChange={(checked) => handleToggle(mod.name, checked)}
-                  />
-                  <div className="min-w-0">
-                    <span className="text-sm font-medium text-text truncate block">{mod.name}</span>
-                    {mod.description && (
-                      <span className="text-sm text-text-dim truncate block mt-0.5">{mod.description}</span>
-                    )}
-                  </div>
+                <Toggle
+                  checked={mod.enabled}
+                  onChange={(checked) => handleToggle(mod.name, checked)}
+                />
+                <div className="min-w-0 flex-1">
+                  <span className="text-sm font-medium text-text truncate block">{mod.name}</span>
+                  {mod.description && (
+                    <span className="text-sm text-text-dim truncate block mt-0.5">{mod.description}</span>
+                  )}
                 </div>
-                <span className="text-sm text-text-dim whitespace-nowrap ml-3">v{mod.version}</span>
+                <span className="text-sm text-text-dim whitespace-nowrap shrink-0">v{mod.version}</span>
               </div>
             ))}
           </div>

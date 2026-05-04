@@ -59,9 +59,20 @@ impl AppStateInner {
     }
 
     /// Update game-related paths when the game path is set.
+    /// On macOS the game ships as a `.app` bundle and mods live inside
+    /// `SlayTheSpire2.app/Contents/MacOS/mods/` rather than next to the bundle.
     pub fn set_game_path(&mut self, path: PathBuf) {
-        let mods_path = path.join("mods");
-        let disabled_mods_path = path.join("mods_disabled");
+        let mods_path = {
+            let mac_mods = path.join("SlayTheSpire2.app/Contents/MacOS/mods");
+            if cfg!(target_os = "macos") && mac_mods.parent().map_or(false, |p| p.exists()) {
+                mac_mods
+            } else {
+                path.join("mods")
+            }
+        };
+        let disabled_mods_path = mods_path.parent()
+            .unwrap_or(&path)
+            .join("mods_disabled");
 
         // Ensure mod directories exist
         let _ = std::fs::create_dir_all(&mods_path);

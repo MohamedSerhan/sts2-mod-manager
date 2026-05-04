@@ -196,6 +196,37 @@ pub async fn update_mod(
         .map_err(|e| e.to_string())?;
     let tag = release.tag_name.clone();
 
+    // Delete the old mod files before installing the update to prevent duplicates
+    // (e.g., old mod in "ModConfig-v0.2.1/" and new one in "ModConfig-v0.2.2/")
+    {
+        let all_mods: Vec<ModInfo> = scan_mods(&mods_path);
+        if let Some(old_info) = all_mods.iter().find(|m| m.name == name) {
+            let mut parent_dirs = std::collections::HashSet::new();
+            for file_rel in &old_info.files {
+                let normalized = file_rel.replace('\\', "/");
+                let file_path = mods_path.join(&normalized);
+                if file_path.is_dir() {
+                    let _ = std::fs::remove_dir_all(&file_path);
+                } else if file_path.exists() {
+                    let _ = std::fs::remove_file(&file_path);
+                }
+                if let Some(parent_rel) = std::path::Path::new(&normalized).parent() {
+                    if !parent_rel.as_os_str().is_empty() {
+                        parent_dirs.insert(mods_path.join(parent_rel));
+                    }
+                }
+            }
+            for dir in &parent_dirs {
+                if dir.is_dir() {
+                    if std::fs::read_dir(dir).map(|mut d| d.next().is_none()).unwrap_or(false) {
+                        let _ = std::fs::remove_dir(dir);
+                    }
+                }
+            }
+            log::info!("Deleted old files for '{}' before updating", name);
+        }
+    }
+
     let info = download_and_install_github_mod(&owner, &repo, None, &mods_path, &cache_path, token.as_deref())
         .await
         .map_err(|e| e.to_string())?;

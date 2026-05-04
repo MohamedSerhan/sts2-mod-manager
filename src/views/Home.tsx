@@ -8,6 +8,8 @@ import {
   Clipboard,
   Gamepad2,
   Settings,
+  Trash2,
+  Play,
 } from 'lucide-react';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
@@ -21,6 +23,8 @@ import {
   toggleMod,
   getSubscriptions,
   getInstalledMods,
+  unsubscribe,
+  switchProfile,
 } from '../hooks/useTauri';
 import type { SubscriptionUpdate, Subscription } from '../types';
 
@@ -110,6 +114,32 @@ export function HomeView({ onGoToSettings }: { onGoToSettings: () => void }) {
     try {
       await toggleMod(name, enable);
       await refreshMods();
+    } catch (e) {
+      toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  async function handleUnsubscribe(shareId: string, profileName: string) {
+    if (!confirm(`Unlink from "${profileName}"? You'll stop receiving updates.`)) return;
+    try {
+      await unsubscribe(shareId);
+      setSubscriptions((prev) => prev.filter((s) => s.share_id !== shareId));
+      setSubUpdates((prev) => prev.filter((s) => s.share_id !== shareId));
+      toast.success(`Unlinked from "${profileName}"`);
+    } catch (e) {
+      toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  async function handleActivateModpack(profileName: string) {
+    try {
+      const result = await switchProfile(profileName);
+      await refreshAll();
+      if (result.missing_mods.length > 0) {
+        toast.info(`Activated "${profileName}". ${result.downloaded} downloaded, ${result.missing_mods.length} still missing.`);
+      } else {
+        toast.success(`Activated "${profileName}"`);
+      }
     } catch (e) {
       toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -270,10 +300,31 @@ export function HomeView({ onGoToSettings }: { onGoToSettings: () => void }) {
               <div>
                 <p className="text-sm font-medium text-text">{sub.profile_name}</p>
                 <p className="text-sm text-text-dim mt-0.5">
+                  {sub.curator && <span>By {sub.curator} &middot; </span>}
                   Last synced: {new Date(sub.last_synced).toLocaleDateString()}
                 </p>
               </div>
-              <span className="text-sm text-green-400 font-medium">Up to date</span>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleActivateModpack(sub.profile_name)}
+                  title="Activate this modpack"
+                >
+                  <Play size={14} />
+                  Activate
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleUnsubscribe(sub.share_id, sub.profile_name)}
+                  title="Unlink from this modpack"
+                  className="text-red-400 hover:text-red-300"
+                >
+                  <Trash2 size={14} />
+                </Button>
+                <span className="text-sm text-green-400 font-medium ml-1">Up to date</span>
+              </div>
             </div>
           ))}
         </Card>

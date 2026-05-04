@@ -1012,6 +1012,32 @@ pub fn disable_all_mods(state: tauri::State<'_, AppState>) -> std::result::Resul
     Ok(true)
 }
 
+/// Delete ALL mods from both enabled and disabled folders.
+#[tauri::command]
+pub fn delete_all_mods(state: tauri::State<'_, AppState>) -> std::result::Result<u32, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?.clone();
+    let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?.clone();
+    drop(s);
+
+    let mut count = 0u32;
+    for search_path in [&mods_path, &disabled_path] {
+        if let Ok(entries) = fs::read_dir(search_path) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    let _ = fs::remove_dir_all(&path);
+                } else {
+                    let _ = fs::remove_file(&path);
+                }
+                count += 1;
+            }
+        }
+    }
+    log::info!("Deleted all mods ({} items)", count);
+    Ok(count)
+}
+
 /// Install a mod from a local file (zip archive).
 #[tauri::command]
 pub fn install_mod_from_file(path: String, state: tauri::State<'_, AppState>) -> std::result::Result<ModInfo, String> {

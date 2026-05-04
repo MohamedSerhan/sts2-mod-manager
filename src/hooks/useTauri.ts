@@ -57,6 +57,10 @@ export async function disableAllMods(): Promise<boolean> {
   return invoke('disable_all_mods');
 }
 
+export async function deleteAllMods(): Promise<number> {
+  return invoke('delete_all_mods');
+}
+
 export async function installModFromFile(path: string): Promise<ModInfo> {
   return invoke('install_mod_from_file', { path });
 }
@@ -101,6 +105,10 @@ export async function snapshotProfile(name: string): Promise<Profile> {
 
 export async function deleteProfile(name: string): Promise<void> {
   return invoke('delete_profile_cmd', { name });
+}
+
+export async function duplicateProfile(name: string, newName: string): Promise<Profile> {
+  return invoke('duplicate_profile', { name, newName });
 }
 
 export async function exportProfile(name: string): Promise<string> {

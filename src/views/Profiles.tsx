@@ -13,6 +13,7 @@ import {
   Check,
   X,
   Key,
+  Files,
 } from 'lucide-react';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
@@ -24,6 +25,7 @@ import {
   switchProfile,
   snapshotProfile,
   deleteProfile,
+  duplicateProfile,
   exportProfile,
   importProfile,
   shareProfile,
@@ -139,6 +141,18 @@ export function ProfilesView() {
       toastCtx.success(`Profile "${name}" deleted`);
     } catch (e) {
       toastCtx.error(`Failed to delete: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  async function handleDuplicate(name: string) {
+    const newName = prompt(`Duplicate "${name}" as:`, `${name} (copy)`);
+    if (!newName?.trim()) return;
+    try {
+      const profile = await duplicateProfile(name, newName.trim());
+      setProfiles((prev) => [...prev, profile]);
+      toastCtx.success(`Duplicated as "${profile.name}"`);
+    } catch (e) {
+      toastCtx.error(`Failed to duplicate: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -506,6 +520,14 @@ export function ProfilesView() {
                   disabled={sharingProfile === profile.name}
                 >
                   <RefreshCw size={14} />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleDuplicate(profile.name)}
+                  title="Duplicate profile"
+                >
+                  <Files size={14} />
                 </Button>
                 <Button
                   variant="ghost"

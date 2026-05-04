@@ -124,6 +124,7 @@ pub fn run() {
             mods::install_mod_from_file,
             mods::enable_all_mods,
             mods::disable_all_mods,
+            mods::delete_all_mods,
             // Downloads
             download::search_github_mods,
             download::download_github_mod,
@@ -136,6 +137,7 @@ pub fn run() {
             profiles::list_profiles_cmd,
             profiles::create_profile,
             profiles::delete_profile_cmd,
+            profiles::duplicate_profile,
             profiles::switch_profile,
             profiles::snapshot_profile,
             profiles::export_profile_cmd,

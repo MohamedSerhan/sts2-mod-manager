@@ -26,6 +26,7 @@ import { useToast } from '../contexts/ToastContext';
 import {
   toggleMod,
   deleteMod,
+  deleteAllMods,
   installModFromFile,
   quickAddMod,
   enableAllMods,
@@ -124,6 +125,18 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
       await disableAllMods();
       await refreshMods();
       toast.success('All mods disabled');
+    } catch (e) {
+      toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  async function handleDeleteAll() {
+    if (!confirm(`Delete ALL ${mods.length} mods? This cannot be undone!`)) return;
+    if (!confirm('Are you absolutely sure? This will permanently remove all mod files.')) return;
+    try {
+      const deleted = await deleteAllMods();
+      await refreshAll();
+      toast.success(`Deleted ${deleted} mods`);
     } catch (e) {
       toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -271,6 +284,12 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
               <ToggleLeft size={14} />
               Disable All
             </Button>
+            {advancedMode && (
+              <Button variant="ghost" size="sm" onClick={handleDeleteAll} title="Delete all mods" className="text-red-400 hover:text-red-300 hover:bg-red-400/10">
+                <Trash2 size={14} />
+                Delete All
+              </Button>
+            )}
           </div>
         )}
       </div>

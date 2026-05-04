@@ -340,6 +340,22 @@ pub fn delete_profile_cmd(
     Ok(true)
 }
 
+/// Duplicate an existing profile with a new name.
+#[tauri::command]
+pub fn duplicate_profile(
+    name: String,
+    new_name: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Profile, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let mut profile = load_profile(&name, &s.profiles_path).map_err(|e| e.to_string())?;
+    profile.name = new_name;
+    profile.updated_at = chrono::Utc::now();
+    save_profile(&profile, &s.profiles_path).map_err(|e| e.to_string())?;
+    log::info!("Duplicated profile '{}' as '{}'", name, profile.name);
+    Ok(profile)
+}
+
 /// Switch to a profile: auto-snapshots current state first, downloads missing mods,
 /// then applies the target profile's exact enabled/disabled state.
 #[tauri::command]

@@ -149,9 +149,6 @@ export function SettingsView() {
     setCheckingUpdate(true);
     try {
       const update = await check();
-      // Reset the throttle so the next launch's auto-check still runs normally
-      // if this manual check found nothing.
-      try { localStorage.setItem('sts2mm-last-update-check', String(Date.now())); } catch { /* ignore */ }
       if (!update) {
         toast.success('You are on the latest version.');
         return;

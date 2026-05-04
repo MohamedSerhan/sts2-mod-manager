@@ -78,23 +78,22 @@ function AppInner() {
     return () => { unlisten1.then(f => f()); unlisten2.then(f => f()); };
   }, []);
 
-  // Check for app updates on mount, throttled to once per 24h
+  // Check for app updates on launch and every 24 hours while the app is open
   useEffect(() => {
-    const LAST_CHECK_KEY = 'sts2mm-last-update-check';
-    const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-    try {
-      const last = Number(localStorage.getItem(LAST_CHECK_KEY) || 0);
-      if (last && Date.now() - last < ONE_DAY_MS) return;
-    } catch { /* ignore localStorage errors */ }
+    function doCheck() {
+      check()
+        .then((update) => {
+          if (update) setAppUpdate(update);
+        })
+        .catch((e) => {
+          console.warn('Update check failed:', e);
+        });
+    }
 
-    check()
-      .then((update) => {
-        try { localStorage.setItem(LAST_CHECK_KEY, String(Date.now())); } catch { /* ignore */ }
-        if (update) setAppUpdate(update);
-      })
-      .catch((e) => {
-        console.warn('Update check failed:', e);
-      });
+    doCheck();
+    const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+    const interval = setInterval(doCheck, ONE_DAY_MS);
+    return () => clearInterval(interval);
   }, []);
 
   async function handleInstallUpdate() {

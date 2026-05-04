@@ -102,6 +102,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             // Game detection & QOL
             game::detect_game_path,
@@ -117,7 +119,6 @@ pub fn run() {
             game::set_active_profile,
             game::get_log_path,
             game::open_log_file,
-            game::check_app_update,
             // Mod management
             mods::get_installed_mods,
             mods::toggle_mod,

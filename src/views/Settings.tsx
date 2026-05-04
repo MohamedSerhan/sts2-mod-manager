@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
-import { FolderSearch, Key, FolderOpen } from 'lucide-react';
+import { FolderSearch, Key, FolderOpen, RefreshCw } from 'lucide-react';
+import { open } from '@tauri-apps/plugin-dialog';
+import { check } from '@tauri-apps/plugin-updater';
+import { relaunch } from '@tauri-apps/plugin-process';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
@@ -68,6 +71,27 @@ export function SettingsView() {
     }
   }
 
+  async function handleBrowseGamePath() {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: 'Select Slay the Spire 2 folder',
+      });
+      if (!selected) return;
+      const picked = typeof selected === 'string' ? selected : String(selected);
+      setGamePathValue(picked);
+      const info = await setGamePath(picked);
+      if (info.valid && info.game_path) {
+        setGamePathValue(info.game_path);
+        await refreshAll();
+        toast.success('Game path updated.');
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   async function handleSaveNexusKey() {
     if (!nexusKey.trim()) return;
     try {
@@ -108,6 +132,29 @@ export function SettingsView() {
     }
   }
 
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  async function handleCheckUpdateNow() {
+    if (checkingUpdate) return;
+    setCheckingUpdate(true);
+    try {
+      const update = await check();
+      // Reset the throttle so the next launch's auto-check still runs normally
+      // if this manual check found nothing.
+      try { localStorage.setItem('sts2mm-last-update-check', String(Date.now())); } catch { /* ignore */ }
+      if (!update) {
+        toast.success('You are on the latest version.');
+        return;
+      }
+      toast.success(`v${update.version} available — installing...`);
+      await update.downloadAndInstall();
+      await relaunch();
+    } catch (e) {
+      toast.error(`Update check failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setCheckingUpdate(false);
+    }
+  }
+
   return (
     <div className="p-8 space-y-6">
       <div>
@@ -132,6 +179,9 @@ export function SettingsView() {
               onKeyDown={(e) => e.key === 'Enter' && handleSetGamePath()}
             />
           </div>
+          <Button variant="secondary" size="md" onClick={handleBrowseGamePath}>
+            Browse...
+          </Button>
           <Button variant="secondary" size="md" onClick={handleDetectGame}>
             Auto-Detect
           </Button>
@@ -242,6 +292,15 @@ export function SettingsView() {
           }}>
             View Logs
           </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleCheckUpdateNow}
+            disabled={checkingUpdate}
+          >
+            <RefreshCw size={14} className={checkingUpdate ? 'animate-spin' : ''} />
+            {checkingUpdate ? 'Checking...' : 'Check for Updates'}
+          </Button>
         </div>
       </Card>
 
@@ -274,7 +333,7 @@ export function SettingsView() {
       <Card className="space-y-3">
         <h3 className="text-base font-semibold text-text">About</h3>
         <div className="text-xs text-text-dim space-y-1">
-          <p>STS2 Mod Manager v0.1.0</p>
+          <p>STS2 Mod Manager v0.4.0</p>
           <p>Built with Tauri 2 + React + Rust</p>
           <p>Manage your Slay the Spire 2 mods with ease.</p>
         </div>

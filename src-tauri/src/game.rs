@@ -100,8 +100,24 @@ pub fn validate_game_path(path: &Path) -> bool {
         || path.join("Slay the Spire 2.exe").exists();
     let has_dll = path.join("sts2.dll").exists();
     let has_pck = path.join("SlayTheSpire2.pck").exists();
+    // macOS install ships the game as a .app bundle (a directory) inside the
+    // Steam "common/Slay the Spire 2" folder.
+    let has_app = path.join("SlayTheSpire2.app").is_dir();
 
-    has_exe || has_dll || has_pck
+    has_exe || has_dll || has_pck || has_app
+}
+
+/// Normalize a user-provided game path. On macOS the actual game is a
+/// `SlayTheSpire2.app` bundle inside the "Slay the Spire 2" Steam folder; if
+/// the user points us directly at the `.app`, treat its parent as the game
+/// path so `mods/` and `mods_disabled/` end up next to the bundle.
+fn normalize_game_path(path: PathBuf) -> PathBuf {
+    if path.extension().and_then(|e| e.to_str()) == Some("app") {
+        if let Some(parent) = path.parent() {
+            return parent.to_path_buf();
+        }
+    }
+    path
 }
 
 /// Auto-detect the STS2 game installation.
@@ -183,7 +199,7 @@ pub fn detect_game_path(state: tauri::State<'_, AppState>) -> std::result::Resul
 /// Manually set the game path after validation. Returns GameInfo.
 #[tauri::command]
 pub fn set_game_path(path: String, state: tauri::State<'_, AppState>) -> std::result::Result<GameInfo, String> {
-    let game_path = PathBuf::from(&path);
+    let game_path = normalize_game_path(PathBuf::from(&path));
     if !validate_game_path(&game_path) {
         return Err(AppError::GameNotFound(format!(
             "Invalid game path: {}. Could not find STS2 game files.",
@@ -422,64 +438,3 @@ pub fn open_log_file(
     }
 }
 
-/// Check for app updates by querying GitHub releases.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AppUpdateInfo {
-    pub current_version: String,
-    pub latest_version: String,
-    pub update_available: bool,
-    pub download_url: String,
-    pub release_notes: String,
-}
-
-#[tauri::command]
-pub async fn check_app_update() -> std::result::Result<AppUpdateInfo, String> {
-    let current = env!("CARGO_PKG_VERSION");
-
-    let client = reqwest::Client::builder()
-        .user_agent("sts2-mod-manager")
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    let resp = client
-        .get("https://api.github.com/repos/MohamedSerhan/sts2-mod-manager/releases/latest")
-        .header("Accept", "application/vnd.github+json")
-        .send()
-        .await
-        .map_err(|e| format!("Failed to check for updates: {}", e))?;
-
-    if !resp.status().is_success() {
-        return Err(format!("GitHub API returned {}", resp.status()));
-    }
-
-    let release: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-
-    let tag = release["tag_name"]
-        .as_str()
-        .unwrap_or("v0.0.0")
-        .trim_start_matches('v');
-    let notes = release["body"].as_str().unwrap_or("").to_string();
-    let html_url = release["html_url"]
-        .as_str()
-        .unwrap_or("https://github.com/MohamedSerhan/sts2-mod-manager/releases")
-        .to_string();
-
-    // Simple version comparison: split by '.' and compare numerically
-    let current_parts: Vec<u32> = current.split('.').filter_map(|s| s.parse().ok()).collect();
-    let latest_parts: Vec<u32> = tag.split('.').filter_map(|s| s.parse().ok()).collect();
-
-    let update_available = latest_parts > current_parts;
-
-    log::info!(
-        "App update check: current={}, latest={}, update_available={}",
-        current, tag, update_available
-    );
-
-    Ok(AppUpdateInfo {
-        current_version: current.to_string(),
-        latest_version: tag.to_string(),
-        update_available,
-        download_url: html_url,
-        release_notes: notes,
-    })
-}

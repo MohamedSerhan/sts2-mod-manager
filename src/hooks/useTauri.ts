@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ModInfo, Profile, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, AppUpdateInfo } from '../types';
+import type { ModInfo, Profile, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult } from '../types';
 
 // ── Game Detection & QOL ───────────────────────────────────────────────────
 
@@ -33,10 +33,6 @@ export async function setGithubToken(token: string): Promise<boolean> {
 
 export async function getApiKeyStatus(): Promise<{ nexus_api_key_set: boolean; github_token_set: boolean }> {
   return invoke('get_api_key_status');
-}
-
-export async function checkAppUpdate(): Promise<AppUpdateInfo> {
-  return invoke('check_app_update');
 }
 
 // ── Mod Management ─────────────────────────────────────────────────────────

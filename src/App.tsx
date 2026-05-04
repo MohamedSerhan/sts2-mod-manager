@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Home, LayoutDashboard, Package, Search, Layers, Settings, Play, ChevronRight, Wrench } from 'lucide-react';
+import { check, type Update } from '@tauri-apps/plugin-updater';
+import { relaunch } from '@tauri-apps/plugin-process';
 import { cn } from './lib/utils';
 import { ToastProvider, useToast } from './contexts/ToastContext';
 import { AppProvider, useApp } from './contexts/AppContext';
@@ -9,8 +11,7 @@ import { ModsView } from './views/Mods';
 import { BrowseView } from './views/Browse';
 import { ProfilesView } from './views/Profiles';
 import { SettingsView } from './views/Settings';
-import { launchGame, launchVanilla, installModFromFile, checkAppUpdate } from './hooks/useTauri';
-import type { AppUpdateInfo } from './types';
+import { launchGame, launchVanilla, installModFromFile } from './hooks/useTauri';
 
 type View = 'home' | 'dashboard' | 'mods' | 'browse' | 'profiles' | 'settings';
 
@@ -51,19 +52,41 @@ function AppInner() {
   const { gameInfo, mods, refreshAll, activeProfile } = useApp();
   const toast = useToast();
   const [dragOver, setDragOver] = useState(false);
-  const [appUpdate, setAppUpdate] = useState<AppUpdateInfo | null>(null);
+  const [appUpdate, setAppUpdate] = useState<Update | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
+  const [updateInstalling, setUpdateInstalling] = useState(false);
 
-  // Check for app updates on mount
+  // Check for app updates on mount, throttled to once per 24h
   useEffect(() => {
-    checkAppUpdate()
-      .then((info) => {
-        if (info.update_available) {
-          setAppUpdate(info);
-        }
+    const LAST_CHECK_KEY = 'sts2mm-last-update-check';
+    const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+    try {
+      const last = Number(localStorage.getItem(LAST_CHECK_KEY) || 0);
+      if (last && Date.now() - last < ONE_DAY_MS) return;
+    } catch { /* ignore localStorage errors */ }
+
+    check()
+      .then((update) => {
+        try { localStorage.setItem(LAST_CHECK_KEY, String(Date.now())); } catch { /* ignore */ }
+        if (update) setAppUpdate(update);
       })
-      .catch(() => { /* silent fail for update check */ });
+      .catch((e) => {
+        console.warn('Update check failed:', e);
+      });
   }, []);
+
+  async function handleInstallUpdate() {
+    if (!appUpdate || updateInstalling) return;
+    setUpdateInstalling(true);
+    try {
+      await appUpdate.downloadAndInstall();
+      toast.success('Update installed. Restarting...');
+      await relaunch();
+    } catch (e) {
+      toast.error(`Update failed: ${e instanceof Error ? e.message : String(e)}`);
+      setUpdateInstalling(false);
+    }
+  }
 
   const enabledCount = mods.filter((m) => m.enabled).length;
   const totalCount = mods.length;
@@ -164,7 +187,7 @@ function AppInner() {
       <nav className="w-[240px] flex-shrink-0 bg-surface border-r border-border flex flex-col">
         <div className="px-5 py-5 border-b border-border">
           <h1 className="text-lg font-bold text-text tracking-tight">STS2 Mod Manager</h1>
-          <p className="text-xs text-text-dim mt-1">v0.3.0</p>
+          <p className="text-xs text-text-dim mt-1">v0.4.0</p>
         </div>
 
         <div className="flex-1 py-3 px-2">
@@ -243,19 +266,23 @@ function AppInner() {
           <div className="bg-blue-600/90 text-white px-5 py-3 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <span className="text-sm font-medium">
-                Update available: v{appUpdate.latest_version} (you have v{appUpdate.current_version})
+                {updateInstalling
+                  ? `Installing v${appUpdate.version}...`
+                  : `Update available: v${appUpdate.version} (you have v${appUpdate.currentVersion})`}
               </span>
             </div>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => window.open(appUpdate.download_url, '_blank')}
-                className="px-3 py-1 bg-white text-blue-600 rounded text-xs font-semibold hover:bg-blue-50 transition-colors"
+                onClick={handleInstallUpdate}
+                disabled={updateInstalling}
+                className="px-3 py-1 bg-white text-blue-600 rounded text-xs font-semibold hover:bg-blue-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                Download
+                {updateInstalling ? 'Installing...' : 'Install & Restart'}
               </button>
               <button
                 onClick={() => setUpdateDismissed(true)}
-                className="px-2 py-1 text-white/70 hover:text-white text-xs transition-colors"
+                disabled={updateInstalling}
+                className="px-2 py-1 text-white/70 hover:text-white text-xs transition-colors disabled:opacity-50"
               >
                 Dismiss
               </button>

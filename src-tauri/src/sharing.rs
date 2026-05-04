@@ -592,8 +592,40 @@ pub async fn share_profile(
     })
 }
 
+/// Get the share info (code + owner) for a profile, if it has been shared.
+#[tauri::command]
+pub fn get_share_info(
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Option<ShareResult>, String> {
+    let profiles_path = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        s.profiles_path.clone()
+    };
+    let share_info_path = profiles_path.join(format!("{}.share", name));
+    let content = match std::fs::read_to_string(&share_info_path) {
+        Ok(c) => c,
+        Err(_) => return Ok(None),
+    };
+    let info: ShareInfo = match serde_json::from_str(&content) {
+        Ok(i) => i,
+        Err(_) => return Ok(None),
+    };
+    let filename = code_to_filename(&info.code);
+    let url = format!(
+        "https://github.com/{}/{}/blob/main/{}",
+        info.owner, PROFILES_REPO, filename
+    );
+    Ok(Some(ShareResult {
+        code: info.code,
+        owner: info.owner,
+        file_path: filename,
+        url,
+    }))
+}
+
 /// Re-share (update) an already-shared profile. Same code, updated content.
-/// Re-bundles mods without GitHub sources.
+/// Re-snapshots the current mods from disk so removed mods are excluded.
 #[tauri::command]
 pub async fn reshare_profile(
     name: String,
@@ -608,9 +640,6 @@ pub async fn reshare_profile(
         (s.profiles_path.clone(), mods_path, s.config_path.clone(), token)
     };
 
-    let mut profile =
-        crate::profiles::load_profile(&name, &profiles_path).map_err(|e| e.to_string())?;
-
     // Load existing share info
     let share_info_path = profiles_path.join(format!("{}.share", name));
     let share_info: ShareInfo = serde_json::from_str(
@@ -618,6 +647,13 @@ pub async fn reshare_profile(
             .map_err(|_| "Profile has not been shared yet. Use 'Share' first.".to_string())?,
     )
     .map_err(|e| e.to_string())?;
+
+    // Re-snapshot current mods from disk so removed mods are excluded
+    // and newly added mods are included.
+    let mut profile = crate::profiles::snapshot_current_with_sources(
+        &name, &mods_path, &profiles_path, Some(&config_path),
+    ).map_err(|e| e.to_string())?;
+    log::info!("Re-snapshot profile '{}': {} mods from disk", name, profile.mods.len());
 
     // Bundle ALL mods to guarantee version matching (same as share_profile).
     for pm in &mut profile.mods {

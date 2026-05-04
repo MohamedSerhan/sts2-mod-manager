@@ -185,6 +185,10 @@ export async function installSharedProfile(code: string): Promise<Profile> {
   return invoke('install_shared_profile', { code });
 }
 
+export async function getShareInfo(name: string): Promise<ShareResult | null> {
+  return invoke('get_share_info', { name });
+}
+
 export async function launchVanilla(): Promise<boolean> {
   return invoke('launch_vanilla');
 }

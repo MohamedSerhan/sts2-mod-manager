@@ -167,6 +167,7 @@ pub fn run() {
             // Sharing
             sharing::share_profile,
             sharing::reshare_profile,
+            sharing::get_share_info,
             sharing::fetch_shared_profile_cmd,
             sharing::install_shared_profile,
             // Subscriptions (friend sync)

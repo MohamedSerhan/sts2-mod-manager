@@ -31,6 +31,7 @@ import {
   shareProfile,
   reshareProfile,
   installSharedProfile,
+  getShareInfo,
 } from '../hooks/useTauri';
 import type { Profile, ShareResult } from '../types';
 
@@ -48,6 +49,8 @@ export function ProfilesView() {
   const [sharingProfile, setSharingProfile] = useState<string | null>(null);
   const [shareResult, setShareResult] = useState<ShareResult | null>(null);
   const [copiedCode, setCopiedCode] = useState(false);
+  const [copiedProfileCode, setCopiedProfileCode] = useState<string | null>(null);
+  const [shareInfoMap, setShareInfoMap] = useState<Record<string, ShareResult>>({});
   const [switchingProfile, setSwitchingProfile] = useState<string | null>(null);
   const { refreshAll, setActiveProfile, activeProfile } = useApp();
   const toastCtx = useToast();
@@ -55,6 +58,22 @@ export function ProfilesView() {
   useEffect(() => {
     loadProfiles();
   }, []);
+
+  // Load share info for all profiles
+  useEffect(() => {
+    if (profiles.length === 0) return;
+    const loadShareInfos = async () => {
+      const map: Record<string, ShareResult> = {};
+      for (const p of profiles) {
+        try {
+          const info = await getShareInfo(p.name);
+          if (info) map[p.name] = info;
+        } catch { /* no share info */ }
+      }
+      setShareInfoMap(map);
+    };
+    loadShareInfos();
+  }, [profiles]);
 
   async function loadProfiles() {
     try {
@@ -174,6 +193,7 @@ export function ProfilesView() {
       setSharingProfile(name);
       const result = await shareProfile(name);
       setShareResult(result);
+      setShareInfoMap((prev) => ({ ...prev, [name]: result }));
       setCopiedCode(false);
     } catch (e) {
       toastCtx.error(`Failed to share: ${e instanceof Error ? e.message : String(e)}`);
@@ -186,6 +206,7 @@ export function ProfilesView() {
       setSharingProfile(name);
       const result = await reshareProfile(name);
       setShareResult(result);
+      setShareInfoMap((prev) => ({ ...prev, [name]: result }));
       setCopiedCode(false);
       toastCtx.success('Profile re-shared! Same code, updated content.');
     } catch (e) {
@@ -484,6 +505,27 @@ export function ProfilesView() {
                     <span className="text-primary">by {profile.created_by}</span>
                   )}
                 </div>
+                {shareInfoMap[profile.name] && (
+                  <div className="flex items-center gap-1.5 mt-1.5">
+                    <code className="text-xs font-mono text-primary bg-primary/10 px-2 py-0.5 rounded select-all">
+                      {shareInfoMap[profile.name].owner}/{shareInfoMap[profile.name].code}
+                    </code>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const code = `${shareInfoMap[profile.name].owner}/${shareInfoMap[profile.name].code}`;
+                        navigator.clipboard.writeText(code).then(() => {
+                          setCopiedProfileCode(profile.name);
+                          setTimeout(() => setCopiedProfileCode(null), 2000);
+                        }).catch(() => {});
+                      }}
+                      className="text-text-dim hover:text-text transition-colors"
+                      title="Copy share code"
+                    >
+                      {copiedProfileCode === profile.name ? <Check size={12} /> : <Copy size={12} />}
+                    </button>
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-1">
                 <Button

@@ -182,6 +182,7 @@ pub fn run() {
             backup::create_backup_cmd,
             backup::list_backups_cmd,
             backup::restore_backup_cmd,
+            backup::delete_backup_cmd,
             backup::reset_to_vanilla_cmd,
             // Sharing
             sharing::share_profile,

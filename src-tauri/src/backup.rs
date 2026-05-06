@@ -22,6 +22,10 @@ pub struct BackupInfo {
     pub size_bytes: u64,
 }
 
+/// Maximum number of backups to retain. Older backups are pruned after each
+/// successful create.
+const MAX_BACKUPS: usize = 5;
+
 /// Create a timestamped backup of the current mods directory.
 ///
 /// Copies all files from `mods_path` into a new subdirectory under
@@ -38,7 +42,58 @@ pub fn create_backup(mods_path: &Path, backup_dir: &Path) -> Result<String> {
         copy_dir_recursive(mods_path, &dest)?;
     }
 
+    if let Err(e) = prune_old_backups(backup_dir, MAX_BACKUPS) {
+        log::warn!("Retention pruning failed: {}", e);
+    }
+
     Ok(backup_name)
+}
+
+/// Keep the newest `keep` backups in `backup_dir`, deleting the rest.
+fn prune_old_backups(backup_dir: &Path, keep: usize) -> io::Result<()> {
+    if !backup_dir.exists() {
+        return Ok(());
+    }
+
+    let mut names: Vec<String> = fs::read_dir(backup_dir)?
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .filter(|n| n.starts_with("backup_"))
+        .collect();
+
+    names.sort_by(|a, b| b.cmp(a));
+
+    for name in names.into_iter().skip(keep) {
+        log::info!("Retention: pruning old backup '{}'", name);
+        if let Err(e) = fs::remove_dir_all(backup_dir.join(&name)) {
+            log::warn!("Failed to prune backup '{}': {}", name, e);
+        }
+    }
+
+    Ok(())
+}
+
+/// Delete a single backup by name. Rejects names that don't start with
+/// `backup_` as a sanity check against accidental directory removal.
+pub fn delete_backup(name: &str, backup_dir: &Path) -> Result<()> {
+    if !name.starts_with("backup_") {
+        return Err(crate::error::AppError::Other(format!(
+            "Refusing to delete '{}' — not a backup directory",
+            name
+        )));
+    }
+
+    let target = backup_dir.join(name);
+    if !target.exists() {
+        return Err(crate::error::AppError::Other(format!(
+            "Backup '{}' not found",
+            name
+        )));
+    }
+
+    fs::remove_dir_all(&target)?;
+    Ok(())
 }
 
 /// List all backups in the backup directory.
@@ -196,6 +251,14 @@ pub fn restore_backup_cmd(name: String, state: tauri::State<'_, AppState>) -> st
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
     let backup_dir = s.config_path.join("backups");
     restore_backup(&name, &backup_dir, mods_path).map_err(|e| e.to_string())
+}
+
+/// Delete a specific backup.
+#[tauri::command]
+pub fn delete_backup_cmd(name: String, state: tauri::State<'_, AppState>) -> std::result::Result<(), String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let backup_dir = s.config_path.join("backups");
+    delete_backup(&name, &backup_dir).map_err(|e| e.to_string())
 }
 
 /// Reset to vanilla by moving all mods to disabled.

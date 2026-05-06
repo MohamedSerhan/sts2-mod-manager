@@ -17,6 +17,13 @@ permissions:
 
 jobs:
   build:
+    # Job-level permissions are also declared here in addition to the
+    # workflow-level block above. tauri-action's "Create a release" call has
+    # been seen to fail with "Resource not accessible by integration" on tag
+    # pushes when only the workflow-level permissions block is present;
+    # repeating the grant at the job level is the documented workaround.
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:

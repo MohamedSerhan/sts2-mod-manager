@@ -16,6 +16,8 @@ interface ToastContextType {
 
 const ToastContext = createContext<ToastContextType | null>(null);
 
+const FADE_MS = 250;
+
 let nextId = 0;
 
 export function ToastProvider({ children }: { children: ReactNode }) {
@@ -53,10 +55,26 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 }
 
 function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }) {
+  // `visible` drives the mount fade-in; `leaving` drives the dismiss fade-out.
+  // We delay the actual unmount by FADE_MS so the exit transition has time to play.
+  const [visible, setVisible] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+
   useEffect(() => {
-    const timer = setTimeout(onDismiss, toast.type === 'error' ? 6000 : 4000);
-    return () => clearTimeout(timer);
-  }, [onDismiss, toast.type]);
+    const raf = requestAnimationFrame(() => setVisible(true));
+    const dismissAt = toast.type === 'error' ? 6000 : 4000;
+    const dismissTimer = setTimeout(() => setLeaving(true), dismissAt);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(dismissTimer);
+    };
+  }, [toast.type]);
+
+  useEffect(() => {
+    if (!leaving) return;
+    const t = setTimeout(onDismiss, FADE_MS);
+    return () => clearTimeout(t);
+  }, [leaving, onDismiss]);
 
   const borderColor = {
     success: 'border-green-500/40',
@@ -70,13 +88,17 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
     info: 'text-primary',
   }[toast.type];
 
+  const shown = visible && !leaving;
+
   return (
     <div
-      className={`bg-surface border ${borderColor} rounded-lg px-4 py-3 shadow-lg flex items-start gap-2 text-sm text-text animate-in fade-in slide-in-from-top-2`}
+      className={`bg-surface border ${borderColor} rounded-lg px-4 py-3 shadow-lg flex items-start gap-2 text-sm text-text transition-all duration-[250ms] ease-out ${
+        shown ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'
+      }`}
     >
       <span className={`${textColor} flex-1`}>{toast.message}</span>
       <button
-        onClick={onDismiss}
+        onClick={() => setLeaving(true)}
         className="text-text-dim hover:text-text shrink-0 mt-0.5"
       >
         <X size={14} />

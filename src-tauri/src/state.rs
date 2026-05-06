@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -39,6 +40,11 @@ pub struct AppStateInner {
     /// Nexus mods queued by Quick Add but not yet downloaded. Consumed by the
     /// downloads watcher to attach Nexus URLs to auto-installed mods.
     pub pending_nexus_installs: Vec<PendingNexusInstall>,
+    /// Profile names currently being shared/re-shared. Used as an in-flight
+    /// guard so a double-click on Share / Re-share doesn't kick off a second
+    /// upload that races the first one against the same gist files (causing
+    /// 409 conflicts on GitHub's create-or-update endpoint).
+    pub sharing_in_flight: HashSet<String>,
 }
 
 pub type AppState = Arc<Mutex<AppStateInner>>;
@@ -72,6 +78,7 @@ impl AppStateInner {
             vanilla_mode: false,
             active_profile: None,
             pending_nexus_installs: Vec::new(),
+            sharing_in_flight: HashSet::new(),
         }
     }
 

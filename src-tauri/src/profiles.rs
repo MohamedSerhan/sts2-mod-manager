@@ -785,6 +785,17 @@ pub fn import_profile_cmd(
 
 // ── Profile drift detection ────────────────────────────────────────────────
 
+/// A mod whose installed version differs from the profile's recorded version.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VersionMismatch {
+    /// Display name of the mod (whichever side has a usable name).
+    pub name: String,
+    /// Version recorded in the profile.
+    pub profile_version: String,
+    /// Version currently installed on disk.
+    pub disk_version: String,
+}
+
 /// Describes the difference between installed mods and a saved profile.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProfileDrift {
@@ -794,6 +805,9 @@ pub struct ProfileDrift {
     pub removed: Vec<String>,
     /// Mods whose enabled/disabled state differs from the profile
     pub toggled: Vec<String>,
+    /// Mods whose installed version differs from the profile version
+    #[serde(default)]
+    pub version_changed: Vec<VersionMismatch>,
     /// True when there is any difference at all
     pub has_drift: bool,
 }
@@ -804,6 +818,20 @@ fn mod_key(name: &str, folder_name: Option<&str>, mod_id: Option<&str>) -> Strin
         .or(folder_name)
         .unwrap_or(name)
         .to_lowercase()
+}
+
+/// Treat a version string as a wildcard if it's missing or a placeholder.
+/// Mirrors the rule used by `apply_subscription_update` and `switch_profile`
+/// so drift detection agrees with what the apply path will actually do.
+fn version_is_wildcard(v: &str) -> bool {
+    let v = v.trim_start_matches('v').trim();
+    v.is_empty() || v == "unknown" || v == "0.0.0"
+}
+
+fn versions_match(profile_v: &str, disk_v: &str) -> bool {
+    let pv = profile_v.trim_start_matches('v');
+    let dv = disk_v.trim_start_matches('v');
+    pv == dv || version_is_wildcard(pv) || version_is_wildcard(dv)
 }
 
 #[tauri::command]
@@ -817,33 +845,36 @@ pub fn get_profile_drift(
 
     let profile = load_profile(&name, &s.profiles_path).map_err(|e| e.to_string())?;
 
-    // Build a map of profile mods: key -> enabled
-    let mut profile_map: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+    // Build a map of profile mods: key -> (enabled, version, display_name)
+    let mut profile_map: std::collections::HashMap<String, (bool, String, String)> =
+        std::collections::HashMap::new();
     for pm in &profile.mods {
         let key = mod_key(&pm.name, pm.folder_name.as_deref(), pm.mod_id.as_deref());
-        profile_map.insert(key, pm.enabled);
+        profile_map.insert(key, (pm.enabled, pm.version.clone(), pm.name.clone()));
     }
 
-    // Build a map of installed mods: key -> (display_name, enabled)
+    // Build a map of installed mods: key -> (display_name, enabled, version)
     let enabled_mods = crate::mods::scan_mods(mods_path);
     let disabled_mods = crate::mods::scan_disabled_mods(disabled_path);
 
-    let mut installed_map: std::collections::HashMap<String, (String, bool)> = std::collections::HashMap::new();
+    let mut installed_map: std::collections::HashMap<String, (String, bool, String)> =
+        std::collections::HashMap::new();
     for m in &enabled_mods {
         let key = mod_key(&m.name, m.folder_name.as_deref(), m.mod_id.as_deref());
-        installed_map.insert(key, (m.name.clone(), true));
+        installed_map.insert(key, (m.name.clone(), true, m.version.clone()));
     }
     for m in &disabled_mods {
         let key = mod_key(&m.name, m.folder_name.as_deref(), m.mod_id.as_deref());
-        installed_map.insert(key, (m.name.clone(), false));
+        installed_map.insert(key, (m.name.clone(), false, m.version.clone()));
     }
 
     let mut added = Vec::new();
     let mut removed = Vec::new();
     let mut toggled = Vec::new();
+    let mut version_changed = Vec::new();
 
     // Mods installed but not in profile
-    for (key, (display_name, _)) in &installed_map {
+    for (key, (display_name, _, _)) in &installed_map {
         if !profile_map.contains_key(key) {
             added.push(display_name.clone());
         }
@@ -857,21 +888,36 @@ pub fn get_profile_drift(
         }
     }
 
-    // Mods whose enabled state differs
-    for (key, profile_enabled) in &profile_map {
-        if let Some((display_name, installed_enabled)) = installed_map.get(key) {
+    // Mods whose enabled state OR version differs
+    for (key, (profile_enabled, profile_version, profile_display)) in &profile_map {
+        if let Some((disk_display, installed_enabled, disk_version)) = installed_map.get(key) {
             if profile_enabled != installed_enabled {
-                toggled.push(display_name.clone());
+                toggled.push(disk_display.clone());
+            }
+            if !versions_match(profile_version, disk_version) {
+                version_changed.push(VersionMismatch {
+                    name: if disk_display.is_empty() {
+                        profile_display.clone()
+                    } else {
+                        disk_display.clone()
+                    },
+                    profile_version: profile_version.clone(),
+                    disk_version: disk_version.clone(),
+                });
             }
         }
     }
 
-    let has_drift = !added.is_empty() || !removed.is_empty() || !toggled.is_empty();
+    let has_drift = !added.is_empty()
+        || !removed.is_empty()
+        || !toggled.is_empty()
+        || !version_changed.is_empty();
 
     Ok(ProfileDrift {
         added,
         removed,
         toggled,
+        version_changed,
         has_drift,
     })
 }

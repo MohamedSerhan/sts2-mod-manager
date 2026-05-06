@@ -4,7 +4,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::download::{fetch_latest_release, GitHubRepo};
+use crate::download::{fetch_latest_release, search_github_repos_relevance, GitHubRepo};
 use crate::error::Result;
 use crate::mods::ModInfo;
 use crate::state::AppState;
@@ -393,7 +393,9 @@ pub async fn find_github_from_nexus(
                 continue;
             }
             let search_query = format!("{} slay-the-spire-2 OR sts2 OR \"slay the spire 2\"", query);
-            let results = search_github_raw(&search_query, github_token.as_deref()).await;
+            let results = search_github_repos_relevance(&search_query, github_token.as_deref())
+                .await
+                .unwrap_or_default();
 
             // Find a result that matches by name similarity
             let norm_name = query.to_lowercase().replace(' ', "").replace('-', "").replace('_', "");
@@ -501,50 +503,39 @@ pub async fn extract_github_from_nexus(
     None
 }
 
-// ── GitHub Search (raw, without STS2 qualifiers) ───────────────────────────
+// ── STS2 Evidence Gate ──────────────────────────────────────────────────────
 
-/// Response type for GitHub search API.
-#[derive(Debug, Deserialize)]
-struct GHSearchResponse {
-    items: Vec<GitHubRepo>,
-}
+/// Auto-detect picks from a broad relevance search, so we require independent evidence
+/// that a candidate is actually an STS2 mod before linking it. Without this, a generic
+/// repo named "AutoPath" can outrank the real `jadistanbelly/autopath-sts2`.
+fn is_sts2_related(repo: &GitHubRepo) -> bool {
+    let name_lower = repo.name.to_lowercase();
+    if name_lower.contains("sts2")
+        || name_lower.contains("slay-the-spire-2")
+        || name_lower.contains("spire-2")
+    {
+        return true;
+    }
 
-/// Search GitHub repositories with an arbitrary query string (no STS2 qualifiers appended).
-async fn search_github_raw(query: &str, token: Option<&str>) -> Vec<GitHubRepo> {
-    let mut headers = reqwest::header::HeaderMap::new();
-    if let Ok(v) = "application/vnd.github+json".parse() {
-        headers.insert(reqwest::header::ACCEPT, v);
-    }
-    if let Ok(v) = "sts2-mod-manager/0.1".parse() {
-        headers.insert(reqwest::header::USER_AGENT, v);
-    }
-    if let Some(tok) = token {
-        if let Ok(val) = format!("Bearer {}", tok).parse() {
-            headers.insert(reqwest::header::AUTHORIZATION, val);
+    for topic in &repo.topics {
+        let t = topic.to_lowercase();
+        if t == "sts2" || t == "slay-the-spire-2" || t == "slay-the-spire" {
+            return true;
         }
     }
-    let client = reqwest::Client::builder()
-        .default_headers(headers)
-        .build()
-        .unwrap_or_default();
 
-    let resp = client
-        .get("https://api.github.com/search/repositories")
-        .query(&[
-            ("q", query),
-            ("sort", "updated"),
-            ("per_page", "30"),
-        ])
-        .send()
-        .await;
-
-    match resp {
-        Ok(r) => match r.error_for_status() {
-            Ok(r) => r.json::<GHSearchResponse>().await.map(|s| s.items).unwrap_or_default(),
-            Err(_) => Vec::new(),
-        },
-        Err(_) => Vec::new(),
+    if let Some(ref desc) = repo.description {
+        let d = desc.to_lowercase();
+        if d.contains("sts2")
+            || d.contains("slay the spire 2")
+            || d.contains("slaythespire2")
+            || d.contains("slay-the-spire-2")
+        {
+            return true;
+        }
     }
+
+    false
 }
 
 // ── Normalization Helpers ───────────────────────────────────────────────────
@@ -874,19 +865,30 @@ pub async fn auto_detect_sources(
         let mut candidates: Vec<Candidate> = Vec::new();
         let mut seen_repos = std::collections::HashSet::new();
 
+        const MIN_SCORE: u32 = 70;
+
         for query in &queries {
             // Rate-limit: 100ms delay between API calls
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-            let repos = search_github_raw(query, token.as_deref()).await;
+            let repos = search_github_repos_relevance(query, token.as_deref())
+                .await
+                .unwrap_or_default();
             for repo in repos {
                 if seen_repos.contains(&repo.full_name) {
                     continue;
                 }
                 let sc = score_repo(&repo, &m.name, folder_name.as_deref());
-                if sc > 0 {
+                if sc >= MIN_SCORE {
                     seen_repos.insert(repo.full_name.clone());
                     candidates.push(Candidate { repo, score: sc });
+                } else if sc > 0 {
+                    log::info!(
+                        "Auto-detect candidate {} score={} (below threshold {})",
+                        repo.full_name,
+                        sc,
+                        MIN_SCORE
+                    );
                 }
             }
 
@@ -899,9 +901,20 @@ pub async fn auto_detect_sources(
         // Sort candidates by score descending
         candidates.sort_by(|a, b| b.score.cmp(&a.score));
 
-        // Try candidates in score order, verify they have releases
+        let best_score = candidates.first().map(|c| c.score).unwrap_or(0);
+
+        // Try candidates in score order, verify they're STS2-related and have releases
         let mut found = false;
         for candidate in &candidates {
+            if !is_sts2_related(&candidate.repo) {
+                log::info!(
+                    "Auto-detect candidate {} score={} (rejected: not STS2-related)",
+                    candidate.repo.full_name,
+                    candidate.score
+                );
+                continue;
+            }
+
             // Rate-limit before release check
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
@@ -917,16 +930,21 @@ pub async fn auto_detect_sources(
                 let full_name = candidate.repo.full_name.clone();
                 let confidence = if candidate.score >= 90 {
                     "high"
-                } else if candidate.score >= 50 {
-                    "medium"
                 } else {
-                    "low"
+                    "medium"
                 };
 
                 let entry = db.mods.entry(m.name.clone()).or_default();
                 entry.github_repo = Some(full_name.clone());
                 entry.github_auto_detected = true;
                 save_sources(&db, &config_path).map_err(|e| e.to_string())?;
+
+                log::info!(
+                    "Auto-detect: '{}' resolved to {} (score={})",
+                    m.name,
+                    full_name,
+                    candidate.score
+                );
 
                 matched.push(AutoDetectMatch {
                     mod_name: m.name.clone(),
@@ -939,6 +957,11 @@ pub async fn auto_detect_sources(
         }
 
         if !found {
+            log::info!(
+                "Auto-detect: no acceptable candidate for '{}' (best score={})",
+                m.name,
+                best_score
+            );
             unmatched.push(m.name.clone());
         }
     }

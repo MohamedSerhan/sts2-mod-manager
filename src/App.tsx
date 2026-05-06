@@ -313,7 +313,7 @@ function AppInner() {
         {activeView === 'home' && <HomeView onGoToSettings={() => setActiveView('settings')} />}
         {activeView === 'dashboard' && <DashboardView />}
         {activeView === 'mods' && <ModsView advancedMode={advancedMode} />}
-        {activeView === 'browse' && <BrowseView />}
+        {activeView === 'browse' && <BrowseView onGoToSettings={() => setActiveView('settings')} />}
         {activeView === 'profiles' && <ProfilesView />}
         {activeView === 'settings' && <SettingsView />}
       </main>

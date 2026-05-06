@@ -159,6 +159,8 @@ pub fn run() {
             nexus::handle_nxm_link,
             nexus::get_nexus_mod_info,
             nexus::set_nexus_api_key,
+            nexus::nexus_get_trending,
+            nexus::nexus_get_latest_added,
             // Profiles
             profiles::list_profiles_cmd,
             profiles::create_profile,

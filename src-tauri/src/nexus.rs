@@ -157,9 +157,50 @@ impl NexusClient {
             "https://api.nexusmods.com/v1/games/{}/mods/{}.json",
             game, mod_id
         );
-        let resp = self.client.get(&url).send().await?.error_for_status()?;
+        log::debug!("Nexus API: get_mod_info {}/{}", game, mod_id);
+        let resp = self.client.get(&url).send().await.map_err(|e| {
+            log::warn!("Nexus get_mod_info request failed for {}/{}: {}", game, mod_id, e);
+            e
+        })?;
+        let resp = resp.error_for_status().map_err(|e| {
+            log::warn!("Nexus get_mod_info HTTP error for {}/{}: {}", game, mod_id, e);
+            e
+        })?;
         let info: NexusModInfo = resp.json().await?;
         Ok(info)
+    }
+
+    /// Fetch one of the public mod-list endpoints (`trending`, `latest_added`, etc.).
+    async fn get_mod_list(&self, game: &str, list_kind: &str) -> Result<Vec<NexusModInfo>> {
+        let url = format!(
+            "https://api.nexusmods.com/v1/games/{}/mods/{}.json",
+            game, list_kind
+        );
+        log::debug!("Nexus GET {}", url);
+        let resp = self.client.get(&url).send().await.map_err(|e| {
+            log::warn!("Nexus {} request failed: {}", list_kind, e);
+            e
+        })?;
+        let resp = resp.error_for_status().map_err(|e| {
+            log::warn!("Nexus {} HTTP error: {}", list_kind, e);
+            e
+        })?;
+        let mods: Vec<NexusModInfo> = resp.json().await.map_err(|e| {
+            log::warn!("Nexus {} decode failed: {}", list_kind, e);
+            e
+        })?;
+        log::debug!("Nexus {} returned {} mods", list_kind, mods.len());
+        Ok(mods)
+    }
+
+    /// Get the trending mods for a game.
+    pub async fn get_trending(&self, game: &str) -> Result<Vec<NexusModInfo>> {
+        self.get_mod_list(game, "trending").await
+    }
+
+    /// Get the latest added mods for a game.
+    pub async fn get_latest_added(&self, game: &str) -> Result<Vec<NexusModInfo>> {
+        self.get_mod_list(game, "latest_added").await
     }
 
     /// Get file listing for a mod.
@@ -168,8 +209,17 @@ impl NexusClient {
             "https://api.nexusmods.com/v1/games/{}/mods/{}/files.json",
             game, mod_id
         );
-        let resp = self.client.get(&url).send().await?.error_for_status()?;
+        log::debug!("Nexus API: get_mod_files {}/{}", game, mod_id);
+        let resp = self.client.get(&url).send().await.map_err(|e| {
+            log::warn!("Nexus get_mod_files request failed for {}/{}: {}", game, mod_id, e);
+            e
+        })?;
+        let resp = resp.error_for_status().map_err(|e| {
+            log::warn!("Nexus get_mod_files HTTP error for {}/{}: {}", game, mod_id, e);
+            e
+        })?;
         let files_resp: NexusFilesResponse = resp.json().await?;
+        log::debug!("Nexus API: {}/{} returned {} files", game, mod_id, files_resp.files.len());
         Ok(files_resp.files)
     }
 
@@ -186,8 +236,17 @@ impl NexusClient {
             "https://api.nexusmods.com/v1/games/{}/mods/{}/files/{}/download_link.json?key={}&expires={}",
             game, mod_id, file_id, key, expires
         );
-        let resp = self.client.get(&url).send().await?.error_for_status()?;
+        log::debug!("Nexus API: get_download_urls {}/{}/files/{}", game, mod_id, file_id);
+        let resp = self.client.get(&url).send().await.map_err(|e| {
+            log::warn!("Nexus get_download_urls request failed for {}/{}/files/{}: {}", game, mod_id, file_id, e);
+            e
+        })?;
+        let resp = resp.error_for_status().map_err(|e| {
+            log::warn!("Nexus get_download_urls HTTP error for {}/{}/files/{}: {} (key may have expired)", game, mod_id, file_id, e);
+            e
+        })?;
         let urls: Vec<NexusDownloadUrl> = resp.json().await?;
+        log::debug!("Nexus API: {} download URL(s) returned", urls.len());
         Ok(urls)
     }
 }
@@ -200,7 +259,15 @@ pub async fn handle_nxm_link(
     url: String,
     _state: tauri::State<'_, AppState>,
 ) -> std::result::Result<NxmLink, String> {
-    let link = parse_nxm_url(&url).map_err(|e| e.to_string())?;
+    log::info!("Received NXM link: {}", url);
+    let link = parse_nxm_url(&url).map_err(|e| {
+        log::warn!("Failed to parse NXM link '{}': {}", url, e);
+        e.to_string()
+    })?;
+    log::info!(
+        "Parsed NXM link: game={} mod_id={} file_id={} (has_key={})",
+        link.game_domain, link.mod_id, link.file_id, link.key.is_some()
+    );
     Ok(link)
 }
 
@@ -221,6 +288,43 @@ pub async fn get_nexus_mod_info(
     let client = NexusClient::new(&api_key);
     client
         .get_mod_info(&game, mod_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Hardcoded Nexus game domain for STS2.
+const STS2_GAME_DOMAIN: &str = "slaythespire2";
+
+fn nexus_client_from_state(
+    state: &tauri::State<'_, AppState>,
+) -> std::result::Result<NexusClient, String> {
+    let api_key = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        s.nexus_api_key
+            .clone()
+            .ok_or_else(|| "Nexus API key not set".to_string())?
+    };
+    Ok(NexusClient::new(&api_key))
+}
+
+/// Get the trending mods on Nexus for STS2.
+#[tauri::command]
+pub async fn nexus_get_trending(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<NexusModInfo>, String> {
+    nexus_client_from_state(&state)?
+        .get_trending(STS2_GAME_DOMAIN)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Get the most recently added mods on Nexus for STS2.
+#[tauri::command]
+pub async fn nexus_get_latest_added(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<NexusModInfo>, String> {
+    nexus_client_from_state(&state)?
+        .get_latest_added(STS2_GAME_DOMAIN)
         .await
         .map_err(|e| e.to_string())
 }

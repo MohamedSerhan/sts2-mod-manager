@@ -78,9 +78,11 @@ export interface NexusModInfo {
   mod_id: number;
   name: string | null;
   summary: string | null;
+  description: string | null;
   version: string | null;
   author: string | null;
   category_id: number | null;
+  picture_url: string | null;
 }
 
 export interface ModUpdate {

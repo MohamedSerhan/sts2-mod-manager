@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
-import { FolderSearch, Key, FolderOpen, RefreshCw, ClipboardCheck, ExternalLink, Download, Pin, PinOff } from 'lucide-react';
+import { FolderSearch, Key, FolderOpen, RefreshCw, ClipboardCheck, ExternalLink, Download, Pin, PinOff, Archive, RotateCcw, Trash2 } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
@@ -20,11 +20,14 @@ import {
   openLogFile,
   getLogPath,
   auditModVersions,
-  repairModFolders,
   pinMod,
   unpinMod,
+  createBackup,
+  listBackups,
+  restoreBackup,
+  deleteBackup,
 } from '../hooks/useTauri';
-import type { ModAuditEntry } from '../types';
+import type { ModAuditEntry, BackupInfo } from '../types';
 
 export function SettingsView() {
   const { gameInfo, refreshAll } = useApp();
@@ -37,6 +40,71 @@ export function SettingsView() {
   const [appVersion, setAppVersion] = useState('');
   const [auditing, setAuditing] = useState(false);
   const [auditResults, setAuditResults] = useState<ModAuditEntry[] | null>(null);
+  const [backups, setBackups] = useState<BackupInfo[]>([]);
+  const [backupBusy, setBackupBusy] = useState<string | null>(null);
+
+  async function refreshBackups() {
+    try {
+      setBackups(await listBackups());
+    } catch (e) {
+      toast.error(`Failed to load backups: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  useEffect(() => { refreshBackups(); }, []);
+
+  async function handleCreateBackup() {
+    setBackupBusy('create');
+    try {
+      const name = await createBackup();
+      toast.success(`Backup created: ${name}`);
+      await refreshBackups();
+    } catch (e) {
+      toast.error(`Failed to create backup: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBackupBusy(null);
+    }
+  }
+
+  async function handleRestoreBackup(name: string) {
+    if (!confirm('Restore this backup? This will replace your current mods.')) return;
+    setBackupBusy(name);
+    try {
+      await restoreBackup(name);
+      await refreshAll();
+      toast.success('Backup restored.');
+    } catch (e) {
+      toast.error(`Failed to restore backup: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBackupBusy(null);
+    }
+  }
+
+  async function handleDeleteBackup(name: string) {
+    if (!confirm('Delete this backup?')) return;
+    setBackupBusy(name);
+    try {
+      await deleteBackup(name);
+      toast.success('Backup deleted.');
+      await refreshBackups();
+    } catch (e) {
+      toast.error(`Failed to delete backup: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBackupBusy(null);
+    }
+  }
+
+  function formatBackupTimestamp(name: string): string {
+    const m = name.match(/^backup_(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})$/);
+    if (!m) return name;
+    const [, y, mo, d, h, mi, s] = m;
+    const date = new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s));
+    return date.toLocaleString();
+  }
+
+  function formatSizeMb(bytes: number): string {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
 
   useEffect(() => { getVersion().then(setAppVersion).catch(() => {}); }, []);
 
@@ -293,9 +361,10 @@ export function SettingsView() {
           <Button variant="secondary" size="sm" onClick={async () => {
             try {
               await openLogFile();
-            } catch {
+            } catch (e) {
               const path = await getLogPath().catch(() => 'unknown');
-              toast.error(`Log file not found at: ${path}`);
+              const msg = e instanceof Error ? e.message : String(e);
+              toast.error(`Could not open log: ${msg} (path: ${path})`);
             }
           }}>
             View Logs
@@ -328,30 +397,71 @@ export function SettingsView() {
             <ClipboardCheck size={14} className={auditing ? 'animate-pulse' : ''} />
             {auditing ? 'Auditing...' : 'Audit Mod Versions'}
           </Button>
+        </div>
+      </Card>
+
+      {/* Backups */}
+      <Card className="space-y-4">
+        <h3 className="text-base font-semibold text-text flex items-center gap-2">
+          <Archive size={18} />
+          Backups
+        </h3>
+        <p className="text-xs text-text-dim">
+          Auto-created before each game launch and Vanilla Mode. Keeps last 5.
+        </p>
+        <div>
           <Button
-            variant="secondary"
             size="sm"
-            onClick={async () => {
-              try {
-                const repairs = await repairModFolders();
-                await refreshAll();
-                if (repairs.length === 0) {
-                  toast.success('All mod folders are correctly named — nothing to repair.');
-                } else {
-                  toast.success(
-                    `Repaired ${repairs.length} folder${repairs.length !== 1 ? 's' : ''}: ` +
-                    repairs.map(r => `${r.old_folder} → ${r.new_folder}`).join(', ')
-                  );
-                }
-              } catch (e) {
-                toast.error(`Repair failed: ${e instanceof Error ? e.message : String(e)}`);
-              }
-            }}
+            onClick={handleCreateBackup}
+            disabled={backupBusy !== null}
           >
-            <RefreshCw size={14} />
-            Repair Mod Folders
+            <Archive size={14} />
+            {backupBusy === 'create' ? 'Creating...' : 'Create Backup Now'}
           </Button>
         </div>
+        {backups.length === 0 ? (
+          <p className="text-xs text-text-dim italic">No backups yet.</p>
+        ) : (
+          <div className="space-y-1.5">
+            {backups.map((b) => {
+              const busy = backupBusy === b.name;
+              const anyBusy = backupBusy !== null;
+              return (
+                <div
+                  key={b.name}
+                  className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-surface text-xs"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="text-text font-medium">{formatBackupTimestamp(b.name)}</div>
+                    <div className="text-text-dim">
+                      {b.mod_count} {b.mod_count === 1 ? 'file' : 'files'} &middot; {formatSizeMb(b.size_bytes)}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => handleRestoreBackup(b.name)}
+                      disabled={anyBusy}
+                    >
+                      <RotateCcw size={12} />
+                      {busy ? 'Working...' : 'Restore'}
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={() => handleDeleteBackup(b.name)}
+                      disabled={anyBusy}
+                      title="Delete backup"
+                    >
+                      <Trash2 size={12} />
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </Card>
 
       {/* Mod Version Audit */}

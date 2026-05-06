@@ -39,6 +39,8 @@ pub struct GitHubRepo {
     pub stargazers_count: u64,
     pub updated_at: String,
     pub owner: GitHubOwner,
+    #[serde(default)]
+    pub topics: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,8 +89,17 @@ pub async fn fetch_latest_release(
         "https://api.github.com/repos/{}/{}/releases/latest",
         owner, repo
     );
-    let resp = client.get(&url).send().await?.error_for_status()?;
+    log::debug!("GitHub API: fetch latest release {}/{} (token={})", owner, repo, token.is_some());
+    let resp = client.get(&url).send().await.map_err(|e| {
+        log::warn!("GitHub fetch_latest_release request failed for {}/{}: {}", owner, repo, e);
+        e
+    })?;
+    let resp = resp.error_for_status().map_err(|e| {
+        log::warn!("GitHub fetch_latest_release HTTP error for {}/{}: {}", owner, repo, e);
+        e
+    })?;
     let release: GitHubRelease = resp.json().await?;
+    log::debug!("GitHub API: {}/{} latest = {} ({} assets)", owner, repo, release.tag_name, release.assets.len());
     Ok(release)
 }
 
@@ -159,6 +170,31 @@ pub async fn search_github_repos(
     Ok(search.items)
 }
 
+/// Search GitHub repositories sorted by best-match relevance (no STS2 qualifier appended).
+/// Used by auto-detect so the most semantically relevant repo wins, not the most recently
+/// updated one. Includes the mercy-preview Accept header so `topics` is reliably populated.
+pub async fn search_github_repos_relevance(
+    query: &str,
+    token: Option<&str>,
+) -> Result<Vec<GitHubRepo>> {
+    let client = build_client(token);
+    let url = "https://api.github.com/search/repositories";
+
+    let req = client
+        .get(url)
+        .header(
+            reqwest::header::ACCEPT,
+            "application/vnd.github.mercy-preview+json",
+        )
+        .query(&[("q", query), ("per_page", "30")]);
+
+    log::debug!("Auto-detect search: GET {}?q={}&per_page=30", url, query);
+
+    let resp = req.send().await?.error_for_status()?;
+    let search: GitHubSearchResponse = resp.json().await?;
+    Ok(search.items)
+}
+
 /// Download a file from a URL to a destination path with progress callback.
 pub async fn download_file<F>(url: &str, dest: &Path, on_progress: F) -> Result<()>
 where
@@ -216,18 +252,33 @@ pub async fn download_and_install_github_mod(
     cache_path: &Path,
     token: Option<&str>,
 ) -> Result<ModInfo> {
+    log::info!(
+        "Downloading GitHub mod {}/{} (tag={}, mods_path={}, cache_path={})",
+        owner, repo, tag.unwrap_or("<latest>"),
+        mods_path.display(), cache_path.display()
+    );
     let release = match tag {
         Some(t) => fetch_release_by_tag(owner, repo, t, token).await?,
         None => fetch_latest_release(owner, repo, token).await?,
     };
 
     let asset = find_best_asset(&release).ok_or_else(|| {
+        log::error!(
+            "No downloadable assets in release {} for {}/{} (assets: {:?})",
+            release.tag_name, owner, repo,
+            release.assets.iter().map(|a| &a.name).collect::<Vec<_>>()
+        );
         AppError::Other(format!(
             "No downloadable assets found in release {} for {}/{}",
             release.tag_name, owner, repo
         ))
     })?
     .clone();
+
+    log::info!(
+        "Selected asset '{}' for {}/{} v{} ({} bytes)",
+        asset.name, owner, repo, release.tag_name, asset.size
+    );
 
     let dest = cache_path.join(&asset.name);
 
@@ -239,7 +290,13 @@ pub async fn download_and_install_github_mod(
             total
         );
     })
-    .await?;
+    .await
+    .map_err(|e| {
+        log::error!("Download failed for {}/{} asset '{}': {}", owner, repo, asset.name, e);
+        e
+    })?;
+
+    log::info!("Downloaded '{}' to {}", asset.name, dest.display());
 
     // Install the downloaded file
     if dest.extension().and_then(|e| e.to_str()) == Some("zip") {

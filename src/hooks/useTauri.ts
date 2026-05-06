@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ModInfo, Profile, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, ModAuditEntry } from '../types';
+import type { ModInfo, Profile, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, ModAuditEntry, NexusModInfo } from '../types';
 
 // ── Game Detection & QOL ───────────────────────────────────────────────────
 
@@ -85,6 +85,14 @@ export async function setNexusApiKey(key: string): Promise<void> {
   return invoke('set_nexus_api_key', { key });
 }
 
+export async function nexusGetTrending(): Promise<NexusModInfo[]> {
+  return invoke('nexus_get_trending');
+}
+
+export async function nexusGetLatestAdded(): Promise<NexusModInfo[]> {
+  return invoke('nexus_get_latest_added');
+}
+
 // ── Profiles ───────────────────────────────────────────────────────────────
 
 export async function listProfiles(): Promise<Profile[]> {
@@ -119,10 +127,17 @@ export async function importProfile(json: string): Promise<Profile> {
   return invoke('import_profile_cmd', { json });
 }
 
+export interface VersionMismatch {
+  name: string;
+  profile_version: string;
+  disk_version: string;
+}
+
 export interface ProfileDrift {
   added: string[];
   removed: string[];
   toggled: string[];
+  version_changed: VersionMismatch[];
   has_drift: boolean;
 }
 
@@ -146,10 +161,6 @@ export async function updateAllMods(): Promise<ModInfo[]> {
 
 export async function auditModVersions(): Promise<ModAuditEntry[]> {
   return invoke('audit_mod_versions');
-}
-
-export async function repairModFolders(): Promise<{ old_folder: string; new_folder: string; mod_name: string }[]> {
-  return invoke('repair_mod_folders');
 }
 
 export async function quickAddMod(url: string): Promise<QuickAddResult> {
@@ -244,6 +255,10 @@ export async function restoreBackup(name: string): Promise<void> {
   return invoke('restore_backup_cmd', { name });
 }
 
+export async function deleteBackup(name: string): Promise<void> {
+  return invoke('delete_backup_cmd', { name });
+}
+
 export async function resetToVanilla(): Promise<void> {
   return invoke('reset_to_vanilla_cmd');
 }
@@ -264,6 +279,10 @@ export async function checkSubscriptionUpdates(): Promise<SubscriptionUpdate[]> 
 
 export async function applySubscriptionUpdate(shareId: string): Promise<Profile> {
   return invoke('apply_subscription_update', { shareId });
+}
+
+export async function repairModpackSubscription(shareId: string): Promise<Profile> {
+  return invoke('repair_modpack_subscription', { shareId });
 }
 
 // ── Logging ────────────────────────────────────────────────────────────────

@@ -6,6 +6,40 @@ use crate::error::{AppError, Result};
 use crate::profiles::Profile;
 use crate::state::AppState;
 
+/// In-flight guard so a double-click on Share / Re-share for the same profile
+/// can't kick off two concurrent uploads that race against the same gist files
+/// (which previously produced 409 SHA-mismatch storms on GitHub's API).
+/// Holds the lock for the duration of the share/reshare; the Drop impl frees it
+/// even if the operation errors out.
+struct ShareGuard {
+    state: AppState,
+    name: String,
+}
+
+impl ShareGuard {
+    fn try_acquire(state: &AppState, name: &str) -> std::result::Result<Self, String> {
+        let mut s = state.lock().map_err(|e| e.to_string())?;
+        if !s.sharing_in_flight.insert(name.to_string()) {
+            return Err(format!(
+                "A share for '{}' is already in progress -- please wait for it to finish.",
+                name
+            ));
+        }
+        Ok(Self {
+            state: state.clone(),
+            name: name.to_string(),
+        })
+    }
+}
+
+impl Drop for ShareGuard {
+    fn drop(&mut self) {
+        if let Ok(mut s) = self.state.lock() {
+            s.sharing_in_flight.remove(&self.name);
+        }
+    }
+}
+
 // ── Types ───────────────────────────────────────────────────────────────────
 
 const PROFILES_REPO: &str = "sts2mm-profiles";
@@ -331,45 +365,65 @@ async fn upload_mod_bundle(
         username, PROFILES_REPO, filename
     );
 
-    // Check if file already exists (get SHA for update)
-    let existing_sha = {
-        let resp = client.get(&url).send().await;
-        if let Ok(resp) = resp {
-            if resp.status().is_success() {
-                let info: ContentsResponse = resp.json().await.unwrap_or(ContentsResponse {
-                    sha: None, content: None, html_url: None,
-                });
-                info.sha
-            } else { None }
-        } else { None }
-    };
-
     let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, zip_data);
-    let mut body = serde_json::json!({
-        "message": format!("Bundle mod: {} v{}", mod_name, version),
-        "content": encoded,
-    });
-    if let Some(sha) = &existing_sha {
-        body["sha"] = serde_json::json!(sha);
-    }
 
-    let resp = client.put(&url).json(&body).send().await?;
+    // Fetch the current SHA (None if the file does not exist yet) and PUT.
+    // GitHub's create-or-update file API rejects with 409/422 if the SHA we
+    // pass doesn't match the current file -- which happens when two reshares
+    // race for the same path. On 409/422 we re-fetch the SHA and retry once;
+    // that's enough for the common case (a stale read followed by another
+    // writer landing first) without masking real auth/permission errors.
+    const MAX_ATTEMPTS: u32 = 3;
+    let mut attempt = 0u32;
+    loop {
+        attempt += 1;
 
-    if !resp.status().is_success() {
+        let existing_sha = fetch_existing_sha(&client, &url).await;
+
+        let mut body = serde_json::json!({
+            "message": format!("Bundle mod: {} v{}", mod_name, version),
+            "content": encoded.clone(),
+        });
+        if let Some(ref sha) = existing_sha {
+            body["sha"] = serde_json::json!(sha);
+        }
+
+        let resp = client.put(&url).json(&body).send().await?;
         let status = resp.status();
+        if status.is_success() {
+            let download_url = format!(
+                "https://raw.githubusercontent.com/{}/{}/main/{}",
+                username, PROFILES_REPO, filename
+            );
+            return Ok(download_url);
+        }
+
         let text = resp.text().await.unwrap_or_default();
+        let is_sha_conflict = status.as_u16() == 409 || status.as_u16() == 422;
+        if is_sha_conflict && attempt < MAX_ATTEMPTS {
+            log::warn!(
+                "Upload conflict for '{}' (attempt {}/{}, status {}): {} -- retrying with fresh SHA",
+                mod_name, attempt, MAX_ATTEMPTS, status, text.lines().next().unwrap_or("").chars().take(160).collect::<String>()
+            );
+            continue;
+        }
+
         return Err(AppError::Other(format!(
             "Failed to upload mod bundle '{}' ({}): {}",
             mod_name, status, text
         )));
     }
+}
 
-    // Return the raw download URL
-    let download_url = format!(
-        "https://raw.githubusercontent.com/{}/{}/main/{}",
-        username, PROFILES_REPO, filename
-    );
-    Ok(download_url)
+async fn fetch_existing_sha(client: &reqwest::Client, url: &str) -> Option<String> {
+    let resp = client.get(url).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let info: ContentsResponse = resp.json().await.unwrap_or(ContentsResponse {
+        sha: None, content: None, html_url: None,
+    });
+    info.sha
 }
 /// Download a bundled mod zip from a URL and extract into mods_path.
 /// Uses the GitHub API (not raw.githubusercontent.com) to avoid CDN caching issues.
@@ -553,12 +607,16 @@ pub async fn share_profile(
         (s.profiles_path.clone(), mods_path, disabled_path, s.config_path.clone(), token)
     };
 
-    // If already shared, reuse the existing code (same as reshare)
+    // If already shared, reuse the existing code (same as reshare). Drop our
+    // would-be guard before delegating so reshare_profile can acquire its own
+    // without "already in progress" tripping.
     let share_info_path = profiles_path.join(format!("{}.share", name));
     if share_info_path.exists() {
         log::info!("Profile '{}' already shared, reusing code via reshare", name);
         return reshare_profile(name, state).await;
     }
+
+    let _guard = ShareGuard::try_acquire(state.inner(), &name)?;
 
     let mut profile =
         crate::profiles::load_profile(&name, &profiles_path).map_err(|e| e.to_string())?;
@@ -688,6 +746,8 @@ pub async fn reshare_profile(
     name: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ShareResult, String> {
+    let _guard = ShareGuard::try_acquire(state.inner(), &name)?;
+
     let (profiles_path, mods_path, disabled_path, config_path, token) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let token = s.github_token.clone().ok_or(

@@ -135,8 +135,10 @@ pub async fn quick_add_mod(
     url: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<QuickAddResult, String> {
+    log::info!("Quick add: {}", url);
     // Try GitHub first
     if let Ok((owner, repo)) = resolve_github_url(&url) {
+        log::info!("Quick add resolved as GitHub: {}/{}", owner, repo);
         let (mods_path, cache_path, token, config_path) = {
             let s = state.lock().map_err(|e| e.to_string())?;
             let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
@@ -172,6 +174,7 @@ pub async fn quick_add_mod(
 
     // Try Nexus
     if let Ok((game_domain, mod_id)) = resolve_nexus_url(&url) {
+        log::info!("Quick add resolved as Nexus: {}/mods/{}", game_domain, mod_id);
         let api_key = {
             let s = state.lock().map_err(|e| e.to_string())?;
             s.nexus_api_key
@@ -209,6 +212,7 @@ pub async fn quick_add_mod(
         return Ok(QuickAddResult::NexusInfo { nexus_info });
     }
 
+    log::warn!("Quick add: unrecognized URL format: {}", url);
     Err(format!(
         "Could not recognize URL format: {}. Supported: GitHub URLs, github:owner/repo, Nexus URLs, nexus:game/mods/id",
         url

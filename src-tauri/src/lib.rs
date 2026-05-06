@@ -54,6 +54,16 @@ pub fn run() {
         .join("sts2-mod-manager");
     setup_logging(&config_dir.join("sts2mm.log"));
 
+    // Startup banner -- makes it easy to find session boundaries when
+    // reviewing a log dump from a user.
+    log::info!(
+        "==== sts2-mod-manager v{} starting (os={}, arch={}) ====",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+    );
+    log::info!("Config dir: {}", config_dir.display());
+
     let app_state = create_app_state();
 
     // Auto-detect game path on startup
@@ -149,6 +159,8 @@ pub fn run() {
             nexus::handle_nxm_link,
             nexus::get_nexus_mod_info,
             nexus::set_nexus_api_key,
+            nexus::nexus_get_trending,
+            nexus::nexus_get_latest_added,
             // Profiles
             profiles::list_profiles_cmd,
             profiles::create_profile,
@@ -177,11 +189,11 @@ pub fn run() {
             // Dependency resolution
             mods::check_mod_dependencies,
             mods::get_mod_dependents,
-            mods::repair_mod_folders,
             // Backup & safety
             backup::create_backup_cmd,
             backup::list_backups_cmd,
             backup::restore_backup_cmd,
+            backup::delete_backup_cmd,
             backup::reset_to_vanilla_cmd,
             // Sharing
             sharing::share_profile,
@@ -195,6 +207,7 @@ pub fn run() {
             subscriptions::unsubscribe,
             subscriptions::check_subscription_updates,
             subscriptions::apply_subscription_update,
+            subscriptions::repair_modpack_subscription,
         ])
         .setup(|app| {
             // Register deep link handler for nxm:// and sts2mm:// protocols

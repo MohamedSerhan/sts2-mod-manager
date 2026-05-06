@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
 import { listen } from '@tauri-apps/api/event';
-import { Home, LayoutDashboard, Package, Search, Layers, Settings, Play, ChevronRight, Wrench } from 'lucide-react';
+import { Home, LayoutDashboard, Package, Search, Layers, Settings, Play, ChevronRight, Wrench, GraduationCap } from 'lucide-react';
 import { check, type Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { cn } from './lib/utils';
@@ -13,13 +13,15 @@ import { ModsView } from './views/Mods';
 import { BrowseView } from './views/Browse';
 import { ProfilesView } from './views/Profiles';
 import { SettingsView } from './views/Settings';
+import { TutorialView } from './views/Tutorial';
 import { launchGame, launchVanilla, installModFromFile } from './hooks/useTauri';
 
-type View = 'home' | 'dashboard' | 'mods' | 'browse' | 'profiles' | 'settings';
+type View = 'home' | 'dashboard' | 'mods' | 'browse' | 'profiles' | 'tutorial' | 'settings';
 
 const SIMPLE_NAV: { id: View; label: string; icon: typeof Home }[] = [
   { id: 'home', label: 'Home', icon: Home },
   { id: 'mods', label: 'My Mods', icon: Package },
+  { id: 'tutorial', label: 'Tutorial', icon: GraduationCap },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
@@ -29,6 +31,7 @@ const ADVANCED_NAV: { id: View; label: string; icon: typeof LayoutDashboard }[] 
   { id: 'mods', label: 'Mods', icon: Package },
   { id: 'browse', label: 'Browse', icon: Search },
   { id: 'profiles', label: 'Profiles', icon: Layers },
+  { id: 'tutorial', label: 'Tutorial', icon: GraduationCap },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
@@ -118,7 +121,7 @@ function AppInner() {
     try {
       localStorage.setItem('sts2mm-advanced-mode', String(next));
     } catch { /* ignore */ }
-    if (!next && !['home', 'mods', 'settings'].includes(activeView)) {
+    if (!next && !['home', 'mods', 'tutorial', 'settings'].includes(activeView)) {
       setActiveView('home');
     }
   }
@@ -313,8 +316,9 @@ function AppInner() {
         {activeView === 'home' && <HomeView onGoToSettings={() => setActiveView('settings')} />}
         {activeView === 'dashboard' && <DashboardView />}
         {activeView === 'mods' && <ModsView advancedMode={advancedMode} />}
-        {activeView === 'browse' && <BrowseView />}
+        {activeView === 'browse' && <BrowseView onGoToSettings={() => setActiveView('settings')} />}
         {activeView === 'profiles' && <ProfilesView />}
+        {activeView === 'tutorial' && <TutorialView advancedMode={advancedMode} onGoToSettings={() => setActiveView('settings')} />}
         {activeView === 'settings' && <SettingsView />}
       </main>
     </div>

@@ -22,6 +22,10 @@ pub struct BackupInfo {
     pub size_bytes: u64,
 }
 
+/// Maximum number of backups to retain. Older backups are pruned after each
+/// successful create.
+const MAX_BACKUPS: usize = 5;
+
 /// Create a timestamped backup of the current mods directory.
 ///
 /// Copies all files from `mods_path` into a new subdirectory under
@@ -35,10 +39,66 @@ pub fn create_backup(mods_path: &Path, backup_dir: &Path) -> Result<String> {
     fs::create_dir_all(&dest)?;
 
     if mods_path.exists() {
+        log::info!("Creating backup '{}' from {}", backup_name, mods_path.display());
         copy_dir_recursive(mods_path, &dest)?;
+    } else {
+        log::warn!("create_backup: mods_path {} does not exist; backup will be empty", mods_path.display());
+    }
+
+    log::info!("Backup created: {}", dest.display());
+
+    if let Err(e) = prune_old_backups(backup_dir, MAX_BACKUPS) {
+        log::warn!("Retention pruning failed: {}", e);
     }
 
     Ok(backup_name)
+}
+
+/// Keep the newest `keep` backups in `backup_dir`, deleting the rest.
+fn prune_old_backups(backup_dir: &Path, keep: usize) -> io::Result<()> {
+    if !backup_dir.exists() {
+        return Ok(());
+    }
+
+    let mut names: Vec<String> = fs::read_dir(backup_dir)?
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .filter(|n| n.starts_with("backup_"))
+        .collect();
+
+    names.sort_by(|a, b| b.cmp(a));
+
+    for name in names.into_iter().skip(keep) {
+        log::info!("Retention: pruning old backup '{}'", name);
+        if let Err(e) = fs::remove_dir_all(backup_dir.join(&name)) {
+            log::warn!("Failed to prune backup '{}': {}", name, e);
+        }
+    }
+
+    Ok(())
+}
+
+/// Delete a single backup by name. Rejects names that don't start with
+/// `backup_` as a sanity check against accidental directory removal.
+pub fn delete_backup(name: &str, backup_dir: &Path) -> Result<()> {
+    if !name.starts_with("backup_") {
+        return Err(crate::error::AppError::Other(format!(
+            "Refusing to delete '{}' — not a backup directory",
+            name
+        )));
+    }
+
+    let target = backup_dir.join(name);
+    if !target.exists() {
+        return Err(crate::error::AppError::Other(format!(
+            "Backup '{}' not found",
+            name
+        )));
+    }
+
+    fs::remove_dir_all(&target)?;
+    Ok(())
 }
 
 /// List all backups in the backup directory.
@@ -103,11 +163,14 @@ pub fn list_backups(backup_dir: &Path) -> Vec<BackupInfo> {
 pub fn restore_backup(backup_name: &str, backup_dir: &Path, mods_path: &Path) -> Result<()> {
     let src = backup_dir.join(backup_name);
     if !src.exists() {
+        log::error!("restore_backup: backup '{}' not found at {}", backup_name, src.display());
         return Err(crate::error::AppError::Other(format!(
             "Backup '{}' not found",
             backup_name
         )));
     }
+
+    log::info!("Restoring backup '{}' into {}", backup_name, mods_path.display());
 
     // Clear current mods
     if mods_path.exists() {
@@ -126,6 +189,7 @@ pub fn restore_backup(backup_name: &str, backup_dir: &Path, mods_path: &Path) ->
     // Copy backup contents into mods
     copy_dir_recursive(&src, mods_path)?;
 
+    log::info!("Backup '{}' restored successfully", backup_name);
     Ok(())
 }
 
@@ -134,8 +198,12 @@ pub fn reset_to_vanilla(mods_path: &Path, disabled_path: &Path) -> Result<()> {
     let _ = fs::create_dir_all(disabled_path);
 
     if !mods_path.exists() {
+        log::info!("reset_to_vanilla: mods_path {} doesn't exist; nothing to do", mods_path.display());
         return Ok(());
     }
+
+    log::info!("Resetting to vanilla: moving everything from {} to {}", mods_path.display(), disabled_path.display());
+    let mut moved: usize = 0;
 
     for entry in fs::read_dir(mods_path)?.flatten() {
         let src_path = entry.path();
@@ -149,8 +217,10 @@ pub fn reset_to_vanilla(mods_path: &Path, disabled_path: &Path) -> Result<()> {
                 fs::copy(&src_path, &dest_path).and_then(|_| fs::remove_file(&src_path))
             })?;
         }
+        moved += 1;
     }
 
+    log::info!("reset_to_vanilla: moved {} item(s) to disabled", moved);
     Ok(())
 }
 
@@ -196,6 +266,14 @@ pub fn restore_backup_cmd(name: String, state: tauri::State<'_, AppState>) -> st
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
     let backup_dir = s.config_path.join("backups");
     restore_backup(&name, &backup_dir, mods_path).map_err(|e| e.to_string())
+}
+
+/// Delete a specific backup.
+#[tauri::command]
+pub fn delete_backup_cmd(name: String, state: tauri::State<'_, AppState>) -> std::result::Result<(), String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let backup_dir = s.config_path.join("backups");
+    delete_backup(&name, &backup_dir).map_err(|e| e.to_string())
 }
 
 /// Reset to vanilla by moving all mods to disabled.

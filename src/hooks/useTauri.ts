@@ -127,10 +127,17 @@ export async function importProfile(json: string): Promise<Profile> {
   return invoke('import_profile_cmd', { json });
 }
 
+export interface VersionMismatch {
+  name: string;
+  profile_version: string;
+  disk_version: string;
+}
+
 export interface ProfileDrift {
   added: string[];
   removed: string[];
   toggled: string[];
+  version_changed: VersionMismatch[];
   has_drift: boolean;
 }
 

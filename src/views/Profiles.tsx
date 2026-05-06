@@ -545,8 +545,15 @@ export function ProfilesView() {
                   </div>
                 )}
                 {driftMap[profile.name] && (
-                  <div className="flex items-center gap-2 mt-1.5 text-xs text-amber-400 bg-amber-500/10 rounded px-2 py-1">
-                    <AlertTriangle size={12} className="flex-shrink-0" />
+                  <div
+                    className="flex items-start gap-2 mt-1.5 text-xs text-amber-400 bg-amber-500/10 rounded px-2 py-1"
+                    title={
+                      (driftMap[profile.name].version_changed ?? [])
+                        .map((v) => `${v.name}: ${v.profile_version} → ${v.disk_version}`)
+                        .join('\n') || undefined
+                    }
+                  >
+                    <AlertTriangle size={12} className="flex-shrink-0 mt-0.5" />
                     <span>
                       Out of sync
                       {driftMap[profile.name].added.length > 0 && (
@@ -557,6 +564,9 @@ export function ProfilesView() {
                       )}
                       {driftMap[profile.name].toggled.length > 0 && (
                         <> &middot; {driftMap[profile.name].toggled.length} toggled</>
+                      )}
+                      {(driftMap[profile.name].version_changed?.length ?? 0) > 0 && (
+                        <> &middot; {driftMap[profile.name].version_changed.length} version{driftMap[profile.name].version_changed.length > 1 ? 's' : ''} changed</>
                       )}
                       {shareInfoMap[profile.name] && (
                         <> &mdash; re-share to update subscribers</>

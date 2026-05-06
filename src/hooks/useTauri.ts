@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ModInfo, Profile, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, ModAuditEntry } from '../types';
+import type { ModInfo, Profile, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, ModAuditEntry, NexusModInfo } from '../types';
 
 // ── Game Detection & QOL ───────────────────────────────────────────────────
 
@@ -83,6 +83,14 @@ export async function downloadUrlMod(url: string): Promise<ModInfo> {
 
 export async function setNexusApiKey(key: string): Promise<void> {
   return invoke('set_nexus_api_key', { key });
+}
+
+export async function nexusGetTrending(): Promise<NexusModInfo[]> {
+  return invoke('nexus_get_trending');
+}
+
+export async function nexusGetLatestAdded(): Promise<NexusModInfo[]> {
+  return invoke('nexus_get_latest_added');
 }
 
 // ── Profiles ───────────────────────────────────────────────────────────────

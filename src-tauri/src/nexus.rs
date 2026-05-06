@@ -162,6 +162,39 @@ impl NexusClient {
         Ok(info)
     }
 
+    /// Fetch one of the public mod-list endpoints (`trending`, `latest_added`, etc.).
+    async fn get_mod_list(&self, game: &str, list_kind: &str) -> Result<Vec<NexusModInfo>> {
+        let url = format!(
+            "https://api.nexusmods.com/v1/games/{}/mods/{}.json",
+            game, list_kind
+        );
+        log::debug!("Nexus GET {}", url);
+        let resp = self.client.get(&url).send().await.map_err(|e| {
+            log::warn!("Nexus {} request failed: {}", list_kind, e);
+            e
+        })?;
+        let resp = resp.error_for_status().map_err(|e| {
+            log::warn!("Nexus {} HTTP error: {}", list_kind, e);
+            e
+        })?;
+        let mods: Vec<NexusModInfo> = resp.json().await.map_err(|e| {
+            log::warn!("Nexus {} decode failed: {}", list_kind, e);
+            e
+        })?;
+        log::debug!("Nexus {} returned {} mods", list_kind, mods.len());
+        Ok(mods)
+    }
+
+    /// Get the trending mods for a game.
+    pub async fn get_trending(&self, game: &str) -> Result<Vec<NexusModInfo>> {
+        self.get_mod_list(game, "trending").await
+    }
+
+    /// Get the latest added mods for a game.
+    pub async fn get_latest_added(&self, game: &str) -> Result<Vec<NexusModInfo>> {
+        self.get_mod_list(game, "latest_added").await
+    }
+
     /// Get file listing for a mod.
     pub async fn get_mod_files(&self, game: &str, mod_id: u64) -> Result<Vec<NexusFile>> {
         let url = format!(
@@ -221,6 +254,43 @@ pub async fn get_nexus_mod_info(
     let client = NexusClient::new(&api_key);
     client
         .get_mod_info(&game, mod_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Hardcoded Nexus game domain for STS2.
+const STS2_GAME_DOMAIN: &str = "slaythespire2";
+
+fn nexus_client_from_state(
+    state: &tauri::State<'_, AppState>,
+) -> std::result::Result<NexusClient, String> {
+    let api_key = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        s.nexus_api_key
+            .clone()
+            .ok_or_else(|| "Nexus API key not set".to_string())?
+    };
+    Ok(NexusClient::new(&api_key))
+}
+
+/// Get the trending mods on Nexus for STS2.
+#[tauri::command]
+pub async fn nexus_get_trending(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<NexusModInfo>, String> {
+    nexus_client_from_state(&state)?
+        .get_trending(STS2_GAME_DOMAIN)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Get the most recently added mods on Nexus for STS2.
+#[tauri::command]
+pub async fn nexus_get_latest_added(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<NexusModInfo>, String> {
+    nexus_client_from_state(&state)?
+        .get_latest_added(STS2_GAME_DOMAIN)
         .await
         .map_err(|e| e.to_string())
 }

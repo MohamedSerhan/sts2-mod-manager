@@ -49,7 +49,7 @@ export function ProfilesView() {
   const [showImportCode, setShowImportCode] = useState(false);
   const [importCode, setImportCode] = useState('');
   const [importingCode, setImportingCode] = useState(false);
-  const [sharingProfile, setSharingProfile] = useState<string | null>(null);
+  const [loadingShare, setLoadingShare] = useState<{ name: string; kind: 'share' | 'reshare' } | null>(null);
   const [shareResult, setShareResult] = useState<ShareResult | null>(null);
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedProfileCode, setCopiedProfileCode] = useState<string | null>(null);
@@ -207,7 +207,7 @@ export function ProfilesView() {
 
   async function handleShare(name: string) {
     try {
-      setSharingProfile(name);
+      setLoadingShare({ name, kind: 'share' });
       const result = await shareProfile(name);
       setShareResult(result);
       setShareInfoMap((prev) => ({ ...prev, [name]: result }));
@@ -215,13 +215,14 @@ export function ProfilesView() {
       await loadProfiles();
     } catch (e) {
       toastCtx.error(`Failed to share: ${e instanceof Error ? e.message : String(e)}`);
-      setSharingProfile(null);
+    } finally {
+      setLoadingShare(null);
     }
   }
 
   async function handleReshare(name: string) {
     try {
-      setSharingProfile(name);
+      setLoadingShare({ name, kind: 'reshare' });
       const result = await reshareProfile(name);
       setShareResult(result);
       setShareInfoMap((prev) => ({ ...prev, [name]: result }));
@@ -230,7 +231,8 @@ export function ProfilesView() {
       toastCtx.success('Profile re-shared! Same code, updated content.');
     } catch (e) {
       toastCtx.error(`Failed to re-share: ${e instanceof Error ? e.message : String(e)}`);
-      setSharingProfile(null);
+    } finally {
+      setLoadingShare(null);
     }
   }
 
@@ -294,10 +296,7 @@ export function ProfilesView() {
                 Profile Shared!
               </h3>
               <button
-                onClick={() => {
-                  setShareResult(null);
-                  setSharingProfile(null);
-                }}
+                onClick={() => setShareResult(null)}
                 className="text-text-dim hover:text-text"
               >
                 <X size={16} />
@@ -585,9 +584,9 @@ export function ProfilesView() {
                   size="sm"
                   onClick={() => handleShare(profile.name)}
                   title="Share profile (get a code for friends)"
-                  disabled={sharingProfile === profile.name}
+                  disabled={loadingShare?.name === profile.name}
                 >
-                  {sharingProfile === profile.name ? (
+                  {loadingShare?.name === profile.name && loadingShare.kind === 'share' ? (
                     <RefreshCw size={14} className="animate-spin" />
                   ) : (
                     <Share2 size={14} />
@@ -598,9 +597,12 @@ export function ProfilesView() {
                   size="sm"
                   onClick={() => handleReshare(profile.name)}
                   title="Re-share (update for friends, same code)"
-                  disabled={sharingProfile === profile.name}
+                  disabled={loadingShare?.name === profile.name}
                 >
-                  <RefreshCw size={14} />
+                  <RefreshCw
+                    size={14}
+                    className={loadingShare?.name === profile.name && loadingShare.kind === 'reshare' ? 'animate-spin' : ''}
+                  />
                 </Button>
                 <Button
                   variant="ghost"

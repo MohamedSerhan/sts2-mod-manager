@@ -12,6 +12,9 @@ import {
   Play,
   Copy,
   Check,
+  Wrench,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
@@ -22,6 +25,7 @@ import {
   installSharedProfile,
   checkSubscriptionUpdates,
   applySubscriptionUpdate,
+  repairModpackSubscription,
   toggleMod,
   getSubscriptions,
   getInstalledMods,
@@ -71,6 +75,8 @@ export function HomeView({ onGoToSettings }: { onGoToSettings: () => void }) {
   const [applyingSub, setApplyingSub] = useState<string | null>(null);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [checking, setChecking] = useState(false);
+  const [repairingShareId, setRepairingShareId] = useState<string | null>(null);
+  const [yourModsExpanded, setYourModsExpanded] = useState(false);
 
   useEffect(() => {
     loadSubscriptions();
@@ -162,6 +168,20 @@ export function HomeView({ onGoToSettings }: { onGoToSettings: () => void }) {
       toast.success(`Unlinked from "${profileName}"`);
     } catch (e) {
       toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  async function handleRepairModpack(shareId: string) {
+    if (!confirm('Wipe all mods and reinstall this modpack? This will delete all current mod files.')) return;
+    try {
+      setRepairingShareId(shareId);
+      await repairModpackSubscription(shareId);
+      await refreshAll();
+      toast.success('Modpack reinstalled');
+    } catch (e) {
+      toast.error(`Repair failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setRepairingShareId(null);
     }
   }
 
@@ -357,6 +377,20 @@ export function HomeView({ onGoToSettings }: { onGoToSettings: () => void }) {
                 <Button
                   variant="ghost"
                   size="sm"
+                  onClick={() => handleRepairModpack(sub.share_id)}
+                  disabled={repairingShareId === sub.share_id}
+                  title="Wipe and reinstall this modpack"
+                >
+                  {repairingShareId === sub.share_id ? (
+                    <RefreshCw size={14} className="animate-spin" />
+                  ) : (
+                    <Wrench size={14} />
+                  )}
+                  Repair
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => handleUnsubscribe(sub.share_id, sub.profile_name)}
                   title="Unlink from this modpack"
                   className="text-red-400 hover:text-red-300"
@@ -372,11 +406,19 @@ export function HomeView({ onGoToSettings }: { onGoToSettings: () => void }) {
 
       {/* Step 2: Your Mods */}
       <Card className="space-y-4">
-        <div className="flex items-center justify-between">
+        <div
+          className="flex items-center justify-between cursor-pointer select-none"
+          onClick={() => setYourModsExpanded((v) => !v)}
+        >
           <div className="flex items-center gap-3">
             <div className="flex items-center justify-center w-9 h-9 rounded-full bg-primary/20 text-primary text-base font-bold">
               2
             </div>
+            {yourModsExpanded ? (
+              <ChevronDown size={18} className="text-text-dim" />
+            ) : (
+              <ChevronRight size={18} className="text-text-dim" />
+            )}
             <div>
               <h3 className="text-base font-semibold text-text">Your Mods</h3>
               <p className="text-sm text-text-dim mt-0.5">
@@ -384,39 +426,50 @@ export function HomeView({ onGoToSettings }: { onGoToSettings: () => void }) {
               </p>
             </div>
           </div>
-          <Button variant="ghost" size="sm" onClick={() => refreshMods()}>
-            <RefreshCw size={14} />
-            Refresh
-          </Button>
+          {yourModsExpanded && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                refreshMods();
+              }}
+            >
+              <RefreshCw size={14} />
+              Refresh
+            </Button>
+          )}
         </div>
 
-        {mods.length === 0 ? (
-          <div className="flex flex-col items-center py-12 text-text-dim">
-            <Package size={40} className="mb-3 opacity-40" />
-            <p className="text-base">No mods installed yet</p>
-            <p className="text-sm mt-1">Enter a modpack code above to get started</p>
-          </div>
-        ) : (
-          <div className="space-y-0.5">
-            {mods.map((mod) => (
-              <div
-                key={mod.name}
-                className="flex items-center gap-4 py-3 px-4 rounded-xl hover:bg-surface-hover transition-colors"
-              >
-                <Toggle
-                  checked={mod.enabled}
-                  onChange={(checked) => handleToggle(mod.name, checked)}
-                />
-                <div className="min-w-0 flex-1">
-                  <span className="text-sm font-medium text-text truncate block">{mod.name}</span>
-                  {mod.description && (
-                    <span className="text-sm text-text-dim truncate block mt-0.5">{mod.description}</span>
-                  )}
+        {yourModsExpanded && (
+          mods.length === 0 ? (
+            <div className="flex flex-col items-center py-12 text-text-dim">
+              <Package size={40} className="mb-3 opacity-40" />
+              <p className="text-base">No mods installed yet</p>
+              <p className="text-sm mt-1">Enter a modpack code above to get started</p>
+            </div>
+          ) : (
+            <div className="space-y-0.5">
+              {mods.map((mod) => (
+                <div
+                  key={mod.name}
+                  className="flex items-center gap-4 py-3 px-4 rounded-xl hover:bg-surface-hover transition-colors"
+                >
+                  <Toggle
+                    checked={mod.enabled}
+                    onChange={(checked) => handleToggle(mod.name, checked)}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <span className="text-sm font-medium text-text truncate block">{mod.name}</span>
+                    {mod.description && (
+                      <span className="text-sm text-text-dim truncate block mt-0.5">{mod.description}</span>
+                    )}
+                  </div>
+                  <span className="text-sm text-text-dim whitespace-nowrap shrink-0">v{mod.version}</span>
                 </div>
-                <span className="text-sm text-text-dim whitespace-nowrap shrink-0">v{mod.version}</span>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )
         )}
       </Card>
 

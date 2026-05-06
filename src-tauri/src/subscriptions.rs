@@ -260,6 +260,61 @@ pub async fn apply_subscription_update(
     share_id: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Profile, String> {
+    apply_subscription_update_inner(share_id, state).await
+}
+
+/// Wipe & reinstall a modpack: delete all mod files, then re-run the
+/// subscription update flow (which downloads + applies + activates).
+#[tauri::command]
+pub async fn repair_modpack_subscription(
+    share_id: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Profile, String> {
+    let (mods_path, disabled_path) = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        (
+            s.mods_path.clone().ok_or("Game path not set")?,
+            s.disabled_mods_path.clone().ok_or("Game path not set")?,
+        )
+    };
+
+    log::info!("Repair: wiping mods directory at {}", mods_path.display());
+    wipe_directory_contents(&mods_path).map_err(|e| e.to_string())?;
+
+    log::info!("Repair: wiping disabled mods directory at {}", disabled_path.display());
+    wipe_directory_contents(&disabled_path).map_err(|e| e.to_string())?;
+
+    log::info!("Repair: directories cleared, running subscription update for '{}'", share_id);
+    let profile = apply_subscription_update_inner(share_id.clone(), state).await?;
+    log::info!("Repair: completed for '{}'", share_id);
+
+    Ok(profile)
+}
+
+/// Delete all entries inside `dir` without removing `dir` itself.
+/// No-op if `dir` does not exist.
+fn wipe_directory_contents(dir: &Path) -> Result<()> {
+    if !dir.exists() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(dir)?.flatten() {
+        let path = entry.path();
+        let result = if path.is_dir() {
+            fs::remove_dir_all(&path)
+        } else {
+            fs::remove_file(&path)
+        };
+        if let Err(e) = result {
+            log::warn!("Repair: failed to remove '{}': {}", path.display(), e);
+        }
+    }
+    Ok(())
+}
+
+async fn apply_subscription_update_inner(
+    share_id: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Profile, String> {
     let (config_path, mods_path, disabled_path, profiles_path, cache_path, token) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         (
@@ -419,6 +474,13 @@ pub async fn apply_subscription_update(
     // ── STEP 2: Apply profile AFTER downloads ──
     crate::profiles::apply_profile(&remote, &mods_path, &disabled_path)
         .map_err(|e| e.to_string())?;
+
+    // Mark this profile active so the rest of the app reflects the new state.
+    {
+        let mut s = state.lock().map_err(|e| e.to_string())?;
+        s.active_profile = Some(remote.name.clone());
+        let _ = fs::write(s.config_path.join("active_profile.txt"), &remote.name);
+    }
 
     // Update subscription record
     let mut db = load_subscriptions(&config_path);

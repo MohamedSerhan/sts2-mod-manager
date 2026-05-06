@@ -282,6 +282,13 @@ fn snapshot_current_inner(
 
 /// Apply a profile: restore exact enabled/disabled state for all listed mods.
 /// Mods not in the profile are disabled. Uses move_mod_by_info with fallback.
+///
+/// Matches on-disk mods against the profile by **name OR folder_name OR mod_id**
+/// (same multi-key lookup used by `switch_profile` / `apply_subscription_update`).
+/// A name-only match is fragile across platforms because names are user-facing
+/// strings parsed from `info.json` and may differ in case (Linux is
+/// case-sensitive). folder_name and mod_id are stable identifiers that survive
+/// renames and case differences.
 pub fn apply_profile(
     profile: &Profile,
     mods_path: &Path,
@@ -289,19 +296,55 @@ pub fn apply_profile(
 ) -> Result<()> {
     use std::collections::HashMap;
 
-    // Build a map of profile mod states
-    let profile_state: HashMap<String, bool> = profile.mods.iter()
-        .map(|m| (m.name.clone(), m.enabled))
-        .collect();
+    // Build a map from any identifier (name / folder_name / mod_id) to the
+    // desired enabled state. Last write wins, but the same ProfileMod owns all
+    // its identifiers so collisions only happen if two profile entries share an
+    // identifier — in which case the profile itself is malformed.
+    let mut profile_state: HashMap<String, bool> = HashMap::new();
+    for pm in &profile.mods {
+        profile_state.insert(pm.name.clone(), pm.enabled);
+        if let Some(ref folder) = pm.folder_name {
+            profile_state.insert(folder.clone(), pm.enabled);
+        }
+        if let Some(ref id) = pm.mod_id {
+            profile_state.insert(id.clone(), pm.enabled);
+        }
+    }
+
+    // Look up an on-disk mod against the multi-key profile state. Returns None
+    // if no identifier matched the profile at all (i.e. mod is not part of the
+    // profile and should be disabled).
+    let lookup = |m: &crate::mods::ModInfo| -> Option<bool> {
+        if let Some(v) = profile_state.get(&m.name) {
+            return Some(*v);
+        }
+        if let Some(ref folder) = m.folder_name {
+            if let Some(v) = profile_state.get(folder) {
+                return Some(*v);
+            }
+        }
+        if let Some(ref id) = m.mod_id {
+            if let Some(v) = profile_state.get(id) {
+                return Some(*v);
+            }
+        }
+        None
+    };
 
     // Step 1: Move mods that should be DISABLED from enabled to disabled
     let current_enabled = scan_mods(mods_path);
     for m in &current_enabled {
-        let should_be_enabled = profile_state.get(&m.name).copied().unwrap_or(false);
+        let should_be_enabled = lookup(m).unwrap_or(false);
         if !should_be_enabled {
-            log::info!("Profile apply: disabling '{}'", m.name);
-            if crate::mods::move_mod_by_info(m, mods_path, disabled_path).is_err() {
-                let _ = crate::mods::disable_mod(&m.name, mods_path, disabled_path);
+            log::info!(
+                "Profile apply: disabling '{}' (folder={:?}, mod_id={:?})",
+                m.name, m.folder_name, m.mod_id
+            );
+            if let Err(e) = crate::mods::move_mod_by_info(m, mods_path, disabled_path) {
+                log::warn!("move_mod_by_info failed for '{}': {} -- falling back to disable_mod", m.name, e);
+                if let Err(e2) = crate::mods::disable_mod(&m.name, mods_path, disabled_path) {
+                    log::error!("disable_mod fallback also failed for '{}': {}", m.name, e2);
+                }
             }
         }
     }
@@ -309,11 +352,44 @@ pub fn apply_profile(
     // Step 2: Move mods that should be ENABLED from disabled to enabled
     let current_disabled = scan_disabled_mods(disabled_path);
     for m in &current_disabled {
-        let should_be_enabled = profile_state.get(&m.name).copied().unwrap_or(false);
+        let should_be_enabled = lookup(m).unwrap_or(false);
         if should_be_enabled {
-            log::info!("Profile apply: enabling '{}'", m.name);
-            if crate::mods::move_mod_by_info(m, disabled_path, mods_path).is_err() {
-                let _ = crate::mods::enable_mod(&m.name, mods_path, disabled_path);
+            log::info!(
+                "Profile apply: enabling '{}' (folder={:?}, mod_id={:?})",
+                m.name, m.folder_name, m.mod_id
+            );
+            if let Err(e) = crate::mods::move_mod_by_info(m, disabled_path, mods_path) {
+                log::warn!("move_mod_by_info failed for '{}': {} -- falling back to enable_mod", m.name, e);
+                if let Err(e2) = crate::mods::enable_mod(&m.name, mods_path, disabled_path) {
+                    log::error!("enable_mod fallback also failed for '{}': {}", m.name, e2);
+                }
+            }
+        }
+    }
+
+    // Warn about profile mods that we never saw on disk (neither enabled nor
+    // disabled). Helps diagnose subscription-update issues where a download
+    // landed under a different identifier than the profile expected.
+    let on_disk_ids: std::collections::HashSet<String> = current_enabled
+        .iter()
+        .chain(current_disabled.iter())
+        .flat_map(|m| {
+            let mut ids = vec![m.name.clone()];
+            if let Some(ref f) = m.folder_name { ids.push(f.clone()); }
+            if let Some(ref i) = m.mod_id { ids.push(i.clone()); }
+            ids
+        })
+        .collect();
+    for pm in &profile.mods {
+        if pm.enabled {
+            let found = on_disk_ids.contains(&pm.name)
+                || pm.folder_name.as_ref().map_or(false, |f| on_disk_ids.contains(f))
+                || pm.mod_id.as_ref().map_or(false, |i| on_disk_ids.contains(i));
+            if !found {
+                log::warn!(
+                    "Profile apply: profile expects '{}' enabled but no matching mod found on disk (folder={:?}, mod_id={:?})",
+                    pm.name, pm.folder_name, pm.mod_id
+                );
             }
         }
     }

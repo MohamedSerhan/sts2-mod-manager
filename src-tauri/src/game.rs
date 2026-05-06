@@ -245,7 +245,8 @@ pub fn open_mods_folder(state: tauri::State<'_, AppState>) -> std::result::Resul
     // Try mods folder first
     if let Some(ref mods_path) = s.mods_path {
         if mods_path.exists() {
-            open::that_in_background(mods_path);
+            open::that_detached(mods_path)
+                .map_err(|e| format!("Failed to open mods folder: {}", e))?;
             return Ok(true);
         }
     }
@@ -253,7 +254,8 @@ pub fn open_mods_folder(state: tauri::State<'_, AppState>) -> std::result::Resul
     // Fall back to game folder
     if let Some(ref game_path) = s.game_path {
         if game_path.exists() {
-            open::that_in_background(game_path);
+            open::that_detached(game_path)
+                .map_err(|e| format!("Failed to open game folder: {}", e))?;
             return Ok(true);
         }
     }
@@ -268,7 +270,8 @@ pub fn open_game_folder(state: tauri::State<'_, AppState>) -> std::result::Resul
 
     if let Some(ref game_path) = s.game_path {
         if game_path.exists() {
-            open::that_in_background(game_path);
+            open::that_detached(game_path)
+                .map_err(|e| format!("Failed to open game folder: {}", e))?;
             return Ok(true);
         }
     }
@@ -430,18 +433,42 @@ pub fn get_log_path(
     Ok(log_path.to_string_lossy().to_string())
 }
 
-/// Open the log file in the system's default text editor / file explorer.
+/// Open the log file in the system's default text editor.
+/// Falls back to revealing the parent directory in the file explorer if the
+/// file cannot be opened directly (e.g. no handler registered for `.log`).
 #[tauri::command]
 pub fn open_log_file(
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<bool, String> {
-    let s = state.lock().map_err(|e| e.to_string())?;
-    let log_path = s.config_path.join("sts2mm.log");
+    let (log_path, parent) = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        let log_path = s.config_path.join("sts2mm.log");
+        let parent = s.config_path.clone();
+        (log_path, parent)
+    };
+
     if log_path.exists() {
-        open::that_in_background(&log_path);
+        match open::that_detached(&log_path) {
+            Ok(()) => return Ok(true),
+            Err(e) => {
+                log::warn!(
+                    "open::that_detached failed for log file {:?}: {}. Falling back to parent dir.",
+                    log_path, e
+                );
+            }
+        }
+    } else {
+        log::info!("Log file {:?} does not exist yet; opening config dir instead.", log_path);
+    }
+
+    // Fall back to opening the parent (config) directory so the user can find the log.
+    if parent.exists() {
+        open::that_detached(&parent).map_err(|e| {
+            format!("Failed to open log directory {}: {}", parent.display(), e)
+        })?;
         Ok(true)
     } else {
-        Err("Log file not found".to_string())
+        Err(format!("Log file and config directory not found at {}", parent.display()))
     }
 }
 

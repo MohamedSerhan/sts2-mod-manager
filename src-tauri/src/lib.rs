@@ -54,6 +54,16 @@ pub fn run() {
         .join("sts2-mod-manager");
     setup_logging(&config_dir.join("sts2mm.log"));
 
+    // Startup banner -- makes it easy to find session boundaries when
+    // reviewing a log dump from a user.
+    log::info!(
+        "==== sts2-mod-manager v{} starting (os={}, arch={}) ====",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+    );
+    log::info!("Config dir: {}", config_dir.display());
+
     let app_state = create_app_state();
 
     // Auto-detect game path on startup

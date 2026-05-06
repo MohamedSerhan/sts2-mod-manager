@@ -35,9 +35,13 @@ pub fn create_backup(mods_path: &Path, backup_dir: &Path) -> Result<String> {
     fs::create_dir_all(&dest)?;
 
     if mods_path.exists() {
+        log::info!("Creating backup '{}' from {}", backup_name, mods_path.display());
         copy_dir_recursive(mods_path, &dest)?;
+    } else {
+        log::warn!("create_backup: mods_path {} does not exist; backup will be empty", mods_path.display());
     }
 
+    log::info!("Backup created: {}", dest.display());
     Ok(backup_name)
 }
 
@@ -103,11 +107,14 @@ pub fn list_backups(backup_dir: &Path) -> Vec<BackupInfo> {
 pub fn restore_backup(backup_name: &str, backup_dir: &Path, mods_path: &Path) -> Result<()> {
     let src = backup_dir.join(backup_name);
     if !src.exists() {
+        log::error!("restore_backup: backup '{}' not found at {}", backup_name, src.display());
         return Err(crate::error::AppError::Other(format!(
             "Backup '{}' not found",
             backup_name
         )));
     }
+
+    log::info!("Restoring backup '{}' into {}", backup_name, mods_path.display());
 
     // Clear current mods
     if mods_path.exists() {
@@ -126,6 +133,7 @@ pub fn restore_backup(backup_name: &str, backup_dir: &Path, mods_path: &Path) ->
     // Copy backup contents into mods
     copy_dir_recursive(&src, mods_path)?;
 
+    log::info!("Backup '{}' restored successfully", backup_name);
     Ok(())
 }
 
@@ -134,8 +142,12 @@ pub fn reset_to_vanilla(mods_path: &Path, disabled_path: &Path) -> Result<()> {
     let _ = fs::create_dir_all(disabled_path);
 
     if !mods_path.exists() {
+        log::info!("reset_to_vanilla: mods_path {} doesn't exist; nothing to do", mods_path.display());
         return Ok(());
     }
+
+    log::info!("Resetting to vanilla: moving everything from {} to {}", mods_path.display(), disabled_path.display());
+    let mut moved: usize = 0;
 
     for entry in fs::read_dir(mods_path)?.flatten() {
         let src_path = entry.path();
@@ -149,8 +161,10 @@ pub fn reset_to_vanilla(mods_path: &Path, disabled_path: &Path) -> Result<()> {
                 fs::copy(&src_path, &dest_path).and_then(|_| fs::remove_file(&src_path))
             })?;
         }
+        moved += 1;
     }
 
+    log::info!("reset_to_vanilla: moved {} item(s) to disabled", moved);
     Ok(())
 }
 

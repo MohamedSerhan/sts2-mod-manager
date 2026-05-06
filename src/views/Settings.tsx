@@ -293,9 +293,10 @@ export function SettingsView() {
           <Button variant="secondary" size="sm" onClick={async () => {
             try {
               await openLogFile();
-            } catch {
+            } catch (e) {
               const path = await getLogPath().catch(() => 'unknown');
-              toast.error(`Log file not found at: ${path}`);
+              const msg = e instanceof Error ? e.message : String(e);
+              toast.error(`Could not open log: ${msg} (path: ${path})`);
             }
           }}>
             View Logs

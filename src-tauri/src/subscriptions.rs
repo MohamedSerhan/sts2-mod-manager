@@ -417,8 +417,21 @@ pub async fn apply_subscription_update(
     }
 
     // ── STEP 2: Apply profile AFTER downloads ──
+    log::info!("Subscription update: applying profile '{}' ({} mods)", remote.name, remote.mods.len());
     crate::profiles::apply_profile(&remote, &mods_path, &disabled_path)
         .map_err(|e| e.to_string())?;
+
+    // ── STEP 3: Mark this profile as active ──
+    // Without this, a previously-active profile would still be reported as
+    // active and a later "Activate" of it (or app reload) would undo the sync.
+    {
+        let mut s = state.lock().map_err(|e| e.to_string())?;
+        s.active_profile = Some(remote.name.clone());
+        if let Err(e) = std::fs::write(s.config_path.join("active_profile.txt"), &remote.name) {
+            log::warn!("Failed to persist active_profile.txt after subscription update: {}", e);
+        }
+        log::info!("Subscription update: active profile set to '{}'", remote.name);
+    }
 
     // Update subscription record
     let mut db = load_subscriptions(&config_path);

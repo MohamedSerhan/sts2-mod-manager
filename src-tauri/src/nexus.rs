@@ -157,7 +157,15 @@ impl NexusClient {
             "https://api.nexusmods.com/v1/games/{}/mods/{}.json",
             game, mod_id
         );
-        let resp = self.client.get(&url).send().await?.error_for_status()?;
+        log::debug!("Nexus API: get_mod_info {}/{}", game, mod_id);
+        let resp = self.client.get(&url).send().await.map_err(|e| {
+            log::warn!("Nexus get_mod_info request failed for {}/{}: {}", game, mod_id, e);
+            e
+        })?;
+        let resp = resp.error_for_status().map_err(|e| {
+            log::warn!("Nexus get_mod_info HTTP error for {}/{}: {}", game, mod_id, e);
+            e
+        })?;
         let info: NexusModInfo = resp.json().await?;
         Ok(info)
     }
@@ -168,8 +176,17 @@ impl NexusClient {
             "https://api.nexusmods.com/v1/games/{}/mods/{}/files.json",
             game, mod_id
         );
-        let resp = self.client.get(&url).send().await?.error_for_status()?;
+        log::debug!("Nexus API: get_mod_files {}/{}", game, mod_id);
+        let resp = self.client.get(&url).send().await.map_err(|e| {
+            log::warn!("Nexus get_mod_files request failed for {}/{}: {}", game, mod_id, e);
+            e
+        })?;
+        let resp = resp.error_for_status().map_err(|e| {
+            log::warn!("Nexus get_mod_files HTTP error for {}/{}: {}", game, mod_id, e);
+            e
+        })?;
         let files_resp: NexusFilesResponse = resp.json().await?;
+        log::debug!("Nexus API: {}/{} returned {} files", game, mod_id, files_resp.files.len());
         Ok(files_resp.files)
     }
 
@@ -186,8 +203,17 @@ impl NexusClient {
             "https://api.nexusmods.com/v1/games/{}/mods/{}/files/{}/download_link.json?key={}&expires={}",
             game, mod_id, file_id, key, expires
         );
-        let resp = self.client.get(&url).send().await?.error_for_status()?;
+        log::debug!("Nexus API: get_download_urls {}/{}/files/{}", game, mod_id, file_id);
+        let resp = self.client.get(&url).send().await.map_err(|e| {
+            log::warn!("Nexus get_download_urls request failed for {}/{}/files/{}: {}", game, mod_id, file_id, e);
+            e
+        })?;
+        let resp = resp.error_for_status().map_err(|e| {
+            log::warn!("Nexus get_download_urls HTTP error for {}/{}/files/{}: {} (key may have expired)", game, mod_id, file_id, e);
+            e
+        })?;
         let urls: Vec<NexusDownloadUrl> = resp.json().await?;
+        log::debug!("Nexus API: {} download URL(s) returned", urls.len());
         Ok(urls)
     }
 }
@@ -200,7 +226,15 @@ pub async fn handle_nxm_link(
     url: String,
     _state: tauri::State<'_, AppState>,
 ) -> std::result::Result<NxmLink, String> {
-    let link = parse_nxm_url(&url).map_err(|e| e.to_string())?;
+    log::info!("Received NXM link: {}", url);
+    let link = parse_nxm_url(&url).map_err(|e| {
+        log::warn!("Failed to parse NXM link '{}': {}", url, e);
+        e.to_string()
+    })?;
+    log::info!(
+        "Parsed NXM link: game={} mod_id={} file_id={} (has_key={})",
+        link.game_domain, link.mod_id, link.file_id, link.key.is_some()
+    );
     Ok(link)
 }
 

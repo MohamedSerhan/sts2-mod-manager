@@ -244,6 +244,10 @@ export async function restoreBackup(name: string): Promise<void> {
   return invoke('restore_backup_cmd', { name });
 }
 
+export async function deleteBackup(name: string): Promise<void> {
+  return invoke('delete_backup_cmd', { name });
+}
+
 export async function resetToVanilla(): Promise<void> {
   return invoke('reset_to_vanilla_cmd');
 }

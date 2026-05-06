@@ -39,6 +39,8 @@ pub struct GitHubRepo {
     pub stargazers_count: u64,
     pub updated_at: String,
     pub owner: GitHubOwner,
+    #[serde(default)]
+    pub topics: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -164,6 +166,31 @@ pub async fn search_github_repos(
         .await?
         .error_for_status()?;
 
+    let search: GitHubSearchResponse = resp.json().await?;
+    Ok(search.items)
+}
+
+/// Search GitHub repositories sorted by best-match relevance (no STS2 qualifier appended).
+/// Used by auto-detect so the most semantically relevant repo wins, not the most recently
+/// updated one. Includes the mercy-preview Accept header so `topics` is reliably populated.
+pub async fn search_github_repos_relevance(
+    query: &str,
+    token: Option<&str>,
+) -> Result<Vec<GitHubRepo>> {
+    let client = build_client(token);
+    let url = "https://api.github.com/search/repositories";
+
+    let req = client
+        .get(url)
+        .header(
+            reqwest::header::ACCEPT,
+            "application/vnd.github.mercy-preview+json",
+        )
+        .query(&[("q", query), ("per_page", "30")]);
+
+    log::debug!("Auto-detect search: GET {}?q={}&per_page=30", url, query);
+
+    let resp = req.send().await?.error_for_status()?;
     let search: GitHubSearchResponse = resp.json().await?;
     Ok(search.items)
 }

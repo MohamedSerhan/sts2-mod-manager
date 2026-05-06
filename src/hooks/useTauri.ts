@@ -156,10 +156,6 @@ export async function auditModVersions(): Promise<ModAuditEntry[]> {
   return invoke('audit_mod_versions');
 }
 
-export async function repairModFolders(): Promise<{ old_folder: string; new_folder: string; mod_name: string }[]> {
-  return invoke('repair_mod_folders');
-}
-
 export async function quickAddMod(url: string): Promise<QuickAddResult> {
   return invoke('quick_add_mod', { url });
 }
@@ -276,6 +272,10 @@ export async function checkSubscriptionUpdates(): Promise<SubscriptionUpdate[]> 
 
 export async function applySubscriptionUpdate(shareId: string): Promise<Profile> {
   return invoke('apply_subscription_update', { shareId });
+}
+
+export async function repairModpackSubscription(shareId: string): Promise<Profile> {
+  return invoke('repair_modpack_subscription', { shareId });
 }
 
 // ── Logging ────────────────────────────────────────────────────────────────

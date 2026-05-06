@@ -189,7 +189,6 @@ pub fn run() {
             // Dependency resolution
             mods::check_mod_dependencies,
             mods::get_mod_dependents,
-            mods::repair_mod_folders,
             // Backup & safety
             backup::create_backup_cmd,
             backup::list_backups_cmd,
@@ -208,6 +207,7 @@ pub fn run() {
             subscriptions::unsubscribe,
             subscriptions::check_subscription_updates,
             subscriptions::apply_subscription_update,
+            subscriptions::repair_modpack_subscription,
         ])
         .setup(|app| {
             // Register deep link handler for nxm:// and sts2mm:// protocols

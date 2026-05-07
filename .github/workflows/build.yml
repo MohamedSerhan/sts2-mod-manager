@@ -177,13 +177,13 @@ jobs:
           #### Linux
           $(link "STS2.Mod.Manager_${VERSION}_amd64.deb" "STS2.Mod.Manager_${VERSION}_amd64.deb" "For Ubuntu, Debian, Pop!_OS, Linux Mint. Install with \`sudo dpkg -i\`." true)
           $(link "STS2.Mod.Manager-${VERSION}-1.x86_64.rpm" "STS2.Mod.Manager-${VERSION}-1.x86_64.rpm" "For Fedora, openSUSE. Install with \`sudo rpm -i\`." true)
-          $(link "STS2.Mod.Manager_${VERSION}_amd64.AppImage" "STS2.Mod.Manager_${VERSION}_amd64.AppImage" "Portable, no install needed. **Note:** May show a white screen on Arch-based distros (CachyOS, Manjaro) -- use the .deb or .rpm instead.")
+          $(link "STS2.Mod.Manager_${VERSION}_amd64.AppImage" "STS2.Mod.Manager_${VERSION}_amd64.AppImage" "Portable, no install needed. **Note:** White screen on Arch-based distros (CachyOS, Manjaro) — use the RPM extraction method below instead.")
 
-          > **Arch/CachyOS users:** The AppImage has a known WebKitGTK issue. Use the .deb package with \`debtap\`:
+          > **Arch/CachyOS/Manjaro users:** The AppImage has a known upstream Tauri bug ([tauri-apps/tauri#12491](https://github.com/tauri-apps/tauri/pull/12491)) where WebKit's GPU subprocess fails EGL initialisation through the FUSE layer, causing a blank white window. This cannot be fixed with environment variables. Extract the RPM binary directly instead — it runs against the system webkit2gtk-4.1 with no FUSE layer and works correctly:
           > \`\`\`
-          > yay -S debtap && sudo debtap -u
-          > sudo debtap STS2.Mod.Manager_${VERSION}_amd64.deb
-          > sudo pacman -U sts2-mod-manager-*.pkg.tar.zst
+          > curl -fLo /tmp/sts2.rpm "https://github.com/${REPO}/releases/download/${TAG}/STS2.Mod.Manager-${VERSION}-1.x86_64.rpm"
+          > mkdir -p /tmp/rpm-extract && bsdtar -C /tmp/rpm-extract -xf /tmp/sts2.rpm
+          > sudo install -Dm755 /tmp/rpm-extract/usr/bin/sts2-mod-manager /usr/local/bin/sts2-mod-manager
           > \`\`\`
 
           ---

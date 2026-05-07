@@ -164,7 +164,7 @@ if [ -n "$TAG" ]; then
   KEY_FILE="$(mktemp)"
   printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" | base64 --decode > "$KEY_FILE"
   printf '%s\n' "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" | \
-    "$MINISIGN" -Sm "$TARBALL" -s "$KEY_FILE"
+    "$MINISIGN" -Sm "$TARBALL" -s "$KEY_FILE" -x "${TARBALL}.sig"
   rm -f "$KEY_FILE"
 
   # Replace the three assets in the GitHub release

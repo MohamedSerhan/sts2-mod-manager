@@ -50,7 +50,8 @@ jobs:
             libssl-dev \
             libgtk-3-dev \
             libayatana-appindicator3-dev \
-            librsvg2-dev
+            librsvg2-dev \
+            squashfs-tools
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -90,6 +91,24 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-') }}
           includeUpdaterJson: false
           args: ${{ matrix.args }}
+
+      - name: Patch AppImage AppRun (Arch/Wayland LD_PRELOAD fix)
+        if: matrix.platform == 'ubuntu-22.04'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          APPIMAGE=$(find src-tauri/target/release/bundle/appimage -name "*.AppImage" ! -name "*.tar.gz" | head -1)
+          if [ -z "$APPIMAGE" ]; then
+            echo "No AppImage found, skipping patch."
+            exit 0
+          fi
+          TAG=""
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          bash scripts/patch-appimage-apprun.sh "$APPIMAGE" "$TAG"
 
       - name: Upload build artifacts
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
@@ -177,14 +196,9 @@ jobs:
           #### Linux
           $(link "STS2.Mod.Manager_${VERSION}_amd64.deb" "STS2.Mod.Manager_${VERSION}_amd64.deb" "For Ubuntu, Debian, Pop!_OS, Linux Mint. Install with \`sudo dpkg -i\`." true)
           $(link "STS2.Mod.Manager-${VERSION}-1.x86_64.rpm" "STS2.Mod.Manager-${VERSION}-1.x86_64.rpm" "For Fedora, openSUSE. Install with \`sudo rpm -i\`." true)
-          $(link "STS2.Mod.Manager_${VERSION}_amd64.AppImage" "STS2.Mod.Manager_${VERSION}_amd64.AppImage" "Portable, no install needed. **Note:** White screen on Arch-based distros (CachyOS, Manjaro) — use the RPM extraction method below instead.")
+          $(link "STS2.Mod.Manager_${VERSION}_amd64.AppImage" "STS2.Mod.Manager_${VERSION}_amd64.AppImage" "Portable, no install needed. Works on all distros including Arch-based (CachyOS, Manjaro, EndeavourOS)." true)
 
-          > **Arch/CachyOS/Manjaro users:** The AppImage has a known upstream Tauri bug ([tauri-apps/tauri#12491](https://github.com/tauri-apps/tauri/pull/12491)) where WebKit's GPU subprocess fails EGL initialisation through the FUSE layer, causing a blank white window. This cannot be fixed with environment variables. Extract the RPM binary directly instead — it runs against the system webkit2gtk-4.1 with no FUSE layer and works correctly:
-          > \`\`\`
-          > curl -fLo /tmp/sts2.rpm "https://github.com/${REPO}/releases/download/${TAG}/STS2.Mod.Manager-${VERSION}-1.x86_64.rpm"
-          > mkdir -p /tmp/rpm-extract && bsdtar -C /tmp/rpm-extract -xf /tmp/sts2.rpm
-          > sudo install -Dm755 /tmp/rpm-extract/usr/bin/sts2-mod-manager /usr/local/bin/sts2-mod-manager
-          > \`\`\`
+          > **Arch/CachyOS/Manjaro users:** The AppImage now includes a built-in fix for the blank white screen issue. The AppRun script preloads the system \`libwayland-client.so\` before launching, which prevents WebKit's GPU subprocess from failing EGL initialisation. Simply download, mark executable, and run — no workarounds needed.
 
           ---
 

@@ -49,66 +49,6 @@ fn setup_logging(log_path: &std::path::Path) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // On Arch-based distros (CachyOS, Manjaro, EndeavourOS) the AppImage's
-    // bundled libwayland-client can be a different version from the system's
-    // Wayland compositor.  When WebKit spawns its GPU subprocess
-    // (WebKitGPUProcess), that subprocess tries to initialise EGL via
-    // eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR, ...) using the
-    // mismatched library, which returns EGL_BAD_PARAMETER and aborts —
-    // leaving a blank white window.
-    //
-    // Preloading the system's libwayland-client.so via LD_PRELOAD forces
-    // the dynamic linker to use the correct version in all child processes
-    // (WebKitGPUProcess, WebKitWebProcess, WebKitNetworkProcess), fixing
-    // EGL initialisation before any Wayland protocol exchange occurs.
-    //
-    // We resolve the library path at runtime via ldconfig so this works on
-    // any distro regardless of install prefix.  We only apply this when
-    // running inside an AppImage ($APPIMAGE is set by the AppImage runtime).
-    #[cfg(target_os = "linux")]
-    if std::env::var_os("APPIMAGE").is_some() {
-        // Try to resolve libwayland-client.so via ldconfig (use absolute path
-        // because file managers launch with a minimal PATH that may omit /usr/bin).
-        let lib_path: Option<String> = ["/usr/bin/ldconfig", "/sbin/ldconfig", "/usr/sbin/ldconfig"]
-            .iter()
-            .find_map(|ldconfig| {
-                std::process::Command::new(ldconfig)
-                    .arg("-p")
-                    .output()
-                    .ok()
-                    .and_then(|out| {
-                        let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
-                        stdout
-                            .lines()
-                            .find(|l| {
-                                l.contains("libwayland-client.so") && l.contains(" => ")
-                            })
-                            .and_then(|l| l.split(" => ").nth(1))
-                            .map(|p| p.trim().to_string())
-                    })
-            })
-            // Fall back to well-known paths when ldconfig is unavailable.
-            .or_else(|| {
-                [
-                    "/usr/lib/libwayland-client.so",
-                    "/usr/lib/libwayland-client.so.0",
-                    "/usr/lib/x86_64-linux-gnu/libwayland-client.so.0",
-                    "/usr/lib64/libwayland-client.so.0",
-                ]
-                .iter()
-                .find(|p| std::path::Path::new(p).exists())
-                .map(|p| p.to_string())
-            });
-
-        if let Some(lib_path) = lib_path {
-            let new_preload = match std::env::var("LD_PRELOAD") {
-                Ok(existing) if !existing.is_empty() => format!("{}:{}", lib_path, existing),
-                _ => lib_path,
-            };
-            std::env::set_var("LD_PRELOAD", &new_preload);
-        }
-    }
-
     let config_dir = dirs::config_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join("sts2-mod-manager");

@@ -142,15 +142,12 @@ if [ -n "$TAG" ]; then
   : "${TAURI_SIGNING_PRIVATE_KEY:?TAURI_SIGNING_PRIVATE_KEY must be set}"
   : "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:?TAURI_SIGNING_PRIVATE_KEY_PASSWORD must be set}"
 
-  TARBALL="${APPIMAGE_NAME}.tar.gz"
-  SIG="${TARBALL}.sig"
+  # Tauri 2.x signs the AppImage directly (no .tar.gz wrapper).
+  SIG="${APPIMAGE_NAME}.sig"
 
   cd "$BUNDLE_DIR"
 
-  # Create updater tarball
-  tar czf "$TARBALL" "$APPIMAGE_NAME"
-
-  # Re-sign using the Tauri minisign key
+  # Re-sign using the Tauri minisign key.
   # minisign is not in Ubuntu 22.04 default repos — download a pre-built binary.
   if ! command -v minisign &>/dev/null; then
     MINISIGN_URL="https://github.com/jedisct1/minisign/releases/download/0.11/minisign-0.11-linux.tar.gz"
@@ -164,14 +161,13 @@ if [ -n "$TAG" ]; then
   KEY_FILE="$(mktemp)"
   printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" | base64 --decode > "$KEY_FILE"
   printf '%s\n' "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" | \
-    "$MINISIGN" -Sm "$TARBALL" -s "$KEY_FILE" -x "${TARBALL}.sig"
+    "$MINISIGN" -Sm "$APPIMAGE_NAME" -s "$KEY_FILE" -x "$SIG"
   rm -f "$KEY_FILE"
 
-  # Replace the three assets in the GitHub release
+  # Replace the two assets in the GitHub release
   gh release delete-asset "$TAG" "$APPIMAGE_NAME" --yes 2>/dev/null || true
-  gh release delete-asset "$TAG" "$TARBALL"        --yes 2>/dev/null || true
   gh release delete-asset "$TAG" "$SIG"            --yes 2>/dev/null || true
-  gh release upload "$TAG" "$APPIMAGE_NAME" "$TARBALL" "$SIG"
+  gh release upload "$TAG" "$APPIMAGE_NAME" "$SIG"
 
   echo "==> Release assets replaced for $TAG"
 fi

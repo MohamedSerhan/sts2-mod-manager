@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
 import { listen } from '@tauri-apps/api/event';
-import { Home, LayoutDashboard, Package, Search, Layers, Settings, Play, ChevronRight, Wrench, GraduationCap, AlertTriangle } from 'lucide-react';
+import { Home, LayoutDashboard, Package, Search, Layers, Settings, Play, ChevronRight, Wrench, GraduationCap, ExternalLink, AlertTriangle } from 'lucide-react';
 import { check, type Update } from '@tauri-apps/plugin-updater';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { cn } from './lib/utils';
 import { ToastProvider, useToast } from './contexts/ToastContext';
@@ -99,6 +100,8 @@ function AppInner() {
     return () => clearInterval(interval);
   }, []);
 
+  const RELEASES_URL = 'https://github.com/MohamedSerhan/sts2-mod-manager/releases/latest';
+
   async function handleInstallUpdate() {
     if (!appUpdate || updateInstalling) return;
     setUpdateInstalling(true);
@@ -107,8 +110,24 @@ function AppInner() {
       toast.success('Update installed. Restarting...');
       await relaunch();
     } catch (e) {
-      toast.error(`Update failed: ${e instanceof Error ? e.message : String(e)}`);
+      const msg = e instanceof Error ? e.message : String(e);
+      // Seamless in-app updates only work when running the AppImage build.
+      // .deb and .rpm installs require pkexec/sudo elevation which is
+      // unreliable (Wayland, non-sudo users, polkit misconfigurations).
+      // In those cases the install attempt fails here — guide the user to
+      // download the AppImage (or the new .deb/.rpm) manually instead.
+      toast.error(
+        `Update failed: ${msg}. If you installed via .deb or .rpm, use the AppImage build for seamless updates, or click Download to get the new package manually.`
+      );
       setUpdateInstalling(false);
+    }
+  }
+
+  async function handleDownloadUpdate() {
+    try {
+      await openUrl(RELEASES_URL);
+    } catch (e) {
+      toast.error(`Failed to open browser: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -316,6 +335,15 @@ function AppInner() {
                 className="px-3 py-1 bg-white text-blue-600 rounded text-xs font-semibold hover:bg-blue-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {updateInstalling ? 'Installing...' : 'Install & Restart'}
+              </button>
+              <button
+                onClick={handleDownloadUpdate}
+                disabled={updateInstalling}
+                title="Open GitHub releases page to download manually"
+                className="flex items-center gap-1 px-3 py-1 bg-white/20 hover:bg-white/30 text-white rounded text-xs font-semibold transition-colors disabled:opacity-50"
+              >
+                <ExternalLink size={11} />
+                Download
               </button>
               <button
                 onClick={() => setUpdateDismissed(true)}

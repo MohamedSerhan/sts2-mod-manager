@@ -4,8 +4,18 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
+    paths-ignore:
+      - "**/*.md"
+      - ".claude/**"
+      - ".gitignore"
+      - "LICENSE"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - ".claude/**"
+      - ".gitignore"
+      - "LICENSE"
   workflow_dispatch:
 
 concurrency:
@@ -16,7 +26,51 @@ permissions:
   contents: write
 
 jobs:
+  # Cheap pre-flight check: runs on every PR and push to main.
+  # The expensive 3-platform bundle build only runs on tag pushes (and manual dispatch).
+  check:
+    if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+
+      - name: Cargo check
+        working-directory: src-tauri
+        run: cargo check --locked
+
   build:
+    if: ${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}
     # Job-level permissions are also declared here in addition to the
     # workflow-level block above. tauri-action's "Create a release" call has
     # been seen to fail with "Resource not accessible by integration" on tag
@@ -61,6 +115,12 @@ jobs:
           rustup target add aarch64-apple-darwin
           rustup target add x86_64-apple-darwin
 
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.platform }}
+
       - name: Install Node.js
         uses: actions/setup-node@v5
         with:
@@ -68,10 +128,7 @@ jobs:
           cache: "npm"
 
       - name: Install frontend dependencies
-        run: npm install
-
-      - name: TypeScript check
-        run: npx tsc --noEmit
+        run: npm ci
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
@@ -177,13 +234,13 @@ jobs:
           #### Linux
           $(link "STS2.Mod.Manager_${VERSION}_amd64.deb" "STS2.Mod.Manager_${VERSION}_amd64.deb" "For Ubuntu, Debian, Pop!_OS, Linux Mint. Install with \`sudo dpkg -i\`." true)
           $(link "STS2.Mod.Manager-${VERSION}-1.x86_64.rpm" "STS2.Mod.Manager-${VERSION}-1.x86_64.rpm" "For Fedora, openSUSE. Install with \`sudo rpm -i\`." true)
-          $(link "STS2.Mod.Manager_${VERSION}_amd64.AppImage" "STS2.Mod.Manager_${VERSION}_amd64.AppImage" "Portable, no install needed. **Note:** May show a white screen on Arch-based distros (CachyOS, Manjaro) -- use the .deb or .rpm instead.")
+          $(link "STS2.Mod.Manager_${VERSION}_amd64.AppImage" "STS2.Mod.Manager_${VERSION}_amd64.AppImage" "Portable, no install needed. **Note:** White screen on Arch-based distros (CachyOS, Manjaro) — use the RPM extraction method below instead.")
 
-          > **Arch/CachyOS users:** The AppImage has a known WebKitGTK issue. Use the .deb package with \`debtap\`:
+          > **Arch/CachyOS/Manjaro users:** The AppImage has a known upstream Tauri bug ([tauri-apps/tauri#12491](https://github.com/tauri-apps/tauri/pull/12491)) where WebKit's GPU subprocess fails EGL initialisation through the FUSE layer, causing a blank white window. This cannot be fixed with environment variables. Extract the RPM binary directly instead — it runs against the system webkit2gtk-4.1 with no FUSE layer and works correctly:
           > \`\`\`
-          > yay -S debtap && sudo debtap -u
-          > sudo debtap STS2.Mod.Manager_${VERSION}_amd64.deb
-          > sudo pacman -U sts2-mod-manager-*.pkg.tar.zst
+          > curl -fLo /tmp/sts2.rpm "https://github.com/${REPO}/releases/download/${TAG}/STS2.Mod.Manager-${VERSION}-1.x86_64.rpm"
+          > mkdir -p /tmp/rpm-extract && bsdtar -C /tmp/rpm-extract -xf /tmp/sts2.rpm
+          > sudo install -Dm755 /tmp/rpm-extract/usr/bin/sts2-mod-manager /usr/local/bin/sts2-mod-manager
           > \`\`\`
 
           ---

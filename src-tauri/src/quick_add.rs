@@ -135,6 +135,7 @@ pub async fn quick_add_mod(
     url: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<QuickAddResult, String> {
+    crate::game::ensure_game_not_running()?;
     log::info!("Quick add: {}", url);
     // Try GitHub first
     if let Ok((owner, repo)) = resolve_github_url(&url) {

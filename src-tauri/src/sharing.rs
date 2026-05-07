@@ -871,6 +871,7 @@ pub async fn install_shared_profile(
     code: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Profile, String> {
+    crate::game::ensure_game_not_running()?;
     let (owner, profile_code) = parse_share_code(&code)
         .map_err(|e| e.to_string())?;
 
@@ -913,6 +914,7 @@ pub async fn install_shared_profile(
     }
 
     let mod_sources_db = crate::mod_sources::load_sources(&config_path);
+    let pinned_set = crate::mod_sources::load_pinned_set(&config_path);
     let mut download_failures: Vec<String> = Vec::new();
 
     for pm in &profile.mods {
@@ -921,6 +923,20 @@ pub async fn install_shared_profile(
             .or_else(|| pm.folder_name.as_ref().and_then(|f| on_disk_by_id.get(f)))
             .or_else(|| pm.mod_id.as_ref().and_then(|id| on_disk_by_id.get(id)))
             .copied();
+
+        // Pinned mods keep their installed version — don't replace files.
+        let is_pinned = pinned_set.contains(&pm.name)
+            || pm.folder_name.as_ref().map_or(false, |f| pinned_set.contains(f))
+            || pm.mod_id.as_ref().map_or(false, |i| pinned_set.contains(i))
+            || on_disk_mod.map_or(false, |d| {
+                pinned_set.contains(&d.name)
+                    || d.folder_name.as_ref().map_or(false, |f| pinned_set.contains(f))
+                    || d.mod_id.as_ref().map_or(false, |i| pinned_set.contains(i))
+            });
+        if is_pinned {
+            log::info!("install_shared_profile: skipping pinned mod '{}' (preserving installed version)", pm.name);
+            continue;
+        }
 
         if let Some(disk_mod) = on_disk_mod {
             let disk_ver = disk_mod.version.trim_start_matches('v');
@@ -1036,7 +1052,7 @@ pub async fn install_shared_profile(
 
     // ── STEP 2: Apply profile AFTER downloads ──
     // Now all downloadable mods are in mods_path, apply_profile can correctly enable/disable
-    crate::profiles::apply_profile(&profile, &mods_path, &disabled_path)
+    crate::profiles::apply_profile_with_pins(&profile, &mods_path, &disabled_path, &pinned_set)
         .map_err(|e| e.to_string())?;
 
     // ── STEP 3: Auto-subscribe for future updates ──

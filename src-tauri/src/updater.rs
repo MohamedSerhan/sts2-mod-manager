@@ -327,6 +327,7 @@ pub async fn update_mod(
     name: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ModInfo, String> {
+    crate::game::ensure_game_not_running()?;
     let (mods_path, cache_path, config_path, token) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
@@ -402,6 +403,7 @@ pub async fn update_mod(
 pub async fn update_all_mods(
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Vec<ModInfo>, String> {
+    crate::game::ensure_game_not_running()?;
     let (mods_path, cache_path, config_path, token, nexus_key) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let mods_path = s.mods_path.clone().ok_or("Game path not set")?;

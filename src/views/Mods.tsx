@@ -15,6 +15,8 @@ import {
   ChevronDown,
   ChevronUp,
   Save,
+  Pin,
+  PinOff,
 } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
@@ -35,10 +37,12 @@ import {
   openModsFolder,
   setModSource,
   findGithubFromNexus,
+  pinMod,
+  unpinMod,
 } from '../hooks/useTauri';
 
 export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
-  const { mods, refreshMods, refreshAll } = useApp();
+  const { mods, refreshMods, refreshAll, gameRunning } = useApp();
   const toast = useToast();
   const [filter, setFilter] = useState('');
   const [showQuickAdd, setShowQuickAdd] = useState(false);
@@ -61,6 +65,21 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
       toast.success(`${name} ${enable ? 'enabled' : 'disabled'}`);
     } catch (e) {
       toast.error(`Failed to toggle ${name}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  async function handleTogglePin(name: string, pinned: boolean) {
+    try {
+      if (pinned) {
+        await unpinMod(name);
+        toast.success(`Unpinned ${name}`);
+      } else {
+        await pinMod(name);
+        toast.success(`Pinned ${name} — its enabled state will survive modpack updates`);
+      }
+      await refreshMods();
+    } catch (e) {
+      toast.error(`Failed to ${pinned ? 'unpin' : 'pin'} ${name}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -243,11 +262,11 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
           </Button>
           {advancedMode && (
             <>
-              <Button variant="secondary" size="sm" onClick={handleImportFile}>
+              <Button variant="secondary" size="sm" onClick={handleImportFile} disabled={gameRunning}>
                 <Upload size={14} />
                 Import Mod
               </Button>
-              <Button variant="secondary" size="sm" onClick={() => setShowQuickAdd(!showQuickAdd)}>
+              <Button variant="secondary" size="sm" onClick={() => setShowQuickAdd(!showQuickAdd)} disabled={gameRunning}>
                 <Link size={14} />
                 Quick Add URL
               </Button>
@@ -303,16 +322,16 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
         </div>
         {mods.length > 0 && (
           <div className="flex gap-1.5">
-            <Button variant="ghost" size="sm" onClick={handleEnableAll} title="Enable all mods">
+            <Button variant="ghost" size="sm" onClick={handleEnableAll} disabled={gameRunning} title={gameRunning ? 'Close STS2 first' : 'Enable all mods'}>
               <ToggleRight size={14} />
               Enable All
             </Button>
-            <Button variant="ghost" size="sm" onClick={handleDisableAll} title="Disable all mods">
+            <Button variant="ghost" size="sm" onClick={handleDisableAll} disabled={gameRunning} title={gameRunning ? 'Close STS2 first' : 'Disable all mods'}>
               <ToggleLeft size={14} />
               Disable All
             </Button>
             {advancedMode && (
-              <Button variant="ghost" size="sm" onClick={handleDeleteAll} title="Delete all mods" className="text-red-400 hover:text-red-300 hover:bg-red-400/10">
+              <Button variant="ghost" size="sm" onClick={handleDeleteAll} disabled={gameRunning} title={gameRunning ? 'Close STS2 first' : 'Delete all mods'} className="text-red-400 hover:text-red-300 hover:bg-red-400/10">
                 <Trash2 size={14} />
                 Delete All
               </Button>
@@ -352,6 +371,7 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
                     <Toggle
                       checked={mod.enabled}
                       onChange={(checked) => handleToggle(mod.name, checked)}
+                      disabled={gameRunning}
                     />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2.5 flex-wrap">
@@ -359,6 +379,14 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
                           {mod.name}
                         </span>
                         <span className="text-sm text-text-dim">v{mod.version}</span>
+                        {mod.pinned && (
+                          <span
+                            className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300"
+                            title="Pinned — modpack updates will preserve this mod's enabled/disabled state and version"
+                          >
+                            <Pin size={9} /> Pinned
+                          </span>
+                        )}
                         {/* Source badges (advanced only) */}
                         {advancedMode && mod.github_url ? (
                           <a
@@ -402,6 +430,21 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5 ml-4 shrink-0">
+                    <button
+                      onClick={() => handleTogglePin(mod.name, mod.pinned)}
+                      className={`p-2 rounded-lg transition-colors ${
+                        mod.pinned
+                          ? 'text-blue-300 bg-blue-500/15 hover:bg-blue-500/25'
+                          : 'text-text-dim hover:text-blue-300 hover:bg-blue-500/10'
+                      }`}
+                      title={
+                        mod.pinned
+                          ? 'Unpin — modpack updates can change this mod again'
+                          : 'Pin — keep this mod\'s enabled/disabled state across modpack updates'
+                      }
+                    >
+                      {mod.pinned ? <PinOff size={16} /> : <Pin size={16} />}
+                    </button>
                     {advancedMode && (
                       <button
                         onClick={() => isExpanded ? setExpandedMod(null) : startEditSource(mod.name)}
@@ -414,8 +457,9 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
                     {advancedMode && (
                       <button
                         onClick={() => handleDelete(mod.name)}
-                        className="p-2 rounded-lg text-text-dim hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                        title="Delete mod"
+                        disabled={gameRunning}
+                        title={gameRunning ? 'Close STS2 first' : 'Delete mod'}
+                        className="p-2 rounded-lg text-text-dim hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-text-dim disabled:hover:bg-transparent"
                       >
                         <Trash2 size={16} />
                       </button>

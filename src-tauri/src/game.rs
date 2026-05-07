@@ -120,6 +120,55 @@ fn normalize_game_path(path: PathBuf) -> PathBuf {
     path
 }
 
+/// Names the STS2 process can appear under across platforms.
+/// Matched case-insensitively, with platform-appropriate `.exe` stripping.
+const GAME_PROCESS_NAMES: &[&str] = &[
+    "SlayTheSpire2",
+    "Slay the Spire 2",
+];
+
+/// Check whether STS2 is currently running.
+/// File operations on the mods folder while the game is up can corrupt save state,
+/// crash the game, or leave the install in a half-applied state — callers gate
+/// mutating commands on this.
+pub fn is_game_running() -> bool {
+    use sysinfo::System;
+
+    let mut sys = System::new();
+    sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+
+    for proc in sys.processes().values() {
+        let name = proc.name().to_string_lossy();
+        let stripped = name
+            .strip_suffix(".exe")
+            .or_else(|| name.strip_suffix(".EXE"))
+            .unwrap_or(&name);
+        for target in GAME_PROCESS_NAMES {
+            if stripped.eq_ignore_ascii_case(target) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Guard helper: returns an error if STS2 is running, suitable for use in
+/// Tauri commands that mutate the mods folder or profile state.
+pub fn ensure_game_not_running() -> std::result::Result<(), String> {
+    if is_game_running() {
+        Err("Slay the Spire 2 is currently running. Close the game before changing mods or profiles to avoid corruption.".to_string())
+    } else {
+        Ok(())
+    }
+}
+
+/// Tauri command: report whether the game process is currently running.
+/// The frontend polls this to gate UI controls and show a banner.
+#[tauri::command]
+pub fn is_game_running_cmd() -> bool {
+    is_game_running()
+}
+
 /// Auto-detect the STS2 game installation.
 pub fn detect_game() -> Option<PathBuf> {
     let steam_path = find_steam_path()?;
@@ -321,6 +370,7 @@ pub fn launch_game(
 pub fn launch_vanilla(
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<bool, String> {
+    ensure_game_not_running()?;
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?.clone();
     let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?.clone();

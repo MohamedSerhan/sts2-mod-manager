@@ -34,6 +34,12 @@ pub struct ModInfo {
     /// Linked Nexus Mods URL
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nexus_url: Option<String>,
+    /// Whether this mod is pinned. Pinned mods are excluded from update checks
+    /// and from automated state changes during modpack/profile applies — they
+    /// keep their installed version and current enabled/disabled state.
+    /// Populated by `mod_sources::enrich_mods_with_sources`.
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 /// Raw manifest structure from STS2 mod JSON files.
@@ -261,6 +267,7 @@ fn parse_manifest(manifest_path: &Path, base_dir: &Path, enabled: bool) -> Optio
         mod_id,
         github_url,
         nexus_url,
+        pinned: false,
     })
 }
 
@@ -311,6 +318,7 @@ fn dll_only_mod(dll_path: &Path, base_dir: &Path, enabled: bool) -> ModInfo {
         mod_id: None,
         github_url: None,
         nexus_url: None,
+        pinned: false,
     }
 }
 
@@ -1100,6 +1108,7 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
                 mod_id: None,
                 github_url: None,
                 nexus_url: None,
+                pinned: false,
             })
         }
     }
@@ -1129,6 +1138,7 @@ pub fn get_installed_mods(state: tauri::State<'_, AppState>) -> std::result::Res
 /// Toggle a mod between enabled and disabled.
 #[tauri::command]
 pub fn toggle_mod(name: String, enable: bool, state: tauri::State<'_, AppState>) -> std::result::Result<bool, String> {
+    crate::game::ensure_game_not_running()?;
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
     let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
@@ -1160,6 +1170,7 @@ pub fn toggle_mod(name: String, enable: bool, state: tauri::State<'_, AppState>)
 /// Permanently delete a mod.
 #[tauri::command]
 pub fn delete_mod_cmd(name: String, state: tauri::State<'_, AppState>) -> std::result::Result<bool, String> {
+    crate::game::ensure_game_not_running()?;
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?.clone();
     let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?.clone();
@@ -1253,6 +1264,7 @@ pub fn delete_mod_cmd(name: String, state: tauri::State<'_, AppState>) -> std::r
 /// Uses direct filesystem iteration instead of scan-then-move for reliability.
 #[tauri::command]
 pub fn enable_all_mods(state: tauri::State<'_, AppState>) -> std::result::Result<bool, String> {
+    crate::game::ensure_game_not_running()?;
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?.clone();
     let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?.clone();
@@ -1303,6 +1315,7 @@ pub fn enable_all_mods(state: tauri::State<'_, AppState>) -> std::result::Result
 /// Uses direct filesystem iteration instead of scan-then-move for reliability.
 #[tauri::command]
 pub fn disable_all_mods(state: tauri::State<'_, AppState>) -> std::result::Result<bool, String> {
+    crate::game::ensure_game_not_running()?;
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?.clone();
     let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?.clone();
@@ -1352,6 +1365,7 @@ pub fn disable_all_mods(state: tauri::State<'_, AppState>) -> std::result::Resul
 /// Delete ALL mods from both enabled and disabled folders.
 #[tauri::command]
 pub fn delete_all_mods(state: tauri::State<'_, AppState>) -> std::result::Result<u32, String> {
+    crate::game::ensure_game_not_running()?;
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?.clone();
     let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?.clone();
@@ -1378,6 +1392,7 @@ pub fn delete_all_mods(state: tauri::State<'_, AppState>) -> std::result::Result
 /// Install a mod from a local file (zip archive).
 #[tauri::command]
 pub fn install_mod_from_file(path: String, state: tauri::State<'_, AppState>) -> std::result::Result<ModInfo, String> {
+    crate::game::ensure_game_not_running()?;
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
     let zip_path = PathBuf::from(&path);

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
 import { listen } from '@tauri-apps/api/event';
-import { Home, LayoutDashboard, Package, Search, Layers, Settings, Play, ChevronRight, Wrench, GraduationCap } from 'lucide-react';
+import { Home, LayoutDashboard, Package, Search, Layers, Settings, Play, ChevronRight, Wrench, GraduationCap, AlertTriangle } from 'lucide-react';
 import { check, type Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { cn } from './lib/utils';
@@ -54,7 +54,7 @@ function AppInner() {
       return false;
     }
   });
-  const { gameInfo, mods, refreshAll, activeProfile } = useApp();
+  const { gameInfo, mods, refreshAll, activeProfile, gameRunning } = useApp();
   const toast = useToast();
   const [dragOver, setDragOver] = useState(false);
   const [appUpdate, setAppUpdate] = useState<Update | null>(null);
@@ -260,7 +260,9 @@ function AppInner() {
           </button>
           <button
             onClick={handleLaunchVanilla}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-surface-hover hover:bg-yellow-600/20 text-text-muted text-xs font-medium transition-colors border border-border"
+            disabled={gameRunning}
+            title={gameRunning ? 'Close STS2 first' : undefined}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-surface-hover hover:bg-yellow-600/20 text-text-muted text-xs font-medium transition-colors border border-border disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-surface-hover"
           >
             Launch Vanilla (no mods)
           </button>
@@ -285,6 +287,18 @@ function AppInner() {
 
       {/* Main Content */}
       <main className="flex-1 overflow-auto bg-background">
+        {/* Game Running Banner — blocks mod/profile mutations */}
+        {gameRunning && (
+          <div className="bg-amber-600/95 text-white px-5 py-3 flex items-center gap-3">
+            <AlertTriangle size={18} className="shrink-0" />
+            <div className="flex-1">
+              <div className="text-sm font-semibold">Slay the Spire 2 is running</div>
+              <div className="text-xs text-white/85">
+                Mod and profile changes are paused until the game closes — touching files now can crash the game or corrupt your install.
+              </div>
+            </div>
+          </div>
+        )}
         {/* App Update Banner */}
         {appUpdate && !updateDismissed && (
           <div className="bg-blue-600/90 text-white px-5 py-3 flex items-center justify-between">

@@ -231,6 +231,10 @@ export async function launchVanilla(): Promise<boolean> {
   return invoke('launch_vanilla');
 }
 
+export async function isGameRunning(): Promise<boolean> {
+  return invoke('is_game_running_cmd');
+}
+
 // ── Dependency Resolution ──────────────────────────────────────────────────
 
 export async function checkModDependencies(name: string): Promise<string[]> {

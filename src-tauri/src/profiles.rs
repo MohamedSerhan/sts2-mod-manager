@@ -289,12 +289,30 @@ fn snapshot_current_inner(
 /// strings parsed from `info.json` and may differ in case (Linux is
 /// case-sensitive). folder_name and mod_id are stable identifiers that survive
 /// renames and case differences.
-pub fn apply_profile(
+///
+/// Skips any on-disk mod whose name/folder_name/mod_id is in `pinned` —
+/// pinned mods retain their current enabled/disabled state. This lets a
+/// player permanently disable cosmetic/non-multiplayer-breaking mods while
+/// still subscribed to a curator's modpack. Pass an empty set if no pinning
+/// is desired.
+pub fn apply_profile_with_pins(
     profile: &Profile,
     mods_path: &Path,
     disabled_path: &Path,
+    pinned: &std::collections::HashSet<String>,
 ) -> Result<()> {
     use std::collections::HashMap;
+
+    let is_pinned = |m: &crate::mods::ModInfo| -> bool {
+        if pinned.contains(&m.name) { return true; }
+        if let Some(ref folder) = m.folder_name {
+            if pinned.contains(folder) { return true; }
+        }
+        if let Some(ref id) = m.mod_id {
+            if pinned.contains(id) { return true; }
+        }
+        false
+    };
 
     // Build a map from any identifier (name / folder_name / mod_id) to the
     // desired enabled state. Last write wins, but the same ProfileMod owns all
@@ -334,6 +352,10 @@ pub fn apply_profile(
     // Step 1: Move mods that should be DISABLED from enabled to disabled
     let current_enabled = scan_mods(mods_path);
     for m in &current_enabled {
+        if is_pinned(m) {
+            log::info!("Profile apply: skipping pinned mod '{}' (currently enabled)", m.name);
+            continue;
+        }
         let should_be_enabled = lookup(m).unwrap_or(false);
         if !should_be_enabled {
             log::info!(
@@ -352,6 +374,10 @@ pub fn apply_profile(
     // Step 2: Move mods that should be ENABLED from disabled to enabled
     let current_disabled = scan_disabled_mods(disabled_path);
     for m in &current_disabled {
+        if is_pinned(m) {
+            log::info!("Profile apply: skipping pinned mod '{}' (currently disabled)", m.name);
+            continue;
+        }
         let should_be_enabled = lookup(m).unwrap_or(false);
         if should_be_enabled {
             log::info!(
@@ -490,6 +516,7 @@ pub async fn switch_profile(
     name: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<SwitchProfileResult, String> {
+    crate::game::ensure_game_not_running()?;
     let (mods_path, disabled_path, profiles_path, config_path, cache_path, token, current_profile_name) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let mods = s.mods_path.as_ref().ok_or("Game path not set")?.clone();
@@ -577,8 +604,21 @@ pub async fn switch_profile(
     }
 
     let mod_sources_db = crate::mod_sources::load_sources(&config_path);
+    let pinned_set = crate::mod_sources::load_pinned_set(&config_path);
     let mut downloaded_count = 0u32;
     let mut download_failures: Vec<String> = Vec::new();
+
+    let pm_is_pinned = |pm: &ProfileMod, disk: Option<&crate::mods::ModInfo>| -> bool {
+        if pinned_set.contains(&pm.name) { return true; }
+        if let Some(ref f) = pm.folder_name { if pinned_set.contains(f) { return true; } }
+        if let Some(ref i) = pm.mod_id { if pinned_set.contains(i) { return true; } }
+        if let Some(d) = disk {
+            if pinned_set.contains(&d.name) { return true; }
+            if let Some(ref f) = d.folder_name { if pinned_set.contains(f) { return true; } }
+            if let Some(ref i) = d.mod_id { if pinned_set.contains(i) { return true; } }
+        }
+        false
+    };
 
     for pm in &profile.mods {
         // Find matching on-disk mod
@@ -586,6 +626,12 @@ pub async fn switch_profile(
             .or_else(|| pm.folder_name.as_ref().and_then(|f| on_disk_by_id.get(f)))
             .or_else(|| pm.mod_id.as_ref().and_then(|id| on_disk_by_id.get(id)))
             .copied();
+
+        // Pinned mods keep their installed version — don't replace files.
+        if pm_is_pinned(pm, on_disk_mod) {
+            log::info!("switch_profile: skipping pinned mod '{}' (preserving installed version)", pm.name);
+            continue;
+        }
 
         if let Some(disk_mod) = on_disk_mod {
             let disk_ver = disk_mod.version.trim_start_matches('v');
@@ -705,7 +751,8 @@ pub async fn switch_profile(
     }
 
     // ── STEP 2: Apply profile AFTER downloads ──
-    apply_profile(&profile, &mods_path, &disabled_path).map_err(|e| e.to_string())?;
+    apply_profile_with_pins(&profile, &mods_path, &disabled_path, &pinned_set)
+        .map_err(|e| e.to_string())?;
 
     // ── STEP 3: Check what's still missing ──
     let final_on_disk: Vec<crate::mods::ModInfo> = scan_mods(&mods_path)

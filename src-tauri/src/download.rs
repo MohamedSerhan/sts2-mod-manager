@@ -322,6 +322,7 @@ pub async fn download_and_install_github_mod(
             nexus_url: None,
             folder_name: None,
             mod_id: None,
+            pinned: false,
         })
     } else {
         Err(AppError::Other(format!(
@@ -356,6 +357,7 @@ pub async fn download_github_mod(
     tag: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ModInfo, String> {
+    crate::game::ensure_game_not_running()?;
     let (mods_path, cache_path, token, config_path) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
@@ -391,6 +393,7 @@ pub async fn download_url_mod(
     url: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ModInfo, String> {
+    crate::game::ensure_game_not_running()?;
     let (mods_path, cache_path) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
@@ -435,6 +438,7 @@ pub async fn download_url_mod(
             mod_id: None,
             github_url: None,
             nexus_url: None,
+            pinned: false,
         })
     } else {
         Err(format!("Unsupported file type: {}", file_name))

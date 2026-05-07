@@ -12,6 +12,7 @@ export interface ModInfo {
   nexus_url: string | null;
   folder_name: string | null;
   mod_id: string | null;
+  pinned: boolean;
 }
 
 export interface Profile {

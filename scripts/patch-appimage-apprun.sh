@@ -151,14 +151,20 @@ if [ -n "$TAG" ]; then
   tar czf "$TARBALL" "$APPIMAGE_NAME"
 
   # Re-sign using the Tauri minisign key
+  # minisign is not in Ubuntu 22.04 default repos — download a pre-built binary.
   if ! command -v minisign &>/dev/null; then
-    sudo apt-get install -y -q minisign
+    MINISIGN_URL="https://github.com/jedisct1/minisign/releases/download/0.11/minisign-0.11-linux.tar.gz"
+    wget -q "$MINISIGN_URL" -O /tmp/minisign.tar.gz
+    tar -C /tmp -xf /tmp/minisign.tar.gz
+    MINISIGN=/tmp/minisign-linux/x86_64/minisign
+  else
+    MINISIGN=minisign
   fi
 
   KEY_FILE="$(mktemp)"
   printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" | base64 --decode > "$KEY_FILE"
   printf '%s\n' "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" | \
-    minisign -Sm "$TARBALL" -s "$KEY_FILE" -t "" 2>/dev/null
+    "$MINISIGN" -Sm "$TARBALL" -s "$KEY_FILE"
   rm -f "$KEY_FILE"
 
   # Replace the three assets in the GitHub release

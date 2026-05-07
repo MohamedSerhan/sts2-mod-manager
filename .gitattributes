@@ -1,0 +1,27 @@
+# Force LF line endings for all text files in the repo.
+# Prevents Windows checkouts (with core.autocrlf=true) from committing
+# CRLF and producing huge spurious diffs — see commit bfbb3bd.
+* text=auto eol=lf
+
+# Common binaries — never touch.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.zip binary
+*.gz binary
+*.tar binary
+*.exe binary
+*.dll binary
+*.dmg binary
+*.deb binary
+*.rpm binary
+*.msi binary
+*.AppImage binary

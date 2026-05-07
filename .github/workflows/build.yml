@@ -4,8 +4,18 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
+    paths-ignore:
+      - "**/*.md"
+      - ".claude/**"
+      - ".gitignore"
+      - "LICENSE"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - ".claude/**"
+      - ".gitignore"
+      - "LICENSE"
   workflow_dispatch:
 
 concurrency:
@@ -16,7 +26,51 @@ permissions:
   contents: write
 
 jobs:
+  # Cheap pre-flight check: runs on every PR and push to main.
+  # The expensive 3-platform bundle build only runs on tag pushes (and manual dispatch).
+  check:
+    if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+
+      - name: Cargo check
+        working-directory: src-tauri
+        run: cargo check --locked
+
   build:
+    if: ${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}
     # Job-level permissions are also declared here in addition to the
     # workflow-level block above. tauri-action's "Create a release" call has
     # been seen to fail with "Resource not accessible by integration" on tag
@@ -62,6 +116,12 @@ jobs:
           rustup target add aarch64-apple-darwin
           rustup target add x86_64-apple-darwin
 
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.platform }}
+
       - name: Install Node.js
         uses: actions/setup-node@v5
         with:
@@ -69,10 +129,7 @@ jobs:
           cache: "npm"
 
       - name: Install frontend dependencies
-        run: npm install
-
-      - name: TypeScript check
-        run: npx tsc --noEmit
+        run: npm ci
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0

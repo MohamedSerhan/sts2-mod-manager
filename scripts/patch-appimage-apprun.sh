@@ -164,10 +164,8 @@ if [ -n "$TAG" ]; then
     "$MINISIGN" -Sm "$APPIMAGE_NAME" -s "$KEY_FILE" -x "$SIG"
   rm -f "$KEY_FILE"
 
-  # Replace the two assets in the GitHub release
-  gh release delete-asset "$TAG" "$APPIMAGE_NAME" --yes 2>/dev/null || true
-  gh release delete-asset "$TAG" "$SIG"            --yes 2>/dev/null || true
-  gh release upload "$TAG" "$APPIMAGE_NAME" "$SIG"
+  # Replace the two assets in the GitHub release (--clobber overwrites if already present)
+  gh release upload "$TAG" "$APPIMAGE_NAME" "$SIG" --clobber
 
   echo "==> Release assets replaced for $TAG"
 fi

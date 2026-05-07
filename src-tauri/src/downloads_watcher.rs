@@ -104,6 +104,23 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                             continue;
                         }
 
+                        // Don't auto-install while the game is running — file
+                        // moves on the mods folder can crash the game or leave
+                        // it in a half-applied state. The user will see the
+                        // file in Downloads and can re-trigger the watcher
+                        // (e.g., by saving the file again) once the game exits.
+                        if crate::game::is_game_running() {
+                            log::info!(
+                                "Downloads watcher: skipping {:?} — game is running",
+                                path
+                            );
+                            let _ = app.emit("mod-auto-install-failed", serde_json::json!({
+                                "file_name": path.file_name().unwrap_or_default().to_string_lossy().to_string(),
+                                "error": "Slay the Spire 2 is running. Close the game and re-save the file to install."
+                            }));
+                            continue;
+                        }
+
                         recent.insert(path.clone(), Instant::now());
 
                         let (mods_path, disabled_path, config_path) = {

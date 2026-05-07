@@ -85,6 +85,19 @@ pub fn save_sources(db: &ModSourcesDb, config_path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Load the set of pinned mod names from mod_sources.json.
+/// Returns a set of names — the caller can match these against ModInfo.name,
+/// ModInfo.folder_name, or ModInfo.mod_id since pinning is keyed by display name
+/// in the sources DB but mods on disk may be matched by any of those identifiers.
+pub fn load_pinned_set(config_path: &Path) -> std::collections::HashSet<String> {
+    let db = load_sources(config_path);
+    db.mods
+        .iter()
+        .filter(|(_, e)| e.pinned)
+        .map(|(name, _)| name.clone())
+        .collect()
+}
+
 /// Update just the installed_version for a mod in mod_sources.json.
 pub fn update_installed_version(mod_name: &str, version: &str, config_path: &Path) {
     let mut db = load_sources(config_path);
@@ -103,7 +116,12 @@ pub fn update_installed_version(mod_name: &str, version: &str, config_path: &Pat
 pub fn enrich_mods_with_sources(mods: &mut [ModInfo], config_path: &Path) {
     let db = load_sources(config_path);
     for m in mods.iter_mut() {
-        if let Some(entry) = db.mods.get(&m.name) {
+        // Look up the source entry by name, folder_name, or mod_id — pinning
+        // can be set against any of these identifiers.
+        let entry = db.mods.get(&m.name)
+            .or_else(|| m.folder_name.as_ref().and_then(|f| db.mods.get(f)))
+            .or_else(|| m.mod_id.as_ref().and_then(|i| db.mods.get(i)));
+        if let Some(entry) = entry {
             // Only set from sources DB if not already extracted from manifest
             if m.github_url.is_none() {
                 m.github_url = entry
@@ -114,6 +132,7 @@ pub fn enrich_mods_with_sources(mods: &mut [ModInfo], config_path: &Path) {
             if m.nexus_url.is_none() {
                 m.nexus_url = entry.nexus_url.clone();
             }
+            m.pinned = entry.pinned;
         }
         // Also try to infer from the legacy `source` field if no explicit link
         if m.github_url.is_none() {

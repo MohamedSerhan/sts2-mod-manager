@@ -262,6 +262,7 @@ pub fn list_backups_cmd(state: tauri::State<'_, AppState>) -> std::result::Resul
 /// Restore a specific backup.
 #[tauri::command]
 pub fn restore_backup_cmd(name: String, state: tauri::State<'_, AppState>) -> std::result::Result<(), String> {
+    crate::game::ensure_game_not_running()?;
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
     let backup_dir = s.config_path.join("backups");
@@ -279,6 +280,7 @@ pub fn delete_backup_cmd(name: String, state: tauri::State<'_, AppState>) -> std
 /// Reset to vanilla by moving all mods to disabled.
 #[tauri::command]
 pub fn reset_to_vanilla_cmd(state: tauri::State<'_, AppState>) -> std::result::Result<(), String> {
+    crate::game::ensure_game_not_running()?;
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
     let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;

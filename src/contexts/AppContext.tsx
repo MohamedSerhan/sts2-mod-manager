@@ -1,5 +1,5 @@
-import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
-import { getGameInfo, getInstalledMods } from '../hooks/useTauri';
+import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
+import { getGameInfo, getInstalledMods, isGameRunning } from '../hooks/useTauri';
 import { invoke } from '@tauri-apps/api/core';
 import type { GameInfo, ModInfo } from '../types';
 
@@ -8,9 +8,11 @@ interface AppContextType {
   mods: ModInfo[];
   loading: boolean;
   activeProfile: string | null;
+  gameRunning: boolean;
   refreshGameInfo: () => Promise<void>;
   refreshMods: () => Promise<void>;
   refreshAll: () => Promise<void>;
+  refreshGameRunning: () => Promise<void>;
   setActiveProfile: (name: string | null) => void;
 }
 
@@ -21,6 +23,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [mods, setMods] = useState<ModInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeProfile, setActiveProfileState] = useState<string | null>(null);
+  const [gameRunning, setGameRunning] = useState<boolean>(false);
+  const gameRunningRef = useRef<boolean>(false);
+
+  const refreshGameRunning = useCallback(async () => {
+    try {
+      const running = await isGameRunning();
+      if (running !== gameRunningRef.current) {
+        gameRunningRef.current = running;
+        setGameRunning(running);
+      }
+    } catch (e) {
+      // Detection failed — assume game is not running so user isn't blocked.
+      console.debug('isGameRunning check failed:', e);
+    }
+  }, []);
 
   const refreshGameInfo = useCallback(async () => {
     try {
@@ -60,8 +77,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     refreshAll();
   }, [refreshAll]);
 
+  // Poll for game running state. 3s feels responsive without burning CPU on
+  // process enumeration; refresh installed mods after the game exits since
+  // it may have left the mods folder in a different state.
+  useEffect(() => {
+    refreshGameRunning();
+    const id = setInterval(() => {
+      const wasRunning = gameRunningRef.current;
+      refreshGameRunning().then(() => {
+        if (wasRunning && !gameRunningRef.current) {
+          refreshMods();
+        }
+      });
+    }, 3000);
+    return () => clearInterval(id);
+  }, [refreshGameRunning, refreshMods]);
+
   return (
-    <AppContext.Provider value={{ gameInfo, mods, loading, activeProfile, refreshGameInfo, refreshMods, refreshAll, setActiveProfile }}>
+    <AppContext.Provider value={{ gameInfo, mods, loading, activeProfile, gameRunning, refreshGameInfo, refreshMods, refreshAll, refreshGameRunning, setActiveProfile }}>
       {children}
     </AppContext.Provider>
   );

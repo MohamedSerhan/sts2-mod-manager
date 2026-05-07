@@ -67,22 +67,45 @@ pub fn run() {
     // running inside an AppImage ($APPIMAGE is set by the AppImage runtime).
     #[cfg(target_os = "linux")]
     if std::env::var_os("APPIMAGE").is_some() {
-        if let Ok(output) = std::process::Command::new("ldconfig").arg("-p").output() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            if let Some(lib_path) = stdout
-                .lines()
-                .find(|l| l.contains("libwayland-client.so") && l.contains(" => "))
-                .and_then(|l| l.split(" => ").nth(1))
-                .map(str::trim)
-            {
-                let new_preload = match std::env::var("LD_PRELOAD") {
-                    Ok(existing) if !existing.is_empty() => {
-                        format!("{}:{}", lib_path, existing)
-                    }
-                    _ => lib_path.to_string(),
-                };
-                std::env::set_var("LD_PRELOAD", &new_preload);
-            }
+        // Try to resolve libwayland-client.so via ldconfig (use absolute path
+        // because file managers launch with a minimal PATH that may omit /usr/bin).
+        let lib_path: Option<String> = ["/usr/bin/ldconfig", "/sbin/ldconfig", "/usr/sbin/ldconfig"]
+            .iter()
+            .find_map(|ldconfig| {
+                std::process::Command::new(ldconfig)
+                    .arg("-p")
+                    .output()
+                    .ok()
+                    .and_then(|out| {
+                        let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+                        stdout
+                            .lines()
+                            .find(|l| {
+                                l.contains("libwayland-client.so") && l.contains(" => ")
+                            })
+                            .and_then(|l| l.split(" => ").nth(1))
+                            .map(|p| p.trim().to_string())
+                    })
+            })
+            // Fall back to well-known paths when ldconfig is unavailable.
+            .or_else(|| {
+                [
+                    "/usr/lib/libwayland-client.so",
+                    "/usr/lib/libwayland-client.so.0",
+                    "/usr/lib/x86_64-linux-gnu/libwayland-client.so.0",
+                    "/usr/lib64/libwayland-client.so.0",
+                ]
+                .iter()
+                .find(|p| std::path::Path::new(p).exists())
+                .map(|p| p.to_string())
+            });
+
+        if let Some(lib_path) = lib_path {
+            let new_preload = match std::env::var("LD_PRELOAD") {
+                Ok(existing) if !existing.is_empty() => format!("{}:{}", lib_path, existing),
+                _ => lib_path,
+            };
+            std::env::set_var("LD_PRELOAD", &new_preload);
         }
     }
 

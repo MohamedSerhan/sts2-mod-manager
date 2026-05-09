@@ -522,3 +522,25 @@ pub fn open_log_file(
     }
 }
 
+/// Return the last `lines` lines of the log file (newest at the end).
+/// Returns an empty string if the log doesn't exist yet.
+#[tauri::command]
+pub fn read_log_tail(
+    state: tauri::State<'_, AppState>,
+    lines: usize,
+) -> std::result::Result<String, String> {
+    let log_path = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        s.config_path.join("sts2mm.log")
+    };
+    if !log_path.exists() {
+        return Ok(String::new());
+    }
+    let want = lines.clamp(1, 5000);
+    let text = std::fs::read_to_string(&log_path)
+        .map_err(|e| format!("Failed to read log {}: {}", log_path.display(), e))?;
+    let collected: Vec<&str> = text.lines().collect();
+    let start = collected.len().saturating_sub(want);
+    Ok(collected[start..].join("\n"))
+}
+

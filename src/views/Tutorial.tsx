@@ -19,18 +19,20 @@ export function TutorialView({ advancedMode, onGoToSettings }: TutorialViewProps
   }
 
   return (
-    <div className="p-8 space-y-6 max-w-4xl">
-      <div>
-        <h2 className="text-2xl font-bold text-text flex items-center gap-2">
-          <GraduationCap size={24} />
-          Tutorial
-        </h2>
-        <p className="text-sm text-text-muted mt-1.5">
-          How to use the mod manager. Bookmark this page or send the link to a friend.
-        </p>
+    <div className="gf-body" style={{ maxWidth: 1024 }}>
+      <div className="gf-page-head">
+        <div>
+          <h1 className="gf-page-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <GraduationCap size={20} />
+            Tutorial
+          </h1>
+          <p className="gf-page-sub">
+            How to use the mod manager. Bookmark this page or send the link to a friend.
+          </p>
+        </div>
       </div>
 
-      <div className="flex gap-1 border-b border-border">
+      <div className="gf-tabs gf-tabs-settings" style={{ marginBottom: 14 }}>
         <TabButton active={tab === 'user'} onClick={() => setTab('user')} icon={User}>
           User Guide
         </TabButton>
@@ -61,14 +63,10 @@ function TabButton({
   return (
     <button
       onClick={onClick}
-      className={cn(
-        'flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors',
-        active
-          ? 'border-primary text-primary'
-          : 'border-transparent text-text-muted hover:text-text'
-      )}
+      className={cn('gf-tab', active && 'active')}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
     >
-      <Icon size={16} />
+      <Icon size={14} />
       {children}
     </button>
   );
@@ -96,9 +94,57 @@ function Kbd({ children }: { children: React.ReactNode }) {
   );
 }
 
+// v5 — quick-reference numbered grid that summarises the long-form guide.
+// Casual players who don't want to read paragraphs can scan this in 30s.
+const QUICK_REF: [string, string][] = [
+  ['Install your first mod', 'Open Browse, find one, hit Install. Done.'],
+  ['Follow a friend', "Paste their share code in the Home hero's Add box."],
+  ['Switch active pack', 'Top-bar profile chip → pick a pack.'],
+  ['Update everything', 'Profiles → Update all on the active pack.'],
+  ['Pin a version', 'Mods → toggle the Advanced switch → Pin from each row.'],
+  ['Roll back', 'Settings → Backups → Restore. Auto-saved before every launch.'],
+  ['Audit a mod', 'Settings → Audit → Run audit. See current vs latest at a glance.'],
+  ['Launch vanilla', 'Top-bar Vanilla button — ignores your active profile.'],
+];
+
 function UserGuide({ onGoToSettings }: { onGoToSettings?: () => void }) {
   return (
-    <Card className="space-y-7">
+    <>
+      {/* Quick reference — v5 numbered step grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
+        {QUICK_REF.map(([t, b], i) => (
+          <div key={i} className="gf-tut-step">
+            <div className="gf-tut-num">{i + 1}</div>
+            <div>
+              <div className="gf-tut-t">{t}</div>
+              <div className="gf-tut-b">{b}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div
+        style={{
+          marginBottom: 22,
+          padding: 12,
+          border: '1px solid var(--indigo-line)',
+          borderRadius: 8,
+          background: 'oklch(0.20 0.025 270 / 0.5)',
+          fontSize: 12,
+          color: 'var(--ink-mute)',
+        }}
+      >
+        <strong style={{ color: 'var(--ink)' }}>Keyboard:</strong>
+        <span style={{ marginLeft: 8 }}>
+          <kbd className="gf-kbd">Ctrl+L</kbd> Launch{' '}
+          <kbd className="gf-kbd">Ctrl+,</kbd> Settings{' '}
+          <kbd className="gf-kbd">/</kbd> Search{' '}
+          <kbd className="gf-kbd">Ctrl+B</kbd> Browse{' '}
+          <kbd className="gf-kbd">Esc</kbd> Close dialog
+        </span>
+      </div>
+
+      <Card className="space-y-7">
       <p className="text-sm text-text-muted">
         For players. Most setups take a couple of minutes — you do the first three steps once and after that
         you just paste a code your friend sent you and hit Launch.
@@ -218,6 +264,7 @@ function UserGuide({ onGoToSettings }: { onGoToSettings?: () => void }) {
         </p>
       </Step>
     </Card>
+    </>
   );
 }
 

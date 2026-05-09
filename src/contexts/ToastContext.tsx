@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
-import { X } from 'lucide-react';
+import { X, Check, Info, AlertCircle } from 'lucide-react';
 
 interface Toast {
   id: number;
@@ -20,6 +20,7 @@ const FADE_MS = 250;
 
 let nextId = 0;
 
+// v5 — bottom-right toast stack with gf-toast pills.
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
@@ -42,12 +43,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={ctx}>
       {children}
-      {/* Toast container */}
-      <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2 max-w-md pointer-events-none">
+      <div className="gf-toasts">
         {toasts.map((t) => (
-          <div key={t.id} className="pointer-events-auto">
-            <ToastItem toast={t} onDismiss={() => removeToast(t.id)} />
-          </div>
+          <ToastItem key={t.id} toast={t} onDismiss={() => removeToast(t.id)} />
         ))}
       </div>
     </ToastContext.Provider>
@@ -55,8 +53,6 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 }
 
 function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }) {
-  // `visible` drives the mount fade-in; `leaving` drives the dismiss fade-out.
-  // We delay the actual unmount by FADE_MS so the exit transition has time to play.
   const [visible, setVisible] = useState(false);
   const [leaving, setLeaving] = useState(false);
 
@@ -76,32 +72,43 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
     return () => clearTimeout(t);
   }, [leaving, onDismiss]);
 
-  const borderColor = {
-    success: 'border-green-500/40',
-    error: 'border-red-500/40',
-    info: 'border-primary/40',
+  const variantClass = {
+    success: 'gf-toast gf-toast-success',
+    error: 'gf-toast gf-toast-error',
+    info: 'gf-toast gf-toast-info',
   }[toast.type];
 
-  const textColor = {
-    success: 'text-green-400',
-    error: 'text-red-400',
-    info: 'text-primary',
+  const Icon = { success: Check, error: AlertCircle, info: Info }[toast.type];
+  const iconColor = {
+    success: 'var(--ok)',
+    error: 'oklch(0.75 0.13 25)',
+    info: 'oklch(0.75 0.10 250)',
   }[toast.type];
 
   const shown = visible && !leaving;
 
   return (
     <div
-      className={`bg-surface border ${borderColor} rounded-lg px-4 py-3 shadow-lg flex items-start gap-2 text-sm text-text transition-all duration-[250ms] ease-out ${
-        shown ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'
-      }`}
+      className={variantClass}
+      style={{
+        opacity: shown ? 1 : 0,
+        transform: shown ? 'translateY(0)' : 'translateY(8px)',
+        transition: `opacity ${FADE_MS}ms ease-out, transform ${FADE_MS}ms ease-out`,
+      }}
     >
-      <span className={`${textColor} flex-1`}>{toast.message}</span>
+      <span className="gf-toast-ico" style={{ color: iconColor }}>
+        <Icon size={14} />
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 500, wordBreak: 'break-word' }}>{toast.message}</div>
+      </div>
       <button
         onClick={() => setLeaving(true)}
-        className="text-text-dim hover:text-text shrink-0 mt-0.5"
+        className="gf-btn-3 gf-btn-icon"
+        style={{ border: 0, padding: 4, minWidth: 22, height: 22 }}
+        title="Dismiss"
       >
-        <X size={14} />
+        <X size={12} />
       </button>
     </div>
   );

@@ -143,6 +143,7 @@ pub fn run() {
             game::set_active_profile,
             game::get_log_path,
             game::open_log_file,
+            game::read_log_tail,
             game::is_game_running_cmd,
             // Mod management
             mods::get_installed_mods,

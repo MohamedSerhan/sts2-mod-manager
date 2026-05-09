@@ -357,10 +357,8 @@ fn try_load_mod_from(
         let sub_path = sub_entry.path();
         if sub_path.is_file() && sub_path.extension().and_then(|e| e.to_str()) == Some("json") {
             if let Some(info) = parse_manifest(&sub_path, base_dir, enabled) {
-                if !found_names.contains(&info.name) {
-                    found_names.insert(info.name.clone());
-                    mods.push(info);
-                }
+                found_names.insert(normalize_name(&info.name));
+                upsert_mod_dedup(mods, info, &sub_path.display().to_string());
                 return true;
             }
         }
@@ -370,10 +368,8 @@ fn try_load_mod_from(
         let sub_path = sub_entry.path();
         if sub_path.is_file() && sub_path.extension().and_then(|e| e.to_str()) == Some("dll") {
             let info = dll_only_mod(&sub_path, base_dir, enabled);
-            if !found_names.contains(&info.name) {
-                found_names.insert(info.name.clone());
-                mods.push(info);
-            }
+            found_names.insert(normalize_name(&info.name));
+            upsert_mod_dedup(mods, info, &sub_path.display().to_string());
             return true;
         }
     }
@@ -391,6 +387,48 @@ pub fn scan_disabled_mods(disabled_path: &Path) -> Vec<ModInfo> {
     scan_mods_inner(disabled_path, false)
 }
 
+/// "Quality" score for a ModInfo entry — used to pick the best match when
+/// the same mod (after name normalization) is detected by multiple scan
+/// passes. A proper JSON manifest with a real version beats a DLL-only
+/// fallback every time.
+fn mod_quality(info: &ModInfo) -> u32 {
+    let mut score = 0;
+    let v = info.version.trim();
+    if !v.is_empty() && v != "unknown" && v != "0.0.0" { score += 100; }
+    if !info.description.trim().is_empty() { score += 20; }
+    score += info.files.len() as u32;
+    score
+}
+
+/// Add `info` to `mods`, but if another entry with a normalized-equivalent
+/// name is already present, keep whichever has the richer manifest. Logs a
+/// warning either way so the user knows there are duplicate files on disk.
+fn upsert_mod_dedup(mods: &mut Vec<ModInfo>, info: ModInfo, source_hint: &str) {
+    let key = normalize_name(&info.name);
+    if let Some(pos) = mods.iter().position(|m| normalize_name(&m.name) == key) {
+        let existing_quality = mod_quality(&mods[pos]);
+        let new_quality = mod_quality(&info);
+        if new_quality > existing_quality {
+            log::warn!(
+                "Replacing duplicate mod '{}' (existing) with '{}' from {} — better manifest. Clean up the older copy in your mods folder.",
+                mods[pos].name,
+                info.name,
+                source_hint,
+            );
+            mods[pos] = info;
+        } else {
+            log::warn!(
+                "Skipping duplicate mod '{}' from {} — '{}' already loaded with a richer manifest. Clean up the older copy in your mods folder.",
+                info.name,
+                source_hint,
+                mods[pos].name,
+            );
+        }
+        return;
+    }
+    mods.push(info);
+}
+
 fn scan_mods_inner(dir: &Path, enabled: bool) -> Vec<ModInfo> {
     let mut mods = Vec::new();
     let mut found_names = std::collections::HashSet::new();
@@ -399,14 +437,18 @@ fn scan_mods_inner(dir: &Path, enabled: bool) -> Vec<ModInfo> {
         return mods;
     }
 
-    // PASS 1: Look for .json manifests at the top level
+    // PASS 1: Look for .json manifests at the top level.
+    // Dedup by NORMALIZED name within the same folder — two manifests with
+    // the same Name (allowing whitespace / case / dash differences) are
+    // almost always leftover stale files. We keep whichever has the richer
+    // manifest and log so the user can investigate.
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("json") {
                 if let Some(info) = parse_manifest(&path, dir, enabled) {
-                    found_names.insert(info.name.clone());
-                    mods.push(info);
+                    found_names.insert(normalize_name(&info.name));
+                    upsert_mod_dedup(&mut mods, info, &path.display().to_string());
                 }
             }
         }
@@ -439,6 +481,9 @@ fn scan_mods_inner(dir: &Path, enabled: bool) -> Vec<ModInfo> {
     }
 
     // PASS 3: Find DLL-only mods at top level (DLLs without a matching .json)
+    // Dedup by normalized name so an orphan `BetterSpire2Lite.dll` doesn't
+    // re-register the same mod that PASS 1 already loaded as
+    // `"BetterSpire2 Lite"` from a JSON manifest.
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -448,10 +493,10 @@ fn scan_mods_inner(dir: &Path, enabled: bool) -> Vec<ModInfo> {
                     .unwrap_or_default()
                     .to_string_lossy()
                     .to_string();
-                if !found_names.contains(&stem) {
+                if !found_names.contains(&normalize_name(&stem)) {
                     let info = dll_only_mod(&path, dir, enabled);
-                    found_names.insert(info.name.clone());
-                    mods.push(info);
+                    found_names.insert(normalize_name(&info.name));
+                    upsert_mod_dedup(&mut mods, info, &path.display().to_string());
                 }
             }
         }
@@ -1117,16 +1162,44 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
 // ── Tauri Commands ──────────────────────────────────────────────────────────
 
 /// Get all installed mods (active + disabled), enriched with source links.
+///
+/// If the same mod name exists in BOTH `mods/` and `mods_disabled/` at the
+/// same time (typically the result of an interrupted toggle or a half-applied
+/// profile switch), the active copy wins and the disabled one is logged but
+/// hidden — otherwise the user sees the same mod listed twice with confusing
+/// version strings. The disabled files stay on disk so the user can recover
+/// them manually if needed.
 #[tauri::command]
 pub fn get_installed_mods(state: tauri::State<'_, AppState>) -> std::result::Result<Vec<ModInfo>, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
-    let mut all_mods = Vec::new();
 
-    if let Some(ref mods_path) = s.mods_path {
-        all_mods.extend(scan_mods(mods_path));
-    }
-    if let Some(ref disabled_path) = s.disabled_mods_path {
-        all_mods.extend(scan_disabled_mods(disabled_path));
+    let active_mods = s
+        .mods_path
+        .as_ref()
+        .map(|p| scan_mods(p))
+        .unwrap_or_default();
+    let disabled_mods = s
+        .disabled_mods_path
+        .as_ref()
+        .map(|p| scan_disabled_mods(p))
+        .unwrap_or_default();
+
+    // Build a lookup of active names by NORMALIZED key so disabled mods
+    // with whitespace / case differences (e.g. "BetterSpire2 Lite" vs
+    // "BetterSpire2Lite") still collapse to a single entry.
+    let active_keys: std::collections::HashSet<String> =
+        active_mods.iter().map(|m| normalize_name(&m.name)).collect();
+
+    let mut all_mods = active_mods;
+    for d in disabled_mods {
+        if active_keys.contains(&normalize_name(&d.name)) {
+            log::warn!(
+                "Mod '{}' has files in BOTH active and disabled folders — showing the active copy only. Re-toggle or repair the profile to clean this up.",
+                d.name
+            );
+            continue;
+        }
+        all_mods.push(d);
     }
 
     // Enrich with source metadata (GitHub/Nexus links)

@@ -2,6 +2,16 @@
   "name": "sts2-mod-manager",
   "private": true,
   "version": "0.7.6",
+  "license": "MIT",
+  "author": "Mohamed Serhan",
+  "homepage": "https://github.com/MohamedSerhan/sts2-mod-manager",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MohamedSerhan/sts2-mod-manager.git"
+  },
+  "bugs": {
+    "url": "https://github.com/MohamedSerhan/sts2-mod-manager/issues"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",

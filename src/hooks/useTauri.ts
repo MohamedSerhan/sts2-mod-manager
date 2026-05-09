@@ -298,3 +298,8 @@ export async function getLogPath(): Promise<string> {
 export async function openLogFile(): Promise<boolean> {
   return invoke('open_log_file');
 }
+
+/** Return the last N lines of the in-app log (newest at end). */
+export async function readLogTail(lines: number = 500): Promise<string> {
+  return invoke('read_log_tail', { lines });
+}

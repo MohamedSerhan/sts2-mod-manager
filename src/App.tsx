@@ -1,15 +1,35 @@
 import { useState, useEffect } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
 import { listen } from '@tauri-apps/api/event';
-import { Home, LayoutDashboard, Package, Search, Layers, Settings, Play, ChevronRight, Wrench, GraduationCap, ExternalLink, AlertTriangle } from 'lucide-react';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import {
+  Home,
+  Package,
+  Search,
+  Layers,
+  Settings,
+  Play,
+  GraduationCap,
+  ExternalLink,
+  AlertTriangle,
+  ChevronDown,
+  ArrowUpCircle,
+  Minus,
+  Square,
+  X,
+} from 'lucide-react';
 import { check, type Update } from '@tauri-apps/plugin-updater';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { cn } from './lib/utils';
 import { ToastProvider, useToast } from './contexts/ToastContext';
 import { AppProvider, useApp } from './contexts/AppContext';
+import { ConfirmProvider } from './components/ConfirmDialog';
+import { OnboardingOverlay } from './components/OnboardingOverlay';
+import { ShortcutsOverlay } from './components/ShortcutsOverlay';
+import { LaunchSpinner } from './components/LaunchSpinner';
+import { ProfileSwitcher } from './components/ProfileSwitcher';
 import { HomeView } from './views/Home';
-import { DashboardView } from './views/Dashboard';
 import { ModsView } from './views/Mods';
 import { BrowseView } from './views/Browse';
 import { ProfilesView } from './views/Profiles';
@@ -17,21 +37,17 @@ import { SettingsView } from './views/Settings';
 import { TutorialView } from './views/Tutorial';
 import { launchGame, launchVanilla, installModFromFile } from './hooks/useTauri';
 
-type View = 'home' | 'dashboard' | 'mods' | 'browse' | 'profiles' | 'tutorial' | 'settings';
+type View = 'home' | 'profiles' | 'mods' | 'browse' | 'tutorial' | 'settings';
 
-const SIMPLE_NAV: { id: View; label: string; icon: typeof Home }[] = [
-  { id: 'home', label: 'Home', icon: Home },
-  { id: 'mods', label: 'My Mods', icon: Package },
-  { id: 'tutorial', label: 'Tutorial', icon: GraduationCap },
-  { id: 'settings', label: 'Settings', icon: Settings },
-];
-
-const ADVANCED_NAV: { id: View; label: string; icon: typeof LayoutDashboard }[] = [
-  { id: 'home', label: 'Home', icon: Home },
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'mods', label: 'Mods', icon: Package },
-  { id: 'browse', label: 'Browse', icon: Search },
+// v5 IA — 4 main nav items, Tutorial+Settings in the foot. Backups absorbed
+// into Settings as a tab. Dashboard cut (was redundant with Home).
+const NAV: { id: View; label: string; icon: typeof Home }[] = [
+  { id: 'home',     label: 'Home',     icon: Home },
   { id: 'profiles', label: 'Profiles', icon: Layers },
+  { id: 'mods',     label: 'Mods',     icon: Package },
+  { id: 'browse',   label: 'Browse',   icon: Search },
+];
+const FOOT_NAV: { id: View; label: string; icon: typeof Home }[] = [
   { id: 'tutorial', label: 'Tutorial', icon: GraduationCap },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
@@ -39,22 +55,17 @@ const ADVANCED_NAV: { id: View; label: string; icon: typeof LayoutDashboard }[] 
 export default function App() {
   return (
     <ToastProvider>
-      <AppProvider>
-        <AppInner />
-      </AppProvider>
+      <ConfirmProvider>
+        <AppProvider>
+          <AppInner />
+        </AppProvider>
+      </ConfirmProvider>
     </ToastProvider>
   );
 }
 
 function AppInner() {
   const [activeView, setActiveView] = useState<View>('home');
-  const [advancedMode, setAdvancedMode] = useState(() => {
-    try {
-      return localStorage.getItem('sts2mm-advanced-mode') === 'true';
-    } catch {
-      return false;
-    }
-  });
   const { gameInfo, mods, refreshAll, activeProfile, gameRunning } = useApp();
   const toast = useToast();
   const [dragOver, setDragOver] = useState(false);
@@ -62,8 +73,25 @@ function AppInner() {
   const [updateDismissed, setUpdateDismissed] = useState(false);
   const [updateInstalling, setUpdateInstalling] = useState(false);
   const [appVersion, setAppVersion] = useState('');
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showProfileSwitcher, setShowProfileSwitcher] = useState(false);
+  const [launching, setLaunching] = useState<null | 'modded' | 'vanilla'>(null);
 
   useEffect(() => { getVersion().then(setAppVersion).catch(() => {}); }, []);
+
+  // First-launch onboarding wizard (v5 batch 4). Shown once unless dismissed.
+  useEffect(() => {
+    let dismissed = false;
+    try { dismissed = localStorage.getItem('sts2mm-onboarded') === 'true'; } catch {}
+    if (dismissed) return;
+    setShowOnboarding(true);
+  }, []);
+
+  function dismissOnboarding() {
+    setShowOnboarding(false);
+    try { localStorage.setItem('sts2mm-onboarded', 'true'); } catch {}
+  }
 
   // Listen for auto-installed mods from the Downloads watcher
   useEffect(() => {
@@ -111,11 +139,6 @@ function AppInner() {
       await relaunch();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      // Seamless in-app updates only work when running the AppImage build.
-      // .deb and .rpm installs require pkexec/sudo elevation which is
-      // unreliable (Wayland, non-sudo users, polkit misconfigurations).
-      // In those cases the install attempt fails here — guide the user to
-      // download the AppImage (or the new .deb/.rpm) manually instead.
       toast.error(
         `Update failed: ${msg}. If you installed via .deb or .rpm, use the AppImage build for seamless updates, or click Download to get the new package manually.`
       );
@@ -134,36 +157,95 @@ function AppInner() {
   const enabledCount = mods.filter((m) => m.enabled).length;
   const totalCount = mods.length;
 
-  function toggleAdvancedMode() {
-    const next = !advancedMode;
-    setAdvancedMode(next);
-    try {
-      localStorage.setItem('sts2mm-advanced-mode', String(next));
-    } catch { /* ignore */ }
-    if (!next && !['home', 'mods', 'tutorial', 'settings'].includes(activeView)) {
-      setActiveView('home');
-    }
-  }
-
   async function handleLaunchGame() {
+    if (launching) return;
+    setLaunching('modded');
     try {
       await launchGame();
       toast.success('Launching STS2 via Steam (auto-backup created)...');
-      setTimeout(() => refreshAll(), 1000);
+      // Keep the spinner up briefly so the user sees the transition;
+      // hide once the Steam launcher takes over the foreground.
+      setTimeout(() => { setLaunching(null); refreshAll(); }, 2500);
     } catch (e) {
+      setLaunching(null);
       toast.error(`Failed to launch game: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
   async function handleLaunchVanilla() {
+    if (launching) return;
+    setLaunching('vanilla');
     try {
       await launchVanilla();
       toast.success('Launching STS2 in vanilla mode (all mods disabled, backup created)...');
       await refreshAll();
+      setTimeout(() => setLaunching(null), 2500);
     } catch (e) {
+      setLaunching(null);
       toast.error(`Failed to launch: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
+
+  // Custom titlebar window controls (Tauri). Errors are logged so a missing
+  // capability shows up in the console rather than failing silently.
+  async function handleTitlebarMin() {
+    try { await getCurrentWindow().minimize(); }
+    catch (e) { console.warn('minimize failed:', e); }
+  }
+  async function handleTitlebarMax() {
+    try { await getCurrentWindow().toggleMaximize(); }
+    catch (e) { console.warn('toggleMaximize failed:', e); }
+  }
+  async function handleTitlebarClose() {
+    try { await getCurrentWindow().close(); }
+    catch (e) { console.warn('close failed:', e); }
+  }
+
+  // Global keyboard shortcuts (v5 batch 4 — see ShortcutsOverlay for the
+  // canonical map). Only fires when no input/textarea is focused.
+  useEffect(() => {
+    function isTypingTarget(t: EventTarget | null): boolean {
+      if (!(t instanceof HTMLElement)) return false;
+      const tag = t.tagName.toUpperCase();
+      return tag === 'INPUT' || tag === 'TEXTAREA' || t.isContentEditable;
+    }
+    function handler(e: KeyboardEvent) {
+      if (isTypingTarget(e.target)) return;
+      if (showOnboarding) return;
+      const mod = e.metaKey || e.ctrlKey;
+      // Help / shortcuts
+      if (e.key === '?' || (e.shiftKey && e.key === '/')) {
+        e.preventDefault(); setShowShortcuts((v) => !v); return;
+      }
+      if (e.key === 'Escape' && showShortcuts) {
+        e.preventDefault(); setShowShortcuts(false); return;
+      }
+      // Navigation 1-4
+      if (!mod && !e.shiftKey && !e.altKey) {
+        if (e.key === '1') { e.preventDefault(); setActiveView('home'); return; }
+        if (e.key === '2') { e.preventDefault(); setActiveView('profiles'); return; }
+        if (e.key === '3') { e.preventDefault(); setActiveView('mods'); return; }
+        if (e.key === '4') { e.preventDefault(); setActiveView('browse'); return; }
+        if (e.key === '/') {
+          // Focus the first search input on the active view.
+          const search = document.querySelector<HTMLInputElement>('.gf-search input');
+          if (search) { e.preventDefault(); search.focus(); }
+          return;
+        }
+      }
+      // Mod-key shortcuts
+      if (mod && (e.key === ',' || e.key === ',')) {
+        e.preventDefault(); setActiveView('settings'); return;
+      }
+      if (mod && (e.key === 'l' || e.key === 'L')) {
+        e.preventDefault();
+        if (!gameRunning && !launching) handleLaunchGame();
+        return;
+      }
+    }
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [showOnboarding, showShortcuts, gameRunning, launching]);
 
   // Drag-and-drop zip import
   useEffect(() => {
@@ -212,157 +294,255 @@ function AppInner() {
     };
   }, [refreshAll, toast]);
 
-  const navItems = advancedMode ? ADVANCED_NAV : SIMPLE_NAV;
+  const profileInitials = (activeProfile || 'Vanilla')
+    .split(/[\s_-]+/)
+    .map((w) => w[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden relative">
-      {/* Drag-and-drop overlay */}
-      {dragOver && (
-        <div className="absolute inset-0 z-30 bg-primary/10 border-2 border-dashed border-primary rounded-xl flex items-center justify-center">
-          <div className="text-center">
-            <Package size={48} className="mx-auto mb-3 text-primary" />
-            <p className="text-lg font-semibold text-primary">Drop .zip to install mod</p>
+    <div className="flex flex-col h-screen w-screen overflow-hidden relative">
+      {/* Custom titlebar (Tauri drag region + window controls) */}
+      <div className="gf-titlebar">
+        <div className="gf-titlebar-app">
+          <div className="gf-titlebar-mark">✦</div>
+          <span className="gf-titlebar-title">STS2 Mod Manager</span>
+        </div>
+        <div className="gf-titlebar-controls">
+          <button className="gf-titlebar-btn" title="Minimize" onClick={handleTitlebarMin}>
+            <Minus size={12} />
+          </button>
+          <button className="gf-titlebar-btn" title="Maximize" onClick={handleTitlebarMax}>
+            <Square size={10} />
+          </button>
+          <button className="gf-titlebar-btn gf-titlebar-close" title="Close" onClick={handleTitlebarClose}>
+            <X size={12} />
+          </button>
+        </div>
+      </div>
+
+      <div className="flex flex-1 min-h-0 relative">
+        {/* Drag-and-drop overlay (v5 dropzone) */}
+        {dragOver && (
+          <div className="gf-dropzone">
+            <div className="gf-dropzone-card">
+              <div className="gf-dropzone-icon">
+                <Package size={28} />
+              </div>
+              <div className="gf-dropzone-title">Drop to install</div>
+              <div className="gf-dropzone-sub">.zip — we'll detect the source for you</div>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Sidebar */}
-      <nav className="w-[240px] flex-shrink-0 bg-surface border-r border-border flex flex-col">
-        <div className="px-5 py-5 border-b border-border">
-          <h1 className="text-lg font-bold text-text tracking-tight">STS2 Mod Manager</h1>
-          {appVersion && <p className="text-xs text-text-dim mt-1">v{appVersion}</p>}
-        </div>
+        {/* Sidebar — 4 main nav, foot has Tutorial+Settings, status block, version */}
+        <nav className="gf-sidebar">
+          <div className="gf-brand">
+            <div className="gf-brand-mark">✦</div>
+            <span>STS2 Mods</span>
+          </div>
 
-        <div className="flex-1 py-3 px-2">
-          {navItems.map(({ id, label, icon: Icon }) => (
+          {NAV.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               onClick={() => setActiveView(id)}
-              className={cn(
-                'w-full flex items-center gap-3 px-4 py-3 text-sm rounded-lg mb-0.5 transition-colors',
-                activeView === id
-                  ? 'bg-primary/10 text-primary font-medium'
-                  : 'text-text-muted hover:bg-surface-hover hover:text-text'
-              )}
+              className={cn('gf-nav', activeView === id && 'active')}
             >
-              <Icon size={18} />
-              {label}
+              <Icon size={14} className="gf-nav-icon" />
+              <span>{label}</span>
             </button>
           ))}
-        </div>
 
-        {/* Advanced Mode Toggle */}
-        <div className="px-3 pb-2">
-          <button
-            onClick={toggleAdvancedMode}
-            className={cn(
-              'w-full flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-medium transition-colors',
-              advancedMode
-                ? 'bg-primary/10 text-primary border border-primary/30'
-                : 'text-text-dim hover:text-text hover:bg-surface-hover border border-transparent'
-            )}
-          >
-            <Wrench size={14} />
-            <span className="flex-1 text-left">Advanced Mode</span>
-            <ChevronRight size={12} className={cn('transition-transform', advancedMode && 'rotate-90')} />
-          </button>
-        </div>
+          <div className="gf-side-foot">
+            {FOOT_NAV.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                onClick={() => setActiveView(id)}
+                className={cn('gf-nav', activeView === id && 'active')}
+              >
+                <Icon size={14} className="gf-nav-icon" />
+                <span>{label}</span>
+              </button>
+            ))}
 
-        {/* Launch Game Buttons */}
-        <div className="px-3 pb-3 space-y-1.5">
-          <button
-            onClick={handleLaunchGame}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold transition-colors shadow-lg shadow-green-600/20"
-          >
-            <Play size={16} />
-            {activeProfile ? `Launch STS2 (${activeProfile})` : 'Launch STS2'}
-          </button>
-          <button
-            onClick={handleLaunchVanilla}
-            disabled={gameRunning}
-            title={gameRunning ? 'Close STS2 first' : undefined}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-surface-hover hover:bg-yellow-600/20 text-text-muted text-xs font-medium transition-colors border border-border disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-surface-hover"
-          >
-            Launch Vanilla (no mods)
-          </button>
-        </div>
-
-        {/* Status bar */}
-        <div className="px-4 py-3 border-t border-border text-xs text-text-dim space-y-1.5">
-          <div className="flex items-center gap-2">
-            <div className={cn(
-              'w-2 h-2 rounded-full',
-              gameInfo?.valid ? 'bg-green-500' : 'bg-red-500'
-            )} />
-            <span>{gameInfo?.valid ? 'Game detected' : 'Game not detected'}</span>
-          </div>
-          {gameInfo?.valid && (
-            <div className="pl-4 text-text-dim">
-              {enabledCount} active / {totalCount} total mods
+            {/* Status block */}
+            <div className="gf-side-status">
+              <div className="gf-side-stat-row">
+                <span className={cn('gf-side-stat-dot', !gameInfo?.valid && 'err')} />
+                <span className="gf-side-stat-label">
+                  {gameInfo?.valid ? 'STS2 detected' : 'Game not found'}
+                </span>
+              </div>
+              {gameInfo?.valid && (
+                <div className="gf-side-stat-meta">
+                  {enabledCount} active / {totalCount} mods
+                </div>
+              )}
+              {appVersion && <div className="gf-side-version">v{appVersion}</div>}
             </div>
-          )}
-        </div>
-      </nav>
+          </div>
+        </nav>
 
-      {/* Main Content */}
-      <main className="flex-1 overflow-auto bg-background">
-        {/* Game Running Banner — blocks mod/profile mutations */}
-        {gameRunning && (
-          <div className="bg-amber-600/95 text-white px-5 py-3 flex items-center gap-3">
-            <AlertTriangle size={18} className="shrink-0" />
-            <div className="flex-1">
-              <div className="text-sm font-semibold">Slay the Spire 2 is running</div>
-              <div className="text-xs text-white/85">
-                Mod and profile changes are paused until the game closes — touching files now can crash the game or corrupt your install.
+        {/* Main column: top bar + content */}
+        <div className="flex-1 min-w-0 flex flex-col">
+          {/* Top bar — profile chip + Vanilla + Launch */}
+          <div className="gf-top">
+            <div style={{ position: 'relative' }}>
+              <button
+                className="gf-prof"
+                onClick={() => setShowProfileSwitcher((v) => !v)}
+                title="Switch active pack"
+              >
+                <div className="gf-prof-avatar">{profileInitials || 'VA'}</div>
+                <div className="gf-prof-text">
+                  <span className="gf-prof-eyebrow">Active Profile</span>
+                  <span className="gf-prof-name">{activeProfile || 'Vanilla'}</span>
+                </div>
+                <span className="gf-prof-meta">
+                  {enabledCount} active / {totalCount} mods
+                </span>
+                <ChevronDown
+                  size={14}
+                  style={{
+                    opacity: 0.4,
+                    marginLeft: 4,
+                    transform: showProfileSwitcher ? 'rotate(180deg)' : undefined,
+                    transition: 'transform 0.15s',
+                  }}
+                />
+              </button>
+              {showProfileSwitcher && (
+                <ProfileSwitcher
+                  onClose={() => setShowProfileSwitcher(false)}
+                  onAddPack={() => setActiveView('home')}
+                  onManageAll={() => setActiveView('profiles')}
+                />
+              )}
+            </div>
+
+            <div className="flex gap-1.5">
+              <button
+                onClick={handleLaunchVanilla}
+                disabled={gameRunning}
+                title={gameRunning ? 'Close STS2 first' : 'Launch the game without any mods (vanilla)'}
+                className="gf-btn-2 gf-btn-2-sm"
+              >
+                <Play size={11} /> Vanilla
+              </button>
+              <button
+                onClick={handleLaunchGame}
+                disabled={gameRunning}
+                title={gameRunning ? 'Close STS2 first' : 'Launch STS2 with the active profile'}
+                className="gf-btn"
+              >
+                <Play size={12} />
+                Launch STS2
+              </button>
+            </div>
+          </div>
+
+          {/* Game-running banner — v5 warn style */}
+          {gameRunning && (
+            <div style={{ padding: '10px 22px 0' }}>
+              <div className="gf-banner gf-banner-warn">
+                <AlertTriangle size={16} className="gf-banner-icon" />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600 }}>Slay the Spire 2 is running</div>
+                  <div style={{ fontSize: 12, opacity: 0.85 }}>
+                    Mod and profile changes are paused until the game closes — touching files now can crash the game.
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-        )}
-        {/* App Update Banner */}
-        {appUpdate && !updateDismissed && (
-          <div className="bg-blue-600/90 text-white px-5 py-3 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <span className="text-sm font-medium">
-                {updateInstalling
-                  ? `Installing v${appUpdate.version}...`
-                  : `Update available: v${appUpdate.version} (you have v${appUpdate.currentVersion})`}
-              </span>
+          )}
+
+          {/* App-update banner — v5 info style */}
+          {appUpdate && !updateDismissed && (
+            <div style={{ padding: '10px 22px 0' }}>
+              <div className="gf-banner gf-banner-info">
+                <ArrowUpCircle size={16} className="gf-banner-icon" />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600 }}>
+                    {updateInstalling
+                      ? `Installing v${appUpdate.version}...`
+                      : `Mod Manager v${appUpdate.version} is available`}
+                  </div>
+                  <div style={{ fontSize: 12, opacity: 0.8 }}>
+                    {updateInstalling
+                      ? 'The app will restart when this finishes.'
+                      : `You're on v${appUpdate.currentVersion}.`}
+                  </div>
+                </div>
+                <button
+                  onClick={() => setUpdateDismissed(true)}
+                  disabled={updateInstalling}
+                  className="gf-btn-3"
+                >
+                  Dismiss
+                </button>
+                <button
+                  onClick={handleDownloadUpdate}
+                  disabled={updateInstalling}
+                  title="Open GitHub releases page to download manually"
+                  className="gf-btn-3"
+                >
+                  <ExternalLink size={11} /> Download
+                </button>
+                <button
+                  onClick={handleInstallUpdate}
+                  disabled={updateInstalling}
+                  className="gf-btn gf-btn-sm"
+                >
+                  {updateInstalling ? 'Installing...' : 'Install & Restart'}
+                </button>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleInstallUpdate}
-                disabled={updateInstalling}
-                className="px-3 py-1 bg-white text-blue-600 rounded text-xs font-semibold hover:bg-blue-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                {updateInstalling ? 'Installing...' : 'Install & Restart'}
-              </button>
-              <button
-                onClick={handleDownloadUpdate}
-                disabled={updateInstalling}
-                title="Open GitHub releases page to download manually"
-                className="flex items-center gap-1 px-3 py-1 bg-white/20 hover:bg-white/30 text-white rounded text-xs font-semibold transition-colors disabled:opacity-50"
-              >
-                <ExternalLink size={11} />
-                Download
-              </button>
-              <button
-                onClick={() => setUpdateDismissed(true)}
-                disabled={updateInstalling}
-                className="px-2 py-1 text-white/70 hover:text-white text-xs transition-colors disabled:opacity-50"
-              >
-                Dismiss
-              </button>
-            </div>
-          </div>
-        )}
-        {activeView === 'home' && <HomeView onGoToSettings={() => setActiveView('settings')} />}
-        {activeView === 'dashboard' && <DashboardView />}
-        {activeView === 'mods' && <ModsView advancedMode={advancedMode} />}
-        {activeView === 'browse' && <BrowseView onGoToSettings={() => setActiveView('settings')} />}
-        {activeView === 'profiles' && <ProfilesView />}
-        {activeView === 'tutorial' && <TutorialView advancedMode={advancedMode} onGoToSettings={() => setActiveView('settings')} />}
-        {activeView === 'settings' && <SettingsView />}
-      </main>
+          )}
+
+          {/* Active view */}
+          <main className="flex-1 min-h-0 overflow-auto" style={{ position: 'relative' }}>
+            {activeView === 'home' && (
+              <HomeView
+                onGoToSettings={() => setActiveView('settings')}
+                onGoToMods={() => setActiveView('mods')}
+                onSwitchPack={() => setShowProfileSwitcher(true)}
+                onLaunch={handleLaunchGame}
+              />
+            )}
+            {activeView === 'profiles' && <ProfilesView />}
+            {activeView === 'mods' && <ModsView />}
+            {activeView === 'browse' && <BrowseView onGoToSettings={() => setActiveView('settings')} />}
+            {activeView === 'tutorial' && <TutorialView advancedMode={false} onGoToSettings={() => setActiveView('settings')} />}
+            {activeView === 'settings' && <SettingsView />}
+
+            {/* First-launch onboarding wizard (v5 batch 4) */}
+            {showOnboarding && (
+              <OnboardingOverlay
+                gameInfo={gameInfo}
+                onSkip={dismissOnboarding}
+                onComplete={dismissOnboarding}
+                onAddCode={() => setActiveView('home')}
+                refreshGame={refreshAll}
+              />
+            )}
+
+            {/* Keyboard shortcuts overlay (? to open) */}
+            {showShortcuts && (
+              <ShortcutsOverlay onClose={() => setShowShortcuts(false)} />
+            )}
+
+            {/* Launching-game spinner */}
+            {launching && (
+              <LaunchSpinner
+                vanilla={launching === 'vanilla'}
+                onCancel={() => setLaunching(null)}
+              />
+            )}
+          </main>
+        </div>
+      </div>
     </div>
   );
 }

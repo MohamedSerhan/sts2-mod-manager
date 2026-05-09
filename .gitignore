@@ -43,3 +43,8 @@ whatisee.txt
 continue.txt
 *.7z
 godot.log
+
+# Local-only — design bundle copy + icon-regen artifacts
+.claude/
+src-tauri/icons/_backup/
+src-tauri/icons/.icon-source.png

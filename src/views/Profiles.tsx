@@ -20,6 +20,9 @@ import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
+import { useConfirm } from '../components/ConfirmDialog';
+import { KebabMenu, KebabSection, KebabDivider, KebabItem } from '../components/KebabMenu';
+import { PublishModal } from '../components/PublishModal';
 import {
   listProfiles,
   createProfile,
@@ -29,8 +32,6 @@ import {
   duplicateProfile,
   exportProfile,
   importProfile,
-  shareProfile,
-  reshareProfile,
   installSharedProfile,
   getShareInfo,
   getProfileDrift,
@@ -49,15 +50,20 @@ export function ProfilesView() {
   const [showImportCode, setShowImportCode] = useState(false);
   const [importCode, setImportCode] = useState('');
   const [importingCode, setImportingCode] = useState(false);
-  const [loadingShare, setLoadingShare] = useState<{ name: string; kind: 'share' | 'reshare' } | null>(null);
+  const [loadingShare] = useState<{ name: string; kind: 'share' | 'reshare' } | null>(null);
   const [shareResult, setShareResult] = useState<ShareResult | null>(null);
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedProfileCode, setCopiedProfileCode] = useState<string | null>(null);
   const [shareInfoMap, setShareInfoMap] = useState<Record<string, ShareResult>>({});
+  const [publishTarget, setPublishTarget] = useState<{ profile: Profile; isReshare: boolean } | null>(null);
   const [driftMap, setDriftMap] = useState<Record<string, ProfileDrift>>({});
   const [switchingProfile, setSwitchingProfile] = useState<string | null>(null);
+  // v5 batch 3 — Following / Published tabs.
+  // "Following" = every profile you have. "Published" = ones you've shared (have a share code).
+  const [tab, setTab] = useState<'following' | 'published'>('following');
   const { refreshAll, setActiveProfile, activeProfile } = useApp();
   const toastCtx = useToast();
+  const confirm = useConfirm();
 
   useEffect(() => {
     loadProfiles();
@@ -170,7 +176,13 @@ export function ProfilesView() {
   }
 
   async function handleDelete(name: string) {
-    if (!confirm(`Delete profile "${name}"?`)) return;
+    const ok = await confirm({
+      title: `Delete profile "${name}"?`,
+      body: 'The profile manifest will be removed. Mod files on disk stay where they are.',
+      confirmLabel: 'Delete profile',
+      destructive: true,
+    });
+    if (!ok) return;
     try {
       await deleteProfile(name);
       setProfiles((prev) => prev.filter((p) => p.name !== name));
@@ -205,36 +217,9 @@ export function ProfilesView() {
     }
   }
 
-  async function handleShare(name: string) {
-    try {
-      setLoadingShare({ name, kind: 'share' });
-      const result = await shareProfile(name);
-      setShareResult(result);
-      setShareInfoMap((prev) => ({ ...prev, [name]: result }));
-      setCopiedCode(false);
-      await loadProfiles();
-    } catch (e) {
-      toastCtx.error(`Failed to share: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setLoadingShare(null);
-    }
-  }
-
-  async function handleReshare(name: string) {
-    try {
-      setLoadingShare({ name, kind: 'reshare' });
-      const result = await reshareProfile(name);
-      setShareResult(result);
-      setShareInfoMap((prev) => ({ ...prev, [name]: result }));
-      setCopiedCode(false);
-      await loadProfiles();
-      toastCtx.success('Profile re-shared! Same code, updated content.');
-    } catch (e) {
-      toastCtx.error(`Failed to re-share: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setLoadingShare(null);
-    }
-  }
+  // Share + re-share are now driven by <PublishModal> which calls
+  // shareProfile / reshareProfile internally. The legacy direct handlers
+  // have been removed.
 
   async function handleCopyCode() {
     if (!shareResult) return;
@@ -268,72 +253,81 @@ export function ProfilesView() {
   }
 
   return (
-    <div className="p-8 space-y-6">
-      {/* Switching Profile Overlay */}
+    <div className="gf-body">
+      {/* Switching Profile Overlay (v5 loading) */}
       {switchingProfile && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <Card className="max-w-sm w-full mx-4 text-center space-y-4">
-            <RefreshCw size={32} className="animate-spin text-primary mx-auto" />
-            <h3 className="text-base font-semibold text-text">
-              Activating "{switchingProfile}"
-            </h3>
-            <p className="text-sm text-text-muted">
-              Fetching profile data and downloading missing mods...
-            </p>
-            <p className="text-xs text-text-dim">
+        <div className="gf-modal-back">
+          <div className="gf-loading-card">
+            <div className="gf-spinner" />
+            <div className="gf-loading-msg">Activating "{switchingProfile}"</div>
+            <div className="gf-loading-sub">
+              Fetching profile data and downloading missing mods…
+            </div>
+            <div className="gf-loading-step">
               This may take a minute depending on the number of mods.
-            </p>
-          </Card>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Share Result Modal */}
+      {/* Share Result Modal — v5 gf-modal */}
       {shareResult && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50">
-          <Card className="max-w-md w-full mx-4 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-text">
-                Profile Shared!
-              </h3>
+        <div className="gf-modal-back">
+          <div className="gf-modal" style={{ width: 540 }}>
+            <div className="gf-modal-head">
+              <div>
+                <div className="gf-modal-title">Profile published</div>
+                <div className="gf-modal-sub">Anyone with the code can install this exact set of mods.</div>
+              </div>
               <button
                 onClick={() => setShareResult(null)}
-                className="text-text-dim hover:text-text"
+                className="gf-btn-3 gf-btn-icon"
+                title="Close"
               >
-                <X size={16} />
+                <X size={14} />
               </button>
             </div>
-            <p className="text-xs text-text-muted">
-              Send this code to your friends. They enter it in "Import Code" to get your modpack:
-            </p>
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                readOnly
-                value={`${shareResult.owner}/${shareResult.code}`}
-                className="flex-1 bg-background border border-border rounded-lg px-4 py-3 text-lg text-text font-mono font-bold text-center tracking-wider select-all focus:outline-none"
-              />
-              <Button size="sm" onClick={handleCopyCode}>
-                {copiedCode ? <Check size={14} /> : <Copy size={14} />}
-                {copiedCode ? 'Copied' : 'Copy'}
-              </Button>
+            <div className="gf-modal-body">
+              <div className="gf-share-code">
+                <div className="gf-share-code-text">
+                  <div className="gf-share-code-eyebrow">Share code</div>
+                  <div className="gf-share-code-value">{shareResult.owner}/{shareResult.code}</div>
+                </div>
+                <Button variant="secondary" size="sm" onClick={handleCopyCode}>
+                  {copiedCode ? <Check size={14} /> : <Copy size={14} />}
+                  {copiedCode ? 'Copied' : 'Copy'}
+                </Button>
+              </div>
+              <div
+                style={{
+                  background: 'oklch(0.55 0.13 250 / 0.10)',
+                  border: '1px solid oklch(0.55 0.13 250 / 0.3)',
+                  borderRadius: 7,
+                  padding: '10px 12px',
+                  fontSize: 12,
+                  color: 'oklch(0.85 0.07 250)',
+                }}
+              >
+                This same code is reused if you re-share later — friends will see updates instead of having to follow a new code.
+              </div>
             </div>
-            <div className="text-xs text-text-dim space-y-1">
-              <p>When you update your mods and re-share, the code stays the same.</p>
-              <p>Your friends will see "Update available" on their Dashboard.</p>
+            <div className="gf-modal-foot">
+              <div style={{ flex: 1 }} />
+              <Button onClick={() => setShareResult(null)}>Done</Button>
             </div>
-          </Card>
+          </div>
         </div>
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="gf-page-head">
         <div>
-          <h2 className="text-2xl font-bold text-text">Profiles</h2>
-          <p className="text-sm text-text-muted mt-1.5">
-            Manage mod configurations and share with friends
+          <h1 className="gf-page-title">Your packs</h1>
+          <p className="gf-page-sub">
+            All the packs you follow, plus your own
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="gf-page-actions">
           <Button
             variant="secondary"
             size="sm"
@@ -344,7 +338,7 @@ export function ProfilesView() {
             }}
           >
             <Key size={14} />
-            Import Code
+            Add by code
           </Button>
           <Button
             variant="secondary"
@@ -360,7 +354,7 @@ export function ProfilesView() {
           </Button>
           <Button variant="secondary" size="sm" onClick={handleSnapshot}>
             <Camera size={14} />
-            Snapshot Current
+            Snapshot current
           </Button>
           <Button size="sm" onClick={() => {
             setShowCreate(!showCreate);
@@ -368,10 +362,55 @@ export function ProfilesView() {
             setShowImportCode(false);
           }}>
             <Plus size={14} />
-            New Profile
+            New profile
           </Button>
         </div>
       </div>
+
+      {/* Following / Published tabs (v5 batch 3) */}
+      <div className="gf-tabs gf-tabs-settings" style={{ marginBottom: 14 }}>
+        <button
+          className={`gf-tab ${tab === 'following' ? 'active' : ''}`}
+          onClick={() => setTab('following')}
+        >
+          Following
+          <span className="gf-tab-count">{profiles.length}</span>
+        </button>
+        <button
+          className={`gf-tab ${tab === 'published' ? 'active' : ''}`}
+          onClick={() => setTab('published')}
+        >
+          Published by you
+          <span className="gf-tab-count">{Object.keys(shareInfoMap).length}</span>
+        </button>
+      </div>
+
+      {/* Drift banner on the active profile (v5 batch 3) */}
+      {activeProfile && driftMap[activeProfile] && (
+        <div className="gf-banner gf-banner-warn" style={{ marginBottom: 14 }}>
+          <AlertTriangle size={16} className="gf-banner-icon" />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 600 }}>{activeProfile} has drifted</div>
+            <div style={{ fontSize: 12, opacity: 0.85 }}>
+              {[
+                driftMap[activeProfile].added.length && `${driftMap[activeProfile].added.length} new`,
+                driftMap[activeProfile].removed.length && `${driftMap[activeProfile].removed.length} removed`,
+                driftMap[activeProfile].toggled.length && `${driftMap[activeProfile].toggled.length} toggled`,
+                (driftMap[activeProfile].version_changed?.length ?? 0) && `${driftMap[activeProfile].version_changed.length} version-changed`,
+              ].filter(Boolean).join(' · ') || 'profile and disk are out of sync'}
+              {' '}since the manifest. Repair to match exactly.
+            </div>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => handleSwitch(activeProfile)}
+            title="Re-apply this profile to match the manifest"
+          >
+            Repair
+          </Button>
+        </div>
+      )}
 
       {/* Import Code Form */}
       {showImportCode && (
@@ -487,16 +526,29 @@ export function ProfilesView() {
           </Button>
         </Card>
       ) : profiles.length === 0 ? (
-        <Card className="flex flex-col items-center justify-center py-16">
-          <Layers size={44} className="text-text-dim opacity-40 mb-4" />
-          <p className="text-base text-text-dim">No profiles yet</p>
-          <p className="text-sm text-text-dim mt-1.5">
-            Create a profile to save your mod configuration, or import a code from a friend
-          </p>
-        </Card>
-      ) : (
+        <div className="gf-empty">
+          <div className="gf-empty-art"><Layers size={28} /></div>
+          <div className="gf-empty-title">No profiles yet</div>
+          <div className="gf-empty-sub">
+            Create a profile to save your mod configuration, or import a code from a friend.
+          </div>
+        </div>
+      ) : (() => {
+        const visible = tab === 'published'
+          ? profiles.filter((p) => shareInfoMap[p.name])
+          : profiles;
+        if (visible.length === 0) {
+          return (
+            <div className="gf-empty">
+              <div className="gf-empty-art"><Layers size={28} /></div>
+              <div className="gf-empty-title">You haven't published anything yet</div>
+              <div className="gf-empty-sub">Share a profile to make it appear here. Friends paste your code to install the same set of mods.</div>
+            </div>
+          );
+        }
+        return (
         <div className="space-y-2">
-          {profiles.map((profile) => (
+          {visible.map((profile) => (
             <Card
               key={profile.name}
               className={`flex items-center justify-between hover:bg-surface-hover transition-colors ${activeProfile === profile.name ? 'border-green-500/50 bg-green-500/5' : ''}`}
@@ -576,74 +628,96 @@ export function ProfilesView() {
                 )}
               </div>
               <div className="flex items-center gap-1">
+                {activeProfile === profile.name ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleSwitch(profile.name)}
+                    title="Re-apply this profile to match the manifest"
+                    disabled={switchingProfile !== null}
+                  >
+                    {switchingProfile === profile.name ? (
+                      <RefreshCw size={14} className="animate-spin" />
+                    ) : (
+                      <RefreshCw size={14} />
+                    )}
+                  </Button>
+                ) : (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => handleSwitch(profile.name)}
+                    title="Activate profile (enable these mods)"
+                    disabled={switchingProfile !== null}
+                  >
+                    {switchingProfile === profile.name ? (
+                      <RefreshCw size={14} className="animate-spin" />
+                    ) : (
+                      <><Play size={14} /> Switch to</>
+                    )}
+                  </Button>
+                )}
                 <Button
-                  variant="ghost"
+                  variant="secondary"
                   size="sm"
-                  onClick={() => handleSwitch(profile.name)}
-                  title="Activate profile (enable these mods)"
-                  disabled={switchingProfile !== null}
-                >
-                  {switchingProfile === profile.name ? (
-                    <RefreshCw size={14} className="animate-spin" />
-                  ) : (
-                    <Play size={14} />
-                  )}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleShare(profile.name)}
-                  title="Share profile (get a code for friends)"
+                  onClick={() => setPublishTarget({ profile, isReshare: !!shareInfoMap[profile.name] })}
+                  title={shareInfoMap[profile.name] ? 'Re-share — same code, friends see an update' : 'Share — friends paste the code to install'}
                   disabled={loadingShare?.name === profile.name}
                 >
-                  {loadingShare?.name === profile.name && loadingShare.kind === 'share' ? (
-                    <RefreshCw size={14} className="animate-spin" />
-                  ) : (
-                    <Share2 size={14} />
-                  )}
+                  <Share2 size={14} />
+                  {shareInfoMap[profile.name] ? 'Re-share' : 'Share'}
                 </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleReshare(profile.name)}
-                  title="Re-share (update for friends, same code)"
-                  disabled={loadingShare?.name === profile.name}
-                >
-                  <RefreshCw
-                    size={14}
-                    className={loadingShare?.name === profile.name && loadingShare.kind === 'reshare' ? 'animate-spin' : ''}
-                  />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleDuplicate(profile.name)}
-                  title="Duplicate profile"
-                >
-                  <Files size={14} />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleExport(profile.name)}
-                  title="Export as JSON"
-                >
-                  <Download size={14} />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleDelete(profile.name)}
-                  title="Delete profile"
-                  className="hover:text-danger"
-                >
-                  <Trash2 size={14} />
-                </Button>
+                <KebabMenu title="More actions">
+                  <KebabSection>
+                    <KebabItem icon={<Camera size={12} />} onClick={() => handleSnapshot()}>
+                      Snapshot from current install
+                    </KebabItem>
+                    <KebabItem icon={<Files size={12} />} onClick={() => handleDuplicate(profile.name)}>
+                      Duplicate
+                    </KebabItem>
+                  </KebabSection>
+                  <KebabDivider />
+                  <KebabSection>
+                    <KebabItem icon={<Download size={12} />} onClick={() => handleExport(profile.name)}>
+                      Export JSON…
+                    </KebabItem>
+                    {shareInfoMap[profile.name] && (
+                      <KebabItem
+                        icon={<Copy size={12} />}
+                        onClick={() => {
+                          const code = `${shareInfoMap[profile.name].owner}/${shareInfoMap[profile.name].code}`;
+                          navigator.clipboard.writeText(code).then(() => toastCtx.success('Share code copied'));
+                        }}
+                      >
+                        Copy share code
+                      </KebabItem>
+                    )}
+                  </KebabSection>
+                  <KebabDivider />
+                  <KebabItem
+                    danger
+                    icon={<Trash2 size={12} />}
+                    onClick={() => handleDelete(profile.name)}
+                  >
+                    Delete profile…
+                  </KebabItem>
+                </KebabMenu>
               </div>
             </Card>
           ))}
         </div>
-      )}
+        );
+      })()}
+
+      <PublishModal
+        open={!!publishTarget}
+        profile={publishTarget?.profile ?? null}
+        isReshare={publishTarget?.isReshare ?? false}
+        onClose={() => setPublishTarget(null)}
+        onShared={(result) => {
+          setShareInfoMap((prev) => ({ ...prev, [publishTarget!.profile.name]: result }));
+        }}
+      />
     </div>
   );
 }

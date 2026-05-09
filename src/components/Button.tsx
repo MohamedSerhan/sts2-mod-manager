@@ -9,17 +9,21 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   size?: ButtonSize;
 }
 
-const variantStyles: Record<ButtonVariant, string> = {
-  primary: 'bg-primary text-white hover:bg-primary-hover',
-  secondary: 'bg-surface text-text border border-border hover:bg-surface-hover',
-  danger: 'bg-danger text-white hover:bg-danger/80',
-  ghost: 'bg-transparent text-text-muted hover:bg-surface-hover hover:text-text',
+// v5 — gold-flat primary, slate-fill secondary, ghost tertiary, red danger.
+// Reuses `.gf-btn*` utility classes from styles.css so chrome buttons and
+// view-level Button components share one visual language.
+const variantClass: Record<ButtonVariant, string> = {
+  primary: 'gf-btn',
+  secondary: 'gf-btn-2',
+  danger: 'gf-btn-3 gf-btn-danger',
+  ghost: 'gf-btn-3',
 };
 
-const sizeStyles: Record<ButtonSize, string> = {
-  sm: 'px-3 py-1.5 text-xs',
-  md: 'px-5 py-2.5 text-sm',
-  lg: 'px-7 py-3 text-base',
+const sizeClass: Record<ButtonVariant, Record<ButtonSize, string>> = {
+  primary:   { sm: 'gf-btn-sm', md: '',           lg: 'gf-btn-lg' },
+  secondary: { sm: 'gf-btn-2-sm', md: '',         lg: '' },
+  danger:    { sm: '',          md: '',           lg: '' },
+  ghost:     { sm: '',          md: '',           lg: '' },
 };
 
 export function Button({
@@ -32,11 +36,8 @@ export function Button({
   return (
     <button
       className={cn(
-        'inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors',
-        'focus:outline-none focus:ring-2 focus:ring-primary/50',
-        'disabled:opacity-50 disabled:cursor-not-allowed',
-        variantStyles[variant],
-        sizeStyles[size],
+        variantClass[variant],
+        sizeClass[variant][size],
         className,
       )}
       disabled={disabled}

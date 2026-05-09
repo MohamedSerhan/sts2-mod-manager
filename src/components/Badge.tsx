@@ -1,6 +1,6 @@
 import { cn } from '../lib/utils';
 
-type BadgeVariant = 'github' | 'nexus' | 'local' | 'default';
+type BadgeVariant = 'github' | 'nexus' | 'local' | 'default' | 'update' | 'ok';
 
 interface BadgeProps {
   variant?: BadgeVariant;
@@ -8,22 +8,19 @@ interface BadgeProps {
   className?: string;
 }
 
-const variantStyles: Record<BadgeVariant, string> = {
-  github: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
-  nexus: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
-  local: 'bg-gray-500/15 text-gray-400 border-gray-500/30',
-  default: 'bg-primary/15 text-primary border-primary/30',
+// v5 — pills are uppercase + tracked. Source pills are neutral; warm reserved for state.
+const variantClass: Record<BadgeVariant, string> = {
+  github: 'gf-pill gf-pill-github',
+  nexus: 'gf-pill gf-pill-nexus',
+  local: 'gf-pill gf-pill-github',
+  default: 'gf-pill gf-pill-github',
+  update: 'gf-pill gf-pill-update',
+  ok: 'gf-pill gf-pill-ok',
 };
 
 export function Badge({ variant = 'default', children, className }: BadgeProps) {
   return (
-    <span
-      className={cn(
-        'inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium border',
-        variantStyles[variant],
-        className,
-      )}
-    >
+    <span className={cn(variantClass[variant], className)}>
       {children}
     </span>
   );

@@ -12,9 +12,6 @@ import {
   X,
   GitBranch,
   ExternalLink,
-  ChevronDown,
-  ChevronUp,
-  Save,
   Pin,
   PinOff,
 } from 'lucide-react';
@@ -26,6 +23,10 @@ import { Toggle } from '../components/Toggle';
 import { Badge, getSourceVariant } from '../components/Badge';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
+import { useConfirm } from '../components/ConfirmDialog';
+import { KebabMenu, KebabSection, KebabDivider, KebabItem } from '../components/KebabMenu';
+import { SourceEditor } from '../components/SourceEditor';
+import { Copy } from 'lucide-react';
 import {
   toggleMod,
   deleteMod,
@@ -36,24 +37,38 @@ import {
   disableAllMods,
   openModsFolder,
   setModSource,
+  setModSourcesFull,
   findGithubFromNexus,
   pinMod,
   unpinMod,
 } from '../hooks/useTauri';
 
-export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
+// v5 — Advanced mode is per-screen, persisted in localStorage. Off by default.
+const ADVANCED_KEY = 'sts2mm-mods-advanced';
+
+export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: boolean } = {}) {
   const { mods, refreshMods, refreshAll, gameRunning } = useApp();
   const toast = useToast();
+  const confirm = useConfirm();
   const [filter, setFilter] = useState('');
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [quickAddUrl, setQuickAddUrl] = useState('');
   const [quickAdding, setQuickAdding] = useState(false);
   const [expandedMod, setExpandedMod] = useState<string | null>(null);
-  const [editingSource, setEditingSource] = useState<string | null>(null);
-  const [sourceInput, setSourceInput] = useState('');
   const [savingSource, setSavingSource] = useState(false);
   const [findingGithub, setFindingGithub] = useState<string | null>(null);
+  const [advancedMode, setAdvancedMode] = useState<boolean>(() => {
+    if (advancedModeProp !== undefined) return advancedModeProp;
+    try { return localStorage.getItem(ADVANCED_KEY) === 'true'; }
+    catch { return false; }
+  });
+  function toggleAdvanced() {
+    const next = !advancedMode;
+    setAdvancedMode(next);
+    try { localStorage.setItem(ADVANCED_KEY, String(next)); } catch {}
+  }
 
+  const totalCount = mods.length;
   const enabledCount = mods.filter((m) => m.enabled).length;
   const disabledCount = mods.filter((m) => !m.enabled).length;
   const linkedCount = mods.filter((m) => m.github_url || m.nexus_url).length;
@@ -84,7 +99,13 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
   }
 
   async function handleDelete(name: string) {
-    if (!confirm(`Delete mod "${name}"? This cannot be undone.`)) return;
+    const ok = await confirm({
+      title: `Delete "${name}"?`,
+      body: 'This permanently removes the mod files from disk. This cannot be undone.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
     try {
       await deleteMod(name);
       await refreshMods();
@@ -177,8 +198,15 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
   }
 
   async function handleDeleteAll() {
-    if (!confirm(`Delete ALL ${mods.length} mods? This cannot be undone!`)) return;
-    if (!confirm('Are you absolutely sure? This will permanently remove all mod files.')) return;
+    const ok = await confirm({
+      title: `Delete all ${mods.length} mods?`,
+      body: 'Every mod folder will be permanently removed from disk. This cannot be undone.',
+      warning: 'Profiles that include these mods will be unable to launch until mods are reinstalled.',
+      confirmLabel: 'Delete everything',
+      destructive: true,
+      typedPhrase: 'delete all',
+    });
+    if (!ok) return;
     try {
       const deleted = await deleteAllMods();
       await refreshAll();
@@ -196,22 +224,6 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
     }
   }
 
-  async function handleSaveSource(modName: string) {
-    if (!sourceInput.trim()) return;
-    try {
-      setSavingSource(true);
-      await setModSource(modName, sourceInput.trim());
-      await refreshMods();
-      toast.success(`Source linked for ${modName}`);
-      setEditingSource(null);
-      setSourceInput('');
-    } catch (e) {
-      toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setSavingSource(false);
-    }
-  }
-
   async function handleClearSource(modName: string) {
     try {
       await setModSource(modName, '');
@@ -223,8 +235,6 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
   }
 
   function startEditSource(modName: string) {
-    setEditingSource(modName);
-    setSourceInput('');
     setExpandedMod(modName);
   }
 
@@ -241,38 +251,38 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
   );
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="gf-body">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="gf-page-head">
         <div>
-          <h2 className="text-2xl font-bold text-text">{advancedMode ? 'Installed Mods' : 'My Mods'}</h2>
-          <p className="text-sm text-text-muted mt-1.5">
-            {enabledCount} active, {disabledCount} disabled
+          <h1 className="gf-page-title">Your mods</h1>
+          <p className="gf-page-sub">
+            {totalCount} installed · {enabledCount} active{disabledCount > 0 ? `, ${disabledCount} disabled` : ''}
             {advancedMode && linkedCount > 0 && (
-              <span className="text-green-400 ml-2">
-                ({linkedCount} linked for auto-updates)
+              <span style={{ color: 'var(--ok)', marginLeft: 8 }}>
+                · {linkedCount} linked for auto-updates
               </span>
             )}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="gf-page-actions">
           <Button variant="secondary" size="sm" onClick={handleOpenFolder}>
             <FolderOpen size={14} />
-            Open Folder
+            Open folder
           </Button>
           {advancedMode && (
             <>
               <Button variant="secondary" size="sm" onClick={handleImportFile} disabled={gameRunning}>
                 <Upload size={14} />
-                Import Mod
+                Import mod
               </Button>
               <Button variant="secondary" size="sm" onClick={() => setShowQuickAdd(!showQuickAdd)} disabled={gameRunning}>
                 <Link size={14} />
-                Quick Add URL
+                Quick add URL
               </Button>
             </>
           )}
-          <Button variant="secondary" size="sm" onClick={() => refreshMods()}>
+          <Button size="sm" onClick={() => refreshMods()}>
             <RefreshCw size={14} />
             Refresh
           </Button>
@@ -306,55 +316,59 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
       )}
 
       {/* Search / Filter + Bulk Actions */}
-      <div className="flex gap-3">
-        <div className="relative flex-1">
-          <Search
-            size={16}
-            className="absolute left-4 top-1/2 -translate-y-1/2 text-text-dim"
-          />
+      <div className="gf-toolbar">
+        <div className="gf-search" style={{ maxWidth: 380 }}>
+          <Search size={14} style={{ color: 'var(--ink-dim)' }} />
           <input
             type="text"
-            placeholder="Search mods..."
+            placeholder={`Search ${totalCount} mod${totalCount === 1 ? '' : 's'}…`}
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            className="w-full bg-surface border border-border rounded-lg pl-11 pr-4 py-3 text-sm text-text placeholder:text-text-dim focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-colors"
           />
         </div>
+        {/* Per-screen Advanced toggle (v5 batch 2) */}
+        <button
+          type="button"
+          className={`gf-adv-toggle ${advancedMode ? 'on' : ''}`}
+          onClick={toggleAdvanced}
+          title="Show source pills, Pin/Delete, source editor"
+        >
+          <span className="gf-adv-toggle-track">
+            <span className="gf-adv-toggle-dot" />
+          </span>
+          <span className="gf-adv-toggle-label">Advanced</span>
+        </button>
         {mods.length > 0 && (
           <div className="flex gap-1.5">
             <Button variant="ghost" size="sm" onClick={handleEnableAll} disabled={gameRunning} title={gameRunning ? 'Close STS2 first' : 'Enable all mods'}>
               <ToggleRight size={14} />
-              Enable All
+              Enable all
             </Button>
             <Button variant="ghost" size="sm" onClick={handleDisableAll} disabled={gameRunning} title={gameRunning ? 'Close STS2 first' : 'Disable all mods'}>
               <ToggleLeft size={14} />
-              Disable All
+              Disable all
             </Button>
-            {advancedMode && (
-              <Button variant="ghost" size="sm" onClick={handleDeleteAll} disabled={gameRunning} title={gameRunning ? 'Close STS2 first' : 'Delete all mods'} className="text-red-400 hover:text-red-300 hover:bg-red-400/10">
-                <Trash2 size={14} />
-                Delete All
-              </Button>
-            )}
+            <Button variant="danger" size="sm" onClick={handleDeleteAll} disabled={gameRunning} title={gameRunning ? 'Close STS2 first' : 'Delete every mod'}>
+              <Trash2 size={14} />
+              Delete all
+            </Button>
           </div>
         )}
       </div>
 
       {/* Mod List */}
       {filtered.length === 0 ? (
-        <Card className="flex flex-col items-center justify-center py-16">
-          <Package size={44} className="text-text-dim opacity-40 mb-4" />
-          <p className="text-base text-text-dim">
+        <div className="gf-empty">
+          <div className="gf-empty-art"><Package size={28} /></div>
+          <div className="gf-empty-title">
+            {mods.length === 0 ? 'No mods installed' : 'No mods match your filter'}
+          </div>
+          <div className="gf-empty-sub">
             {mods.length === 0
-              ? 'No mods installed yet'
-              : 'No mods match your filter'}
-          </p>
-          <p className="text-sm text-text-dim mt-1.5">
-            {mods.length === 0
-              ? 'Import a .zip, use Quick Add, or browse GitHub mods'
-              : 'Try a different search term'}
-          </p>
-        </Card>
+              ? "Browse to install a mod, paste a friend's profile code, or drop a .zip anywhere on this window."
+              : 'Try a different search term.'}
+          </div>
+        </div>
       ) : (
         <div className="space-y-2">
           {filtered.map((mod) => {
@@ -364,7 +378,7 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
             return (
               <Card
                 key={mod.name}
-                className="hover:bg-surface-hover transition-colors"
+                className={`hover:bg-surface-hover transition-colors ${mod.pinned ? 'gf-mod-pinned' : ''}`}
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-4 min-w-0">
@@ -430,140 +444,136 @@ export function ModsView({ advancedMode = false }: { advancedMode?: boolean }) {
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5 ml-4 shrink-0">
-                    <button
-                      onClick={() => handleTogglePin(mod.name, mod.pinned)}
-                      className={`p-2 rounded-lg transition-colors ${
-                        mod.pinned
-                          ? 'text-blue-300 bg-blue-500/15 hover:bg-blue-500/25'
-                          : 'text-text-dim hover:text-blue-300 hover:bg-blue-500/10'
-                      }`}
-                      title={
-                        mod.pinned
-                          ? 'Unpin — modpack updates can change this mod again'
-                          : 'Pin — keep this mod\'s enabled/disabled state across modpack updates'
-                      }
-                    >
-                      {mod.pinned ? <PinOff size={16} /> : <Pin size={16} />}
-                    </button>
-                    {advancedMode && (
-                      <button
-                        onClick={() => isExpanded ? setExpandedMod(null) : startEditSource(mod.name)}
-                        className="p-2 rounded-lg text-text-dim hover:text-primary hover:bg-primary/10 transition-colors"
-                        title="Link to GitHub/Nexus for auto-updates"
-                      >
-                        {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                      </button>
-                    )}
-                    {advancedMode && (
-                      <button
+                    <KebabMenu title="Mod actions">
+                      <KebabSection>
+                        <KebabItem
+                          icon={mod.pinned ? <PinOff size={12} /> : <Pin size={12} />}
+                          onClick={() => handleTogglePin(mod.name, mod.pinned)}
+                        >
+                          {mod.pinned
+                            ? 'Unpin (allow updates & profile changes)'
+                            : 'Pin (lock version & on/off state)'}
+                        </KebabItem>
+                        <KebabItem
+                          icon={<Copy size={12} />}
+                          onClick={() => {
+                            navigator.clipboard.writeText(mod.version).then(
+                              () => toast.success(`Copied v${mod.version}`),
+                              () => toast.error('Could not copy'),
+                            );
+                          }}
+                        >
+                          Copy version (v{mod.version})
+                        </KebabItem>
+                        <KebabItem icon={<FolderOpen size={12} />} onClick={handleOpenFolder}>
+                          Open mods folder
+                        </KebabItem>
+                      </KebabSection>
+                      {advancedMode && (
+                        <>
+                          <KebabDivider />
+                          <KebabSection head="Sources">
+                            <KebabItem
+                              icon={<Link size={12} />}
+                              onClick={() =>
+                                isExpanded ? setExpandedMod(null) : startEditSource(mod.name)
+                              }
+                            >
+                              {isExpanded ? 'Close source editor' : 'Edit sources…'}
+                            </KebabItem>
+                            {mod.github_url && (
+                              <KebabItem
+                                icon={<GitBranch size={12} />}
+                                onClick={() => openUrl(mod.github_url!).catch(() => {})}
+                              >
+                                View on GitHub
+                              </KebabItem>
+                            )}
+                            {mod.nexus_url && (
+                              <KebabItem
+                                icon={<ExternalLink size={12} />}
+                                onClick={() => openUrl(mod.nexus_url!).catch(() => {})}
+                              >
+                                View on Nexus
+                              </KebabItem>
+                            )}
+                            {mod.nexus_url && !mod.github_url && (
+                              <KebabItem
+                                icon={<GitBranch size={12} />}
+                                onClick={async () => {
+                                  try {
+                                    setFindingGithub(mod.name);
+                                    const repo = await findGithubFromNexus(mod.name);
+                                    if (repo) {
+                                      await refreshMods();
+                                      toast.success(`Found GitHub repo: ${repo}`);
+                                    } else {
+                                      toast.info(`No GitHub link found in Nexus description for ${mod.name}`);
+                                    }
+                                  } catch (e) {
+                                    toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+                                  } finally {
+                                    setFindingGithub(null);
+                                  }
+                                }}
+                              >
+                                Find GitHub from Nexus
+                              </KebabItem>
+                            )}
+                          </KebabSection>
+                        </>
+                      )}
+                      <KebabDivider />
+                      <KebabItem
+                        danger
+                        icon={<Trash2 size={12} />}
                         onClick={() => handleDelete(mod.name)}
                         disabled={gameRunning}
-                        title={gameRunning ? 'Close STS2 first' : 'Delete mod'}
-                        className="p-2 rounded-lg text-text-dim hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-text-dim disabled:hover:bg-transparent"
                       >
-                        <Trash2 size={16} />
-                      </button>
-                    )}
+                        Remove mod…
+                      </KebabItem>
+                    </KebabMenu>
                   </div>
                 </div>
 
-                {/* Expanded: source linking panel (advanced only) */}
+                {/* v5 Source editor drawer (advanced only) */}
                 {advancedMode && isExpanded && (
-                  <div className="mt-4 pt-4 border-t border-border/50 space-y-3">
-                    <div className="flex items-center gap-3 text-sm text-text-dim">
-                      <span>{mod.files.length} file{mod.files.length !== 1 ? 's' : ''}</span>
-                      {mod.dependencies.length > 0 && (
-                        <>
-                          <span className="text-text-dim">|</span>
-                          <span>Depends on: {mod.dependencies.join(', ')}</span>
-                        </>
-                      )}
-                    </div>
-
-                    {/* Find GitHub from Nexus button */}
-                    {mod.nexus_url && !mod.github_url && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={async () => {
-                          try {
-                            setFindingGithub(mod.name);
-                            const repo = await findGithubFromNexus(mod.name);
-                            if (repo) {
-                              await refreshMods();
-                              toast.success(`Found GitHub repo for ${mod.name}: ${repo}`);
-                            } else {
-                              toast.info(`No GitHub link found in Nexus description for ${mod.name}`);
-                            }
-                          } catch (e) {
-                            toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
-                          } finally {
-                            setFindingGithub(null);
-                          }
-                        }}
-                        disabled={findingGithub === mod.name}
-                      >
-                        <GitBranch size={12} />
-                        {findingGithub === mod.name ? 'Searching Nexus...' : 'Find GitHub from Nexus'}
-                      </Button>
-                    )}
-
-                    {/* Current links */}
-                    {hasLinks && (
-                      <div className="flex gap-4 items-center text-sm">
-                        {mod.github_url && (
-                          <a href={mod.github_url} target="_blank" rel="noopener noreferrer"
-                            className="flex items-center gap-1.5 text-blue-400 hover:underline">
-                            <GitBranch size={14} /> {mod.github_url.replace('https://github.com/', '')}
-                            <ExternalLink size={12} />
-                          </a>
-                        )}
-                        {mod.nexus_url && (
-                          <a href={mod.nexus_url} target="_blank" rel="noopener noreferrer"
-                            className="flex items-center gap-1.5 text-orange-400 hover:underline">
-                            Nexus <ExternalLink size={12} />
-                          </a>
-                        )}
-                        <button
-                          onClick={() => handleClearSource(mod.name)}
-                          className="text-text-dim hover:text-red-400 ml-auto"
-                          title="Remove source links"
-                        >
-                          <X size={14} />
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Link source form */}
-                    {editingSource === mod.name ? (
-                      <div className="flex gap-2 items-center">
-                        <input
-                          type="text"
-                          value={sourceInput}
-                          onChange={(e) => setSourceInput(e.target.value)}
-                          placeholder="github:owner/repo, Nexus URL, or owner/repo"
-                          className="flex-1 bg-background border border-border rounded-lg px-4 py-2 text-sm text-text placeholder:text-text-dim focus:outline-none focus:ring-2 focus:ring-primary/50"
-                          onKeyDown={(e) => e.key === 'Enter' && handleSaveSource(mod.name)}
-                          disabled={savingSource}
-                          autoFocus
-                        />
-                        <Button size="sm" onClick={() => handleSaveSource(mod.name)} disabled={savingSource}>
-                          <Save size={12} />
-                          {savingSource ? 'Saving...' : 'Save'}
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => setEditingSource(null)}>
-                          <X size={12} />
-                        </Button>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => startEditSource(mod.name)}
-                        className="text-sm text-primary hover:underline"
-                      >
-                        {hasLinks ? '+ Add another source link' : '+ Link to GitHub or Nexus for auto-updates'}
-                      </button>
-                    )}
-                  </div>
+                  <SourceEditor
+                    mod={mod}
+                    findingGithub={findingGithub === mod.name}
+                    onClose={() => setExpandedMod(null)}
+                    onClear={() => handleClearSource(mod.name)}
+                    onFindGithub={async () => {
+                      try {
+                        setFindingGithub(mod.name);
+                        const repo = await findGithubFromNexus(mod.name);
+                        if (repo) {
+                          await refreshMods();
+                          toast.success(`Found GitHub repo: ${repo}`);
+                        } else {
+                          toast.info(`No GitHub link found in Nexus description for ${mod.name}`);
+                        }
+                      } catch (e) {
+                        toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+                      } finally {
+                        setFindingGithub(null);
+                      }
+                    }}
+                    onSave={async (gh, nx) => {
+                      try {
+                        setSavingSource(true);
+                        await setModSourcesFull(mod.name, gh.trim() || null, nx.trim() || null);
+                        await refreshMods();
+                        toast.success(`Sources saved for ${mod.name}`);
+                        setExpandedMod(null);
+                      } catch (e) {
+                        toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+                      } finally {
+                        setSavingSource(false);
+                      }
+                    }}
+                    saving={savingSource}
+                  />
                 )}
               </Card>
             );

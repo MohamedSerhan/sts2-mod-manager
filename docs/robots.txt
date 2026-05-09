@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://mohamedserhan.github.io/sts2-mod-manager/sitemap.xml

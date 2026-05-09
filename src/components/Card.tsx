@@ -5,11 +5,12 @@ interface CardProps extends HTMLAttributes<HTMLDivElement> {
   noPadding?: boolean;
 }
 
+// v5 — indigo panel + 1px indigo-line border + 10px radius.
 export function Card({ className, noPadding, children, ...props }: CardProps) {
   return (
     <div
       className={cn(
-        'bg-surface border border-border rounded-xl',
+        'gf-card',
         !noPadding && 'p-5',
         className,
       )}

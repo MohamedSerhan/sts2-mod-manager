@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Search, Star, Download, ExternalLink, Flame, Sparkles, Loader2 } from 'lucide-react';
+import { Search, Star, Download, ExternalLink, Flame, Sparkles, Loader2, Plus } from 'lucide-react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { Badge } from '../components/Badge';
+import { QuickAddModal } from '../components/QuickAddModal';
+import { BrowseDetail } from '../components/BrowseDetail';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import {
@@ -26,6 +28,9 @@ export function BrowseView({ onGoToSettings }: BrowseViewProps = {}) {
   const { refreshAll } = useApp();
   const toast = useToast();
   const [tab, setTab] = useState<BrowseTab>('github');
+  const [showQuickAdd, setShowQuickAdd] = useState(false);
+  const [detailRepo, setDetailRepo] = useState<GitHubRepo | null>(null);
+  const [detailNexus, setDetailNexus] = useState<NexusModInfo | null>(null);
 
   // GitHub tab state
   const [query, setQuery] = useState('');
@@ -110,28 +115,30 @@ export function BrowseView({ onGoToSettings }: BrowseViewProps = {}) {
   const tabBtn = (id: BrowseTab, label: string, Icon: typeof Search) => (
     <button
       onClick={() => setTab(id)}
-      className={`flex items-center gap-2 px-4 py-2 text-sm rounded-md transition-colors ${
-        tab === id
-          ? 'bg-primary text-white'
-          : 'text-text-muted hover:text-text hover:bg-surface-hover'
-      }`}
+      className={`gf-tab ${tab === id ? 'active' : ''}`}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
     >
-      <Icon size={14} />
+      <Icon size={12} />
       {label}
     </button>
   );
 
   return (
-    <div className="p-8 space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-text">Browse Mods</h2>
-        <p className="text-sm text-text-muted mt-1.5">
-          Search GitHub or browse what's hot on Nexus Mods
-        </p>
+    <div className="gf-body">
+      <div className="gf-page-head">
+        <div>
+          <h1 className="gf-page-title">Browse mods</h1>
+          <p className="gf-page-sub">From GitHub & Nexus — install with one click</p>
+        </div>
+        <div className="gf-page-actions">
+          <Button size="sm" onClick={() => setShowQuickAdd(true)}>
+            <Plus size={14} /> Add by URL
+          </Button>
+        </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 p-1 bg-surface border border-border rounded-lg w-fit">
+      <div className="gf-tabs" style={{ marginBottom: 14 }}>
         {tabBtn('github', 'GitHub', Search)}
         {tabBtn('nexus_trending', 'Nexus Trending', Flame)}
         {tabBtn('nexus_latest', 'Nexus Latest', Sparkles)}
@@ -168,10 +175,10 @@ export function BrowseView({ onGoToSettings }: BrowseViewProps = {}) {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {results.map((repo) => (
                 <Card key={repo.full_name} className="flex flex-col justify-between">
-                  <div>
+                  <div onClick={() => setDetailRepo(repo)} style={{ cursor: 'pointer' }}>
                     <div className="flex items-start justify-between mb-2">
                       <div className="min-w-0">
-                        <h3 className="text-sm font-semibold text-text truncate">
+                        <h3 className="text-sm font-semibold text-text truncate hover:underline">
                           {repo.name}
                         </h3>
                         <p className="text-xs text-text-dim">{repo.full_name}</p>
@@ -229,41 +236,43 @@ export function BrowseView({ onGoToSettings }: BrowseViewProps = {}) {
       {tab !== 'github' && (
         <>
           {nexusKeyMissing ? (
-            <Card className="flex flex-col items-center justify-center py-16">
-              <Sparkles size={44} className="text-text-dim opacity-40 mb-4" />
-              <p className="text-base text-text">
-                Set your Nexus API key in Settings to browse Nexus mods.
-              </p>
-              <p className="text-xs text-text-dim mt-2 max-w-md text-center">
-                Nexus's free API does not allow general text search, but it does
-                expose Trending and Latest Added lists.
-              </p>
-              {onGoToSettings && (
-                <Button className="mt-4" onClick={onGoToSettings}>
-                  Open Settings
-                </Button>
-              )}
-            </Card>
+            <>
+              <div className="gf-banner gf-banner-info" style={{ marginBottom: 14 }}>
+                <Sparkles size={16} className="gf-banner-icon" />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600 }}>Nexus is hidden — set an API key to see Nexus mods</div>
+                  <div style={{ fontSize: 12, opacity: 0.85 }}>
+                    Nexus's free API does not allow general text search, but it does expose Trending and Latest Added lists.
+                  </div>
+                </div>
+                {onGoToSettings && (
+                  <Button variant="secondary" size="sm" onClick={onGoToSettings}>
+                    Open Settings
+                  </Button>
+                )}
+              </div>
+            </>
           ) : nexusLoading ? (
-            <Card className="flex flex-col items-center justify-center py-16">
-              <Loader2 size={32} className="text-primary animate-spin mb-3" />
-              <p className="text-sm text-text-muted">
-                Loading {tab === 'nexus_trending' ? 'trending' : 'latest'} mods…
-              </p>
-            </Card>
+            <div className="gf-empty">
+              <div className="gf-empty-art"><Loader2 size={28} className="animate-spin" /></div>
+              <div className="gf-empty-title">Loading {tab === 'nexus_trending' ? 'trending' : 'latest'} mods…</div>
+            </div>
           ) : nexusError ? (
-            <Card className="flex flex-col items-center justify-center py-16">
-              <p className="text-sm text-red-400">{nexusError}</p>
-            </Card>
+            <div className="gf-empty">
+              <div className="gf-empty-art" style={{ color: 'oklch(0.65 0.18 25)' }}>!</div>
+              <div className="gf-empty-title">Couldn't reach Nexus</div>
+              <div className="gf-empty-sub">{nexusError}</div>
+            </div>
           ) : nexusMods.length === 0 ? (
-            <Card className="flex flex-col items-center justify-center py-16">
-              <p className="text-sm text-text-dim">No mods returned.</p>
-            </Card>
+            <div className="gf-empty">
+              <div className="gf-empty-art"><Sparkles size={28} /></div>
+              <div className="gf-empty-title">No mods returned</div>
+            </div>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {nexusMods.map((mod) => (
                 <Card key={mod.mod_id} className="flex flex-col justify-between gap-3">
-                  <div className="flex gap-3">
+                  <div className="flex gap-3 cursor-pointer" onClick={() => setDetailNexus(mod)}>
                     {mod.picture_url && (
                       <img
                         src={mod.picture_url}
@@ -297,6 +306,31 @@ export function BrowseView({ onGoToSettings }: BrowseViewProps = {}) {
             </div>
           )}
         </>
+      )}
+
+      <QuickAddModal open={showQuickAdd} onClose={() => setShowQuickAdd(false)} />
+
+      {detailRepo && (
+        <BrowseDetail
+          kind="github"
+          repo={detailRepo}
+          installing={installing === detailRepo.full_name}
+          onClose={() => setDetailRepo(null)}
+          onInstall={async () => {
+            await handleInstall(detailRepo);
+            setDetailRepo(null);
+          }}
+          onOpenExternal={() => openUrl(detailRepo.html_url).catch(() => {})}
+        />
+      )}
+
+      {detailNexus && (
+        <BrowseDetail
+          kind="nexus"
+          mod={detailNexus}
+          onClose={() => setDetailNexus(null)}
+          onOpenExternal={() => openUrl(`https://www.nexusmods.com/${NEXUS_GAME_DOMAIN}/mods/${detailNexus.mod_id}`).catch(() => {})}
+        />
       )}
     </div>
   );

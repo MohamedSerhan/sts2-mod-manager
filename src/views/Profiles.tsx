@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Plus,
   Camera,
@@ -71,34 +71,42 @@ export function ProfilesView() {
     loadProfiles();
   }, []);
 
-  // Load share info and drift for all profiles
+  /**
+   * Re-pull share info + drift state for currently-loaded profiles.
+   *
+   * Drift only matters for the active profile — every other profile is
+   * just a saved snapshot, so "differs from disk" there is the expected
+   * state, not a problem.
+   *
+   * Exposed (vs being inline in the useEffect) so that mutating actions —
+   * Share, Re-share, Update from drift — can fire it after they finish
+   * and the UI updates immediately instead of leaving the user staring at
+   * a stale "out of sync" banner until they navigate away and back.
+   */
+  const refreshShareAndDrift = useCallback(async () => {
+    const shareMap: Record<string, ShareResult> = {};
+    for (const p of profiles) {
+      try {
+        const info = await getShareInfo(p.name);
+        if (info) shareMap[p.name] = info;
+      } catch { /* no share info */ }
+    }
+    setShareInfoMap(shareMap);
+
+    const driftEntries: Record<string, ProfileDrift> = {};
+    if (activeProfile) {
+      try {
+        const drift = await getProfileDrift(activeProfile);
+        if (drift.has_drift) driftEntries[activeProfile] = drift;
+      } catch { /* ignore */ }
+    }
+    setDriftMap(driftEntries);
+  }, [profiles, activeProfile]);
+
   useEffect(() => {
     if (profiles.length === 0) return;
-    const loadShareInfos = async () => {
-      const map: Record<string, ShareResult> = {};
-      for (const p of profiles) {
-        try {
-          const info = await getShareInfo(p.name);
-          if (info) map[p.name] = info;
-        } catch { /* no share info */ }
-      }
-      setShareInfoMap(map);
-    };
-    loadShareInfos();
-
-    // Load drift only for the active profile (other profiles will naturally differ from disk)
-    const loadDrift = async () => {
-      const map: Record<string, ProfileDrift> = {};
-      if (activeProfile) {
-        try {
-          const drift = await getProfileDrift(activeProfile);
-          if (drift.has_drift) map[activeProfile] = drift;
-        } catch { /* ignore */ }
-      }
-      setDriftMap(map);
-    };
-    loadDrift();
-  }, [profiles, activeProfile]);
+    refreshShareAndDrift();
+  }, [profiles, activeProfile, refreshShareAndDrift]);
 
   async function loadProfiles() {
     try {
@@ -781,7 +789,16 @@ export function ProfilesView() {
         isReshare={publishTarget?.isReshare ?? false}
         onClose={() => setPublishTarget(null)}
         onShared={(result) => {
+          // Optimistically patch share info so the row flips Share→Re-share
+          // immediately even before the reload below settles.
           setShareInfoMap((prev) => ({ ...prev, [publishTarget!.profile.name]: result }));
+          // Re-share takes a fresh snapshot of disk into the profile, so
+          // after it finishes the profile and disk should match again.
+          // Reload the profile list — that bumps the `profiles` state
+          // reference, which trips the effect that re-derives drift, so
+          // the "out of sync" banner clears immediately instead of
+          // hanging around until the user navigates away and back.
+          loadProfiles();
         }}
       />
     </div>

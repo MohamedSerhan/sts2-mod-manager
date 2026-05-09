@@ -43,6 +43,12 @@ export interface SwitchProfileResult {
   failed_downloads: string[];
 }
 
+export interface RepairProfileResult extends SwitchProfileResult {
+  /** Mods that were on disk but not in the profile manifest, deleted as
+   *  part of the repair. Includes both active and disabled folder orphans. */
+  deleted_orphans: string[];
+}
+
 export interface GameInfo {
   game_path: string | null;
   mods_path: string | null;

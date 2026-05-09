@@ -27,6 +27,7 @@ import {
   listProfiles,
   createProfile,
   switchProfile,
+  repairProfile,
   snapshotProfile,
   deleteProfile,
   duplicateProfile,
@@ -35,6 +36,7 @@ import {
   installSharedProfile,
   getShareInfo,
   getProfileDrift,
+  createBackup,
 } from '../hooks/useTauri';
 import type { ProfileDrift } from '../hooks/useTauri';
 import type { Profile, ShareResult } from '../types';
@@ -160,6 +162,70 @@ export function ProfilesView() {
       }
     } catch (e) {
       toastCtx.error(`Failed to switch: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSwitchingProfile(null);
+    }
+  }
+
+  /**
+   * Drift Repair — same as Switch, but ALSO deletes orphan mod files (on
+   * disk but not in the manifest). Surfaces the orphan list to the user
+   * via a confirm dialog before deleting; warns when there's nothing to
+   * delete (drift is purely from missing mods or version mismatch).
+   */
+  async function handleRepairDrift(name: string) {
+    const drift = driftMap[name];
+    const orphanCount = drift?.added.length ?? 0;
+    const orphans = drift?.added ?? [];
+    const orphanList = orphans.length > 8
+      ? `${orphans.slice(0, 8).join(', ')}, …${orphans.length - 8} more`
+      : orphans.join(', ');
+
+    const ok = await confirm({
+      title: `Repair "${name}"?`,
+      body: orphanCount > 0
+        ? `Re-applies the manifest and deletes ${orphanCount} mod file(s) that aren't in the profile: ${orphanList}.`
+        : 'Re-applies the manifest. No orphan files to delete — drift will be fixed by toggling state.',
+      warning: orphanCount > 0
+        ? 'Orphan files will be permanently removed. Restore from a backup if you change your mind.'
+        : undefined,
+      confirmLabel: 'Repair',
+      destructive: orphanCount > 0,
+      checkbox: orphanCount > 0
+        ? { label: 'Make a backup before repairing', defaultChecked: true }
+        : undefined,
+    });
+    if (!ok) return;
+
+    try {
+      setSwitchingProfile(name);
+      if (ok.checked) {
+        try { await createBackup(); }
+        catch (e) { toastCtx.error(`Backup failed: ${e instanceof Error ? e.message : String(e)}`); }
+      }
+      const result = await repairProfile(name);
+      setActiveProfile(name);
+      await refreshAll();
+      await loadProfiles();
+
+      const summary: string[] = [];
+      if (result.deleted_orphans.length > 0) {
+        summary.push(`removed ${result.deleted_orphans.length} orphan mod${result.deleted_orphans.length === 1 ? '' : 's'}`);
+      }
+      if (result.downloaded > 0) summary.push(`downloaded ${result.downloaded}`);
+      if (result.failed_downloads.length > 0) {
+        summary.push(`${result.failed_downloads.length} download(s) failed`);
+      }
+      if (result.missing_mods.length > 0) {
+        summary.push(`${result.missing_mods.length} still missing`);
+      }
+      toastCtx.success(
+        summary.length > 0
+          ? `Repaired "${name}" — ${summary.join(', ')}`
+          : `Repaired "${name}"`
+      );
+    } catch (e) {
+      toastCtx.error(`Repair failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setSwitchingProfile(null);
     }
@@ -404,8 +470,8 @@ export function ProfilesView() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => handleSwitch(activeProfile)}
-            title="Re-apply this profile to match the manifest"
+            onClick={() => handleRepairDrift(activeProfile)}
+            title="Re-apply manifest and delete orphan mod files"
           >
             Repair
           </Button>

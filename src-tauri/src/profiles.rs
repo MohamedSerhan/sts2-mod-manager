@@ -958,3 +958,75 @@ pub fn get_profile_drift(
         has_drift,
     })
 }
+
+/// Repair a profile: re-apply the manifest, then delete any orphan mod
+/// files left over (mods present on disk but not in the manifest, in either
+/// the active or disabled folder). The plain `switch_profile` command only
+/// toggles enabled/disabled state — it never deletes — which means orphan
+/// disabled mods can keep showing up in drift forever. This command is the
+/// "actually match the manifest" version invoked from the drift banner.
+///
+/// Returns the same shape as `switch_profile` plus the names of the orphan
+/// mods that were deleted, so the UI can show a confirm-then-toast flow.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepairProfileResult {
+    pub applied: bool,
+    pub missing_mods: Vec<String>,
+    pub downloaded: u32,
+    pub failed_downloads: Vec<String>,
+    pub deleted_orphans: Vec<String>,
+}
+
+#[tauri::command]
+pub async fn repair_profile(
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<RepairProfileResult, String> {
+    crate::game::ensure_game_not_running()?;
+
+    // Phase 1: standard apply (this also auto-snapshots current state).
+    let switch_result = switch_profile(name.clone(), state.clone()).await?;
+
+    // Phase 2: build the set of identifiers known to the profile, then
+    // delete every disk file that doesn't match.
+    let (mods_path, disabled_path, profile) = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        let mods = s.mods_path.as_ref().ok_or("Game path not set")?.clone();
+        let disabled = s.disabled_mods_path.as_ref().ok_or("Game path not set")?.clone();
+        let p = load_profile(&name, &s.profiles_path).map_err(|e| e.to_string())?;
+        (mods, disabled, p)
+    };
+
+    let mut profile_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for pm in &profile.mods {
+        profile_keys.insert(mod_key(&pm.name, pm.folder_name.as_deref(), pm.mod_id.as_deref()));
+    }
+
+    let mut deleted_orphans = Vec::new();
+    for (folder, label) in [(&mods_path, "active"), (&disabled_path, "disabled")] {
+        let installed = if label == "active" {
+            crate::mods::scan_mods(folder)
+        } else {
+            crate::mods::scan_disabled_mods(folder)
+        };
+        for m in &installed {
+            let key = mod_key(&m.name, m.folder_name.as_deref(), m.mod_id.as_deref());
+            if !profile_keys.contains(&key) {
+                log::info!(
+                    "Repair: deleting orphan mod '{}' from {} folder (not in profile '{}')",
+                    m.name, label, name
+                );
+                crate::mods::delete_mod_files_by_info(m, folder);
+                deleted_orphans.push(m.name.clone());
+            }
+        }
+    }
+
+    Ok(RepairProfileResult {
+        applied: switch_result.applied,
+        missing_mods: switch_result.missing_mods,
+        downloaded: switch_result.downloaded,
+        failed_downloads: switch_result.failed_downloads,
+        deleted_orphans,
+    })
+}

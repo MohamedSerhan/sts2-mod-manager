@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ModInfo, Profile, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, ModAuditEntry, NexusModInfo } from '../types';
+import type { ModInfo, Profile, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, RepairProfileResult, ModAuditEntry, NexusModInfo } from '../types';
 
 // ── Game Detection & QOL ───────────────────────────────────────────────────
 
@@ -105,6 +105,14 @@ export async function createProfile(name: string): Promise<Profile> {
 
 export async function switchProfile(name: string): Promise<SwitchProfileResult> {
   return invoke('switch_profile', { name });
+}
+
+/** Repair a profile: re-apply the manifest *and* delete every mod on disk
+ *  that isn't in the manifest (including disabled-folder orphans). The plain
+ *  `switch_profile` only toggles state — it never deletes — which means
+ *  orphan disabled mods can keep showing up in drift forever. */
+export async function repairProfile(name: string): Promise<RepairProfileResult> {
+  return invoke('repair_profile', { name });
 }
 
 export async function snapshotProfile(name: string): Promise<Profile> {

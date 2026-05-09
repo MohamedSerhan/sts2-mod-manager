@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="public/icon.png" alt="STS2 Mod Manager" width="128" height="128" />
+  <img src="public/icon.png?v=2" alt="STS2 Mod Manager" width="128" height="128" />
 </p>
 
 <h1 align="center">STS2 Mod Manager</h1>

@@ -177,6 +177,7 @@ pub fn run() {
             // Curator workflow
             updater::check_for_updates,
             updater::update_mod,
+            updater::repair_mod,
             updater::update_all_mods,
             updater::audit_mod_versions,
             quick_add::quick_add_mod,

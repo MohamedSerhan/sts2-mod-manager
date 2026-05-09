@@ -423,6 +423,30 @@ pub async fn update_mod(
     Ok(info)
 }
 
+/// Force-reinstall a mod from its linked GitHub source.
+///
+/// Behaviorally identical to `update_mod` today — both fetch the latest
+/// release from GitHub, defensively wipe the existing on-disk install, and
+/// re-extract the new zip. The DIFFERENCE is intent and UX surfacing:
+///
+/// - `update_mod` is "I know there's a newer version, install it." It's
+///   shown on rows the audit flagged with `needs_update`.
+/// - `repair_mod` is "this install is broken (can't parse, version reads
+///   'unknown', game won't load it, etc.) — re-download and reinstall."
+///   It's shown as an explicit advanced action on the Mods row.
+///
+/// Splitting them now makes it possible to evolve repair semantics later
+/// (e.g. pinning to currently-recorded version instead of always-latest)
+/// without breaking the update path. For v1.0.13 the body is a thin wrap.
+#[tauri::command]
+pub async fn repair_mod(
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<ModInfo, String> {
+    log::info!("repair_mod: force-reinstall requested for '{}'", name);
+    update_mod(name, state).await
+}
+
 /// Update all mods that have available GitHub updates.
 #[tauri::command]
 pub async fn update_all_mods(

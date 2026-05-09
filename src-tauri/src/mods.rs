@@ -42,6 +42,45 @@ pub struct ModInfo {
     pub pinned: bool,
 }
 
+/// One dependency entry in a mod manifest.
+///
+/// The ecosystem ships two formats for the `dependencies` array:
+///   - Old / simple: `["DepName", "OtherDep"]`
+///   - New / structured (BAKAOLC, RitsuLib-based mods): `[{"id": "DepName",
+///     "min_version": "1.2.3"}]`
+///
+/// `#[serde(untagged)]` makes serde try each variant in order and pick the
+/// first that matches. Without this, mixing the two formats made
+/// serde_json fail the entire manifest parse, which dropped the mod into
+/// the dll-only-fallback path with name "<repo-slug>" and version
+/// "unknown" — which is exactly the broken state the user kept hitting
+/// for `STS2-ShowPlayerHandCards`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum RawDependency {
+    Name(String),
+    /// Structured form. We deserialize via the explicit `id` alias; any
+    /// other fields the upstream manifest carries (e.g. `min_version`)
+    /// are tolerated and ignored — serde drops unknown fields by default,
+    /// so this stays forward-compatible with manifest schema additions
+    /// without us tracking what we don't currently consume.
+    Structured {
+        #[serde(alias = "Id", alias = "ID", alias = "id")]
+        id: String,
+    },
+}
+
+impl RawDependency {
+    /// Reduce to just the dep's identifier — that's all the rest of our
+    /// dependency-resolution code currently consumes.
+    fn id(&self) -> &str {
+        match self {
+            RawDependency::Name(s) => s,
+            RawDependency::Structured { id } => id,
+        }
+    }
+}
+
 /// Raw manifest structure from STS2 mod JSON files.
 #[derive(Debug, Deserialize)]
 #[serde(default)]
@@ -53,7 +92,7 @@ struct RawManifest {
     #[serde(alias = "Description")]
     description: String,
     #[serde(alias = "Dependencies")]
-    dependencies: Vec<String>,
+    dependencies: Vec<RawDependency>,
     #[serde(alias = "Source")]
     source: Option<String>,
     /// Mod's unique ID (used by game for dependency resolution)
@@ -168,8 +207,34 @@ fn collect_mod_files(manifest_path: &Path, base_dir: &Path) -> Vec<String> {
 
 /// Parse a single manifest JSON into a ModInfo.
 fn parse_manifest(manifest_path: &Path, base_dir: &Path, enabled: bool) -> Option<ModInfo> {
-    let content = fs::read_to_string(manifest_path).ok()?;
-    let raw: RawManifest = serde_json::from_str(&content).ok()?;
+    let content = match fs::read_to_string(manifest_path) {
+        Ok(s) => s,
+        Err(e) => {
+            log::warn!(
+                "parse_manifest: could not read '{}': {}",
+                manifest_path.display(), e,
+            );
+            return None;
+        }
+    };
+    let raw: RawManifest = match serde_json::from_str(&content) {
+        Ok(r) => r,
+        Err(e) => {
+            // The mod's manifest exists on disk but doesn't match our struct.
+            // Loud-log the path + parse error so we can spot new manifest
+            // format drift instead of silently falling back to a broken
+            // dll-only stub.
+            log::warn!(
+                "parse_manifest: failed to deserialize '{}': {} — \
+                 the mod will fall through to the DLL-only path and show \
+                 with version 'unknown'. This is almost always a manifest \
+                 schema change upstream; please open an issue with the \
+                 manifest contents.",
+                manifest_path.display(), e,
+            );
+            return None;
+        }
+    };
 
     let name = if raw.name.is_empty() {
         manifest_path
@@ -253,6 +318,16 @@ fn parse_manifest(manifest_path: &Path, base_dir: &Path, enabled: bool) -> Optio
         }
     }
 
+    // Reduce the deserialized dependencies to plain ID strings — that's
+    // what the rest of the codebase consumes today (dependency-resolution
+    // command, profile manifests). We may want to surface min_version in
+    // the future, but plumbing it everywhere is a separate change.
+    let deps_as_ids: Vec<String> = raw
+        .dependencies
+        .iter()
+        .map(|d| d.id().to_string())
+        .collect();
+
     Some(ModInfo {
         name,
         version: raw.version,
@@ -261,7 +336,7 @@ fn parse_manifest(manifest_path: &Path, base_dir: &Path, enabled: bool) -> Optio
         files,
         source: raw.source,
         hash: file_hash,
-        dependencies: raw.dependencies,
+        dependencies: deps_as_ids,
         size_bytes,
         folder_name,
         mod_id,
@@ -1545,6 +1620,7 @@ pub fn check_dependencies(mod_name: &str, mods_path: &Path) -> Vec<String> {
 
     raw.dependencies
         .into_iter()
+        .map(|d| d.id().to_string())
         .filter(|dep| !installed.contains(dep))
         .collect()
 }

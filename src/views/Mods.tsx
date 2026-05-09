@@ -14,6 +14,7 @@ import {
   ExternalLink,
   Pin,
   PinOff,
+  Wrench,
 } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
@@ -41,6 +42,7 @@ import {
   findGithubFromNexus,
   pinMod,
   unpinMod,
+  repairMod,
 } from '../hooks/useTauri';
 
 // v5 — Advanced mode is per-screen, persisted in localStorage. Off by default.
@@ -97,6 +99,40 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
       await refreshMods();
     } catch (e) {
       toast.error(`Failed to ${pinned ? 'unpin' : 'pin'} ${name}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  // Force-reinstall a single mod from its linked GitHub source. Used to
+  // recover from broken installs (manifest fails to parse, version reads
+  // 'unknown', game won't load it). Confirms first because it nukes the
+  // current on-disk install before re-extracting.
+  const [repairingMod, setRepairingMod] = useState<string | null>(null);
+  async function handleRepair(name: string, hasGithub: boolean) {
+    if (!hasGithub) {
+      toast.error(
+        `'${name}' has no GitHub source linked — repair fetches from GitHub. ` +
+        `Add a source via Edit sources… first.`,
+      );
+      return;
+    }
+    const ok = await confirm({
+      title: `Repair '${name}'?`,
+      body:
+        `This will delete the current on-disk install and re-download the latest ` +
+        `release from the linked GitHub source. Use it when a mod is broken ` +
+        `(version reads "unknown", game won't load it, etc.). Make sure STS2 is closed.`,
+      confirmLabel: 'Repair now',
+    });
+    if (!ok) return;
+    setRepairingMod(name);
+    try {
+      const info = await repairMod(name);
+      toast.success(`Repaired '${info.name}' (v${info.version})`);
+      await refreshAll();
+    } catch (e) {
+      toast.error(`Repair failed for '${name}': ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setRepairingMod(null);
     }
   }
 
@@ -529,6 +565,31 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                                 Find GitHub from Nexus
                               </KebabItem>
                             )}
+                          </KebabSection>
+                          <KebabDivider />
+                          <KebabSection head="Recovery">
+                            <KebabItem
+                              icon={
+                                repairingMod === mod.name ? (
+                                  <RefreshCw size={12} className="animate-spin" />
+                                ) : (
+                                  <Wrench size={12} />
+                                )
+                              }
+                              onClick={() => handleRepair(mod.name, !!mod.github_url)}
+                              disabled={
+                                gameRunning ||
+                                repairingMod !== null ||
+                                !mod.github_url
+                              }
+                              description={
+                                mod.github_url
+                                  ? 'Force-reinstall from GitHub. Use when version reads "unknown", the game refuses to load this mod, or the install otherwise looks broken.'
+                                  : 'Link a GitHub source first via "Edit sources…" — repair fetches from GitHub.'
+                              }
+                            >
+                              {repairingMod === mod.name ? 'Repairing…' : 'Repair this mod'}
+                            </KebabItem>
                           </KebabSection>
                         </>
                       )}

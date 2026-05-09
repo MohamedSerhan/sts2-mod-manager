@@ -163,6 +163,16 @@ export async function updateMod(name: string): Promise<ModInfo> {
   return invoke('update_mod', { name });
 }
 
+/**
+ * Force-reinstall a mod from its linked GitHub source. Use when an
+ * install is in a broken state (manifest fails to parse, version reads
+ * 'unknown', game won't load it, etc.) — same backend pipeline as
+ * updateMod, just messaged differently in the UI.
+ */
+export async function repairMod(name: string): Promise<ModInfo> {
+  return invoke('repair_mod', { name });
+}
+
 export async function updateAllMods(): Promise<ModInfo[]> {
   return invoke('update_all_mods');
 }

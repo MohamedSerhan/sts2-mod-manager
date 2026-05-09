@@ -354,7 +354,17 @@ pub async fn update_mod(
     let tag = release.tag_name.clone();
 
     // Delete the old mod files before installing the update to prevent duplicates
-    // (e.g., old mod in "ModConfig-v0.2.1/" and new one in "ModConfig-v0.2.2/")
+    // (e.g., old mod in "ModConfig-v0.2.1/" and new one in "ModConfig-v0.2.2/").
+    //
+    // We do TWO passes:
+    //   1. Delete every file the manifest tracks. Empty parent dirs come down
+    //      with them.
+    //   2. If the mod has a folder_name, blow away that whole directory.
+    //      This catches orphan files we never tracked — historically root-
+    //      level installs only captured same-stem siblings, so things like
+    //      a mod's `Translations/` subfolder survived an update and merged
+    //      with the new install. RitsuLib hit this and broke every mod
+    //      that depended on it.
     {
         let all_mods: Vec<ModInfo> = scan_mods(&mods_path);
         if let Some(old_info) = all_mods.iter().find(|m| m.name == name) {
@@ -378,6 +388,15 @@ pub async fn update_mod(
                     if std::fs::read_dir(dir).map(|mut d| d.next().is_none()).unwrap_or(false) {
                         let _ = std::fs::remove_dir(dir);
                     }
+                }
+            }
+            // Defensive sweep: nuke the whole mod folder so orphan files from
+            // a previous broken install (pre-v1.0.4 mixed-root extraction)
+            // don't survive into the new install.
+            if let Some(folder) = old_info.folder_name.as_deref() {
+                let folder_path = mods_path.join(folder);
+                if folder_path.is_dir() {
+                    let _ = std::fs::remove_dir_all(&folder_path);
                 }
             }
             log::info!("Deleted old files for '{}' before updating", name);
@@ -636,7 +655,38 @@ pub async fn audit_mod_versions(
                 let client = crate::nexus::NexusClient::new(nkey);
                 match client.get_mod_info(domain, mod_id).await {
                     Ok(info) => {
-                        if let Some(ref nv) = info.version {
+                        // For mod pages that host multiple variants under one
+                        // mod_id (e.g. "BetterSpire2" + "BetterSpire2Lite"),
+                        // the page-level `version` field is one number for
+                        // the latest-uploaded file regardless of variant.
+                        // Look at the file list and pick the version that
+                        // matches the LOCAL mod's flavor — otherwise the
+                        // user's lite install gets compared against the
+                        // non-lite version and shows a bogus mismatch.
+                        let mut effective_version = info.version.clone();
+                        match client.get_mod_files(domain, mod_id).await {
+                            Ok(files) => {
+                                if let Some(picked) =
+                                    crate::nexus::pick_version_for_local_mod(&files, &m.name)
+                                {
+                                    if effective_version.as_deref() != Some(picked.as_str()) {
+                                        log::debug!(
+                                            "Nexus variant pick for '{}' (mod_id {}): page version {:?} → file version {:?}",
+                                            m.name, mod_id, info.version, picked
+                                        );
+                                    }
+                                    effective_version = Some(picked);
+                                }
+                            }
+                            Err(e) => {
+                                log::warn!(
+                                    "Nexus files lookup failed for '{}' (mod {}): {} — falling back to page version",
+                                    m.name, mod_id, e
+                                );
+                            }
+                        }
+
+                        if let Some(ref nv) = effective_version {
                             nexus_version = Some(nv.clone());
                             // Use the best known version: check mod_sources installed_version
                             // first (tracks what was actually downloaded), then fall back to

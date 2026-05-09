@@ -182,55 +182,6 @@ pub fn detect_game() -> Option<PathBuf> {
     }
 }
 
-/// Count .json files in a directory (rough mod count).
-fn count_mods_in_dir(dir: &Path) -> usize {
-    if !dir.exists() {
-        return 0;
-    }
-    let mut count = 0;
-    // Count top-level .json files
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("json") {
-                count += 1;
-            } else if path.is_dir() {
-                // Count subdirectory mods (one mod per subfolder)
-                let has_json = std::fs::read_dir(&path)
-                    .map(|entries| {
-                        entries.flatten().any(|e| {
-                            e.path().extension().and_then(|ext| ext.to_str()) == Some("json")
-                        })
-                    })
-                    .unwrap_or(false);
-                let has_dll = std::fs::read_dir(&path)
-                    .map(|entries| {
-                        entries.flatten().any(|e| {
-                            e.path().extension().and_then(|ext| ext.to_str()) == Some("dll")
-                        })
-                    })
-                    .unwrap_or(false);
-                if has_json || has_dll {
-                    count += 1;
-                }
-            }
-        }
-    }
-    // Also count DLL-only mods at top level (DLLs without matching .json)
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("dll") {
-                let json_path = path.with_extension("json");
-                if !json_path.exists() {
-                    count += 1;
-                }
-            }
-        }
-    }
-    count
-}
-
 // ── Tauri Commands ──────────────────────────────────────────────────────────
 
 /// Auto-detect the game path and store it in state. Returns GameInfo.
@@ -272,8 +223,20 @@ pub fn get_game_info(state: tauri::State<'_, AppState>) -> std::result::Result<G
         .map(|p| validate_game_path(p))
         .unwrap_or(false);
 
-    let mods_count = s.mods_path.as_ref().map(|p| count_mods_in_dir(p)).unwrap_or(0);
-    let disabled_count = s.disabled_mods_path.as_ref().map(|p| count_mods_in_dir(p)).unwrap_or(0);
+    // Use the same deduped scan logic the Mods view uses, so the count in
+    // Settings matches the Mods page exactly. count_mods_in_dir was a raw
+    // filesystem-entry count and would double-count duplicates that the
+    // Mods view's normalize-name dedup collapses.
+    let mods_count = s
+        .mods_path
+        .as_ref()
+        .map(|p| crate::mods::scan_mods(p).len())
+        .unwrap_or(0);
+    let disabled_count = s
+        .disabled_mods_path
+        .as_ref()
+        .map(|p| crate::mods::scan_disabled_mods(p).len())
+        .unwrap_or(0);
 
     Ok(GameInfo {
         game_path: s.game_path.as_ref().map(|p| p.to_string_lossy().to_string()),

@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { getVersion } from '@tauri-apps/api/app';
 import {
   FolderSearch,
   Key,
@@ -36,6 +35,7 @@ import {
   auditModVersions,
   pinMod,
   unpinMod,
+  updateMod,
   createBackup,
   listBackups,
   restoreBackup,
@@ -43,7 +43,7 @@ import {
 } from '../hooks/useTauri';
 import type { ModAuditEntry, BackupInfo } from '../types';
 
-type Tab = 'general' | 'accounts' | 'backups' | 'audit' | 'advanced' | 'about';
+type Tab = 'general' | 'accounts' | 'backups' | 'audit' | 'advanced';
 
 // v5 — tabbed Settings shell. Tabs are stateful; tab content is rendered
 // inline beneath the tab strip. All existing handlers preserved.
@@ -62,12 +62,10 @@ export function SettingsView() {
   const [nexusKeySaved, setNexusKeySaved] = useState(false);
   const [githubTokenSaved, setGithubTokenSaved] = useState(false);
 
-  // ── App version (About) ────────────────────────────
-  const [appVersion, setAppVersion] = useState('');
-
   // ── Audit ───────────────────────────────────────────
   const [auditing, setAuditing] = useState(false);
   const [auditResults, setAuditResults] = useState<ModAuditEntry[] | null>(null);
+  const [updatingMod, setUpdatingMod] = useState<string | null>(null);
 
   // ── Backups ─────────────────────────────────────────
   const [backups, setBackups] = useState<BackupInfo[]>([]);
@@ -89,7 +87,6 @@ export function SettingsView() {
   }
 
   useEffect(() => { refreshBackups(); }, []);
-  useEffect(() => { getVersion().then(setAppVersion).catch(() => {}); }, []);
   useEffect(() => {
     if (gameInfo?.game_path) {
       setGamePathValue(gameInfo.game_path);
@@ -272,6 +269,30 @@ export function SettingsView() {
     }
   }
 
+  // Update a single mod inline from the audit row. Only available for mods
+  // whose source is GitHub — Nexus mods still require the user to download
+  // through the browser via the existing "Download from Nexus" pill.
+  async function handleUpdateOne(modName: string) {
+    if (updatingMod) return;
+    setUpdatingMod(modName);
+    try {
+      const info = await updateMod(modName);
+      toast.success(`Updated '${modName}' to v${info.version}`);
+      await refreshAll();
+      // Keep the audit list fresh so the row flips from "X → Y" to "(latest)".
+      try {
+        const results = await auditModVersions();
+        setAuditResults(results);
+      } catch {
+        /* non-fatal */
+      }
+    } catch (e) {
+      toast.error(`Update failed for '${modName}': ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setUpdatingMod(null);
+    }
+  }
+
   async function handleCheckUpdateNow() {
     if (checkingUpdate) return;
     setCheckingUpdate(true);
@@ -297,7 +318,8 @@ export function SettingsView() {
     { id: 'backups',  label: 'Backups',  count: backups.length || undefined },
     { id: 'audit',    label: 'Audit',    count: auditResults?.filter(r => r.needs_update).length || undefined },
     { id: 'advanced', label: 'Advanced' },
-    { id: 'about',    label: 'About' },
+    // About moved to the Home screen footer (v1.0.4) — kept the section in
+    // history because the diag-bundle action and update-check now live there.
   ];
 
   return (
@@ -617,6 +639,23 @@ export function SettingsView() {
                             )}
                           </span>
                           <span className="flex items-center gap-2">
+                            {entry.needs_update && entry.github_repo && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleUpdateOne(entry.mod_name);
+                                }}
+                                disabled={updatingMod === entry.mod_name}
+                                className="gf-btn gf-btn-sm"
+                                title={`Download and install v${entry.latest_release_with_assets_tag ?? entry.nexus_version ?? 'latest'}`}
+                              >
+                                {updatingMod === entry.mod_name ? (
+                                  <><RefreshCw size={10} className="animate-spin" /> Updating…</>
+                                ) : (
+                                  <><Download size={10} /> Update</>
+                                )}
+                              </button>
+                            )}
                             <button
                               onClick={async (e) => {
                                 e.stopPropagation();
@@ -768,64 +807,6 @@ export function SettingsView() {
           </>
         )}
 
-        {tab === 'about' && (
-          <>
-            <div
-              style={{
-                background: 'var(--indigo-panel)',
-                border: '1px solid var(--indigo-line)',
-                borderRadius: 10,
-                padding: 24,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 18,
-              }}
-            >
-              <div
-                style={{
-                  width: 56,
-                  height: 56,
-                  borderRadius: 12,
-                  background: 'var(--gf)',
-                  color: 'var(--gf-ink)',
-                  display: 'grid',
-                  placeItems: 'center',
-                  fontSize: 28,
-                  fontWeight: 800,
-                }}
-              >
-                ✦
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 18, fontWeight: 600 }}>STS2 Mod Manager</div>
-                <div style={{ fontSize: 12.5, color: 'var(--ink-mute)', marginTop: 4 }}>
-                  v{appVersion} · built for Slay the Spire 2 · Tauri 2 + React + Rust
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--ink-dim)', marginTop: 10 }}>
-                  Made by{' '}
-                  <a
-                    href="https://github.com/MohamedSerhan"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ color: 'var(--gf)' }}
-                    className="hover:underline"
-                  >
-                    Mohamed Serhan
-                  </a>
-                  {' · '}open source · MIT license
-                </div>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <Button variant="secondary" size="sm" onClick={handleCheckUpdateNow} disabled={checkingUpdate}>
-                  {checkingUpdate ? 'Checking...' : 'Check for updates'}
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => setShowDiag(true)}>
-                  Generate support bundle
-                </Button>
-              </div>
-            </div>
-          </>
-        )}
       </div>
 
       <DiagnosticBundle open={showDiag} onClose={() => setShowDiag(false)} />

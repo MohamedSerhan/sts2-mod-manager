@@ -147,7 +147,47 @@ pub async fn fetch_release_by_tag(
     Ok(release)
 }
 
+/// Returns true iff the repo's metadata explicitly references STS2.
+///
+/// We require a strong signal — "sts2", "slay-the-spire-2", "slay the spire 2",
+/// or "slay the spire ii" — somewhere in name / full_name / description / topics.
+/// A repo that only says "slay the spire" (no 2) is for the first game and
+/// must be rejected. Without this filter the search picks up StS-1 mods that
+/// happen to match part of the user's query, which is the bug report.
+fn repo_mentions_sts2(repo: &GitHubRepo) -> bool {
+    let mut haystack = String::with_capacity(256);
+    haystack.push_str(&repo.full_name);
+    haystack.push(' ');
+    haystack.push_str(&repo.name);
+    haystack.push(' ');
+    if let Some(desc) = &repo.description {
+        haystack.push_str(desc);
+        haystack.push(' ');
+    }
+    for t in &repo.topics {
+        haystack.push_str(t);
+        haystack.push(' ');
+    }
+    haystack.make_ascii_lowercase();
+
+    // Normalize separators so "slay-the-spire-2" and "slay the spire 2" and
+    // "slaythespire2" all look the same to the matcher.
+    let collapsed: String = haystack
+        .chars()
+        .filter(|c| !matches!(c, ' ' | '-' | '_' | '.' | '/' | '\\'))
+        .collect();
+
+    const SIGNALS: [&str; 3] = ["sts2", "slaythespire2", "slaythespireii"];
+    SIGNALS.iter().any(|s| collapsed.contains(s))
+}
+
 /// Search GitHub for STS2 mod repositories.
+///
+/// Post-filters out anything that doesn't explicitly mention STS2 — GitHub's
+/// `OR` search will happily return StS-1 results that share a word with the
+/// user's query, and those leak into the Browse view as "this isn't even for
+/// my game" noise. We trust nothing the API returns until it has at least
+/// one of "sts2" / "slay the spire 2" / "slay the spire ii" in its metadata.
 pub async fn search_github_repos(
     query: &str,
     token: Option<&str>,
@@ -167,7 +207,19 @@ pub async fn search_github_repos(
         .error_for_status()?;
 
     let search: GitHubSearchResponse = resp.json().await?;
-    Ok(search.items)
+    let total = search.items.len();
+    let filtered: Vec<GitHubRepo> = search
+        .items
+        .into_iter()
+        .filter(repo_mentions_sts2)
+        .collect();
+    log::debug!(
+        "search_github_repos: kept {}/{} repos after STS2 relevance filter (query: {})",
+        filtered.len(),
+        total,
+        query
+    );
+    Ok(filtered)
 }
 
 /// Search GitHub repositories sorted by best-match relevance (no STS2 qualifier appended).

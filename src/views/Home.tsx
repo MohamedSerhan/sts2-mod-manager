@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Download,
   RefreshCw,
@@ -16,6 +16,7 @@ import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../components/ConfirmDialog';
 import { SubUpdateDetail } from '../components/SubUpdateDetail';
+import { AboutCard } from '../components/AboutCard';
 import {
   installSharedProfile,
   checkSubscriptionUpdates,
@@ -53,10 +54,17 @@ function packInitials(name: string): string {
 interface HomeProps {
   onGoToSettings: () => void;
   onGoToMods?: () => void;
+  onGoToProfiles?: () => void;
   onSwitchPack?: () => void;
   onLaunch?: () => void;
+  /**
+   * Bumped from App when the user clicks "Add pack" elsewhere (profile
+   * kebab today). Each change triggers focus + a one-shot pulse on the
+   * share-code input so the user sees where to type.
+   */
+  focusCodeBarSignal?: number;
 }
-export function HomeView({ onGoToSettings, onGoToMods, onSwitchPack, onLaunch }: HomeProps) {
+export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchPack, onLaunch, focusCodeBarSignal }: HomeProps) {
   const { gameInfo, mods, refreshAll, refreshMods, activeProfile } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
@@ -70,11 +78,31 @@ export function HomeView({ onGoToSettings, onGoToMods, onSwitchPack, onLaunch }:
   const [activatingProfile, setActivatingProfile] = useState<string | null>(null);
   const [updateDetail, setUpdateDetail] = useState<SubscriptionUpdate | null>(null);
   const [repairing, setRepairing] = useState(false);
+  const codeBarRef = useRef<HTMLDivElement | null>(null);
+  const codeInputRef = useRef<HTMLInputElement | null>(null);
+  const [codeBarPulse, setCodeBarPulse] = useState(false);
 
   useEffect(() => {
     loadSubscriptions();
     checkSubs();
   }, []);
+
+  // When a sibling view asks to focus the code bar (Add Pack from kebab),
+  // scroll it into view, focus the input, and pulse it briefly so the user
+  // sees where the share code goes. Skip the very first render (signal=0).
+  useEffect(() => {
+    if (!focusCodeBarSignal) return;
+    const el = codeBarRef.current;
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const input = codeInputRef.current;
+    if (input) {
+      // Wait one frame so the scroll starts before focus steals it back.
+      requestAnimationFrame(() => input.focus({ preventScroll: true }));
+    }
+    setCodeBarPulse(true);
+    const t = window.setTimeout(() => setCodeBarPulse(false), 1400);
+    return () => window.clearTimeout(t);
+  }, [focusCodeBarSignal]);
 
   async function loadSubscriptions() {
     try {
@@ -394,10 +422,14 @@ export function HomeView({ onGoToSettings, onGoToMods, onSwitchPack, onLaunch }:
       </div>
 
       {/* Quick Add — code only */}
-      <div className="gf-quickadd">
+      <div
+        ref={codeBarRef}
+        className={`gf-quickadd${codeBarPulse ? ' gf-quickadd-pulse' : ''}`}
+      >
         <div className="gf-quickadd-eyebrow">Drop a code, hit Add</div>
         <div style={{ display: 'flex', gap: 8, marginTop: 11 }}>
           <input
+            ref={codeInputRef}
             className="gf-input-hero"
             placeholder="username/AA5A-315D-61AE"
             value={profileCode}
@@ -422,9 +454,14 @@ export function HomeView({ onGoToSettings, onGoToMods, onSwitchPack, onLaunch }:
             <div className="gf-section-eyebrow">
               Your other packs · {otherSubs.length}
             </div>
-            <span style={{ fontSize: 12, color: 'var(--ink-mute)', cursor: 'pointer' }}>
+            <button
+              type="button"
+              onClick={() => onGoToProfiles?.()}
+              className="gf-link-button"
+              title="Open the Profiles page to manage every pack"
+            >
               View all in Profiles <ChevronRight size={12} style={{ display: 'inline', verticalAlign: 'middle' }} />
-            </span>
+            </button>
           </div>
 
           {otherSubs.map((sub) => {
@@ -553,6 +590,13 @@ export function HomeView({ onGoToSettings, onGoToMods, onSwitchPack, onLaunch }:
 
       {/* keep refreshMods reference live so unused-import lint doesn't complain */}
       <span style={{ display: 'none' }} aria-hidden onClick={() => refreshMods()} />
+
+      {/* About — moved out of Settings so version + support actions are
+          always visible. Lives at the bottom because it's reference info,
+          not something you act on every session. */}
+      <div style={{ marginTop: 36 }}>
+        <AboutCard />
+      </div>
 
       <SubUpdateDetail
         open={!!updateDetail}

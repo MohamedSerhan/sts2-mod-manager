@@ -267,10 +267,25 @@ body {
   align-items: center;
   gap: 8px;
   white-space: nowrap;
-  transition: background 0.15s;
+  transition: background 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease, filter 0.15s ease;
+  box-shadow: 0 1px 0 oklch(0.78 0.13 78 / 0.55) inset, 0 1px 2px oklch(0 0 0 / 0.25);
 }
-.gf-btn:hover:not(:disabled) { background: var(--gf-hov); }
-.gf-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.gf-btn:hover:not(:disabled) {
+  background: var(--gf-hov);
+  filter: brightness(1.06);
+  box-shadow: 0 1px 0 oklch(0.85 0.13 78 / 0.7) inset, 0 4px 12px oklch(0.78 0.16 78 / 0.35);
+  transform: translateY(-1px);
+}
+.gf-btn:active:not(:disabled) {
+  transform: translateY(0);
+  filter: brightness(0.97);
+  box-shadow: 0 1px 0 oklch(0.78 0.13 78 / 0.55) inset, 0 1px 2px oklch(0 0 0 / 0.25);
+}
+.gf-btn:focus-visible {
+  outline: 2px solid var(--gf);
+  outline-offset: 2px;
+}
+.gf-btn:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
 .gf-btn-sm { padding: 7px 13px; font-size: 12.5px; gap: 6px; border-radius: 5px; }
 .gf-btn-lg { padding: 12px 22px; font-size: 14px; }
 
@@ -708,6 +723,32 @@ body {
 .gf-hero-meta { font-size: 13px; color: var(--ink-mute); margin-top: 6px; }
 .gf-hero-actions { display: flex; gap: 8px; margin-top: 18px; flex-wrap: wrap; }
 
+/* ── About card on Home footer ───────────────────────────────────── */
+.gf-about-card {
+  background: var(--indigo-panel);
+  border: 1px solid var(--indigo-line);
+  border-radius: 10px;
+  padding: 18px 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.gf-about-glyph {
+  width: 48px; height: 48px; border-radius: 11px;
+  background: var(--gf); color: var(--gf-ink);
+  display: grid; place-items: center;
+  font-size: 24px; font-weight: 800;
+  flex-shrink: 0;
+}
+.gf-about-actions {
+  display: flex; flex-direction: column; gap: 6px;
+  flex-shrink: 0;
+}
+@media (max-width: 600px) {
+  .gf-about-actions { flex-direction: row; flex-wrap: wrap; }
+}
+
 /* ── Quick add ────────────────────────────────────────────────────── */
 .gf-quickadd {
   margin-top: 22px;
@@ -715,11 +756,47 @@ body {
   border: 1px solid var(--indigo-line);
   border-radius: 10px;
   padding: 18px 20px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
 }
 .gf-quickadd-eyebrow {
   font-size: 10.5px; font-weight: 700;
   text-transform: uppercase; letter-spacing: 0.12em;
   color: var(--ink-dim);
+}
+/* One-shot pulse to draw the eye when "Add pack" is triggered from
+   another part of the UI (profile kebab today). Three soft yellow
+   glows over ~1.4s, then back to normal. */
+.gf-quickadd-pulse {
+  animation: gf-quickadd-pulse 1.4s ease-in-out;
+  border-color: var(--gf);
+}
+@keyframes gf-quickadd-pulse {
+  0%   { box-shadow: 0 0 0 0 oklch(0.78 0.16 78 / 0); border-color: var(--indigo-line); }
+  20%  { box-shadow: 0 0 0 6px oklch(0.78 0.16 78 / 0.35); border-color: var(--gf); }
+  50%  { box-shadow: 0 0 0 2px oklch(0.78 0.16 78 / 0.15); border-color: var(--gf); }
+  80%  { box-shadow: 0 0 0 6px oklch(0.78 0.16 78 / 0.25); border-color: var(--gf); }
+  100% { box-shadow: 0 0 0 0 oklch(0.78 0.16 78 / 0); border-color: var(--indigo-line); }
+}
+
+/* Inline link styled as text. Used for "View all in Profiles" etc. */
+.gf-link-button {
+  background: none;
+  border: 0;
+  color: var(--ink-mute);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.gf-link-button:hover { color: var(--gf); background: oklch(0.22 0.04 280); }
+.gf-link-button:focus-visible {
+  outline: 2px solid var(--gf);
+  outline-offset: 2px;
 }
 
 /* ── Section heading ──────────────────────────────────────────────── */
@@ -873,6 +950,20 @@ body {
   width: 16px; text-align: center; font-size: 12px; opacity: 0.85;
   display: inline-flex; align-items: center; justify-content: center;
 }
+.gf-kebab-item-multiline { align-items: flex-start; padding-top: 8px; padding-bottom: 8px; }
+.gf-kebab-item-multiline .gf-kebab-ico { margin-top: 1px; }
+.gf-kebab-label { display: block; font-weight: 500; }
+.gf-kebab-desc {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--ink-dim);
+  line-height: 1.35;
+  white-space: normal;
+  max-width: 240px;
+}
+.gf-kebab-item:hover .gf-kebab-desc { color: var(--ink-mute); }
 .gf-kebab-divider { height: 1px; background: var(--indigo-line); margin: 4px 0; }
 .gf-kebab-danger { color: oklch(0.75 0.13 25); }
 .gf-kebab-danger:hover { background: oklch(0.55 0.16 25 / 0.18); color: oklch(0.85 0.13 25); }
@@ -1081,6 +1172,120 @@ body {
 }
 .gf-tut-t { font-size: 13px; font-weight: 600; color: var(--ink); }
 .gf-tut-b { font-size: 12px; color: var(--ink-mute); margin-top: 3px; }
+
+/* Tutorial hero — the friend-modpack quick start surfaced first. */
+.gf-tut-hero {
+  background: linear-gradient(135deg, oklch(0.22 0.04 280) 0%, oklch(0.20 0.025 270) 100%);
+  border: 1px solid var(--indigo-line);
+  border-radius: 14px;
+  padding: 22px 26px;
+  position: relative;
+  overflow: hidden;
+}
+.gf-tut-hero::before {
+  /* Subtle yellow accent ribbon along the top */
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--gf) 0%, oklch(0.78 0.16 78 / 0) 100%);
+}
+.gf-tut-hero-eyebrow {
+  font-size: 10.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.12em;
+  color: var(--gf);
+}
+.gf-tut-hero-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-top: 6px;
+  margin-bottom: 18px;
+}
+.gf-tut-hero-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+@media (max-width: 880px) {
+  .gf-tut-hero-grid { grid-template-columns: 1fr; }
+}
+.gf-tut-hero-card {
+  background: oklch(0.18 0.03 270 / 0.6);
+  border: 1px solid var(--indigo-line);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gf-tut-hero-card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 4px;
+}
+.gf-tut-hero-card-num {
+  width: 26px; height: 26px; border-radius: 7px;
+  background: var(--gf); color: var(--gf-ink);
+  display: grid; place-items: center;
+  font-weight: 700; font-size: 13px;
+}
+.gf-tut-hero-card-ico { color: var(--ink-mute); opacity: 0.85; }
+.gf-tut-hero-card-title {
+  font-size: 14.5px; font-weight: 600; color: var(--ink);
+  margin: 0;
+}
+.gf-tut-hero-card-body {
+  font-size: 12.5px; color: var(--ink-mute);
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* Cheat-sheet grid expands to use the available width on big screens. */
+.gf-tut-cheat-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (min-width: 1080px) {
+  .gf-tut-cheat-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (min-width: 800px) and (max-width: 1079px) {
+  .gf-tut-cheat-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+.gf-tut-kbd-row {
+  margin: 14px 0 18px;
+  padding: 12px;
+  border: 1px solid var(--indigo-line);
+  border-radius: 8px;
+  background: oklch(0.20 0.025 270 / 0.5);
+  font-size: 12px;
+  color: var(--ink-mute);
+}
+
+/* Collapsed full-reference toggle. */
+.gf-tut-reference-toggle {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: 1px dashed var(--indigo-line);
+  border-radius: 9px;
+  color: var(--ink-mute);
+  padding: 11px 14px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.gf-tut-reference-toggle:hover {
+  background: oklch(0.22 0.04 280 / 0.5);
+  color: var(--ink);
+  border-color: oklch(0.34 0.06 280);
+}
+.gf-tut-reference { margin-top: 14px; }
 .gf-kbd {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 11px; padding: 2px 6px;
@@ -1289,6 +1494,15 @@ body {
   display: flex; align-items: center; gap: 8px;
   padding: 8px 10px; border-bottom: 1px solid var(--indigo-line);
   background: var(--indigo-panel);
+  /* Wrap the toolbar onto a second row at narrow widths so the right-most
+     buttons (Send to support, Close) stay inside the viewport instead of
+     drifting offscreen. */
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+.gf-logs-bar input { min-width: 140px; }
+@media (max-width: 720px) {
+  .gf-logs-bar input { flex-basis: 100%; min-width: 0; order: 99; }
 }
 .gf-logs-body {
   font-family: ui-monospace, "JetBrains Mono", Menlo, monospace;

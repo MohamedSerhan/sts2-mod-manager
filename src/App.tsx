@@ -88,6 +88,11 @@ function AppInner() {
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showProfileSwitcher, setShowProfileSwitcher] = useState(false);
+  // Bumped whenever something elsewhere in the UI wants Home's share-code
+  // input to grab focus + pulse (e.g. clicking "Add pack" in the profile
+  // switcher). Each bump triggers a one-shot effect in Home; the value
+  // itself is meaningless, only the change matters.
+  const [focusCodeBarSignal, setFocusCodeBarSignal] = useState(0);
   const [launching, setLaunching] = useState<null | 'modded' | 'vanilla'>(null);
 
   useEffect(() => { getVersion().then(setAppVersion).catch(() => {}); }, []);
@@ -443,7 +448,10 @@ function AppInner() {
               {showProfileSwitcher && (
                 <ProfileSwitcher
                   onClose={() => setShowProfileSwitcher(false)}
-                  onAddPack={() => setActiveView('home')}
+                  onAddPack={() => {
+                    setActiveView('home');
+                    setFocusCodeBarSignal((n) => n + 1);
+                  }}
                   onManageAll={() => setActiveView('profiles')}
                 />
               )}
@@ -534,8 +542,10 @@ function AppInner() {
               <HomeView
                 onGoToSettings={() => setActiveView('settings')}
                 onGoToMods={() => setActiveView('mods')}
+                onGoToProfiles={() => setActiveView('profiles')}
                 onSwitchPack={() => setShowProfileSwitcher(true)}
                 onLaunch={handleLaunchGame}
+                focusCodeBarSignal={focusCodeBarSignal}
               />
             )}
             {activeView === 'profiles' && <ProfilesView />}

@@ -107,17 +107,23 @@ interface KebabItemProps {
   onClick?: () => void;
   danger?: boolean;
   disabled?: boolean;
+  /**
+   * Optional dim secondary line shown under the main label. Use for plain-
+   * language explanations of jargon-y actions ("Pin", "Repair", etc.) so a
+   * first-time user knows what they're about to do without hovering.
+   */
+  description?: ReactNode;
   children: ReactNode;
 }
 
-export function KebabItem({ icon, onClick, danger, disabled, children }: KebabItemProps) {
+export function KebabItem({ icon, onClick, danger, disabled, description, children }: KebabItemProps) {
   const { close } = useContext(KebabContext);
   return (
     <button
       role="menuitem"
       type="button"
       disabled={disabled}
-      className={`gf-kebab-item ${danger ? 'gf-kebab-danger' : ''}`}
+      className={`gf-kebab-item ${danger ? 'gf-kebab-danger' : ''} ${description ? 'gf-kebab-item-multiline' : ''}`}
       onClick={() => {
         if (disabled) return;
         close();
@@ -125,7 +131,10 @@ export function KebabItem({ icon, onClick, danger, disabled, children }: KebabIt
       }}
     >
       <span className="gf-kebab-ico">{icon}</span>
-      <span style={{ flex: 1, textAlign: 'left' }}>{children}</span>
+      <span style={{ flex: 1, textAlign: 'left', minWidth: 0 }}>
+        <span className="gf-kebab-label">{children}</span>
+        {description && <span className="gf-kebab-desc">{description}</span>}
+      </span>
     </button>
   );
 }

@@ -578,6 +578,11 @@ fn transfer_mod_sources(old_name: &str, new_name: &str, config_path: &Path) {
 
 /// Query the Nexus API (blocking) for the current version of a mod.
 /// Returns None if the mod has no Nexus source or if the API call fails.
+///
+/// Pages with multiple variants (e.g. BetterSpire2 + BetterSpire2Lite) report
+/// a single page-level `version` that's whichever file the author uploaded
+/// last. To stay accurate we also pull the files list and pick the one that
+/// matches the local mod's flavor (currently: "lite" detection).
 fn fetch_nexus_version_blocking(
     mod_name: &str,
     config_path: &Path,
@@ -593,31 +598,48 @@ fn fetch_nexus_version_blocking(
         s.nexus_api_key.clone()?
     };
 
-    // Build a simple blocking HTTP request to the Nexus API
-    let url = format!(
+    let client = reqwest::blocking::Client::new();
+    let mk_get = |url: &str| {
+        client
+            .get(url)
+            .header("apikey", &api_key)
+            .header("accept", "application/json")
+            .header("user-agent", "sts2-mod-manager/0.1")
+    };
+
+    // 1. Page-level version as the fallback.
+    let page_url = format!(
         "https://api.nexusmods.com/v1/games/{}/mods/{}.json",
         domain, mod_id
     );
-
-    let client = reqwest::blocking::Client::new();
-    let resp = client
-        .get(&url)
-        .header("apikey", &api_key)
-        .header("accept", "application/json")
-        .header("user-agent", "sts2-mod-manager/0.1")
+    let page_version = mk_get(&page_url)
         .send()
-        .ok()?
-        .error_for_status()
-        .ok()?;
+        .ok()
+        .and_then(|r| r.error_for_status().ok())
+        .and_then(|r| r.json::<serde_json::Value>().ok())
+        .and_then(|info| info.get("version")?.as_str().map(|s| s.to_string()))
+        .filter(|v| !v.is_empty());
 
-    let info: serde_json::Value = resp.json().ok()?;
-    let version = info.get("version")?.as_str()?.to_string();
+    // 2. Files list — pick the variant matching the local mod's flavor.
+    let files_url = format!(
+        "https://api.nexusmods.com/v1/games/{}/mods/{}/files.json",
+        domain, mod_id
+    );
+    let picked = mk_get(&files_url)
+        .send()
+        .ok()
+        .and_then(|r| r.error_for_status().ok())
+        .and_then(|r| r.json::<serde_json::Value>().ok())
+        .and_then(|v| {
+            let arr = v.get("files")?.as_array()?.clone();
+            let files: Vec<crate::nexus::NexusFile> = arr
+                .into_iter()
+                .filter_map(|item| serde_json::from_value(item).ok())
+                .collect();
+            crate::nexus::pick_version_for_local_mod(&files, mod_name)
+        });
 
-    if version.is_empty() {
-        None
-    } else {
-        Some(version)
-    }
+    picked.or(page_version)
 }
 
 /// If the user recently queued a Nexus mod via Quick Add and this download

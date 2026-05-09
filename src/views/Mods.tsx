@@ -455,10 +455,13 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                         <KebabItem
                           icon={mod.pinned ? <PinOff size={12} /> : <Pin size={12} />}
                           onClick={() => handleTogglePin(mod.name, mod.pinned)}
+                          description={
+                            mod.pinned
+                              ? "Modpacks can update or replace this mod again."
+                              : "Lock this mod's version and enabled/disabled state. Switching profiles or applying a modpack won't touch it."
+                          }
                         >
-                          {mod.pinned
-                            ? 'Unpin (allow updates & profile changes)'
-                            : 'Pin (lock version & on/off state)'}
+                          {mod.pinned ? 'Unpin this mod' : 'Pin this mod'}
                         </KebabItem>
                         <KebabItem
                           icon={<Copy size={12} />}

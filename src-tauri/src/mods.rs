@@ -968,13 +968,6 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
         }
     }
 
-    // Determine extraction strategy based on mod-relevant files:
-    // - If mod files share exactly one top-level directory, preserve that subdirectory
-    // - If mod files are at root (no subdirectory), put them in a subdir
-    // - If there are multiple top-level dirs, extract as-is
-    let has_single_subdir = top_dirs.len() == 1 || (top_dirs.is_empty() && all_top_dirs.len() == 1);
-    let all_at_root = relevant_entries.iter().all(|n| !n.contains('/'));
-
     // Detect a packaging quirk where the zip wraps everything in a redundant
     // outer folder of the same name (e.g. "Foo/Foo/Foo.dll"). Strip the outer
     // level so the mod ends up at "Foo/Foo.dll" rather than nested two deep,
@@ -997,31 +990,37 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
         .to_string_lossy()
         .to_string();
 
-    // When files are at root and we need to wrap them in a subdirectory,
-    // try to determine the correct folder name from the mod manifest or
-    // DLL/PCK filenames rather than using the zip filename (which may
-    // include Nexus suffixes like "STS2-Ritsu-281-0-0-46-1775500710").
-    let wrap_folder_name = if all_at_root && all_entries.len() > 1 {
-        // Strategy 1: Peek at manifest JSON inside the zip for mod name/id
+    // Compute a stable wrap folder name regardless of the zip's internal
+    // layout. We may not end up using it (clean single-subdir zips are
+    // preserved as-is below), but for everything else — root-only AND
+    // mixed-root-plus-subfolder layouts — we MUST wrap so a future update
+    // can delete a single self-contained folder and avoid the leftovers
+    // bug RitsuLib hit (zip had RitsuLib.dll + manifest.json at root and
+    // a separate `Translations/` subfolder; old code extracted everything
+    // to the mods root, then update's same-stem deletion couldn't reach
+    // the surviving Translations files, and dependents loaded against a
+    // half-old / half-new RitsuLib).
+    //
+    // Strategy: prefer manifest Id (game uses this for dependency resolution),
+    // then DLL/PCK stem, then a Nexus-suffix-stripped zip stem.
+    let wrap_folder_name = {
         let manifest_name = peek_manifest_name(&mut archive);
-
-        // Strategy 2: Use the DLL/PCK filename stem (most reliable for game dependency resolution)
         let dll_stem = relevant_entries.iter()
             .find(|n| {
                 let ext = Path::new(n).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
                 ext == "dll" || ext == "pck"
             })
+            .and_then(|n| Path::new(n).file_name())
             .and_then(|n| Path::new(n).file_stem())
             .map(|s| s.to_string_lossy().to_string());
-
-        // Strategy 3: Strip Nexus suffixes from the zip stem
         let clean_stem = strip_nexus_suffix(&zip_stem);
-
-        // Prefer DLL stem (what the game actually loads), then manifest name, then cleaned zip stem
-        dll_stem.or(manifest_name).unwrap_or(clean_stem)
-    } else {
-        zip_stem.clone()
+        manifest_name.or(dll_stem).unwrap_or(clean_stem)
     };
+
+    // True when the zip already has every file under a single top-level
+    // directory. Those zips are well-behaved — preserve their structure.
+    let has_clean_single_top_dir = all_top_dirs.len() == 1
+        && all_entries.iter().all(|n| n.contains('/'));
 
     let mut extracted_files = Vec::new();
     let mut manifest: Option<ModInfo> = None;
@@ -1045,25 +1044,31 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
         // The ReflectionTypeLoadException in .NET mods is often caused by
         // missing dependency files that were filtered out.
 
-        // Determine the relative path to extract to
+        // Determine the relative path to extract to.
+        //
+        // Priority order:
+        //   1. If the zip is doubly-wrapped in a same-name folder, peel the
+        //      outer layer so we don't end up at mods/Foo/Foo/...
+        //   2. If the zip already wraps everything in a single clean
+        //      top-level dir (`has_clean_single_top_dir`) — keep that
+        //      structure verbatim. This handles the well-behaved release
+        //      format (`ModName/ModName.dll, ModName/manifest.json`).
+        //   3. Single-file zip — drop in at the root with no wrapping.
+        //   4. Otherwise (root-only OR mixed-root-plus-subfolder) — wrap
+        //      EVERYTHING into `wrap_folder_name` so the install is one
+        //      self-contained directory we can fully delete on update.
+        //
+        // The previous "preserve as-is" fallback for mixed layouts was the
+        // RitsuLib bug: it spilled root files alongside subfolders, and
+        // updates couldn't clean leftovers because tracking was stem-based.
         let rel_path = if let Some(ref outer) = strip_redundant_outer {
-            // Doubly-nested same-name folder in the zip — drop the outer
-            // "Foo/" prefix so we install at "Foo/<files>" not "Foo/Foo/<files>".
             name.strip_prefix(&format!("{}/", outer)).unwrap_or(&name).to_string()
-        } else if has_single_subdir {
-            // Keep the subdirectory structure as-is (e.g., ModName/ModName.dll)
+        } else if has_clean_single_top_dir {
             name.clone()
-        } else if all_at_root {
-            // Mod files are at root: wrap in a subdirectory named after the mod
-            // Only if there are multiple files; single file stays flat
-            if all_entries.len() == 1 {
-                name.clone()
-            } else {
-                format!("{}/{}", wrap_folder_name, name)
-            }
+        } else if all_entries.len() == 1 {
+            name.clone()
         } else {
-            // Multiple top-level dirs or mixed: preserve as-is
-            name.clone()
+            format!("{}/{}", wrap_folder_name, name)
         };
 
         let dest_path = mods_path.join(&rel_path);

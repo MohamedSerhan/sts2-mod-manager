@@ -92,6 +92,32 @@ pub struct NexusModInfo {
     pub picture_url: Option<String>,
 }
 
+/// One file entry from Nexus's `/files.json` endpoint.
+///
+/// Nexus mod pages can host multiple variants of the same mod (e.g.
+/// `BetterSpire2` ships both a full and a "Lite" zip). The page-level
+/// `version` field only reflects whichever the author bumped most recently,
+/// so audits comparing "what's on disk" against "page version" misclassify
+/// the inactive variant. The fix is to look at this list and pick the file
+/// that matches the local mod's flavor.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NexusFile {
+    pub file_id: u64,
+    pub name: Option<String>,
+    pub file_name: Option<String>,
+    pub version: Option<String>,
+    /// Nexus category id: 1 = MAIN, 2 = UPDATE/PATCH, 3 = OPTIONAL, 4 = OLD,
+    /// 6 = MISCELLANEOUS, 7 = ARCHIVED. We only ever care about MAIN/OPTIONAL
+    /// for "what's the latest" — anything ARCHIVED is gone and shouldn't win.
+    pub category_id: Option<u64>,
+    pub uploaded_timestamp: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct NexusFilesResponse {
+    files: Vec<NexusFile>,
+}
+
 pub struct NexusClient {
     client: reqwest::Client,
 }
@@ -173,6 +199,83 @@ impl NexusClient {
     pub async fn get_latest_added(&self, game: &str) -> Result<Vec<NexusModInfo>> {
         self.get_mod_list(game, "latest_added").await
     }
+
+    /// List every file uploaded to a mod page. Used to disambiguate variants
+    /// (Lite/Full/etc.) that share a single Nexus mod_id.
+    pub async fn get_mod_files(&self, game: &str, mod_id: u64) -> Result<Vec<NexusFile>> {
+        let url = format!(
+            "https://api.nexusmods.com/v1/games/{}/mods/{}/files.json",
+            game, mod_id
+        );
+        log::debug!("Nexus API: get_mod_files {}/{}", game, mod_id);
+        let resp = self.client.get(&url).send().await?;
+        let resp = resp.error_for_status()?;
+        let body: NexusFilesResponse = resp.json().await?;
+        Ok(body.files)
+    }
+}
+
+/// Score a Nexus file for "is this the latest version of THIS variant?"
+///
+/// Variant detection is keyword-based: if the local mod name contains "lite"
+/// (case-insensitive), prefer files whose name also contains "lite". Same for
+/// any other tag we add later. Files with no matching tag are still candidates
+/// — we just pick the highest-scoring one.
+///
+/// Tier-1 boosts: matching variant tag, MAIN category, recent upload.
+fn nexus_file_relevance(file: &NexusFile, want_lite: bool) -> i64 {
+    let mut score: i64 = 0;
+    let blob = format!(
+        "{} {}",
+        file.name.as_deref().unwrap_or(""),
+        file.file_name.as_deref().unwrap_or(""),
+    )
+    .to_lowercase();
+
+    let has_lite = blob.contains("lite");
+    if want_lite {
+        if has_lite {
+            score += 1000;
+        } else {
+            score -= 1000;
+        }
+    } else if has_lite {
+        // Looking for the non-lite variant — penalize lite files.
+        score -= 1000;
+    }
+
+    match file.category_id {
+        Some(1) => score += 200,           // MAIN
+        Some(3) => score += 80,            // OPTIONAL
+        Some(4) | Some(7) => score -= 500, // OLD / ARCHIVED
+        Some(6) => score -= 50,            // MISC (readmes etc.)
+        _ => {}
+    }
+
+    if let Some(ts) = file.uploaded_timestamp {
+        // Spread the timestamp into the score so newer wins among equal-tier files.
+        score += ts / 1000;
+    }
+    score
+}
+
+/// Pick the version string Nexus should report for a mod, given the local
+/// mod's display name (used as a flavor hint).
+///
+/// Returns None if no file looks like a sensible match — caller then falls
+/// back to the page-level `version` field.
+pub fn pick_version_for_local_mod(files: &[NexusFile], local_mod_name: &str) -> Option<String> {
+    if files.is_empty() {
+        return None;
+    }
+    let want_lite = local_mod_name.to_lowercase().contains("lite");
+    let mut ranked: Vec<(&NexusFile, i64)> = files
+        .iter()
+        .map(|f| (f, nexus_file_relevance(f, want_lite)))
+        .collect();
+    ranked.sort_by(|a, b| b.1.cmp(&a.1));
+    let winner = ranked.first()?.0;
+    winner.version.clone().filter(|v| !v.trim().is_empty())
 }
 
 // ── Tauri Commands ──────────────────────────────────────────────────────────

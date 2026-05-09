@@ -376,7 +376,7 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
             disabled={!onLaunch}
             title={onLaunch ? 'Launch STS2 with this pack' : 'Use the Launch button in the top bar'}
           >
-            <Play size={11} /> Launch with this pack
+            <Play size={11} fill="currentColor" /> Launch with this pack
           </button>
           <button
             className="gf-btn-2"
@@ -419,6 +419,11 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
             </button>
           )}
         </div>
+        {activeProfile && (
+          <div className="gf-hero-shortcut-tip">
+            Tip: press <kbd className="gf-kbd">Ctrl</kbd>+<kbd className="gf-kbd">L</kbd> from anywhere to launch this pack.
+          </div>
+        )}
       </div>
 
       {/* Quick Add — code only */}
@@ -591,12 +596,9 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
       {/* keep refreshMods reference live so unused-import lint doesn't complain */}
       <span style={{ display: 'none' }} aria-hidden onClick={() => refreshMods()} />
 
-      {/* About — moved out of Settings so version + support actions are
-          always visible. Lives at the bottom because it's reference info,
-          not something you act on every session. */}
-      <div style={{ marginTop: 36 }}>
-        <AboutCard />
-      </div>
+      {/* About — Home footer. Reference info + support actions, low
+          visual weight, separator rule on top. */}
+      <AboutCard />
 
       <SubUpdateDetail
         open={!!updateDetail}

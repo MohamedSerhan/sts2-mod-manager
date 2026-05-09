@@ -200,13 +200,9 @@ function UserGuide({ onGoToSettings }: { onGoToSettings?: () => void }) {
       </div>
 
       <div className="gf-tut-kbd-row">
-        <strong style={{ color: 'var(--ink)' }}>Keyboard:</strong>
+        <strong style={{ color: 'var(--ink)' }}>Tip:</strong>
         <span style={{ marginLeft: 8 }}>
-          <kbd className="gf-kbd">Ctrl+L</kbd> Launch{' '}
-          <kbd className="gf-kbd">Ctrl+,</kbd> Settings{' '}
-          <kbd className="gf-kbd">/</kbd> Search{' '}
-          <kbd className="gf-kbd">Ctrl+B</kbd> Browse{' '}
-          <kbd className="gf-kbd">Esc</kbd> Close dialog
+          <kbd className="gf-kbd">Ctrl+L</kbd> launches the active modpack from anywhere in the app.
         </span>
       </div>
 

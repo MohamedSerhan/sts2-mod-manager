@@ -719,7 +719,7 @@ export function ProfilesView() {
                     {switchingProfile === profile.name ? (
                       <RefreshCw size={14} className="animate-spin" />
                     ) : (
-                      <><Play size={14} /> Switch to</>
+                      <><Play size={14} fill="currentColor" /> Switch to</>
                     )}
                   </Button>
                 )}

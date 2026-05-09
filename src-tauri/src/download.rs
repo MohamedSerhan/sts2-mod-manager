@@ -183,11 +183,19 @@ fn repo_mentions_sts2(repo: &GitHubRepo) -> bool {
 
 /// Search GitHub for STS2 mod repositories.
 ///
-/// Post-filters out anything that doesn't explicitly mention STS2 — GitHub's
-/// `OR` search will happily return StS-1 results that share a word with the
-/// user's query, and those leak into the Browse view as "this isn't even for
-/// my game" noise. We trust nothing the API returns until it has at least
-/// one of "sts2" / "slay the spire 2" / "slay the spire ii" in its metadata.
+/// Strategy:
+///   - Use GitHub's default best-match sort (don't pass `sort`) so the
+///     user's query terms drive ranking. The previous `sort=updated`
+///     buried name-matches behind whatever happened to be pushed most
+///     recently — searching "auto" never surfaced "autopath-sts2".
+///   - Bump per_page to 100 so the post-filter has enough candidates
+///     to keep STS2-relevant results around.
+///   - Post-filter rejects anything that doesn't explicitly mention STS2
+///     ("sts2" / "slay the spire 2" / "slay the spire ii") — keeps StS-1
+///     noise out.
+///
+/// Frontend does a separate client-side rerank for typo tolerance; we keep
+/// the server side simple and delegate fuzzy matching to JS.
 pub async fn search_github_repos(
     query: &str,
     token: Option<&str>,
@@ -199,8 +207,7 @@ pub async fn search_github_repos(
         .get("https://api.github.com/search/repositories")
         .query(&[
             ("q", search_query.as_str()),
-            ("sort", "updated"),
-            ("per_page", "30"),
+            ("per_page", "100"),
         ])
         .send()
         .await?

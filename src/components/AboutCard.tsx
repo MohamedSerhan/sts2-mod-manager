@@ -7,10 +7,10 @@ import { useToast } from '../contexts/ToastContext';
 import { DiagnosticBundle } from './DiagnosticBundle';
 
 /**
- * Compact "About" card — shown at the bottom of Home so the version, author,
- * and the two power-user actions (Check for updates, Generate support
- * bundle) are always one click away. Previously this only existed buried
- * under Settings → About, which the user couldn't find.
+ * "About" footer for the Home screen. Lives below all primary content as a
+ * low-weight footer (rule line, dim text, two utility actions) — not a
+ * card. The user explicitly asked for footer treatment so the visual
+ * weight stops fighting the actual home content above it.
  */
 export function AboutCard() {
   const toast = useToast();
@@ -43,36 +43,36 @@ export function AboutCard() {
 
   return (
     <>
-      <div className="gf-about-card">
-        <div className="gf-about-glyph">✦</div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 16, fontWeight: 600 }}>STS2 Mod Manager</div>
-          <div style={{ fontSize: 12.5, color: 'var(--ink-mute)', marginTop: 4 }}>
-            v{appVersion || '—'} · built for Slay the Spire 2 · Tauri 2 + React + Rust
-          </div>
-          <div style={{ fontSize: 12, color: 'var(--ink-dim)', marginTop: 8 }}>
+      <footer className="gf-about-footer">
+        <div className="gf-about-footer-line">
+          <span className="gf-about-footer-glyph" aria-hidden>✦</span>
+          <span className="gf-about-footer-text">
+            <strong>Slay the Spire 2 Mod Manager</strong>
+            <span className="gf-about-footer-sep">·</span>
+            v{appVersion || '—'}
+            <span className="gf-about-footer-sep">·</span>
             Made by{' '}
             <a
               href="https://github.com/MohamedSerhan"
               target="_blank"
               rel="noopener noreferrer"
-              style={{ color: 'var(--gf)' }}
-              className="hover:underline"
+              className="gf-about-footer-link"
             >
               Mohamed Serhan
             </a>
-            {' · '}open source · MIT license
-          </div>
+            <span className="gf-about-footer-sep">·</span>
+            open source · MIT
+          </span>
+          <span className="gf-about-footer-actions">
+            <Button variant="ghost" size="sm" onClick={handleCheckUpdateNow} disabled={checkingUpdate}>
+              {checkingUpdate ? 'Checking…' : 'Check for updates'}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setShowDiag(true)}>
+              Generate support bundle
+            </Button>
+          </span>
         </div>
-        <div className="gf-about-actions">
-          <Button variant="secondary" size="sm" onClick={handleCheckUpdateNow} disabled={checkingUpdate}>
-            {checkingUpdate ? 'Checking...' : 'Check for updates'}
-          </Button>
-          <Button variant="ghost" size="sm" onClick={() => setShowDiag(true)}>
-            Generate support bundle
-          </Button>
-        </div>
-      </div>
+      </footer>
       <DiagnosticBundle open={showDiag} onClose={() => setShowDiag(false)} />
     </>
   );

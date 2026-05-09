@@ -14,6 +14,7 @@ import {
   nexusGetTrending,
   nexusGetLatestAdded,
 } from '../hooks/useTauri';
+import { fuzzyRerank } from '../lib/fuzzy';
 import type { GitHubRepo, NexusModInfo } from '../types';
 
 type BrowseTab = 'github' | 'nexus_trending' | 'nexus_latest';
@@ -45,12 +46,27 @@ export function BrowseView({ onGoToSettings }: BrowseViewProps = {}) {
   const [nexusKeyMissing, setNexusKeyMissing] = useState(false);
 
   async function handleSearch() {
-    if (!query.trim()) return;
+    const q = query.trim();
+    if (!q) return;
     try {
       setLoading(true);
-      const repos = await searchGithubMods(query.trim());
-      setResults(repos);
-      if (repos.length === 0) {
+      const repos = await searchGithubMods(q);
+      // Client-side rerank for typo tolerance + better short-query
+      // matching. The backend already trimmed to STS2-relevant repos;
+      // this just surfaces the row that best matches what the user typed.
+      // Repo name carries more weight than description.
+      const ranked = fuzzyRerank(repos, q, (r) => [
+        r.name,
+        r.full_name,
+        r.description ?? '',
+      ]);
+      // If the fuzzy filter dropped everything (all candidates had zero
+      // tolerable match against the query), fall back to whatever the
+      // backend gave us — better to show "maybe relevant" rows than an
+      // empty page.
+      const finalList = ranked.length > 0 ? ranked : repos;
+      setResults(finalList);
+      if (finalList.length === 0) {
         toast.info('No mods found. Try different keywords.');
       }
     } catch (e) {

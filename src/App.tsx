@@ -26,7 +26,6 @@ import { ToastProvider, useToast } from './contexts/ToastContext';
 import { AppProvider, useApp } from './contexts/AppContext';
 import { ConfirmProvider } from './components/ConfirmDialog';
 import { OnboardingOverlay } from './components/OnboardingOverlay';
-import { ShortcutsOverlay } from './components/ShortcutsOverlay';
 import { LaunchSpinner } from './components/LaunchSpinner';
 import { ProfileSwitcher } from './components/ProfileSwitcher';
 import { HomeView } from './views/Home';
@@ -86,7 +85,6 @@ function AppInner() {
   const [updateInstalling, setUpdateInstalling] = useState(false);
   const [appVersion, setAppVersion] = useState('');
   const [showOnboarding, setShowOnboarding] = useState(false);
-  const [showShortcuts, setShowShortcuts] = useState(false);
   const [showProfileSwitcher, setShowProfileSwitcher] = useState(false);
   // Bumped whenever something elsewhere in the UI wants Home's share-code
   // input to grab focus + pulse (e.g. clicking "Add pack" in the profile
@@ -224,8 +222,10 @@ function AppInner() {
     catch (err) { console.warn(`resize ${direction} failed:`, err); }
   }
 
-  // Global keyboard shortcuts (v5 batch 4 — see ShortcutsOverlay for the
-  // canonical map). Only fires when no input/textarea is focused.
+  // Global keyboard shortcut: Ctrl/Cmd + L launches the active profile.
+  // The other shortcuts (nav 1-4, focus search, settings, ?-overlay) were
+  // pruned in v1.0.5 — they were inconsistent and underused; a single
+  // discoverable launch chord is more valuable than a sprawling map.
   useEffect(() => {
     function isTypingTarget(t: EventTarget | null): boolean {
       if (!(t instanceof HTMLElement)) return false;
@@ -236,39 +236,14 @@ function AppInner() {
       if (isTypingTarget(e.target)) return;
       if (showOnboarding) return;
       const mod = e.metaKey || e.ctrlKey;
-      // Help / shortcuts
-      if (e.key === '?' || (e.shiftKey && e.key === '/')) {
-        e.preventDefault(); setShowShortcuts((v) => !v); return;
-      }
-      if (e.key === 'Escape' && showShortcuts) {
-        e.preventDefault(); setShowShortcuts(false); return;
-      }
-      // Navigation 1-4
-      if (!mod && !e.shiftKey && !e.altKey) {
-        if (e.key === '1') { e.preventDefault(); setActiveView('home'); return; }
-        if (e.key === '2') { e.preventDefault(); setActiveView('profiles'); return; }
-        if (e.key === '3') { e.preventDefault(); setActiveView('mods'); return; }
-        if (e.key === '4') { e.preventDefault(); setActiveView('browse'); return; }
-        if (e.key === '/') {
-          // Focus the first search input on the active view.
-          const search = document.querySelector<HTMLInputElement>('.gf-search input');
-          if (search) { e.preventDefault(); search.focus(); }
-          return;
-        }
-      }
-      // Mod-key shortcuts
-      if (mod && (e.key === ',' || e.key === ',')) {
-        e.preventDefault(); setActiveView('settings'); return;
-      }
       if (mod && (e.key === 'l' || e.key === 'L')) {
         e.preventDefault();
         if (!gameRunning && !launching) handleLaunchGame();
-        return;
       }
     }
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [showOnboarding, showShortcuts, gameRunning, launching]);
+  }, [showOnboarding, gameRunning, launching]);
 
   // Drag-and-drop zip import
   useEffect(() => {
@@ -373,7 +348,10 @@ function AppInner() {
         <nav className="gf-sidebar">
           <div className="gf-brand">
             <div className="gf-brand-mark">✦</div>
-            <span>STS2 Mods</span>
+            <span className="gf-brand-title">
+              <span className="gf-brand-game">Slay the Spire 2</span>
+              <span className="gf-brand-tag">Mod Manager</span>
+            </span>
           </div>
 
           {NAV.map(({ id, label, icon: Icon }) => (
@@ -461,19 +439,29 @@ function AppInner() {
               <button
                 onClick={handleLaunchVanilla}
                 disabled={gameRunning}
-                title={gameRunning ? 'Close STS2 first' : 'Launch the game without any mods (vanilla)'}
+                title={
+                  gameRunning
+                    ? 'Close STS2 first'
+                    : 'Launches Slay the Spire 2 with all mods temporarily disabled (auto-backup first).'
+                }
                 className="gf-btn-2 gf-btn-2-sm"
               >
-                <Play size={11} /> Vanilla
+                <Play size={11} /> Vanilla — no mods
               </button>
               <button
                 onClick={handleLaunchGame}
                 disabled={gameRunning}
-                title={gameRunning ? 'Close STS2 first' : 'Launch STS2 with the active profile'}
+                title={
+                  gameRunning
+                    ? 'Close STS2 first'
+                    : `Launch Slay the Spire 2 with ${activeProfile || 'no active profile'}`
+                }
                 className="gf-btn"
               >
-                <Play size={12} />
-                Launch STS2
+                <Play size={12} fill="currentColor" />
+                <span className="gf-launch-label">
+                  Launch{activeProfile ? <> · <span className="gf-launch-prof">{activeProfile}</span></> : ''}
+                </span>
               </button>
             </div>
           </div>
@@ -563,11 +551,6 @@ function AppInner() {
                 onAddCode={() => setActiveView('home')}
                 refreshGame={refreshAll}
               />
-            )}
-
-            {/* Keyboard shortcuts overlay (? to open) */}
-            {showShortcuts && (
-              <ShortcutsOverlay onClose={() => setShowShortcuts(false)} />
             )}
 
             {/* Launching-game spinner */}

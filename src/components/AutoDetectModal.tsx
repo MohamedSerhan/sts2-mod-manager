@@ -98,6 +98,36 @@ export function AutoDetectModal({ open, onClose, onApplied }: Props) {
             </div>
           ) : !result ? (
             <div style={{ padding: 18, color: 'var(--ink-mute)' }}>No result.</div>
+          ) : matched.length === 0 && unmatched.length === 0 ? (
+            // Nothing scanned. Either there are no mods installed, or every
+            // installed mod already has a GitHub or Nexus source attached
+            // (auto-detect skips those by design — we don't overwrite a
+            // deliberate user choice). Spell that out so the user doesn't
+            // see three confusing zero badges with no context.
+            <div style={{ padding: 22 }}>
+              {result.skipped_already_linked && result.skipped_already_linked > 0 ? (
+                <>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', marginBottom: 6 }}>
+                    Nothing to detect — every mod already has a source.
+                  </div>
+                  <div style={{ fontSize: 12.5, color: 'var(--ink-mute)', lineHeight: 1.55 }}>
+                    All {result.skipped_already_linked} installed mod
+                    {result.skipped_already_linked === 1 ? ' has' : 's have'} a GitHub or Nexus link
+                    attached, so auto-detect left them alone. To re-link a specific mod manually,
+                    open the Mods view, expand the row, and edit its source.
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', marginBottom: 6 }}>
+                    No mods to scan.
+                  </div>
+                  <div style={{ fontSize: 12.5, color: 'var(--ink-mute)' }}>
+                    Install some mods first.
+                  </div>
+                </>
+              )}
+            </div>
           ) : (
             <>
               <div className="gf-detect-stats">
@@ -114,6 +144,12 @@ export function AutoDetectModal({ open, onClose, onApplied }: Props) {
                   <span>no match</span>
                 </div>
               </div>
+              {result.skipped_already_linked && result.skipped_already_linked > 0 && (
+                <div style={{ marginTop: 10, fontSize: 12, color: 'var(--ink-dim)' }}>
+                  {result.skipped_already_linked} mod{result.skipped_already_linked === 1 ? '' : 's'}{' '}
+                  skipped — already linked.
+                </div>
+              )}
 
               <div className="gf-detect-list" style={{ maxHeight: 320, overflowY: 'auto' }}>
                 {high.map((m: AutoDetectMatch) => {

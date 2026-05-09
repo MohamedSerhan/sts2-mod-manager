@@ -52,6 +52,12 @@ pub struct ModSourcesDb {
 pub struct AutoDetectResult {
     pub matched: Vec<AutoDetectMatch>,
     pub unmatched: Vec<String>,
+    /// How many installed mods we skipped because they already had a
+    /// source linked (GitHub or Nexus). Surfaced so the UI can
+    /// distinguish "auto-detect found nothing" from "auto-detect had
+    /// nothing to do because every mod already has a source".
+    #[serde(default)]
+    pub skipped_already_linked: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -865,6 +871,7 @@ pub async fn auto_detect_sources(
     // per-row source editor, which lets the user add a GitHub link if
     // they actually want one for this mod.
 
+    let mut skipped_already_linked: u32 = 0;
     for m in &installed {
         // Skip mods that ALREADY have any linked source — GitHub OR Nexus.
         //
@@ -883,6 +890,7 @@ pub async fn auto_detect_sources(
             let has_github = entry.github_repo.is_some();
             let has_nexus = entry.nexus_mod_id.is_some() || entry.nexus_url.is_some();
             if has_github || has_nexus {
+                skipped_already_linked += 1;
                 continue;
             }
         }
@@ -1053,5 +1061,9 @@ pub async fn auto_detect_sources(
         }
     }
 
-    Ok(AutoDetectResult { matched, unmatched })
+    Ok(AutoDetectResult {
+        matched,
+        unmatched,
+        skipped_already_linked,
+    })
 }

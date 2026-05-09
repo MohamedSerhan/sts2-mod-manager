@@ -659,9 +659,15 @@ export function SettingsView() {
             {(() => {
               // Only the audit toolbar needs this — derive the GitHub-update
               // list once per render and reuse it for the "Update all"
-              // gating below.
+              // gating below. We require latest_release_with_assets_tag too
+              // — same reason the per-row Update button does: rows where
+              // GitHub's latest release has no installable asset can't be
+              // updated via update_mod and would just produce errors during
+              // a bulk Update all.
               const ghUpdates = auditResults
-                ? auditResults.filter((r) => r.needs_update && r.github_repo).map((r) => r.mod_name)
+                ? auditResults
+                    .filter((r) => r.needs_update && r.github_repo && r.latest_release_with_assets_tag)
+                    .map((r) => r.mod_name)
                 : [];
               return (
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
@@ -762,7 +768,19 @@ export function SettingsView() {
                             )}
                           </span>
                           <span className="flex items-center gap-2">
-                            {entry.needs_update && entry.github_repo && (
+                            {entry.needs_update &&
+                              entry.github_repo &&
+                              entry.latest_release_with_assets_tag && (
+                              // Only show the Update button when there's an
+                              // ACTUAL installable asset on GitHub. The audit
+                              // can flag "needs_update" because Nexus has a
+                              // newer version even when GitHub's latest
+                              // release ships no .zip/.dll — clicking
+                              // Update in that case fails inside
+                              // download_and_install_github_mod with a
+                              // confusing "no asset" error. Nexus updates
+                              // still flow through the existing "Download
+                              // from Nexus" pill below.
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -770,7 +788,7 @@ export function SettingsView() {
                                 }}
                                 disabled={updatingMod === entry.mod_name || updatingAll}
                                 className="gf-btn gf-btn-sm"
-                                title={`Download and install v${entry.latest_release_with_assets_tag ?? entry.nexus_version ?? 'latest'}`}
+                                title={`Download and install v${entry.latest_release_with_assets_tag}`}
                               >
                                 {updatingMod === entry.mod_name || updatingAll ? (
                                   <><RefreshCw size={10} className="animate-spin" /> Updating…</>

@@ -122,6 +122,10 @@ export interface ModSourceEntry {
 export interface AutoDetectResult {
   matched: AutoDetectMatch[];
   unmatched: string[];
+  /** Mods skipped because they already had a GitHub or Nexus link.
+   *  Surfaced so the modal can show "X already linked — nothing to detect"
+   *  instead of three confusing zero badges. */
+  skipped_already_linked?: number;
 }
 
 export interface AutoDetectMatch {

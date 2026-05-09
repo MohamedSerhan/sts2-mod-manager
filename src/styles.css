@@ -106,6 +106,39 @@ body {
 .gf-titlebar-btn:hover { background: oklch(0.30 0.04 270); color: var(--ink); }
 .gf-titlebar-close:hover { background: var(--danger); color: white; }
 
+.gf-resize-handle {
+  position: absolute;
+  z-index: 80;
+  pointer-events: auto;
+}
+.gf-resize-n,
+.gf-resize-s {
+  left: 12px;
+  right: 12px;
+  height: 7px;
+}
+.gf-resize-e,
+.gf-resize-w {
+  top: 12px;
+  bottom: 12px;
+  width: 7px;
+}
+.gf-resize-n { top: 0; cursor: n-resize; }
+.gf-resize-s { bottom: 0; cursor: s-resize; }
+.gf-resize-e { right: 0; cursor: e-resize; }
+.gf-resize-w { left: 0; cursor: w-resize; }
+.gf-resize-ne,
+.gf-resize-nw,
+.gf-resize-se,
+.gf-resize-sw {
+  width: 14px;
+  height: 14px;
+}
+.gf-resize-ne { top: 0; right: 0; cursor: ne-resize; }
+.gf-resize-nw { top: 0; left: 0; cursor: nw-resize; }
+.gf-resize-se { right: 0; bottom: 0; cursor: se-resize; }
+.gf-resize-sw { left: 0; bottom: 0; cursor: sw-resize; }
+
 /* ── Sidebar ─────────────────────────────────────────────────────── */
 .gf-sidebar {
   width: 200px;

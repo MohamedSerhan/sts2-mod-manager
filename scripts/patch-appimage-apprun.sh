@@ -39,6 +39,10 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/updater-signature.sh
+source "$SCRIPT_DIR/lib/updater-signature.sh"
+
 APPIMAGE="${1:?Usage: $0 <path/to/App.AppImage> [tag]}"
 TAG="${2:-}"
 
@@ -160,9 +164,15 @@ if [ -n "$TAG" ]; then
 
   KEY_FILE="$(mktemp)"
   printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" | base64 --decode > "$KEY_FILE"
+  RAW_SIG="${SIG}.raw"
   printf '%s\n' "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" | \
-    "$MINISIGN" -Sm "$APPIMAGE_NAME" -s "$KEY_FILE" -x "$SIG"
+    "$MINISIGN" -Sm "$APPIMAGE_NAME" -s "$KEY_FILE" -x "$RAW_SIG"
   rm -f "$KEY_FILE"
+
+  # Tauri's updater manifest expects the signature field to contain the
+  # base64-encoded contents of the minisign signature box.
+  tauri_signature_field "$RAW_SIG" > "$SIG"
+  rm -f "$RAW_SIG"
 
   # Replace the two assets in the GitHub release (--clobber overwrites if already present)
   gh release upload "$TAG" "$APPIMAGE_NAME" "$SIG" --clobber

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type MouseEvent } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -38,6 +38,7 @@ import { TutorialView } from './views/Tutorial';
 import { launchGame, launchVanilla, installModFromFile } from './hooks/useTauri';
 
 type View = 'home' | 'profiles' | 'mods' | 'browse' | 'tutorial' | 'settings';
+type ResizeDirection = 'East' | 'North' | 'NorthEast' | 'NorthWest' | 'South' | 'SouthEast' | 'SouthWest' | 'West';
 
 // v5 IA — 4 main nav items, Tutorial+Settings in the foot. Backups absorbed
 // into Settings as a tab. Dashboard cut (was redundant with Home).
@@ -50,6 +51,17 @@ const NAV: { id: View; label: string; icon: typeof Home }[] = [
 const FOOT_NAV: { id: View; label: string; icon: typeof Home }[] = [
   { id: 'tutorial', label: 'Tutorial', icon: GraduationCap },
   { id: 'settings', label: 'Settings', icon: Settings },
+];
+
+const RESIZE_HANDLES: { direction: ResizeDirection; className: string }[] = [
+  { direction: 'North', className: 'gf-resize-n' },
+  { direction: 'NorthEast', className: 'gf-resize-ne' },
+  { direction: 'East', className: 'gf-resize-e' },
+  { direction: 'SouthEast', className: 'gf-resize-se' },
+  { direction: 'South', className: 'gf-resize-s' },
+  { direction: 'SouthWest', className: 'gf-resize-sw' },
+  { direction: 'West', className: 'gf-resize-w' },
+  { direction: 'NorthWest', className: 'gf-resize-nw' },
 ];
 
 export default function App() {
@@ -200,6 +212,12 @@ function AppInner() {
     try { await getCurrentWindow().close(); }
     catch (e) { console.warn('close failed:', e); }
   }
+  async function handleResizeStart(direction: ResizeDirection, e: MouseEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    try { await getCurrentWindow().startResizeDragging(direction); }
+    catch (err) { console.warn(`resize ${direction} failed:`, err); }
+  }
 
   // Global keyboard shortcuts (v5 batch 4 — see ShortcutsOverlay for the
   // canonical map). Only fires when no input/textarea is focused.
@@ -305,10 +323,10 @@ function AppInner() {
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden relative">
       {/* Custom titlebar (Tauri drag region + window controls) */}
-      <div className="gf-titlebar">
-        <div className="gf-titlebar-app">
-          <div className="gf-titlebar-mark">✦</div>
-          <span className="gf-titlebar-title">STS2 Mod Manager</span>
+      <div className="gf-titlebar" data-tauri-drag-region>
+        <div className="gf-titlebar-app" data-tauri-drag-region>
+          <div className="gf-titlebar-mark" data-tauri-drag-region>✦</div>
+          <span className="gf-titlebar-title" data-tauri-drag-region>STS2 Mod Manager</span>
         </div>
         <div className="gf-titlebar-controls">
           <button className="gf-titlebar-btn" title="Minimize" onClick={handleTitlebarMin}>
@@ -322,6 +340,15 @@ function AppInner() {
           </button>
         </div>
       </div>
+
+      {RESIZE_HANDLES.map(({ direction, className }) => (
+        <div
+          key={direction}
+          className={cn('gf-resize-handle', className)}
+          onMouseDown={(e) => handleResizeStart(direction, e)}
+          aria-hidden="true"
+        />
+      ))}
 
       <div className="flex flex-1 min-h-0 relative">
         {/* Drag-and-drop overlay (v5 dropzone) */}

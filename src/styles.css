@@ -774,8 +774,13 @@ body {
 
 /* ── About footer on Home ────────────────────────────────────────── */
 .gf-about-footer {
-  margin-top: 40px;
-  padding-top: 16px;
+  /* Stick to the bottom of the scroll area when Home content is shorter
+     than the viewport. The parent .gf-body is already a flex column with
+     flex:1, so margin-top:auto pushes us all the way down. On tall pages
+     the auto-margin collapses to 0 and a regular padding-top keeps the
+     divider from crashing into the last content row. */
+  margin-top: auto;
+  padding-top: 24px;
   border-top: 1px solid var(--indigo-line);
 }
 .gf-about-footer-line {

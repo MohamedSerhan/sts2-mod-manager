@@ -271,6 +271,24 @@ export function SettingsView() {
     }
   }
 
+  // Re-audit just the named mods and splice their fresh entries back into
+  // the existing audit list, leaving every other row untouched. Used after
+  // single-mod / bulk updates so the user doesn't have to wait for a full
+  // audit (every mod fetches its source) just to see the row flip from
+  // "X → Y" to "(latest)".
+  async function refreshAuditEntries(names: string[]) {
+    if (names.length === 0) return;
+    try {
+      const fresh = await auditModVersions(names);
+      const byName = new Map(fresh.map((e) => [e.mod_name, e]));
+      setAuditResults((prev) =>
+        prev ? prev.map((e) => byName.get(e.mod_name) ?? e) : prev,
+      );
+    } catch {
+      /* non-fatal — leaves existing rows in place */
+    }
+  }
+
   // Update every GitHub-sourced mod with a pending update in one shot.
   // Pinned mods are skipped on the backend, so this only touches things
   // the audit was already flagging. We confirm first because it kicks off
@@ -294,12 +312,13 @@ export function SettingsView() {
           : `Updated ${updated.length} mod${updated.length === 1 ? '' : 's'}.`,
       );
       await refreshAll();
-      try {
-        const results = await auditModVersions();
-        setAuditResults(results);
-      } catch {
-        /* non-fatal — the user can re-audit manually */
-      }
+      // Targeted re-audit of just the rows we touched. Mod names can shift
+      // after install (manifest renames), so audit by both the requested
+      // set and what came back — the union covers both pre- and post-rename.
+      const names = Array.from(
+        new Set([...githubUpdateNames, ...updated.map((m) => m.name)]),
+      );
+      await refreshAuditEntries(names);
     } catch (e) {
       toast.error(`Update all failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -317,13 +336,10 @@ export function SettingsView() {
       const info = await updateMod(modName);
       toast.success(`Updated '${modName}' to v${info.version}`);
       await refreshAll();
-      // Keep the audit list fresh so the row flips from "X → Y" to "(latest)".
-      try {
-        const results = await auditModVersions();
-        setAuditResults(results);
-      } catch {
-        /* non-fatal */
-      }
+      // Re-audit only this mod (and the manifest name if install_mod_from_zip
+      // ended up rewriting it) so the row flips fast — no full audit needed.
+      const names = info.name !== modName ? [modName, info.name] : [modName];
+      await refreshAuditEntries(names);
     } catch (e) {
       toast.error(`Update failed for '${modName}': ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -739,8 +755,11 @@ export function SettingsView() {
                                     await pinMod(entry.mod_name);
                                     toast.success(`Pinned '${entry.mod_name}' — version and on/off state locked.`);
                                   }
-                                  const results = await auditModVersions();
-                                  setAuditResults(results);
+                                  // Pin/unpin only flips the `pinned` flag
+                                  // and recomputes needs_update for THIS
+                                  // row. No need to re-fetch every other
+                                  // mod's source.
+                                  await refreshAuditEntries([entry.mod_name]);
                                 } catch (err) {
                                   toast.error(err instanceof Error ? err.message : String(err));
                                 }

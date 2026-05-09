@@ -167,8 +167,16 @@ export async function updateAllMods(): Promise<ModInfo[]> {
   return invoke('update_all_mods');
 }
 
-export async function auditModVersions(): Promise<ModAuditEntry[]> {
-  return invoke('audit_mod_versions');
+/**
+ * Audit installed mods.
+ *
+ * @param only Optional whitelist of mod names. Pass a list to re-audit just
+ *   those rows after an update — much faster than a full audit because it
+ *   skips per-mod GitHub/Nexus calls for everything else. Pass undefined
+ *   (or omit) for a full audit.
+ */
+export async function auditModVersions(only?: string[]): Promise<ModAuditEntry[]> {
+  return invoke('audit_mod_versions', only ? { only } : {});
 }
 
 export async function quickAddMod(url: string): Promise<QuickAddResult> {

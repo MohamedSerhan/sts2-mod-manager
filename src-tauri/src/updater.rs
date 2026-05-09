@@ -515,12 +515,20 @@ fn is_mod_asset(name: &str) -> bool {
     name.ends_with(".zip") || name.ends_with(".dll") || name.ends_with(".pck")
 }
 
-/// Audit all installed mods against their latest GitHub releases.
+/// Audit installed mods against their latest GitHub releases.
+///
 /// For each mod with a GitHub source, fetches releases (paginated) to find
-/// the most recent release that actually has downloadable mod files (.zip, .dll, .pck).
-/// This validates that the update-checking logic correctly skips empty releases.
+/// the most recent release that actually has downloadable mod files
+/// (.zip, .dll, .pck). This validates that the update-checking logic
+/// correctly skips empty releases.
+///
+/// `only` — optional whitelist of mod names. When `Some(names)` we audit
+/// only those mods (used by the UI to refresh just the rows that changed
+/// after a single-mod or bulk update, instead of forcing a full audit
+/// every time). When `None` we audit every installed mod.
 #[tauri::command]
 pub async fn audit_mod_versions(
+    only: Option<Vec<String>>,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Vec<ModAuditEntry>, String> {
     let (mods_path, disabled_path, config_path, token) = {
@@ -537,6 +545,15 @@ pub async fn audit_mod_versions(
     if let Some(ref dp) = disabled_path {
         let disabled = scan_mods(dp);
         all_mods.extend(disabled);
+    }
+
+    // If the caller asked for a subset, prune everything else up front so
+    // we skip the (slow) per-mod GitHub/Nexus calls for mods we don't care
+    // about right now.
+    if let Some(filter) = only.as_ref() {
+        let want: std::collections::HashSet<&str> =
+            filter.iter().map(|s| s.as_str()).collect();
+        all_mods.retain(|m| want.contains(m.name.as_str()));
     }
 
     let sources_db = load_sources(&config_path);

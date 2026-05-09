@@ -212,15 +212,15 @@ pub fn run() {
             subscriptions::repair_modpack_subscription,
         ])
         .setup(|app| {
-            // Register deep link handler for nxm:// and sts2mm:// protocols
+            // Register deep link handler for nxm:// and sts2mm:// protocols.
+            // We only log on the Rust side here — the actual NXM handling lives
+            // on the frontend via the handle_nxm_link command, which Tauri
+            // forwards the deep-link payload to automatically.
             #[cfg(desktop)]
             {
                 use tauri::Listener;
-                let handle = app.handle().clone();
                 app.listen("deep-link://new-url", move |event| {
                     log::info!("Deep link received: {:?}", event.payload());
-                    // Deep link events will be forwarded to the frontend
-                    // The frontend handles NXM links via the handle_nxm_link command
                 });
             }
 

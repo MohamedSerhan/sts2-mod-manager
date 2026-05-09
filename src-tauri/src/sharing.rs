@@ -66,18 +66,12 @@ struct ShareInfo {
     file_sha: Option<String>,
 }
 
-/// GitHub Contents API response
+/// GitHub Contents API response — we only need the SHA for upsert ops.
+/// serde drops unknown fields by default, so the rest of the payload
+/// (content, html_url, etc.) is ignored without us having to declare them.
 #[derive(Debug, Deserialize)]
 struct ContentsResponse {
     sha: Option<String>,
-    content: Option<String>,
-    html_url: Option<String>,
-}
-
-/// GitHub repo check response
-#[derive(Debug, Deserialize)]
-struct RepoResponse {
-    full_name: Option<String>,
 }
 
 /// GitHub user response
@@ -250,11 +244,7 @@ async fn upsert_file(
         let resp = client.get(&url).send().await;
         if let Ok(resp) = resp {
             if resp.status().is_success() {
-                let info: ContentsResponse = resp.json().await.unwrap_or(ContentsResponse {
-                    sha: None,
-                    content: None,
-                    html_url: None,
-                });
+                let info: ContentsResponse = resp.json().await.unwrap_or(ContentsResponse { sha: None });
                 info.sha
             } else {
                 None
@@ -420,9 +410,7 @@ async fn fetch_existing_sha(client: &reqwest::Client, url: &str) -> Option<Strin
     if !resp.status().is_success() {
         return None;
     }
-    let info: ContentsResponse = resp.json().await.unwrap_or(ContentsResponse {
-        sha: None, content: None, html_url: None,
-    });
+    let info: ContentsResponse = resp.json().await.unwrap_or(ContentsResponse { sha: None });
     info.sha
 }
 /// Download a bundled mod zip from a URL and extract into mods_path.
@@ -597,14 +585,16 @@ pub async fn share_profile(
     name: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ShareResult, String> {
-    let (profiles_path, mods_path, disabled_path, config_path, token) = {
+    let (profiles_path, mods_path, token) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let token = s.github_token.clone().ok_or(
             "GitHub token required to share profiles. Set it in Settings."
         )?;
         let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
-        let disabled_path = s.disabled_mods_path.clone().ok_or("Game path not set")?;
-        (s.profiles_path.clone(), mods_path, disabled_path, s.config_path.clone(), token)
+        // disabled_path and config_path validation kept here so we fail fast
+        // before doing any GitHub work, even though we don't need the values.
+        let _ = s.disabled_mods_path.clone().ok_or("Game path not set")?;
+        (s.profiles_path.clone(), mods_path, token)
     };
 
     // If already shared, reuse the existing code (same as reshare). Drop our

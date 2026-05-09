@@ -92,33 +92,7 @@ pub struct NexusModInfo {
     pub picture_url: Option<String>,
 }
 
-/// Nexus Mods API response for a file entry.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NexusFile {
-    pub file_id: u64,
-    pub name: String,
-    pub version: Option<String>,
-    pub size_in_bytes: Option<u64>,
-    pub file_name: String,
-    pub category_name: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct NexusFilesResponse {
-    files: Vec<NexusFile>,
-}
-
-/// Nexus download URL response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NexusDownloadUrl {
-    #[serde(alias = "URI")]
-    pub uri: String,
-    pub name: Option<String>,
-    pub short_name: Option<String>,
-}
-
 pub struct NexusClient {
-    api_key: String,
     client: reqwest::Client,
 }
 
@@ -145,10 +119,7 @@ impl NexusClient {
             .build()
             .unwrap_or_default();
 
-        Self {
-            api_key: api_key.to_string(),
-            client,
-        }
+        Self { client }
     }
 
     /// Get information about a mod.
@@ -201,53 +172,6 @@ impl NexusClient {
     /// Get the latest added mods for a game.
     pub async fn get_latest_added(&self, game: &str) -> Result<Vec<NexusModInfo>> {
         self.get_mod_list(game, "latest_added").await
-    }
-
-    /// Get file listing for a mod.
-    pub async fn get_mod_files(&self, game: &str, mod_id: u64) -> Result<Vec<NexusFile>> {
-        let url = format!(
-            "https://api.nexusmods.com/v1/games/{}/mods/{}/files.json",
-            game, mod_id
-        );
-        log::debug!("Nexus API: get_mod_files {}/{}", game, mod_id);
-        let resp = self.client.get(&url).send().await.map_err(|e| {
-            log::warn!("Nexus get_mod_files request failed for {}/{}: {}", game, mod_id, e);
-            e
-        })?;
-        let resp = resp.error_for_status().map_err(|e| {
-            log::warn!("Nexus get_mod_files HTTP error for {}/{}: {}", game, mod_id, e);
-            e
-        })?;
-        let files_resp: NexusFilesResponse = resp.json().await?;
-        log::debug!("Nexus API: {}/{} returned {} files", game, mod_id, files_resp.files.len());
-        Ok(files_resp.files)
-    }
-
-    /// Get download URLs for a file.
-    pub async fn get_download_urls(
-        &self,
-        game: &str,
-        mod_id: u64,
-        file_id: u64,
-        key: &str,
-        expires: u64,
-    ) -> Result<Vec<NexusDownloadUrl>> {
-        let url = format!(
-            "https://api.nexusmods.com/v1/games/{}/mods/{}/files/{}/download_link.json?key={}&expires={}",
-            game, mod_id, file_id, key, expires
-        );
-        log::debug!("Nexus API: get_download_urls {}/{}/files/{}", game, mod_id, file_id);
-        let resp = self.client.get(&url).send().await.map_err(|e| {
-            log::warn!("Nexus get_download_urls request failed for {}/{}/files/{}: {}", game, mod_id, file_id, e);
-            e
-        })?;
-        let resp = resp.error_for_status().map_err(|e| {
-            log::warn!("Nexus get_download_urls HTTP error for {}/{}/files/{}: {} (key may have expired)", game, mod_id, file_id, e);
-            e
-        })?;
-        let urls: Vec<NexusDownloadUrl> = resp.json().await?;
-        log::debug!("Nexus API: {} download URL(s) returned", urls.len());
-        Ok(urls)
     }
 }
 

@@ -848,42 +848,6 @@ pub fn restore_mod_from_cache(
     Ok(())
 }
 
-/// Permanently remove a mod and all its files.
-pub fn delete_mod_files(mod_name: &str, mods_path: &Path) -> Result<()> {
-    let mut found = false;
-
-    if let Ok(entries) = fs::read_dir(mods_path) {
-        for entry in entries.flatten() {
-            let fname = entry.file_name().to_string_lossy().to_string();
-            let fstem = Path::new(&fname)
-                .file_stem()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
-            if fstem == mod_name {
-                fs::remove_file(entry.path())?;
-                found = true;
-            }
-        }
-    }
-
-    let sub_dir = mods_path.join(mod_name);
-    if sub_dir.is_dir() {
-        fs::remove_dir_all(&sub_dir)?;
-        found = true;
-    }
-
-    if !found {
-        return Err(AppError::ModNotFound(format!(
-            "Mod '{}' not found in {}",
-            mod_name,
-            mods_path.display()
-        )));
-    }
-
-    Ok(())
-}
-
 /// Strip Nexus Mods filename suffixes.
 /// E.g. "STS2-Ritsu-281-0-0-46-1775500710" -> "STS2-Ritsu"
 /// "RelicsReminder-284-1-1-0-1775500710" -> "RelicsReminder"
@@ -1023,15 +987,6 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
         } else {
             None
         }
-    } else {
-        None
-    };
-    
-    // Use the all_top_dirs single dir if mod files are at root but other files aren't
-    let effective_single_subdir = if top_dirs.len() == 1 {
-        top_dirs.iter().next().cloned()
-    } else if all_top_dirs.len() == 1 {
-        all_top_dirs.iter().next().cloned()
     } else {
         None
     };

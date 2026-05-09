@@ -159,16 +159,6 @@ pub fn delete_profile(name: &str, profiles_path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Create a snapshot of currently installed (enabled) mods as a profile.
-/// Enriches source links with mod_sources DB so shared profiles include download info.
-pub fn snapshot_current(
-    name: &str,
-    mods_path: &Path,
-    profiles_path: &Path,
-) -> Result<Profile> {
-    snapshot_current_with_sources(name, mods_path, profiles_path, None)
-}
-
 /// Create a snapshot with optional source enrichment from config_path.
 /// Captures BOTH enabled and disabled mods with their current state.
 pub fn snapshot_current_with_sources(

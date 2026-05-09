@@ -385,9 +385,14 @@ body {
 
 /* ── Body & main ──────────────────────────────────────────────────── */
 .gf-body {
-  flex: 1;
+  /* min-height: 100% so the body always fills the visible area of <main>
+     even when its content is short. Without this, gf-body sizes to its
+     content (block default) and margin-top:auto on a child has no room
+     to push down — so the Home footer appeared mid-screen instead of
+     pinned to the bottom. With this, the flex column actually spans
+     the full viewport and the footer's auto-margin works. */
+  min-height: 100%;
   padding: 24px 32px 28px;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
 }

@@ -532,13 +532,17 @@ fn is_sts2_related(repo: &GitHubRepo) -> bool {
     if name_lower.contains("sts2")
         || name_lower.contains("slay-the-spire-2")
         || name_lower.contains("spire-2")
+        || name_lower.contains("slaythespire2")
     {
         return true;
     }
 
     for topic in &repo.topics {
         let t = topic.to_lowercase();
-        if t == "sts2" || t == "slay-the-spire-2" || t == "slay-the-spire" {
+        // ⚠️ Don't accept "slay-the-spire" alone — that's the StS-1 topic.
+        // Auto-detect was matching against StS-1 mods that happened to share
+        // a name fragment with the user's STS2 mod (e.g. "ModConfig").
+        if t == "sts2" || t == "slay-the-spire-2" || t == "slay-the-spire-ii" {
             return true;
         }
     }
@@ -547,6 +551,7 @@ fn is_sts2_related(repo: &GitHubRepo) -> bool {
         let d = desc.to_lowercase();
         if d.contains("sts2")
             || d.contains("slay the spire 2")
+            || d.contains("slay the spire ii")
             || d.contains("slaythespire2")
             || d.contains("slay-the-spire-2")
         {
@@ -884,7 +889,12 @@ pub async fn auto_detect_sources(
         let mut candidates: Vec<Candidate> = Vec::new();
         let mut seen_repos = std::collections::HashSet::new();
 
-        const MIN_SCORE: u32 = 70;
+        // Bumped from 70 → 80 to cut false-positive auto-attaches. Score 70
+        // was just "one normalized name contains the other" which is too
+        // loose for short / generic mod names like "ModConfig" or "ModSync"
+        // — a StS-1 mod with the same fragment scored 70 and got attached
+        // even though it had nothing to do with STS2.
+        const MIN_SCORE: u32 = 80;
 
         for query in &queries {
             // Rate-limit: 100ms delay between API calls

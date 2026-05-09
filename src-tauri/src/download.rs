@@ -181,42 +181,79 @@ fn repo_mentions_sts2(repo: &GitHubRepo) -> bool {
     SIGNALS.iter().any(|s| collapsed.contains(s))
 }
 
+async fn fetch_one_search(
+    client: &reqwest::Client,
+    q: &str,
+) -> Result<Vec<GitHubRepo>> {
+    let resp = client
+        .get("https://api.github.com/search/repositories")
+        .query(&[("q", q), ("per_page", "100")])
+        .send()
+        .await?
+        .error_for_status()?;
+    let search: GitHubSearchResponse = resp.json().await?;
+    Ok(search.items)
+}
+
 /// Search GitHub for STS2 mod repositories.
 ///
-/// Strategy:
-///   - Use GitHub's default best-match sort (don't pass `sort`) so the
-///     user's query terms drive ranking. The previous `sort=updated`
-///     buried name-matches behind whatever happened to be pushed most
-///     recently — searching "auto" never surfaced "autopath-sts2".
-///   - Bump per_page to 100 so the post-filter has enough candidates
-///     to keep STS2-relevant results around.
-///   - Post-filter rejects anything that doesn't explicitly mention STS2
-///     ("sts2" / "slay the spire 2" / "slay the spire ii") — keeps StS-1
-///     noise out.
+/// Strategy: do TWO API calls in parallel and merge the results.
 ///
-/// Frontend does a separate client-side rerank for typo tolerance; we keep
-/// the server side simple and delegate fuzzy matching to JS.
+/// - Call A: `<user query> slay-the-spire-2 OR sts2 OR "slay the spire 2"`.
+///   Catches repos where the user's literal query terms hit GitHub's
+///   tokenizer (whole-word matches on name / description / readme).
+///
+/// - Call B: `topic:slay-the-spire-2 OR topic:sts2 OR "slay the spire 2" in:name,description`.
+///   Returns up to 100 STS2-tagged repos regardless of the user's query —
+///   the client-side fuzzy reranker then surfaces the row that best
+///   matches what the user typed via SUBSTRING and typo tolerance, which
+///   GitHub's tokenizer can't do (it can't see "autopath" when the user
+///   types "path" because the hyphen is a token boundary, but our JS
+///   ranker can).
+///
+/// Both result sets are merged, deduped by `full_name`, then post-filtered
+/// to STS2-relevance to drop any StS-1 leakage.
 pub async fn search_github_repos(
     query: &str,
     token: Option<&str>,
 ) -> Result<Vec<GitHubRepo>> {
     let client = build_client(token);
-    let search_query = format!("{} slay-the-spire-2 OR sts2 OR \"slay the spire 2\"", query);
+    let q_user = format!(
+        "{} slay-the-spire-2 OR sts2 OR \"slay the spire 2\"",
+        query
+    );
+    let q_topic = String::from(
+        "topic:slay-the-spire-2 OR topic:sts2 OR \"slay the spire 2\" in:name,description",
+    );
 
-    let resp = client
-        .get("https://api.github.com/search/repositories")
-        .query(&[
-            ("q", search_query.as_str()),
-            ("per_page", "100"),
-        ])
-        .send()
-        .await?
-        .error_for_status()?;
+    // Run both in parallel — total wall time is one round-trip, not two.
+    let (a, b) = futures_util::future::join(
+        fetch_one_search(&client, &q_user),
+        fetch_one_search(&client, &q_topic),
+    )
+    .await;
 
-    let search: GitHubSearchResponse = resp.json().await?;
-    let total = search.items.len();
-    let filtered: Vec<GitHubRepo> = search
-        .items
+    // If either one errored we still want to return what the other got.
+    let mut merged: Vec<GitHubRepo> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut push_unique = |list: Vec<GitHubRepo>| {
+        for repo in list {
+            if seen.insert(repo.full_name.clone()) {
+                merged.push(repo);
+            }
+        }
+    };
+    match a {
+        Ok(list) => push_unique(list),
+        Err(e) => log::warn!("search_github_repos query A failed: {}", e),
+    }
+    match b {
+        Ok(list) => push_unique(list),
+        Err(e) => log::warn!("search_github_repos query B failed: {}", e),
+    }
+
+    let total = merged.len();
+    let filtered: Vec<GitHubRepo> = merged
         .into_iter()
         .filter(repo_mentions_sts2)
         .collect();

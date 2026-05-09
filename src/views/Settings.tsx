@@ -36,6 +36,7 @@ import {
   pinMod,
   unpinMod,
   updateMod,
+  updateAllMods,
   createBackup,
   listBackups,
   restoreBackup,
@@ -66,6 +67,7 @@ export function SettingsView() {
   const [auditing, setAuditing] = useState(false);
   const [auditResults, setAuditResults] = useState<ModAuditEntry[] | null>(null);
   const [updatingMod, setUpdatingMod] = useState<string | null>(null);
+  const [updatingAll, setUpdatingAll] = useState(false);
 
   // ── Backups ─────────────────────────────────────────
   const [backups, setBackups] = useState<BackupInfo[]>([]);
@@ -266,6 +268,42 @@ export function SettingsView() {
       toast.error(`Audit failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setAuditing(false);
+    }
+  }
+
+  // Update every GitHub-sourced mod with a pending update in one shot.
+  // Pinned mods are skipped on the backend, so this only touches things
+  // the audit was already flagging. We confirm first because it kicks off
+  // multiple downloads and modifies the install on disk.
+  async function handleUpdateAll(githubUpdateNames: string[]) {
+    if (updatingAll || githubUpdateNames.length === 0) return;
+    const ok = await confirm({
+      title: `Update ${githubUpdateNames.length} mod${githubUpdateNames.length === 1 ? '' : 's'}?`,
+      body:
+        `This will download and re-install the latest GitHub release for each. ` +
+        `Pinned mods are skipped. Make sure STS2 is closed first.`,
+      confirmLabel: 'Update all',
+    });
+    if (!ok) return;
+    setUpdatingAll(true);
+    try {
+      const updated = await updateAllMods();
+      toast.success(
+        updated.length === 0
+          ? 'Nothing to update.'
+          : `Updated ${updated.length} mod${updated.length === 1 ? '' : 's'}.`,
+      );
+      await refreshAll();
+      try {
+        const results = await auditModVersions();
+        setAuditResults(results);
+      } catch {
+        /* non-fatal — the user can re-audit manually */
+      }
+    } catch (e) {
+      toast.error(`Update all failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setUpdatingAll(false);
     }
   }
 
@@ -567,21 +605,50 @@ export function SettingsView() {
 
         {tab === 'audit' && (
           <>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
-              <div>
-                <div className="gf-set-label" style={{ fontSize: 14 }}>Mod audit</div>
-                <div className="gf-set-desc">Compare each installed mod against its source · pin to lock the current version</div>
-              </div>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <Button variant="ghost" size="sm" onClick={() => setShowAutoDetect(true)}>
-                  Auto-detect sources
-                </Button>
-                <Button variant="secondary" size="sm" onClick={handleRunAudit} disabled={auditing}>
-                  <ClipboardCheck size={14} className={auditing ? 'animate-pulse' : ''} />
-                  {auditing ? 'Auditing...' : auditResults ? 'Re-audit' : 'Run audit'}
-                </Button>
-              </div>
-            </div>
+            {(() => {
+              // Only the audit toolbar needs this — derive the GitHub-update
+              // list once per render and reuse it for the "Update all"
+              // gating below.
+              const ghUpdates = auditResults
+                ? auditResults.filter((r) => r.needs_update && r.github_repo).map((r) => r.mod_name)
+                : [];
+              return (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
+                  <div>
+                    <div className="gf-set-label" style={{ fontSize: 14 }}>Mod audit</div>
+                    <div className="gf-set-desc">Compare each installed mod against its source · pin to lock the current version</div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {/* Show Update all only when there are 2+ GitHub-sourced
+                        updates queued — for a single one the inline Update
+                        button on the row is enough. */}
+                    {ghUpdates.length >= 2 && (
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={() => handleUpdateAll(ghUpdates)}
+                        disabled={updatingAll || updatingMod !== null}
+                        title={`Update ${ghUpdates.length} GitHub-sourced mods (skips pinned)`}
+                      >
+                        {updatingAll ? (
+                          <RefreshCw size={14} className="animate-spin" />
+                        ) : (
+                          <Download size={14} />
+                        )}
+                        {updatingAll ? 'Updating…' : `Update all (${ghUpdates.length})`}
+                      </Button>
+                    )}
+                    <Button variant="ghost" size="sm" onClick={() => setShowAutoDetect(true)} disabled={updatingAll}>
+                      Auto-detect sources
+                    </Button>
+                    <Button variant="secondary" size="sm" onClick={handleRunAudit} disabled={auditing || updatingAll}>
+                      <ClipboardCheck size={14} className={auditing ? 'animate-pulse' : ''} />
+                      {auditing ? 'Auditing...' : auditResults ? 'Re-audit' : 'Run audit'}
+                    </Button>
+                  </div>
+                </div>
+              );
+            })()}
 
             {auditResults === null ? (
               <div className="gf-empty">
@@ -650,11 +717,11 @@ export function SettingsView() {
                                   e.stopPropagation();
                                   handleUpdateOne(entry.mod_name);
                                 }}
-                                disabled={updatingMod === entry.mod_name}
+                                disabled={updatingMod === entry.mod_name || updatingAll}
                                 className="gf-btn gf-btn-sm"
                                 title={`Download and install v${entry.latest_release_with_assets_tag ?? entry.nexus_version ?? 'latest'}`}
                               >
-                                {updatingMod === entry.mod_name ? (
+                                {updatingMod === entry.mod_name || updatingAll ? (
                                   <><RefreshCw size={10} className="animate-spin" /> Updating…</>
                                 ) : (
                                   <><Download size={10} /> Update</>

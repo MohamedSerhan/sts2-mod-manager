@@ -287,6 +287,13 @@ body {
   background: var(--indigo-panel);
   border: 1px solid var(--indigo-line);
   border-radius: 10px;
+  transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+.gf-pack-row, .gf-mod, .gf-backup, .gf-set-row {
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.gf-pack-row:hover, .gf-backup:hover, .gf-set-row:hover {
+  border-color: oklch(0.34 0.06 280);
 }
 .gf-card-active {
   background: linear-gradient(180deg, oklch(0.24 0.05 280), oklch(0.20 0.04 280));
@@ -895,6 +902,7 @@ body {
   background: oklch(0.10 0.02 270 / 0.6);
   backdrop-filter: blur(4px);
   display: grid; place-items: center;
+  animation: gf-fade-in 0.18s ease-out;
 }
 .gf-modal {
   background: var(--indigo-panel);
@@ -903,6 +911,15 @@ body {
   box-shadow: 0 24px 60px rgba(0,0,0,0.5);
   display: flex; flex-direction: column;
   max-height: 90%;
+  animation: gf-modal-pop 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes gf-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes gf-modal-pop {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 .gf-modal-head {
   padding: 16px 18px 12px;

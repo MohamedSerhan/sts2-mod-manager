@@ -25,6 +25,9 @@ import {
   getInstalledMods,
   unsubscribe,
   switchProfile,
+  repairProfile,
+  getProfileDrift,
+  createBackup,
 } from '../hooks/useTauri';
 import type { SubscriptionUpdate, Subscription } from '../types';
 
@@ -66,6 +69,7 @@ export function HomeView({ onGoToSettings, onGoToMods, onSwitchPack, onLaunch }:
   const [repairingShareId, setRepairingShareId] = useState<string | null>(null);
   const [activatingProfile, setActivatingProfile] = useState<string | null>(null);
   const [updateDetail, setUpdateDetail] = useState<SubscriptionUpdate | null>(null);
+  const [repairing, setRepairing] = useState(false);
 
   useEffect(() => {
     loadSubscriptions();
@@ -174,6 +178,57 @@ export function HomeView({ onGoToSettings, onGoToMods, onSwitchPack, onLaunch }:
       toast.error(`Repair failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setRepairingShareId(null);
+    }
+  }
+
+  /** Repair the active profile from Home — same flow as the Profiles drift
+   *  banner: confirm with orphan list, optional pre-backup, then call
+   *  repair_profile (apply + delete orphans). */
+  async function handleRepair(name: string) {
+    let drift: Awaited<ReturnType<typeof getProfileDrift>> | null = null;
+    try { drift = await getProfileDrift(name); } catch { /* fall through with no-orphans */ }
+    const orphanCount = drift?.added.length ?? 0;
+    const orphans = drift?.added ?? [];
+    const orphanList = orphans.length > 8
+      ? `${orphans.slice(0, 8).join(', ')}, …${orphans.length - 8} more`
+      : orphans.join(', ');
+
+    const ok = await confirm({
+      title: `Repair "${name}"?`,
+      body: orphanCount > 0
+        ? `Re-applies the manifest and deletes ${orphanCount} mod file(s) that aren't in the profile: ${orphanList}.`
+        : 'Re-applies the manifest exactly. Toggles, versions, and load order are restored from the saved snapshot.',
+      warning: orphanCount > 0
+        ? 'Orphan files will be permanently removed. Restore from a backup if you change your mind.'
+        : undefined,
+      confirmLabel: 'Repair',
+      destructive: orphanCount > 0,
+      checkbox: orphanCount > 0
+        ? { label: 'Make a backup before repairing', defaultChecked: true }
+        : undefined,
+    });
+    if (!ok) return;
+
+    setRepairing(true);
+    try {
+      if (ok.checked) {
+        try { await createBackup(); }
+        catch (e) { toast.error(`Backup failed: ${e instanceof Error ? e.message : String(e)}`); }
+      }
+      const result = await repairProfile(name);
+      await refreshAll();
+      const summary: string[] = [];
+      if (result.deleted_orphans.length > 0) {
+        summary.push(`removed ${result.deleted_orphans.length} orphan mod${result.deleted_orphans.length === 1 ? '' : 's'}`);
+      }
+      if (result.downloaded > 0) summary.push(`downloaded ${result.downloaded}`);
+      if (result.failed_downloads.length > 0) summary.push(`${result.failed_downloads.length} download(s) failed`);
+      if (result.missing_mods.length > 0) summary.push(`${result.missing_mods.length} still missing`);
+      toast.success(summary.length ? `Repaired "${name}" — ${summary.join(', ')}` : `Repaired "${name}"`);
+    } catch (e) {
+      toast.error(`Repair failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setRepairing(false);
     }
   }
 
@@ -309,6 +364,21 @@ export function HomeView({ onGoToSettings, onGoToMods, onSwitchPack, onLaunch }:
           >
             Switch pack
           </button>
+          {activeProfile && (
+            <button
+              className="gf-btn-2"
+              onClick={() => handleRepair(activeProfile)}
+              disabled={repairing}
+              title="Re-apply the manifest and delete any orphan mod files"
+            >
+              {repairing ? (
+                <RefreshCw size={11} className="animate-spin" />
+              ) : (
+                <Wrench size={11} />
+              )}
+              {repairing ? 'Repairing…' : 'Repair'}
+            </button>
+          )}
           {heroCode && (
             <button
               className="gf-btn-2"

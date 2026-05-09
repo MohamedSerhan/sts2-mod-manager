@@ -68,6 +68,8 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
     try { localStorage.setItem(ADVANCED_KEY, String(next)); } catch {}
   }
 
+  const [refreshing, setRefreshing] = useState(false);
+
   const totalCount = mods.length;
   const enabledCount = mods.filter((m) => m.enabled).length;
   const disabledCount = mods.filter((m) => !m.enabled).length;
@@ -282,9 +284,13 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
               </Button>
             </>
           )}
-          <Button size="sm" onClick={() => refreshMods()}>
-            <RefreshCw size={14} />
-            Refresh
+          <Button size="sm" onClick={async () => {
+            setRefreshing(true);
+            try { await refreshMods(); }
+            finally { setRefreshing(false); }
+          }} disabled={refreshing}>
+            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+            {refreshing ? 'Refreshing…' : 'Refresh'}
           </Button>
         </div>
       </div>

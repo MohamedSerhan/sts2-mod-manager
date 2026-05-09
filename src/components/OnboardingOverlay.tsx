@@ -336,8 +336,16 @@ export function OnboardingOverlay({
           </button>
           <div style={{ flex: 1 }} />
           {step < 3 ? (
+            // On step 2, the accounts are optional. If the user hasn't saved
+            // either credential, surface the primary action as "Skip" so it's
+            // clear they're moving on without entering anything — instead of
+            // implying "Next" means saving was already done.
             <button className="gf-btn" onClick={next}>
-              Next <ExternalLink size={11} style={{ transform: 'rotate(-45deg)' }} />
+              {step === 2 && !nexusOk && !ghSaved ? (
+                'Skip for now'
+              ) : (
+                <>Next <ExternalLink size={11} style={{ transform: 'rotate(-45deg)' }} /></>
+              )}
             </button>
           ) : null}
         </div>

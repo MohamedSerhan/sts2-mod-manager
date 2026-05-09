@@ -520,8 +520,12 @@ export function SettingsView() {
                       onClick={() => handleRestoreBackup(b.name)}
                       disabled={anyBusy}
                     >
-                      <RotateCcw size={12} />
-                      {busy ? 'Working...' : 'Restore'}
+                      {busy ? (
+                        <RefreshCw size={12} className="animate-spin" />
+                      ) : (
+                        <RotateCcw size={12} />
+                      )}
+                      {busy ? 'Restoring…' : 'Restore'}
                     </Button>
                     <Button
                       variant="danger"

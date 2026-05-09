@@ -1164,12 +1164,24 @@ pub fn get_installed_mods(state: tauri::State<'_, AppState>) -> std::result::Res
 }
 
 /// Toggle a mod between enabled and disabled.
+///
+/// After the file move succeeds, re-snapshots the active profile so its
+/// manifest reflects the new state immediately. This makes "the profile is
+/// the complete state" actually true — without it, a toggle would only
+/// affect disk, leaving the manifest stale until the next profile switch.
+/// A subsequent Repair (which re-applies the manifest) would then undo
+/// the user's toggle, which is the source of the "switching profiles
+/// doesn't remember state" complaint.
 #[tauri::command]
 pub fn toggle_mod(name: String, enable: bool, state: tauri::State<'_, AppState>) -> std::result::Result<bool, String> {
     crate::game::ensure_game_not_running()?;
-    let s = state.lock().map_err(|e| e.to_string())?;
-    let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
-    let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
+    let (mods_path, disabled_path) = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        (
+            s.mods_path.clone().ok_or("Game path not set")?,
+            s.disabled_mods_path.clone().ok_or("Game path not set")?,
+        )
+    };
 
     let (src, dest) = if enable {
         (disabled_path.as_path(), mods_path.as_path())
@@ -1177,22 +1189,54 @@ pub fn toggle_mod(name: String, enable: bool, state: tauri::State<'_, AppState>)
         (mods_path.as_path(), disabled_path.as_path())
     };
 
-    // First try the simple name-based move
-    match move_mod_files(&name, src, dest) {
-        Ok(()) => return Ok(true),
-        Err(_) => {
-            // Fallback: scan for actual ModInfo and use file list
-            let mods_in_src = scan_mods_inner(src, enable);
-            let mod_info = mods_in_src.iter().find(|m| m.name == name);
-            if let Some(info) = mod_info {
-                move_mod_by_info(info, src, dest).map_err(|e| e.to_string())?;
-            } else {
-                return Err(format!("No files found for mod '{}' in {}", name, src.display()));
-            }
+    // First try the simple name-based move; fall back to scanning for the
+    // actual ModInfo and using its file list when the name doesn't match a
+    // top-level file (e.g. mod is in a subfolder).
+    let move_result = move_mod_files(&name, src, dest).or_else(|_| {
+        let mods_in_src = scan_mods_inner(src, enable);
+        let mod_info = mods_in_src.iter().find(|m| m.name == name).cloned();
+        match mod_info {
+            Some(info) => move_mod_by_info(&info, src, dest),
+            None => Err(crate::error::AppError::ModNotFound(format!(
+                "No files found for mod '{}' in {}",
+                name, src.display()
+            ))),
         }
-    }
+    });
+    move_result.map_err(|e| e.to_string())?;
 
+    refresh_active_profile_manifest(&state);
     Ok(true)
+}
+
+/// Re-snapshot the currently active profile from disk so its manifest is
+/// always live. Called after every disk mutation (toggle, enable-all,
+/// disable-all, delete). Failures are logged but never bubbled — a stale
+/// manifest is recoverable, but blocking the user's mutation isn't worth it.
+fn refresh_active_profile_manifest(state: &tauri::State<'_, AppState>) {
+    let Ok(s) = state.lock() else { return };
+    let Some(active_name) = s.active_profile.clone() else { return };
+    let mods_path = match s.mods_path.clone() { Some(p) => p, None => return };
+    let disabled_path = match s.disabled_mods_path.clone() { Some(p) => p, None => return };
+    let profiles_path = s.profiles_path.clone();
+    let config_path = s.config_path.clone();
+    drop(s);
+
+    if let Err(e) = crate::profiles::snapshot_current_with_paths(
+        &active_name,
+        &mods_path,
+        &disabled_path,
+        &profiles_path,
+        Some(&config_path),
+    ) {
+        log::warn!(
+            "Failed to refresh active profile manifest for '{}' after mutation: {} \
+             — manifest is now stale; next profile switch will re-snapshot.",
+            active_name, e
+        );
+    } else {
+        log::debug!("Refreshed active profile manifest for '{}'", active_name);
+    }
 }
 
 /// Permanently delete a mod.
@@ -1244,6 +1288,7 @@ pub fn delete_mod_cmd(name: String, state: tauri::State<'_, AppState>) -> std::r
         }
 
         log::info!("Deleted mod '{}' ({} files)", name, info.files.len());
+        refresh_active_profile_manifest(&state);
         return Ok(true);
     }
 
@@ -1285,6 +1330,7 @@ pub fn delete_mod_cmd(name: String, state: tauri::State<'_, AppState>) -> std::r
         return Err(format!("Could not find files for mod '{}' to delete", name));
     }
     log::info!("Deleted mod '{}' via fallback matching", name);
+    refresh_active_profile_manifest(&state);
     Ok(true)
 }
 
@@ -1336,6 +1382,7 @@ pub fn enable_all_mods(state: tauri::State<'_, AppState>) -> std::result::Result
     if !errors.is_empty() {
         log::warn!("Some mods failed to enable: {:?}", errors);
     }
+    refresh_active_profile_manifest(&state);
     Ok(true)
 }
 
@@ -1387,6 +1434,7 @@ pub fn disable_all_mods(state: tauri::State<'_, AppState>) -> std::result::Resul
     if !errors.is_empty() {
         log::warn!("Some mods failed to disable: {:?}", errors);
     }
+    refresh_active_profile_manifest(&state);
     Ok(true)
 }
 
@@ -1414,6 +1462,7 @@ pub fn delete_all_mods(state: tauri::State<'_, AppState>) -> std::result::Result
         }
     }
     log::info!("Deleted all mods ({} items)", count);
+    refresh_active_profile_manifest(&state);
     Ok(count)
 }
 
@@ -1421,10 +1470,14 @@ pub fn delete_all_mods(state: tauri::State<'_, AppState>) -> std::result::Result
 #[tauri::command]
 pub fn install_mod_from_file(path: String, state: tauri::State<'_, AppState>) -> std::result::Result<ModInfo, String> {
     crate::game::ensure_game_not_running()?;
-    let s = state.lock().map_err(|e| e.to_string())?;
-    let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
+    let mods_path = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        s.mods_path.as_ref().ok_or("Game path not set")?.clone()
+    };
     let zip_path = PathBuf::from(&path);
-    install_mod_from_zip(&zip_path, mods_path).map_err(|e| e.to_string())
+    let result = install_mod_from_zip(&zip_path, &mods_path).map_err(|e| e.to_string())?;
+    refresh_active_profile_manifest(&state);
+    Ok(result)
 }
 
 // ── Dependency Resolution ──────────────────────────────────────────────────

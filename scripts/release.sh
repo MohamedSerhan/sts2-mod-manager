@@ -35,7 +35,13 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
 fi
 
 echo "Fetching origin..."
-git fetch origin --tags --quiet
+# Fetch the branch ref, but NOT --tags. We don't need local tags in sync;
+# the collision check below uses `git ls-remote --tags origin` directly.
+# Fetching tags here used to silently abort the whole script when a local
+# tag pointed at a different SHA than origin (e.g. the v0.7.4/v0.7.5 mess
+# left a stale local v0.7.6) — `set -euo pipefail` + `--quiet` made the
+# resulting "would clobber existing tag" error invisible.
+git fetch origin main --quiet
 
 LOCAL=$(git rev-parse main)
 REMOTE=$(git rev-parse origin/main)

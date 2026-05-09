@@ -14,6 +14,11 @@ pub struct GameInfo {
     pub mods_count: usize,
     pub disabled_count: usize,
     pub valid: bool,
+    /// Detected STS2 build version, e.g. "0.103.2". None if release_info.json
+    /// is missing or unreadable. Frontend uses this to display the user's
+    /// game version next to mod-version warnings ("needs game ≥ X.Y.Z, you
+    /// have A.B.C").
+    pub game_version: Option<String>,
 }
 
 /// Find the Steam installation path based on OS.
@@ -245,6 +250,7 @@ pub fn get_game_info(state: tauri::State<'_, AppState>) -> std::result::Result<G
         mods_count,
         disabled_count,
         valid,
+        game_version: s.game_version.clone(),
     })
 }
 

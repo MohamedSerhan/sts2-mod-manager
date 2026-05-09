@@ -40,6 +40,13 @@ pub struct ModInfo {
     /// Populated by `mod_sources::enrich_mods_with_sources`.
     #[serde(default)]
     pub pinned: bool,
+    /// Minimum game version required by this mod's manifest. None when
+    /// the manifest doesn't declare one (older mods didn't). UI compares
+    /// this to the user's detected game_version to show "won't load on
+    /// your build" warnings; Repair uses it to walk back to a compatible
+    /// release.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_game_version: Option<String>,
 }
 
 /// One dependency entry in a mod manifest.
@@ -110,6 +117,12 @@ struct RawManifest {
     url: Option<String>,
     #[serde(alias = "Author", alias = "author")]
     author: Option<String>,
+    /// Minimum STS2 build the mod's code targets (e.g. "0.105.0"). Mods
+    /// declaring this expect game features / APIs that landed in that
+    /// build; the game's loader silently skips mods whose requirement
+    /// the current build doesn't satisfy.
+    #[serde(alias = "MinGameVersion", alias = "min_game_version")]
+    min_game_version: Option<String>,
 }
 
 impl Default for RawManifest {
@@ -126,6 +139,7 @@ impl Default for RawManifest {
             repository: None,
             url: None,
             author: None,
+            min_game_version: None,
         }
     }
 }
@@ -343,6 +357,7 @@ fn parse_manifest(manifest_path: &Path, base_dir: &Path, enabled: bool) -> Optio
         github_url,
         nexus_url,
         pinned: false,
+        min_game_version: raw.min_game_version,
     })
 }
 
@@ -394,6 +409,7 @@ fn dll_only_mod(dll_path: &Path, base_dir: &Path, enabled: bool) -> ModInfo {
         github_url: None,
         nexus_url: None,
         pinned: false,
+        min_game_version: None,
     }
 }
 
@@ -1228,6 +1244,7 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
                 github_url: None,
                 nexus_url: None,
                 pinned: false,
+                min_game_version: None,
             })
         }
     }

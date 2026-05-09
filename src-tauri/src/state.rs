@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -45,6 +45,14 @@ pub struct AppStateInner {
     /// upload that races the first one against the same gist files (causing
     /// 409 conflicts on GitHub's create-or-update endpoint).
     pub sharing_in_flight: HashSet<String>,
+    /// Slay the Spire 2 build version, parsed from `<game>/release_info.json`
+    /// at startup or whenever the game path changes. Stored as a plain
+    /// string ("v0.103.2", "0.105.0", etc.) so we can compare against
+    /// each mod's `min_game_version` to flag incompatible installs and
+    /// drive Repair's walk-back logic. None when the file is missing or
+    /// can't be parsed — in that case we fail open and skip compatibility
+    /// checks rather than blocking the user on a guess.
+    pub game_version: Option<String>,
 }
 
 pub type AppState = Arc<Mutex<AppStateInner>>;
@@ -79,6 +87,7 @@ impl AppStateInner {
             active_profile: None,
             pending_nexus_installs: Vec::new(),
             sharing_in_flight: HashSet::new(),
+            game_version: None,
         }
     }
 
@@ -104,7 +113,39 @@ impl AppStateInner {
 
         self.mods_path = Some(mods_path);
         self.disabled_mods_path = Some(disabled_mods_path);
+        // Parse the game's release_info.json so we know which build the user
+        // is on. Drives min_game_version compatibility checks and Repair's
+        // walk-back. Failures are non-fatal — we just leave game_version as
+        // None and skip the check (fail-open) rather than blocking the
+        // user on a parse hiccup.
+        self.game_version = read_release_info_version(&path);
         self.game_path = Some(path);
+    }
+}
+
+/// Read `<game>/release_info.json` and pull out the `version` string.
+///
+/// The file's shape (verified against an actual STS2 install):
+/// ```json
+/// { "commit": "...", "version": "v0.103.2", "date": "...", ... }
+/// ```
+///
+/// Returns the trimmed version string with a leading "v" stripped so
+/// comparisons against mod manifests (which usually omit the "v") match.
+/// Returns None on any read / parse error — caller should treat that as
+/// "we don't know" and skip compatibility checks.
+fn read_release_info_version(game_path: &Path) -> Option<String> {
+    let path = game_path.join("release_info.json");
+    let content = std::fs::read_to_string(&path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&content).ok()?;
+    let raw = value.get("version")?.as_str()?.trim().to_string();
+    let stripped = raw.trim_start_matches('v').to_string();
+    if stripped.is_empty() {
+        log::warn!("release_info.json had empty version string at {}", path.display());
+        None
+    } else {
+        log::info!("Detected game version v{} from {}", stripped, path.display());
+        Some(stripped)
     }
 }
 

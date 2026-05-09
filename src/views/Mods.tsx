@@ -48,8 +48,28 @@ import {
 // v5 — Advanced mode is per-screen, persisted in localStorage. Off by default.
 const ADVANCED_KEY = 'sts2mm-mods-advanced';
 
+/**
+ * Numeric semver compare for the small subset we actually see in
+ * mod manifests + STS2's release_info.json: "MAJOR.MINOR.PATCH" with
+ * an optional leading "v". Returns true when `current >= required`.
+ *
+ * Fails OPEN on parse hiccups — UI would rather skip the warning than
+ * cry "won't load!" at the user because of a quirky version string.
+ */
+function gameVersionSatisfies(current: string | null | undefined, required: string | null | undefined): boolean {
+  if (!current || !required) return true;
+  const parse = (v: string) =>
+    v.trim().replace(/^v/i, '').split('.').slice(0, 3).map((n) => Number.parseInt(n, 10));
+  const [cMaj, cMin, cPatch] = parse(current);
+  const [rMaj, rMin, rPatch] = parse(required);
+  if ([cMaj, cMin, cPatch, rMaj, rMin, rPatch].some((n) => Number.isNaN(n))) return true;
+  if (cMaj !== rMaj) return cMaj > rMaj;
+  if (cMin !== rMin) return cMin > rMin;
+  return cPatch >= rPatch;
+}
+
 export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: boolean } = {}) {
-  const { mods, refreshMods, refreshAll, gameRunning } = useApp();
+  const { mods, refreshMods, refreshAll, gameRunning, gameInfo } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
   const [filter, setFilter] = useState('');
@@ -441,6 +461,24 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                             title="Pinned — modpack updates will preserve this mod's enabled/disabled state and version"
                           >
                             <Pin size={9} /> Pinned
+                          </span>
+                        )}
+                        {mod.min_game_version &&
+                          !gameVersionSatisfies(gameInfo?.game_version, mod.min_game_version) && (
+                          <span
+                            className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded"
+                            style={{
+                              background: 'oklch(0.78 0.16 60 / 0.18)',
+                              color: 'oklch(0.85 0.16 60)',
+                            }}
+                            title={
+                              `This mod's manifest declares min_game_version=${mod.min_game_version}. ` +
+                              `Your STS2 is v${gameInfo?.game_version ?? 'unknown'}. ` +
+                              `The game's loader will silently skip this mod until you update STS2 or switch beta branches. ` +
+                              `Use Repair (advanced kebab) to roll back to a compatible release.`
+                            }
+                          >
+                            ⚠ needs game ≥ v{mod.min_game_version}
                           </span>
                         )}
                         {/* Source badges (advanced only) */}

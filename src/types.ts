@@ -13,6 +13,9 @@ export interface ModInfo {
   folder_name: string | null;
   mod_id: string | null;
   pinned: boolean;
+  /** Minimum STS2 build the mod's manifest declares (e.g. "0.105.0").
+   *  null when the mod doesn't care about game version. */
+  min_game_version?: string | null;
 }
 
 export interface Profile {
@@ -56,6 +59,10 @@ export interface GameInfo {
   mods_count: number;
   disabled_count: number;
   valid: boolean;
+  /** STS2 build version (e.g. "0.103.2") parsed from release_info.json
+   *  in the game's install directory. `null` if the file is missing or
+   *  the field couldn't be read — UI falls back to "unknown" in that case. */
+  game_version?: string | null;
 }
 
 export interface GitHubRepo {
@@ -183,5 +190,11 @@ export interface ModAuditEntry {
   update_source: string | null;
   github_auto_detected: boolean;
   pinned: boolean;
+  /** Minimum game version this mod's manifest declares, if any. */
+  min_game_version?: string | null;
+  /** True iff `min_game_version` exists and the user's detected game
+   *  version is below it — the game won't load this mod until they
+   *  update their STS2 install or switch beta branches. */
+  game_version_too_old?: boolean;
 }
 

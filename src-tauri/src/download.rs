@@ -1,5 +1,5 @@
 use std::io::Write as IoWrite;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -325,6 +325,128 @@ where
     Ok(())
 }
 
+/// Sanitize an arbitrary string into a path-safe slug. Used to scope
+/// cached release zips by owner/repo/tag without colliding on disk.
+fn slugify(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '_' })
+        .collect()
+}
+
+/// Download a specific tagged release's primary zip asset into a cache
+/// path scoped by owner/repo/tag. Returns the cached path. Used by the
+/// Repair walk-back (which downloads multiple candidate releases and
+/// peeks their manifests to find a compatible one) — keeping each
+/// candidate at a distinct path means parallel walk-backs of the same
+/// repo don't clobber each other and the cache survives across runs.
+///
+/// Skips the actual HTTP download if a non-empty cached file already
+/// exists for the same tag — useful for repeat repair attempts.
+pub async fn download_release_zip_to_cache(
+    owner: &str,
+    repo: &str,
+    tag: &str,
+    cache_path: &Path,
+    token: Option<&str>,
+) -> Result<PathBuf> {
+    let release = fetch_release_by_tag(owner, repo, tag, token).await?;
+    let asset = find_best_asset(&release).ok_or_else(|| {
+        AppError::Other(format!(
+            "Release {} for {}/{} has no downloadable asset",
+            tag, owner, repo
+        ))
+    })?;
+
+    if !asset.name.ends_with(".zip") {
+        return Err(AppError::Other(format!(
+            "Release {} for {}/{} is not a zip ({}) — walk-back can only inspect zip releases",
+            tag, owner, repo, asset.name
+        )));
+    }
+
+    let dir = cache_path
+        .join("repair-walkback")
+        .join(format!("{}__{}", slugify(owner), slugify(repo)));
+    std::fs::create_dir_all(&dir)?;
+    let dest = dir.join(format!("{}__{}", slugify(tag), asset.name));
+
+    // Reuse the cached zip if it's already there and non-empty.
+    if let Ok(meta) = std::fs::metadata(&dest) {
+        if meta.is_file() && meta.len() > 0 {
+            log::debug!("Walk-back: reusing cached {}", dest.display());
+            return Ok(dest);
+        }
+    }
+
+    download_file(&asset.browser_download_url, &dest, |_, _| {})
+        .await
+        .map_err(|e| {
+            log::error!(
+                "Walk-back: download failed for {}/{}@{} asset '{}': {}",
+                owner, repo, tag, asset.name, e
+            );
+            e
+        })?;
+    log::debug!("Walk-back: downloaded {}/{}@{} -> {}", owner, repo, tag, dest.display());
+    Ok(dest)
+}
+
+/// Open a downloaded mod zip and read the `min_game_version` field from
+/// whichever JSON manifest it contains (top-level `mod_manifest.json` or
+/// the first `*.json` we find that has a `min_game_version` key). Used
+/// by the Repair walk-back to pre-screen each candidate release before
+/// committing to install it.
+///
+/// Returns:
+///   - `Ok(Some("0.105.0"))` — manifest declares a minimum
+///   - `Ok(None)` — manifest exists but doesn't declare one (mod runs on
+///     any build)
+///   - `Err(...)` — couldn't open the zip or no manifest at all
+pub fn peek_zip_min_game_version(zip_path: &Path) -> Result<Option<String>> {
+    let file = std::fs::File::open(zip_path)?;
+    let mut archive = zip::ZipArchive::new(file)
+        .map_err(|e| AppError::Other(format!("Open zip {}: {}", zip_path.display(), e)))?;
+
+    for i in 0..archive.len() {
+        let mut entry = match archive.by_index(i) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let name = entry.name().to_string();
+        if !name.to_lowercase().ends_with(".json") {
+            continue;
+        }
+        if name.starts_with("__MACOSX") || name.starts_with("._") {
+            continue;
+        }
+        // Mod manifests live at root or one folder deep — skip anything
+        // buried inside a deep subdirectory.
+        if name.split('/').count() > 2 {
+            continue;
+        }
+
+        let mut buf = String::new();
+        if std::io::Read::read_to_string(&mut entry, &mut buf).is_err() {
+            continue;
+        }
+        let val: serde_json::Value = match serde_json::from_str(&buf) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        // Try both case variants the ecosystem uses.
+        let mgv = val.get("min_game_version")
+            .or_else(|| val.get("MinGameVersion"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().trim_start_matches('v').to_string())
+            .filter(|s| !s.is_empty());
+        return Ok(mgv);
+    }
+    Err(AppError::Other(format!(
+        "No JSON manifest found inside {}",
+        zip_path.display()
+    )))
+}
+
 /// Find the best asset to download from a release (prefer .zip containing mod files).
 fn find_best_asset(release: &GitHubRelease) -> Option<&GitHubAsset> {
     // Prefer zip files
@@ -421,6 +543,7 @@ pub async fn download_and_install_github_mod(
             folder_name: None,
             mod_id: None,
             pinned: false,
+            min_game_version: None,
         })
     } else {
         Err(AppError::Other(format!(
@@ -537,6 +660,7 @@ pub async fn download_url_mod(
             github_url: None,
             nexus_url: None,
             pinned: false,
+            min_game_version: None,
         })
     } else {
         Err(format!("Unsupported file type: {}", file_name))

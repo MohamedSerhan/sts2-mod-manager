@@ -735,16 +735,25 @@ export function SettingsView() {
                     // separately in the footer so it doesn't inflate the
                     // error count.
                     const isGone = !hasRealError && !!entry.latest_release_tag && !entry.latest_release_with_assets_tag;
-                    const state: 'ok' | 'update' | 'gone' | 'unlinked' | 'error' =
+                    const isIncompatible = !!entry.game_version_too_old;
+                    // Incompatible takes precedence over OK so the row reads
+                    // as "won't load" instead of "up to date" — but updates
+                    // and real errors still take precedence over it,
+                    // because the user can fix those by clicking Update /
+                    // resolving the error before they have to think about
+                    // the game-version mismatch.
+                    const state: 'ok' | 'update' | 'gone' | 'unlinked' | 'error' | 'incompatible' =
                       hasRealError ? 'error'
                         : entry.needs_update ? 'update'
                         : !hasAnySource ? 'unlinked'
+                        : isIncompatible ? 'incompatible'
                         : isGone ? 'gone'
                         : 'ok';
                     const ledClass = {
                       ok: 'gf-audit-led-ok',
                       update: 'gf-audit-led-update',
                       gone: 'gf-audit-led-warn',
+                      incompatible: 'gf-audit-led-warn',
                       unlinked: '',
                       error: 'gf-audit-led-gone',
                     }[state];
@@ -890,16 +899,40 @@ export function SettingsView() {
                             {entry.error}
                           </div>
                         )}
+                        {entry.game_version_too_old && entry.min_game_version && (
+                          <div
+                            className="mt-1 ml-4"
+                            style={{
+                              fontSize: 11,
+                              color: 'oklch(0.78 0.16 60)',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 6,
+                            }}
+                            title={
+                              `This mod's manifest declares min_game_version=${entry.min_game_version}. ` +
+                              `Your STS2 install reports ${gameInfo?.game_version ?? 'unknown'}. ` +
+                              `Until you update STS2 (or switch beta branches), the game's loader will silently skip this mod.`
+                            }
+                          >
+                            ⚠ Won't load on your game (needs Slay the Spire 2 ≥ v
+                            {entry.min_game_version}; you have v
+                            {gameInfo?.game_version ?? '?'}). Use Repair on the
+                            Mods row to roll back to a compatible release.
+                          </div>
+                        )}
                       </div>
                     );
                   })}
                 </div>
                 {(() => {
+                  const incompatibleCount = auditResults.filter(r => r.game_version_too_old).length;
                   const okCount = auditResults.filter(r =>
                     (r.github_repo || r.nexus_url) &&
                     !r.needs_update &&
                     !(r.error && !r.github_auto_detected) &&
-                    !(r.latest_release_tag && !r.latest_release_with_assets_tag)
+                    !(r.latest_release_tag && !r.latest_release_with_assets_tag) &&
+                    !r.game_version_too_old
                   ).length;
                   const updateCount = auditResults.filter(r => r.needs_update).length;
                   const goneCount = auditResults.filter(r =>
@@ -921,6 +954,18 @@ export function SettingsView() {
                         <span className="gf-audit-led gf-audit-led-update" />
                         {updateCount} updates available
                       </div>
+                      {incompatibleCount > 0 && (
+                        <div
+                          className="gf-audit-foot-stat"
+                          title={
+                            `These mods declare a min_game_version above your detected STS2 build (v${gameInfo?.game_version ?? '?'}). ` +
+                            `Use Repair on each Mods row to roll back to a compatible release.`
+                          }
+                        >
+                          <span className="gf-audit-led gf-audit-led-warn" />
+                          {incompatibleCount} won't load
+                        </div>
+                      )}
                       {goneCount > 0 && (
                         <div
                           className="gf-audit-foot-stat"

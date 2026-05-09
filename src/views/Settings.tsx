@@ -606,16 +606,21 @@ export function SettingsView() {
                   {auditResults.map((entry) => {
                     const hasAnySource = entry.github_repo || entry.nexus_url;
                     const hasRealError = entry.error && !entry.github_auto_detected;
+                    // "gone" = GitHub has a latest release tagged but no
+                    // installable asset (zip/dll). Soft problem — counted
+                    // separately in the footer so it doesn't inflate the
+                    // error count.
+                    const isGone = !hasRealError && !!entry.latest_release_tag && !entry.latest_release_with_assets_tag;
                     const state: 'ok' | 'update' | 'gone' | 'unlinked' | 'error' =
                       hasRealError ? 'error'
                         : entry.needs_update ? 'update'
                         : !hasAnySource ? 'unlinked'
-                        : entry.latest_release_tag && !entry.latest_release_with_assets_tag ? 'gone'
+                        : isGone ? 'gone'
                         : 'ok';
                     const ledClass = {
                       ok: 'gf-audit-led-ok',
                       update: 'gf-audit-led-update',
-                      gone: 'gf-audit-led-gone',
+                      gone: 'gf-audit-led-warn',
                       unlinked: '',
                       error: 'gf-audit-led-gone',
                     }[state];
@@ -678,7 +683,14 @@ export function SettingsView() {
                             >
                               {entry.pinned ? <><PinOff size={9} /> Unpin</> : <><Pin size={9} /> Pin</>}
                             </button>
-                            <span className="gf-audit-mono">
+                            <span
+                              className="gf-audit-mono"
+                              title={
+                                isGone
+                                  ? `GitHub release ${entry.latest_release_tag ?? ''} ships no installable asset. Auto-update can't fetch from this source.`
+                                  : undefined
+                              }
+                            >
                               {hasRealError
                                 ? 'ERROR'
                                 : entry.needs_update
@@ -689,6 +701,8 @@ export function SettingsView() {
                                   }`
                                 : !hasAnySource
                                 ? 'No source'
+                                : isGone
+                                ? `${entry.installed_version} · release missing assets`
                                 : `${entry.installed_version} (latest)`}
                             </span>
                           </span>
@@ -741,23 +755,52 @@ export function SettingsView() {
                     );
                   })}
                 </div>
-                <div className="gf-audit-foot" style={{ marginTop: 12 }}>
-                  <div className="gf-audit-foot-stat">
-                    <span className="gf-audit-led gf-audit-led-ok" />
-                    {auditResults.filter(r => (r.github_repo || r.nexus_url) && !r.needs_update && !r.error).length} up to date
-                  </div>
-                  <div className="gf-audit-foot-stat">
-                    <span className="gf-audit-led gf-audit-led-update" />
-                    {auditResults.filter(r => r.needs_update).length} updates available
-                  </div>
-                  <div className="gf-audit-foot-stat">
-                    <span className="gf-audit-led gf-audit-led-gone" />
-                    {auditResults.filter(r => r.error && !r.github_auto_detected).length} errors
-                  </div>
-                  <div className="gf-audit-foot-stat" style={{ marginLeft: 'auto', color: 'var(--ink-dim)' }}>
-                    {auditResults.filter(r => r.pinned).length} pinned · {auditResults.filter(r => !r.github_repo && !r.nexus_url).length} unlinked
-                  </div>
-                </div>
+                {(() => {
+                  const okCount = auditResults.filter(r =>
+                    (r.github_repo || r.nexus_url) &&
+                    !r.needs_update &&
+                    !(r.error && !r.github_auto_detected) &&
+                    !(r.latest_release_tag && !r.latest_release_with_assets_tag)
+                  ).length;
+                  const updateCount = auditResults.filter(r => r.needs_update).length;
+                  const goneCount = auditResults.filter(r =>
+                    !(r.error && !r.github_auto_detected) &&
+                    r.latest_release_tag &&
+                    !r.latest_release_with_assets_tag &&
+                    !r.needs_update
+                  ).length;
+                  const errCount = auditResults.filter(r => r.error && !r.github_auto_detected).length;
+                  const pinnedCount = auditResults.filter(r => r.pinned).length;
+                  const unlinkedCount = auditResults.filter(r => !r.github_repo && !r.nexus_url).length;
+                  return (
+                    <div className="gf-audit-foot" style={{ marginTop: 12 }}>
+                      <div className="gf-audit-foot-stat">
+                        <span className="gf-audit-led gf-audit-led-ok" />
+                        {okCount} up to date
+                      </div>
+                      <div className="gf-audit-foot-stat">
+                        <span className="gf-audit-led gf-audit-led-update" />
+                        {updateCount} updates available
+                      </div>
+                      {goneCount > 0 && (
+                        <div
+                          className="gf-audit-foot-stat"
+                          title="GitHub release exists but ships no installable asset — auto-update can't fetch from this source."
+                        >
+                          <span className="gf-audit-led gf-audit-led-warn" />
+                          {goneCount} release{goneCount === 1 ? '' : 's'} missing assets
+                        </div>
+                      )}
+                      <div className="gf-audit-foot-stat">
+                        <span className="gf-audit-led gf-audit-led-gone" />
+                        {errCount} error{errCount === 1 ? '' : 's'}
+                      </div>
+                      <div className="gf-audit-foot-stat" style={{ marginLeft: 'auto', color: 'var(--ink-dim)' }}>
+                        {pinnedCount} pinned · {unlinkedCount} unlinked
+                      </div>
+                    </div>
+                  );
+                })()}
               </>
             )}
           </>

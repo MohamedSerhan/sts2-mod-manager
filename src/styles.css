@@ -698,6 +698,10 @@ body {
 }
 .gf-audit-led-ok { background: var(--ok); box-shadow: 0 0 5px var(--ok); }
 .gf-audit-led-update { background: var(--gf); box-shadow: 0 0 5px var(--gf); }
+/* "gone" = GitHub has a release tagged but it ships no installable assets.
+   That's a soft problem (the user can't auto-update from this source)
+   but it isn't an error — reserve red for actual fetch failures. */
+.gf-audit-led-warn { background: oklch(0.78 0.16 60); box-shadow: 0 0 5px oklch(0.78 0.16 60); }
 .gf-audit-led-gone { background: var(--danger); box-shadow: 0 0 5px var(--danger); }
 .gf-audit-asset {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;

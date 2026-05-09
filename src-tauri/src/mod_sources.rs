@@ -789,45 +789,62 @@ pub async fn auto_detect_sources(
     let mut matched = Vec::new();
     let mut unmatched = Vec::new();
 
-    // Phase 0: Save any manifest-extracted URLs to the sources DB.
-    // parse_manifest may have found github/nexus URLs in the mod's JSON,
-    // but those are only in ModInfo, not persisted yet.
+    // Phase 0: Save any manifest-extracted URLs to the sources DB —
+    // ONLY for mods that don't already have a source linked.
+    //
+    // Per user instruction (v1.0.11): the absence of a link on a mod that
+    // ALREADY has one source attached is intentional. They may have
+    // unlinked the manifest-declared GitHub on purpose, or they prefer
+    // Nexus as the canonical source for that mod, etc. Re-running auto-
+    // detect was overwriting their choice every time.
+    //
+    // We still seed both fields together for first-time mods that have
+    // never had a source set — manifest-declared URLs are author-intent,
+    // not a guess, so initial population is OK.
     for m in &installed {
+        let already_linked = db
+            .mods
+            .get(&m.name)
+            .map(|e| {
+                e.github_repo.is_some()
+                    || e.nexus_url.is_some()
+                    || e.nexus_mod_id.is_some()
+            })
+            .unwrap_or(false);
+        if already_linked {
+            continue;
+        }
+
         let entry = db.mods.entry(m.name.clone()).or_default();
         let mut changed = false;
 
         // Save manifest-extracted GitHub URL
-        if entry.github_repo.is_none() {
-            if let Some(ref gh_url) = m.github_url {
-                if let Some(parsed) = parse_source_url(gh_url) {
-                    entry.github_repo = parsed.github_repo;
-                    entry.github_auto_detected = true;
-                    changed = true;
-                }
+        if let Some(ref gh_url) = m.github_url {
+            if let Some(parsed) = parse_source_url(gh_url) {
+                entry.github_repo = parsed.github_repo;
+                entry.github_auto_detected = true;
+                changed = true;
             }
-            // Also check the source field
-            if entry.github_repo.is_none() {
-                if let Some(ref src) = m.source {
-                    if src.starts_with("github:") || src.contains("github.com") {
-                        if let Some(parsed) = parse_source_url(src) {
-                            entry.github_repo = parsed.github_repo;
-                            entry.github_auto_detected = true;
-                            changed = true;
-                        }
+        }
+        if entry.github_repo.is_none() {
+            if let Some(ref src) = m.source {
+                if src.starts_with("github:") || src.contains("github.com") {
+                    if let Some(parsed) = parse_source_url(src) {
+                        entry.github_repo = parsed.github_repo;
+                        entry.github_auto_detected = true;
+                        changed = true;
                     }
                 }
             }
         }
 
         // Save manifest-extracted Nexus URL
-        if entry.nexus_url.is_none() {
-            if let Some(ref nx_url) = m.nexus_url {
-                if let Some(parsed) = parse_source_url(nx_url) {
-                    entry.nexus_url = parsed.nexus_url;
-                    entry.nexus_game_domain = parsed.nexus_game_domain;
-                    entry.nexus_mod_id = parsed.nexus_mod_id;
-                    changed = true;
-                }
+        if let Some(ref nx_url) = m.nexus_url {
+            if let Some(parsed) = parse_source_url(nx_url) {
+                entry.nexus_url = parsed.nexus_url;
+                entry.nexus_game_domain = parsed.nexus_game_domain;
+                entry.nexus_mod_id = parsed.nexus_mod_id;
+                changed = true;
             }
         }
 
@@ -836,48 +853,36 @@ pub async fn auto_detect_sources(
         }
     }
 
-    // Phase 0.5: For mods with a Nexus URL but no GitHub URL, query the Nexus API
-    // to extract GitHub links from the mod description.
-    {
-        let nexus_api_key = {
-            let s = state.lock().map_err(|e| e.to_string())?;
-            s.nexus_api_key.clone()
-        };
-        if let Some(ref nkey) = nexus_api_key {
-            for m in &installed {
-                let entry = db.mods.get(&m.name);
-                let has_github = entry.map(|e| e.github_repo.is_some()).unwrap_or(false);
-                let has_nexus = entry.map(|e| e.nexus_mod_id.is_some()).unwrap_or(false);
-
-                if !has_github && has_nexus {
-                    let entry_ref = db.mods.get(&m.name).unwrap();
-                    let game_domain = entry_ref.nexus_game_domain.clone().unwrap_or_else(|| "slaythespire2".to_string());
-                    let mod_id = entry_ref.nexus_mod_id.unwrap();
-
-                    // Rate limit
-                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-
-                    if let Some(repo) = extract_github_from_nexus(nkey, &game_domain, mod_id).await {
-                        let entry_mut = db.mods.entry(m.name.clone()).or_default();
-                        entry_mut.github_repo = Some(repo.clone());
-                        entry_mut.github_auto_detected = true;
-                        let _ = save_sources(&db, &config_path);
-
-                        matched.push(AutoDetectMatch {
-                            mod_name: m.name.clone(),
-                            github_repo: repo,
-                            confidence: "high (nexus description)".to_string(),
-                        });
-                    }
-                }
-            }
-        }
-    }
+    // Phase 0.5 (REMOVED in v1.0.11): we used to scrape GitHub links out
+    // of Nexus mod descriptions and auto-attach them when the user had a
+    // Nexus link but no GitHub. Per user instruction, the absence of a
+    // GitHub link on a Nexus-linked mod is INTENTIONAL — the user may
+    // prefer Nexus as the canonical source, or the GitHub repo may be
+    // unrelated/abandoned. Auto-attaching GitHub on top of a deliberate
+    // Nexus pick was overwriting that choice.
+    //
+    // The same outcome is still reachable explicitly via the Mods view's
+    // per-row source editor, which lets the user add a GitHub link if
+    // they actually want one for this mod.
 
     for m in &installed {
-        // Skip mods that already have a GitHub source (either from DB or just saved from manifest)
+        // Skip mods that ALREADY have any linked source — GitHub OR Nexus.
+        //
+        // The previous behavior only skipped on github_repo, which meant a
+        // mod the user had deliberately linked to Nexus (because it lives
+        // on Nexus only, or because they prefer Nexus updates) would still
+        // get a GitHub repo guessed and auto-attached on top. That guessed
+        // repo was the source of "auto-detect keeps messing up" — it was
+        // overwriting deliberate user choices with low-confidence matches.
+        //
+        // Now: if the user (or earlier Phase 0 / 0.5) already attached a
+        // Nexus link OR a GitHub repo, we leave the mod alone. The user
+        // can still trigger a manual re-link from the Mods view if they
+        // genuinely want a different source.
         if let Some(entry) = db.mods.get(&m.name) {
-            if entry.github_repo.is_some() {
+            let has_github = entry.github_repo.is_some();
+            let has_nexus = entry.nexus_mod_id.is_some() || entry.nexus_url.is_some();
+            if has_github || has_nexus {
                 continue;
             }
         }

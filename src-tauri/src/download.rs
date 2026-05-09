@@ -197,43 +197,41 @@ async fn fetch_one_search(
 
 /// Search GitHub for STS2 mod repositories.
 ///
-/// Strategy: do TWO API calls in parallel and merge the results.
+/// Strategy: THREE parallel API calls, merged + STS2-filtered.
 ///
-/// - Call A: `<user query> slay-the-spire-2 OR sts2 OR "slay the spire 2"`.
-///   Catches repos where the user's literal query terms hit GitHub's
-///   tokenizer (whole-word matches on name / description / readme).
+/// Empirically tested against the live GitHub API on 2026-05-09 with the
+/// query "path" — these are the queries that actually return
+/// `jadistanbelly/autopath-sts2`:
 ///
-/// - Call B: `topic:slay-the-spire-2 OR topic:sts2 OR "slay the spire 2" in:name,description`.
-///   Returns up to 100 STS2-tagged repos regardless of the user's query —
-///   the client-side fuzzy reranker then surfaces the row that best
-///   matches what the user typed via SUBSTRING and typo tolerance, which
-///   GitHub's tokenizer can't do (it can't see "autopath" when the user
-///   types "path" because the hyphen is a token boundary, but our JS
-///   ranker can).
+/// 1. `<query> sts2` — implicit AND. Matches any repo where both the
+///    user's term AND the literal "sts2" token appear. Most STS2 mods
+///    have "sts2" somewhere in name / description / readme.
+/// 2. `<query> topic:slay-the-spire-2` — repos topic-tagged for STS2.
+/// 3. `<query> topic:sts2` — same idea, alt topic. (autopath-sts2 has
+///    NO topics, so falls back to query 1; other mods are tagged.)
 ///
-/// Both result sets are merged, deduped by `full_name`, then post-filtered
-/// to STS2-relevance to drop any StS-1 leakage.
+/// Earlier attempts using `<query> slay-the-spire-2 OR sts2 OR "slay the
+/// spire 2"` returned 304k results sorted by best-match against `path`
+/// alone — none STS2-related — because GitHub's OR operator made the
+/// STS2 qualifier optional. The OR-joined `topic:` version returned 0
+/// because GitHub's parser doesn't handle that combination cleanly.
+/// Sticking to implicit-AND queries keeps results predictable.
 pub async fn search_github_repos(
     query: &str,
     token: Option<&str>,
 ) -> Result<Vec<GitHubRepo>> {
     let client = build_client(token);
-    let q_user = format!(
-        "{} slay-the-spire-2 OR sts2 OR \"slay the spire 2\"",
-        query
-    );
-    let q_topic = String::from(
-        "topic:slay-the-spire-2 OR topic:sts2 OR \"slay the spire 2\" in:name,description",
-    );
+    let q1 = format!("{} sts2", query);
+    let q2 = format!("{} topic:slay-the-spire-2", query);
+    let q3 = format!("{} topic:sts2", query);
 
-    // Run both in parallel — total wall time is one round-trip, not two.
-    let (a, b) = futures_util::future::join(
-        fetch_one_search(&client, &q_user),
-        fetch_one_search(&client, &q_topic),
+    let (a, b, c) = futures_util::future::join3(
+        fetch_one_search(&client, &q1),
+        fetch_one_search(&client, &q2),
+        fetch_one_search(&client, &q3),
     )
     .await;
 
-    // If either one errored we still want to return what the other got.
     let mut merged: Vec<GitHubRepo> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut push_unique = |list: Vec<GitHubRepo>| {
@@ -245,11 +243,15 @@ pub async fn search_github_repos(
     };
     match a {
         Ok(list) => push_unique(list),
-        Err(e) => log::warn!("search_github_repos query A failed: {}", e),
+        Err(e) => log::warn!("search_github_repos query (sts2 AND) failed: {}", e),
     }
     match b {
         Ok(list) => push_unique(list),
-        Err(e) => log::warn!("search_github_repos query B failed: {}", e),
+        Err(e) => log::warn!("search_github_repos query (topic:slay-the-spire-2) failed: {}", e),
+    }
+    match c {
+        Ok(list) => push_unique(list),
+        Err(e) => log::warn!("search_github_repos query (topic:sts2) failed: {}", e),
     }
 
     let total = merged.len();

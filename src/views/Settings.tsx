@@ -16,6 +16,7 @@ import {
 import { open } from '@tauri-apps/plugin-dialog';
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
+import { listen } from '@tauri-apps/api/event';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { useApp } from '../contexts/AppContext';
@@ -100,6 +101,32 @@ export function SettingsView() {
       setGithubTokenSaved(status.github_token_set);
     }).catch(() => {});
   }, []);
+
+  // When a mod is auto-installed by the Downloads watcher (NXM link or
+  // .zip drop while Settings is open), re-audit just the affected rows so
+  // the audit reflects the new state without forcing the user to click
+  // Re-audit. Only fires if the audit list is currently loaded — if the
+  // user hasn't run an audit yet, there's nothing to refresh.
+  useEffect(() => {
+    const unlisten = listen<{ mod_name: string; file_name: string; replaced: string | null }>(
+      'mod-auto-installed',
+      (event) => {
+        if (auditResults === null) return;
+        const names = [event.payload.mod_name];
+        if (event.payload.replaced && event.payload.replaced !== event.payload.mod_name) {
+          names.push(event.payload.replaced);
+        }
+        refreshAuditEntries(names);
+      },
+    );
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+    // refreshAuditEntries is stable enough; we want this to re-bind only
+    // when auditResults flips between null and non-null so the early-exit
+    // gate stays accurate.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auditResults === null]);
 
   async function handleCreateBackup() {
     setBackupBusy('create');
@@ -275,15 +302,23 @@ export function SettingsView() {
   // the existing audit list, leaving every other row untouched. Used after
   // single-mod / bulk updates so the user doesn't have to wait for a full
   // audit (every mod fetches its source) just to see the row flip from
-  // "X → Y" to "(latest)".
+  // "X → Y" to "(latest)". If a fresh entry corresponds to a mod that
+  // wasn't in the existing list (e.g. just installed via the Downloads
+  // watcher / Nexus path), we append it so it shows up immediately.
   async function refreshAuditEntries(names: string[]) {
     if (names.length === 0) return;
     try {
       const fresh = await auditModVersions(names);
       const byName = new Map(fresh.map((e) => [e.mod_name, e]));
-      setAuditResults((prev) =>
-        prev ? prev.map((e) => byName.get(e.mod_name) ?? e) : prev,
-      );
+      setAuditResults((prev) => {
+        if (!prev) return prev;
+        const existingNames = new Set(prev.map((e) => e.mod_name));
+        const merged = prev.map((e) => byName.get(e.mod_name) ?? e);
+        for (const e of fresh) {
+          if (!existingNames.has(e.mod_name)) merged.push(e);
+        }
+        return merged;
+      });
     } catch {
       /* non-fatal — leaves existing rows in place */
     }

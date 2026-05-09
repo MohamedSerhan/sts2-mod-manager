@@ -108,6 +108,59 @@ pub fn update_installed_version(mod_name: &str, version: &str, config_path: &Pat
     }
 }
 
+/// Carry a mod's source bindings (github repo, nexus link, pin state) from
+/// `old_name` to `new_name` after the install renamed the mod.
+///
+/// The audit looks up sources by mod name, so when an updated zip declares
+/// a different `Name` field in its manifest (e.g. "Show Player Hand Cards"
+/// → "ShowPlayerHandCards", or BAKAOLC's STS2-ShowPlayerHandCards repo
+/// changing its manifest casing) the old entry gets stranded and the new
+/// entry has nothing — the audit then reports "no source" and the user
+/// has to relink the repo manually. This is what the user reported.
+///
+/// We move the link, the pin state, the source-detection origin, and the
+/// previously-recorded installed version. We DON'T delete the old entry
+/// because other parts of the app (subscription manifests, exported
+/// modpacks) may still reference it. Both entries pointing at the same
+/// repo is harmless; an empty new entry is not.
+pub fn migrate_source_entry(old_name: &str, new_name: &str, config_path: &Path) {
+    if old_name == new_name {
+        return;
+    }
+    let mut db = load_sources(config_path);
+    let old = match db.mods.get(old_name).cloned() {
+        Some(e) => e,
+        None => return, // nothing to migrate
+    };
+    let dest = db.mods.entry(new_name.to_string()).or_default();
+    if dest.github_repo.is_none() {
+        dest.github_repo = old.github_repo;
+        dest.github_auto_detected = old.github_auto_detected;
+    }
+    if dest.nexus_url.is_none() {
+        dest.nexus_url = old.nexus_url;
+        dest.nexus_game_domain = old.nexus_game_domain;
+        dest.nexus_mod_id = old.nexus_mod_id;
+    }
+    if !dest.pinned {
+        dest.pinned = old.pinned;
+    }
+    if dest.installed_version.is_none() {
+        dest.installed_version = old.installed_version;
+    }
+    if let Err(e) = save_sources(&db, config_path) {
+        log::error!(
+            "Failed to migrate source entry from '{}' to '{}': {}",
+            old_name, new_name, e
+        );
+    } else {
+        log::info!(
+            "Migrated source entry on rename: '{}' → '{}'",
+            old_name, new_name
+        );
+    }
+}
+
 // ── Core Logic ──────────────────────────────────────────────────────────────
 
 /// Merge source metadata into ModInfo structs.

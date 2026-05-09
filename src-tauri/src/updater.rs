@@ -411,6 +411,12 @@ pub async fn update_mod(
     // Save under both the original name AND the manifest name (they may differ).
     update_installed_version(&name, &tag, &config_path);
     if info.name != name {
+        // When the install renamed the mod (manifest's Name field changed
+        // between releases — e.g. "STS2-ShowPlayerHandCards" → "Highlight
+        // Card Types in Potion Description"), carry the source link / pin /
+        // version over so the audit doesn't lose track and report "no
+        // source" on the freshly-installed copy.
+        crate::mod_sources::migrate_source_entry(&name, &info.name, &config_path);
         update_installed_version(&info.name, &tag, &config_path);
     }
 
@@ -457,7 +463,18 @@ pub async fn update_all_mods(
         .await
         {
             Ok(info) => {
-                // Update the source link and record installed version
+                // Carry pin / nexus link / source-detection origin from
+                // the pre-update entry to the post-update name so manifest
+                // renames don't strand the audit. We do this BEFORE writing
+                // the new entry so it lands as the baseline that we then
+                // patch with the fresh repo + version.
+                if info.name != update.mod_name {
+                    crate::mod_sources::migrate_source_entry(
+                        &update.mod_name,
+                        &info.name,
+                        &config_path,
+                    );
+                }
                 let mut db = load_sources(&config_path);
                 let entry = db.mods.entry(info.name.clone()).or_default();
                 entry.github_repo = Some(format!("{}/{}", owner, repo));

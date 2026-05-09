@@ -357,7 +357,22 @@ fn try_load_mod_from(
         let sub_path = sub_entry.path();
         if sub_path.is_file() && sub_path.extension().and_then(|e| e.to_str()) == Some("json") {
             if let Some(info) = parse_manifest(&sub_path, base_dir, enabled) {
+                // Same dedup-key registration as scan_mods_inner PASS 1 — see
+                // that block for the rationale. Without these extra keys a
+                // subdir mod gets double-counted by the top-level DLL pass
+                // when its manifest Name differs from the DLL filename.
                 found_names.insert(normalize_name(&info.name));
+                if let Some(stem) = sub_path.file_stem().and_then(|s| s.to_str()) {
+                    found_names.insert(normalize_name(stem));
+                }
+                if let Some(folder) = info.folder_name.as_deref() {
+                    found_names.insert(normalize_name(folder));
+                }
+                for f in &info.files {
+                    if let Some(stem) = std::path::Path::new(f).file_stem().and_then(|s| s.to_str()) {
+                        found_names.insert(normalize_name(stem));
+                    }
+                }
                 upsert_mod_dedup(mods, info, &sub_path.display().to_string());
                 return true;
             }
@@ -369,6 +384,9 @@ fn try_load_mod_from(
         if sub_path.is_file() && sub_path.extension().and_then(|e| e.to_str()) == Some("dll") {
             let info = dll_only_mod(&sub_path, base_dir, enabled);
             found_names.insert(normalize_name(&info.name));
+            if let Some(folder) = info.folder_name.as_deref() {
+                found_names.insert(normalize_name(folder));
+            }
             upsert_mod_dedup(mods, info, &sub_path.display().to_string());
             return true;
         }
@@ -442,12 +460,33 @@ fn scan_mods_inner(dir: &Path, enabled: bool) -> Vec<ModInfo> {
     // the same Name (allowing whitespace / case / dash differences) are
     // almost always leftover stale files. We keep whichever has the richer
     // manifest and log so the user can investigate.
+    //
+    // We register THREE keys per loaded mod into `found_names`:
+    //   - normalized manifest Name (the user-facing name)
+    //   - normalized json file stem (e.g. "HighlightPotionCards" when the
+    //     manifest declares Name: "Highlight Card Types in Potion
+    //     Description")
+    //   - normalized stem of every sibling .dll/.pck file the manifest
+    //     pulled in via collect_mod_files
+    // PASS 3 (DLL-only fallback) checks the DLL stem, so without these
+    // extra registrations a mod whose manifest Name doesn't match the DLL
+    // filename gets DOUBLE-COUNTED — once as the JSON manifest and once
+    // as an "orphan" DLL. That was the +1 in the user's count vs the
+    // game's.
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("json") {
                 if let Some(info) = parse_manifest(&path, dir, enabled) {
                     found_names.insert(normalize_name(&info.name));
+                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                        found_names.insert(normalize_name(stem));
+                    }
+                    for f in &info.files {
+                        if let Some(stem) = std::path::Path::new(f).file_stem().and_then(|s| s.to_str()) {
+                            found_names.insert(normalize_name(stem));
+                        }
+                    }
                     upsert_mod_dedup(&mut mods, info, &path.display().to_string());
                 }
             }

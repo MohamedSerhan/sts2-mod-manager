@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/updater-signature.sh
+source "$SCRIPT_DIR/lib/updater-signature.sh"
+
 # Usage:
 #   ./scripts/publish-updater.sh <tag> [repo]
 #
@@ -33,7 +37,7 @@ gh release download "$TAG" --repo "$REPO" --pattern "*.sig" --dir "$SIGDIR"
 
 sig() {
   local f="${SIGDIR}/$1.sig"
-  if [ -f "$f" ]; then cat "$f"; else echo ""; fi
+  if [ -f "$f" ]; then tauri_signature_field "$f"; else echo ""; fi
 }
 
 ASSETS_JSON=$(gh release view "$TAG" --repo "$REPO" --json assets)

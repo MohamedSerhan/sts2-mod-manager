@@ -65,7 +65,7 @@ interface HomeProps {
   focusCodeBarSignal?: number;
 }
 export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchPack, onLaunch, focusCodeBarSignal }: HomeProps) {
-  const { gameInfo, mods, refreshAll, refreshMods, activeProfile } = useApp();
+  const { gameInfo, mods, refreshAll, refreshMods, activeProfile, refreshSubUpdates } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
   const [profileCode, setProfileCode] = useState('');
@@ -162,6 +162,10 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
       const profile = await applySubscriptionUpdate(shareId);
       await refreshAll();
       setSubUpdates((prev) => prev.filter((s) => s.share_id !== shareId));
+      // Keep AppContext (and thus the sidebar badge) in sync — the
+      // background poll would catch this in 90s but the user expects
+      // the badge to clear immediately.
+      refreshSubUpdates();
       toast.success(`Synced modpack "${profile.name}" - you're up to date!`);
     } catch (e) {
       toast.error(`Sync failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -182,6 +186,7 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
       await unsubscribe(shareId);
       setSubscriptions((prev) => prev.filter((s) => s.share_id !== shareId));
       setSubUpdates((prev) => prev.filter((s) => s.share_id !== shareId));
+      refreshSubUpdates();
       toast.success(`Unlinked from "${profileName}"`);
     } catch (e) {
       toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);

@@ -258,10 +258,11 @@ pub async fn check_subscription_updates(
 #[tauri::command]
 pub async fn apply_subscription_update(
     share_id: String,
+    app_handle: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Profile, String> {
     crate::game::ensure_game_not_running()?;
-    apply_subscription_update_inner(share_id, state).await
+    apply_subscription_update_inner(share_id, app_handle, state).await
 }
 
 /// Wipe & reinstall a modpack: delete all mod files, then re-run the
@@ -269,6 +270,7 @@ pub async fn apply_subscription_update(
 #[tauri::command]
 pub async fn repair_modpack_subscription(
     share_id: String,
+    app_handle: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Profile, String> {
     crate::game::ensure_game_not_running()?;
@@ -287,7 +289,7 @@ pub async fn repair_modpack_subscription(
     wipe_directory_contents(&disabled_path).map_err(|e| e.to_string())?;
 
     log::info!("Repair: directories cleared, running subscription update for '{}'", share_id);
-    let profile = apply_subscription_update_inner(share_id.clone(), state).await?;
+    let profile = apply_subscription_update_inner(share_id.clone(), app_handle, state).await?;
     log::info!("Repair: completed for '{}'", share_id);
 
     Ok(profile)
@@ -315,9 +317,11 @@ fn wipe_directory_contents(dir: &Path) -> Result<()> {
 
 async fn apply_subscription_update_inner(
     share_id: String,
+    app_handle: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Profile, String> {
-    let (config_path, mods_path, disabled_path, profiles_path, cache_path, token) = {
+    use tauri::Emitter;
+    let (config_path, mods_path, disabled_path, profiles_path, cache_path, token, user_game_version) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         (
             s.config_path.clone(),
@@ -326,8 +330,14 @@ async fn apply_subscription_update_inner(
             s.profiles_path.clone(),
             s.cache_path.clone(),
             s.github_token.clone(),
+            s.game_version.clone(),
         )
     };
+
+    // Mods skipped because their min_game_version is above the user's
+    // STS2 build. Same flow as install_shared_profile — collect, then
+    // emit a Tauri event after the loop so the frontend can toast.
+    let mut skipped_incompatible: Vec<crate::sharing::SkippedMod> = Vec::new();
 
     // Fetch the latest remote profile
     let remote = if let Some(idx) = share_id.find(':') {
@@ -430,13 +440,37 @@ async fn apply_subscription_update_inner(
 
         log::info!("Subscription update: mod '{}' needs download", pm.name);
         let mut downloaded = false;
+        let mut skipped_this_mod = false;
 
         // Prefer bundle_url (curator's bundled copy)
         if let Some(ref bundle_url) = pm.bundle_url {
             match crate::sharing::download_bundle(bundle_url, &pm.name, &mods_path).await {
                 Ok(_) => {
-                    log::info!("Installed bundled mod '{}' from subscription update", pm.name);
-                    downloaded = true;
+                    // Re-scan to read the fresh manifest's min_game_version.
+                    let after = crate::mods::scan_mods(&mods_path);
+                    if let Some(installed) = after.iter().find(|m| m.name == pm.name || Some(&m.name) == pm.folder_name.as_ref()) {
+                        if crate::updater::install_is_incompatible(installed, user_game_version.as_deref()) {
+                            log::info!(
+                                "Subscription update: skipping '{}' — needs game v{}, user has v{}",
+                                installed.name,
+                                installed.min_game_version.as_deref().unwrap_or("?"),
+                                user_game_version.as_deref().unwrap_or("?"),
+                            );
+                            crate::mods::delete_mod_files_by_info(installed, &mods_path);
+                            skipped_incompatible.push(crate::sharing::SkippedMod {
+                                mod_name: installed.name.clone(),
+                                min_game_version: installed.min_game_version.clone().unwrap_or_default(),
+                                user_game_version: user_game_version.clone().unwrap_or_default(),
+                            });
+                            skipped_this_mod = true;
+                        } else {
+                            log::info!("Installed bundled mod '{}' from subscription update", pm.name);
+                            downloaded = true;
+                        }
+                    } else {
+                        log::info!("Installed bundled mod '{}' from subscription update", pm.name);
+                        downloaded = true;
+                    }
                 }
                 Err(e) => {
                     log::warn!("Bundle download failed for '{}': {} -- trying GitHub fallback", pm.name, e);
@@ -444,8 +478,9 @@ async fn apply_subscription_update_inner(
             }
         }
 
-        // Fallback: try GitHub source
-        if !downloaded {
+        // Fallback: try GitHub source (only if bundle didn't install AND we
+        // didn't already skip this mod for incompatibility above).
+        if !downloaded && !skipped_this_mod {
             let github_repo = pm.source.as_ref().and_then(|s| {
                 if let Some(repo) = s.strip_prefix("github:") {
                     return Some(repo.to_string());
@@ -472,8 +507,23 @@ async fn apply_subscription_update_inner(
                         parts[0], parts[1], None, &mods_path, &cache_path, token.as_deref(),
                     ).await {
                         Ok(info) => {
-                            log::info!("Downloaded mod '{}' from GitHub for subscription", info.name);
-                            downloaded = true;
+                            if crate::updater::install_is_incompatible(&info, user_game_version.as_deref()) {
+                                log::info!(
+                                    "Subscription update: skipping GitHub-installed '{}' — needs game v{}, user has v{}",
+                                    info.name,
+                                    info.min_game_version.as_deref().unwrap_or("?"),
+                                    user_game_version.as_deref().unwrap_or("?"),
+                                );
+                                crate::mods::delete_mod_files_by_info(&info, &mods_path);
+                                skipped_incompatible.push(crate::sharing::SkippedMod {
+                                    mod_name: info.name.clone(),
+                                    min_game_version: info.min_game_version.clone().unwrap_or_default(),
+                                    user_game_version: user_game_version.clone().unwrap_or_default(),
+                                });
+                            } else {
+                                log::info!("Downloaded mod '{}' from GitHub for subscription", info.name);
+                                downloaded = true;
+                            }
                         }
                         Err(e) => {
                             log::warn!("GitHub download also failed for '{}': {}", pm.name, e);
@@ -483,9 +533,23 @@ async fn apply_subscription_update_inner(
             }
         }
 
-        if !downloaded {
+        if !downloaded && !skipped_this_mod {
             log::warn!("No download source for mod '{}' in subscription update", pm.name);
         }
+    }
+
+    if !skipped_incompatible.is_empty() {
+        log::info!(
+            "Subscription update: {} mod(s) skipped due to game-version incompatibility",
+            skipped_incompatible.len(),
+        );
+        let _ = app_handle.emit(
+            "modpack-mods-skipped",
+            serde_json::json!({
+                "profile_name": &remote.name,
+                "skipped": &skipped_incompatible,
+            }),
+        );
     }
 
     // ── STEP 2: Apply profile AFTER downloads ──

@@ -6,6 +6,23 @@ use crate::error::{AppError, Result};
 use crate::profiles::Profile;
 use crate::state::AppState;
 
+/// One mod skipped during a modpack install because it declared a
+/// `min_game_version` higher than the user's STS2 build. Surfaced in
+/// the `modpack-mods-skipped` Tauri event so the frontend can toast
+/// "Skipped 1: Show Player Hand Cards needs game v0.105.0; you have v0.103.2".
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkippedMod {
+    pub mod_name: String,
+    pub min_game_version: String,
+    pub user_game_version: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ModpackSkippedEvent<'a> {
+    profile_name: &'a str,
+    skipped: &'a [SkippedMod],
+}
+
 /// In-flight guard so a double-click on Share / Re-share for the same profile
 /// can't kick off two concurrent uploads that race against the same gist files
 /// (which previously produced 409 SHA-mismatch storms on GitHub's API).
@@ -856,11 +873,20 @@ pub async fn fetch_shared_profile_cmd(
 
 /// Install a shared profile from a code AND auto-subscribe for updates.
 /// Downloads missing mods FIRST, then applies the profile (enable/disable).
+///
+/// `app_handle` is taken so we can emit a `modpack-mods-skipped`
+/// notification when one or more mods in the pack declare a
+/// `min_game_version` higher than the user's STS2 build. Those mods
+/// can't be loaded by the game on this branch, so we skip the install
+/// (rather than landing a useless artifact) and tell the UI to surface
+/// the skip with a clear toast.
 #[tauri::command]
 pub async fn install_shared_profile(
     code: String,
+    app_handle: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Profile, String> {
+    use tauri::Emitter;
     crate::game::ensure_game_not_running()?;
     let (owner, profile_code) = parse_share_code(&code)
         .map_err(|e| e.to_string())?;
@@ -870,7 +896,7 @@ pub async fn install_shared_profile(
         .await
         .map_err(|e| e.to_string())?;
 
-    let (mods_path, disabled_path, profiles_path, config_path, cache_path, token) = {
+    let (mods_path, disabled_path, profiles_path, config_path, cache_path, token, user_game_version) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let mods = s.mods_path.clone().ok_or("Game path not set")?;
         let disabled = s.disabled_mods_path.clone().ok_or("Game path not set")?;
@@ -878,8 +904,15 @@ pub async fn install_shared_profile(
         let config = s.config_path.clone();
         let cache = s.cache_path.clone();
         let token = s.github_token.clone();
-        (mods, disabled, profiles, config, cache, token)
+        let game_version = s.game_version.clone();
+        (mods, disabled, profiles, config, cache, token, game_version)
     };
+
+    // Mods skipped because they declare a min_game_version higher than the
+    // user's STS2. We download + extract them (since we can't read the
+    // manifest until the zip is on disk), then immediately delete the
+    // files and record the skip. The frontend toasts about these.
+    let mut skipped_incompatible: Vec<SkippedMod> = Vec::new();
 
     // Save the profile locally
     crate::profiles::save_profile(&profile, &profiles_path).map_err(|e| e.to_string())?;
@@ -968,6 +1001,28 @@ pub async fn install_shared_profile(
             log::info!("Downloading bundled mod '{}' from profiles repo", pm.name);
             match download_bundle(bundle_url, &pm.name, &mods_path).await {
                 Ok(_) => {
+                    // Re-scan to find the just-installed mod's parsed manifest.
+                    // We need this to read its min_game_version field —
+                    // download_bundle returns () so we don't have a ModInfo
+                    // back. The fresh scan picks up the install correctly.
+                    let after = crate::mods::scan_mods(&mods_path);
+                    if let Some(installed) = after.iter().find(|m| m.name == pm.name || Some(&m.name) == pm.folder_name.as_ref()) {
+                        if crate::updater::install_is_incompatible(installed, user_game_version.as_deref()) {
+                            log::info!(
+                                "Modpack apply: skipping '{}' — needs game v{}, user has v{}",
+                                installed.name,
+                                installed.min_game_version.as_deref().unwrap_or("?"),
+                                user_game_version.as_deref().unwrap_or("?"),
+                            );
+                            crate::mods::delete_mod_files_by_info(installed, &mods_path);
+                            skipped_incompatible.push(SkippedMod {
+                                mod_name: installed.name.clone(),
+                                min_game_version: installed.min_game_version.clone().unwrap_or_default(),
+                                user_game_version: user_game_version.clone().unwrap_or_default(),
+                            });
+                            continue;
+                        }
+                    }
                     log::info!("Installed bundled mod '{}'", pm.name);
                     continue;
                 }
@@ -1018,6 +1073,21 @@ pub async fn install_shared_profile(
                 .await
                 {
                     Ok(info) => {
+                        if crate::updater::install_is_incompatible(&info, user_game_version.as_deref()) {
+                            log::info!(
+                                "Modpack apply: skipping GitHub-installed '{}' — needs game v{}, user has v{}",
+                                info.name,
+                                info.min_game_version.as_deref().unwrap_or("?"),
+                                user_game_version.as_deref().unwrap_or("?"),
+                            );
+                            crate::mods::delete_mod_files_by_info(&info, &mods_path);
+                            skipped_incompatible.push(SkippedMod {
+                                mod_name: info.name.clone(),
+                                min_game_version: info.min_game_version.clone().unwrap_or_default(),
+                                user_game_version: user_game_version.clone().unwrap_or_default(),
+                            });
+                            continue;
+                        }
                         log::info!("Downloaded mod '{}' from GitHub", info.name);
                         continue;
                     }
@@ -1037,6 +1107,21 @@ pub async fn install_shared_profile(
             "Could not download {} mods: {:?}. These need to be installed manually.",
             download_failures.len(),
             download_failures
+        );
+    }
+
+    if !skipped_incompatible.is_empty() {
+        log::info!(
+            "Modpack apply: {} mod(s) skipped due to game-version incompatibility: {:?}",
+            skipped_incompatible.len(),
+            skipped_incompatible.iter().map(|s| &s.mod_name).collect::<Vec<_>>(),
+        );
+        let _ = app_handle.emit(
+            "modpack-mods-skipped",
+            ModpackSkippedEvent {
+                profile_name: &profile.name,
+                skipped: &skipped_incompatible,
+            },
         );
     }
 

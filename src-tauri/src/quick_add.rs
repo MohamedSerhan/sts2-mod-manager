@@ -2,7 +2,6 @@ use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
-use crate::download::download_and_install_github_mod;
 use crate::error::{AppError, Result};
 use crate::mod_sources::{load_sources, save_sources};
 use crate::mods::ModInfo;
@@ -140,21 +139,22 @@ pub async fn quick_add_mod(
     // Try GitHub first
     if let Ok((owner, repo)) = resolve_github_url(&url) {
         log::info!("Quick add resolved as GitHub: {}/{}", owner, repo);
-        let (mods_path, cache_path, token, config_path) = {
+        let (mods_path, cache_path, token, config_path, game_version) = {
             let s = state.lock().map_err(|e| e.to_string())?;
             let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
             let cache_path = s.cache_path.clone();
             let token = s.github_token.clone();
             let config_path = s.config_path.clone();
-            (mods_path, cache_path, token, config_path)
+            let game_version = s.game_version.clone();
+            (mods_path, cache_path, token, config_path, game_version)
         };
 
-        let mod_info = download_and_install_github_mod(
+        let (mod_info, _chosen_tag, _walked_back) = crate::download::install_compatible_github_mod(
             &owner,
             &repo,
-            None,
             &mods_path,
             &cache_path,
+            game_version.as_deref(),
             token.as_deref(),
         )
         .await

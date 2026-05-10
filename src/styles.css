@@ -209,6 +209,56 @@ body {
   display: grid; place-items: center;
   font-size: 12px; opacity: 0.85;
 }
+/* Update-count chip on a sidebar nav item — pinned to the right edge
+   so it doesn't reflow the label. Yellow to match the gold accent
+   that signals "actionable" everywhere else (update / install). */
+.gf-nav-badge {
+  margin-left: auto;
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px; height: 18px;
+  padding: 0 5px;
+  font-size: 10.5px;
+  font-weight: 700;
+  border-radius: 9px;
+  background: var(--gf);
+  color: var(--gf-ink);
+  line-height: 1;
+}
+
+/* Activity feed on the Profiles view — followed packs with pending
+   updates. Reads as a focused worklist: header pill, then one row per
+   update with a quick "Apply" affordance. Yellow accent matches the
+   sidebar badge so the visual story (sidebar count → here → apply)
+   tracks across the surfaces. */
+.gf-activity-feed {
+  background: var(--indigo-panel);
+  border: 1px solid var(--indigo-line);
+  border-left: 3px solid var(--gf);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.gf-activity-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  color: var(--gf);
+  margin-bottom: 8px;
+}
+.gf-activity-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--indigo-line);
+}
+.gf-activity-row:first-of-type { border-top: 0; padding-top: 4px; }
+.gf-activity-name { font-size: 13px; font-weight: 600; color: var(--ink); }
+.gf-activity-summary { font-size: 11.5px; color: var(--ink-mute); margin-top: 2px; }
 .gf-side-foot { margin-top: auto; padding-top: 12px; display: flex; flex-direction: column; gap: 1px; }
 
 /* Sidebar status block */

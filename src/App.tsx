@@ -77,7 +77,7 @@ export default function App() {
 
 function AppInner() {
   const [activeView, setActiveView] = useState<View>('home');
-  const { gameInfo, mods, refreshAll, activeProfile, gameRunning } = useApp();
+  const { gameInfo, mods, refreshAll, activeProfile, gameRunning, subUpdates } = useApp();
   const toast = useToast();
   const [dragOver, setDragOver] = useState(false);
   const [appUpdate, setAppUpdate] = useState<Update | null>(null);
@@ -122,7 +122,27 @@ function AppInner() {
     const unlisten2 = listen<{ file_name: string; error: string }>('mod-auto-install-failed', (event) => {
       toast.error(`Failed to install ${event.payload.file_name}: ${event.payload.error}`);
     });
-    return () => { unlisten1.then(f => f()); unlisten2.then(f => f()); };
+    // Modpack apply / subscription update emits this when one or more
+    // mods in the pack require a newer game version than the user's
+    // STS2 ships. We've already deleted the offending files (the install
+    // would have produced a useless artifact); just tell the user
+    // why those mods aren't there.
+    const unlisten3 = listen<{
+      profile_name: string;
+      skipped: { mod_name: string; min_game_version: string; user_game_version: string }[];
+    }>('modpack-mods-skipped', (event) => {
+      const { profile_name, skipped } = event.payload;
+      if (skipped.length === 0) return;
+      const summary = skipped.length === 1
+        ? `Skipped 1 mod: ${skipped[0].mod_name} needs game v${skipped[0].min_game_version} (you have v${skipped[0].user_game_version || '?'}).`
+        : `Skipped ${skipped.length} mods (need a newer game build than yours): ${skipped.map((s) => s.mod_name).join(', ')}.`;
+      toast.info(`Modpack "${profile_name}" applied. ${summary}`);
+    });
+    return () => {
+      unlisten1.then(f => f());
+      unlisten2.then(f => f());
+      unlisten3.then(f => f());
+    };
   }, []);
 
   // Check for app updates on launch and every 24 hours while the app is open
@@ -354,16 +374,28 @@ function AppInner() {
             </span>
           </div>
 
-          {NAV.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              onClick={() => setActiveView(id)}
-              className={cn('gf-nav', activeView === id && 'active')}
-            >
-              <Icon size={14} className="gf-nav-icon" />
-              <span>{label}</span>
-            </button>
-          ))}
+          {NAV.map(({ id, label, icon: Icon }) => {
+            // Profiles gets a count badge when followed packs have
+            // pending updates — same data the Home view's "update
+            // available" cards consume, lifted to AppContext so the
+            // sidebar can read it from anywhere.
+            const badge = id === 'profiles' && subUpdates.length > 0 ? subUpdates.length : null;
+            return (
+              <button
+                key={id}
+                onClick={() => setActiveView(id)}
+                className={cn('gf-nav', activeView === id && 'active')}
+              >
+                <Icon size={14} className="gf-nav-icon" />
+                <span>{label}</span>
+                {badge !== null && (
+                  <span className="gf-nav-badge" title={`${badge} pack${badge === 1 ? '' : 's'} ${badge === 1 ? 'has' : 'have'} an update available`}>
+                    {badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
 
           <div className="gf-side-foot">
             {FOOT_NAV.map(({ id, label, icon: Icon }) => (

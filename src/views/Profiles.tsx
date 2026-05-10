@@ -37,6 +37,7 @@ import {
   getShareInfo,
   getProfileDrift,
   createBackup,
+  applySubscriptionUpdate,
 } from '../hooks/useTauri';
 import type { ProfileDrift } from '../hooks/useTauri';
 import type { Profile, ShareResult } from '../types';
@@ -63,9 +64,25 @@ export function ProfilesView() {
   // v5 batch 3 — Following / Published tabs.
   // "Following" = every profile you have. "Published" = ones you've shared (have a share code).
   const [tab, setTab] = useState<'following' | 'published'>('following');
-  const { refreshAll, setActiveProfile, activeProfile } = useApp();
+  const { refreshAll, setActiveProfile, activeProfile, subUpdates, refreshSubUpdates } = useApp();
   const toastCtx = useToast();
   const confirm = useConfirm();
+  const [applyingSubId, setApplyingSubId] = useState<string | null>(null);
+
+  async function handleApplySub(shareId: string) {
+    if (applyingSubId) return;
+    setApplyingSubId(shareId);
+    try {
+      const profile = await applySubscriptionUpdate(shareId);
+      await refreshAll();
+      refreshSubUpdates();
+      toastCtx.success(`Synced "${profile.name}" — you're up to date.`);
+    } catch (e) {
+      toastCtx.error(`Sync failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setApplyingSubId(null);
+    }
+  }
 
   useEffect(() => {
     loadProfiles();
@@ -458,6 +475,49 @@ export function ProfilesView() {
           <span className="gf-tab-count">{Object.keys(shareInfoMap).length}</span>
         </button>
       </div>
+
+      {/* Activity — pending updates from followed packs. One row per
+          pack the curator has re-shared since the user last synced.
+          Same data the Home view's "update available" cards consume,
+          plus a sidebar badge — surfaced here as a focused worklist. */}
+      {subUpdates.length > 0 && (
+        <div className="gf-activity-feed" style={{ marginBottom: 14 }}>
+          <div className="gf-activity-head">
+            <RefreshCw size={14} />
+            <span>
+              {subUpdates.length} pack{subUpdates.length === 1 ? '' : 's'} {subUpdates.length === 1 ? 'has' : 'have'} updates
+            </span>
+          </div>
+          {subUpdates.map((u) => {
+            const summary = [
+              u.added_mods.length > 0 && `+${u.added_mods.length} added`,
+              u.updated_mods.length > 0 && `${u.updated_mods.length} updated`,
+              u.removed_mods.length > 0 && `-${u.removed_mods.length} removed`,
+            ].filter(Boolean).join(' · ') || 'curator pushed an update';
+            return (
+              <div key={u.share_id} className="gf-activity-row">
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="gf-activity-name">{u.profile_name}</div>
+                  <div className="gf-activity-summary">{summary}</div>
+                </div>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={applyingSubId !== null}
+                  onClick={() => handleApplySub(u.share_id)}
+                >
+                  {applyingSubId === u.share_id ? (
+                    <RefreshCw size={12} className="animate-spin" />
+                  ) : (
+                    <Download size={12} />
+                  )}
+                  {applyingSubId === u.share_id ? 'Applying…' : 'Apply update'}
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Drift banner on the active profile (v5 batch 3) */}
       {activeProfile && driftMap[activeProfile] && (

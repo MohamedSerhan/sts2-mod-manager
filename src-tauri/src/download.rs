@@ -447,6 +447,61 @@ pub fn peek_zip_min_game_version(zip_path: &Path) -> Result<Option<String>> {
     )))
 }
 
+/// Install a GitHub mod, picking the latest release that's actually
+/// compatible with the user's game version. If `user_game_version` is
+/// None we don't have anything to compare against — install latest
+/// (legacy behavior).
+///
+/// Used by every "first install from GitHub" entry point — Browse →
+/// Install, Add by URL with a github.com URL, the friend-pack apply
+/// flow. Repair has its own caller because it also handles the
+/// pre-existing on-disk install (defensive folder sweep).
+///
+/// Returns (info, chosen_tag, walked_back) so the frontend can toast a
+/// version-aware message ("Installed AutoPath v1.3.0 — latest compatible
+/// for your game v0.103.2") instead of just "Installed".
+pub async fn install_compatible_github_mod(
+    owner: &str,
+    repo: &str,
+    mods_path: &Path,
+    cache_path: &Path,
+    user_game_version: Option<&str>,
+    token: Option<&str>,
+) -> Result<(crate::mods::ModInfo, String, bool)> {
+    if user_game_version.is_none() {
+        // No way to compare — fall through to legacy "install latest" path.
+        let info = download_and_install_github_mod(owner, repo, None, mods_path, cache_path, token).await?;
+        return Ok((info, String::new(), false));
+    }
+
+    let chosen = crate::updater::pick_compatible_release(
+        owner, repo, user_game_version, cache_path, token,
+    )
+    .await?;
+
+    // Determine if this was actually a walk-back (i.e. we picked something
+    // older than latest) so the caller can toast about it. Cheap second
+    // call to fetch_latest_release — already cached server-side via the
+    // GitHub API's CDN.
+    let walked_back = match fetch_latest_release(owner, repo, token).await {
+        Ok(latest) => latest.tag_name != chosen.tag,
+        Err(_) => false,
+    };
+
+    let info = crate::mods::install_mod_from_zip(&chosen.zip_path, mods_path)
+        .map_err(|e| AppError::Other(format!("install_mod_from_zip failed: {}", e)))?;
+
+    if walked_back {
+        log::info!(
+            "install_compatible_github_mod: picked {}/{}@{} for game v{} (skipped newer release with min_game_version={})",
+            owner, repo, chosen.tag,
+            user_game_version.unwrap_or("?"),
+            chosen.min_game_version.as_deref().unwrap_or("?"),
+        );
+    }
+    Ok((info, chosen.tag, walked_back))
+}
+
 /// Find the best asset to download from a release (prefer .zip containing mod files).
 fn find_best_asset(release: &GitHubRelease) -> Option<&GitHubAsset> {
     // Prefer zip files
@@ -579,25 +634,32 @@ pub async fn download_github_mod(
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ModInfo, String> {
     crate::game::ensure_game_not_running()?;
-    let (mods_path, cache_path, token, config_path) = {
+    let (mods_path, cache_path, token, config_path, game_version) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
         let cache_path = s.cache_path.clone();
         let token = s.github_token.clone();
         let config_path = s.config_path.clone();
-        (mods_path, cache_path, token, config_path)
+        let game_version = s.game_version.clone();
+        (mods_path, cache_path, token, config_path, game_version)
     };
 
-    let mod_info = download_and_install_github_mod(
-        &owner,
-        &repo,
-        tag.as_deref(),
-        &mods_path,
-        &cache_path,
-        token.as_deref(),
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+    // When the caller asked for a specific tag, install that exact tag —
+    // they know what they want. When asking for "latest" (tag=None),
+    // route through the compatibility-aware installer so we don't land
+    // a release the game can't load.
+    let mod_info = if let Some(t) = tag.as_deref() {
+        download_and_install_github_mod(&owner, &repo, Some(t), &mods_path, &cache_path, token.as_deref())
+            .await
+            .map_err(|e| e.to_string())?
+    } else {
+        let (info, _chosen_tag, _walked_back) = install_compatible_github_mod(
+            &owner, &repo, &mods_path, &cache_path, game_version.as_deref(), token.as_deref(),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        info
+    };
 
     // Auto-save the GitHub source link so updates work later
     let mut db = crate::mod_sources::load_sources(&config_path);

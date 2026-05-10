@@ -64,6 +64,20 @@ pub fn game_version_satisfies(current: &str, required: &str) -> bool {
     }
 }
 
+/// Returns true iff `info` (a freshly-installed mod) declares a
+/// `min_game_version` higher than the user's `user_game_version` —
+/// i.e. the install landed but the game's loader will silently skip
+/// it. `None` user version = we don't know, fail open (return false).
+pub fn install_is_incompatible(
+    info: &crate::mods::ModInfo,
+    user_game_version: Option<&str>,
+) -> bool {
+    match (user_game_version, info.min_game_version.as_deref()) {
+        (Some(gv), Some(req)) => !game_version_satisfies(gv, req),
+        _ => false,
+    }
+}
+
 // ── Types ───────────────────────────────────────────────────────────────────
 
 /// Describes an available update for an installed mod.
@@ -582,12 +596,12 @@ pub async fn repair_mod(
     Ok(info)
 }
 
-/// Result of the Repair walk-back: which release we picked + the path to
-/// its cached zip (already on disk, ready to extract).
-struct WalkBackChoice {
-    tag: String,
-    min_game_version: Option<String>,
-    zip_path: std::path::PathBuf,
+/// Result of the walk-back: which release we picked + the path to its
+/// cached zip (already on disk, ready to extract).
+pub struct WalkBackChoice {
+    pub tag: String,
+    pub min_game_version: Option<String>,
+    pub zip_path: std::path::PathBuf,
 }
 
 /// Walk a repo's release list newest → oldest, return the first release
@@ -598,7 +612,7 @@ struct WalkBackChoice {
 /// If `game_version` is None we can't compare — return the latest release
 /// to mirror the legacy update_mod behavior. Logged so we know we
 /// skipped the check.
-async fn pick_compatible_release(
+pub async fn pick_compatible_release(
     owner: &str,
     repo: &str,
     game_version: Option<&str>,

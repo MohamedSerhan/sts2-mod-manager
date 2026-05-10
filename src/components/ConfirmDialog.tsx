@@ -23,7 +23,10 @@ interface CheckboxOption {
 
 export interface ConfirmOptions {
   title: string;
-  body?: string;
+  /** Body copy under the title. Pass a string for simple cases or a
+   *  ReactNode when you need a list (e.g. share-code import shows the
+   *  source URLs as bullets). */
+  body?: ReactNode;
   warning?: string;
   confirmLabel?: string;
   cancelLabel?: string;
@@ -32,6 +35,9 @@ export interface ConfirmOptions {
   typedPhrase?: string;
   /** Optional checkbox; result.checked reflects the final state. */
   checkbox?: CheckboxOption;
+  /** Optional override for the modal's pixel width. Default 480. The
+   *  share-import preview wants more room for the source list. */
+  width?: number;
 }
 
 export type ConfirmResult = false | { confirmed: true; checked: boolean };
@@ -75,7 +81,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
         <div className="gf-modal-back" onClick={() => close(false)}>
           <div
             className="gf-modal"
-            style={{ width: 480 }}
+            style={{ width: pending.width ?? 480 }}
             onClick={(e) => e.stopPropagation()}
           >
             <div

@@ -522,28 +522,45 @@ pub async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::P
     Ok(())
 }
 
-/// Fetch a profile from any user's profiles repo (public, no auth needed).
-/// Uses the GitHub Contents API to avoid CDN caching issues with raw.githubusercontent.com.
-/// This ensures that recently reshared profiles are fetched immediately.
-pub async fn fetch_shared_profile(owner: &str, filename: &str) -> Result<Profile> {
+/// Fetch a profile from any user's profiles repo.
+///
+/// Uses the GitHub Contents API to avoid CDN caching issues with
+/// raw.githubusercontent.com — recently re-shared profiles need to be
+/// fetched immediately.
+///
+/// When `token` is `Some`, the request is authenticated and gets the
+/// 5000-req/hour rate limit. When `None`, the request is anonymous and
+/// shares the per-IP 60-req/hour pool. The subscription poll passes the
+/// user's PAT here so a follower with several subscriptions doesn't keep
+/// hitting 429s.
+pub async fn fetch_shared_profile(
+    owner: &str,
+    filename: &str,
+    token: Option<&str>,
+) -> Result<Profile> {
     let client = reqwest::Client::builder()
         .user_agent("sts2-mod-manager/0.1")
         .build()
         .unwrap_or_default();
 
     // Primary: use GitHub Contents API with raw accept header to bypass CDN cache.
-    // Works without auth for public repos (60 req/hour rate limit, plenty for subscription checks).
     let api_url = format!(
         "https://api.github.com/repos/{}/{}/contents/{}",
         owner, PROFILES_REPO, filename
     );
-    log::info!("Fetching shared profile via GitHub API: {}", api_url);
+    log::info!(
+        "Fetching shared profile via GitHub API ({}): {}",
+        if token.is_some() { "authed" } else { "anon" },
+        api_url
+    );
 
-    let api_resp = client
+    let mut req = client
         .get(&api_url)
-        .header("Accept", "application/vnd.github.raw+json")
-        .send()
-        .await;
+        .header("Accept", "application/vnd.github.raw+json");
+    if let Some(t) = token {
+        req = req.bearer_auth(t);
+    }
+    let api_resp = req.send().await;
 
     let text = match api_resp {
         Ok(resp) if resp.status().is_success() => resp.text().await?,
@@ -860,13 +877,18 @@ pub async fn reshare_profile(
 #[tauri::command]
 pub async fn fetch_shared_profile_cmd(
     code: String,
-    _state: tauri::State<'_, AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Profile, String> {
     let (owner, profile_code) = parse_share_code(&code)
         .map_err(|e| e.to_string())?;
 
+    let token = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        s.github_token.clone()
+    };
+
     let filename = code_to_filename(&profile_code);
-    fetch_shared_profile(&owner, &filename)
+    fetch_shared_profile(&owner, &filename, token.as_deref())
         .await
         .map_err(|e| e.to_string())
 }
@@ -891,11 +913,8 @@ pub async fn install_shared_profile(
     let (owner, profile_code) = parse_share_code(&code)
         .map_err(|e| e.to_string())?;
 
-    let filename = code_to_filename(&profile_code);
-    let profile = fetch_shared_profile(&owner, &filename)
-        .await
-        .map_err(|e| e.to_string())?;
-
+    // Pull paths + token from state first so the GitHub fetch can use the
+    // user's PAT for the higher rate limit.
     let (mods_path, disabled_path, profiles_path, config_path, cache_path, token, user_game_version) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let mods = s.mods_path.clone().ok_or("Game path not set")?;
@@ -907,6 +926,11 @@ pub async fn install_shared_profile(
         let game_version = s.game_version.clone();
         (mods, disabled, profiles, config, cache, token, game_version)
     };
+
+    let filename = code_to_filename(&profile_code);
+    let profile = fetch_shared_profile(&owner, &filename, token.as_deref())
+        .await
+        .map_err(|e| e.to_string())?;
 
     // Mods skipped because they declare a min_game_version higher than the
     // user's STS2. We download + extract them (since we can't read the
@@ -1149,7 +1173,42 @@ pub async fn install_shared_profile(
     Ok(profile)
 }
 
+/// True iff `s` matches GitHub's username rules: 1-39 chars, alphanumeric
+/// or single hyphens, can't start or end with a hyphen, no consecutive
+/// hyphens. We use this as a hard gate before interpolating `owner` into
+/// any URL — otherwise a malicious share code containing `..`, `/`, `?`,
+/// `#`, `@`, etc. could redirect us to the wrong repo or API endpoint
+/// when `format!`-built into a `https://api.github.com/repos/{owner}/...`
+/// path. `format!` does NOT URL-encode.
+fn is_valid_github_username(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    if bytes.is_empty() || bytes.len() > 39 {
+        return false;
+    }
+    if bytes[0] == b'-' || bytes[bytes.len() - 1] == b'-' {
+        return false;
+    }
+    let mut prev_hyphen = false;
+    for &b in bytes {
+        let is_alnum = b.is_ascii_alphanumeric();
+        let is_hyphen = b == b'-';
+        if !is_alnum && !is_hyphen {
+            return false;
+        }
+        if is_hyphen && prev_hyphen {
+            return false;
+        }
+        prev_hyphen = is_hyphen;
+    }
+    true
+}
+
 /// Parse a share code like "username/AA5A-315D-61AE" into (owner, code).
+///
+/// `owner` is validated against GitHub's username rules before return so
+/// it's safe to interpolate into API URLs. `code_raw` is normalized to
+/// lowercase hex by `normalize_code_input` so it can't carry path-special
+/// characters either.
 fn parse_share_code(input: &str) -> Result<(String, String)> {
     let trimmed = input.trim();
 
@@ -1162,10 +1221,52 @@ fn parse_share_code(input: &str) -> Result<(String, String)> {
                 "Invalid share code format. Expected: username/XXXX-XXXX-XXXX".to_string(),
             ));
         }
+        if !is_valid_github_username(&owner) {
+            return Err(AppError::Other(format!(
+                "Invalid GitHub username '{}' in share code. Usernames are 1-39 chars, alphanumeric and single hyphens only.",
+                owner
+            )));
+        }
         return Ok((owner, code_raw));
     }
 
     Err(AppError::Other(
         "Invalid share code format. Expected: username/XXXX-XXXX-XXXX (the curator shares this code with you)".to_string(),
     ))
+}
+
+#[cfg(test)]
+mod parse_share_code_tests {
+    use super::is_valid_github_username;
+
+    #[test]
+    fn accepts_normal_usernames() {
+        assert!(is_valid_github_username("MohamedSerhan"));
+        assert!(is_valid_github_username("octocat"));
+        assert!(is_valid_github_username("a-b-c"));
+        assert!(is_valid_github_username("123"));
+    }
+
+    #[test]
+    fn rejects_traversal_and_separators() {
+        assert!(!is_valid_github_username(".."));
+        assert!(!is_valid_github_username("a/b"));
+        assert!(!is_valid_github_username("a..b"));
+        assert!(!is_valid_github_username("foo?bar"));
+        assert!(!is_valid_github_username("foo#bar"));
+        assert!(!is_valid_github_username("foo@bar"));
+        assert!(!is_valid_github_username(""));
+    }
+
+    #[test]
+    fn rejects_invalid_hyphens() {
+        assert!(!is_valid_github_username("-foo"));
+        assert!(!is_valid_github_username("foo-"));
+        assert!(!is_valid_github_username("foo--bar"));
+    }
+
+    #[test]
+    fn rejects_too_long() {
+        assert!(!is_valid_github_username(&"a".repeat(40)));
+    }
 }

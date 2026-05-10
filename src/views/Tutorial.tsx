@@ -4,19 +4,13 @@ import { Card } from '../components/Card';
 import { cn } from '../lib/utils';
 
 interface TutorialViewProps {
-  advancedMode: boolean;
   onGoToSettings?: () => void;
 }
 
 type TutorialTab = 'user' | 'creator';
 
-export function TutorialView({ advancedMode, onGoToSettings }: TutorialViewProps) {
+export function TutorialView({ onGoToSettings }: TutorialViewProps) {
   const [tab, setTab] = useState<TutorialTab>('user');
-
-  // If advanced mode gets turned off while on the creator tab, fall back.
-  if (!advancedMode && tab === 'creator') {
-    setTab('user');
-  }
 
   return (
     // Wider on big screens — the old 1024 cap left huge empty gutters at full screen.
@@ -37,15 +31,13 @@ export function TutorialView({ advancedMode, onGoToSettings }: TutorialViewProps
         <TabButton active={tab === 'user'} onClick={() => setTab('user')} icon={User}>
           Player tutorial
         </TabButton>
-        {advancedMode && (
-          <TabButton active={tab === 'creator'} onClick={() => setTab('creator')} icon={Wrench}>
-            Modpack creator
-          </TabButton>
-        )}
+        <TabButton active={tab === 'creator'} onClick={() => setTab('creator')} icon={Wrench}>
+          Modpack creator
+        </TabButton>
       </div>
 
       {tab === 'user' && <UserGuide onGoToSettings={onGoToSettings} />}
-      {tab === 'creator' && advancedMode && <CreatorGuide onGoToSettings={onGoToSettings} />}
+      {tab === 'creator' && <CreatorGuide onGoToSettings={onGoToSettings} />}
     </div>
   );
 }
@@ -332,21 +324,13 @@ function CreatorGuide({ onGoToSettings }: { onGoToSettings?: () => void }) {
       <p className="text-sm text-text-muted">
         For modpack creators. A modpack is a named profile that captures every mod in your install (with
         its version + source). Friends paste your share code; their app downloads the same mods from the
-        same sources. You don't host any files yourself — share data lives on a private gist in your
-        GitHub account.
+        same sources. You don't host any files yourself — share data lives in a public repo
+        (<Kbd>sts2mm-profiles</Kbd>) on your GitHub account that the app creates and updates for you.
       </p>
 
-      <Step n={1} title="Enable Advanced Mode">
+      <Step n={1} title="Set up a GitHub token">
         <p>
-          Bottom-left of the sidebar: click <Kbd>Advanced Mode</Kbd>. This unlocks the Profiles tab and
-          extra Browse/Dashboard views. You're already in advanced mode if you're reading this.
-        </p>
-      </Step>
-
-      <Step n={2} title="Set up a GitHub token">
-        <p>
-          Sharing requires a GitHub token with the <Kbd>repo</Kbd> scope so the app can create a private
-          gist on your account.
+          Sharing requires a GitHub token with permission to create + update a repo on your account.
         </p>
         <ol className="list-decimal list-inside space-y-1 ml-1">
           <li>
@@ -354,7 +338,7 @@ function CreatorGuide({ onGoToSettings }: { onGoToSettings?: () => void }) {
             "Tokens (classic)" — both work).
           </li>
           <li>
-            Give it <Kbd>repo</Kbd> access (classic) or <Kbd>Gists: Read and write</Kbd> (fine-grained).
+            Give it <Kbd>repo</Kbd> access (classic) or <Kbd>Contents: Read and write</Kbd> (fine-grained).
           </li>
           <li>
             Paste the token into{' '}
@@ -371,17 +355,17 @@ function CreatorGuide({ onGoToSettings }: { onGoToSettings?: () => void }) {
         </ol>
       </Step>
 
-      <Step n={3} title="Install the mods you want in your modpack">
+      <Step n={2} title="Install the mods you want in your modpack">
         <p>
           Use Quick Add for GitHub/Nexus links, drag-and-drop a <Kbd>.zip</Kbd>, or use the Browse tab.
           For mods that don't auto-link to a source: open Mods view → expand the mod → click{' '}
           <Kbd>Auto-detect source</Kbd> or paste the GitHub repo manually. Mods without a known source
-          can still be shared (the app bundles a copy on your gist) but linking the source is preferred —
-          your friends get the canonical release.
+          can still be shared (the app bundles a copy in your sharing repo) but linking the source is
+          preferred — your friends get the canonical release.
         </p>
       </Step>
 
-      <Step n={4} title="Create a profile from your current state">
+      <Step n={3} title="Create a profile from your current state">
         <p>
           Open <Kbd>Profiles</Kbd> → <Kbd>Create Profile</Kbd>. Pick a name (e.g. "Co-op night" or
           "Daily-cheese-build"). The app captures your current mods folder — everything currently
@@ -389,10 +373,11 @@ function CreatorGuide({ onGoToSettings }: { onGoToSettings?: () => void }) {
         </p>
       </Step>
 
-      <Step n={5} title="Share it">
+      <Step n={4} title="Share it">
         <p>
-          On the Profiles row for your new profile, click the <Kbd>Share</Kbd> (paper plane) icon. The app
-          creates a private gist on your GitHub account and shows you a code like <Kbd>you/ABC1</Kbd>.
+          On the Profiles row for your new profile, click the <Kbd>Share</Kbd> (paper plane) icon. The
+          app uploads the manifest to your <Kbd>sts2mm-profiles</Kbd> repo (creating the repo on first
+          use) and shows you a code like <Kbd>you/AA5A-315D-61AE</Kbd>.
         </p>
         <p>
           Send that code to your friends — they paste it on their Home page and they're playing your
@@ -400,7 +385,7 @@ function CreatorGuide({ onGoToSettings }: { onGoToSettings?: () => void }) {
         </p>
       </Step>
 
-      <Step n={6} title="Updating your modpack">
+      <Step n={5} title="Updating your modpack">
         <p>
           Change your installed mods (install, upgrade, remove). Then on the same Profiles row, click the{' '}
           <Kbd>Re-share</Kbd> (refresh) icon. <strong>Same code, updated content.</strong> Your friends'
@@ -412,31 +397,31 @@ function CreatorGuide({ onGoToSettings }: { onGoToSettings?: () => void }) {
         </p>
       </Step>
 
-      <Step n={7} title="What gets shared (and what doesn't)">
+      <Step n={6} title="What gets shared (and what doesn't)">
         <ul className="list-disc list-inside space-y-1 ml-1">
           <li>
             <strong>Shared:</strong> the profile name, the list of mods, each mod's name + folder name +
             mod_id + version, and a source per mod (a GitHub repo, or — for mods without a public
-            source — a direct download URL pointing back to the bundled copy on your gist).
+            source — a direct download URL pointing back to the bundled copy in your repo).
           </li>
           <li>
             <strong>Not shared:</strong> your local mod files themselves (unless they need to be
             bundled), your save data, your API keys, anything outside the profile manifest.
           </li>
           <li>
-            <strong>Privacy:</strong> the gist is private (only your token can write to it), but the
-            content is fetched anonymously by your friends' apps using the gist's raw URL. Don't put
-            anything secret in a profile name.
+            <strong>Visibility:</strong> the <Kbd>sts2mm-profiles</Kbd> repo is public — anyone with
+            your share code can read it, and the repo itself is browsable on github.com under your
+            account. Don't put anything secret in a profile name or in the bundled mod files.
           </li>
         </ul>
       </Step>
 
-      <Step n={8} title="Curator best practices">
+      <Step n={7} title="Curator best practices">
         <ul className="list-disc list-inside space-y-1 ml-1">
           <li>
             <strong>Audit before sharing.</strong> Settings → <Kbd>Audit Mod Versions</Kbd> flags mods
-            without a known source — link them first, otherwise they get bundled into your gist (bigger
-            footprint, slower for friends to download).
+            without a known source — link them first, otherwise they get bundled into your sharing repo
+            (bigger footprint, slower for friends to download).
           </li>
           <li>
             <strong>Pin versions.</strong> Mods → expand a mod → <Kbd>Pin</Kbd> — pinning prevents

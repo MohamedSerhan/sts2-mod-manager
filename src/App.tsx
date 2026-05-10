@@ -571,7 +571,7 @@ function AppInner() {
             {activeView === 'profiles' && <ProfilesView />}
             {activeView === 'mods' && <ModsView />}
             {activeView === 'browse' && <BrowseView onGoToSettings={() => setActiveView('settings')} />}
-            {activeView === 'tutorial' && <TutorialView advancedMode={false} onGoToSettings={() => setActiveView('settings')} />}
+            {activeView === 'tutorial' && <TutorialView onGoToSettings={() => setActiveView('settings')} />}
             {activeView === 'settings' && <SettingsView />}
 
             {/* First-launch onboarding wizard (v5 batch 4) */}

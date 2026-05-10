@@ -362,7 +362,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
               type="text"
               value={quickAddUrl}
               onChange={(e) => setQuickAddUrl(e.target.value)}
-              placeholder="https://github.com/user/mod or nexus:slaythefire2/mods/123"
+              placeholder="https://github.com/user/mod or nexus:slaythespire2/mods/123"
               className="w-full bg-background border border-border rounded-lg px-4 py-2.5 text-sm text-text placeholder:text-text-dim focus:outline-none focus:ring-2 focus:ring-primary/50"
               onKeyDown={(e) => e.key === 'Enter' && handleQuickAdd()}
               disabled={quickAdding}

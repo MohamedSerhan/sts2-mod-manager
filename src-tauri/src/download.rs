@@ -684,14 +684,19 @@ pub async fn download_url_mod(
         (mods_path, cache_path)
     };
 
-    // Derive a filename from the URL
-    let file_name = url::Url::parse(&url)
+    // Derive a filename from the URL.
+    // The raw last-path-segment is attacker-influenced (the user pastes the
+    // URL into Quick Add, or a hostile profile points at one). URL-decoded
+    // `..%2F..%2F` would otherwise traverse out of the cache or mods folder
+    // when joined below — sanitize to a single safe segment first.
+    let raw_file_name = url::Url::parse(&url)
         .ok()
         .and_then(|u| {
             u.path_segments()
                 .and_then(|seg| seg.last().map(|s| s.to_string()))
         })
         .unwrap_or_else(|| "download.zip".to_string());
+    let file_name = crate::mods::sanitize_path_segment(&raw_file_name);
 
     let dest = cache_path.join(&file_name);
 
@@ -705,6 +710,14 @@ pub async fn download_url_mod(
         install_mod_from_zip(&dest, &mods_path).map_err(|e| e.to_string())
     } else if dest.extension().and_then(|e| e.to_str()) == Some("dll") {
         let dest_path = mods_path.join(&file_name);
+        // Defense-in-depth: even after sanitize_path_segment, confirm the
+        // join didn't escape the mods folder.
+        if !crate::mods::path_is_inside(&dest_path, &mods_path) {
+            return Err(format!(
+                "Refusing to write outside mods folder: {}",
+                dest_path.display()
+            ));
+        }
         std::fs::copy(&dest, &dest_path).map_err(|e| e.to_string())?;
         let mod_name = file_name.trim_end_matches(".dll").to_string();
         Ok(ModInfo {

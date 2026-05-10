@@ -72,8 +72,8 @@ pub fn resolve_github_url(url: &str) -> Result<(String, String)> {
 /// Parse a Nexus Mods URL or shorthand into (game_domain, mod_id).
 ///
 /// Supported formats:
-/// - `https://www.nexusmods.com/slaythefire2/mods/1234`
-/// - `nexus:slaythefire2/mods/1234`
+/// - `https://www.nexusmods.com/slaythespire2/mods/1234`
+/// - `nexus:slaythespire2/mods/1234`
 pub fn resolve_nexus_url(url: &str) -> Result<(String, u64)> {
     // Shorthand: nexus:game_domain/mods/1234
     if let Some(rest) = url.strip_prefix("nexus:") {

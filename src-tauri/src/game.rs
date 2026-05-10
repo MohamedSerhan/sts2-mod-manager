@@ -81,15 +81,62 @@ pub fn parse_library_folders(steam_path: &Path) -> Vec<PathBuf> {
     libraries
 }
 
-/// Look for "Slay the Spire 2" in the given Steam library directories.
+/// Look for an STS2 install in the given Steam library directories.
+///
+/// Strategy:
+///   1. Fast path: check `steamapps/common/Slay the Spire 2`. This is the
+///      depot folder name Mega Crit ships today and it's how every existing
+///      install resolves.
+///   2. Fallback: scan `steamapps/common/*` for any subdir that
+///      `validate_game_path` accepts (looks for SlayTheSpire2.exe / .dll /
+///      .pck / .app). This means the auto-detector keeps working even if
+///      MC renames the depot folder for the 1.0 launch (e.g. dropping the
+///      "2", adding "Definitive Edition", etc.) — the file-shape check is
+///      what actually identifies the game, not the folder name.
 pub fn find_game_in_libraries(libraries: &[PathBuf]) -> Option<PathBuf> {
+    // Pass 1: literal name (current convention).
     for lib in libraries {
         let game_path = lib
             .join("steamapps")
             .join("common")
             .join("Slay the Spire 2");
-        if game_path.exists() {
+        if game_path.exists() && validate_game_path(&game_path) {
             return Some(game_path);
+        }
+    }
+
+    // Pass 2: scan common/* for anything that looks like STS2.
+    for lib in libraries {
+        let common = lib.join("steamapps").join("common");
+        let entries = match std::fs::read_dir(&common) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            // A second check on name pattern keeps us fast on big libraries —
+            // skip directories that obviously aren't STS2 before doing the
+            // file-system probe in validate_game_path.
+            let name_lower = entry
+                .file_name()
+                .to_string_lossy()
+                .to_lowercase();
+            let looks_like_sts2 = name_lower.contains("slay")
+                || name_lower.contains("spire")
+                || name_lower.contains("sts2");
+            if !looks_like_sts2 {
+                continue;
+            }
+            if validate_game_path(&path) {
+                log::info!(
+                    "Auto-detected STS2 at non-default folder name: {}",
+                    path.display()
+                );
+                return Some(path);
+            }
         }
     }
     None

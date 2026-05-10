@@ -196,9 +196,9 @@ pub fn unsubscribe(
 pub async fn check_subscription_updates(
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Vec<SubscriptionUpdate>, String> {
-    let config_path = {
+    let (config_path, token) = {
         let s = state.lock().map_err(|e| e.to_string())?;
-        s.config_path.clone()
+        (s.config_path.clone(), s.github_token.clone())
     };
 
     let mut db = load_subscriptions(&config_path);
@@ -213,12 +213,14 @@ pub async fn check_subscription_updates(
             None => continue,
         };
 
-        // Parse share_id format: "owner:CODE" or just try as-is
+        // Parse share_id format: "owner:CODE" or just try as-is.
+        // Pass the user's PAT when set so the poll uses the 5000/hr authed
+        // limit rather than the 60/hr anonymous-per-IP one.
         let fetch_result = if let Some(idx) = share_id.find(':') {
             let owner = &share_id[..idx];
             let code = &share_id[idx + 1..];
             let filename = format!("{}.json", code.to_lowercase());
-            fetch_shared_profile(owner, &filename).await
+            fetch_shared_profile(owner, &filename, token.as_deref()).await
         } else {
             // Legacy format - try as direct ID
             Err(crate::error::AppError::Other(format!("Invalid subscription ID: {}", share_id)))
@@ -339,12 +341,13 @@ async fn apply_subscription_update_inner(
     // emit a Tauri event after the loop so the frontend can toast.
     let mut skipped_incompatible: Vec<crate::sharing::SkippedMod> = Vec::new();
 
-    // Fetch the latest remote profile
+    // Fetch the latest remote profile, using the PAT if set for the
+    // higher rate limit.
     let remote = if let Some(idx) = share_id.find(':') {
         let owner = &share_id[..idx];
         let code = &share_id[idx + 1..];
         let filename = format!("{}.json", code.to_lowercase());
-        fetch_shared_profile(owner, &filename)
+        fetch_shared_profile(owner, &filename, token.as_deref())
             .await
             .map_err(|e| e.to_string())?
     } else {

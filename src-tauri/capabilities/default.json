@@ -12,7 +12,6 @@
     "core:window:allow-start-resize-dragging",
     "opener:default",
     "dialog:default",
-    "fs:default",
     "updater:default",
     "process:default"
   ]

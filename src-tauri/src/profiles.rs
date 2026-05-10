@@ -550,7 +550,7 @@ pub async fn switch_profile(
                 let owner = share_info["owner"].as_str().ok_or("Share file missing owner")?;
                 let code = share_info["code"].as_str().ok_or("Share file missing code")?;
                 let filename = format!("{}.json", code.replace('-', "").to_lowercase());
-                let fetched = crate::sharing::fetch_shared_profile(owner, &filename)
+                let fetched = crate::sharing::fetch_shared_profile(owner, &filename, token.as_deref())
                     .await
                     .map_err(|e| format!("Failed to re-fetch shared profile: {}", e))?;
                 // Save locally so we have it next time

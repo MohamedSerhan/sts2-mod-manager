@@ -158,12 +158,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [refreshAll]);
 
   // Poll for subscription updates so the Profiles sidebar item can show a
-  // badge when followed packs have updates pending. 90s is a good
-  // balance — the GitHub API is happy with that cadence and the user
-  // doesn't have to wait long after a friend re-shares.
+  // badge when followed packs have updates pending.
+  //
+  // 5 minutes (300s) is the cadence: with multiple subscriptions polled
+  // unauthenticated, GitHub's 60-req/hour-per-IP limit was reachable at
+  // the old 90s tick (1 sub: 40/hr; 2 subs: 80/hr — 429s every other hour).
+  // The Rust side now passes the user's PAT when set, so authed users get
+  // the 5000/hr ceiling — but the slower base cadence is also kinder to
+  // unauthenticated users and to GitHub.
   useEffect(() => {
     refreshSubUpdates();
-    const id = setInterval(refreshSubUpdates, 90_000);
+    const id = setInterval(refreshSubUpdates, 300_000);
     return () => clearInterval(id);
   }, [refreshSubUpdates]);
 

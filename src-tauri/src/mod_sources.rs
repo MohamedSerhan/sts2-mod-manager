@@ -24,7 +24,7 @@ pub struct ModSourceEntry {
     /// Full Nexus Mods URL
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nexus_url: Option<String>,
-    /// Nexus game domain (e.g. "slaythefire2")
+    /// Nexus game domain (e.g. "slaythespire2")
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nexus_game_domain: Option<String>,
     /// Nexus mod ID

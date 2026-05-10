@@ -850,6 +850,63 @@ fn sanitize_for_filename(s: &str) -> String {
         .collect()
 }
 
+/// Sanitize an attacker-influenced single path segment so it can't escape
+/// when joined onto a destination root. Replaces any path-separator-like
+/// characters and `..` with underscores. Used for `wrap_folder_name` and
+/// for URL-derived filenames in the download path — those strings can come
+/// from a manifest's Name/Id field, a zip stem, or a redirect URL, all of
+/// which are publisher-controlled and therefore untrusted.
+pub fn sanitize_path_segment(s: &str) -> String {
+    let mapped: String = s
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '\0' => '_',
+            _ => c,
+        })
+        .collect();
+    let no_dotdot = mapped.replace("..", "_");
+    let trimmed = no_dotdot.trim_matches(|c: char| c == '.' || c.is_whitespace());
+    // Empty after trim → fall back. Also fall back if everything we have
+    // is the underscore replacement marker — that happens when the input
+    // was 100% path-special characters (e.g. "..", "...", "/", "\\:")
+    // and the result would be a useless folder name like "_".
+    if trimmed.is_empty() || trimmed.chars().all(|c| c == '_') {
+        "mod".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// True if `path` resolves inside `root`. Handles the common case where
+/// `path` doesn't exist yet (we're about to create it) by walking the
+/// component list and tracking depth — `..` decrements depth, normal
+/// components increment it. Negative depth means the path escapes.
+///
+/// Falls through to canonicalize-and-prefix-check when both ends exist,
+/// for the symlink-resolved guarantee.
+pub fn path_is_inside(path: &Path, root: &Path) -> bool {
+    if let (Ok(p), Ok(r)) = (path.canonicalize(), root.canonicalize()) {
+        return p.starts_with(&r);
+    }
+    // Component walk: starting from `root`'s depth, ensure we never go below.
+    use std::path::Component;
+    let mut depth: i32 = 0;
+    // Strip the `root` prefix off `path` if it's there; otherwise treat
+    // `path` as the relative payload appended to `root`.
+    let rel = path.strip_prefix(root).unwrap_or(path);
+    for comp in rel.components() {
+        match comp {
+            Component::ParentDir => depth -= 1,
+            Component::CurDir | Component::Prefix(_) | Component::RootDir => {}
+            Component::Normal(_) => depth += 1,
+        }
+        if depth < 0 {
+            return false;
+        }
+    }
+    true
+}
+
 /// Build the local cache path for a specific mod version.
 fn mod_cache_path(cache_path: &Path, mod_name: &str, version: &str) -> PathBuf {
     let safe_name = sanitize_for_filename(mod_name);
@@ -1155,13 +1212,40 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
     let mut extracted_files = Vec::new();
     let mut manifest: Option<ModInfo> = None;
 
+    // wrap_folder_name comes from manifest fields / DLL stems / zip stems —
+    // mostly attacker-influenceable for a hostile share-code or Quick Add
+    // URL. Sanitize once before it gets joined into a destination path so a
+    // malicious manifest with `Name: "../.."` can't redirect extraction.
+    let wrap_folder_name = sanitize_path_segment(&wrap_folder_name);
+
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i)?;
-        let name = entry.name().to_string();
+        let raw_name = entry.name().to_string();
 
-        if entry.is_dir() || name.starts_with("__MACOSX") || name.starts_with("._") {
+        if entry.is_dir() || raw_name.starts_with("__MACOSX") || raw_name.starts_with("._") {
             continue;
         }
+
+        // Reject zip entries whose path would escape the mods folder.
+        // `enclosed_name()` returns None for any entry containing absolute
+        // paths, drive prefixes, or `..` components that traverse upward.
+        // Without this gate, a hostile zip from a share-code, Quick Add
+        // URL, drag-drop, or downloads-watcher catch could write anywhere
+        // the user has write access (zip-slip).
+        let safe_rel = match entry.enclosed_name() {
+            Some(p) => p,
+            None => {
+                log::warn!(
+                    "Refusing zip entry with unsafe path {:?} in {}",
+                    raw_name,
+                    zip_path.display()
+                );
+                continue;
+            }
+        };
+        // The rest of this file does its path math on forward-slash strings;
+        // normalize once after the safety check.
+        let name = safe_rel.to_string_lossy().replace('\\', "/");
 
         let ext = Path::new(&name)
             .extension()
@@ -1202,6 +1286,18 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
         };
 
         let dest_path = mods_path.join(&rel_path);
+
+        // Belt-and-braces: even after the enclosed_name() filter, verify the
+        // resolved destination stays inside mods_path. Catches any drift
+        // from wrap_folder_name sanitization or future refactors.
+        if !path_is_inside(&dest_path, mods_path) {
+            log::warn!(
+                "Refusing extraction outside mods folder: {} (rel: {})",
+                dest_path.display(),
+                rel_path
+            );
+            continue;
+        }
 
         // Ensure parent directory exists
         if let Some(parent) = dest_path.parent() {
@@ -1665,5 +1761,65 @@ pub fn get_mod_dependents(name: String, state: tauri::State<'_, AppState>) -> st
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
     Ok(get_dependents(&name, mods_path))
+}
+
+#[cfg(test)]
+mod path_safety_tests {
+    use super::{path_is_inside, sanitize_path_segment};
+    use std::path::Path;
+
+    #[test]
+    fn sanitize_strips_separators() {
+        assert_eq!(sanitize_path_segment("foo/bar"), "foo_bar");
+        assert_eq!(sanitize_path_segment("foo\\bar"), "foo_bar");
+        assert_eq!(sanitize_path_segment("C:foo"), "C_foo");
+    }
+
+    #[test]
+    fn sanitize_neutralizes_dotdot() {
+        // ".." → "_" → all-underscore → fallback "mod"
+        assert_eq!(sanitize_path_segment(".."), "mod");
+        // "..foo" → "_foo" — safe (the "_" can't escape a parent dir)
+        assert_eq!(sanitize_path_segment("..foo"), "_foo");
+        // "foo.." → "foo_" — safe
+        assert_eq!(sanitize_path_segment("foo.."), "foo_");
+        // "a..b" → "a_b"
+        assert_eq!(sanitize_path_segment("a..b"), "a_b");
+    }
+
+    #[test]
+    fn sanitize_handles_empty_and_dots() {
+        assert_eq!(sanitize_path_segment(""), "mod");
+        assert_eq!(sanitize_path_segment("..."), "mod");
+        assert_eq!(sanitize_path_segment("   "), "mod");
+    }
+
+    #[test]
+    fn sanitize_preserves_normal_names() {
+        assert_eq!(sanitize_path_segment("RitsuLib"), "RitsuLib");
+        assert_eq!(sanitize_path_segment("My-Mod_v1.2"), "My-Mod_v1.2");
+    }
+
+    #[test]
+    fn path_inside_accepts_subpath() {
+        let root = Path::new("/tmp/mods");
+        assert!(path_is_inside(&root.join("foo"), root));
+        assert!(path_is_inside(&root.join("foo/bar.dll"), root));
+    }
+
+    #[test]
+    fn path_inside_rejects_traversal() {
+        let root = Path::new("/tmp/mods");
+        assert!(!path_is_inside(&root.join("../escaped"), root));
+        assert!(!path_is_inside(&root.join("../../etc/passwd"), root));
+        assert!(!path_is_inside(&root.join("foo/../../escaped"), root));
+    }
+
+    #[test]
+    fn path_inside_handles_curdir() {
+        let root = Path::new("/tmp/mods");
+        assert!(path_is_inside(&root.join("./foo"), root));
+        assert!(path_is_inside(&root.join("foo/./bar"), root));
+    }
 }
 

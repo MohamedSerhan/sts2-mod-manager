@@ -11,7 +11,6 @@ import {
   RefreshCw,
   Copy,
   Check,
-  X,
   Key,
   Files,
   AlertTriangle,
@@ -33,12 +32,12 @@ import {
   duplicateProfile,
   exportProfile,
   importProfile,
-  installSharedProfile,
   getShareInfo,
   getProfileDrift,
   createBackup,
   applySubscriptionUpdate,
 } from '../hooks/useTauri';
+import { installSharedProfileWithConfirm } from '../lib/shareImport';
 import type { ProfileDrift } from '../hooks/useTauri';
 import type { Profile, ShareResult } from '../types';
 
@@ -53,9 +52,6 @@ export function ProfilesView() {
   const [showImportCode, setShowImportCode] = useState(false);
   const [importCode, setImportCode] = useState('');
   const [importingCode, setImportingCode] = useState(false);
-  const [loadingShare] = useState<{ name: string; kind: 'share' | 'reshare' } | null>(null);
-  const [shareResult, setShareResult] = useState<ShareResult | null>(null);
-  const [copiedCode, setCopiedCode] = useState(false);
   const [copiedProfileCode, setCopiedProfileCode] = useState<string | null>(null);
   const [shareInfoMap, setShareInfoMap] = useState<Record<string, ShareResult>>({});
   const [publishTarget, setPublishTarget] = useState<{ profile: Profile; isReshare: boolean } | null>(null);
@@ -312,25 +308,15 @@ export function ProfilesView() {
   // shareProfile / reshareProfile internally. The legacy direct handlers
   // have been removed.
 
-  async function handleCopyCode() {
-    if (!shareResult) return;
-    try {
-      await navigator.clipboard.writeText(`${shareResult.owner}/${shareResult.code}`);
-      setCopiedCode(true);
-      setTimeout(() => setCopiedCode(false), 2000);
-    } catch {
-      // fallback: select the input
-      toastCtx.info('Select the code and copy manually');
-    }
-  }
-
   async function handleImportFromCode() {
     const code = importCode.trim();
     if (!code) return;
 
     try {
       setImportingCode(true);
-      const profile = await installSharedProfile(code);
+      // Confirms with the user (showing source URLs) before installing.
+      const profile = await installSharedProfileWithConfirm(code, confirm);
+      if (!profile) return;
       setProfiles((prev) => [...prev, profile]);
       setImportCode('');
       setShowImportCode(false);
@@ -356,55 +342,6 @@ export function ProfilesView() {
             </div>
             <div className="gf-loading-step">
               This may take a minute depending on the number of mods.
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Share Result Modal — v5 gf-modal */}
-      {shareResult && (
-        <div className="gf-modal-back">
-          <div className="gf-modal" style={{ width: 540 }}>
-            <div className="gf-modal-head">
-              <div>
-                <div className="gf-modal-title">Profile published</div>
-                <div className="gf-modal-sub">Anyone with the code can install this exact set of mods.</div>
-              </div>
-              <button
-                onClick={() => setShareResult(null)}
-                className="gf-btn-3 gf-btn-icon"
-                title="Close"
-              >
-                <X size={14} />
-              </button>
-            </div>
-            <div className="gf-modal-body">
-              <div className="gf-share-code">
-                <div className="gf-share-code-text">
-                  <div className="gf-share-code-eyebrow">Share code</div>
-                  <div className="gf-share-code-value">{shareResult.owner}/{shareResult.code}</div>
-                </div>
-                <Button variant="secondary" size="sm" onClick={handleCopyCode}>
-                  {copiedCode ? <Check size={14} /> : <Copy size={14} />}
-                  {copiedCode ? 'Copied' : 'Copy'}
-                </Button>
-              </div>
-              <div
-                style={{
-                  background: 'oklch(0.55 0.13 250 / 0.10)',
-                  border: '1px solid oklch(0.55 0.13 250 / 0.3)',
-                  borderRadius: 7,
-                  padding: '10px 12px',
-                  fontSize: 12,
-                  color: 'oklch(0.85 0.07 250)',
-                }}
-              >
-                This same code is reused if you re-share later — friends will see updates instead of having to follow a new code.
-              </div>
-            </div>
-            <div className="gf-modal-foot">
-              <div style={{ flex: 1 }} />
-              <Button onClick={() => setShareResult(null)}>Done</Button>
             </div>
           </div>
         </div>
@@ -796,7 +733,6 @@ export function ProfilesView() {
                   size="sm"
                   onClick={() => setPublishTarget({ profile, isReshare: !!shareInfoMap[profile.name] })}
                   title={shareInfoMap[profile.name] ? 'Re-share — same code, friends see an update' : 'Share — friends paste the code to install'}
-                  disabled={loadingShare?.name === profile.name}
                 >
                   <Share2 size={14} />
                   {shareInfoMap[profile.name] ? 'Re-share' : 'Share'}

@@ -18,7 +18,6 @@ import { useConfirm } from '../components/ConfirmDialog';
 import { SubUpdateDetail } from '../components/SubUpdateDetail';
 import { AboutCard } from '../components/AboutCard';
 import {
-  installSharedProfile,
   checkSubscriptionUpdates,
   applySubscriptionUpdate,
   repairModpackSubscription,
@@ -30,6 +29,7 @@ import {
   getProfileDrift,
   createBackup,
 } from '../hooks/useTauri';
+import { installSharedProfileWithConfirm } from '../lib/shareImport';
 import type { SubscriptionUpdate, Subscription } from '../types';
 
 function formatShareCode(shareId: string): string {
@@ -65,7 +65,7 @@ interface HomeProps {
   focusCodeBarSignal?: number;
 }
 export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchPack, onLaunch, focusCodeBarSignal }: HomeProps) {
-  const { gameInfo, mods, refreshAll, refreshMods, activeProfile, refreshSubUpdates } = useApp();
+  const { gameInfo, mods, refreshAll, activeProfile, refreshSubUpdates } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
   const [profileCode, setProfileCode] = useState('');
@@ -132,7 +132,10 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
     if (!code) return;
     try {
       setImporting(true);
-      const profile = await installSharedProfile(code);
+      // Shows a confirm dialog with the profile's source URLs before
+      // downloading anything. Returns null if the user cancels.
+      const profile = await installSharedProfileWithConfirm(code, confirm);
+      if (!profile) return;
       await refreshAll();
       await loadSubscriptions();
 
@@ -597,9 +600,6 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
           </div>
         </>
       )}
-
-      {/* keep refreshMods reference live so unused-import lint doesn't complain */}
-      <span style={{ display: 'none' }} aria-hidden onClick={() => refreshMods()} />
 
       {/* About — Home footer. Reference info + support actions, low
           visual weight, separator rule on top. */}

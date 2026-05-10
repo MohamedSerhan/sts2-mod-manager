@@ -9,6 +9,45 @@
   Install, manage, and share mod profiles with one click.
 </p>
 
+<p align="center">
+  <a href="https://github.com/MohamedSerhan/sts2-mod-manager/releases/latest"><strong>Download latest →</strong></a>
+  ·
+  <a href="https://mohamedserhan.github.io/sts2-mod-manager/">Website</a>
+  ·
+  <a href="https://github.com/MohamedSerhan/sts2-mod-manager/issues">Report a bug</a>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/hero-home.png?v=1" alt="STS2 Mod Manager Home view — active profile hero with Launch and share-code Quick Add" width="900" />
+</p>
+
+---
+
+## Why this one (and not r2modman / Vortex / a folder of zips)
+
+There are mod managers, and there are mod managers built for the
+"play exactly what my friend plays" workflow. STS2 Mod Manager is the
+second kind. The bits that don't usually exist elsewhere:
+
+- **Modpack share codes.** Friend pastes you `jess/AA5A-315D-61AE` →
+  the app downloads every mod from its source, enables the right ones,
+  marks the pack active. Re-shares reuse the same code so followers see
+  "update available" instead of having to follow a new one.
+- **Game-version aware Repair.** When a mod's latest release needs a
+  newer Slay the Spire 2 build than yours, Repair walks back through
+  the mod's release history and installs the newest version that's
+  *actually compatible* with your game. No more "the manager says it's
+  installed but the game won't load it."
+- **Drift detection.** If your installed mods diverge from the active
+  profile (you toggled something, an update reshaped a mod), the app
+  flags it with a one-click Repair that re-applies the manifest.
+- **Pin locks both version and on/off state.** Most managers only pin
+  versions; a curator's modpack update can still toggle your pinned
+  mods. This one prevents that.
+- **No account, no telemetry.** Open source, MIT, ships standalone.
+  Network calls go to GitHub releases and (optionally) the Nexus API.
+  Nothing else leaves the app.
+
 ---
 
 ## Status
@@ -17,7 +56,7 @@
 updates — if you'd like changes or fixes, fork the repo and open a PR. The
 codebase is small enough that most additions are straightforward.
 
-If you hit a bug, the **Settings → About → Generate support bundle** button
+If you hit a bug, the **Home footer → Generate support bundle** button
 copies a redacted text report (recent logs, mod list, profile state) to your
 clipboard for pasting into a GitHub issue.
 

@@ -196,5 +196,18 @@ export interface ModAuditEntry {
    *  version is below it — the game won't load this mod until they
    *  update their STS2 install or switch beta branches. */
   game_version_too_old?: boolean;
+  /** `min_game_version` declared by the latest GitHub release with
+   *  installable assets. Read from the release zip's manifest during
+   *  audit. None = the release didn't declare one. */
+  latest_release_min_game_version?: string | null;
+  /** True iff the latest release with assets requires a newer game
+   *  version than the user has — clicking Update will walk back to an
+   *  older compatible release rather than installing the latest. */
+  latest_release_blocked_by_game_version?: boolean;
+  /** The tag the Update button will actually install (the newest
+   *  release whose `min_game_version` is satisfied by the user's
+   *  game). When `latest_release_blocked_by_game_version` is true,
+   *  this names the older fallback so the UI can preview it. */
+  latest_compatible_tag?: string | null;
 }
 

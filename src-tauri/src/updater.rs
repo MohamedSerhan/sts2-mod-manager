@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::download::{download_and_install_github_mod, fetch_latest_release, fetch_releases};
+use crate::download::{fetch_latest_release, fetch_releases};
 use crate::error::Result;
 use crate::mod_sources::{load_sources, save_sources, update_installed_version, ModSourceEntry};
 use crate::mods::{scan_mods, ModInfo};
@@ -350,20 +350,33 @@ pub async fn check_for_updates(
         .map_err(|e| e.to_string())
 }
 
-/// Download and install the latest version of a specific mod from its GitHub source.
+/// Download and install the newest version of a specific mod from its
+/// GitHub source that's compatible with the user's Slay the Spire 2 build.
+///
+/// This walks releases newest → oldest (same logic as `repair_mod`) so a
+/// curator's freshly-published release that requires a beta game build
+/// doesn't get installed on a stable-branch user — that produced the
+/// "vunknown" stub state that Repair was invented to fix in the first
+/// place. The Update button in the audit calls this; we only refuse if
+/// the walk-back lands on a tag the user already has.
+///
+/// When `game_version` is unknown (release_info.json missing) we fail
+/// open and grab the latest release, mirroring legacy update_mod
+/// behavior. Logged so we know we skipped the check.
 #[tauri::command]
 pub async fn update_mod(
     name: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ModInfo, String> {
     crate::game::ensure_game_not_running()?;
-    let (mods_path, cache_path, config_path, token) = {
+    let (mods_path, cache_path, config_path, token, game_version) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
         let cache_path = s.cache_path.clone();
         let config_path = s.config_path.clone();
         let token = s.github_token.clone();
-        (mods_path, cache_path, config_path, token)
+        let game_version = s.game_version.clone();
+        (mods_path, cache_path, config_path, token, game_version)
     };
 
     let installed = scan_mods(&mods_path);
@@ -377,26 +390,77 @@ pub async fn update_mod(
     let (owner, repo) = resolve_github_repo(mod_info, &sources_db.mods)
         .ok_or_else(|| format!("Mod '{}' has no GitHub source linked. Link one in the Mods view.", name))?;
 
-    let release = fetch_latest_release(&owner, &repo, token.as_deref())
+    // Resolve which tag we'll actually install BEFORE deleting the old
+    // copy — same shape as repair_mod. If the walk-back can't find any
+    // compatible release, we want the user to keep what they had.
+    let chosen_tag: String;
+    let chosen_zip: std::path::PathBuf;
+    let chosen_mgv: Option<String>;
+    if game_version.is_some() {
+        let chosen = pick_compatible_release(
+            &owner,
+            &repo,
+            game_version.as_deref(),
+            &cache_path,
+            token.as_deref(),
+        )
         .await
         .map_err(|e| e.to_string())?;
-    let tag = release.tag_name.clone();
+
+        // If the walk-back picked the version the user already has, refuse
+        // the update — the audit's "needs_update" flag was based on the
+        // absolute latest release, which the user can't run. Tell them so
+        // they understand why nothing changed.
+        let installed_tag = sources_db
+            .mods
+            .get(&name)
+            .and_then(|e| e.installed_version.as_deref())
+            .map(|s| s.trim_start_matches('v'))
+            .unwrap_or("");
+        let manifest_ver = mod_info.version.trim_start_matches('v');
+        let chosen_ver = chosen.tag.trim_start_matches('v');
+        let already_on_chosen = chosen_ver == installed_tag || chosen_ver == manifest_ver;
+        if already_on_chosen {
+            return Err(format!(
+                "Already on the newest version compatible with your Slay the Spire 2 build (v{}). \
+                 The latest release of {}/{} requires a newer game version{} — update Slay the Spire 2 \
+                 (or switch Steam beta branches) to pick up the newer mod release.",
+                chosen.tag, owner, repo,
+                chosen.min_game_version
+                    .as_ref()
+                    .map(|v| format!(" (min v{})", v))
+                    .unwrap_or_default(),
+            ));
+        }
+
+        chosen_tag = chosen.tag;
+        chosen_mgv = chosen.min_game_version;
+        chosen_zip = chosen.zip_path;
+    } else {
+        // Fail open: no game version means we can't compare. Grab latest.
+        let release = fetch_latest_release(&owner, &repo, token.as_deref())
+            .await
+            .map_err(|e| e.to_string())?;
+        let tag = release.tag_name.clone();
+        log::warn!(
+            "update_mod: no game_version detected — installing latest {}/{}@{} without compatibility check",
+            owner, repo, tag,
+        );
+        chosen_zip = crate::download::download_release_zip_to_cache(
+            &owner, &repo, &tag, &cache_path, token.as_deref(),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        chosen_mgv = crate::download::peek_zip_min_game_version(&chosen_zip)
+            .ok()
+            .flatten();
+        chosen_tag = tag;
+    }
 
     // Delete the old mod files before installing the update to prevent duplicates
     // (e.g., old mod in "ModConfig-v0.2.1/" and new one in "ModConfig-v0.2.2/").
-    //
-    // We do TWO passes:
-    //   1. Delete every file the manifest tracks. Empty parent dirs come down
-    //      with them.
-    //   2. If the mod has a folder_name, blow away that whole directory.
-    //      This catches orphan files we never tracked — historically root-
-    //      level installs only captured same-stem siblings, so things like
-    //      a mod's `Translations/` subfolder survived an update and merged
-    //      with the new install. RitsuLib hit this and broke every mod
-    //      that depended on it.
     {
-        let all_mods: Vec<ModInfo> = scan_mods(&mods_path);
-        if let Some(old_info) = all_mods.iter().find(|m| m.name == name) {
+        if let Some(old_info) = installed.iter().find(|m| m.name == name) {
             let mut parent_dirs = std::collections::HashSet::new();
             for file_rel in &old_info.files {
                 let normalized = file_rel.replace('\\', "/");
@@ -413,15 +477,12 @@ pub async fn update_mod(
                 }
             }
             for dir in &parent_dirs {
-                if dir.is_dir() {
-                    if std::fs::read_dir(dir).map(|mut d| d.next().is_none()).unwrap_or(false) {
-                        let _ = std::fs::remove_dir(dir);
-                    }
+                if dir.is_dir()
+                    && std::fs::read_dir(dir).map(|mut d| d.next().is_none()).unwrap_or(false)
+                {
+                    let _ = std::fs::remove_dir(dir);
                 }
             }
-            // Defensive sweep: nuke the whole mod folder so orphan files from
-            // a previous broken install (pre-v1.0.4 mixed-root extraction)
-            // don't survive into the new install.
             if let Some(folder) = old_info.folder_name.as_deref() {
                 let folder_path = mods_path.join(folder);
                 if folder_path.is_dir() {
@@ -432,8 +493,13 @@ pub async fn update_mod(
         }
     }
 
-    let info = download_and_install_github_mod(&owner, &repo, None, &mods_path, &cache_path, token.as_deref())
-        .await
+    log::info!(
+        "update_mod: installing {}/{}@{} for {} (game v{}, min_game_version={})",
+        owner, repo, chosen_tag, name,
+        game_version.as_deref().unwrap_or("?"),
+        chosen_mgv.as_deref().unwrap_or("none"),
+    );
+    let info = crate::mods::install_mod_from_zip(&chosen_zip, &mods_path)
         .map_err(|e| e.to_string())?;
 
     // Only record the new installed_version if the install RESULT looks
@@ -444,7 +510,7 @@ pub async fn update_mod(
     // which version was last working).
     let install_healthy = info.version != "unknown" && !info.version.is_empty();
     if install_healthy {
-        update_installed_version(&name, &tag, &config_path);
+        update_installed_version(&name, &chosen_tag, &config_path);
         if info.name != name {
             // When the install renamed the mod (manifest's Name field changed
             // between releases — e.g. "STS2-ShowPlayerHandCards" → "Highlight
@@ -452,13 +518,13 @@ pub async fn update_mod(
             // version over so the audit doesn't lose track and report "no
             // source" on the freshly-installed copy.
             crate::mod_sources::migrate_source_entry(&name, &info.name, &config_path);
-            update_installed_version(&info.name, &tag, &config_path);
+            update_installed_version(&info.name, &chosen_tag, &config_path);
         }
     } else {
         log::warn!(
             "update_mod: install of '{}' from {}/{}@{} produced an unhealthy ModInfo (version='{}'); \
              leaving installed_version untouched so the previously-recorded value survives for Repair walk-back.",
-            name, owner, repo, tag, info.version,
+            name, owner, repo, chosen_tag, info.version,
         );
     }
 
@@ -693,19 +759,27 @@ pub async fn pick_compatible_release(
 }
 
 /// Update all mods that have available GitHub updates.
+///
+/// Per-mod walk-back: each candidate goes through `pick_compatible_release`
+/// so we never install a release that requires a newer Slay the Spire 2
+/// build than the user has. If the walk-back lands on the version the user
+/// is already on, the mod is skipped (the audit's "needs_update" was based
+/// on the absolute latest tag which the user can't run). Skipped mods are
+/// logged but don't fail the batch.
 #[tauri::command]
 pub async fn update_all_mods(
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Vec<ModInfo>, String> {
     crate::game::ensure_game_not_running()?;
-    let (mods_path, cache_path, config_path, token, nexus_key) = {
+    let (mods_path, cache_path, config_path, token, nexus_key, game_version) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
         let cache_path = s.cache_path.clone();
         let config_path = s.config_path.clone();
         let token = s.github_token.clone();
         let nexus_key = s.nexus_api_key.clone();
-        (mods_path, cache_path, config_path, token, nexus_key)
+        let game_version = s.game_version.clone();
+        (mods_path, cache_path, config_path, token, nexus_key, game_version)
     };
 
     let installed = scan_mods(&mods_path);
@@ -716,44 +790,129 @@ pub async fn update_all_mods(
 
     let mut results = Vec::new();
     for update in &updates {
+        // Skip Nexus updates here — the curator workflow's "Update all"
+        // is the GitHub auto-update path; Nexus updates require user
+        // interaction (Slow Download / Manual) and surface separately.
+        if update.source_type != "github" {
+            continue;
+        }
+
         let (owner, repo) = match parse_owner_repo(&update.source_id) {
             Some(pair) => pair,
             None => continue,
         };
 
-        match download_and_install_github_mod(
-            &owner,
-            &repo,
-            None,
-            &mods_path,
-            &cache_path,
-            token.as_deref(),
-        )
-        .await
-        {
+        // Walk-back: find the newest release compatible with the user's
+        // game version. Falls open to absolute-latest when game_version
+        // is unknown.
+        let (chosen_tag, chosen_zip) = if game_version.is_some() {
+            match pick_compatible_release(
+                &owner,
+                &repo,
+                game_version.as_deref(),
+                &cache_path,
+                token.as_deref(),
+            )
+            .await
+            {
+                Ok(c) => {
+                    let installed_tag = sources_db
+                        .mods
+                        .get(&update.mod_name)
+                        .and_then(|e| e.installed_version.as_deref())
+                        .map(|s| s.trim_start_matches('v'))
+                        .unwrap_or("");
+                    let manifest_ver = installed
+                        .iter()
+                        .find(|m| m.name == update.mod_name)
+                        .map(|m| m.version.trim_start_matches('v'))
+                        .unwrap_or("");
+                    let chosen_ver = c.tag.trim_start_matches('v');
+                    if chosen_ver == installed_tag || chosen_ver == manifest_ver {
+                        log::info!(
+                            "update_all_mods: skipping '{}' — already on newest compatible release (chosen {}, latest {} requires newer game)",
+                            update.mod_name, c.tag, update.latest_version,
+                        );
+                        continue;
+                    }
+                    (c.tag, c.zip_path)
+                }
+                Err(e) => {
+                    log::error!(
+                        "update_all_mods: walk-back failed for '{}' ({}/{}): {}",
+                        update.mod_name, owner, repo, e
+                    );
+                    continue;
+                }
+            }
+        } else {
+            log::warn!(
+                "update_all_mods: no game_version detected — installing latest {}/{}@{} without compatibility check",
+                owner, repo, update.latest_version,
+            );
+            let zip = match crate::download::download_release_zip_to_cache(
+                &owner, &repo, &update.latest_version, &cache_path, token.as_deref(),
+            )
+            .await
+            {
+                Ok(p) => p,
+                Err(e) => {
+                    log::error!(
+                        "update_all_mods: download failed for '{}' ({}/{}@{}): {}",
+                        update.mod_name, owner, repo, update.latest_version, e,
+                    );
+                    continue;
+                }
+            };
+            (update.latest_version.clone(), zip)
+        };
+
+        // Delete old files before extracting the new zip — same shape as
+        // update_mod / repair_mod.
+        if let Some(old_info) = installed.iter().find(|m| m.name == update.mod_name) {
+            let mut parent_dirs = std::collections::HashSet::new();
+            for file_rel in &old_info.files {
+                let normalized = file_rel.replace('\\', "/");
+                let file_path = mods_path.join(&normalized);
+                if file_path.is_dir() {
+                    let _ = std::fs::remove_dir_all(&file_path);
+                } else if file_path.exists() {
+                    let _ = std::fs::remove_file(&file_path);
+                }
+                if let Some(parent_rel) = std::path::Path::new(&normalized).parent() {
+                    if !parent_rel.as_os_str().is_empty() {
+                        parent_dirs.insert(mods_path.join(parent_rel));
+                    }
+                }
+            }
+            for dir in &parent_dirs {
+                if dir.is_dir()
+                    && std::fs::read_dir(dir).map(|mut d| d.next().is_none()).unwrap_or(false)
+                {
+                    let _ = std::fs::remove_dir(dir);
+                }
+            }
+            if let Some(folder) = old_info.folder_name.as_deref() {
+                let folder_path = mods_path.join(folder);
+                if folder_path.is_dir() {
+                    let _ = std::fs::remove_dir_all(&folder_path);
+                }
+            }
+        }
+
+        match crate::mods::install_mod_from_zip(&chosen_zip, &mods_path) {
             Ok(info) => {
-                // Same healthy-install gate as update_mod — only persist
-                // the new installed_version when the manifest parsed
-                // cleanly. Stub installs (version="unknown") survived the
-                // download but the on-disk state isn't actually working,
-                // so we don't want to lose track of the previously-known-
-                // good version that Repair walk-back will need.
                 let install_healthy = info.version != "unknown" && !info.version.is_empty();
                 if !install_healthy {
                     log::warn!(
-                        "update_all_mods: '{}' from {}/{} produced an unhealthy ModInfo (version='{}'); \
+                        "update_all_mods: '{}' from {}/{}@{} produced an unhealthy ModInfo (version='{}'); \
                          leaving installed_version untouched.",
-                        update.mod_name, owner, repo, info.version,
+                        update.mod_name, owner, repo, chosen_tag, info.version,
                     );
                     results.push(info);
                     continue;
                 }
 
-                // Carry pin / nexus link / source-detection origin from
-                // the pre-update entry to the post-update name so manifest
-                // renames don't strand the audit. We do this BEFORE writing
-                // the new entry so it lands as the baseline that we then
-                // patch with the fresh repo + version.
                 if info.name != update.mod_name {
                     crate::mod_sources::migrate_source_entry(
                         &update.mod_name,
@@ -764,7 +923,7 @@ pub async fn update_all_mods(
                 let mut db = load_sources(&config_path);
                 let entry = db.mods.entry(info.name.clone()).or_default();
                 entry.github_repo = Some(format!("{}/{}", owner, repo));
-                entry.installed_version = Some(update.latest_version.clone());
+                entry.installed_version = Some(chosen_tag.clone());
                 let _ = save_sources(&db, &config_path);
                 results.push(info);
             }
@@ -822,6 +981,26 @@ pub struct ModAuditEntry {
     /// version (we fail open in that case).
     #[serde(default)]
     pub game_version_too_old: bool,
+    /// `min_game_version` declared by the latest GitHub release that has
+    /// downloadable assets. Read by peeking the release zip's manifest
+    /// during the audit. None = release didn't declare one (mod doesn't
+    /// care) OR we couldn't peek (download/parse failed).
+    #[serde(default)]
+    pub latest_release_min_game_version: Option<String>,
+    /// True iff `latest_release_with_assets_tag` declares a `min_game_version`
+    /// the user's STS2 build doesn't satisfy. When this is true, clicking
+    /// Update on the row will walk back to an older compatible release —
+    /// which `latest_compatible_tag` (below) names so the UI can preview
+    /// the actual-installable version.
+    #[serde(default)]
+    pub latest_release_blocked_by_game_version: bool,
+    /// The tag the Update button will actually install — i.e. the newest
+    /// release whose `min_game_version` is satisfied by the user's game.
+    /// Equal to `latest_release_with_assets_tag` when that release is
+    /// compatible. None when no release in the walked-back window is
+    /// compatible (the row falls back to "Repair" semantics).
+    #[serde(default)]
+    pub latest_compatible_tag: Option<String>,
 }
 
 /// Valid mod asset extensions for STS2 mods.
@@ -845,13 +1024,14 @@ pub async fn audit_mod_versions(
     only: Option<Vec<String>>,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Vec<ModAuditEntry>, String> {
-    let (mods_path, disabled_path, config_path, token) = {
+    let (mods_path, disabled_path, config_path, cache_path, token) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
         let disabled_path = s.disabled_mods_path.clone();
         let config_path = s.config_path.clone();
+        let cache_path = s.cache_path.clone();
         let token = s.github_token.clone();
-        (mods_path, disabled_path, config_path, token)
+        (mods_path, disabled_path, config_path, cache_path, token)
     };
 
     // Scan both enabled and disabled mods
@@ -914,6 +1094,12 @@ pub async fn audit_mod_versions(
         let mut asset_names: Vec<String> = Vec::new();
         let mut total_scanned: u32 = 0;
         let mut github_error: Option<String> = None;
+        // Walk-back / compat fields. Populated below when we have an
+        // actionable github_needs_update on a row whose latest release
+        // declares a min_game_version higher than the user's STS2 build.
+        let mut latest_release_min_game_version: Option<String> = None;
+        let mut latest_release_blocked_by_game_version = false;
+        let mut latest_compatible_tag: Option<String> = None;
 
         if let Some((owner, repo)) = github_pair {
             let full_name = format!("{}/{}", owner, repo);
@@ -976,6 +1162,96 @@ pub async fn audit_mod_versions(
                     {
                         // Use semver comparison — only flag if latest > current
                         github_needs_update = is_newer_version(current_ver, latest_ver);
+                    }
+                }
+
+                // Compat walk-back — runs only when the basic GitHub check
+                // already says an update is available. Cheap when nothing's
+                // pending; one zip download (cached) when something is.
+                //
+                // We peek the latest release with assets first. If its
+                // declared min_game_version is satisfied, we're done — that
+                // tag is what Update will install. If it's too high for
+                // the user's STS2 build, we walk back to find the newest
+                // compatible tag and flag the row so the UI can show
+                // "Latest vY needs game vZ; will install vX (compatible)".
+                if github_needs_update {
+                    if let Some(ref assets_tag) = latest_release_with_assets_tag.clone() {
+                        match crate::download::download_release_zip_to_cache(
+                            &owner, &repo, assets_tag, &cache_path, token.as_deref(),
+                        )
+                        .await
+                        {
+                            Ok(zip_path) => {
+                                let peeked = crate::download::peek_zip_min_game_version(&zip_path)
+                                    .ok()
+                                    .flatten();
+                                latest_release_min_game_version = peeked.clone();
+                                let compatible = match (user_game_version.as_deref(), peeked.as_deref()) {
+                                    (_, None) => true,
+                                    (None, Some(_)) => true,
+                                    (Some(gv), Some(req)) => game_version_satisfies(gv, req),
+                                };
+                                if compatible {
+                                    latest_compatible_tag = Some(assets_tag.clone());
+                                } else {
+                                    latest_release_blocked_by_game_version = true;
+                                    // Walk back from latest. Reuses cache,
+                                    // so we don't re-download what we
+                                    // already peeked.
+                                    match pick_compatible_release(
+                                        &owner, &repo,
+                                        user_game_version.as_deref(),
+                                        &cache_path, token.as_deref(),
+                                    )
+                                    .await
+                                    {
+                                        Ok(walk) => {
+                                            latest_compatible_tag = Some(walk.tag.clone());
+                                            // Re-evaluate whether the walked-
+                                            // back tag is actually newer than
+                                            // installed. If not, drop the
+                                            // update flag — the user already
+                                            // has the newest compatible
+                                            // release; the only thing newer
+                                            // is the blocked latest.
+                                            let installed_tag = sources_db
+                                                .mods
+                                                .get(&m.name)
+                                                .and_then(|e| e.installed_version.as_deref())
+                                                .map(|s| s.trim_start_matches('v'))
+                                                .unwrap_or("");
+                                            let manifest_ver = m.version.trim_start_matches('v');
+                                            let walk_ver = walk.tag.trim_start_matches('v');
+                                            if walk_ver == installed_tag || walk_ver == manifest_ver {
+                                                github_needs_update = false;
+                                            }
+                                        }
+                                        Err(e) => {
+                                            log::warn!(
+                                                "audit: walk-back failed for {}/{} (game v{}): {}",
+                                                owner, repo,
+                                                user_game_version.as_deref().unwrap_or("?"), e,
+                                            );
+                                            // Couldn't find a compatible
+                                            // release — drop the update flag
+                                            // since clicking Update would
+                                            // produce a broken install.
+                                            github_needs_update = false;
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                log::warn!(
+                                    "audit: failed to peek {}/{}@{} for compat check: {}",
+                                    owner, repo, assets_tag, e,
+                                );
+                                // Peek failed → keep github_needs_update as
+                                // the basic check decided. Update flow has
+                                // its own walk-back as a final safety net.
+                            }
+                        }
                     }
                 }
             }
@@ -1050,17 +1326,6 @@ pub async fn audit_mod_versions(
             }
         }
 
-        let needs_update = !is_pinned && (github_needs_update || nexus_update_available);
-        let update_source = if github_needs_update && nexus_update_available {
-            Some("both".to_string())
-        } else if github_needs_update {
-            Some("github".to_string())
-        } else if nexus_update_available {
-            Some("nexus".to_string())
-        } else {
-            None
-        };
-
         // If no source at all, still include in report
         if !has_any_source {
             results.push(ModAuditEntry {
@@ -1085,6 +1350,9 @@ pub async fn audit_mod_versions(
                     (user_game_version.as_deref(), m.min_game_version.as_deref()),
                     (Some(gv), Some(req)) if !game_version_satisfies(gv, req)
                 ),
+                latest_release_min_game_version: None,
+                latest_release_blocked_by_game_version: false,
+                latest_compatible_tag: None,
             });
             continue;
         }
@@ -1105,6 +1373,20 @@ pub async fn audit_mod_versions(
             (user_game_version.as_deref(), min_game_version.as_deref()),
             (Some(gv), Some(req)) if !game_version_satisfies(gv, req)
         );
+        // Compute needs_update + update_source AFTER the walk-back has had
+        // a chance to drop github_needs_update (it does so when the only
+        // newer release is incompatible, or when the walked-back tag is
+        // already what's installed).
+        let needs_update = !is_pinned && (github_needs_update || nexus_update_available);
+        let update_source = if github_needs_update && nexus_update_available {
+            Some("both".to_string())
+        } else if github_needs_update {
+            Some("github".to_string())
+        } else if nexus_update_available {
+            Some("nexus".to_string())
+        } else {
+            None
+        };
         results.push(ModAuditEntry {
             mod_name: m.name.clone(),
             github_repo: display_github,
@@ -1124,6 +1406,9 @@ pub async fn audit_mod_versions(
             pinned: is_pinned,
             min_game_version,
             game_version_too_old,
+            latest_release_min_game_version,
+            latest_release_blocked_by_game_version,
+            latest_compatible_tag,
         });
     }
 

@@ -125,7 +125,6 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
@@ -214,21 +213,9 @@ pub fn run() {
             subscriptions::repair_modpack_subscription,
         ])
         .setup(|app| {
-            // NOTE: nxm:// (Nexus "Mod Manager Download") and sts2mm://
-            // schemes are declared in tauri.conf.json's deep-link plugin
-            // config so the OS knows about them, but the actual install
-            // pipeline currently catches Nexus zips via the Downloads
-            // folder watcher (set up below) — i.e. the user clicks
-            // Nexus's Slow / Manual button, the zip lands in ~/Downloads,
-            // and the watcher picks it up. Wiring nxm:// through to a
-            // real install action is a future improvement; until then,
-            // explicitly NOT installing a deep-link listener here so the
-            // copy in Settings/Tutorial/README ("don't click Mod Manager
-            // Download — it isn't wired in yet") matches the actual
-            // behavior instead of silently dropping the click on the
-            // floor.
-
-            // Start watching the Downloads folder for new mod zips
+            // Nexus zips are caught via the Downloads-folder watcher
+            // below — user clicks Nexus's Slow / Manual button, the zip
+            // lands in ~/Downloads, watcher picks it up.
             {
                 use tauri::Manager;
                 let handle = app.handle().clone();

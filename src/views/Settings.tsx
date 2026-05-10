@@ -807,7 +807,12 @@ export function SettingsView() {
                                 }}
                                 disabled={updatingMod === entry.mod_name || updatingAll}
                                 className="gf-btn gf-btn-sm"
-                                title={`Download and install v${entry.latest_release_with_assets_tag}`}
+                                title={
+                                  entry.latest_release_blocked_by_game_version && entry.latest_compatible_tag
+                                    ? `Latest v${entry.latest_release_with_assets_tag} requires game v${entry.latest_release_min_game_version ?? '?'}. ` +
+                                      `Will install the newest compatible release: v${entry.latest_compatible_tag}.`
+                                    : `Download and install v${entry.latest_compatible_tag ?? entry.latest_release_with_assets_tag}`
+                                }
                               >
                                 {updatingMod === entry.mod_name || updatingAll ? (
                                   <><RefreshCw size={10} className="animate-spin" /> Updating…</>
@@ -855,7 +860,7 @@ export function SettingsView() {
                                 ? `${entry.installed_version} → ${
                                     entry.update_source === 'nexus' || (!entry.latest_release_with_assets_tag && entry.nexus_version)
                                       ? entry.nexus_version
-                                      : entry.latest_release_with_assets_tag
+                                      : entry.latest_compatible_tag ?? entry.latest_release_with_assets_tag
                                   }`
                                 : !hasAnySource
                                 ? 'No source'
@@ -929,6 +934,27 @@ export function SettingsView() {
                             {entry.min_game_version}; you have v
                             {gameInfo?.game_version ?? '?'}). Use Repair on the
                             Mods row to roll back to a compatible release.
+                          </div>
+                        )}
+                        {entry.latest_release_blocked_by_game_version && entry.latest_compatible_tag && (
+                          <div
+                            className="mt-1 ml-4"
+                            style={{
+                              fontSize: 11,
+                              color: 'var(--ink-dim)',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 6,
+                            }}
+                            title={
+                              `Latest release v${entry.latest_release_with_assets_tag} requires game v${entry.latest_release_min_game_version ?? '?'}. ` +
+                              `Update will walk back to v${entry.latest_compatible_tag}, the newest release compatible with your STS2 build.`
+                            }
+                          >
+                            ↺ Latest v{entry.latest_release_with_assets_tag} needs
+                            game v{entry.latest_release_min_game_version ?? '?'};
+                            Update will install v{entry.latest_compatible_tag}{' '}
+                            (newest compatible).
                           </div>
                         )}
                       </div>
@@ -1025,22 +1051,6 @@ export function SettingsView() {
 
             <div className="gf-section-title">In-app logs</div>
             <LogsViewer />
-
-            <div className="gf-section-title">Protocol handlers</div>
-            <div className="gf-set-row">
-              <div>
-                <div className="gf-set-label">sts2mm:// handler</div>
-                <div className="gf-set-desc">Handle one-click install links · registered automatically</div>
-              </div>
-              <span className="gf-pill gf-pill-ok">Active</span>
-            </div>
-            <div className="gf-set-row">
-              <div>
-                <div className="gf-set-label">nxm:// handler</div>
-                <div className="gf-set-desc">Handle Nexus Mods download links · registered automatically</div>
-              </div>
-              <span className="gf-pill gf-pill-ok">Active</span>
-            </div>
           </>
         )}
 

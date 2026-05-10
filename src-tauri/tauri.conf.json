@@ -41,14 +41,6 @@
     "longDescription": "A cross-platform mod manager for Slay the Spire 2 that lets you install, manage, and share mod profiles with friends via shareable links."
   },
   "plugins": {
-    "deep-link": {
-      "desktop": {
-        "schemes": [
-          "sts2mm",
-          "nxm"
-        ]
-      }
-    },
     "updater": {
       "active": true,
       "endpoints": [

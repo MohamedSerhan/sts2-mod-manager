@@ -96,6 +96,13 @@ clipboard for pasting into a GitHub issue.
   app (requires a free Nexus API key — Settings → Accounts).
 - **One-click install** straight from the cards.
 
+> **Nexus integration is free-tier only.** The app uses Nexus's free API
+> + the standard "Mod Manager Download" button flow. There's no premium-
+> account support — Nexus Premium's instant-download endpoints aren't
+> wired in, so premium subscribers don't get faster downloads or skip
+> the standard 5-second download gate. Everything that's free-tier-
+> downloadable on Nexus works; anything paywalled doesn't.
+
 ### Backups
 - **Auto-backup before every launch.** Keeps the last 5 by default.
 - **Restore preview.** When you restore a backup, the app offers to back up

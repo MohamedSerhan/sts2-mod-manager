@@ -253,7 +253,13 @@ function UserGuide({ onGoToSettings }: { onGoToSettings?: () => void }) {
               <li>
                 <strong>Nexus API key</strong> — sign up free at nexusmods.com → Profile → API Keys → "Personal
                 API key". Paste into Settings → Nexus Mods API Key. Lets you Quick-Add Nexus links and browse
-                Nexus mods inside the app.
+                Nexus mods inside the app.{' '}
+                <em>
+                  Free-tier only — the app uses Nexus's standard "Mod Manager
+                  Download" flow. Nexus Premium's instant-download API isn't
+                  wired in, so paid subscribers don't get faster downloads
+                  here.
+                </em>
               </li>
               <li>
                 <strong>GitHub token</strong> — only needed if you plan to share modpacks (see the Modpack

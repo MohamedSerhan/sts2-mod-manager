@@ -266,6 +266,10 @@ export function OnboardingOverlay({
                 {!nexusOk && keySub !== 'keyRejected' && (
                   <div className="gf-help muted">Skip if you only use GitHub mods.</div>
                 )}
+                <div className="gf-help muted" style={{ marginTop: 4, fontSize: 11 }}>
+                  Free Nexus account is fine — the app doesn't use Nexus
+                  Premium's instant-download API.
+                </div>
               </div>
 
               <div className="gf-field">

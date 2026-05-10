@@ -23,7 +23,7 @@
 
 ---
 
-## Why this one (and not r2modman / Vortex / a folder of zips)
+## Why this one
 
 There are mod managers, and there are mod managers built for the
 "play exactly what my friend plays" workflow. STS2 Mod Manager is the

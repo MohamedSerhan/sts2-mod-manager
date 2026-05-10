@@ -62,7 +62,7 @@ function nexusFilesUrl(input: string): string | null {
 
 export function QuickAddModal({ open, onClose }: Props) {
   const toast = useToast();
-  const { refreshAll } = useApp();
+  const { refreshAll, notifyNexusOpen } = useApp();
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const detected = useMemo(() => detect(url), [url]);
@@ -84,9 +84,11 @@ export function QuickAddModal({ open, onClose }: Props) {
         const filesUrl = nexusFilesUrl(input);
         if (filesUrl) {
           await openUrl(filesUrl);
-          toast.info(
-            `Opened ${result.nexus_info.name || 'Nexus mod'}. Click "Slow Download" (or "Manual") on Nexus — the app catches the zip from your Downloads folder.`,
-          );
+          // Sticky toast — stays up until the downloads watcher reports
+          // an install (or a 10-min fail-safe timeout fires). Replaces
+          // the previous 4-second info toast that vanished before the
+          // user could read it, never mind act on it.
+          notifyNexusOpen(result.nexus_info.name || 'Nexus mod');
         } else {
           toast.info(`Found Nexus mod: ${result.nexus_info.name || 'Unknown'}.`);
         }

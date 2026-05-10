@@ -5,13 +5,23 @@ interface Toast {
   id: number;
   message: string;
   type: 'success' | 'error' | 'info';
+  /** Sticky toasts skip the auto-dismiss timer — caller is responsible for
+   *  calling `dismiss(id)` when the underlying condition resolves (e.g. the
+   *  "click Slow Download on Nexus" toast stays up until the downloads
+   *  watcher reports the install). */
+  sticky?: boolean;
 }
 
 interface ToastContextType {
-  toast: (message: string, type?: 'success' | 'error' | 'info') => void;
-  success: (message: string) => void;
-  error: (message: string) => void;
-  info: (message: string) => void;
+  toast: (message: string, type?: 'success' | 'error' | 'info') => number;
+  success: (message: string) => number;
+  error: (message: string) => number;
+  info: (message: string) => number;
+  /** Show a toast that does NOT auto-dismiss. Caller dismisses it via
+   *  `dismiss(id)`. Use sparingly — sticky toasts that nobody dismisses
+   *  pile up forever. Always pair with a clear resolution path. */
+  sticky: (message: string, type?: 'success' | 'error' | 'info') => number;
+  dismiss: (id: number) => void;
 }
 
 const ToastContext = createContext<ToastContextType | null>(null);
@@ -24,9 +34,14 @@ let nextId = 0;
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const addToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
+  const addToast = useCallback((
+    message: string,
+    type: 'success' | 'error' | 'info' = 'info',
+    sticky = false,
+  ): number => {
     const id = nextId++;
-    setToasts((prev) => [...prev, { id, message, type }]);
+    setToasts((prev) => [...prev, { id, message, type, sticky }]);
+    return id;
   }, []);
 
   const removeToast = useCallback((id: number) => {
@@ -34,10 +49,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const ctx: ToastContextType = {
-    toast: addToast,
-    success: (msg) => addToast(msg, 'success'),
-    error: (msg) => addToast(msg, 'error'),
-    info: (msg) => addToast(msg, 'info'),
+    toast: (msg, type = 'info') => addToast(msg, type, false),
+    success: (msg) => addToast(msg, 'success', false),
+    error: (msg) => addToast(msg, 'error', false),
+    info: (msg) => addToast(msg, 'info', false),
+    sticky: (msg, type = 'info') => addToast(msg, type, true),
+    dismiss: removeToast,
   };
 
   return (
@@ -58,13 +75,17 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => setVisible(true));
+    if (toast.sticky) {
+      // Sticky toasts skip the dismiss timer — caller controls lifetime.
+      return () => cancelAnimationFrame(raf);
+    }
     const dismissAt = toast.type === 'error' ? 6000 : 4000;
     const dismissTimer = setTimeout(() => setLeaving(true), dismissAt);
     return () => {
       cancelAnimationFrame(raf);
       clearTimeout(dismissTimer);
     };
-  }, [toast.type]);
+  }, [toast.type, toast.sticky]);
 
   useEffect(() => {
     if (!leaving) return;

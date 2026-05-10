@@ -69,7 +69,7 @@ function gameVersionSatisfies(current: string | null | undefined, required: stri
 }
 
 export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: boolean } = {}) {
-  const { mods, refreshMods, refreshAll, gameRunning, gameInfo } = useApp();
+  const { mods, refreshMods, refreshAll, gameRunning, gameInfo, notifyNexusOpen } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
   const [filter, setFilter] = useState('');
@@ -202,9 +202,9 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
         const filesUrl = nexusFilesUrl(input);
         if (filesUrl) {
           await openUrl(filesUrl);
-          toast.info(
-            `Opened ${result.nexus_info.name || 'Nexus mod'}. Click "Slow Download" (or "Manual") on Nexus — your browser will save the zip and the app will auto-install it from Downloads.`
-          );
+          // Sticky toast — dismissed when the downloads watcher reports
+          // an install or after a 10-min fail-safe.
+          notifyNexusOpen(result.nexus_info.name || 'Nexus mod');
         } else {
           toast.info(`Found Nexus mod: ${result.nexus_info.name || 'Unknown'}. Open it on Nexus and click "Slow Download" / "Manual" — the app will catch the zip from your Downloads folder.`);
         }

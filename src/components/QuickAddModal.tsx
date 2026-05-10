@@ -35,10 +35,10 @@ function detect(input: string): Detected {
 
   // Nexus patterns
   const nxUrl = v.match(/nexusmods\.com\/([^/]+)\/mods\/(\d+)/);
-  if (nxUrl) return { kind: 'nexus', display: `nexusmods.com/${nxUrl[1]}/mods/${nxUrl[2]}`, helper: 'Nexus mod · we\'ll open the Files tab so you can pick a download' };
+  if (nxUrl) return { kind: 'nexus', display: `nexusmods.com/${nxUrl[1]}/mods/${nxUrl[2]}`, helper: 'Nexus mod · we\'ll open the Files tab — click Slow Download / Manual' };
 
   const nxShort = v.match(/^nexus:([^/]+)\/mods\/(\d+)/);
-  if (nxShort) return { kind: 'nexus', display: `${nxShort[1]}/${nxShort[2]}`, helper: 'Nexus mod · we\'ll open the Files tab so you can pick a download' };
+  if (nxShort) return { kind: 'nexus', display: `${nxShort[1]}/${nxShort[2]}`, helper: 'Nexus mod · we\'ll open the Files tab — click Slow Download / Manual' };
 
   return { kind: null, display: v, helper: 'Unrecognised URL — paste a GitHub repo or Nexus mod link' };
 }
@@ -85,7 +85,7 @@ export function QuickAddModal({ open, onClose }: Props) {
         if (filesUrl) {
           await openUrl(filesUrl);
           toast.info(
-            `Opened ${result.nexus_info.name || 'Nexus mod'}. Click "Mod Manager Download" — it'll auto-install when the file lands in Downloads.`,
+            `Opened ${result.nexus_info.name || 'Nexus mod'}. Click "Slow Download" (or "Manual") on Nexus — the app catches the zip from your Downloads folder.`,
           );
         } else {
           toast.info(`Found Nexus mod: ${result.nexus_info.name || 'Unknown'}.`);

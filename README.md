@@ -96,12 +96,21 @@ clipboard for pasting into a GitHub issue.
   app (requires a free Nexus API key — Settings → Accounts).
 - **One-click install** straight from the cards.
 
-> **Nexus integration is free-tier only.** The app uses Nexus's free API
-> + the standard "Mod Manager Download" button flow. There's no premium-
-> account support — Nexus Premium's instant-download endpoints aren't
-> wired in, so premium subscribers don't get faster downloads or skip
-> the standard 5-second download gate. Everything that's free-tier-
-> downloadable on Nexus works; anything paywalled doesn't.
+> **Nexus integration is free-tier only.** When you install a Nexus mod
+> via Quick Add or the Browse view, the app opens the mod's Files page
+> in your browser. From there: click Nexus's **Slow Download** /
+> **Manual** button (the free one), wait the few seconds, and your
+> browser saves the zip to `~/Downloads`. The app's downloads-folder
+> watcher picks the zip up automatically and installs it.
+>
+> The app does NOT handle the **Mod Manager Download** button —
+> Nexus's nxm:// deep-link route isn't wired through to the install
+> pipeline. If you click Mod Manager Download, nothing happens.
+> Stick to Slow / Manual.
+>
+> Nexus Premium's instant-download API isn't wired in either, so paid
+> subscribers don't get faster downloads here. Everything free-tier-
+> downloadable on Nexus works the same way for everyone.
 
 ### Backups
 - **Auto-backup before every launch.** Keeps the last 5 by default.

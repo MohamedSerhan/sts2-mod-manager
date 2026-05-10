@@ -542,10 +542,12 @@ export function SettingsView() {
                 )}
                 <div className="gf-help muted" style={{ marginTop: 6, fontSize: 11.5 }}>
                   <span>
-                    Free-tier only — the app uses Nexus's standard "Mod Manager
-                    Download" flow, which any free account can trigger. Nexus
-                    Premium's instant-download API isn't wired in, so paid
-                    subscribers don't get faster downloads here.
+                    Free-tier only. To install a Nexus mod, click the
+                    "Slow Download" / "Manual" button on Nexus — the app
+                    catches the zip from your <code>Downloads</code> folder.
+                    The "Mod Manager Download" button isn't wired through.
+                    Nexus Premium's instant-download API isn't either, so
+                    paid subscribers don't get faster downloads here.
                   </span>
                 </div>
               </div>

@@ -214,17 +214,19 @@ pub fn run() {
             subscriptions::repair_modpack_subscription,
         ])
         .setup(|app| {
-            // Register deep link handler for nxm:// and sts2mm:// protocols.
-            // We only log on the Rust side here — the actual NXM handling lives
-            // on the frontend via the handle_nxm_link command, which Tauri
-            // forwards the deep-link payload to automatically.
-            #[cfg(desktop)]
-            {
-                use tauri::Listener;
-                app.listen("deep-link://new-url", move |event| {
-                    log::info!("Deep link received: {:?}", event.payload());
-                });
-            }
+            // NOTE: nxm:// (Nexus "Mod Manager Download") and sts2mm://
+            // schemes are declared in tauri.conf.json's deep-link plugin
+            // config so the OS knows about them, but the actual install
+            // pipeline currently catches Nexus zips via the Downloads
+            // folder watcher (set up below) — i.e. the user clicks
+            // Nexus's Slow / Manual button, the zip lands in ~/Downloads,
+            // and the watcher picks it up. Wiring nxm:// through to a
+            // real install action is a future improvement; until then,
+            // explicitly NOT installing a deep-link listener here so the
+            // copy in Settings/Tutorial/README ("don't click Mod Manager
+            // Download — it isn't wired in yet") matches the actual
+            // behavior instead of silently dropping the click on the
+            // floor.
 
             // Start watching the Downloads folder for new mod zips
             {

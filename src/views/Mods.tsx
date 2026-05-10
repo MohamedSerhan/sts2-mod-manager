@@ -203,10 +203,10 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
         if (filesUrl) {
           await openUrl(filesUrl);
           toast.info(
-            `Opened ${result.nexus_info.name || 'Nexus mod'}. Click "Mod Manager Download" — it'll auto-install when the file lands in Downloads.`
+            `Opened ${result.nexus_info.name || 'Nexus mod'}. Click "Slow Download" (or "Manual") on Nexus — your browser will save the zip and the app will auto-install it from Downloads.`
           );
         } else {
-          toast.info(`Found Nexus mod: ${result.nexus_info.name || 'Unknown'}. Open it on Nexus and click "Mod Manager Download".`);
+          toast.info(`Found Nexus mod: ${result.nexus_info.name || 'Unknown'}. Open it on Nexus and click "Slow Download" / "Manual" — the app will catch the zip from your Downloads folder.`);
         }
       }
       setQuickAddUrl('');

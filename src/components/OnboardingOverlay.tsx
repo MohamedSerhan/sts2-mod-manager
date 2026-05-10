@@ -267,8 +267,10 @@ export function OnboardingOverlay({
                   <div className="gf-help muted">Skip if you only use GitHub mods.</div>
                 )}
                 <div className="gf-help muted" style={{ marginTop: 4, fontSize: 11 }}>
-                  Free Nexus account is fine — the app doesn't use Nexus
-                  Premium's instant-download API.
+                  Free Nexus account is fine. To install a Nexus mod, you'll
+                  click "Slow Download" / "Manual" on Nexus — the app catches
+                  the zip from your Downloads folder. (Nexus Premium's
+                  instant-download API isn't wired in.)
                 </div>
               </div>
 

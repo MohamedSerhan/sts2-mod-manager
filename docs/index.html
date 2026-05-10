@@ -290,12 +290,16 @@
   </div>
 
   <p style="margin-top: 14px; font-size: 12.5px; color: var(--mute); border-left: 2px solid var(--line); padding-left: 12px;">
-    <b style="color: var(--ink);">A note on Nexus.</b> Nexus integration is free-tier only — the app
-    uses the standard "Mod Manager Download" button flow that any free
-    Nexus account can trigger. Nexus Premium's instant-download API
-    isn't wired in, so paid subscribers don't get faster downloads or
-    skip the 5-second download gate. Everything free-tier-downloadable
-    on Nexus works.
+    <b style="color: var(--ink);">A note on Nexus.</b> Free-tier only.
+    The app opens the mod's Files page in your browser; you click
+    Nexus's <b>Slow Download</b> / <b>Manual</b> button (the free one),
+    wait the few seconds, and the browser drops a zip into
+    <code>~/Downloads</code>. The app's folder watcher picks it up and
+    installs automatically. Don't click Nexus's <b>Mod Manager
+    Download</b> — its <code>nxm://</code> deep-link isn't wired
+    through to the install pipeline yet, so nothing happens. Premium
+    accounts use the same free-tier flow, so paid subscribers don't get
+    faster downloads here.
   </p>
 
   <h2>Quick start</h2>

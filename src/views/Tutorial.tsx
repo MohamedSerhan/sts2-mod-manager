@@ -255,10 +255,10 @@ function UserGuide({ onGoToSettings }: { onGoToSettings?: () => void }) {
                 API key". Paste into Settings → Nexus Mods API Key. Lets you Quick-Add Nexus links and browse
                 Nexus mods inside the app.{' '}
                 <em>
-                  Free-tier only — the app uses Nexus's standard "Mod Manager
-                  Download" flow. Nexus Premium's instant-download API isn't
-                  wired in, so paid subscribers don't get faster downloads
-                  here.
+                  Free-tier only. The app catches Nexus zips that land in
+                  your Downloads folder when you use Slow / Manual downloads.
+                  Nexus Premium's instant-download API isn't wired in, so
+                  paid subscribers don't get faster downloads here.
                 </em>
               </li>
               <li>
@@ -277,8 +277,13 @@ function UserGuide({ onGoToSettings }: { onGoToSettings?: () => void }) {
               </li>
               <li>
                 A Nexus Mods URL (e.g. <Kbd>https://www.nexusmods.com/slaythespire2/mods/123</Kbd>) — the app
-                opens your browser; click <Kbd>Mod Manager Download</Kbd> on Nexus and the app catches the file
-                and installs it.
+                opens the mod's <strong>Files</strong> tab in your browser. Click Nexus's{' '}
+                <Kbd>Slow Download</Kbd> (sometimes labelled <Kbd>Manual</Kbd>), wait the few seconds, and
+                let your browser save the zip to <Kbd>~/Downloads</Kbd>. The app's downloads-folder watcher
+                picks it up and installs it for you.{' '}
+                <strong>Don't click <Kbd>Mod Manager Download</Kbd></strong> — that uses Nexus's
+                <code>nxm://</code> deep link, which isn't wired through to the install pipeline yet, so
+                nothing happens when you click it.
               </li>
             </ul>
             <p>

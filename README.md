@@ -133,13 +133,12 @@ clipboard for pasting into a GitHub issue.
 ### App polish
 - **First-run onboarding wizard** — three gated steps: detect game install,
   connect optional accounts, pick a starter profile.
-- **Custom titlebar** with native min/max/close controls.
+- **Custom titlebar** with min / max / close controls.
 - **In-app log viewer** with filter chips (Info / Warn / Error / Debug),
   free-text search, and "Send to support" that opens a GitHub issue prefilled
   with the recent log tail.
-- **Keyboard shortcuts.** `?` opens the cheat sheet. `1–4` jump between Home /
-  Profiles / Mods / Browse. `Ctrl/⌘ L` launches the game. `/` focuses search
-  on the current view. `Ctrl/⌘ ,` opens Settings. `Esc` closes any dialog.
+- **Keyboard shortcut.** `Ctrl/⌘ L` launches the active modpack from anywhere
+  in the app.
 - **Toasts** on every action with success / info / error severity.
 - **Confirm dialogs** for destructive actions, with optional checkbox
   ("backup first") and typed-phrase confirmation for the really scary stuff.
@@ -253,8 +252,10 @@ src/
   views/                  # Home / Profiles / Mods / Browse / Settings / Tutorial
   components/             # Button, Card, Toggle, Badge, Input,
                           # ConfirmDialog, OnboardingOverlay,
-                          # ShortcutsOverlay, ProfileSwitcher, LogsViewer,
-                          # DiagnosticBundle, LaunchSpinner
+                          # ProfileSwitcher, KebabMenu, PublishModal,
+                          # AutoDetectModal, QuickAddModal, BrowseDetail,
+                          # SourceEditor, LogsViewer, DiagnosticBundle,
+                          # LaunchSpinner, AboutCard, SubUpdateDetail
   contexts/               # ToastContext, AppContext
   hooks/useTauri.ts       # all Tauri command bindings (one place)
   styles.css              # all theme tokens + utility classes (gf-*)

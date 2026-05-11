@@ -115,11 +115,12 @@ function FriendHero({ onGoToSettings: _onGoToSettings }: { onGoToSettings?: () =
         <HeroCard
           n={2}
           icon={<Play size={18} />}
-          title="Hit Launch STS2"
+          title="Hit Launch"
           body={
             <>
-              Bottom-left corner. The game opens through Steam with their exact mods enabled. The app
-              auto-backs-up before every launch so it's always reversible.
+              Top-right of the window, or press <Kbd>Ctrl/⌘ L</Kbd>. The game opens through Steam with
+              your friend's exact mods enabled. The app auto-backs-up before every launch so it's
+              always reversible.
             </>
           }
         />
@@ -257,7 +258,7 @@ function UserGuide({ onGoToSettings }: { onGoToSettings?: () => void }) {
               </li>
               <li>
                 <strong>GitHub token</strong> — only needed if you plan to share modpacks (see the Modpack
-                Creator tab in Advanced Mode). Otherwise skip.
+                Creator tab above). Otherwise skip.
               </li>
             </ul>
           </Step>
@@ -309,9 +310,9 @@ function UserGuide({ onGoToSettings }: { onGoToSettings?: () => void }) {
 
           <Step n={7} title="Reporting bugs">
             <p>
-              Settings → <Kbd>View Logs</Kbd> opens the log file (or its folder). If something goes wrong, send
-              the file to whoever's helping you debug — the log captures every download, every profile apply,
-              every error.
+              Settings → scroll to <Kbd>In-app logs</Kbd>. The viewer has filter chips (Info / Warn / Error /
+              Debug) and a <Kbd>Send to support</Kbd> button that opens a prefilled GitHub issue with the
+              recent log tail. The log captures every download, every profile apply, every error.
             </p>
           </Step>
         </Card>
@@ -421,7 +422,7 @@ function CreatorGuide({ onGoToSettings }: { onGoToSettings?: () => void }) {
       <Step n={7} title="Curator best practices">
         <ul className="list-disc list-inside space-y-1 ml-1">
           <li>
-            <strong>Audit before sharing.</strong> Settings → <Kbd>Audit Mod Versions</Kbd> flags mods
+            <strong>Audit before sharing.</strong> Settings → Audit → <Kbd>Run audit</Kbd> flags mods
             without a known source — link them first, otherwise they get bundled into your sharing repo
             (bigger footprint, slower for friends to download).
           </li>
@@ -434,8 +435,9 @@ function CreatorGuide({ onGoToSettings }: { onGoToSettings?: () => void }) {
             paste the code on a clean install and confirm they see the same mods enabled.
           </li>
           <li>
-            <strong>Send your log if things break.</strong> Settings → View Logs. Logs are detailed enough
-            to diagnose most "it didn't work for my friend" reports.
+            <strong>Send your log if things break.</strong> Settings → In-app logs. The viewer's
+            <Kbd>Send to support</Kbd> button opens a GitHub issue prefilled with the recent log tail —
+            detailed enough to diagnose most "it didn't work for my friend" reports.
           </li>
         </ul>
       </Step>

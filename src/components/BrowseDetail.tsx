@@ -145,9 +145,10 @@ export function BrowseDetail(props: Props) {
                     Nexus install
                   </div>
                   Nexus doesn't allow direct downloads — clicking install opens
-                  the mod's Files tab in your browser. Pick "Mod Manager
-                  Download" and the file auto-installs when it lands in your
-                  Downloads folder.
+                  the mod's Files tab in your browser. Click <b>Slow Download</b>
+                  (or <b>Manual</b>) — not Mod Manager Download — wait the few
+                  seconds, and the manager auto-installs the .zip as soon as it
+                  lands in your Downloads folder.
                 </div>
               </div>
             </>

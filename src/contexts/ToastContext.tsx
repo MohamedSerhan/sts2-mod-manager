@@ -57,13 +57,28 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     dismiss: removeToast,
   };
 
+  // Split errors from success/info so screen readers can announce errors
+  // assertively (interrupts) while routine confirmations stay polite (queued
+  // after current speech). Without these live regions, screen readers don't
+  // notice toasts at all — they were the biggest a11y gap surfaced by the
+  // pre-release audit.
+  const errors = toasts.filter((t) => t.type === 'error');
+  const polite = toasts.filter((t) => t.type !== 'error');
+
   return (
     <ToastContext.Provider value={ctx}>
       {children}
-      <div className="gf-toasts">
-        {toasts.map((t) => (
-          <ToastItem key={t.id} toast={t} onDismiss={() => removeToast(t.id)} />
-        ))}
+      <div className="gf-toasts" aria-label="Notifications">
+        <div role="alert" aria-live="assertive" aria-atomic="false">
+          {errors.map((t) => (
+            <ToastItem key={t.id} toast={t} onDismiss={() => removeToast(t.id)} />
+          ))}
+        </div>
+        <div role="status" aria-live="polite" aria-atomic="false">
+          {polite.map((t) => (
+            <ToastItem key={t.id} toast={t} onDismiss={() => removeToast(t.id)} />
+          ))}
+        </div>
       </div>
     </ToastContext.Provider>
   );
@@ -117,7 +132,7 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
         transition: `opacity ${FADE_MS}ms ease-out, transform ${FADE_MS}ms ease-out`,
       }}
     >
-      <span className="gf-toast-ico" style={{ color: iconColor }}>
+      <span className="gf-toast-ico" style={{ color: iconColor }} aria-hidden="true">
         <Icon size={14} />
       </span>
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -128,8 +143,9 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
         className="gf-btn-3 gf-btn-icon"
         style={{ border: 0, padding: 4, minWidth: 22, height: 22 }}
         title="Dismiss"
+        aria-label="Dismiss notification"
       >
-        <X size={12} />
+        <X size={12} aria-hidden="true" />
       </button>
     </div>
   );

@@ -98,7 +98,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const refreshSubUpdates = useCallback(async () => {
     try {
       const updates = await checkSubscriptionUpdates();
-      setSubUpdates(updates);
+      // The Rust command returns ONE record per subscription regardless
+      // of whether there's a pending update — the `has_update` flag is
+      // what distinguishes them. Without this filter we'd light up the
+      // Profiles "1 pack has updates · curator pushed an update" banner
+      // immediately after every install (because the freshly-installed
+      // pack comes back with has_update=false but still gets counted by
+      // subUpdates.length on the consumer side). ProfileSwitcher does
+      // the same filter; lifting it here keeps every consumer of the
+      // context honest without each having to remember.
+      setSubUpdates(updates.filter((u) => u.has_update));
     } catch (e) {
       // Network hiccup — fail silently. The badge just won't update
       // until the next successful poll.

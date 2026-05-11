@@ -144,7 +144,7 @@ export function BrowseView({ onGoToSettings }: BrowseViewProps = {}) {
       <div className="gf-page-head">
         <div>
           <h1 className="gf-page-title">Browse mods</h1>
-          <p className="gf-page-sub">From GitHub & Nexus — install with one click</p>
+          <p className="gf-page-sub">GitHub installs in one click; Nexus opens in your browser (free-tier)</p>
         </div>
         <div className="gf-page-actions">
           <Button size="sm" onClick={() => setShowQuickAdd(true)}>

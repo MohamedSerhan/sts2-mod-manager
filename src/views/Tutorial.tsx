@@ -103,12 +103,14 @@ function FriendHero({ onGoToSettings: _onGoToSettings }: { onGoToSettings?: () =
         <HeroCard
           n={1}
           icon={<Clipboard size={18} />}
-          title="Paste their share code"
+          title="Paste the code or click the link"
           body={
             <>
-              They give you something like <Kbd>jess/AA5A-315D-61AE</Kbd>. Drop it in the box at the top
-              of <Kbd>Home</Kbd> and click <Kbd>Add Pack</Kbd>. The app downloads every mod in their pack
-              from the source.
+              They send you a code like <Kbd>jess/AA5A-315D-61AE</Kbd> or a link like{' '}
+              <Kbd>sts2mm://import/jess/AA5A-315D-61AE</Kbd>. Paste the code in the box at the top of{' '}
+              <Kbd>Home</Kbd> and click <Kbd>Add Pack</Kbd>, or just click the link. The app installs
+              the pack — GitHub-sourced and bundled mods download automatically; any Nexus-only mods
+              show up as pending so you know what to grab.
             </>
           }
         />
@@ -131,7 +133,8 @@ function FriendHero({ onGoToSettings: _onGoToSettings }: { onGoToSettings?: () =
           body={
             <>
               When your friend updates their pack you'll see an <Kbd>Update available</Kbd> card on Home.
-              One click downloads only what changed and re-applies their pack — your save is unaffected.
+              One click pulls the diff and re-applies their pack (Nexus changes still need a manual
+              download from Nexus). Your save is unaffected.
             </>
           }
         />
@@ -380,11 +383,22 @@ function CreatorGuide({ onGoToSettings }: { onGoToSettings?: () => void }) {
         <p>
           On the Profiles row for your new profile, click the <Kbd>Share</Kbd> (paper plane) icon. The
           app uploads the manifest to your <Kbd>sts2mm-profiles</Kbd> repo (creating the repo on first
-          use) and shows you a code like <Kbd>you/AA5A-315D-61AE</Kbd>.
+          use) and gives you back two interchangeable things:
         </p>
+        <ul className="list-disc list-inside space-y-1 ml-1">
+          <li>
+            A <strong>share code</strong> like <Kbd>you/AA5A-315D-61AE</Kbd> — friends paste it on Home.
+          </li>
+          <li>
+            A <strong>paste-ready message</strong> with an{' '}
+            <Kbd>sts2mm://import/...</Kbd> link — friends with the manager installed can click straight
+            through. Use the <Kbd>Copy share message</Kbd> button next to the code on any share surface.
+          </li>
+        </ul>
         <p>
-          Send that code to your friends — they paste it on their Home page and they're playing your
-          modpack within minutes.
+          Drop either in Discord / a chat / a forum and you're done. The smart router on the receiving
+          side handles brand-new installs, re-activations, and pending updates without the friend having
+          to think about which case applies.
         </p>
       </Step>
 

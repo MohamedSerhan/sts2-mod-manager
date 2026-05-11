@@ -6,7 +6,7 @@
 
 <p align="center">
   A cross-platform mod manager for <strong>Slay the Spire 2</strong>.<br/>
-  Install, manage, and share mod profiles with one click.
+  Built around playing your friends' modpacks — share via code or one-click link.
 </p>
 
 <p align="center">
@@ -32,14 +32,21 @@
 
 ## Why this one
 
-There are mod managers, and there are mod managers built for the
-"play exactly what my friend plays" workflow. STS2 Mod Manager is the
-second kind. The bits that don't usually exist elsewhere:
+This mod manager has a social focus — built around sharing modpacks and
+playing the same builds as your friends. The bits that don't usually
+exist elsewhere:
 
-- **Modpack share codes.** Friend pastes you `jess/AA5A-315D-61AE` →
-  the app downloads every mod from its source, enables the right ones,
-  marks the pack active. Re-shares reuse the same code so followers see
-  "update available" instead of having to follow a new one.
+- **Share by code or one-click link.** Friend pastes you
+  `jess/AA5A-315D-61AE`, or clicks `sts2mm://import/jess/AA5A-315D-61AE`.
+  Either way the app installs the pack — bundled mods and GitHub releases
+  pull automatically; any Nexus-only mods the curator didn't bundle show
+  up as pending so you know what to grab from Nexus. Re-shares reuse the
+  same code so followers see "update available" instead of having to
+  follow a new one.
+- **Smart import.** Click a friend's link and the app figures out what to
+  do: brand-new pack → confirm + install; you already have it but it's
+  not active → "Switch to *X*?"; an update is pending → "Apply update?";
+  already on the latest → friendly "you're already on this" toast.
 - **Game-version aware Repair.** When a mod's latest release needs a
   newer Slay the Spire 2 build than yours, Repair walks back through
   the mod's release history and installs the newest version that's
@@ -72,9 +79,15 @@ clipboard for pasting into a GitHub issue.
 ## Features
 
 ### Profiles & sharing
-- **One-click profile import.** Paste a friend's `username/CODE` share code on
-  Home and the app downloads every mod from its source (GitHub releases or
-  Nexus), enables the right ones, and marks the pack active.
+- **Profile import — code or link.** Paste a friend's `username/CODE` share
+  code on Home, or click an `sts2mm://import/username/CODE` link they sent
+  you. The app installs the pack: bundled mods and GitHub releases pull
+  automatically; Nexus-only mods that weren't bundled surface as pending
+  so you know what to grab.
+- **Smart link handling.** A click on a share link routes through the same
+  logic as paste: brand-new pack installs after a confirm; pack you
+  already have asks to switch or apply a pending update; pack you're
+  already on shows a friendly "you're up to date" toast.
 - **Same-code re-share.** Re-publishing a profile reuses the same share code —
   followers see "update available" instead of having to follow a new code.
 - **Profile switcher.** Top-bar profile chip → popover with every pack;
@@ -90,9 +103,10 @@ clipboard for pasting into a GitHub issue.
   auto-update and modpack updates can't toggle them. Useful when a mod
   works perfectly at v1 and you want it to stay that way regardless of what
   the curator pushes.
-- **Source linking.** Link a mod to its GitHub repo or Nexus page so it joins
-  the auto-update flow. Auto-detect button can scan filenames against known
-  sources.
+- **Source linking.** Link a mod to its GitHub repo or Nexus page. GitHub
+  links join the auto-update flow ("Update all"); Nexus links surface updates
+  in the audit so you know to re-download from Nexus. Auto-detect button
+  scans filenames against known sources.
 - **Drag and drop** any `.zip` onto the window to install a mod.
 - **Quick Add by URL** for one-off installs from a GitHub or Nexus URL.
 
@@ -100,8 +114,11 @@ clipboard for pasting into a GitHub issue.
 - **GitHub search.** Full text search of GitHub repos with a Slay the Spire 2
   topic.
 - **Nexus trending / latest.** Browse what's hot on Nexus directly inside the
-  app (requires a free Nexus API key — Settings → Accounts).
-- **One-click install** straight from the cards.
+  app (requires a free Nexus API key — Settings → Accounts). Nexus's free API
+  doesn't expose general text search, so this surface is Trending and Latest
+  Added only.
+- **One-click install for GitHub cards.** Nexus cards open the mod's Files
+  page in your browser — see the Nexus note below.
 
 > **Nexus integration is free-tier only.** When you install a Nexus mod
 > via Quick Add or the Browse view, the app opens the mod's Files page
@@ -121,8 +138,9 @@ clipboard for pasting into a GitHub issue.
 
 ### Backups
 - **Auto-backup before every launch.** Keeps the last 5 by default.
-- **Restore preview.** When you restore a backup, the app offers to back up
-  your current state first so you can roll forward again.
+- **Backup-current-first on restore.** The restore confirm dialog ships
+  with a pre-checked "save current as a new backup before restoring" option,
+  so you can roll forward again if the restored state isn't what you wanted.
 
 ### Audit
 - **Settings → Audit** runs a scan that compares each installed mod against
@@ -202,6 +220,13 @@ that causes a blank window. If you hit this, install the **`.deb`** or
 **`.rpm`** package instead — they use the system's WebKitGTK directly and work
 around the issue.
 
+**`sts2mm://` deep links:** the `.deb`, `.rpm`, `.msi`, `.exe`, and `.dmg`
+installers all register the `sts2mm://` URL scheme automatically so clicking
+a share link opens the app. The AppImage is a portable bundle with no install
+step, so it tries to register the scheme at runtime on first launch. If that
+fails (sandboxed Flatpak, read-only mount, restrictive distro policy), the
+link won't open the app — paste the code into Home instead.
+
 ---
 
 ## Quick start
@@ -219,10 +244,16 @@ around the issue.
 That's it. Day-to-day usage from there:
 
 - Friend sends you a code? Paste it on Home and hit **Add Pack**.
+- Friend sends you an `sts2mm://import/...` link? Just click it — the app
+  opens and routes you through the right action (install, switch, sync, or
+  "you're already on it").
 - Modpack out of date? Profiles → **Update all** on the active pack.
 - Something broke after a launch? Settings → Backups → **Restore** the most
   recent.
-- Want to publish your own pack? Profiles → **Publish current**.
+- Want to publish your own pack? Profiles → **Share** (paper-plane icon on
+  the row). The app gives you back both the share code and a paste-ready
+  message with the `sts2mm://` link so you can drop it into Discord and
+  friends with the manager installed can click straight through.
 
 ---
 

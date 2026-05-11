@@ -246,6 +246,14 @@ export async function importShareCodeSmart(
       : { kind: 'cancelled' };
   }
 
+  // Pretty form of the canonical code: `owner/AAAA-BBBB-CCCC`. This is
+  // what we pass to the Rust install/fetch commands — those run their
+  // own canonicalization, but they can't handle a `sts2mm://` prefix
+  // (`parse_share_code` splits on the first `/` and the would-be owner
+  // is `sts2mm:`, which fails the GitHub-username validator). Always
+  // hand Rust the clean code, not the raw deep-link URL.
+  const pretty = prettyShareCode(canonical);
+
   // Match against existing subscriptions using the canonical form. The
   // share_id stored in subscriptions may be `owner/HEX` or `owner/AAAA-...`
   // depending on when it was first installed — normalize both sides.
@@ -254,7 +262,7 @@ export async function importShareCodeSmart(
   );
 
   if (!match) {
-    const profile = await installSharedProfileWithConfirm(input, opts.confirm);
+    const profile = await installSharedProfileWithConfirm(pretty, opts.confirm);
     return profile
       ? { kind: 'installed', profile }
       : { kind: 'cancelled' };
@@ -264,7 +272,8 @@ export async function importShareCodeSmart(
     (u) => canonicalShareCode(u.share_id) === canonical,
   );
   const isActive = opts.activeProfile === match.profile_name;
-  const pretty = prettyShareCode(canonical);
+  // `pretty` was already declared above for the new-pack install path;
+  // the rest of the function reuses it via the outer-scope binding.
 
   // Case 4: an update is pending — that's almost always the right action
   // to surface, regardless of whether the pack is currently active.

@@ -140,42 +140,25 @@ pub fn run() {
     // to the first instance, so single-instance there is redundant and
     // (per the plugin's own docs) interferes with Launch Services.
     //
-    // The closure runs in the FIRST instance whenever a SECOND instance
-    // tries to launch — argv carries the URL (on Windows the protocol
-    // handler invokes `manager.exe "sts2mm://import/..."`). We scan for
-    // anything starting with `sts2mm://`, buffer it in AppState (same
-    // path cold-start URLs take), and emit the open-url event so the
-    // frontend's existing listener routes it through the smart import
-    // confirm dialog. Without this plugin every click spawned a fresh
-    // manager and the running instance never saw the URL — the bug
-    // that produced "5 windows open and nothing installed."
+    // We deliberately DON'T emit `sts2mm-open-url` from this callback,
+    // even though we have argv in hand. The tauri-plugin-deep-link
+    // "deep-link" feature on single-instance already wires the URL
+    // through to the deep-link plugin's `on_open_url` handler (see
+    // the setup() block below), and THAT handler is the single source
+    // of truth for URL routing. Emitting here too would double-fire
+    // the frontend listener — the bug that produced two identical
+    // "Couldn't open share link" toasts per click. So this callback
+    // only has one job: bring the existing window forward so the user
+    // sees the confirm dialog when it appears.
     #[cfg(any(target_os = "windows", target_os = "linux"))]
     {
-        use tauri::{Emitter, Manager};
+        use tauri::Manager;
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             log::info!("Second instance launched; argv={:?}", argv);
-
-            // Bring the existing window forward regardless of whether
-            // there's a URL — the user clicked something expecting the
-            // manager to come up.
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.show();
                 let _ = win.unminimize();
                 let _ = win.set_focus();
-            }
-
-            // Find the first arg that looks like our protocol URL.
-            // argv[0] is the exe path; anything after that is the OS-
-            // injected payload.
-            let url = argv.iter().find(|a| a.starts_with("sts2mm://")).cloned();
-            if let Some(url) = url {
-                log::info!("Forwarding deep-link from second instance: {}", url);
-                if let Some(state) = app.try_state::<AppState>() {
-                    if let Ok(mut s) = state.lock() {
-                        s.pending_deep_link = Some(url.clone());
-                    }
-                }
-                let _ = app.emit("sts2mm-open-url", url);
             }
         }));
     }

@@ -169,20 +169,41 @@ function AppInner() {
   useEffect(() => { activeProfileRef.current = activeProfile; }, [activeProfile]);
   useEffect(() => { subUpdatesRef.current = subUpdates; }, [subUpdates]);
 
+  // De-dupe ref: a URL can arrive via two paths (cold-start buffer
+  // drain AND the live `sts2mm-open-url` event) when the timing lines
+  // up just right, and the Rust deep-link plugin's own on_open_url +
+  // single-instance's argv handoff used to fire the event twice in
+  // some configurations. Each route() call shows a confirm dialog and
+  // (on accept) starts a real install — duplicate dialogs / installs
+  // are user-hostile. The ref tracks URLs we've already processed in
+  // this session; repeat sightings of the same URL are silently
+  // dropped. Cleared on a window-blur > 30s gap so the user CAN
+  // legitimately re-fire the same link after leaving + coming back.
+  const processedUrlsRef = useRef<Set<string>>(new Set());
+
   useEffect(() => {
     let active = true;
 
     async function route(url: string) {
       if (!active) return;
+      if (processedUrlsRef.current.has(url)) {
+        console.debug('Deep-link: skipping duplicate URL:', url);
+        return;
+      }
+      processedUrlsRef.current.add(url);
+
       // Switch to Home so the user has the share-code context visible
       // behind the confirm dialog — disorienting otherwise if they were
       // mid-Audit when the click came in.
       setActiveView('home');
 
       try {
-        // The deep-link payload is the full `sts2mm://import/<owner>/<code>`
-        // string; the smart router's canonicalShareCode helper strips the
-        // protocol+action prefix.
+        // The smart router's canonicalShareCode helper strips the
+        // protocol + action prefix and passes a clean owner/CODE
+        // string to the Rust install commands. We pass the raw URL
+        // through unmodified — canonicalization happens inside the
+        // router so every share-code surface in the app goes through
+        // the same parsing path.
         const subs = await getSubscriptions().catch(() => []);
         const outcome = await importShareCodeSmart(url, {
           confirm,
@@ -208,6 +229,9 @@ function AppInner() {
         }
       } catch (e) {
         toast.error(`Couldn't open share link: ${e instanceof Error ? e.message : String(e)}`);
+        // Don't pin a permanent dedupe entry for failed URLs — the
+        // user might want to retry after fixing whatever was wrong.
+        processedUrlsRef.current.delete(url);
       }
     }
 

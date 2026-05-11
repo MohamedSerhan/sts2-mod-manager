@@ -1207,14 +1207,20 @@ pub async fn audit_mod_versions(
                                     .await
                                     {
                                         Ok(walk) => {
-                                            latest_compatible_tag = Some(walk.tag.clone());
                                             // Re-evaluate whether the walked-
                                             // back tag is actually newer than
                                             // installed. If not, drop the
                                             // update flag — the user already
                                             // has the newest compatible
                                             // release; the only thing newer
-                                            // is the blocked latest.
+                                            // is the blocked latest. Setting
+                                            // latest_compatible_tag = None in
+                                            // that case signals "no installable
+                                            // GitHub update" to the UI, which
+                                            // hides the Update button and
+                                            // switches the hint copy to
+                                            // "you're already on the newest
+                                            // compatible".
                                             let installed_tag = sources_db
                                                 .mods
                                                 .get(&m.name)
@@ -1225,6 +1231,9 @@ pub async fn audit_mod_versions(
                                             let walk_ver = walk.tag.trim_start_matches('v');
                                             if walk_ver == installed_tag || walk_ver == manifest_ver {
                                                 github_needs_update = false;
+                                                latest_compatible_tag = None;
+                                            } else {
+                                                latest_compatible_tag = Some(walk.tag.clone());
                                             }
                                         }
                                         Err(e) => {
@@ -1316,6 +1325,38 @@ pub async fn audit_mod_versions(
                             let nexus_ver = nv.trim_start_matches('v');
                             if current_ver != "unknown" && current_ver != "0.0.0" {
                                 nexus_update_available = is_newer_version(current_ver, nexus_ver);
+                            }
+                            // Nexus and GitHub typically host the same
+                            // mod release at the same version. If the
+                            // GitHub side proved that release is blocked
+                            // by min_game_version, the Nexus zip is the
+                            // same incompatible build — suppress the
+                            // "Download from Nexus" prompt so we don't
+                            // send the user to install something we
+                            // know won't load. We require the version
+                            // numbers to match (≥, since Nexus could
+                            // have an even newer one in flight, but
+                            // that's rare); a stricter equality check
+                            // would miss the simple case where mod
+                            // authors round-trip the same vX.Y.Z to
+                            // both hosts.
+                            if nexus_update_available
+                                && latest_release_blocked_by_game_version
+                                && !is_newer_version(
+                                    latest_release_with_assets_tag
+                                        .as_deref()
+                                        .unwrap_or("")
+                                        .trim_start_matches('v'),
+                                    nexus_ver,
+                                )
+                            {
+                                log::info!(
+                                    "audit: suppressing Nexus update for '{}' — Nexus v{} matches \
+                                     GitHub's game-version-blocked latest v{}",
+                                    m.name, nexus_ver,
+                                    latest_release_with_assets_tag.as_deref().unwrap_or("?"),
+                                );
+                                nexus_update_available = false;
                             }
                         }
                     }

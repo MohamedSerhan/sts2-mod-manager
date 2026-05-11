@@ -789,17 +789,19 @@ export function SettingsView() {
                           <span className="flex items-center gap-2">
                             {entry.needs_update &&
                               entry.github_repo &&
-                              entry.latest_release_with_assets_tag && (
-                              // Only show the Update button when there's an
-                              // ACTUAL installable asset on GitHub. The audit
-                              // can flag "needs_update" because Nexus has a
-                              // newer version even when GitHub's latest
-                              // release ships no .zip/.dll — clicking
-                              // Update in that case fails inside
-                              // download_and_install_github_mod with a
-                              // confusing "no asset" error. Nexus updates
-                              // still flow through the existing "Download
-                              // from Nexus" pill below.
+                              entry.latest_release_with_assets_tag &&
+                              (entry.update_source === 'github' || entry.update_source === 'both') && (
+                              // Only show the Update button when GitHub
+                              // specifically has an actionable update —
+                              // i.e. there's an installable asset AND
+                              // the walked-back compatible tag is newer
+                              // than what's installed. If only Nexus
+                              // flagged an update, the Nexus pill below
+                              // handles it; clicking Update would call
+                              // update_mod which goes through GitHub and
+                              // (post-walk-back) refuses, surfacing as a
+                              // confusing error toast. Gating on
+                              // update_source keeps the button honest.
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -936,26 +938,49 @@ export function SettingsView() {
                             Mods row to roll back to a compatible release.
                           </div>
                         )}
-                        {entry.latest_release_blocked_by_game_version && entry.latest_compatible_tag && (
-                          <div
-                            className="mt-1 ml-4"
-                            style={{
-                              fontSize: 11,
-                              color: 'var(--ink-dim)',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 6,
-                            }}
-                            title={
-                              `Latest release v${entry.latest_release_with_assets_tag} requires game v${entry.latest_release_min_game_version ?? '?'}. ` +
-                              `Update will walk back to v${entry.latest_compatible_tag}, the newest release compatible with your STS2 build.`
-                            }
-                          >
-                            ↺ Latest v{entry.latest_release_with_assets_tag} needs
-                            game v{entry.latest_release_min_game_version ?? '?'};
-                            Update will install v{entry.latest_compatible_tag}{' '}
-                            (newest compatible).
-                          </div>
+                        {entry.latest_release_blocked_by_game_version && (
+                          entry.latest_compatible_tag ? (
+                            <div
+                              className="mt-1 ml-4"
+                              style={{
+                                fontSize: 11,
+                                color: 'var(--ink-dim)',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 6,
+                              }}
+                              title={
+                                `Latest release v${entry.latest_release_with_assets_tag} requires game v${entry.latest_release_min_game_version ?? '?'}. ` +
+                                `Update will walk back to v${entry.latest_compatible_tag}, the newest release compatible with your STS2 build.`
+                              }
+                            >
+                              ↺ Latest v{entry.latest_release_with_assets_tag} needs
+                              game v{entry.latest_release_min_game_version ?? '?'};
+                              Update will install v{entry.latest_compatible_tag}{' '}
+                              (newest compatible).
+                            </div>
+                          ) : (
+                            <div
+                              className="mt-1 ml-4"
+                              style={{
+                                fontSize: 11,
+                                color: 'var(--ink-dim)',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 6,
+                              }}
+                              title={
+                                `Latest release v${entry.latest_release_with_assets_tag} requires game v${entry.latest_release_min_game_version ?? '?'}. ` +
+                                `You're already on v${entry.installed_version}, the newest release that runs on your current STS2 build. ` +
+                                `Update STS2 (or switch beta branches) to pick up the newer mod release.`
+                              }
+                            >
+                              ↺ Latest v{entry.latest_release_with_assets_tag} needs
+                              game v{entry.latest_release_min_game_version ?? '?'};
+                              you're on v{entry.installed_version} — the newest
+                              version that runs on your game.
+                            </div>
+                          )
                         )}
                       </div>
                     );

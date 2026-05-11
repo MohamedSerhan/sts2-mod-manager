@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Install modpack — STS2 Mod Manager</title>
+<meta name="robots" content="noindex" />
+<!-- This page is the HTTPS bridge for `sts2mm://import/<owner>/<code>` deep
+     links. Discord, Slack, iMessage etc. don't auto-linkify custom URL
+     schemes — only http/https — so we ship friends an HTTPS URL pointing
+     here, and the page fires the sts2mm:// for them (with download
+     fallbacks for everyone who doesn't have the manager yet).
+     URL shape: /i.html?c=<owner>/<code>  (dashes optional in <code>) -->
+<link rel="canonical" href="https://mohamedserhan.github.io/sts2-mod-manager/i.html" />
+
+<!-- OpenGraph — so Discord renders a preview card next to the link instead
+     of a bare URL. Keeps the share message looking like a "click to
+     install" CTA instead of mystery-meat. -->
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Install this Slay the Spire 2 modpack" />
+<meta property="og:description" content="Click to install in the STS2 Mod Manager. If you don't have it yet, the page will walk you through getting it." />
+<meta property="og:image" content="https://mohamedserhan.github.io/sts2-mod-manager/screenshots/hero-home.png" />
+<meta property="og:image:width" content="1280" />
+<meta property="og:image:height" content="800" />
+<meta name="twitter:card" content="summary_large_image" />
+
+<style>
+  :root {
+    --bg: oklch(0.16 0.04 280);
+    --panel: oklch(0.20 0.04 280);
+    --line: oklch(0.28 0.05 280);
+    --ink: oklch(0.92 0.02 285);
+    --mute: oklch(0.72 0.02 285);
+    --gold: oklch(0.78 0.13 80);
+    --gold-ink: oklch(0.18 0.04 285);
+    --gf: oklch(0.78 0.13 165);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  main { max-width: 560px; margin: 0 auto; padding: 64px 24px 80px; }
+  header { display: flex; align-items: center; gap: 14px; margin-bottom: 28px; }
+  header img { width: 56px; height: 56px; border-radius: 12px; }
+  h1 { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
+  .tag { font-size: 13.5px; color: var(--mute); margin-top: 2px; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 18px;
+  }
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--mute);
+    margin-bottom: 8px;
+  }
+  .code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--gf);
+    margin-bottom: 16px;
+    word-break: break-all;
+  }
+  p { line-height: 1.55; margin: 0 0 12px; color: var(--mute); font-size: 14px; }
+  p strong { color: var(--ink); font-weight: 600; }
+  .cta {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--gold); color: var(--gold-ink);
+    border-radius: 8px; padding: 12px 22px;
+    font-weight: 600; font-size: 14.5px;
+    margin: 4px 8px 4px 0;
+    text-decoration: none;
+    border: 0;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .cta:hover { background: oklch(0.83 0.13 80); }
+  .cta-secondary {
+    background: var(--panel);
+    color: var(--ink);
+    border: 1px solid var(--line);
+  }
+  .cta-secondary:hover { background: oklch(0.24 0.05 280); }
+  .err {
+    background: oklch(0.55 0.13 25 / 0.10);
+    border: 1px solid oklch(0.55 0.13 25 / 0.35);
+    color: oklch(0.86 0.10 25);
+  }
+  .copy-row {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+    margin-top: 8px;
+  }
+  .copy-row input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    color: var(--ink);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+  }
+  .copy-row button {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    color: var(--ink);
+    padding: 0 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 13px;
+  }
+  .copy-row button:hover { background: oklch(0.24 0.05 280); }
+  footer { margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--mute); text-align: center; }
+  footer a { color: var(--gold); }
+  a { color: var(--gold); }
+  .small { font-size: 12.5px; color: var(--mute); margin-top: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <img src="icon.png" alt="STS2 Mod Manager icon" />
+    <div>
+      <h1>Install modpack</h1>
+      <div class="tag">via STS2 Mod Manager</div>
+    </div>
+  </header>
+
+  <div id="card-invalid" class="card err" style="display:none">
+    <div class="eyebrow" style="color: oklch(0.86 0.10 25)">Couldn't read the code</div>
+    <p>This link is missing the share code, or the code is malformed. A valid share link looks like:</p>
+    <p><code>https://mohamedserhan.github.io/sts2-mod-manager/i.html?c=<strong>username/AA5A-315D-61AE</strong></code></p>
+    <p>Ask your friend to copy a fresh link from the Mod Manager — Home → share code chip → <strong>Copy link</strong>.</p>
+  </div>
+
+  <div id="card-valid" class="card" style="display:none">
+    <div class="eyebrow">Share code</div>
+    <div class="code" id="code-display">—</div>
+
+    <p><strong>If you have the manager installed:</strong> click the button — the manager will pop up with a confirm dialog showing exactly what gets installed.</p>
+
+    <button class="cta" id="open-app">Open in STS2 Mod Manager</button>
+
+    <p class="small" id="open-status">Click the button above to fire <code id="protocol-url">sts2mm://...</code>. Some browsers ask for permission the first time.</p>
+
+    <hr style="border:0; border-top:1px solid var(--line); margin: 22px 0" />
+
+    <p><strong>Don't have the manager yet?</strong> Grab the installer for your OS — install takes about a minute, then come back to this page and click the button above.</p>
+
+    <a class="cta cta-secondary" href="https://github.com/MohamedSerhan/sts2-mod-manager/releases/latest">
+      Download manager (Windows / macOS / Linux)
+    </a>
+
+    <hr style="border:0; border-top:1px solid var(--line); margin: 22px 0" />
+
+    <p><strong>Or paste the code manually.</strong> In the manager → Home → "Drop a code, hit Add" box:</p>
+    <div class="copy-row">
+      <input id="code-input" readonly />
+      <button id="copy-code">Copy</button>
+    </div>
+  </div>
+
+  <footer>
+    Free, open-source. <a href="https://github.com/MohamedSerhan/sts2-mod-manager">Project on GitHub</a>.
+  </footer>
+</main>
+
+<script>
+  // Read `?c=<owner>/<code>` from the URL. Tolerate `?code=` too just in
+  // case a curator hand-types a longer key. Accept the code with or
+  // without dashes — the manager normalizes either form. We do NOT
+  // canonicalize aggressively here because the goal is just to round-trip
+  // the raw value into the sts2mm:// URL; the manager's own canonical
+  // share-code parser handles the rest.
+  function readCode() {
+    var params = new URLSearchParams(window.location.search);
+    var raw = (params.get('c') || params.get('code') || '').trim();
+    if (!raw) return null;
+    // Quick shape sanity check: must have a slash with non-empty halves.
+    var slash = raw.indexOf('/');
+    if (slash <= 0 || slash === raw.length - 1) return null;
+    return raw;
+  }
+
+  var code = readCode();
+  var cardInvalid = document.getElementById('card-invalid');
+  var cardValid = document.getElementById('card-valid');
+
+  if (!code) {
+    cardInvalid.style.display = '';
+  } else {
+    cardValid.style.display = '';
+    var deepUrl = 'sts2mm://import/' + code;
+    document.getElementById('code-display').textContent = code;
+    document.getElementById('protocol-url').textContent = deepUrl;
+    var input = document.getElementById('code-input');
+    input.value = code;
+
+    var openBtn = document.getElementById('open-app');
+    openBtn.addEventListener('click', function () {
+      // Fire the deep link. Browsers handle this differently:
+      //   - Chrome/Edge: navigates the current tab to the sts2mm:// URL,
+      //     OS routes to the manager. If no handler, browser shows an
+      //     error inline.
+      //   - Firefox: prompts the user "Open in STS2 Mod Manager?" with a
+      //     remember-this-choice checkbox.
+      //   - Safari (macOS): similar prompt; on iOS the protocol won't
+      //     resolve (mobile not supported).
+      // We intentionally don't use window.open() — that opens a new tab
+      // and most browsers block protocol-handler navigation in popups.
+      window.location.href = deepUrl;
+      var status = document.getElementById('open-status');
+      status.textContent = 'Opened ' + deepUrl + '. If nothing happened, install the manager below and try again.';
+    });
+
+    document.getElementById('copy-code').addEventListener('click', function () {
+      input.select();
+      navigator.clipboard.writeText(code).then(function () {
+        var btn = document.getElementById('copy-code');
+        var prev = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(function () { btn.textContent = prev; }, 1400);
+      }).catch(function () { /* old browser fallback uses native selection above */ });
+    });
+
+    // Auto-fire the deep link once on first load IF the user is on
+    // desktop AND we have a high-confidence guess they have the manager
+    // (we don't — there's no reliable detection). So we DON'T auto-fire.
+    // The button click is the consent step. This avoids the worst
+    // failure mode: a user lands here, the browser silently fires the
+    // protocol, nothing happens, they have no idea what to do next.
+  }
+</script>
+</body>
+</html>

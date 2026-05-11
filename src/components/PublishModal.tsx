@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, Check, Copy, ExternalLink, Info, Upload, X } from 'lucide-react';
+import { AlertTriangle, Check, Copy, ExternalLink, Info, Link as LinkIcon, MessageSquare, Upload, X } from 'lucide-react';
 import { listen } from '@tauri-apps/api/event';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type { Profile, ShareResult } from '../types';
 import { shareProfile, reshareProfile, getApiKeyStatus } from '../hooks/useTauri';
 import { useToast } from '../contexts/ToastContext';
-import { buildShareMessage } from '../lib/shareImport';
+import { buildShareMessage, buildShareLink } from '../lib/shareImport';
 
 // Publish-current modal. Three states:
 //   1) Pre-flight    — show what's included AND any blockers (missing
@@ -40,7 +40,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const [shared, setShared] = useState<ShareResult | null>(null);
-  const [copied, setCopied] = useState<'code' | 'msg' | null>(null);
+  const [copied, setCopied] = useState<'code' | 'link' | 'msg' | null>(null);
   const [tokenSet, setTokenSet] = useState<boolean | null>(null);
   const [progress, setProgress] = useState<ShareProgress | null>(null);
 
@@ -120,10 +120,13 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
     }
   }
 
-  async function handleCopy(kind: 'code' | 'msg') {
+  async function handleCopy(kind: 'code' | 'link' | 'msg') {
     if (!shared || !profile) return;
     const codeStr = `${shared.owner}/${shared.code}`;
-    const text = kind === 'code' ? codeStr : buildShareMessage(profile.name, codeStr);
+    const text =
+      kind === 'code' ? codeStr
+      : kind === 'link' ? buildShareLink(codeStr)
+      : buildShareMessage(profile.name, codeStr);
     try {
       await navigator.clipboard.writeText(text);
       setCopied(kind);
@@ -327,16 +330,28 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
                     {shared.owner}/{shared.code}
                   </div>
                 </div>
-                <button className="gf-btn-2 gf-btn-2-sm" onClick={() => handleCopy('code')}>
+                <button
+                  className="gf-btn-2 gf-btn-2-sm"
+                  onClick={() => handleCopy('code')}
+                  title="Copy the raw share code (paste into the manager's code box)"
+                >
                   {copied === 'code' ? <Check size={12} /> : <Copy size={12} />}
-                  {copied === 'code' ? 'Copied' : 'Copy'}
+                  {copied === 'code' ? 'Copied' : 'Copy code'}
+                </button>
+                <button
+                  className="gf-btn-2 gf-btn-2-sm"
+                  onClick={() => handleCopy('link')}
+                  title="Copy the install link — clickable in Discord / chat, routes friends through the install bridge page"
+                >
+                  {copied === 'link' ? <Check size={12} /> : <LinkIcon size={12} />}
+                  {copied === 'link' ? 'Copied' : 'Copy link'}
                 </button>
                 <button
                   className="gf-btn-2 gf-btn-2-sm"
                   onClick={() => handleCopy('msg')}
-                  title="Copy a paste-ready share message with the sts2mm:// one-click link + install instructions"
+                  title="Copy a paste-ready share message — intro line + install link + raw code in one block"
                 >
-                  {copied === 'msg' ? <Check size={12} /> : <Copy size={12} />}
+                  {copied === 'msg' ? <Check size={12} /> : <MessageSquare size={12} />}
                   {copied === 'msg' ? 'Copied' : 'Copy message'}
                 </button>
               </div>

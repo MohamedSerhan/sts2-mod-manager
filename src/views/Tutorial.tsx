@@ -167,6 +167,8 @@ const QUICK_REF: [string, string][] = [
   ['Launch vanilla', 'Top-bar Vanilla button — ignores your active profile.'],
   ['Add a single mod', 'Quick-add a GitHub or Nexus URL on Home.'],
   ['Find new mods', 'Browse tab → search by name.'],
+  ['Share your pack', 'Home hero → Copy link (or Copy code / Copy message). Drop in Discord.'],
+  ['Open a friend’s link', 'Click their install link in chat — the manager pops up with a confirm.'],
 ];
 
 function UserGuide({ onGoToSettings }: { onGoToSettings?: () => void }) {
@@ -266,7 +268,48 @@ function UserGuide({ onGoToSettings }: { onGoToSettings?: () => void }) {
             </ul>
           </Step>
 
-          <Step n={3} title="Adding individual mods">
+          <Step n={3} title="Sharing & receiving packs — code vs. link">
+            <p>
+              Every share surface in the app gives you three interchangeable ways to pass a pack to a
+              friend, paired side-by-side: <strong>Copy code</strong>, <strong>Copy link</strong>, and{' '}
+              <strong>Copy message</strong>. You'll find them on the Home hero, in each "Your other
+              packs" row, on every Profiles row (inline next to the code), and in the kebab menu.
+            </p>
+            <ul className="list-disc list-inside space-y-1 ml-1">
+              <li>
+                <strong>Code</strong> — like <Kbd>jess/AA5A-315D-61AE</Kbd>. The raw thing. Friend pastes
+                it into the manager's "Drop a code, hit Add" box on Home.
+              </li>
+              <li>
+                <strong>Link</strong> — like{' '}
+                <Kbd>https://mohamedserhan.github.io/sts2-mod-manager/i.html?c=jess/AA5A-315D-61AE</Kbd>.
+                Discord / Slack / iMessage all turn this into a clickable URL because it's plain HTTPS.
+                Friend clicks → lands on a tiny install-bridge page → clicks "Open in STS2 Mod Manager"
+                → the manager pops up with the confirm dialog. Friends who don't have the manager yet
+                get download links on the same page.
+              </li>
+              <li>
+                <strong>Message</strong> — a paste-ready one-block message containing both the link and
+                the raw code, plus an intro line ("Join my Slay the Spire 2 modpack…"). Drop it in a
+                chat and you're done.
+              </li>
+            </ul>
+            <p>
+              <strong>Why not just paste <Kbd>sts2mm://</Kbd> URLs directly?</strong> Discord and most
+              chat apps only auto-linkify <Kbd>http://</Kbd> and <Kbd>https://</Kbd> — custom protocol
+              schemes show as un-clickable text. The HTTPS bridge page exists exactly to make the link
+              clickable everywhere.
+            </p>
+            <p>
+              <strong>Smart routing on the receiving end.</strong> When a friend pastes a code or clicks
+              a link, the manager checks what state they're in and shows the right dialog: brand-new
+              pack → confirm + install; they already have it but it's not active → "Switch to it?"; an
+              update is pending → "Apply update?"; already on the latest → friendly "you're up to date"
+              toast. No guessing which case applies.
+            </p>
+          </Step>
+
+          <Step n={4} title="Adding individual mods">
             <p>On Home there's a Quick Add box at the top. Paste any of these:</p>
             <ul className="list-disc list-inside space-y-1 ml-1">
               <li>
@@ -289,21 +332,21 @@ function UserGuide({ onGoToSettings }: { onGoToSettings?: () => void }) {
             </p>
           </Step>
 
-          <Step n={4} title="Turning mods on/off">
+          <Step n={5} title="Turning mods on/off">
             <p>
               Mods tab. Toggle individual mods on/off. Disabled mods are kept on disk in{' '}
               <Kbd>mods_disabled/</Kbd> — turning a mod back on is instant, no re-download.
             </p>
           </Step>
 
-          <Step n={5} title="Vanilla play">
+          <Step n={6} title="Vanilla play">
             <p>
               Top-bar <Kbd>Vanilla</Kbd> button. Starts the game with all mods temporarily disabled. The app
               creates an auto-backup first so the next launch puts everything back exactly as it was.
             </p>
           </Step>
 
-          <Step n={6} title="Backups & recovery">
+          <Step n={7} title="Backups & recovery">
             <p>
               The app creates an auto-backup before every game launch and before Vanilla Mode. Settings →
               Backups lists them with timestamp + size. <Kbd>Restore</Kbd> rolls your mods folder back to that
@@ -311,7 +354,7 @@ function UserGuide({ onGoToSettings }: { onGoToSettings?: () => void }) {
             </p>
           </Step>
 
-          <Step n={7} title="Reporting bugs">
+          <Step n={8} title="Reporting bugs">
             <p>
               Settings → scroll to <Kbd>In-app logs</Kbd>. The viewer has filter chips (Info / Warn / Error /
               Debug) and a <Kbd>Send to support</Kbd> button that opens a prefilled GitHub issue with the

@@ -15,6 +15,7 @@ import {
   Files,
   AlertTriangle,
   MessageSquare,
+  Link as LinkIcon,
 } from 'lucide-react';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
@@ -39,7 +40,7 @@ import {
   applySubscriptionUpdate,
   getSubscriptions,
 } from '../hooks/useTauri';
-import { importShareCodeSmart, buildShareMessage } from '../lib/shareImport';
+import { importShareCodeSmart, buildShareMessage, buildShareLink } from '../lib/shareImport';
 import type { ProfileDrift } from '../hooks/useTauri';
 import type { Profile, ShareResult } from '../types';
 
@@ -696,11 +697,21 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
                     >
                       {copiedProfileCode === profile.name ? <Check size={12} /> : <Copy size={12} />}
                     </button>
-                    {/* Paired with the raw-code copy — sts2mm:// link goes
-                        wherever the bare code goes. Friend with the manager
-                        installed clicks the link, friend without it pastes
-                        the code (or follows the install link in the same
-                        message). */}
+                    {/* Copy install link — Discord-clickable HTTPS URL. */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const code = `${shareInfoMap[profile.name].owner}/${shareInfoMap[profile.name].code}`;
+                        navigator.clipboard.writeText(buildShareLink(code))
+                          .then(() => toastCtx.success('Install link copied — paste into Discord / chat'))
+                          .catch(() => toastCtx.error("Couldn't copy to clipboard"));
+                      }}
+                      className="text-text-dim hover:text-text transition-colors"
+                      title="Copy install link (clickable in Discord / chat)"
+                    >
+                      <LinkIcon size={12} />
+                    </button>
+                    {/* Copy full share message — intro + link + raw code. */}
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -711,7 +722,7 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
                           .catch(() => toastCtx.error("Couldn't copy to clipboard"));
                       }}
                       className="text-text-dim hover:text-text transition-colors"
-                      title="Copy share message (paste-ready with sts2mm:// one-click link)"
+                      title="Copy share message (paste-ready: intro + link + code)"
                     >
                       <MessageSquare size={12} />
                     </button>
@@ -811,6 +822,17 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
                           }}
                         >
                           Copy share code
+                        </KebabItem>
+                        <KebabItem
+                          icon={<LinkIcon size={12} />}
+                          onClick={() => {
+                            const code = `${shareInfoMap[profile.name].owner}/${shareInfoMap[profile.name].code}`;
+                            navigator.clipboard.writeText(buildShareLink(code))
+                              .then(() => toastCtx.success('Install link copied — paste into Discord / chat'))
+                              .catch(() => toastCtx.error("Couldn't copy to clipboard"));
+                          }}
+                        >
+                          Copy share link
                         </KebabItem>
                         <KebabItem
                           icon={<MessageSquare size={12} />}

@@ -64,6 +64,25 @@ export function prettyShareCode(canonical: string): string {
   return `${owner}/${c.slice(0, 4)}-${c.slice(4, 8)}-${c.slice(8, 12)}`;
 }
 
+/** Base URL of the GitHub Pages install-bridge page. The page reads `?c=`
+ *  out of the query and routes to `sts2mm://import/<code>` on click,
+ *  with download fallbacks for friends who don't have the manager yet.
+ *
+ *  Why we don't put the raw `sts2mm://` URL in share messages anymore:
+ *  Discord, Slack, iMessage etc. only auto-linkify http/https URLs —
+ *  custom protocol schemes appear as plain text the recipient has to
+ *  copy-paste into a browser bar. The HTTPS bridge URL is clickable
+ *  everywhere AND lets us show a preview card + install fallback for
+ *  recipients without the manager. */
+const INSTALL_BRIDGE_BASE = 'https://mohamedserhan.github.io/sts2-mod-manager/i.html';
+
+/** Build the clickable HTTPS install URL for a share code. Encode the
+ *  `c=` value so an owner with non-ASCII or unusual characters round-
+ *  trips cleanly (rare but real). */
+export function buildShareLink(code: string): string {
+  return `${INSTALL_BRIDGE_BASE}?c=${encodeURIComponent(code)}`;
+}
+
 /** Build the paste-ready share message — used by every "Copy as message"
  *  affordance in the app. Centralizing here means a wording change in
  *  one place propagates to all surfaces (hero chip, PublishModal,
@@ -74,13 +93,12 @@ export function prettyShareCode(canonical: string): string {
  *  smart router, and over-formatting risks losing a recipient who's
  *  used to a different shape). */
 export function buildShareMessage(packName: string, code: string): string {
+  const link = buildShareLink(code);
   return (
     `Join my Slay the Spire 2 modpack "${packName}":\n` +
     `\n` +
-    `One-click (if you have the manager): sts2mm://import/${code}\n` +
-    `Or paste this code in the manager: ${code}\n` +
-    `\n` +
-    `Get the manager: https://github.com/MohamedSerhan/sts2-mod-manager/releases/latest`
+    `Install: ${link}\n` +
+    `Or paste this code in the manager: ${code}`
   );
 }
 

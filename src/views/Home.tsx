@@ -9,10 +9,12 @@ import {
   Wrench,
   ChevronRight,
   Plus,
+  Share2,
   AlertTriangle,
   Copy,
   Check,
   MessageSquare,
+  Link as LinkIcon,
 } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
@@ -31,7 +33,10 @@ import {
   getProfileDrift,
   createBackup,
 } from '../hooks/useTauri';
-import { importShareCodeSmart, buildShareMessage } from '../lib/shareImport';
+import { importShareCodeSmart, buildShareMessage, buildShareLink } from '../lib/shareImport';
+import { getShareInfo, listProfiles } from '../hooks/useTauri';
+import type { ShareResult, Profile } from '../types';
+import { PublishModal } from '../components/PublishModal';
 import type { SubscriptionUpdate, Subscription } from '../types';
 
 function formatShareCode(shareId: string): string {
@@ -50,34 +55,38 @@ function packInitials(name: string): string {
   return name.split(/[\s_-]+/).map((w) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
 }
 
-/** Prominent share-code chip in the hero. Click the chip to copy the
- *  raw `username/CODE`; click the adjacent "Copy as message" button to
- *  put a friendly one-liner on the clipboard ready to paste into
- *  Discord ("Join my Slay the Spire 2 modpack: …"). Each action shows
- *  a brief Copied! confirmation state so the user sees their click
- *  registered without having to dig out the toast. */
+/** Prominent share-code chip in the hero. Three separate copy actions
+ *  because the user might want any one of them:
+ *
+ *  - **Copy code** — the raw `username/CODE`. Power-user paste-into-
+ *    manager flow.
+ *  - **Copy link** — the HTTPS install bridge URL on github.io. This is
+ *    the link friends should drop in Discord / Slack / etc., because
+ *    those apps only auto-linkify http/https — the raw sts2mm:// shows
+ *    as un-clickable plain text. The bridge page on click fires the
+ *    sts2mm:// for friends who have the manager, with download
+ *    fallbacks for everyone else.
+ *  - **Copy message** — the full paste-ready one-liner (intro + link +
+ *    code) so the curator can drop a single chat message.
+ *
+ *  Each action shows a brief inline "Copied" state in addition to the
+ *  toast so the click registers without the user having to track the
+ *  toast stack. */
 function ShareCodeChip({ code, packName }: { code: string; packName: string }) {
-  const [copied, setCopied] = useState<'code' | 'msg' | null>(null);
+  const [copied, setCopied] = useState<'code' | 'link' | 'msg' | null>(null);
   const toast = useToast();
 
-  // One-liner share message — built by the centralized helper so this
-  // surface and every other "Copy as message" affordance (PublishModal,
-  // Profiles, Other Packs row, kebabs) stay in sync if we ever tweak
-  // the wording.
+  const link = buildShareLink(code);
   const message = buildShareMessage(packName, code);
 
-  async function copyTo(kind: 'code' | 'msg', value: string, label: string) {
+  async function copyTo(kind: 'code' | 'link' | 'msg', value: string, label: string) {
     try {
       await navigator.clipboard.writeText(value);
       setCopied(kind);
-      // Match the existing toast cadence so the chip's inline "Copied"
-      // and the toast feel like the same beat. The toast is still
-      // useful for users with motion preferences that hide the inline
-      // state.
       toast.success(label);
       window.setTimeout(() => setCopied(null), 1600);
     } catch (e) {
-      toast.error('Couldn\'t copy to clipboard');
+      toast.error("Couldn't copy to clipboard");
     }
   }
 
@@ -101,14 +110,26 @@ function ShareCodeChip({ code, packName }: { code: string; packName: string }) {
       </button>
       <button
         type="button"
+        className={`gf-sharecode-msg-btn${copied === 'link' ? ' is-copied' : ''}`}
+        onClick={() => copyTo('link', link, 'Install link copied — paste into Discord / chat')}
+        title={`Copies the clickable install link: ${link}`}
+      >
+        {copied === 'link' ? (
+          <><Check size={13} /> Copied link</>
+        ) : (
+          <><LinkIcon size={13} /> Copy link</>
+        )}
+      </button>
+      <button
+        type="button"
         className={`gf-sharecode-msg-btn${copied === 'msg' ? ' is-copied' : ''}`}
         onClick={() => copyTo('msg', message, 'Share message copied — paste into Discord / chat')}
-        title={`Copies: ${message}`}
+        title={`Copies the full share message:\n\n${message}`}
       >
         {copied === 'msg' ? (
           <><Check size={13} /> Copied message</>
         ) : (
-          <><MessageSquare size={13} /> Copy as message</>
+          <><MessageSquare size={13} /> Copy message</>
         )}
       </button>
     </div>
@@ -148,11 +169,39 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
   const codeBarRef = useRef<HTMLDivElement | null>(null);
   const codeInputRef = useRef<HTMLInputElement | null>(null);
   const [codeBarPulse, setCodeBarPulse] = useState(false);
+  // Share info for the curator's OWN active profile (separate from
+  // `activeSub` which only covers profiles received from someone else).
+  // Without this, a curator looking at their own published pack on Home
+  // saw no chip at all because the chip was gated on activeSub.
+  const [activeProfileShare, setActiveProfileShare] = useState<ShareResult | null>(null);
+  // PublishModal target. When the active profile isn't published yet,
+  // the hero gets a "Share this pack" button that opens the modal
+  // directly on Home (no detour through Profiles).
+  const [publishTarget, setPublishTarget] = useState<{ profile: Profile; isReshare: boolean } | null>(null);
 
   useEffect(() => {
     loadSubscriptions();
     checkSubs();
   }, []);
+
+  // Refresh share info whenever the active profile changes — covers
+  // profile-switch, fresh publish, and unpublish (delete sidecar).
+  // refreshAll bumps mods/gameInfo too, so we couple the share lookup
+  // to that signal as a cheap "something changed" indicator.
+  useEffect(() => {
+    let cancelled = false;
+    async function loadShareInfo() {
+      if (!activeProfile) { setActiveProfileShare(null); return; }
+      try {
+        const info = await getShareInfo(activeProfile);
+        if (!cancelled) setActiveProfileShare(info);
+      } catch {
+        if (!cancelled) setActiveProfileShare(null);
+      }
+    }
+    loadShareInfo();
+    return () => { cancelled = true; };
+  }, [activeProfile, mods]);
 
   // When a sibling view asks to focus the code bar (Add Pack from kebab),
   // scroll it into view, focus the input, and pulse it briefly so the user
@@ -377,11 +426,25 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
   const activeUpdate = subUpdates.find((s) => s.profile_name === activeProfile);
 
   const heroName = activeProfile || 'Vanilla';
-  const heroCode = activeSub ? formatShareCode(activeSub.share_id) : null;
+  // Share code source: prefer activeSub (a pack imported FROM someone),
+  // fall back to activeProfileShare (the curator's own published pack
+  // — sidecar on disk, no subscription record). Used to display "yep,
+  // this is shareable, here's the code" UI on every active profile that
+  // has one regardless of who wrote it.
+  const heroCode = activeSub
+    ? formatShareCode(activeSub.share_id)
+    : activeProfileShare
+    ? `${activeProfileShare.owner}/${activeProfileShare.code}`
+    : null;
+  // True if the active profile is locally owned (the user's own) and
+  // hasn't been published yet — drives the "Share this pack" CTA.
+  const canShareActive = !!activeProfile && !activeSub && !activeProfileShare;
   // Code lives in its own ShareCodeChip below, so it's not duplicated
   // in the meta line. The meta keeps just mod count + sync recency.
   const heroMeta = activeSub
     ? `${enabledMods.length} mods · synced ${new Date(activeSub.last_synced).toLocaleDateString()}`
+    : activeProfileShare
+    ? `${enabledMods.length} mods · published by you`
     : `${enabledMods.length} mods · ${activeProfile ? 'Local profile' : 'Built-in vanilla profile'}`;
 
   return (
@@ -505,6 +568,30 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
               {repairing ? 'Repairing…' : 'Repair'}
             </button>
           )}
+          {/* Share-this-pack CTA — only renders when the active profile
+              is the curator's own and hasn't been published yet. After
+              publishing, the ShareCodeChip above takes over and this
+              button collapses. */}
+          {canShareActive && activeProfile && (
+            <button
+              className="gf-btn-2"
+              onClick={async () => {
+                // Load the real Profile object from disk so PublishModal
+                // gets the exact same shape it would from Profiles view.
+                try {
+                  const list = await listProfiles();
+                  const p = list.find((p) => p.name === activeProfile);
+                  if (p) setPublishTarget({ profile: p, isReshare: false });
+                  else toast.error("Couldn't find this profile on disk.");
+                } catch (e) {
+                  toast.error(`Couldn't load profile: ${e instanceof Error ? e.message : String(e)}`);
+                }
+              }}
+              title="Publish this pack to a GitHub repo on your account so friends can install it with a code or link"
+            >
+              <Share2 size={11} /> Share this pack
+            </button>
+          )}
         </div>
         {activeProfile && (
           <div className="gf-hero-shortcut-tip">
@@ -575,6 +662,14 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
                 toast.error("Couldn't copy to clipboard");
               }
             };
+            const handleCopyLink = async () => {
+              try {
+                await navigator.clipboard.writeText(buildShareLink(prettyCode));
+                toast.success('Install link copied — paste into Discord / chat');
+              } catch {
+                toast.error("Couldn't copy to clipboard");
+              }
+            };
             const handleCopyMsg = async () => {
               try {
                 await navigator.clipboard.writeText(buildShareMessage(sub.profile_name, prettyCode));
@@ -605,7 +700,14 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
                 </button>
                 <button
                   className="gf-btn-3 gf-btn-icon"
-                  title="Copy share message — paste-ready one-liner with the sts2mm:// one-click link"
+                  title="Copy install link — clickable in Discord / chat, routes friends through the install bridge"
+                  onClick={handleCopyLink}
+                >
+                  <LinkIcon size={12} />
+                </button>
+                <button
+                  className="gf-btn-3 gf-btn-icon"
+                  title="Copy full share message — intro line + install link + raw code"
                   onClick={handleCopyMsg}
                 >
                   <MessageSquare size={12} />
@@ -727,6 +829,31 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
         onApply={async (shareId) => {
           await handleApplySubUpdate(shareId);
           setUpdateDetail(null);
+        }}
+      />
+
+      {/* PublishModal driven from the hero's "Share this pack" CTA. The
+          modal handles its own token pre-flight, progress, and
+          success state — we just need to refresh share info on close
+          so the chip immediately renders the new code. */}
+      <PublishModal
+        open={!!publishTarget}
+        profile={publishTarget?.profile ?? null}
+        isReshare={publishTarget?.isReshare ?? false}
+        onGoToSettings={onGoToSettings}
+        onClose={async () => {
+          setPublishTarget(null);
+          if (activeProfile) {
+            try {
+              const info = await getShareInfo(activeProfile);
+              setActiveProfileShare(info);
+            } catch { /* leave stale; harmless */ }
+          }
+        }}
+        onShared={(result) => {
+          // Immediately flip the hero to the share-code chip without
+          // waiting for the close handler.
+          setActiveProfileShare(result);
         }}
       />
     </div>

@@ -34,6 +34,9 @@
     --gold: oklch(0.78 0.13 80);
     --gold-ink: oklch(0.18 0.04 285);
     --gf: oklch(0.78 0.13 165);
+    --gf-tint: oklch(0.30 0.06 165 / 0.18);
+    --err: oklch(0.78 0.16 25);
+    --err-tint: oklch(0.55 0.13 25 / 0.12);
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
@@ -121,6 +124,88 @@
   footer a { color: var(--gold); }
   a { color: var(--gold); }
   .small { font-size: 12.5px; color: var(--mute); margin-top: 12px; }
+
+  /* ── Post-click feedback banner ───────────────────────────────────
+     Replaces the previous "small grey line beneath the button" UX
+     where the user got no clear signal that anything was happening.
+     Now the click flips the page into one of three states: opening
+     (spinner + "Looking for the manager"), success (Did-it-work
+     confirmed by the user), or fallback (after a short timer the
+     button stays available + the install section gets emphasized).
+  */
+  .status-banner {
+    display: none;
+    margin-top: 14px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+  }
+  .status-banner.is-visible { display: block; }
+  .status-banner.is-opening {
+    background: var(--gf-tint);
+    border-color: oklch(0.66 0.13 165 / 0.55);
+  }
+  .status-banner.is-stalled {
+    background: oklch(0.55 0.13 50 / 0.10);
+    border-color: oklch(0.55 0.13 50 / 0.35);
+  }
+  .status-banner-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--ink);
+    margin-bottom: 6px;
+  }
+  .status-banner-body {
+    font-size: 13px;
+    color: var(--mute);
+    line-height: 1.55;
+    margin: 0;
+  }
+  .status-banner-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .status-banner-actions .cta {
+    font-size: 13px;
+    padding: 8px 14px;
+    margin: 0;
+  }
+
+  /* CSS-only spinner — matches the "opening" state's gf-tint accent. */
+  .spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid oklch(0.78 0.13 165 / 0.30);
+    border-top-color: var(--gf);
+    border-radius: 50%;
+    animation: spin 0.9s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Install section grows a subtle highlight after the click times out
+     so the user's eye lands on it without us having to scroll. */
+  .install-section {
+    transition: border-color 200ms ease, box-shadow 200ms ease;
+  }
+  .install-section.is-emphasized {
+    border-color: oklch(0.66 0.13 165 / 0.55);
+    box-shadow: 0 0 0 3px oklch(0.66 0.13 165 / 0.18);
+  }
+  .install-section-eyebrow {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--mute);
+    margin-bottom: 8px;
+  }
 </style>
 </head>
 <body>
@@ -148,19 +233,52 @@
 
     <button class="cta" id="open-app">Open in STS2 Mod Manager</button>
 
-    <p class="small" id="open-status">Click the button above to fire <code id="protocol-url">sts2mm://...</code>. Some browsers ask for permission the first time.</p>
+    <!-- Post-click status banner. Hidden initially; flips through
+         three states based on the click + a 3s timer. -->
+    <div class="status-banner" id="status-opening">
+      <div class="status-banner-title">
+        <span class="spinner" aria-hidden="true"></span>
+        Opening STS2 Mod Manager…
+      </div>
+      <p class="status-banner-body">
+        Your browser is firing the install handler. The manager should pop
+        up in a second with a confirm dialog. Keep an eye on your taskbar /
+        dock — it'll come forward automatically.
+      </p>
+    </div>
 
-    <hr style="border:0; border-top:1px solid var(--line); margin: 22px 0" />
+    <div class="status-banner" id="status-stalled">
+      <div class="status-banner-title">Manager didn't open?</div>
+      <p class="status-banner-body">
+        A few seconds passed and we don't see the confirm dialog. Two
+        common reasons: the manager isn't installed on this computer yet,
+        or your browser blocked the protocol handler. Try the steps below.
+      </p>
+      <div class="status-banner-actions">
+        <button class="cta" id="retry-open">Try again</button>
+        <button class="cta cta-secondary" id="scroll-install">I need to install the manager</button>
+      </div>
+    </div>
 
-    <p><strong>Don't have the manager yet?</strong> Grab the installer for your OS — install takes about a minute, then come back to this page and click the button above.</p>
+    <div class="status-banner" id="status-success" style="background: var(--gf-tint); border-color: oklch(0.66 0.13 165 / 0.55);">
+      <div class="status-banner-title" style="color: var(--gf);">Nice — the manager has the link. 🎉</div>
+      <p class="status-banner-body">
+        Switch over to the manager window and confirm the install. You can
+        close this tab.
+      </p>
+    </div>
+  </div>
 
+  <div id="install-section" class="card install-section" style="display:none">
+    <div class="install-section-eyebrow">Don't have the manager?</div>
+    <p><strong>Install takes about a minute.</strong> Grab the right installer for your OS, install it, then come back to this page and click "Open in STS2 Mod Manager" above.</p>
     <a class="cta cta-secondary" href="https://github.com/MohamedSerhan/sts2-mod-manager/releases/latest">
       Download manager (Windows / macOS / Linux)
     </a>
 
     <hr style="border:0; border-top:1px solid var(--line); margin: 22px 0" />
 
-    <p><strong>Or paste the code manually.</strong> In the manager → Home → "Drop a code, hit Add" box:</p>
+    <p><strong>Or paste the code manually.</strong> If you already have the manager open, go to Home → "Drop a code, hit Add" box and paste this:</p>
     <div class="copy-row">
       <input id="code-input" readonly />
       <button id="copy-code">Copy</button>
@@ -192,19 +310,41 @@
   var code = readCode();
   var cardInvalid = document.getElementById('card-invalid');
   var cardValid = document.getElementById('card-valid');
+  var installSection = document.getElementById('install-section');
 
   if (!code) {
     cardInvalid.style.display = '';
   } else {
     cardValid.style.display = '';
+    installSection.style.display = '';
     var deepUrl = 'sts2mm://import/' + code;
     document.getElementById('code-display').textContent = code;
-    document.getElementById('protocol-url').textContent = deepUrl;
     var input = document.getElementById('code-input');
     input.value = code;
 
     var openBtn = document.getElementById('open-app');
-    openBtn.addEventListener('click', function () {
+    var statusOpening = document.getElementById('status-opening');
+    var statusStalled = document.getElementById('status-stalled');
+    var statusSuccess = document.getElementById('status-success');
+    var retryBtn = document.getElementById('retry-open');
+    var scrollInstallBtn = document.getElementById('scroll-install');
+
+    var stalledTimer = null;
+    var blurFired = false;
+
+    function showBanner(which) {
+      [statusOpening, statusStalled, statusSuccess].forEach(function (el) {
+        el.classList.remove('is-visible', 'is-opening', 'is-stalled');
+      });
+      if (which) which.classList.add('is-visible');
+      if (which === statusOpening) statusOpening.classList.add('is-opening');
+      if (which === statusStalled) statusStalled.classList.add('is-stalled');
+    }
+
+    function fireDeepLink() {
+      blurFired = false;
+      showBanner(statusOpening);
+
       // Fire the deep link. Browsers handle this differently:
       //   - Chrome/Edge: navigates the current tab to the sts2mm:// URL,
       //     OS routes to the manager. If no handler, browser shows an
@@ -216,8 +356,57 @@
       // We intentionally don't use window.open() — that opens a new tab
       // and most browsers block protocol-handler navigation in popups.
       window.location.href = deepUrl;
-      var status = document.getElementById('open-status');
-      status.textContent = 'Opened ' + deepUrl + '. If nothing happened, install the manager below and try again.';
+
+      // Two signals decide what happens next:
+      //
+      //  - If the OS routed the URL to the manager, the manager's window
+      //    comes forward and steals focus from the browser. That fires
+      //    `blur` / `visibilitychange:hidden` on the page. We treat
+      //    that as confirmation that SOMETHING received the URL and
+      //    flip to the success banner.
+      //
+      //  - If neither signal fires within 3.5s, we assume the protocol
+      //    didn't resolve (manager not installed, browser blocked it,
+      //    OS dialog dismissed) and flip to the stalled banner with
+      //    install + retry CTAs.
+      //
+      // Cleanup of the timer happens in both the focus-loss handler
+      // and the retry button so we don't accidentally flip stalled
+      // over a real success.
+      if (stalledTimer) { clearTimeout(stalledTimer); }
+      stalledTimer = window.setTimeout(function () {
+        if (blurFired) return; // already declared success
+        showBanner(statusStalled);
+        installSection.classList.add('is-emphasized');
+        installSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 3500);
+    }
+
+    function markSuccess() {
+      blurFired = true;
+      if (stalledTimer) { clearTimeout(stalledTimer); stalledTimer = null; }
+      showBanner(statusSuccess);
+    }
+
+    // The browser losing focus or the tab going hidden right after we
+    // fired the protocol handler is the strongest signal we have that
+    // the OS handed off to the manager. Window managers behave slightly
+    // differently across OSes; covering both events catches all the
+    // common cases (Chrome/Edge fire blur, Safari fires visibilitychange).
+    window.addEventListener('blur', function () {
+      if (statusOpening.classList.contains('is-visible')) markSuccess();
+    });
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden && statusOpening.classList.contains('is-visible')) markSuccess();
+    });
+
+    openBtn.addEventListener('click', fireDeepLink);
+    retryBtn.addEventListener('click', function () {
+      installSection.classList.remove('is-emphasized');
+      fireDeepLink();
+    });
+    scrollInstallBtn.addEventListener('click', function () {
+      installSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
 
     document.getElementById('copy-code').addEventListener('click', function () {

@@ -24,6 +24,14 @@ tauri-plugin-updater = "2"
 # confirm dialog the manual share-code paste flow uses, with smart handling
 # for the "user already has this pack" case.
 tauri-plugin-deep-link = "2"
+# Required companion to tauri-plugin-deep-link on Windows + Linux: when
+# the user clicks a `sts2mm://...` link the OS launches a NEW process
+# with the URL in argv. Without this plugin, every click spawns a fresh
+# manager window and the existing instance never sees the URL.
+# tauri-plugin-single-instance intercepts the second launch, forwards
+# its argv to the first instance via IPC, and lets the existing window
+# come forward and route the URL through `on_open_url`.
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }

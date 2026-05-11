@@ -163,6 +163,18 @@ clipboard for pasting into a GitHub issue.
 - **Vanilla launch** — top-bar Vanilla button starts the game with all mods
   temporarily disabled (auto-backup runs first so the next launch puts
   everything back).
+- **Launch mode (Steam vs Direct).** Defaults to launching via Steam
+  (`steam://rungameid/...`). Settings → General → Launch lets you switch to
+  **Direct**, which runs the game executable itself and drops a
+  `steam_appid.txt` next to it so STS2's Steamworks init won't bail out.
+  Useful for **Steam Family Sharing borrowers** (the lender's library
+  lock blocks normal Steam launches) and **Steam offline mode**. Steam
+  itself still needs to be running — STS2 uses Steamworks for saves and
+  achievements, so Direct bypasses the Steam *launcher*, not Steam-as-a-
+  runtime. On Linux, Direct works only with a native binary; Proton-only
+  installs (a Windows `.exe` with no Linux binary alongside) get a clear
+  error pointing back at Steam launch mode rather than the manager trying
+  to drive Proton itself.
 
 ---
 

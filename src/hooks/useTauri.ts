@@ -35,6 +35,27 @@ export async function getApiKeyStatus(): Promise<{ nexus_api_key_set: boolean; g
   return invoke('get_api_key_status');
 }
 
+// ── Launch Mode ────────────────────────────────────────────────────────────
+
+/**
+ * How the Launch button and `Ctrl/⌘ L` start STS2.
+ *
+ * - `steam`: go through `steam://rungameid/2868840`. Required for cloud
+ *   saves, achievements, and Proton on Linux. Default.
+ * - `direct`: invoke the game executable directly. Useful for Family
+ *   Sharing borrowers, offline play, and non-Steam copies. Not supported
+ *   for Proton-only installs on Linux.
+ */
+export type LaunchMode = 'steam' | 'direct';
+
+export async function getLaunchMode(): Promise<LaunchMode> {
+  return invoke('get_launch_mode');
+}
+
+export async function setLaunchMode(mode: LaunchMode): Promise<LaunchMode> {
+  return invoke('set_launch_mode', { mode });
+}
+
 // ── Mod Management ─────────────────────────────────────────────────────────
 
 export async function getInstalledMods(): Promise<ModInfo[]> {

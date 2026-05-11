@@ -12,6 +12,7 @@ import {
   Archive,
   RotateCcw,
   Trash2,
+  Play,
 } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { check } from '@tauri-apps/plugin-updater';
@@ -42,7 +43,10 @@ import {
   listBackups,
   restoreBackup,
   deleteBackup,
+  getLaunchMode,
+  setLaunchMode,
 } from '../hooks/useTauri';
+import type { LaunchMode } from '../hooks/useTauri';
 import type { ModAuditEntry, BackupInfo } from '../types';
 
 type Tab = 'general' | 'accounts' | 'backups' | 'audit' | 'advanced';
@@ -57,6 +61,8 @@ export function SettingsView() {
 
   // ── General ─────────────────────────────────────────
   const [gamePath, setGamePathValue] = useState('');
+  const [launchMode, setLaunchModeValue] = useState<LaunchMode>('steam');
+  const [savingLaunchMode, setSavingLaunchMode] = useState(false);
 
   // ── Accounts ────────────────────────────────────────
   const [nexusKey, setNexusKey] = useState('');
@@ -100,6 +106,9 @@ export function SettingsView() {
       setNexusKeySaved(status.nexus_api_key_set);
       setGithubTokenSaved(status.github_token_set);
     }).catch(() => {});
+  }, []);
+  useEffect(() => {
+    getLaunchMode().then(setLaunchModeValue).catch(() => {});
   }, []);
 
   // When a mod is auto-installed by the Downloads watcher (NXM link or
@@ -243,6 +252,22 @@ export function SettingsView() {
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function handleChangeLaunchMode(mode: LaunchMode) {
+    if (mode === launchMode || savingLaunchMode) return;
+    setSavingLaunchMode(true);
+    const previous = launchMode;
+    setLaunchModeValue(mode);
+    try {
+      await setLaunchMode(mode);
+      toast.success(`Launch mode set to ${mode === 'steam' ? 'Steam' : 'Direct'}`);
+    } catch (e) {
+      setLaunchModeValue(previous);
+      toast.error(`Failed to update launch mode: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSavingLaunchMode(false);
     }
   }
 
@@ -500,6 +525,67 @@ export function SettingsView() {
                     <span>Click <b>Auto-detect</b> to find your Steam install, or <b>Browse</b> to pick the folder manually.</span>
                   </div>
                 )}
+              </div>
+            </Card>
+
+            <Card className="space-y-4" style={{ marginTop: 8 }}>
+              <h3 className="text-base font-semibold text-text flex items-center gap-2">
+                <Play size={16} />
+                Launch
+              </h3>
+              <div className="gf-set-desc" style={{ marginTop: -6 }}>
+                How the Launch button and <code>Ctrl/⌘ L</code> start Slay the Spire 2.
+              </div>
+              <div role="radiogroup" aria-label="Launch mode" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {([
+                  {
+                    value: 'steam' as LaunchMode,
+                    title: 'Steam (recommended)',
+                    desc: 'Launches via Steam. Required for cloud saves, achievements, and Proton on Linux.',
+                  },
+                  {
+                    value: 'direct' as LaunchMode,
+                    title: 'Direct',
+                    desc: 'Skips the Steam launcher and runs the game executable. Steam itself still needs to be running — STS2 uses Steamworks for saves and achievements. Useful for Family Sharing borrowers (the lender\'s library lock blocks normal Steam launches) and Steam offline mode. Not supported for Proton/Linux installs.',
+                  },
+                ]).map((opt) => {
+                  const selected = launchMode === opt.value;
+                  return (
+                    <label
+                      key={opt.value}
+                      className="gf-launch-mode-row"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: 10,
+                        padding: '10px 12px',
+                        borderRadius: 7,
+                        border: `1px solid ${selected ? 'var(--gf)' : 'var(--indigo-line)'}`,
+                        background: selected ? 'oklch(0.65 0.13 70 / 0.08)' : 'var(--indigo-panel)',
+                        cursor: savingLaunchMode ? 'progress' : 'pointer',
+                        opacity: savingLaunchMode && !selected ? 0.7 : 1,
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="launch-mode"
+                        value={opt.value}
+                        checked={selected}
+                        disabled={savingLaunchMode}
+                        onChange={() => handleChangeLaunchMode(opt.value)}
+                        style={{ marginTop: 2, accentColor: 'var(--gf)' }}
+                      />
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>
+                          {opt.title}
+                        </span>
+                        <span style={{ fontSize: 12, color: 'var(--ink-mute)' }}>
+                          {opt.desc}
+                        </span>
+                      </div>
+                    </label>
+                  );
+                })}
               </div>
             </Card>
           </>

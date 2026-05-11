@@ -3,6 +3,47 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use serde::{Deserialize, Serialize};
+
+/// How the user wants to start Slay the Spire 2 from the Launch button and
+/// the `Ctrl/⌘ L` shortcut.
+///
+/// `Steam` (default) goes through `steam://rungameid/2868840` and keeps
+/// cloud saves, achievements, and Proton on Linux working. `Direct`
+/// invokes the game executable itself — useful for Family Sharing
+/// borrowers, offline-mode users, and non-Steam copies, at the cost of
+/// the Steam-side niceties. There's no auto-fallback between them: an
+/// explicit user choice is the only thing that picks the path, so a
+/// failed direct launch surfaces an error rather than quietly reaching
+/// for Steam (which is what the borrower opted out of in the first place).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum LaunchMode {
+    #[default]
+    Steam,
+    Direct,
+}
+
+impl LaunchMode {
+    /// On-disk token for `launch_mode.txt`. Matches the serde lowercase
+    /// form so a user editing the file by hand sees the same shape as
+    /// the frontend / API.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LaunchMode::Steam => "steam",
+            LaunchMode::Direct => "direct",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<LaunchMode> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "steam" => Some(LaunchMode::Steam),
+            "direct" => Some(LaunchMode::Direct),
+            _ => None,
+        }
+    }
+}
+
 /// A Nexus mod that the user has just queued for download via Quick Add.
 /// The downloads watcher uses this hint to attach the Nexus URL to the
 /// resulting mod once the user clicks "Mod Manager Download" on Nexus.
@@ -62,6 +103,9 @@ pub struct AppStateInner {
     /// Subsequent URLs (warm-hit case: user clicks another sts2mm:// link
     /// while the app is already running) skip the buffer and emit directly.
     pub pending_deep_link: Option<String>,
+    /// How the Launch button and `Ctrl/⌘ L` should start STS2. Persisted
+    /// in `<config>/launch_mode.txt`. Default `Steam`. See `LaunchMode`.
+    pub launch_mode: LaunchMode,
 }
 
 pub type AppState = Arc<Mutex<AppStateInner>>;
@@ -98,6 +142,7 @@ impl AppStateInner {
             sharing_in_flight: HashSet::new(),
             game_version: None,
             pending_deep_link: None,
+            launch_mode: LaunchMode::default(),
         }
     }
 

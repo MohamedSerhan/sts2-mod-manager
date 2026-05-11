@@ -132,6 +132,24 @@ pub fn run() {
         }
     }
 
+    // Restore configured launch mode (Steam vs Direct). Default is Steam
+    // already wired through serde::Default on the enum; we only override
+    // when the persisted file parses cleanly.
+    if let Ok(mut s) = app_state.lock() {
+        let lm_file = s.config_path.join("launch_mode.txt");
+        if let Ok(raw) = std::fs::read_to_string(&lm_file) {
+            if let Some(mode) = state::LaunchMode::parse(&raw) {
+                log::info!("Restored launch mode from previous session: {}", mode.as_str());
+                s.launch_mode = mode;
+            } else {
+                log::warn!(
+                    "Ignoring unrecognized launch_mode.txt content: {:?}",
+                    raw.trim()
+                );
+            }
+        }
+    }
+
     let mut builder = tauri::Builder::default();
 
     // Single-instance has to be the FIRST plugin so its launch-args
@@ -179,6 +197,8 @@ pub fn run() {
             game::open_game_folder,
             game::launch_game,
             game::launch_vanilla,
+            game::get_launch_mode,
+            game::set_launch_mode,
             game::set_github_token,
             game::get_api_key_status,
             game::get_active_profile,

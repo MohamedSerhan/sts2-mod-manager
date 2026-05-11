@@ -3,7 +3,11 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
-use crate::state::AppState;
+use crate::state::{AppState, LaunchMode};
+
+/// STS2's Steam AppID. Used to build the `steam://rungameid/<id>` URL
+/// the Steam launcher consumes.
+const STS2_STEAM_APPID: &str = "2868840";
 
 /// Information about the detected game installation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -540,7 +544,224 @@ pub fn open_game_folder(state: tauri::State<'_, AppState>) -> std::result::Resul
     Err("Game folder not found. Set the game path in Settings.".to_string())
 }
 
-/// Launch STS2 via Steam with optional auto-backup.
+/// Start the game using the user's configured launch mode. Returns an
+/// error string when the chosen mode can't run on the current install
+/// (e.g. Direct + Proton-only on Linux). No auto-fallback: Direct users
+/// explicitly opted out of Steam, so silently reaching for it would
+/// defeat the purpose of the setting.
+fn spawn_game(mode: LaunchMode, game_path: Option<&Path>) -> std::result::Result<(), String> {
+    log::info!("Launching game via {}", mode.as_str());
+    match mode {
+        LaunchMode::Steam => {
+            open::that_in_background(format!("steam://rungameid/{}", STS2_STEAM_APPID));
+            Ok(())
+        }
+        LaunchMode::Direct => spawn_game_direct(game_path),
+    }
+}
+
+/// STS2 calls Steamworks' `SteamAPI_Init()` on startup. When the game
+/// process wasn't spawned by Steam, that call fails with
+/// `k_ESteamAPIInitResult_FailedGeneric: No appID found` and the game
+/// dies with a "Steam Error!" dialog — unless a `steam_appid.txt`
+/// containing the AppID sits in the executable's working directory.
+/// That file is the documented Steamworks-side override for running
+/// the binary outside Steam's launcher.
+///
+/// We rewrite it on every Direct launch (idempotent, 7 bytes, no
+/// downside if it was already there) so users don't have to do it
+/// manually. Failures are logged and non-fatal — the launch still
+/// proceeds; the user just sees the same error dialog they'd see
+/// without us, which is a clearer signal than a launch that we
+/// silently aborted.
+///
+/// Caveat we DON'T paper over: this file gets the game past
+/// `SteamAPI_Init`'s "did you launch from Steam?" check, but Steamworks
+/// still needs a running Steam client to connect to. If Steam isn't
+/// running at all, the game will still fail to initialize. So Direct
+/// launch bypasses the Steam *launcher*, not Steam-the-runtime — Family
+/// Sharing borrowers and Steam-offline-mode users (who do have Steam
+/// running) are the realistic users for this mode.
+fn write_steam_appid_file(dir: &Path) {
+    let path = dir.join("steam_appid.txt");
+    match std::fs::write(&path, STS2_STEAM_APPID) {
+        Ok(_) => log::info!("Wrote {} for Direct launch", path.display()),
+        Err(e) => log::warn!(
+            "Couldn't write {} (Direct launch may fail with a Steam Error dialog): {}",
+            path.display(),
+            e
+        ),
+    }
+}
+
+/// Direct (no-Steam) launch. Per platform:
+///   - Windows: spawn `<install>/SlayTheSpire2.exe` (or the space-variant).
+///   - macOS:   `open` the `.app` bundle. Warn on Apple Silicon that
+///              STS2 needs Rosetta 2 — we don't fail the launch; if
+///              Rosetta isn't installed macOS surfaces its own prompt.
+///   - Linux:   spawn the native binary if one's next to the `.pck`.
+///              Proton-only installs (a `.exe` with no Linux binary)
+///              are not supported here; we don't try to drive Proton
+///              ourselves.
+///
+/// All platforms write `steam_appid.txt` next to the binary first —
+/// without it the game refuses to start outside Steam. See
+/// `write_steam_appid_file` for the why.
+fn spawn_game_direct(game_path: Option<&Path>) -> std::result::Result<(), String> {
+    let game_path = game_path.ok_or_else(|| {
+        "Direct launch needs a detected game install. Set the game path in Settings → General first.".to_string()
+    })?;
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::Command;
+
+        let candidates = [
+            game_path.join("SlayTheSpire2.exe"),
+            game_path.join("Slay the Spire 2.exe"),
+        ];
+        let exe = match candidates.iter().find(|p| p.exists()) {
+            Some(p) => p,
+            None => {
+                let msg = format!(
+                    "Direct launch couldn't find SlayTheSpire2.exe in {}. Verify the game path in Settings → General.",
+                    game_path.display()
+                );
+                log::error!("{}", msg);
+                return Err(msg);
+            }
+        };
+        // CWD will be game_path, which is also where the .exe lives,
+        // so steam_appid.txt goes right next to it.
+        write_steam_appid_file(game_path);
+        log::info!("Direct launch: spawning {}", exe.display());
+        Command::new(exe)
+            .current_dir(game_path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| {
+                let msg = format!("Direct launch failed: {}", e);
+                log::error!("{}", msg);
+                msg
+            })
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+
+        let app_candidates = [
+            game_path.join("SlayTheSpire2.app"),
+            game_path.join("Slay the Spire 2.app"),
+        ];
+        let bundle = match app_candidates.iter().find(|p| p.is_dir()) {
+            Some(p) => p,
+            None => {
+                let msg = format!(
+                    "Direct launch couldn't find SlayTheSpire2.app inside {}. Verify the game path in Settings → General.",
+                    game_path.display()
+                );
+                log::error!("{}", msg);
+                return Err(msg);
+            }
+        };
+
+        // STS2 ships an Intel-only Mac build that runs through Rosetta 2.
+        // On Apple Silicon (`aarch64`) the user needs Rosetta installed for
+        // the bundle to actually start. We don't gate the launch on
+        // detecting Rosetta — macOS will surface its own "Rosetta is
+        // required" prompt if it's missing — but we log so the cause is
+        // obvious if Direct launch produces nothing visible.
+        if std::env::consts::ARCH == "aarch64" {
+            log::warn!(
+                "Direct launch on Apple Silicon: STS2 ships an Intel build and needs Rosetta 2. \
+                 If the game doesn't start, install Rosetta (System Settings → General → Software Update) \
+                 or run via Steam launch mode."
+            );
+        }
+
+        // When `open` launches a .app, the executable's CWD is its
+        // Contents/MacOS directory — write the appid file there.
+        // Also drop one at the game-path root: cheap insurance for any
+        // SteamAPI build that walks up looking for it, and the dialog
+        // text itself asks for "your game folder" which Steam users
+        // tend to read as the install dir.
+        let macos_dir = bundle.join("Contents/MacOS");
+        if macos_dir.is_dir() {
+            write_steam_appid_file(&macos_dir);
+        }
+        write_steam_appid_file(game_path);
+
+        log::info!("Direct launch: open {}", bundle.display());
+        Command::new("open")
+            .arg(bundle)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| {
+                let msg = format!("Direct launch failed: {}", e);
+                log::error!("{}", msg);
+                msg
+            })
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        use std::process::Command;
+
+        let linux_candidates = [
+            game_path.join("SlayTheSpire2.x86_64"),
+            game_path.join("SlayTheSpire2"),
+            game_path.join("Slay the Spire 2.x86_64"),
+            game_path.join("Slay the Spire 2"),
+        ];
+        let binary = linux_candidates.iter().find(|p| p.is_file());
+
+        if let Some(bin) = binary {
+            write_steam_appid_file(game_path);
+            log::info!("Direct launch: spawning {}", bin.display());
+            return Command::new(bin)
+                .current_dir(game_path)
+                .spawn()
+                .map(|_| ())
+                .map_err(|e| {
+                    let msg = format!("Direct launch failed: {}", e);
+                    log::error!("{}", msg);
+                    msg
+                });
+        }
+
+        // Proton install: a Windows .exe in the steamapps/common dir with
+        // no native Linux binary alongside. We deliberately don't try to
+        // spawn Proton ourselves — picking the right Proton version,
+        // wiring up the WINEPREFIX, and matching what Steam would do is
+        // brittle and very Steam-specific. Steer the user back to Steam
+        // mode (which IS the right tool for Proton).
+        let has_exe = game_path.join("SlayTheSpire2.exe").exists()
+            || game_path.join("Slay the Spire 2.exe").exists();
+        if has_exe {
+            let msg = "Direct launch is not supported for Proton installs. Switch to Steam launch in Settings → Launch.".to_string();
+            log::error!("{}", msg);
+            return Err(msg);
+        }
+
+        let msg = format!(
+            "Direct launch couldn't find a Slay the Spire 2 binary in {}. Verify the game path in Settings → General.",
+            game_path.display()
+        );
+        log::error!("{}", msg);
+        Err(msg)
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        let _ = game_path;
+        let msg = "Direct launch isn't supported on this platform.".to_string();
+        log::error!("{}", msg);
+        Err(msg)
+    }
+}
+
+/// Launch STS2 using the configured launch mode, with auto-backup.
 /// If vanilla_mode was active (from a previous Launch Vanilla), restore mods first.
 #[tauri::command]
 pub fn launch_game(
@@ -569,15 +790,18 @@ pub fn launch_game(
             Err(e) => log::warn!("Failed to create pre-launch backup: {}", e),
         }
     }
+
+    let mode = s.launch_mode;
+    let game_path = s.game_path.clone();
     drop(s);
 
-    // STS2 Steam App ID: 2868840
-    open::that_in_background("steam://rungameid/2868840");
+    spawn_game(mode, game_path.as_deref())?;
     Ok(true)
 }
 
-/// Launch STS2 in vanilla mode (disable all mods temporarily).
-/// Mods will be automatically restored on the next normal launch.
+/// Launch STS2 in vanilla mode (disable all mods temporarily) using the
+/// configured launch mode. Mods will be automatically restored on the
+/// next normal launch.
 #[tauri::command]
 pub fn launch_vanilla(
     state: tauri::State<'_, AppState>,
@@ -599,11 +823,39 @@ pub fn launch_vanilla(
     s.vanilla_mode = true;
     let flag_path = s.config_path.join(".vanilla_mode");
     let _ = std::fs::write(&flag_path, "1");
+
+    let mode = s.launch_mode;
+    let game_path = s.game_path.clone();
     drop(s);
 
-    // Launch
-    open::that_in_background("steam://rungameid/2868840");
+    spawn_game(mode, game_path.as_deref())?;
     Ok(true)
+}
+
+/// Return the user's configured launch mode.
+#[tauri::command]
+pub fn get_launch_mode(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<LaunchMode, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    Ok(s.launch_mode)
+}
+
+/// Persist a new launch mode. Writes `<config>/launch_mode.txt` so the
+/// choice survives an app restart.
+#[tauri::command]
+pub fn set_launch_mode(
+    mode: LaunchMode,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<LaunchMode, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.launch_mode = mode;
+    let path = s.config_path.join("launch_mode.txt");
+    if let Err(e) = std::fs::write(&path, mode.as_str()) {
+        log::warn!("Couldn't persist launch_mode to {}: {}", path.display(), e);
+    }
+    log::info!("Launch mode set to {}", mode.as_str());
+    Ok(mode)
 }
 
 /// Move all files/dirs from disabled back to mods (restore from vanilla).

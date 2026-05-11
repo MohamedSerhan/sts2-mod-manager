@@ -827,6 +827,99 @@ body {
 }
 .gf-hero-shortcut-tip .gf-kbd { margin: 0 1px; }
 
+/* Prominent share-code chip in the hero — click to copy, with a paired
+   "copy as message" sub-action for one-liner sharing in Discord/etc.
+   Sized to feel like the primary share affordance, not a hidden one. */
+.gf-sharecode-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+.gf-sharecode-chip {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--gf-tint);
+  border: 1px solid var(--gf-line);
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+  text-align: left;
+  font-family: inherit;
+}
+.gf-sharecode-chip:hover {
+  background: oklch(0.30 0.06 165 / 0.18);
+  border-color: oklch(0.66 0.13 165 / 0.55);
+}
+.gf-sharecode-chip:focus-visible {
+  outline: 2px solid var(--gf);
+  outline-offset: 2px;
+}
+.gf-sharecode-eyebrow {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--gf);
+  white-space: nowrap;
+}
+.gf-sharecode-value {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gf-sharecode-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--gf);
+  white-space: nowrap;
+}
+.gf-sharecode-chip.is-copied { border-color: var(--ok); }
+.gf-sharecode-chip.is-copied .gf-sharecode-action,
+.gf-sharecode-chip.is-copied .gf-sharecode-eyebrow {
+  color: var(--ok);
+}
+.gf-sharecode-msg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 14px;
+  border-radius: 10px;
+  background: transparent;
+  border: 1px solid var(--indigo-line);
+  color: var(--ink-mute);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.gf-sharecode-msg-btn:hover {
+  background: var(--indigo-elev);
+  color: var(--ink);
+  border-color: var(--indigo-line);
+}
+.gf-sharecode-msg-btn.is-copied {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
 /* ── About footer on Home ────────────────────────────────────────── */
 .gf-about-footer {
   /* Stick to the bottom of the scroll area when Home content is shorter

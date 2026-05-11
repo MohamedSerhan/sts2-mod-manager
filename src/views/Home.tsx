@@ -9,8 +9,10 @@ import {
   Wrench,
   ChevronRight,
   Plus,
-  Share2,
   AlertTriangle,
+  Copy,
+  Check,
+  MessageSquare,
 } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
@@ -46,6 +48,68 @@ function formatShareCode(shareId: string): string {
 
 function packInitials(name: string): string {
   return name.split(/[\s_-]+/).map((w) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
+}
+
+/** Prominent share-code chip in the hero. Click the chip to copy the
+ *  raw `username/CODE`; click the adjacent "Copy as message" button to
+ *  put a friendly one-liner on the clipboard ready to paste into
+ *  Discord ("Join my Slay the Spire 2 modpack: …"). Each action shows
+ *  a brief Copied! confirmation state so the user sees their click
+ *  registered without having to dig out the toast. */
+function ShareCodeChip({ code, packName }: { code: string; packName: string }) {
+  const [copied, setCopied] = useState<'code' | 'msg' | null>(null);
+  const toast = useToast();
+
+  const message = `Join my Slay the Spire 2 modpack "${packName}": ${code}\n` +
+    `Get the manager: https://github.com/MohamedSerhan/sts2-mod-manager/releases/latest`;
+
+  async function copyTo(kind: 'code' | 'msg', value: string, label: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(kind);
+      // Match the existing toast cadence so the chip's inline "Copied"
+      // and the toast feel like the same beat. The toast is still
+      // useful for users with motion preferences that hide the inline
+      // state.
+      toast.success(label);
+      window.setTimeout(() => setCopied(null), 1600);
+    } catch (e) {
+      toast.error('Couldn\'t copy to clipboard');
+    }
+  }
+
+  return (
+    <div className="gf-sharecode-row">
+      <button
+        type="button"
+        className={`gf-sharecode-chip${copied === 'code' ? ' is-copied' : ''}`}
+        onClick={() => copyTo('code', code, 'Share code copied')}
+        title="Click to copy the share code"
+      >
+        <span className="gf-sharecode-eyebrow">Share code</span>
+        <span className="gf-sharecode-value">{code}</span>
+        <span className="gf-sharecode-action">
+          {copied === 'code' ? (
+            <><Check size={13} /> Copied</>
+          ) : (
+            <><Copy size={13} /> Copy</>
+          )}
+        </span>
+      </button>
+      <button
+        type="button"
+        className={`gf-sharecode-msg-btn${copied === 'msg' ? ' is-copied' : ''}`}
+        onClick={() => copyTo('msg', message, 'Share message copied — paste into Discord / chat')}
+        title={`Copies: ${message}`}
+      >
+        {copied === 'msg' ? (
+          <><Check size={13} /> Copied message</>
+        ) : (
+          <><MessageSquare size={13} /> Copy as message</>
+        )}
+      </button>
+    </div>
+  );
 }
 
 // v5 — Single-hero "Continue with" home. Hero = active pack; quick-add code
@@ -292,8 +356,10 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
 
   const heroName = activeProfile || 'Vanilla';
   const heroCode = activeSub ? formatShareCode(activeSub.share_id) : null;
+  // Code lives in its own ShareCodeChip below, so it's not duplicated
+  // in the meta line. The meta keeps just mod count + sync recency.
   const heroMeta = activeSub
-    ? `${heroCode} · ${enabledMods.length} mods · synced ${new Date(activeSub.last_synced).toLocaleDateString()}`
+    ? `${enabledMods.length} mods · synced ${new Date(activeSub.last_synced).toLocaleDateString()}`
     : `${enabledMods.length} mods · ${activeProfile ? 'Local profile' : 'Built-in vanilla profile'}`;
 
   return (
@@ -334,6 +400,8 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
           <span className="gf-pill gf-pill-active">ACTIVE</span>
         </div>
         <div className="gf-hero-meta">{heroMeta}</div>
+
+        {heroCode && <ShareCodeChip code={heroCode} packName={heroName} />}
 
         {activeUpdate && (
           <div
@@ -413,17 +481,6 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
                 <Wrench size={11} />
               )}
               {repairing ? 'Repairing…' : 'Repair'}
-            </button>
-          )}
-          {heroCode && (
-            <button
-              className="gf-btn-2"
-              onClick={() => {
-                navigator.clipboard.writeText(heroCode).then(() => toast.success('Share code copied'));
-              }}
-              title={heroCode}
-            >
-              <Share2 size={12} /> Copy share code
             </button>
           )}
         </div>

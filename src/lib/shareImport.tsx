@@ -64,6 +64,26 @@ export function prettyShareCode(canonical: string): string {
   return `${owner}/${c.slice(0, 4)}-${c.slice(4, 8)}-${c.slice(8, 12)}`;
 }
 
+/** Build the paste-ready share message — used by every "Copy as message"
+ *  affordance in the app. Centralizing here means a wording change in
+ *  one place propagates to all surfaces (hero chip, PublishModal,
+ *  Profiles row, Other Packs row, kebab menus) without drift.
+ *
+ *  `code` should already be in `owner/CODE` form (with or without
+ *  dashes — we don't reformat it because both are valid input to the
+ *  smart router, and over-formatting risks losing a recipient who's
+ *  used to a different shape). */
+export function buildShareMessage(packName: string, code: string): string {
+  return (
+    `Join my Slay the Spire 2 modpack "${packName}":\n` +
+    `\n` +
+    `One-click (if you have the manager): sts2mm://import/${code}\n` +
+    `Or paste this code in the manager: ${code}\n` +
+    `\n` +
+    `Get the manager: https://github.com/MohamedSerhan/sts2-mod-manager/releases/latest`
+  );
+}
+
 /**
  * Outcome of an import request. The smart router returns one of these so
  * the caller (Home paste flow, deep-link listener, anything else) can

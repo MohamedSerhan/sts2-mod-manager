@@ -31,7 +31,7 @@ import {
   getProfileDrift,
   createBackup,
 } from '../hooks/useTauri';
-import { importShareCodeSmart } from '../lib/shareImport';
+import { importShareCodeSmart, buildShareMessage } from '../lib/shareImport';
 import type { SubscriptionUpdate, Subscription } from '../types';
 
 function formatShareCode(shareId: string): string {
@@ -60,20 +60,11 @@ function ShareCodeChip({ code, packName }: { code: string; packName: string }) {
   const [copied, setCopied] = useState<'code' | 'msg' | null>(null);
   const toast = useToast();
 
-  // One-liner share message. If the friend already has the manager,
-  // the sts2mm:// URL is clickable and routes straight into the same
-  // smart-import dialog the app uses for manual paste — "already have
-  // this pack" cases get handled (activate / apply pending update /
-  // no-op) instead of an awkward "this is already installed" surprise.
-  // For everyone else, the plain code is fine to paste manually, and
-  // the install link gets them set up.
-  const message =
-    `Join my Slay the Spire 2 modpack "${packName}":\n` +
-    `\n` +
-    `One-click (if you have the manager): sts2mm://import/${code}\n` +
-    `Or paste this code in the manager: ${code}\n` +
-    `\n` +
-    `Get the manager: https://github.com/MohamedSerhan/sts2-mod-manager/releases/latest`;
+  // One-liner share message — built by the centralized helper so this
+  // surface and every other "Copy as message" affordance (PublishModal,
+  // Profiles, Other Packs row, kebabs) stay in sync if we ever tweak
+  // the wording.
+  const message = buildShareMessage(packName, code);
 
   async function copyTo(kind: 'code' | 'msg', value: string, label: string) {
     try {
@@ -571,19 +562,54 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
               ? (update.added_mods.length || 0) + (update.updated_mods.length || 0) + (update.removed_mods.length || 0)
               : 0;
             const initials = packInitials(sub.profile_name);
+            const prettyCode = formatShareCode(sub.share_id);
+            // The code (raw) and the sts2mm:// message are interchangeable
+            // ways to share this pack. Both available inline on every
+            // row so the user doesn't have to navigate elsewhere to pass
+            // it along.
+            const handleCopyCode = async () => {
+              try {
+                await navigator.clipboard.writeText(prettyCode);
+                toast.success(`Copied ${prettyCode}`);
+              } catch {
+                toast.error("Couldn't copy to clipboard");
+              }
+            };
+            const handleCopyMsg = async () => {
+              try {
+                await navigator.clipboard.writeText(buildShareMessage(sub.profile_name, prettyCode));
+                toast.success('Share message copied — paste into Discord / chat');
+              } catch {
+                toast.error("Couldn't copy to clipboard");
+              }
+            };
             return (
               <div key={sub.share_id} className="gf-pack-row">
                 <div className="gf-pack-avatar">{initials || 'P'}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 600 }}>{sub.profile_name}</div>
                   <div style={{ fontSize: 11.5, color: 'var(--ink-mute)', marginTop: 2 }}>
-                    {formatShareCode(sub.share_id)} · {sub.curator ? `by ${sub.curator}` : 'community'} · last synced{' '}
+                    {prettyCode} · {sub.curator ? `by ${sub.curator}` : 'community'} · last synced{' '}
                     {new Date(sub.last_synced).toLocaleDateString()}
                   </div>
                 </div>
                 {updateCount > 0 && (
                   <span className="gf-pill gf-pill-update">{updateCount} updates</span>
                 )}
+                <button
+                  className="gf-btn-3 gf-btn-icon"
+                  title={`Copy share code (${prettyCode})`}
+                  onClick={handleCopyCode}
+                >
+                  <Copy size={12} />
+                </button>
+                <button
+                  className="gf-btn-3 gf-btn-icon"
+                  title="Copy share message — paste-ready one-liner with the sts2mm:// one-click link"
+                  onClick={handleCopyMsg}
+                >
+                  <MessageSquare size={12} />
+                </button>
                 <button
                   className="gf-btn-2 gf-btn-2-sm"
                   onClick={() => handleActivateModpack(sub.profile_name)}

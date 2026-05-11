@@ -14,6 +14,7 @@ import {
   Key,
   Files,
   AlertTriangle,
+  MessageSquare,
 } from 'lucide-react';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
@@ -38,7 +39,7 @@ import {
   applySubscriptionUpdate,
   getSubscriptions,
 } from '../hooks/useTauri';
-import { importShareCodeSmart } from '../lib/shareImport';
+import { importShareCodeSmart, buildShareMessage } from '../lib/shareImport';
 import type { ProfileDrift } from '../hooks/useTauri';
 import type { Profile, ShareResult } from '../types';
 
@@ -695,6 +696,25 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
                     >
                       {copiedProfileCode === profile.name ? <Check size={12} /> : <Copy size={12} />}
                     </button>
+                    {/* Paired with the raw-code copy — sts2mm:// link goes
+                        wherever the bare code goes. Friend with the manager
+                        installed clicks the link, friend without it pastes
+                        the code (or follows the install link in the same
+                        message). */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const code = `${shareInfoMap[profile.name].owner}/${shareInfoMap[profile.name].code}`;
+                        const message = buildShareMessage(profile.name, code);
+                        navigator.clipboard.writeText(message)
+                          .then(() => toastCtx.success('Share message copied — paste into Discord / chat'))
+                          .catch(() => toastCtx.error("Couldn't copy to clipboard"));
+                      }}
+                      className="text-text-dim hover:text-text transition-colors"
+                      title="Copy share message (paste-ready with sts2mm:// one-click link)"
+                    >
+                      <MessageSquare size={12} />
+                    </button>
                   </div>
                 )}
                 {driftMap[profile.name] && (
@@ -782,15 +802,29 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
                       Export JSON…
                     </KebabItem>
                     {shareInfoMap[profile.name] && (
-                      <KebabItem
-                        icon={<Copy size={12} />}
-                        onClick={() => {
-                          const code = `${shareInfoMap[profile.name].owner}/${shareInfoMap[profile.name].code}`;
-                          navigator.clipboard.writeText(code).then(() => toastCtx.success('Share code copied'));
-                        }}
-                      >
-                        Copy share code
-                      </KebabItem>
+                      <>
+                        <KebabItem
+                          icon={<Copy size={12} />}
+                          onClick={() => {
+                            const code = `${shareInfoMap[profile.name].owner}/${shareInfoMap[profile.name].code}`;
+                            navigator.clipboard.writeText(code).then(() => toastCtx.success('Share code copied'));
+                          }}
+                        >
+                          Copy share code
+                        </KebabItem>
+                        <KebabItem
+                          icon={<MessageSquare size={12} />}
+                          onClick={() => {
+                            const code = `${shareInfoMap[profile.name].owner}/${shareInfoMap[profile.name].code}`;
+                            const message = buildShareMessage(profile.name, code);
+                            navigator.clipboard.writeText(message)
+                              .then(() => toastCtx.success('Share message copied — paste into Discord / chat'))
+                              .catch(() => toastCtx.error("Couldn't copy to clipboard"));
+                          }}
+                        >
+                          Copy share message
+                        </KebabItem>
+                      </>
                     )}
                   </KebabSection>
                   <KebabDivider />

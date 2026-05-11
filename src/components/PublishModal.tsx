@@ -5,6 +5,7 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import type { Profile, ShareResult } from '../types';
 import { shareProfile, reshareProfile, getApiKeyStatus } from '../hooks/useTauri';
 import { useToast } from '../contexts/ToastContext';
+import { buildShareMessage } from '../lib/shareImport';
 
 // Publish-current modal. Three states:
 //   1) Pre-flight    — show what's included AND any blockers (missing
@@ -122,14 +123,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
   async function handleCopy(kind: 'code' | 'msg') {
     if (!shared || !profile) return;
     const codeStr = `${shared.owner}/${shared.code}`;
-    const text = kind === 'code'
-      ? codeStr
-      : `Join my Slay the Spire 2 modpack "${profile.name}":\n` +
-        `\n` +
-        `One-click (if you have the manager): sts2mm://import/${codeStr}\n` +
-        `Or paste this code in the manager: ${codeStr}\n` +
-        `\n` +
-        `Get the manager: https://github.com/MohamedSerhan/sts2-mod-manager/releases/latest`;
+    const text = kind === 'code' ? codeStr : buildShareMessage(profile.name, codeStr);
     try {
       await navigator.clipboard.writeText(text);
       setCopied(kind);

@@ -230,9 +230,11 @@ function UserGuide({ onGoToSettings }: { onGoToSettings?: () => void }) {
               ) : (
                 'Settings'
               )}{' '}
-              → <Kbd>Game Path</Kbd> and either click <Kbd>Browse...</Kbd> or paste the folder where{' '}
-              <Kbd>SlayTheSpire2.exe</Kbd> lives (e.g.{' '}
-              <Kbd>C:\Program Files (x86)\Steam\steamapps\common\Slay the Spire 2</Kbd>).
+              → <Kbd>Game Path</Kbd> and either click <Kbd>Browse...</Kbd> or paste the folder where the game
+              files live. The signature file the app checks for depends on your OS:{' '}
+              <Kbd>SlayTheSpire2.exe</Kbd> on Windows, <Kbd>SlayTheSpire2.app</Kbd> on macOS,{' '}
+              <Kbd>SlayTheSpire2.pck</Kbd> on Linux. The default location on Windows is{' '}
+              <Kbd>C:\Program Files (x86)\Steam\steamapps\common\Slay the Spire 2</Kbd>.
             </p>
           </Step>
 

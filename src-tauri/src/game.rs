@@ -22,13 +22,35 @@ pub struct GameInfo {
 }
 
 /// Find the Steam installation path based on OS.
+///
+/// Windows: Steam writes `InstallPath` into both HKCU\Software\Valve\Steam
+/// (current user) and HKLM\Software\WOW6432Node\Valve\Steam (machine-wide).
+/// We try the registry first since users routinely install Steam on a
+/// non-default drive (D:, E:, etc.) and the hardcoded Program Files paths
+/// miss those — that was the dominant cause of "Auto-detect always fails"
+/// reports. Hardcoded paths remain as a fallback in case the registry
+/// values are corrupt or stripped by something like Steam's deletion
+/// uninstall.
+///
+/// Linux: covers native, Flatpak, and Snap installs.
+///
+/// macOS: only one canonical location, but kept consistent with the
+/// "scan multiple candidates" shape so adding e.g. an Application Support
+/// alias is a one-line change later.
 pub fn find_steam_path() -> Option<PathBuf> {
     #[cfg(target_os = "linux")]
     {
         let home = dirs::home_dir()?;
         let paths = [
+            // Native install — most distros.
             home.join(".steam/steam"),
             home.join(".local/share/Steam"),
+            // Flatpak (com.valvesoftware.Steam) — its sandboxed home is
+            // a separate tree under ~/.var/app.
+            home.join(".var/app/com.valvesoftware.Steam/.steam/steam"),
+            home.join(".var/app/com.valvesoftware.Steam/data/Steam"),
+            // Snap install.
+            home.join("snap/steam/common/.local/share/Steam"),
         ];
         paths.into_iter().find(|p| p.exists())
     }
@@ -36,17 +58,34 @@ pub fn find_steam_path() -> Option<PathBuf> {
     #[cfg(target_os = "macos")]
     {
         let home = dirs::home_dir()?;
-        let path = home.join("Library/Application Support/Steam");
-        if path.exists() { Some(path) } else { None }
+        let paths = [home.join("Library/Application Support/Steam")];
+        paths.into_iter().find(|p| p.exists())
     }
 
     #[cfg(target_os = "windows")]
     {
-        let paths = [
-            PathBuf::from(r"C:\Program Files (x86)\Steam"),
-            PathBuf::from(r"C:\Program Files\Steam"),
-        ];
-        paths.into_iter().find(|p| p.exists())
+        // Registry first.
+        if let Some(p) = find_steam_path_from_registry() {
+            log::info!("Steam path from registry: {}", p.display());
+            return Some(p);
+        }
+
+        // Fallback: default install locations on the system drive. Worth
+        // probing all common drive letters so a Steam install on D: is
+        // found even if the registry got nuked.
+        let candidates: Vec<PathBuf> = ["C", "D", "E", "F", "G", "H"]
+            .iter()
+            .flat_map(|drive| {
+                [
+                    format!(r"{}:\Program Files (x86)\Steam", drive),
+                    format!(r"{}:\Program Files\Steam", drive),
+                    format!(r"{}:\Steam", drive),
+                    format!(r"{}:\SteamLibrary", drive),
+                ]
+                .map(PathBuf::from)
+            })
+            .collect();
+        candidates.into_iter().find(|p| p.exists())
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
@@ -55,25 +94,103 @@ pub fn find_steam_path() -> Option<PathBuf> {
     }
 }
 
+/// Read Steam's install path from the Windows registry. Tries HKCU first
+/// (per-user install, more common on modern Windows) then HKLM (machine-
+/// wide). Returns None if Steam isn't registered or the value is empty.
+#[cfg(target_os = "windows")]
+fn find_steam_path_from_registry() -> Option<PathBuf> {
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    use winreg::RegKey;
+
+    // (hive, subkey, value name). Steam writes "SteamPath" under HKCU and
+    // "InstallPath" under HKLM. Both are forward-slash-delimited absolute
+    // paths.
+    let candidates: &[(_, &str, &str)] = &[
+        (HKEY_CURRENT_USER, r"Software\Valve\Steam", "SteamPath"),
+        (
+            HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\WOW6432Node\Valve\Steam",
+            "InstallPath",
+        ),
+        (HKEY_LOCAL_MACHINE, r"SOFTWARE\Valve\Steam", "InstallPath"),
+    ];
+
+    for (hive, subkey, value_name) in candidates {
+        let key = match RegKey::predef(*hive).open_subkey(subkey) {
+            Ok(k) => k,
+            Err(_) => continue,
+        };
+        let value: String = match key.get_value(value_name) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let path = PathBuf::from(trimmed);
+        if path.exists() {
+            return Some(path);
+        }
+        log::warn!(
+            "Registry says Steam is at {} but the path doesn't exist on disk",
+            path.display()
+        );
+    }
+    None
+}
+
 /// Parse Steam's libraryfolders.vdf to extract library folder paths.
+///
+/// VDF escapes backslashes (`"D:\\SteamLibrary"` in the file represents
+/// `D:\SteamLibrary`), so we have to unescape after extracting the
+/// quoted value or the resulting `PathBuf` won't match anything on
+/// disk and alt-drive Steam libraries get silently skipped.
 pub fn parse_library_folders(steam_path: &Path) -> Vec<PathBuf> {
     let vdf_path = steam_path.join("steamapps").join("libraryfolders.vdf");
     let mut libraries = vec![steam_path.to_path_buf()];
 
     let content = match std::fs::read_to_string(&vdf_path) {
         Ok(c) => c,
-        Err(_) => return libraries,
+        Err(e) => {
+            log::warn!(
+                "Couldn't read libraryfolders.vdf at {}: {} — auto-detect will only see the main Steam install, missing any alt-drive libraries",
+                vdf_path.display(), e
+            );
+            return libraries;
+        }
     };
 
     for line in content.lines() {
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_prefix("\"path\"") {
-            let value = rest.trim().trim_matches('"');
-            if !value.is_empty() {
-                let path = PathBuf::from(value);
-                if path.exists() && !libraries.contains(&path) {
-                    libraries.push(path);
-                }
+            // Pull out the value between the second pair of quotes on
+            // the line. Then unescape VDF: backslash-pair → backslash,
+            // backslash-quote → quote. The previous parser just
+            // trim_matches('"')'d the value, which left literal `\\`
+            // sequences in the path and broke .exists() on Windows
+            // alt-drive libraries.
+            let after_first_quote = match rest.find('"') {
+                Some(i) => &rest[i + 1..],
+                None => continue,
+            };
+            let raw = match after_first_quote.rfind('"') {
+                Some(i) => &after_first_quote[..i],
+                None => continue,
+            };
+            let unescaped = raw.replace("\\\\", "\\").replace("\\\"", "\"");
+            if unescaped.is_empty() {
+                continue;
+            }
+            let path = PathBuf::from(&unescaped);
+            if path.exists() && !libraries.contains(&path) {
+                log::debug!("Steam library discovered via VDF: {}", path.display());
+                libraries.push(path);
+            } else if !path.exists() {
+                log::debug!(
+                    "VDF lists Steam library at {} but it doesn't exist on disk — skipping",
+                    path.display()
+                );
             }
         }
     }
@@ -143,20 +260,63 @@ pub fn find_game_in_libraries(libraries: &[PathBuf]) -> Option<PathBuf> {
 }
 
 /// Validate that a path is a legitimate STS2 installation.
+///
+/// Per-platform shape:
+///   - Windows: `SlayTheSpire2.exe` (or "Slay the Spire 2.exe" with the
+///     space variant some builds use) — the `.pck` is always next to it
+///     and acts as the cross-platform fallback signature.
+///   - macOS:   `SlayTheSpire2.app` bundle (a directory) lives inside
+///     Steam's common/Slay the Spire 2 folder; we accept the parent so
+///     `mods/` resolves correctly.
+///   - Linux:   Godot ships a stripped binary alongside the `.pck`. The
+///     binary name varies (`SlayTheSpire2`, `SlayTheSpire2.x86_64`,
+///     `Slay the Spire 2.x86_64`) so we don't pin a single executable
+///     name — `.pck` presence is what identifies the install.
+///
+/// `.pck` is also accepted on every platform as a last-resort signature
+/// because it's the one file Godot guarantees ships with every build —
+/// catches the case where the user pointed us at e.g. an extracted ZIP
+/// of the game folder.
 pub fn validate_game_path(path: &Path) -> bool {
     if !path.exists() || !path.is_dir() {
         return false;
     }
 
-    let has_exe = path.join("SlayTheSpire2.exe").exists()
-        || path.join("Slay the Spire 2.exe").exists();
-    let has_dll = path.join("sts2.dll").exists();
+    // Cross-platform signature: the Godot project archive. Always
+    // present, regardless of OS.
     let has_pck = path.join("SlayTheSpire2.pck").exists();
-    // macOS install ships the game as a .app bundle (a directory) inside the
-    // Steam "common/Slay the Spire 2" folder.
-    let has_app = path.join("SlayTheSpire2.app").is_dir();
 
-    has_exe || has_dll || has_pck || has_app
+    #[cfg(target_os = "windows")]
+    {
+        let has_exe = path.join("SlayTheSpire2.exe").exists()
+            || path.join("Slay the Spire 2.exe").exists();
+        let has_dll = path.join("sts2.dll").exists();
+        has_exe || has_dll || has_pck
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let has_app = path.join("SlayTheSpire2.app").is_dir()
+            || path.join("Slay the Spire 2.app").is_dir();
+        has_app || has_pck
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // Godot's Linux export drops a stripped ELF binary next to the
+        // .pck. Names vary by export config, so we check any plausible
+        // shape rather than pin one.
+        let has_binary = path.join("SlayTheSpire2").is_file()
+            || path.join("SlayTheSpire2.x86_64").is_file()
+            || path.join("Slay the Spire 2").is_file()
+            || path.join("Slay the Spire 2.x86_64").is_file();
+        has_binary || has_pck
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        has_pck
+    }
 }
 
 /// Normalize a user-provided game path. On macOS the actual game is a
@@ -223,13 +383,49 @@ pub fn is_game_running_cmd() -> bool {
 
 /// Auto-detect the STS2 game installation.
 pub fn detect_game() -> Option<PathBuf> {
-    let steam_path = find_steam_path()?;
+    let steam_path = match find_steam_path() {
+        Some(p) => p,
+        None => {
+            log::warn!(
+                "Auto-detect: couldn't find Steam. Checked the registry (Windows), \
+                 standard install locations across common drive letters, and the \
+                 conventional ~/.steam, Library/Application Support/Steam, and \
+                 Flatpak/Snap paths (Linux/macOS). User will need to pick the \
+                 game folder manually."
+            );
+            return None;
+        }
+    };
+    log::info!("Auto-detect: Steam at {}", steam_path.display());
+
     let libraries = parse_library_folders(&steam_path);
-    let game_path = find_game_in_libraries(&libraries)?;
+    log::info!(
+        "Auto-detect: scanning {} Steam library/libraries: {:?}",
+        libraries.len(),
+        libraries.iter().map(|p| p.display().to_string()).collect::<Vec<_>>()
+    );
+
+    let game_path = match find_game_in_libraries(&libraries) {
+        Some(p) => p,
+        None => {
+            log::warn!(
+                "Auto-detect: Steam found at {}, but no Slay the Spire 2 install in any of \
+                 its libraries. Check that STS2 is installed via Steam and the libraryfolders.vdf \
+                 lists the right drives.",
+                steam_path.display()
+            );
+            return None;
+        }
+    };
 
     if validate_game_path(&game_path) {
+        log::info!("Auto-detect: STS2 at {}", game_path.display());
         Some(game_path)
     } else {
+        log::warn!(
+            "Auto-detect: found a candidate folder at {} but it doesn't validate as STS2",
+            game_path.display()
+        );
         None
     }
 }

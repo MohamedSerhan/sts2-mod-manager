@@ -484,7 +484,16 @@ export function SettingsView() {
                   </div>
                 ) : gamePath ? (
                   <div className="gf-help err">
-                    <span>!</span><span>Couldn't verify SlayTheSpire2.exe in this folder. Pick the install root, not a subfolder.</span>
+                    <span>!</span>
+                    <span>
+                      Couldn't verify{' '}
+                      {typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
+                        ? 'SlayTheSpire2.app'
+                        : typeof navigator !== 'undefined' && /Linux/.test(navigator.platform)
+                        ? 'SlayTheSpire2.pck'
+                        : 'SlayTheSpire2.exe'}{' '}
+                      in this folder. Pick the install root, not a subfolder.
+                    </span>
                   </div>
                 ) : (
                   <div className="gf-help muted">

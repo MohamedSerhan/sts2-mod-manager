@@ -39,3 +39,10 @@ regex = "1"
 semver = "1"
 base64 = "0.22"
 sysinfo = { version = "0.32", default-features = false, features = ["system"] }
+
+# Windows: read Steam's install path out of the registry so auto-detect
+# works for users who installed Steam to a non-default drive (D:, E:, etc.).
+# The hardcoded Program Files paths miss those, which was the primary
+# cause of "Auto-detect always fails" reports in v1.1.x.
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"

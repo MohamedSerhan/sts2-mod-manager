@@ -84,7 +84,14 @@ export function OnboardingOverlay({
         setPathError('');
         await refreshGame();
       } else {
-        setPathError("This folder doesn't contain SlayTheSpire2.exe — pick the install root.");
+        // Platform-specific cue for what the install root should look like.
+        const signature =
+          typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
+            ? 'SlayTheSpire2.app'
+            : typeof navigator !== 'undefined' && /Linux/.test(navigator.platform)
+            ? 'SlayTheSpire2.pck'
+            : 'SlayTheSpire2.exe';
+        setPathError(`This folder doesn't look like a Slay the Spire 2 install (no ${signature} found) — pick the install root.`);
       }
     } catch (e) {
       setPathError(e instanceof Error ? e.message : String(e));
@@ -200,7 +207,17 @@ export function OnboardingOverlay({
                 </span>
                 <div style={{ flex: 1 }}>
                   <div className="gf-wiz-detect-t">Couldn't auto-detect Slay the Spire 2</div>
-                  <div className="gf-wiz-detect-s">Pick the folder containing <code>SlayTheSpire2.exe</code>.</div>
+                  <div className="gf-wiz-detect-s">
+                    Pick the folder containing{' '}
+                    <code>
+                      {typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
+                        ? 'SlayTheSpire2.app'
+                        : typeof navigator !== 'undefined' && /Linux/.test(navigator.platform)
+                        ? 'SlayTheSpire2.pck'
+                        : 'SlayTheSpire2.exe'}
+                    </code>
+                    .
+                  </div>
                 </div>
                 <button className="gf-btn-2 gf-btn-2-sm" onClick={handleDetect} disabled={busy}>
                   {busy ? 'Detecting…' : 'Try again'}
@@ -215,10 +232,10 @@ export function OnboardingOverlay({
                     onChange={(e) => setManualPath(e.target.value)}
                     placeholder={
                       typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
-                        ? '~/Library/Application Support/Steam/steamapps/common/SlayTheSpire2'
+                        ? '~/Library/Application Support/Steam/steamapps/common/Slay the Spire 2'
                         : typeof navigator !== 'undefined' && /Linux/.test(navigator.platform)
-                        ? '~/.steam/steam/steamapps/common/SlayTheSpire2'
-                        : 'C:\\Program Files (x86)\\Steam\\steamapps\\common\\SlayTheSpire2'
+                        ? '~/.steam/steam/steamapps/common/Slay the Spire 2'
+                        : 'C:\\Program Files (x86)\\Steam\\steamapps\\common\\Slay the Spire 2'
                     }
                   />
                   <button className="gf-btn-3" onClick={handleBrowse} disabled={busy}>

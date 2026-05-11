@@ -1304,14 +1304,23 @@ pub async fn install_shared_profile(
         .map_err(|e| e.to_string())?;
 
     // ── STEP 3: Auto-subscribe for future updates ──
+    // last_synced_profile is the snapshot future diffs are computed
+    // against, so it has to match what's actually on disk. Mods we
+    // skipped above for game-version incompatibility AREN'T on disk
+    // — leaving them in the saved snapshot would mean Repair tries
+    // to re-install + re-skip them on every cycle, and a later game-
+    // version bump wouldn't surface as "+1 mod available to apply"
+    // because the diff would treat them as already-present. Filter
+    // them out via the shared snapshot helper.
     let share_key = format!("{}:{}", owner, profile_code);
     let now = chrono::Utc::now();
+    let snapshot = crate::subscriptions::build_synced_profile_snapshot(&profile, &skipped_incompatible);
     let sub = crate::subscriptions::Subscription {
         share_id: share_key.clone(),
         share_url: format!("{}/{}", owner, format_code(&profile_code)),
         profile_name: profile.name.clone(),
         curator: profile.created_by.clone(),
-        last_synced_profile: profile.clone(),
+        last_synced_profile: snapshot,
         last_checked: now,
         last_synced: now,
     };

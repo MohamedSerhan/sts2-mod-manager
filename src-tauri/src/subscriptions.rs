@@ -47,6 +47,51 @@ pub struct SubscriptionUpdate {
     pub remote_profile: Option<Profile>,
 }
 
+/// Build the snapshot that gets stored as `last_synced_profile`.
+///
+/// Mods that we skipped during install because their `min_game_version`
+/// is above the user's STS2 build aren't actually on disk — keeping them
+/// in the saved profile snapshot is a footgun:
+///
+///   - `repair_modpack_subscription` re-applies `last_synced_profile`
+///     to disk → tries to re-install the skipped mod → skips again →
+///     every Repair cycle wastes a download.
+///   - `check_subscription_updates` diffs the saved snapshot against
+///     the freshly-fetched remote manifest. When the user's game
+///     version moves up and the previously-skipped mod becomes
+///     compatible, the diff currently shows "no change" (both still
+///     contain it) and the user can't see that they're now eligible
+///     to apply the mod. Filtering keeps the snapshot honest about
+///     what's installed, so a later check correctly reports "+1 added"
+///     and the user can click Apply Update to retry the install.
+///
+/// Filter is by exact mod name (the SkippedMod record's `mod_name` is
+/// taken from `info.name` at the skip site, which matches what's in
+/// `Profile.mods[i].name`). Folder-name / mod-id matching isn't needed
+/// here because both sides come from the same manifest.
+pub fn build_synced_profile_snapshot(
+    profile: &Profile,
+    skipped: &[crate::sharing::SkippedMod],
+) -> Profile {
+    if skipped.is_empty() {
+        return profile.clone();
+    }
+    let skipped_names: std::collections::HashSet<&str> =
+        skipped.iter().map(|s| s.mod_name.as_str()).collect();
+    let mut snapshot = profile.clone();
+    let before = snapshot.mods.len();
+    snapshot.mods.retain(|m| !skipped_names.contains(m.name.as_str()));
+    let removed = before - snapshot.mods.len();
+    if removed > 0 {
+        log::info!(
+            "Subscription snapshot: filtered {} game-version-incompatible mod(s) from '{}'",
+            removed,
+            profile.name,
+        );
+    }
+    snapshot
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModVersionChange {
     pub name: String,
@@ -572,10 +617,14 @@ async fn apply_subscription_update_inner(
         log::info!("Subscription update: active profile set to '{}'", remote.name);
     }
 
-    // Update subscription record
+    // Update subscription record. Use the filtered snapshot so the
+    // saved profile reflects what's actually on disk — mods skipped
+    // for game-version incompatibility above don't get pinned into
+    // the subscription state and dragged through every future Repair.
+    let snapshot = build_synced_profile_snapshot(&remote, &skipped_incompatible);
     let mut db = load_subscriptions(&config_path);
     if let Some(sub) = db.subscriptions.get_mut(&share_id) {
-        sub.last_synced_profile = remote.clone();
+        sub.last_synced_profile = snapshot;
         sub.last_synced = Utc::now();
         sub.last_checked = Utc::now();
     }

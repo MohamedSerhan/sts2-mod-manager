@@ -103,14 +103,15 @@ function FriendHero({ onGoToSettings: _onGoToSettings }: { onGoToSettings?: () =
         <HeroCard
           n={1}
           icon={<Clipboard size={18} />}
-          title="Paste the code or click the link"
+          title="Click the link, or paste the code"
           body={
             <>
-              They send you a code like <Kbd>jess/AA5A-315D-61AE</Kbd> or a link like{' '}
-              <Kbd>sts2mm://import/jess/AA5A-315D-61AE</Kbd>. Paste the code in the box at the top of{' '}
-              <Kbd>Home</Kbd> and click <Kbd>Add Pack</Kbd>, or just click the link. The app installs
-              the pack — GitHub-sourced and bundled mods download automatically; any Nexus-only mods
-              show up as pending so you know what to grab.
+              Your friend sends you a code like <Kbd>jess/AA5A-315D-61AE</Kbd> or a clickable install
+              link. <strong>Click the link</strong> — it opens a small page that pops up this app with
+              a confirm dialog showing exactly what's about to install. <strong>Or paste the code</strong>{' '}
+              into the <Kbd>Drop a code, hit Add</Kbd> box on <Kbd>Home</Kbd>. Same result either way:
+              GitHub-sourced and bundled mods download automatically; any Nexus-only mods show as
+              pending so you know what to grab manually.
             </>
           }
         />
@@ -422,26 +423,42 @@ function CreatorGuide({ onGoToSettings }: { onGoToSettings?: () => void }) {
         </p>
       </Step>
 
-      <Step n={4} title="Share it">
+      <Step n={4} title="Share it — three interchangeable formats">
         <p>
           On the Profiles row for your new profile, click the <Kbd>Share</Kbd> (paper plane) icon. The
-          app uploads the manifest to your <Kbd>sts2mm-profiles</Kbd> repo (creating the repo on first
-          use) and gives you back two interchangeable things:
+          app uploads the manifest to your <Kbd>sts2mm-profiles</Kbd> repo (auto-creating the repo on
+          first use, public, on your GitHub account) and gives you back a share code plus a success
+          modal with three copy buttons. The same trio is available on every share surface (Home hero
+          chip, Profiles inline chip, kebab menu, Other Packs row):
         </p>
         <ul className="list-disc list-inside space-y-1 ml-1">
           <li>
-            A <strong>share code</strong> like <Kbd>you/AA5A-315D-61AE</Kbd> — friends paste it on Home.
+            <strong>Copy code</strong> — the raw <Kbd>you/AA5A-315D-61AE</Kbd>. Friends paste it into the
+            <Kbd>Drop a code, hit Add</Kbd> box on Home. Best for tight spaces (Twitter, terse DMs).
           </li>
           <li>
-            A <strong>paste-ready message</strong> with an{' '}
-            <Kbd>sts2mm://import/...</Kbd> link — friends with the manager installed can click straight
-            through. Use the <Kbd>Copy share message</Kbd> button next to the code on any share surface.
+            <strong>Copy link</strong> — an HTTPS install URL pointing at the manager's bridge page on
+            GitHub Pages. Discord, Slack, iMessage, Reddit etc. <em>all</em> auto-linkify this because
+            it's plain HTTPS. Friend clicks → bridge page opens → bridge page fires the install
+            handler in the manager → confirm dialog. Friends without the manager get download links on
+            the same page.
+          </li>
+          <li>
+            <strong>Copy message</strong> — a paste-ready one-block message containing both the link
+            and the raw code, plus an intro line. Drop it in chat and you're done.
           </li>
         </ul>
         <p>
-          Drop either in Discord / a chat / a forum and you're done. The smart router on the receiving
-          side handles brand-new installs, re-activations, and pending updates without the friend having
-          to think about which case applies.
+          <strong>Why we don't just hand out <Kbd>sts2mm://</Kbd> URLs directly:</strong> Discord and
+          most chat apps only auto-linkify <Kbd>http://</Kbd> and <Kbd>https://</Kbd>. A raw
+          <Kbd>sts2mm://import/...</Kbd> shows as un-clickable plain text the recipient has to
+          select-copy and paste into a browser address bar. The HTTPS bridge page exists exactly to
+          make the share link clickable everywhere a friend might paste it.
+        </p>
+        <p>
+          The smart router on the receiving side handles brand-new installs, re-activations of an
+          already-installed pack, pending updates, and "you're already on this" no-ops — your friend
+          doesn't have to think about which case applies.
         </p>
       </Step>
 

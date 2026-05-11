@@ -69,8 +69,20 @@ pub struct ShareResult {
     pub owner: String,
     /// The raw file path in the repo
     pub file_path: String,
-    /// The URL to view on GitHub
+    /// The URL to view the profile manifest on GitHub
     pub url: String,
+    /// URL of the `sts2mm-profiles` repo the manager auto-created (or
+    /// re-used) on the curator's GitHub. Surfaced in the success state
+    /// so the curator knows exactly which repo holds their published
+    /// pack — they can visit it to make it private, delete it, or
+    /// just confirm it exists.
+    pub repo_url: String,
+    /// Names of mods whose bundle upload to the profiles repo failed.
+    /// Friends installing this share code will see "missing mod" entries
+    /// for these. The frontend surfaces them in a toast so the curator
+    /// can retry instead of finding out from a confused friend later.
+    #[serde(default)]
+    pub failed_uploads: Vec<String>,
 }
 
 /// Local share info stored per profile for re-sharing
@@ -95,6 +107,31 @@ struct ContentsResponse {
 #[derive(Debug, Deserialize)]
 struct UserResponse {
     login: String,
+}
+
+/// Per-step status emitted to the frontend while a share / re-share is
+/// running. Lets the PublishModal show "Bundling mod 5 of 20…" instead
+/// of an opaque "Publishing…" spinner — bundling 20 mods of any real
+/// size takes minutes, and the old UI gave the curator no way to tell
+/// the app from a hang.
+#[derive(Debug, Serialize, Clone)]
+struct ShareProgress {
+    profile_name: String,
+    /// "bundling" while uploading mod zips; "uploading-manifest" while
+    /// PUTting the profile JSON; "done" right before the success
+    /// resolves. Frontend doesn't have to render all of them but a
+    /// stable vocabulary makes future additions cheap.
+    stage: &'static str,
+    /// 1-indexed position within the current stage. 0 when irrelevant.
+    current: usize,
+    /// Total work units in the current stage. 0 when irrelevant.
+    total: usize,
+    /// Mod name when stage == "bundling".
+    mod_name: Option<String>,
+}
+
+fn build_repo_url(owner: &str) -> String {
+    format!("https://github.com/{}/{}", owner, PROFILES_REPO)
 }
 
 // ── Profile Code Encoding ──────────────────────────────────────────────────
@@ -614,11 +651,19 @@ pub async fn fetch_shared_profile(
 
 /// Share a profile by uploading to a GitHub repo. Returns a short profile code.
 /// If already shared, reuses the existing code (delegates to reshare logic).
+///
+/// `app_handle` is taken so we can emit per-mod `share-progress` events
+/// during the bundling loop — bundling a 20-mod pack of any real size
+/// takes minutes, and the PublishModal used to show only an opaque
+/// "Publishing…" spinner which looked identical to a hang. Now the
+/// modal advances through "Bundling mod 5 of 20…" as we go.
 #[tauri::command]
 pub async fn share_profile(
     name: String,
+    app_handle: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ShareResult, String> {
+    use tauri::Emitter;
     let (profiles_path, mods_path, token) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let token = s.github_token.clone().ok_or(
@@ -637,7 +682,7 @@ pub async fn share_profile(
     let share_info_path = profiles_path.join(format!("{}.share", name));
     if share_info_path.exists() {
         log::info!("Profile '{}' already shared, reusing code via reshare", name);
-        return reshare_profile(name, state).await;
+        return reshare_profile(name, app_handle, state).await;
     }
 
     let _guard = ShareGuard::try_acquire(state.inner(), &name)?;
@@ -655,15 +700,32 @@ pub async fn share_profile(
         .await
         .map_err(|e| e.to_string())?;
 
+    let mut failed_uploads: Vec<String> = Vec::new();
+    let bundlable: Vec<usize> = profile
+        .mods
+        .iter()
+        .enumerate()
+        .filter_map(|(i, m)| if !m.files.is_empty() { Some(i) } else { None })
+        .collect();
+    let total_bundlable = bundlable.len();
+
     // Bundle ALL mods to guarantee version matching.
     // Friends get the exact same files the curator has installed.
     // GitHub sources are kept as metadata but bundles are preferred during install.
-    for pm in &mut profile.mods {
-        if pm.files.is_empty() {
-            log::info!("Skipping '{}' -- no files to bundle", pm.name);
-            continue;
-        }
+    for (pos, idx) in bundlable.into_iter().enumerate() {
+        let mod_name = profile.mods[idx].name.clone();
+        let _ = app_handle.emit(
+            "share-progress",
+            ShareProgress {
+                profile_name: profile.name.clone(),
+                stage: "bundling",
+                current: pos + 1,
+                total: total_bundlable,
+                mod_name: Some(mod_name.clone()),
+            },
+        );
 
+        let pm = &mut profile.mods[idx];
         log::info!("Bundling mod '{}' ({} files)", pm.name, pm.files.len());
         match zip_mod_files(&pm.name, &pm.files, &mods_path) {
             Ok(zip_data) => {
@@ -674,7 +736,11 @@ pub async fn share_profile(
                     }
                     Err(e) => {
                         log::warn!("Failed to upload bundle for '{}': {}", pm.name, e);
-                        // If bundling fails and there's no GitHub source either, this mod won't be downloadable
+                        // If bundling fails AND there's no GitHub source either, the
+                        // mod isn't recoverable for friends. Track either way so the
+                        // curator sees a clear "X of N failed" toast — they can
+                        // retry instead of finding out from a confused friend later.
+                        failed_uploads.push(pm.name.clone());
                         if pm.source.is_none() {
                             log::error!("Mod '{}' has no bundle AND no GitHub source -- friends won't be able to download it", pm.name);
                         }
@@ -683,6 +749,7 @@ pub async fn share_profile(
             }
             Err(e) => {
                 log::warn!("Failed to zip mod '{}': {}", pm.name, e);
+                failed_uploads.push(pm.name.clone());
             }
         }
     }
@@ -691,6 +758,17 @@ pub async fn share_profile(
     let code = generate_code(&profile);
     let filename = code_to_filename(&code);
     let profile_json = serde_json::to_string_pretty(&profile).map_err(|e| e.to_string())?;
+
+    let _ = app_handle.emit(
+        "share-progress",
+        ShareProgress {
+            profile_name: profile.name.clone(),
+            stage: "uploading-manifest",
+            current: 0,
+            total: 0,
+            mod_name: None,
+        },
+    );
 
     // Upload profile JSON
     let (file_sha, html_url) = upsert_file(
@@ -722,11 +800,24 @@ pub async fn share_profile(
     )
     .map_err(|e| e.to_string())?;
 
+    let _ = app_handle.emit(
+        "share-progress",
+        ShareProgress {
+            profile_name: profile.name.clone(),
+            stage: "done",
+            current: 0,
+            total: 0,
+            mod_name: None,
+        },
+    );
+
     Ok(ShareResult {
         code,
-        owner: username,
+        owner: username.clone(),
         file_path: filename,
         url: html_url,
+        repo_url: build_repo_url(&username),
+        failed_uploads,
     })
 }
 
@@ -754,11 +845,17 @@ pub fn get_share_info(
         "https://github.com/{}/{}/blob/main/{}",
         info.owner, PROFILES_REPO, filename
     );
+    let repo_url = build_repo_url(&info.owner);
     Ok(Some(ShareResult {
         code: info.code,
         owner: info.owner,
         file_path: filename,
         url,
+        repo_url,
+        // get_share_info reads the saved state — we don't re-attempt the
+        // failed uploads here. The frontend should treat this as "current
+        // share status", not a fresh share result.
+        failed_uploads: Vec::new(),
     }))
 }
 
@@ -768,8 +865,10 @@ pub fn get_share_info(
 #[tauri::command]
 pub async fn reshare_profile(
     name: String,
+    app_handle: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ShareResult, String> {
+    use tauri::Emitter;
     let _guard = ShareGuard::try_acquire(state.inner(), &name)?;
 
     let (profiles_path, mods_path, disabled_path, config_path, token) = {
@@ -806,12 +905,30 @@ pub async fn reshare_profile(
     profile.created_by = Some(share_info.owner.clone());
     log::info!("Re-snapshot profile '{}': {} mods from disk", name, profile.mods.len());
 
-    // Bundle ALL mods to guarantee version matching (same as share_profile).
-    for pm in &mut profile.mods {
-        if pm.files.is_empty() {
-            continue;
-        }
+    let mut failed_uploads: Vec<String> = Vec::new();
+    let bundlable: Vec<usize> = profile
+        .mods
+        .iter()
+        .enumerate()
+        .filter_map(|(i, m)| if !m.files.is_empty() { Some(i) } else { None })
+        .collect();
+    let total_bundlable = bundlable.len();
 
+    // Bundle ALL mods to guarantee version matching (same as share_profile).
+    for (pos, idx) in bundlable.into_iter().enumerate() {
+        let mod_name = profile.mods[idx].name.clone();
+        let _ = app_handle.emit(
+            "share-progress",
+            ShareProgress {
+                profile_name: profile.name.clone(),
+                stage: "bundling",
+                current: pos + 1,
+                total: total_bundlable,
+                mod_name: Some(mod_name.clone()),
+            },
+        );
+
+        let pm = &mut profile.mods[idx];
         log::info!("Re-bundling mod '{}' ({} files)", pm.name, pm.files.len());
         match zip_mod_files(&pm.name, &pm.files, &mods_path) {
             Ok(zip_data) => {
@@ -822,17 +939,30 @@ pub async fn reshare_profile(
                     }
                     Err(e) => {
                         log::warn!("Failed to upload bundle for '{}': {}", pm.name, e);
+                        failed_uploads.push(pm.name.clone());
                     }
                 }
             }
             Err(e) => {
                 log::warn!("Failed to zip mod '{}': {}", pm.name, e);
+                failed_uploads.push(pm.name.clone());
             }
         }
     }
 
     let filename = code_to_filename(&share_info.code);
     let profile_json = serde_json::to_string_pretty(&profile).map_err(|e| e.to_string())?;
+
+    let _ = app_handle.emit(
+        "share-progress",
+        ShareProgress {
+            profile_name: profile.name.clone(),
+            stage: "uploading-manifest",
+            current: 0,
+            total: 0,
+            mod_name: None,
+        },
+    );
 
     let (file_sha, html_url) = upsert_file(
         &token,
@@ -863,11 +993,24 @@ pub async fn reshare_profile(
         serde_json::to_string_pretty(&updated_info).unwrap(),
     );
 
+    let _ = app_handle.emit(
+        "share-progress",
+        ShareProgress {
+            profile_name: profile.name.clone(),
+            stage: "done",
+            current: 0,
+            total: 0,
+            mod_name: None,
+        },
+    );
+
     Ok(ShareResult {
         code,
-        owner,
+        owner: owner.clone(),
         file_path: filename,
         url: html_url,
+        repo_url: build_repo_url(&owner),
+        failed_uploads,
     })
 }
 

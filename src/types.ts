@@ -116,7 +116,16 @@ export interface ShareResult {
   code: string;
   owner: string;
   file_path: string;
+  /** URL to the published profile manifest on GitHub. */
   url: string;
+  /** URL of the `sts2mm-profiles` repo the manager auto-created on the
+   *  curator's GitHub. Surfaced so the curator can see exactly what
+   *  was created (and visit it to delete / make private if they want). */
+  repo_url: string;
+  /** Names of mods whose bundle upload to the profiles repo failed.
+   *  Friends installing this share code will see "missing mod" entries
+   *  for these. Surfaced in a toast so the curator knows to retry. */
+  failed_uploads: string[];
 }
 
 export interface ModSourceEntry {

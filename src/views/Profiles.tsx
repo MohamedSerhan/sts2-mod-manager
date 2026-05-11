@@ -36,12 +36,21 @@ import {
   getProfileDrift,
   createBackup,
   applySubscriptionUpdate,
+  getSubscriptions,
 } from '../hooks/useTauri';
-import { installSharedProfileWithConfirm } from '../lib/shareImport';
+import { importShareCodeSmart } from '../lib/shareImport';
 import type { ProfileDrift } from '../hooks/useTauri';
 import type { Profile, ShareResult } from '../types';
 
-export function ProfilesView() {
+interface ProfilesViewProps {
+  /** Navigates to Settings → Accounts. Passed down to PublishModal's
+   *  pre-flight "GitHub token missing" prompt so the curator gets a
+   *  one-click route to the token field instead of having to discover
+   *  it themselves. */
+  onGoToSettings?: () => void;
+}
+
+export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -314,14 +323,35 @@ export function ProfilesView() {
 
     try {
       setImportingCode(true);
-      // Confirms with the user (showing source URLs) before installing.
-      const profile = await installSharedProfileWithConfirm(code, confirm);
-      if (!profile) return;
-      setProfiles((prev) => [...prev, profile]);
+      // Same smart router Home uses + the deep-link path. Fetches
+      // subscriptions inline so we don't need to lift them into context
+      // for this one call site.
+      const subs = await getSubscriptions().catch(() => []);
+      const outcome = await importShareCodeSmart(code, {
+        confirm,
+        subscriptions: subs,
+        activeProfile,
+        subUpdates,
+      });
+      if (outcome.kind === 'cancelled') return;
+
       setImportCode('');
       setShowImportCode(false);
       await refreshAll();
-      toastCtx.success(`Imported modpack "${profile.name}" - ${profile.mods.length} mods. You're now subscribed for updates!`);
+      refreshSubUpdates();
+
+      if (outcome.kind === 'installed') {
+        setProfiles((prev) => [...prev, outcome.profile]);
+        toastCtx.success(
+          `Imported modpack "${outcome.profile.name}" — ${outcome.profile.mods.length} mods. You're now subscribed for updates!`,
+        );
+      } else if (outcome.kind === 'activated') {
+        toastCtx.success(`Switched to "${outcome.profileName}"`);
+      } else if (outcome.kind === 'synced') {
+        toastCtx.success(`Synced "${outcome.profileName}" — you're up to date!`);
+      } else if (outcome.kind === 'already-active') {
+        toastCtx.info(`You're already on "${outcome.profileName}".`);
+      }
     } catch (e) {
       toastCtx.error(`Failed to import: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -783,6 +813,7 @@ export function ProfilesView() {
         open={!!publishTarget}
         profile={publishTarget?.profile ?? null}
         isReshare={publishTarget?.isReshare ?? false}
+        onGoToSettings={onGoToSettings}
         onClose={() => setPublishTarget(null)}
         onShared={(result) => {
           // Optimistically patch share info so the row flips Share→Re-share

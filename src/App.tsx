@@ -1,6 +1,7 @@
-import { useState, useEffect, type MouseEvent } from 'react';
+import { useState, useEffect, useRef, type MouseEvent } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
 import { listen } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   Home,
@@ -24,7 +25,9 @@ import { relaunch } from '@tauri-apps/plugin-process';
 import { cn } from './lib/utils';
 import { ToastProvider, useToast } from './contexts/ToastContext';
 import { AppProvider, useApp } from './contexts/AppContext';
-import { ConfirmProvider } from './components/ConfirmDialog';
+import { ConfirmProvider, useConfirm } from './components/ConfirmDialog';
+import { importShareCodeSmart } from './lib/shareImport';
+import { getSubscriptions } from './hooks/useTauri';
 import { OnboardingOverlay } from './components/OnboardingOverlay';
 import { LaunchSpinner } from './components/LaunchSpinner';
 import { ProfileSwitcher } from './components/ProfileSwitcher';
@@ -77,8 +80,9 @@ export default function App() {
 
 function AppInner() {
   const [activeView, setActiveView] = useState<View>('home');
-  const { gameInfo, mods, refreshAll, activeProfile, gameRunning, subUpdates } = useApp();
+  const { gameInfo, mods, refreshAll, activeProfile, gameRunning, subUpdates, refreshSubUpdates } = useApp();
   const toast = useToast();
+  const confirm = useConfirm();
   const [dragOver, setDragOver] = useState(false);
   const [appUpdate, setAppUpdate] = useState<Update | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
@@ -143,6 +147,88 @@ function AppInner() {
       unlisten2.then(f => f());
       unlisten3.then(f => f());
     };
+  }, []);
+
+  // ── sts2mm:// deep-link handler ────────────────────────────────────
+  // A friend clicks a share link → OS routes the URL to our app → the
+  // Rust on_open_url callback (lib.rs setup) emits `sts2mm-open-url`
+  // AND buffers it in AppState (in case React isn't mounted yet — cold
+  // start). On mount we drain the buffer, then listen for live URLs.
+  // Both paths route into the SAME smart router the manual paste flow
+  // uses, so "already have this pack" cases (activate / apply pending
+  // update / no-op) get the same handling regardless of how the code
+  // arrived.
+  //
+  // The listener-registration effect runs once and uses refs to read
+  // the LATEST activeProfile + subUpdates at the moment the URL fires —
+  // otherwise a stale closure would tell the smart router "the active
+  // profile is whatever it was at app startup" and incorrect
+  // `already-active` toasts would slip through.
+  const activeProfileRef = useRef(activeProfile);
+  const subUpdatesRef = useRef(subUpdates);
+  useEffect(() => { activeProfileRef.current = activeProfile; }, [activeProfile]);
+  useEffect(() => { subUpdatesRef.current = subUpdates; }, [subUpdates]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function route(url: string) {
+      if (!active) return;
+      // Switch to Home so the user has the share-code context visible
+      // behind the confirm dialog — disorienting otherwise if they were
+      // mid-Audit when the click came in.
+      setActiveView('home');
+
+      try {
+        // The deep-link payload is the full `sts2mm://import/<owner>/<code>`
+        // string; the smart router's canonicalShareCode helper strips the
+        // protocol+action prefix.
+        const subs = await getSubscriptions().catch(() => []);
+        const outcome = await importShareCodeSmart(url, {
+          confirm,
+          subscriptions: subs,
+          activeProfile: activeProfileRef.current,
+          subUpdates: subUpdatesRef.current,
+        });
+        if (outcome.kind === 'cancelled') return;
+
+        await refreshAll();
+        refreshSubUpdates();
+
+        if (outcome.kind === 'installed') {
+          toast.success(
+            `Installed modpack "${outcome.profile.name}" — ${outcome.profile.mods.length} mods. You're subscribed for updates!`,
+          );
+        } else if (outcome.kind === 'activated') {
+          toast.success(`Switched to "${outcome.profileName}"`);
+        } else if (outcome.kind === 'synced') {
+          toast.success(`Synced "${outcome.profileName}" — you're up to date!`);
+        } else if (outcome.kind === 'already-active') {
+          toast.info(`You're already on "${outcome.profileName}".`);
+        }
+      } catch (e) {
+        toast.error(`Couldn't open share link: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+
+    // 1. Drain any URL that arrived before we mounted (cold start).
+    invoke<string | null>('consume_pending_deep_link')
+      .then((url) => {
+        if (url) route(url);
+      })
+      .catch(() => { /* command may be missing during dev hot-reload — fine */ });
+
+    // 2. Listen for live URLs (warm hits — user clicks another share
+    //    link while the app is already running).
+    const unlisten = listen<string>('sts2mm-open-url', (event) => {
+      if (event.payload) route(event.payload);
+    });
+
+    return () => {
+      active = false;
+      unlisten.then((f) => f());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Check for app updates on launch and every 24 hours while the app is open
@@ -568,7 +654,7 @@ function AppInner() {
                 focusCodeBarSignal={focusCodeBarSignal}
               />
             )}
-            {activeView === 'profiles' && <ProfilesView />}
+            {activeView === 'profiles' && <ProfilesView onGoToSettings={() => setActiveView('settings')} />}
             {activeView === 'mods' && <ModsView />}
             {activeView === 'browse' && <BrowseView onGoToSettings={() => setActiveView('settings')} />}
             {activeView === 'tutorial' && <TutorialView onGoToSettings={() => setActiveView('settings')} />}

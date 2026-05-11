@@ -53,6 +53,15 @@ pub struct AppStateInner {
     /// can't be parsed — in that case we fail open and skip compatibility
     /// checks rather than blocking the user on a guess.
     pub game_version: Option<String>,
+    /// A `sts2mm://...` URL that arrived before the React frontend was
+    /// ready to listen for it (cold-start case — the OS launches the
+    /// app with the URL as argv, the deep-link plugin's on_open_url
+    /// fires inside .setup(), but the JS-side `listen('sts2mm-open-url')`
+    /// isn't registered until React mounts). We buffer the URL here and
+    /// the frontend drains it via `consume_pending_deep_link` on mount.
+    /// Subsequent URLs (warm-hit case: user clicks another sts2mm:// link
+    /// while the app is already running) skip the buffer and emit directly.
+    pub pending_deep_link: Option<String>,
 }
 
 pub type AppState = Arc<Mutex<AppStateInner>>;
@@ -88,6 +97,7 @@ impl AppStateInner {
             pending_nexus_installs: Vec::new(),
             sharing_in_flight: HashSet::new(),
             game_version: None,
+            pending_deep_link: None,
         }
     }
 

@@ -18,6 +18,12 @@ tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
+# Routes `sts2mm://import/<owner>/<code>` URLs into the install flow so
+# friends can share clickable links in Discord/etc. The link opens the
+# manager (or focuses it if already running) and shows the same install-
+# confirm dialog the manual share-code paste flow uses, with smart handling
+# for the "user already has this pack" case.
+tauri-plugin-deep-link = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }

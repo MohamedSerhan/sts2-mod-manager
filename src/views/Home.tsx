@@ -31,7 +31,7 @@ import {
   getProfileDrift,
   createBackup,
 } from '../hooks/useTauri';
-import { installSharedProfileWithConfirm } from '../lib/shareImport';
+import { importShareCodeSmart } from '../lib/shareImport';
 import type { SubscriptionUpdate, Subscription } from '../types';
 
 function formatShareCode(shareId: string): string {
@@ -60,7 +60,19 @@ function ShareCodeChip({ code, packName }: { code: string; packName: string }) {
   const [copied, setCopied] = useState<'code' | 'msg' | null>(null);
   const toast = useToast();
 
-  const message = `Join my Slay the Spire 2 modpack "${packName}": ${code}\n` +
+  // One-liner share message. If the friend already has the manager,
+  // the sts2mm:// URL is clickable and routes straight into the same
+  // smart-import dialog the app uses for manual paste — "already have
+  // this pack" cases get handled (activate / apply pending update /
+  // no-op) instead of an awkward "this is already installed" surprise.
+  // For everyone else, the plain code is fine to paste manually, and
+  // the install link gets them set up.
+  const message =
+    `Join my Slay the Spire 2 modpack "${packName}":\n` +
+    `\n` +
+    `One-click (if you have the manager): sts2mm://import/${code}\n` +
+    `Or paste this code in the manager: ${code}\n` +
+    `\n` +
     `Get the manager: https://github.com/MohamedSerhan/sts2-mod-manager/releases/latest`;
 
   async function copyTo(kind: 'code' | 'msg', value: string, label: string) {
@@ -129,7 +141,7 @@ interface HomeProps {
   focusCodeBarSignal?: number;
 }
 export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchPack, onLaunch, focusCodeBarSignal }: HomeProps) {
-  const { gameInfo, mods, refreshAll, activeProfile, refreshSubUpdates } = useApp();
+  const { gameInfo, mods, refreshAll, activeProfile, refreshSubUpdates, subUpdates: ctxSubUpdates } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
   const [profileCode, setProfileCode] = useState('');
@@ -196,24 +208,43 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
     if (!code) return;
     try {
       setImporting(true);
-      // Shows a confirm dialog with the profile's source URLs before
-      // downloading anything. Returns null if the user cancels.
-      const profile = await installSharedProfileWithConfirm(code, confirm);
-      if (!profile) return;
+      // Smart router handles four cases:
+      //   - brand-new pack → confirm + install
+      //   - already subscribed + active + no update → friendly no-op
+      //   - already subscribed + not active → "switch?" confirm
+      //   - already subscribed + has update → "apply update?" confirm
+      // Means the deep-link path can't drift from this — both go through
+      // the same router with the same UX.
+      const outcome = await importShareCodeSmart(code, {
+        confirm,
+        subscriptions,
+        activeProfile,
+        subUpdates: ctxSubUpdates,
+      });
+      if (outcome.kind === 'cancelled') return;
+
       await refreshAll();
       await loadSubscriptions();
+      refreshSubUpdates();
 
-      const installedMods = await getInstalledMods();
-      const installedNames = new Set(installedMods.map(m => m.name));
-      const missing = profile.mods.filter(m => !installedNames.has(m.name));
-
-      if (missing.length > 0) {
-        toast.info(
-          `Installed ${profile.mods.length - missing.length}/${profile.mods.length} mods. ` +
-          `Missing: ${missing.map(m => m.name).join(', ')}. These need to be installed manually.`
-        );
-      } else {
-        toast.success(`Installed modpack "${profile.name}" with ${profile.mods.length} mods!`);
+      if (outcome.kind === 'installed') {
+        const installedMods = await getInstalledMods();
+        const installedNames = new Set(installedMods.map(m => m.name));
+        const missing = outcome.profile.mods.filter(m => !installedNames.has(m.name));
+        if (missing.length > 0) {
+          toast.info(
+            `Installed ${outcome.profile.mods.length - missing.length}/${outcome.profile.mods.length} mods. ` +
+            `Missing: ${missing.map(m => m.name).join(', ')}. These need to be installed manually.`
+          );
+        } else {
+          toast.success(`Installed modpack "${outcome.profile.name}" with ${outcome.profile.mods.length} mods!`);
+        }
+      } else if (outcome.kind === 'activated') {
+        toast.success(`Switched to "${outcome.profileName}"`);
+      } else if (outcome.kind === 'synced') {
+        toast.success(`Synced "${outcome.profileName}" — you're up to date!`);
+      } else if (outcome.kind === 'already-active') {
+        toast.info(`You're already on "${outcome.profileName}".`);
       }
       setProfileCode('');
     } catch (e) {

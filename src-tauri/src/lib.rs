@@ -16,6 +16,18 @@ mod updater;
 use state::create_app_state;
 use state::AppState;
 
+/// Drain and return any `sts2mm://` URL that was received before the
+/// frontend was ready to listen. Called once on mount by the React
+/// deep-link router so cold-start URLs don't get lost. Subsequent URLs
+/// arrive via the `sts2mm-open-url` Tauri event directly.
+#[tauri::command]
+fn consume_pending_deep_link(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Option<String>, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    Ok(s.pending_deep_link.take())
+}
+
 /// Set up logging to both stderr and a log file in the config directory.
 fn setup_logging(log_path: &std::path::Path) {
     let _ = std::fs::create_dir_all(log_path.parent().unwrap_or(log_path));
@@ -126,6 +138,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_deep_link::init())
         .invoke_handler(tauri::generate_handler![
             // Game detection & QOL
             game::detect_game_path,
@@ -203,6 +216,8 @@ pub fn run() {
             sharing::get_share_info,
             sharing::fetch_shared_profile_cmd,
             sharing::install_shared_profile,
+            // Deep link
+            consume_pending_deep_link,
             // Subscriptions (friend sync)
             subscriptions::subscribe_to_profile,
             subscriptions::get_subscriptions,
@@ -212,14 +227,79 @@ pub fn run() {
             subscriptions::repair_modpack_subscription,
         ])
         .setup(|app| {
+            use tauri::{Emitter, Manager};
+
             // Nexus zips are caught via the Downloads-folder watcher
             // below — user clicks Nexus's Slow / Manual button, the zip
             // lands in ~/Downloads, watcher picks it up.
             {
-                use tauri::Manager;
                 let handle = app.handle().clone();
                 let watcher_state = app.state::<AppState>().inner().clone();
                 downloads_watcher::start_downloads_watcher(handle, watcher_state);
+            }
+
+            // `sts2mm://import/<owner>/<code>` deep links. The OS routes
+            // a clicked link to our `on_open_url` callback; we emit it as
+            // a Tauri event so the frontend can run the SHARE-CODE smart
+            // router (which handles "already have this pack" cases —
+            // activate, apply pending update, or no-op).
+            //
+            // Cold-start ordering: when the OS launches the app WITH a
+            // URL, this callback fires inside .setup() — before React
+            // has mounted, so its `listen()` isn't registered yet and
+            // the emit is lost. We buffer the URL in AppState; the
+            // frontend drains it via `consume_pending_deep_link` on
+            // mount. Warm-hit URLs (a second click while the app is
+            // already running) fire through the emit + the buffer
+            // (cheap belt-and-suspenders).
+            //
+            // Per-platform registration: the bundled MSI/NSIS (Win),
+            // DMG (macOS), and .deb/.rpm (Linux) installers all
+            // register the `sts2mm://` scheme automatically via the
+            // plugin's bundler integration. AppImage doesn't — it's a
+            // portable bundle, no install step. And `tauri dev` doesn't
+            // either. We call `register()` here so both of those cases
+            // work without user intervention. The call is idempotent
+            // on installer-managed installs (writes the same registry
+            // entry / .desktop file that's already there) so there's
+            // no downside.
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let handle = app.handle().clone();
+                let dl_state = app.state::<AppState>().inner().clone();
+                if let Err(e) = app.deep_link().register("sts2mm") {
+                    // Common failure modes: read-only filesystem (the
+                    // AppImage user is running off a CD-ROM mount), a
+                    // SELinux/AppArmor policy blocking the write, or a
+                    // sandboxed Flatpak. Log and continue — the
+                    // installer-registered scheme (if present) still
+                    // works.
+                    log::warn!(
+                        "Couldn't runtime-register sts2mm:// handler: {} \
+                         (links still work if you installed via MSI/DMG/deb/rpm; \
+                         AppImage users may need AppImageLauncher or to add a \
+                         .desktop file manually)",
+                        e
+                    );
+                }
+                app.deep_link().on_open_url(move |event| {
+                    for url in event.urls() {
+                        let url_str = url.to_string();
+                        log::info!("Deep link received: {}", url_str);
+                        if let Ok(mut s) = dl_state.lock() {
+                            s.pending_deep_link = Some(url_str.clone());
+                        }
+                        let _ = handle.emit("sts2mm-open-url", url_str);
+                        // Bring the window forward so the user sees the
+                        // confirm dialog without having to alt-tab back
+                        // to a hidden window. No-op if already focused.
+                        if let Some(win) = handle.get_webview_window("main") {
+                            let _ = win.show();
+                            let _ = win.unminimize();
+                            let _ = win.set_focus();
+                        }
+                    }
+                });
             }
 
             Ok(())

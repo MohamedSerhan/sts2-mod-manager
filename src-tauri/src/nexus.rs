@@ -137,7 +137,7 @@ impl NexusClient {
         );
         headers.insert(
             reqwest::header::USER_AGENT,
-            "sts2-mod-manager/0.1".parse().unwrap(),
+            concat!("sts2-mod-manager/", env!("CARGO_PKG_VERSION")).parse().unwrap(),
         );
 
         let client = reqwest::Client::builder()

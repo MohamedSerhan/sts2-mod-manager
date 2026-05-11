@@ -197,9 +197,15 @@ fn build_client(token: &str) -> reqwest::Client {
         reqwest::header::ACCEPT,
         "application/vnd.github+json".parse().unwrap(),
     );
+    // GitHub keys abuse signals off User-Agent — pinning a literal "0.1"
+    // forever means every request from every installed version looks
+    // identical, which dilutes the signal both for us and for them.
+    // Stamping the actual crate version (set by Cargo at compile time)
+    // lets GitHub correlate issues to specific releases and lets us
+    // grep server logs by version when something starts misbehaving.
     headers.insert(
         reqwest::header::USER_AGENT,
-        "sts2-mod-manager/0.1".parse().unwrap(),
+        concat!("sts2-mod-manager/", env!("CARGO_PKG_VERSION")).parse().unwrap(),
     );
     if let Ok(val) = format!("Bearer {}", token).parse() {
         headers.insert(reqwest::header::AUTHORIZATION, val);
@@ -471,7 +477,7 @@ async fn fetch_existing_sha(client: &reqwest::Client, url: &str) -> Option<Strin
 /// Uses the GitHub API (not raw.githubusercontent.com) to avoid CDN caching issues.
 pub async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::Path) -> Result<()> {
     let client = reqwest::Client::builder()
-        .user_agent("sts2-mod-manager/0.1")
+        .user_agent(concat!("sts2-mod-manager/", env!("CARGO_PKG_VERSION")))
         .build()
         .unwrap_or_default();
 
@@ -576,7 +582,7 @@ pub async fn fetch_shared_profile(
     token: Option<&str>,
 ) -> Result<Profile> {
     let client = reqwest::Client::builder()
-        .user_agent("sts2-mod-manager/0.1")
+        .user_agent(concat!("sts2-mod-manager/", env!("CARGO_PKG_VERSION")))
         .build()
         .unwrap_or_default();
 

@@ -604,7 +604,7 @@ fn fetch_nexus_version_blocking(
             .get(url)
             .header("apikey", &api_key)
             .header("accept", "application/json")
-            .header("user-agent", "sts2-mod-manager/0.1")
+            .header("user-agent", concat!("sts2-mod-manager/", env!("CARGO_PKG_VERSION")))
     };
 
     // 1. Page-level version as the fallback.

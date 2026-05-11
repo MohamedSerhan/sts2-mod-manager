@@ -25,8 +25,11 @@ dist-ssr
 
 # Rust / Tauri
 src-tauri/target/
-src-tauri/Cargo.lock
 src-tauri/gen/
+# Cargo.lock IS committed (for reproducible release builds — pins every
+# transitive dep so CI's three platforms build against the exact same
+# graph the dev did, and re-running `cargo build` months later doesn't
+# pull a silently-bumped sub-dep that breaks something).
 
 # Build output
 *.tsbuildinfo

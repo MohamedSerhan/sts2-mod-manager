@@ -65,7 +65,7 @@ fn build_client(token: Option<&str>) -> reqwest::Client {
     );
     headers.insert(
         reqwest::header::USER_AGENT,
-        "sts2-mod-manager/0.1".parse().unwrap(),
+        concat!("sts2-mod-manager/", env!("CARGO_PKG_VERSION")).parse().unwrap(),
     );
     if let Some(tok) = token {
         if let Ok(val) = format!("Bearer {}", tok).parse() {
@@ -299,7 +299,7 @@ where
     F: Fn(u64, u64),
 {
     let client = reqwest::Client::builder()
-        .user_agent("sts2-mod-manager/0.1")
+        .user_agent(concat!("sts2-mod-manager/", env!("CARGO_PKG_VERSION")))
         .build()
         .unwrap_or_default();
 

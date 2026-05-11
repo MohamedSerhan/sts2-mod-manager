@@ -170,27 +170,37 @@ function AppInner() {
   useEffect(() => { subUpdatesRef.current = subUpdates; }, [subUpdates]);
 
   // De-dupe ref: a URL can arrive via two paths (cold-start buffer
-  // drain AND the live `sts2mm-open-url` event) when the timing lines
-  // up just right, and the Rust deep-link plugin's own on_open_url +
-  // single-instance's argv handoff used to fire the event twice in
-  // some configurations. Each route() call shows a confirm dialog and
-  // (on accept) starts a real install — duplicate dialogs / installs
-  // are user-hostile. The ref tracks URLs we've already processed in
-  // this session; repeat sightings of the same URL are silently
-  // dropped. Cleared on a window-blur > 30s gap so the user CAN
-  // legitimately re-fire the same link after leaving + coming back.
-  const processedUrlsRef = useRef<Set<string>>(new Set());
+  // drain AND the live `sts2mm-open-url` event) within milliseconds of
+  // each other. Without de-dupe the user gets two confirm dialogs back
+  // to back — or worse, two parallel installs that race.
+  //
+  // We use a TIME-WINDOW dedupe (URL → last-seen timestamp), not a
+  // permanent set, because the user legitimately re-fires the same URL
+  // when they: cancel a confirm dialog and want to retry from the
+  // bridge page, click the bridge button a minute later, or hit
+  // "Try again" after the stalled banner appears. Anything beyond
+  // DEDUPE_WINDOW_MS is treated as a fresh user intent. Duplicate
+  // emits from the two channels arrive within ~1ms of each other so
+  // 2s is generous; the prior implementation pinned the URL forever
+  // and made cancel-then-retry silently no-op.
+  const processedUrlsRef = useRef<Map<string, number>>(new Map());
+  const DEDUPE_WINDOW_MS = 2000;
 
   useEffect(() => {
     let active = true;
 
     async function route(url: string) {
       if (!active) return;
-      if (processedUrlsRef.current.has(url)) {
-        console.debug('Deep-link: skipping duplicate URL:', url);
+      const now = Date.now();
+      const lastSeen = processedUrlsRef.current.get(url);
+      if (lastSeen !== undefined && now - lastSeen < DEDUPE_WINDOW_MS) {
+        console.debug(
+          `Deep-link: skipping duplicate URL within ${DEDUPE_WINDOW_MS}ms window:`,
+          url,
+        );
         return;
       }
-      processedUrlsRef.current.add(url);
+      processedUrlsRef.current.set(url, now);
 
       // Switch to Home so the user has the share-code context visible
       // behind the confirm dialog — disorienting otherwise if they were
@@ -229,9 +239,8 @@ function AppInner() {
         }
       } catch (e) {
         toast.error(`Couldn't open share link: ${e instanceof Error ? e.message : String(e)}`);
-        // Don't pin a permanent dedupe entry for failed URLs — the
-        // user might want to retry after fixing whatever was wrong.
-        processedUrlsRef.current.delete(url);
+        // No explicit delete needed — the time-window dedupe ages the
+        // entry out in 2s, well within any human-paced retry.
       }
     }
 

@@ -346,3 +346,362 @@ fn historical_6_source_entry_migrates_on_manifest_rename() {
         "old entry must remain so legacy references don't break"
     );
 }
+
+/// Mod-author flow A8 — DLL-only mod (no manifest) surfaces in the
+/// scan as `version: "unknown"`. This is the EXPECTED behavior for
+/// authors iterating without a manifest yet, and it's also the
+/// fallback for installs where the manifest parse genuinely fails.
+/// The scan must register the mod, must call it by its DLL stem, and
+/// must NOT double-count it as both a manifest mod and an orphan DLL.
+#[test]
+fn author_a8_dll_only_mod_surfaces_correctly() {
+    let mods_tmp = tempfile::tempdir().unwrap();
+    let dir = mods_tmp.path().join("MyDevMod");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("MyDevMod.dll"), b"author-dev-bytes").unwrap();
+    fs::write(dir.join("MyDevMod.pck"), b"author-dev-pck").unwrap();
+
+    let scanned = scan_mods(mods_tmp.path());
+    let entries: Vec<&ModInfo> = scanned.iter().filter(|m| m.name == "MyDevMod").collect();
+
+    assert_eq!(
+        entries.len(),
+        1,
+        "DLL-only mod must surface exactly once. Found {}.",
+        entries.len()
+    );
+    let m = entries[0];
+    assert_eq!(m.version, "unknown");
+    assert_eq!(m.folder_name.as_deref(), Some("MyDevMod"));
+    assert!(m.files.iter().any(|f| f.ends_with("MyDevMod.pck")));
+}
+
+/// Kitchen-sink scan: a real user's mods folder has many mods with
+/// every quirk simultaneously. This is the test that the BaseLib bug
+/// would have caught if it had existed in 1.3.0.
+#[test]
+fn kitchen_sink_scan_handles_every_quirk_at_once() {
+    let mods_tmp = tempfile::tempdir().unwrap();
+    let root = mods_tmp.path();
+
+    // 1. BOM-prefixed manifest (BaseLib case).
+    let baselib = root.join("BaseLib");
+    fs::create_dir_all(&baselib).unwrap();
+    let mut bom_manifest: Vec<u8> = vec![0xEF, 0xBB, 0xBF];
+    bom_manifest.extend_from_slice(
+        br#"{"id":"BaseLib","name":"BaseLib","version":"v3.1.2","author":"Alchyr"}"#,
+    );
+    fs::write(baselib.join("BaseLib.json"), &bom_manifest).unwrap();
+    fs::write(baselib.join("BaseLib.dll"), b"dll").unwrap();
+
+    // 2. Two CardArtEditor folders sharing the manifest name.
+    let cae1 = root.join("card_art_editor");
+    fs::create_dir_all(&cae1).unwrap();
+    fs::write(
+        cae1.join("manifest.json"),
+        br#"{"name":"Card Art Editor","version":"1.0.0","author":"Alchyr"}"#,
+    )
+    .unwrap();
+    fs::write(cae1.join("card_art_editor.dll"), b"v1").unwrap();
+    let cae2 = root.join("card_art_editor_v2");
+    fs::create_dir_all(&cae2).unwrap();
+    fs::write(
+        cae2.join("manifest.json"),
+        br#"{"name":"Card Art Editor","version":"2.0.0","author":"Alchyr"}"#,
+    )
+    .unwrap();
+    fs::write(cae2.join("card_art_editor.dll"), b"v2").unwrap();
+
+    // 3. Structured-deps manifest.
+    let shc = root.join("STS2-ShowPlayerHandCards");
+    fs::create_dir_all(&shc).unwrap();
+    fs::write(
+        shc.join("manifest.json"),
+        br#"{"name":"Show Player Hand Cards","version":"0.4.1","dependencies":[{"id":"RitsuLib","min_version":"0.2.0"},"BaseLib"]}"#,
+    )
+    .unwrap();
+    fs::write(shc.join("STS2-ShowPlayerHandCards.dll"), b"dll").unwrap();
+
+    // 4. Subdir mod whose folder name differs from manifest name.
+    let ritsu = root.join("STS2-Ritsu");
+    fs::create_dir_all(&ritsu).unwrap();
+    fs::write(
+        ritsu.join("manifest.json"),
+        br#"{"name":"RitsuLib","version":"0.2.29"}"#,
+    )
+    .unwrap();
+    fs::write(ritsu.join("RitsuLib.dll"), b"dll").unwrap();
+
+    // 5. DLL-only mod (author dev iteration).
+    let dev = root.join("MyDevMod");
+    fs::create_dir_all(&dev).unwrap();
+    fs::write(dev.join("MyDevMod.dll"), b"dll").unwrap();
+
+    let scanned = scan_mods(root);
+    assert_eq!(
+        scanned.len(),
+        6,
+        "Expected 6 mods (BaseLib + 2 CAE + SHC + RitsuLib + MyDevMod), got {}.",
+        scanned.len()
+    );
+
+    let baselib_e = scanned.iter().find(|m| m.folder_name.as_deref() == Some("BaseLib")).unwrap();
+    assert_eq!(baselib_e.version, "v3.1.2");
+
+    let cae_entries: Vec<&ModInfo> =
+        scanned.iter().filter(|m| m.name == "Card Art Editor").collect();
+    assert_eq!(cae_entries.len(), 2);
+
+    let shc_e = scanned.iter().find(|m| m.name == "Show Player Hand Cards").unwrap();
+    assert_eq!(shc_e.version, "0.4.1");
+    assert!(shc_e.dependencies.contains(&"RitsuLib".to_string()));
+    assert!(shc_e.dependencies.contains(&"BaseLib".to_string()));
+
+    let ritsu_e = scanned.iter().find(|m| m.name == "RitsuLib").unwrap();
+    assert_eq!(ritsu_e.folder_name.as_deref(), Some("STS2-Ritsu"));
+
+    let dev_e = scanned.iter().find(|m| m.name == "MyDevMod").unwrap();
+    assert_eq!(dev_e.version, "unknown");
+}
+
+/// Flow 10 - profile snapshot captures every installed mod with its
+/// identity, source, and enabled state. The snapshot is the contract
+/// between the curator's profile and the friend's apply.
+#[test]
+fn flow_10_profile_snapshot_captures_folder_identity_and_source() {
+    use sts2_mod_manager_lib::profiles::snapshot_current_with_paths;
+
+    let mods_tmp = tempfile::tempdir().unwrap();
+    let disabled_tmp = tempfile::tempdir().unwrap();
+    let profiles_tmp = tempfile::tempdir().unwrap();
+    let config_tmp = tempfile::tempdir().unwrap();
+
+    install_baselib_with_bom(mods_tmp.path());
+
+    // Seed a folder-keyed source so the snapshot must look it up via
+    // lookup_entry (folder-first).
+    let mut db = ModSourcesDb::default();
+    let mut entry = ModSourceEntry::default();
+    entry.github_repo = Some("Alchyr/STS2-BaseLib".into());
+    db.mods.insert("BaseLib".into(), entry);
+    save_sources(&db, config_tmp.path()).unwrap();
+
+    let profile = snapshot_current_with_paths(
+        "my-pack",
+        mods_tmp.path(),
+        disabled_tmp.path(),
+        profiles_tmp.path(),
+        Some(config_tmp.path()),
+    )
+    .expect("snapshot must succeed");
+
+    assert_eq!(profile.name, "my-pack");
+    assert_eq!(profile.mods.len(), 1);
+    let pm = &profile.mods[0];
+    assert_eq!(pm.name, "BaseLib");
+    assert_eq!(pm.version, "v3.1.2");
+    assert_eq!(pm.folder_name.as_deref(), Some("BaseLib"));
+    assert_eq!(pm.mod_id.as_deref(), Some("BaseLib"));
+    assert!(pm.enabled);
+    assert_eq!(
+        pm.source.as_deref(),
+        Some("github:Alchyr/STS2-BaseLib"),
+        "snapshot must look up source via folder-first lookup_entry."
+    );
+
+    assert!(profiles_tmp.path().join("my-pack.json").exists());
+}
+
+/// Flow 11 + scenario 003 (full integration) — apply_profile_with_pins
+/// preserves a pinned mod's enabled state even when the profile lists
+/// it as disabled. THE player promise.
+#[test]
+fn flow_11_apply_profile_pins_override_profile_state() {
+    use sts2_mod_manager_lib::profiles::{apply_profile_with_pins, Profile, ProfileMod};
+
+    let mods_tmp = tempfile::tempdir().unwrap();
+    let disabled_tmp = tempfile::tempdir().unwrap();
+    install_baselib_with_bom(mods_tmp.path());
+
+    let baselib_dll_path = mods_tmp.path().join("BaseLib").join("BaseLib.dll");
+    let baselib_dll_before = fs::read(&baselib_dll_path).unwrap();
+
+    let now = chrono::Utc::now();
+    let profile = Profile {
+        name: "off-pack".into(),
+        game_version: Some("0.103.2".into()),
+        created_by: None,
+        mods: vec![ProfileMod {
+            name: "BaseLib".into(),
+            version: "v3.1.2".into(),
+            source: None,
+            hash: None,
+            files: Vec::new(),
+            folder_name: Some("BaseLib".into()),
+            mod_id: Some("BaseLib".into()),
+            enabled: false,
+            bundle_url: None,
+        }],
+        created_at: now,
+        updated_at: now,
+    };
+
+    let mut pinned = std::collections::HashSet::new();
+    pinned.insert("BaseLib".to_string());
+
+    apply_profile_with_pins(&profile, mods_tmp.path(), disabled_tmp.path(), &pinned)
+        .expect("apply with pin must succeed");
+
+    assert!(
+        baselib_dll_path.exists(),
+        "Pinned BaseLib must stay in mods/ even when the applied profile says enabled=false."
+    );
+    assert_eq!(
+        fs::read(&baselib_dll_path).unwrap(),
+        baselib_dll_before,
+        "Pinned mod's bytes must be untouched by apply."
+    );
+}
+
+/// Direct unit test for the `lookup_entry` precedence chain that
+/// underpins every read of mod_sources.json across the codebase. If
+/// this precedence ever drifts, every regression in the watcher + audit
+/// + apply + enrich code paths becomes silent. So we lock it down
+/// explicitly.
+///
+/// Order: folder_name → display name → mod_id.
+#[test]
+fn lookup_entry_precedence_is_folder_then_name_then_mod_id() {
+    use sts2_mod_manager_lib::mod_sources::{lookup_entry, ModSourceEntry};
+    use std::collections::HashMap;
+
+    // Same mod has THREE possible identifiers, each pointing at a
+    // different entry so we can see which one wins.
+    let mut db: HashMap<String, ModSourceEntry> = HashMap::new();
+    let mut folder_entry = ModSourceEntry::default();
+    folder_entry.github_repo = Some("folder/repo".into());
+    db.insert("the-folder".into(), folder_entry);
+
+    let mut name_entry = ModSourceEntry::default();
+    name_entry.github_repo = Some("name/repo".into());
+    db.insert("Display Name".into(), name_entry);
+
+    let mut mod_id_entry = ModSourceEntry::default();
+    mod_id_entry.github_repo = Some("mod-id/repo".into());
+    db.insert("the.mod.id".into(), mod_id_entry);
+
+    // All three identifiers present → folder wins.
+    let all_three =
+        lookup_entry(&db, Some("the-folder"), "Display Name", Some("the.mod.id")).unwrap();
+    assert_eq!(all_three.github_repo.as_deref(), Some("folder/repo"));
+
+    // No folder → name wins.
+    let no_folder = lookup_entry(&db, None, "Display Name", Some("the.mod.id")).unwrap();
+    assert_eq!(no_folder.github_repo.as_deref(), Some("name/repo"));
+
+    // No folder, no name match → mod_id wins.
+    let only_mod_id = lookup_entry(&db, None, "no-match", Some("the.mod.id")).unwrap();
+    assert_eq!(only_mod_id.github_repo.as_deref(), Some("mod-id/repo"));
+
+    // Folder present but doesn't match any entry → name fallback.
+    let unknown_folder =
+        lookup_entry(&db, Some("unknown-folder"), "Display Name", Some("the.mod.id"))
+            .unwrap();
+    assert_eq!(unknown_folder.github_repo.as_deref(), Some("name/repo"));
+
+    // Nothing matches → None.
+    let none = lookup_entry(&db, Some("nope"), "nope", Some("nope"));
+    assert!(none.is_none());
+}
+
+/// migrate_source_entry must NOT clobber existing destination state.
+/// The old entry's fields fill IN where the new entry is empty, but
+/// never overwrite. This is the contract that lets us migrate after a
+/// manifest rename without losing fields a user already set on the
+/// new name (e.g. they re-linked the GitHub before we noticed the
+/// rename).
+#[test]
+fn migrate_source_entry_does_not_overwrite_existing_destination() {
+    use sts2_mod_manager_lib::mod_sources::{
+        load_sources, migrate_source_entry, save_sources, ModSourceEntry, ModSourcesDb,
+    };
+
+    let config_tmp = tempfile::tempdir().unwrap();
+
+    // Source: full state.
+    let mut db = ModSourcesDb::default();
+    let mut src_entry = ModSourceEntry::default();
+    src_entry.github_repo = Some("OLD/repo".into());
+    src_entry.pinned = true;
+    src_entry.installed_version = Some("v0.1.0".into());
+    db.mods.insert("Old Name".into(), src_entry);
+
+    // Destination: user already set a different github_repo manually.
+    // We must NOT overwrite their pick on migration.
+    let mut dest_entry = ModSourceEntry::default();
+    dest_entry.github_repo = Some("USER-PICK/repo".into());
+    db.mods.insert("New Name".into(), dest_entry);
+    save_sources(&db, config_tmp.path()).unwrap();
+
+    migrate_source_entry("Old Name", "New Name", config_tmp.path());
+
+    let after = load_sources(config_tmp.path());
+    let new_entry = after.mods.get("New Name").unwrap();
+
+    assert_eq!(
+        new_entry.github_repo.as_deref(),
+        Some("USER-PICK/repo"),
+        "User's manual github_repo on the destination MUST survive — \
+         migration is fill-in-blanks, not overwrite."
+    );
+    // The pinned + installed_version fields were empty on dest → migrated.
+    assert!(new_entry.pinned);
+    assert_eq!(new_entry.installed_version.as_deref(), Some("v0.1.0"));
+}
+
+/// Flow 11 negative case — same profile apply without the pin actually
+/// moves the mod. Proves apply is doing real work and the pin test is
+/// not a false positive (e.g. apply silently no-oping).
+#[test]
+fn flow_11_apply_profile_without_pin_moves_mod_as_directed() {
+    use sts2_mod_manager_lib::profiles::{apply_profile_with_pins, Profile, ProfileMod};
+
+    let mods_tmp = tempfile::tempdir().unwrap();
+    let disabled_tmp = tempfile::tempdir().unwrap();
+    install_baselib_with_bom(mods_tmp.path());
+
+    let now = chrono::Utc::now();
+    let profile = Profile {
+        name: "off-pack".into(),
+        game_version: Some("0.103.2".into()),
+        created_by: None,
+        mods: vec![ProfileMod {
+            name: "BaseLib".into(),
+            version: "v3.1.2".into(),
+            source: None,
+            hash: None,
+            files: Vec::new(),
+            folder_name: Some("BaseLib".into()),
+            mod_id: Some("BaseLib".into()),
+            enabled: false,
+            bundle_url: None,
+        }],
+        created_at: now,
+        updated_at: now,
+    };
+
+    let empty_pins = std::collections::HashSet::new();
+    apply_profile_with_pins(&profile, mods_tmp.path(), disabled_tmp.path(), &empty_pins)
+        .expect("apply must succeed");
+
+    let active_baselib = mods_tmp.path().join("BaseLib").join("BaseLib.dll");
+    let disabled_baselib = disabled_tmp.path().join("BaseLib").join("BaseLib.dll");
+    assert!(
+        !active_baselib.exists(),
+        "Without pin, BaseLib should have moved out of mods/."
+    );
+    assert!(
+        disabled_baselib.exists(),
+        "Without pin, BaseLib should be in mods_disabled/."
+    );
+}

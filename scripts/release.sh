@@ -199,9 +199,16 @@ git push origin main "$TAG"
 
 if command -v gh >/dev/null 2>&1; then
   # Extract just the body of the new vX.Y.Z section we just wrote.
+  # Match the heading by parsing the `[VERSION]` token explicitly (not by
+  # regex-escaping brackets — that would interpret [1.3.3] as a character
+  # class matching one of "1.3"). The next `## [` line ends the section.
   BODY=$(awk -v ver="$NEW" '
-    $0 ~ "^## \\[" ver "\\]" { in_block=1; next }
-    in_block && /^## \[/ { in_block=0 }
+    /^## \[/ {
+      if (match($0, /^## \[([^\]]+)\]/, m)) {
+        if (m[1] == ver) { in_block = 1; next }
+      }
+      if (in_block) { in_block = 0 }
+    }
     in_block { print }
   ' CHANGELOG.md)
   if [[ -n "$BODY" ]]; then

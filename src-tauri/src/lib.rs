@@ -11,7 +11,7 @@ mod game;
 pub mod mod_sources;
 pub mod mods;
 mod nexus;
-mod profiles;
+pub mod profiles;
 mod quick_add;
 mod sharing;
 mod state;

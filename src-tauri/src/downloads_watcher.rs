@@ -358,7 +358,7 @@ fn peek_zip_identity(zip_path: &Path) -> ZipIdentity {
             // Try to read and parse
             let mut buf = String::new();
             if std::io::Read::read_to_string(&mut entry, &mut buf).is_ok() {
-                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&buf) {
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(crate::mods::strip_utf8_bom(&buf)) {
                     let mod_name = val.get("Name")
                         .or_else(|| val.get("name"))
                         .and_then(|v| v.as_str())

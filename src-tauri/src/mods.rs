@@ -223,6 +223,20 @@ fn collect_mod_files(manifest_path: &Path, base_dir: &Path) -> Vec<String> {
     files
 }
 
+/// Strip a leading UTF-8 BOM (`EF BB BF` / `U+FEFF`) from a manifest body.
+///
+/// Windows tooling (Notepad, some authoring editors) writes JSON with a BOM
+/// by default. `serde_json::from_str` refuses to parse content that doesn't
+/// start with a JSON character — so any BOM-prefixed manifest fails strict
+/// parsing AND the lenient Value-based fallback. That's the actual cause of
+/// the "vunknown" report on BaseLib (a popular library mod whose author
+/// ships a BOM in `BaseLib.json`): both parsers gave up and the install
+/// fell through to the stub. Stripping once at read time fixes every
+/// manifest read in the codebase.
+pub fn strip_utf8_bom(s: &str) -> &str {
+    s.strip_prefix('\u{FEFF}').unwrap_or(s)
+}
+
 /// Last-resort extraction of the fields the UI cares most about (version,
 /// name, description, author, id) when strict struct deserialization fails.
 ///
@@ -234,7 +248,7 @@ fn collect_mod_files(manifest_path: &Path, base_dir: &Path) -> Vec<String> {
 /// loudly so we can still spot real schema drift, and let the install
 /// surface real data.
 fn parse_manifest_lenient(content: &str) -> Option<RawManifest> {
-    let v: serde_json::Value = serde_json::from_str(content).ok()?;
+    let v: serde_json::Value = serde_json::from_str(strip_utf8_bom(content)).ok()?;
     let obj = v.as_object()?;
 
     // Case-insensitive lookup against the small set of aliases we
@@ -287,7 +301,7 @@ fn parse_manifest(manifest_path: &Path, base_dir: &Path, enabled: bool) -> Optio
             return None;
         }
     };
-    let raw: RawManifest = match serde_json::from_str(&content) {
+    let raw: RawManifest = match serde_json::from_str(strip_utf8_bom(&content)) {
         Ok(r) => r,
         Err(e) => {
             // Strict parse failed — likely a new manifest field shape or a
@@ -1177,7 +1191,7 @@ fn peek_manifest_name(archive: &mut zip::ZipArchive<fs::File>) -> Option<String>
             }
             let mut buf = String::new();
             if std::io::Read::read_to_string(&mut entry, &mut buf).is_ok() {
-                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&buf) {
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(strip_utf8_bom(&buf)) {
                     // Prefer Id (game uses this for dependency resolution), then PckName, then Name
                     if let Some(id) = val.get("Id").or_else(|| val.get("id"))
                         .and_then(|v| v.as_str())
@@ -1862,7 +1876,7 @@ pub fn check_dependencies(mod_name: &str, mods_path: &Path) -> Vec<String> {
         Ok(c) => c,
         Err(_) => return Vec::new(),
     };
-    let raw: RawManifest = match serde_json::from_str(&content) {
+    let raw: RawManifest = match serde_json::from_str(strip_utf8_bom(&content)) {
         Ok(r) => r,
         Err(_) => return Vec::new(),
     };
@@ -2002,6 +2016,41 @@ mod lenient_parse_tests {
     fn returns_none_on_invalid_json() {
         assert!(parse_manifest_lenient("not json").is_none());
         assert!(parse_manifest_lenient("{").is_none());
+    }
+
+    /// BOM tolerance at the lenient layer too — covers any code path
+    /// that bypasses parse_manifest and calls the lenient helper directly.
+    #[test]
+    fn lenient_parse_strips_bom() {
+        let with_bom = "\u{FEFF}{\"name\": \"X\", \"version\": \"1.0\"}";
+        let raw = super::parse_manifest_lenient(with_bom).expect("BOM-prefixed content must still parse");
+        assert_eq!(raw.name, "X");
+        assert_eq!(raw.version, "1.0");
+    }
+}
+
+#[cfg(test)]
+mod bom_helper_tests {
+    use super::strip_utf8_bom;
+
+    #[test]
+    fn strips_bom_when_present() {
+        let s = "\u{FEFF}{\"x\": 1}";
+        assert_eq!(strip_utf8_bom(s), "{\"x\": 1}");
+    }
+
+    #[test]
+    fn passes_through_clean_input() {
+        assert_eq!(strip_utf8_bom("{\"x\": 1}"), "{\"x\": 1}");
+        assert_eq!(strip_utf8_bom(""), "");
+    }
+
+    /// Only the leading BOM gets stripped. Some content tools (or attackers)
+    /// might embed U+FEFF deeper in the string — leave those alone.
+    #[test]
+    fn only_strips_leading_bom() {
+        let s = "{\"key\": \"value\u{FEFF}with bom\"}";
+        assert_eq!(strip_utf8_bom(s), s);
     }
 }
 
@@ -2190,6 +2239,50 @@ mod user_scenario_tests {
         // folder_name still resolves to the parent dir even when the
         // strict parse stumbled on a sibling field.
         assert_eq!(parsed.folder_name.as_deref(), Some("baselib"));
+    }
+
+    /// BaseLib (Nexus mod 103) ships its manifest with a UTF-8 BOM. Both
+    /// the strict and lenient `serde_json` paths refuse to parse content
+    /// that doesn't start with a JSON character, so pre-this-fix the
+    /// entire manifest was discarded and the UI showed "vunknown".
+    /// Reproduces the actual bytes from `BaseLib.json` on disk.
+    #[test]
+    fn bom_prefixed_manifest_parses_correctly() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let manifest_path = base.join("BaseLib").join("BaseLib.json");
+        if let Some(parent) = manifest_path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        // EF BB BF prefix — exact UTF-8 BOM bytes as shipped by BaseLib.
+        let bytes: Vec<u8> = {
+            let mut v = vec![0xEF, 0xBB, 0xBF];
+            v.extend_from_slice(
+                br#"{
+  "id": "BaseLib",
+  "name": "BaseLib",
+  "author": "Alchyr",
+  "description": "Modding utility for Slay the Spire 2",
+  "version": "v3.1.2",
+  "has_pck": true,
+  "has_dll": true,
+  "dependencies": [],
+  "affects_gameplay": false
+}"#,
+            );
+            v
+        };
+        fs::write(&manifest_path, &bytes).unwrap();
+
+        let parsed = parse_manifest(&manifest_path, base, true)
+            .expect("BOM-prefixed manifest must parse — this is the BaseLib bug");
+        assert_eq!(parsed.name, "BaseLib");
+        assert_eq!(
+            parsed.version, "v3.1.2",
+            "version must be the manifest's real value, not 'unknown'"
+        );
+        assert_eq!(parsed.author.as_deref(), Some("Alchyr"));
+        assert_eq!(parsed.mod_id.as_deref(), Some("BaseLib"));
     }
 
     /// Sanity: a well-formed manifest still goes through the strict path

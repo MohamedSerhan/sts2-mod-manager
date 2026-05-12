@@ -429,7 +429,7 @@ pub fn peek_zip_min_game_version(zip_path: &Path) -> Result<Option<String>> {
         if std::io::Read::read_to_string(&mut entry, &mut buf).is_err() {
             continue;
         }
-        let val: serde_json::Value = match serde_json::from_str(&buf) {
+        let val: serde_json::Value = match serde_json::from_str(crate::mods::strip_utf8_bom(&buf)) {
             Ok(v) => v,
             Err(_) => continue,
         };

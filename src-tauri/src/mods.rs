@@ -2285,6 +2285,85 @@ mod user_scenario_tests {
         assert_eq!(parsed.mod_id.as_deref(), Some("BaseLib"));
     }
 
+    /// Scenario 005 from `qa/scenarios/`. Closes the install-pipeline
+    /// half of the BaseLib regression. The 1.3.3 fix made `parse_manifest`
+    /// BOM-tolerant; this test proves that the BOM tolerance survives
+    /// `install_mod_from_zip`'s extract → parse pipeline end-to-end.
+    ///
+    /// Builds a real zip in a tempdir with the EXACT byte layout of the
+    /// BaseLib manifest on the user's disk (UTF-8 BOM at byte 0, then
+    /// the manifest JSON), runs install_mod_from_zip against it, and
+    /// asserts the returned ModInfo carries the real version string
+    /// rather than the "unknown" stub.
+    #[test]
+    fn install_mod_from_zip_handles_bom_manifest() {
+        use std::io::Write as _;
+        use zip::write::SimpleFileOptions;
+
+        let src_tmp = tempfile::tempdir().unwrap();
+        let zip_path = src_tmp.path().join("BaseLib.zip");
+
+        let bom_manifest: Vec<u8> = {
+            let mut v = vec![0xEF, 0xBB, 0xBF];
+            v.extend_from_slice(
+                br#"{
+  "id": "BaseLib",
+  "name": "BaseLib",
+  "author": "Alchyr",
+  "description": "Modding utility for Slay the Spire 2",
+  "version": "v3.1.2",
+  "has_pck": true,
+  "has_dll": true,
+  "dependencies": [],
+  "affects_gameplay": false
+}"#,
+            );
+            v
+        };
+        {
+            let f = fs::File::create(&zip_path).unwrap();
+            let mut zw = zip::ZipWriter::new(f);
+            let opts = SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+            zw.start_file("BaseLib/BaseLib.json", opts).unwrap();
+            zw.write_all(&bom_manifest).unwrap();
+            zw.start_file("BaseLib/BaseLib.dll", opts).unwrap();
+            zw.write_all(b"fake-dll-bytes").unwrap();
+            zw.start_file("BaseLib/BaseLib.pck", opts).unwrap();
+            zw.write_all(b"fake-pck-bytes").unwrap();
+            zw.finish().unwrap();
+        }
+
+        let mods_tmp = tempfile::tempdir().unwrap();
+        let info = super::install_mod_from_zip(&zip_path, mods_tmp.path())
+            .expect("install_mod_from_zip must succeed on a BOM-manifest zip");
+
+        assert_eq!(info.name, "BaseLib");
+        assert_eq!(
+            info.version, "v3.1.2",
+            "install must surface the manifest version, NOT 'unknown'. \
+             A regression here means the install pipeline lost BOM tolerance \
+             even though the read path kept it."
+        );
+        assert_eq!(info.author.as_deref(), Some("Alchyr"));
+        assert_eq!(info.mod_id.as_deref(), Some("BaseLib"));
+        assert_eq!(
+            info.folder_name.as_deref(),
+            Some("BaseLib"),
+            "folder_name must resolve to the wrap directory, not the zip stem"
+        );
+
+        // The extracted manifest on disk must still have the BOM (we
+        // didn't rewrite the user's file).
+        let extracted_manifest =
+            fs::read(mods_tmp.path().join("BaseLib").join("BaseLib.json")).unwrap();
+        assert_eq!(
+            &extracted_manifest[0..3],
+            &[0xEF, 0xBB, 0xBF],
+            "BOM must be preserved on disk — install reads through it, doesn't strip it"
+        );
+    }
+
     /// Sanity: a well-formed manifest still goes through the strict path
     /// (the lenient fallback is a recovery hatch, not the default).
     #[test]

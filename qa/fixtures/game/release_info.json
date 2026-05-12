@@ -1,0 +1,5 @@
+{
+  "version": "0.103.2",
+  "build_date": "2026-04-12T18:00:00Z",
+  "notes": "Synthetic STS2 release_info.json used by QA scenarios. The version number is what the manager reads to populate `gameInfo.game_version`. Bump to test compat walk-back; leave as-is for the default scenario."
+}

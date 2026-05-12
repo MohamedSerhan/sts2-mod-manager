@@ -1,0 +1,11 @@
+{
+  "id": "card_art_editor",
+  "name": "Card Art Editor",
+  "author": "Alchyr",
+  "description": "Replace card artwork in-game with your own images. v1.0.0 baseline (older fork).",
+  "version": "1.0.0",
+  "has_pck": true,
+  "has_dll": true,
+  "dependencies": [],
+  "affects_gameplay": false
+}

@@ -21,6 +21,7 @@ import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../components/ConfirmDialog';
 import { SubUpdateDetail } from '../components/SubUpdateDetail';
 import { AboutCard } from '../components/AboutCard';
+import { WhatsNewCard } from '../components/WhatsNewCard';
 import {
   checkSubscriptionUpdates,
   applySubscriptionUpdate,
@@ -460,6 +461,11 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
           </div>
         </div>
       )}
+
+      {/* What's new card — one-shot per-version, dismissable. Sits above
+          everything else so users see release notes before they start
+          clicking around. */}
+      <WhatsNewCard />
 
       {/* Game-not-detected warning */}
       {!gameInfo?.valid && (

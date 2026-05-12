@@ -34,6 +34,36 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
   exit 1
 fi
 
+# --- CHANGELOG.md pre-flight ---
+#
+# Every release MUST have user-facing notes — the in-app "What's new" card
+# reads them, and they double as the GitHub release body. The Unreleased
+# section is the working scratchpad; if it's empty or missing, we refuse
+# to ship so nobody discovers later that v1.X.Y has no changelog entry.
+
+if [[ ! -f CHANGELOG.md ]]; then
+  echo "Error: CHANGELOG.md is missing. Create it with an [Unreleased] section before releasing." >&2
+  exit 1
+fi
+
+# Extract the [Unreleased] block (between `## [Unreleased]` and the next
+# `## [` heading). A section qualifies as "has content" if it contains at
+# least one bullet (`-` / `*` at line start) under an `### ...` subhead —
+# this excludes the empty `### Added` / `### Changed` skeleton the script
+# itself drops in after each release.
+
+UNRELEASED_CONTENT=$(awk '
+  /^## \[Unreleased\]/ { in_block=1; next }
+  in_block && /^## \[/ { in_block=0 }
+  in_block { print }
+' CHANGELOG.md)
+
+if ! echo "$UNRELEASED_CONTENT" | grep -qE '^[[:space:]]*[-*][[:space:]]+\S'; then
+  echo "Error: CHANGELOG.md [Unreleased] section has no bullet entries." >&2
+  echo "Add at least one bullet under ### Added / ### Changed / ### Fixed / ### Security before releasing." >&2
+  exit 1
+fi
+
 echo "Fetching origin..."
 # Fetch the branch ref, but NOT --tags. We don't need local tags in sync;
 # the collision check below uses `git ls-remote --tags origin` directly.
@@ -132,13 +162,57 @@ conf.version = '$NEW';
 fs.writeFileSync(f, JSON.stringify(conf, null, 2) + '\n');
 "
 
+# --- Promote [Unreleased] → [vX.Y.Z] in CHANGELOG.md ---
+#
+# Done via node so we can safely rewrite the file with the new heading and
+# insert a fresh empty [Unreleased] section above it.
+
+TODAY=$(date +%Y-%m-%d)
+node -e "
+const fs = require('fs');
+const path = 'CHANGELOG.md';
+let txt = fs.readFileSync(path, 'utf8');
+const newHeading = '## [${NEW}] - ${TODAY}';
+const freshUnreleased = '## [Unreleased]\n\n### Added\n\n### Changed\n\n### Fixed\n\n### Security\n\n---\n';
+if (!/^## \[Unreleased\]/m.test(txt)) {
+  console.error('CHANGELOG.md is missing [Unreleased] heading after pre-flight — refusing to write.');
+  process.exit(1);
+}
+txt = txt.replace(/^## \[Unreleased\][^\n]*\n/m, freshUnreleased + '\n' + newHeading + '\n');
+fs.writeFileSync(path, txt);
+"
+
 # --- Commit, tag, push ---
 
 git add package.json package-lock.json \
-  src-tauri/Cargo.toml src-tauri/tauri.conf.json
+  src-tauri/Cargo.toml src-tauri/tauri.conf.json \
+  CHANGELOG.md
 git commit -m "release: ${TAG}"
 git tag "$TAG"
 git push origin main "$TAG"
+
+# --- Optional: post the changelog section as the GitHub release body ---
+#
+# If `gh` is installed and authenticated, create a release pointing at
+# the tag with the changelog body. CI may also create the release; we
+# defer if a release already exists for this tag.
+
+if command -v gh >/dev/null 2>&1; then
+  # Extract just the body of the new vX.Y.Z section we just wrote.
+  BODY=$(awk -v ver="$NEW" '
+    $0 ~ "^## \\[" ver "\\]" { in_block=1; next }
+    in_block && /^## \[/ { in_block=0 }
+    in_block { print }
+  ' CHANGELOG.md)
+  if [[ -n "$BODY" ]]; then
+    if ! gh release view "$TAG" >/dev/null 2>&1; then
+      printf '%s\n' "$BODY" | gh release create "$TAG" --notes-file - --title "$TAG" \
+        || echo "(gh release create failed — CI will likely fill it in)"
+    else
+      echo "(release $TAG already exists — leaving notes alone)"
+    fi
+  fi
+fi
 
 echo ""
 echo "Released ${TAG} -- CI will build and publish."

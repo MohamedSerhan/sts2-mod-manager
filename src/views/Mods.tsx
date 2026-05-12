@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Search,
   Upload,
@@ -15,6 +15,9 @@ import {
   Pin,
   PinOff,
   Wrench,
+  ClipboardCheck,
+  Download,
+  AlertTriangle,
 } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
@@ -43,6 +46,7 @@ import {
   pinMod,
   unpinMod,
   repairMod,
+  updateMod,
 } from '../hooks/useTauri';
 
 // v5 — Advanced mode is per-screen, persisted in localStorage. Off by default.
@@ -69,7 +73,7 @@ function gameVersionSatisfies(current: string | null | undefined, required: stri
 }
 
 export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: boolean } = {}) {
-  const { mods, refreshMods, refreshAll, gameRunning, gameInfo, notifyNexusOpen } = useApp();
+  const { mods, refreshMods, refreshAll, gameRunning, gameInfo, notifyNexusOpen, auditResults, auditing, runAudit, refreshAuditEntries } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
   const [filter, setFilter] = useState('');
@@ -91,6 +95,55 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
   }
 
   const [refreshing, setRefreshing] = useState(false);
+  // Per-row spinner state for inline Update button. Keyed by folder_name
+  // (falling back to display name) so two same-named mods don't share
+  // the spinner.
+  const [updatingKey, setUpdatingKey] = useState<string | null>(null);
+
+  // Map ROW KEY → audit row, for O(1) per-row lookup in render. The
+  // row key is `folder_name ?? mod_name` — the same identity Mods view
+  // uses for React keys / toggle dispatch — so two same-named mods don't
+  // share the same audit entry (the CardArtEditor case). The audit
+  // backend now carries folder_name on every entry, so this collapses
+  // back to mod_name only when an audit row legitimately has no folder
+  // (DLL-only mods scanned before 1.3.1, etc.).
+  const auditByKey = useMemo(() => {
+    const m = new Map<string, NonNullable<typeof auditResults>[number]>();
+    if (auditResults) {
+      for (const a of auditResults) {
+        const key = a.folder_name ?? a.mod_name;
+        m.set(key, a);
+      }
+    }
+    return m;
+  }, [auditResults]);
+
+  const auditPendingCount = auditResults
+    ? auditResults.filter((a) => a.needs_update && !a.pinned).length
+    : 0;
+
+  async function handleCheckUpdates() {
+    await runAudit();
+  }
+
+  async function handleInlineUpdate(name: string, folderName: string | null) {
+    const key = folderName ?? name;
+    if (updatingKey) return;
+    setUpdatingKey(key);
+    try {
+      const info = await updateMod(name, folderName);
+      toast.success(`Updated '${name}' to v${info.version}`);
+      await refreshAll();
+      // Targeted re-audit: cover both the requested name and any rename
+      // the install produced (same approach Settings uses).
+      const names = info.name !== name ? [name, info.name] : [name];
+      await refreshAuditEntries(names);
+    } catch (e) {
+      toast.error(`Update failed for '${name}': ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setUpdatingKey(null);
+    }
+  }
 
   const totalCount = mods.length;
   const enabledCount = mods.filter((m) => m.enabled).length;
@@ -355,6 +408,26 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
               </Button>
             </>
           )}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleCheckUpdates}
+            disabled={auditing}
+            title={
+              auditResults === null
+                ? 'Check every linked mod against its GitHub / Nexus source for available updates.'
+                : `Re-check (${auditPendingCount} update${auditPendingCount === 1 ? '' : 's'} pending).`
+            }
+          >
+            <ClipboardCheck size={14} className={auditing ? 'animate-pulse' : ''} />
+            {auditing
+              ? 'Checking…'
+              : auditResults === null
+                ? 'Check for updates'
+                : auditPendingCount > 0
+                  ? `${auditPendingCount} update${auditPendingCount === 1 ? '' : 's'}`
+                  : 'Up to date'}
+          </Button>
           <Button size="sm" onClick={async () => {
             setRefreshing(true);
             try { await refreshMods(); }
@@ -462,6 +535,29 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
               ? (mod.author?.trim() || mod.folder_name || null)
               : null;
 
+            // Audit row for this mod (if an audit has been run). Drives the
+            // inline "update available" pill + game-compat warning. We
+            // intentionally don't surface the pill for pinned mods or
+            // game-version-blocked rows — the audit table in Settings still
+            // shows those details for users who want the full picture.
+            //
+            // Lookup is folder-first so two same-named mods get distinct
+            // audit rows (the CardArtEditor case). Backend audit now
+            // includes folder_name on every entry; the fallback to
+            // display name only fires for legacy data shapes.
+            const auditRow = auditByKey.get(rowKey) ?? auditByKey.get(mod.name);
+            const compatibleTag = auditRow?.latest_compatible_tag ?? auditRow?.latest_release_with_assets_tag ?? null;
+            const showUpdatePill =
+              !!auditRow &&
+              auditRow.needs_update &&
+              !auditRow.pinned &&
+              !auditRow.game_version_too_old &&
+              !auditRow.latest_release_blocked_by_game_version &&
+              !!compatibleTag &&
+              !!mod.github_url;
+            const isUpdatingThisRow = updatingKey === rowKey;
+            const auditError = auditRow?.error ?? null;
+
             return (
               <Card
                 key={rowKey}
@@ -494,6 +590,43 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                             title="Pinned — modpack updates will preserve this mod's enabled/disabled state and version"
                           >
                             <Pin size={9} /> Pinned
+                          </span>
+                        )}
+                        {showUpdatePill && (
+                          <button
+                            onClick={() => handleInlineUpdate(mod.name, mod.folder_name)}
+                            disabled={gameRunning || isUpdatingThisRow || updatingKey !== null}
+                            className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+                            title={
+                              gameRunning
+                                ? 'Close STS2 first.'
+                                : `Click to update from v${mod.version} → v${compatibleTag?.replace(/^v/, '')}. Same pipeline as Settings → Audit.`
+                            }
+                          >
+                            {isUpdatingThisRow ? (
+                              <><RefreshCw size={9} className="animate-spin" /> Updating…</>
+                            ) : (
+                              <><Download size={9} /> Update available → v{compatibleTag?.replace(/^v/, '')}</>
+                            )}
+                          </button>
+                        )}
+                        {auditRow?.latest_release_blocked_by_game_version && !auditRow.pinned && (
+                          <span
+                            className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300"
+                            title={
+                              `Newer release exists (v${auditRow.latest_release_with_assets_tag?.replace(/^v/, '') ?? '?'}) but it requires a newer Slay the Spire 2 build. ` +
+                              `Update STS2 (or switch beta branches) to pick it up; the manager can install an older compatible release in the meantime.`
+                            }
+                          >
+                            <AlertTriangle size={9} /> Update blocked by game version
+                          </span>
+                        )}
+                        {auditError && (
+                          <span
+                            className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-red-500/20 text-red-300"
+                            title={auditError}
+                          >
+                            <AlertTriangle size={9} /> Audit error
                           </span>
                         )}
                         {mod.min_game_version &&

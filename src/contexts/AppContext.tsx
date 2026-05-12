@@ -1,8 +1,8 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
-import { getGameInfo, getInstalledMods, isGameRunning, checkSubscriptionUpdates } from '../hooks/useTauri';
+import { getGameInfo, getInstalledMods, isGameRunning, checkSubscriptionUpdates, auditModVersions } from '../hooks/useTauri';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import type { GameInfo, ModInfo, SubscriptionUpdate } from '../types';
+import type { GameInfo, ModInfo, ModAuditEntry, SubscriptionUpdate } from '../types';
 import { useToast } from './ToastContext';
 
 interface AppContextType {
@@ -14,6 +14,13 @@ interface AppContextType {
   /** Per-pack updates available from upstream. Drives the badge on the
    *  Profiles sidebar item and the Home view's "update available" cards. */
   subUpdates: SubscriptionUpdate[];
+  /** Latest mod-audit result. null = hasn't been run this session. Lifted
+   *  here from Settings so the Mods view can show per-row "update available"
+   *  pills without forcing the user to dig into Settings to discover them. */
+  auditResults: ModAuditEntry[] | null;
+  auditing: boolean;
+  runAudit: () => Promise<void>;
+  refreshAuditEntries: (names: string[]) => Promise<void>;
   refreshGameInfo: () => Promise<void>;
   refreshMods: () => Promise<void>;
   refreshAll: () => Promise<void>;
@@ -45,6 +52,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [activeProfile, setActiveProfileState] = useState<string | null>(null);
   const [gameRunning, setGameRunning] = useState<boolean>(false);
   const [subUpdates, setSubUpdates] = useState<SubscriptionUpdate[]>([]);
+  const [auditResults, setAuditResults] = useState<ModAuditEntry[] | null>(null);
+  const [auditing, setAuditing] = useState<boolean>(false);
   const gameRunningRef = useRef<boolean>(false);
   const toast = useToast();
   // Tracks the active "Nexus pending install" sticky toast so we can
@@ -162,6 +171,69 @@ export function AppProvider({ children }: { children: ReactNode }) {
     invoke('set_active_profile', { name }).catch(() => {});
   }, []);
 
+  /** Run a full mod audit (GitHub + Nexus version checks for every linked
+   *  mod). Result is cached in context so Settings and Mods can share it
+   *  without refetching. Errors surface as a toast and leave the prior
+   *  results in place. */
+  const runAudit = useCallback(async () => {
+    try {
+      setAuditing(true);
+      const results = await auditModVersions();
+      setAuditResults(results);
+    } catch (e) {
+      toast.error(`Audit failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setAuditing(false);
+    }
+  }, [toast]);
+
+  /** Re-audit a targeted subset of mods and splice the fresh entries back
+   *  into `auditResults`. Used after single-mod / bulk updates so rows
+   *  flip from "X → Y" to "(latest)" without rescanning every mod. New
+   *  entries (e.g. a mod that just landed via the Downloads watcher) get
+   *  appended. */
+  const refreshAuditEntries = useCallback(async (names: string[]) => {
+    if (names.length === 0) return;
+    try {
+      const fresh = await auditModVersions(names);
+      const byName = new Map(fresh.map((e) => [e.mod_name, e]));
+      setAuditResults((prev) => {
+        if (!prev) return prev;
+        const existingNames = new Set(prev.map((e) => e.mod_name));
+        const merged = prev.map((e) => byName.get(e.mod_name) ?? e);
+        for (const e of fresh) {
+          if (!existingNames.has(e.mod_name)) merged.push(e);
+        }
+        return merged;
+      });
+    } catch {
+      /* non-fatal — leaves existing rows in place */
+    }
+  }, []);
+
+  // Auto-refresh audit rows when the downloads watcher catches a new mod
+  // — only if an audit is currently loaded (don't surprise the user by
+  // populating a fresh audit they didn't ask for).
+  useEffect(() => {
+    const unlisten = listen<{ mod_name: string; file_name: string; replaced: string | null }>(
+      'mod-auto-installed',
+      (event) => {
+        if (auditResults === null) return;
+        const names = [event.payload.mod_name];
+        if (event.payload.replaced && event.payload.replaced !== event.payload.mod_name) {
+          names.push(event.payload.replaced);
+        }
+        refreshAuditEntries(names);
+      },
+    );
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+    // We only need to re-bind when the audit flips between null and
+    // non-null; refreshAuditEntries is otherwise stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auditResults === null]);
+
   useEffect(() => {
     refreshAll();
   }, [refreshAll]);
@@ -198,7 +270,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [refreshGameRunning, refreshMods]);
 
   return (
-    <AppContext.Provider value={{ gameInfo, mods, loading, activeProfile, gameRunning, subUpdates, refreshGameInfo, refreshMods, refreshAll, refreshGameRunning, refreshSubUpdates, setActiveProfile, notifyNexusOpen }}>
+    <AppContext.Provider value={{ gameInfo, mods, loading, activeProfile, gameRunning, subUpdates, auditResults, auditing, runAudit, refreshAuditEntries, refreshGameInfo, refreshMods, refreshAll, refreshGameRunning, refreshSubUpdates, setActiveProfile, notifyNexusOpen }}>
       {children}
     </AppContext.Provider>
   );

@@ -3,8 +3,13 @@ mod download;
 mod downloads_watcher;
 mod error;
 mod game;
-mod mod_sources;
-mod mods;
+// `mod_sources` and `mods` are pub so `tests/qa_scenarios.rs` can call
+// scan_mods / install_mod_from_zip / load_sources / lookup_entry the
+// same way Tauri commands do. Everything exposed here was already
+// reachable through the IPC surface; this just makes the integration
+// tests tractable.
+pub mod mod_sources;
+pub mod mods;
 mod nexus;
 mod profiles;
 mod quick_add;

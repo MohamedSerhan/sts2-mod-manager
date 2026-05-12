@@ -1,0 +1,14 @@
+{
+  "id": "STS2-ShowPlayerHandCards",
+  "name": "Show Player Hand Cards",
+  "author": "BAKAOLC",
+  "description": "Dependency entries in the structured shape (id + min_version). Pre-1.3.1 the strict parser failed on this and the mod showed up as a 'vunknown' stub. The fix landed RawDependency as #[serde(untagged)].",
+  "version": "0.4.1",
+  "has_pck": false,
+  "has_dll": true,
+  "dependencies": [
+    { "id": "RitsuLib", "min_version": "0.2.0" },
+    "BaseLib"
+  ],
+  "affects_gameplay": false
+}

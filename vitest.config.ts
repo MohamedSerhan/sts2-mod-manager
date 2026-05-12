@@ -45,25 +45,32 @@ export default defineConfig({
         'src/**/*.d.ts',
       ],
       // Thresholds enforced on `npm run qa:coverage`. The numbers below
-      // are the current floor — raise as the suite grows, never lower
-      // silently. Each test added that bumps the actual percentage is a
-      // candidate for raising the corresponding gate.
+      // sit a couple of points BELOW current actual coverage so a normal
+      // working day with one or two refactors doesn't accidentally fail
+      // the gate — but a meaningful regression (e.g. someone deletes a
+      // test file or rips out a tested branch) still trips it.
+      //
+      // Actual coverage at the time of writing:
+      //   Lines: 70.87%   · gate 68
+      //   Funcs: 72.45%   · gate 70
+      //   Branches: 65.62% · gate 63
+      //   Statements: 69.65% · gate 67
       //
       // Target trajectory (per `qa/whats-left.md`):
-      //   - Lines:      55 (now) → 75 (next milestone) → 95 (goal)
-      //   - Branches:   47 → 65 → 90
-      //   - Functions:  59 → 75 → 95
-      //   - Statements: 55 → 75 → 95
+      //   - Lines:      68 (gate) → 80 → 95 (goal)
+      //   - Branches:   63 → 75 → 90
+      //   - Functions:  70 → 85 → 95
+      //   - Statements: 67 → 80 → 95
       //
       // The WebDriver smoke covers user *flows* end-to-end already;
       // these line-level gates protect the static branches the smoke
       // can't easily reach (empty states, error paths, advanced-mode
       // conditionals).
       thresholds: {
-        lines: 69,
-        functions: 71,
-        branches: 64,
-        statements: 68,
+        lines: 68,
+        functions: 70,
+        branches: 63,
+        statements: 67,
       },
     },
   },

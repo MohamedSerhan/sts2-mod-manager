@@ -1,0 +1,17 @@
+{
+  "tag_name": "v2.0.0",
+  "name": "Test Mod v2.0.0",
+  "body": "QA cassette fixture — represents the 'latest release' GitHub returns when the manager asks about qa-fixture/test-mod. The on-disk installed mod is at v1.0.0, so this drives a 'needs update' row through both check_all_updates and audit_mod_versions.\n\nCaptured: synthesized 2026-05-12 against the GitHubRelease schema in src-tauri/src/download.rs. Update-version bumps to this file should change tag_name AND the asset name to match.",
+  "prerelease": false,
+  "published_at": "2026-05-10T12:00:00Z",
+  "html_url": "https://github.com/qa-fixture/test-mod/releases/tag/v2.0.0",
+  "assets": [
+    {
+      "name": "QaTestMod-v2.0.0.zip",
+      "size": 4096,
+      "browser_download_url": "https://github.com/qa-fixture/test-mod/releases/download/v2.0.0/QaTestMod-v2.0.0.zip",
+      "content_type": "application/zip",
+      "download_count": 100
+    }
+  ]
+}

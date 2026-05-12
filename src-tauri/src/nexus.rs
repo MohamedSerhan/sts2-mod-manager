@@ -154,6 +154,10 @@ impl NexusClient {
             "https://api.nexusmods.com/v1/games/{}/mods/{}.json",
             game, mod_id
         );
+        if let Some(bytes) = crate::qa_cassette::intercept_get(&url) {
+            let info: NexusModInfo = serde_json::from_slice(&bytes)?;
+            return Ok(info);
+        }
         log::debug!("Nexus API: get_mod_info {}/{}", game, mod_id);
         let resp = self.client.get(&url).send().await.map_err(|e| {
             log::warn!("Nexus get_mod_info request failed for {}/{}: {}", game, mod_id, e);
@@ -173,6 +177,10 @@ impl NexusClient {
             "https://api.nexusmods.com/v1/games/{}/mods/{}.json",
             game, list_kind
         );
+        if let Some(bytes) = crate::qa_cassette::intercept_get(&url) {
+            let mods: Vec<NexusModInfo> = serde_json::from_slice(&bytes)?;
+            return Ok(mods);
+        }
         log::debug!("Nexus GET {}", url);
         let resp = self.client.get(&url).send().await.map_err(|e| {
             log::warn!("Nexus {} request failed: {}", list_kind, e);
@@ -207,6 +215,10 @@ impl NexusClient {
             "https://api.nexusmods.com/v1/games/{}/mods/{}/files.json",
             game, mod_id
         );
+        if let Some(bytes) = crate::qa_cassette::intercept_get(&url) {
+            let body: NexusFilesResponse = serde_json::from_slice(&bytes)?;
+            return Ok(body.files);
+        }
         log::debug!("Nexus API: get_mod_files {}/{}", game, mod_id);
         let resp = self.client.get(&url).send().await?;
         let resp = resp.error_for_status()?;
@@ -354,6 +366,97 @@ pub async fn nexus_get_latest_added(
         .get_latest_added(STS2_GAME_DOMAIN)
         .await
         .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod nexus_helper_tests {
+    use super::*;
+
+    #[test]
+    fn parse_nxm_url_extracts_all_components() {
+        let nxm = parse_nxm_url("nxm://slaythespire2/mods/103/files/456?key=abc&expires=42").unwrap();
+        assert_eq!(nxm.game_domain, "slaythespire2");
+        assert_eq!(nxm.mod_id, 103);
+        assert_eq!(nxm.file_id, 456);
+        assert_eq!(nxm.key.as_deref(), Some("abc"));
+        assert_eq!(nxm.expires, Some(42));
+    }
+
+    #[test]
+    fn parse_nxm_url_tolerates_missing_query() {
+        let nxm = parse_nxm_url("nxm://slaythespire2/mods/103/files/456").unwrap();
+        assert!(nxm.key.is_none());
+        assert!(nxm.expires.is_none());
+    }
+
+    #[test]
+    fn parse_nxm_url_rejects_non_nxm_or_malformed() {
+        assert!(parse_nxm_url("https://nexusmods.com/slaythespire2/mods/103").is_err());
+        assert!(parse_nxm_url("nxm://slaythespire2/posts/103/files/456").is_err());
+        assert!(parse_nxm_url("nxm://slaythespire2/mods/abc/files/456").is_err());
+        assert!(parse_nxm_url("not-a-url").is_err());
+    }
+
+    fn file(file_id: u64, name: &str, version: &str, category_id: Option<u64>, ts: i64) -> NexusFile {
+        NexusFile {
+            file_id,
+            name: Some(name.into()),
+            file_name: Some(format!("{}-x.zip", name)),
+            version: Some(version.into()),
+            category_id,
+            uploaded_timestamp: Some(ts),
+        }
+    }
+
+    #[test]
+    fn pick_version_for_local_mod_prefers_lite_for_lite_local_name() {
+        // Two files: regular "Full" and "Lite" variant. Local mod's name
+        // contains "lite" → picker must return the lite variant's version.
+        let files = vec![
+            file(1, "BetterSpire2 Full", "2.0.0", Some(1), 1000),
+            file(2, "BetterSpire2 Lite", "1.5.0", Some(1), 900),
+        ];
+        let v = pick_version_for_local_mod(&files, "BetterSpire2Lite").unwrap();
+        assert_eq!(v, "1.5.0");
+    }
+
+    #[test]
+    fn pick_version_for_local_mod_penalizes_lite_when_local_name_is_not_lite() {
+        let files = vec![
+            file(1, "BetterSpire2 Lite", "2.0.0", Some(1), 1000),
+            file(2, "BetterSpire2 Full", "1.5.0", Some(1), 900),
+        ];
+        // No "lite" in local name → picker must prefer the non-lite file.
+        let v = pick_version_for_local_mod(&files, "BetterSpire2").unwrap();
+        assert_eq!(v, "1.5.0");
+    }
+
+    #[test]
+    fn pick_version_for_local_mod_demotes_archived_and_old_categories() {
+        let files = vec![
+            // category_id 7 = ARCHIVED, large penalty
+            file(1, "Old", "5.0.0", Some(7), 2000),
+            // category_id 1 = MAIN
+            file(2, "Current", "2.0.0", Some(1), 1500),
+        ];
+        let v = pick_version_for_local_mod(&files, "AnyMod").unwrap();
+        assert_eq!(v, "2.0.0");
+    }
+
+    #[test]
+    fn pick_version_for_local_mod_returns_none_on_empty() {
+        assert!(pick_version_for_local_mod(&[], "AnyMod").is_none());
+    }
+
+    #[test]
+    fn nexus_client_constructs_without_panicking_on_unicode_key() {
+        // Defensively, the client uses HeaderValue::from_str which fails on
+        // non-printable chars; the code falls back to empty header. We just
+        // assert the constructor doesn't panic.
+        let _ = NexusClient::new("plain-key-123");
+        // Non-ASCII keys (rare but seen in copy-paste mishaps) shouldn't crash.
+        let _ = NexusClient::new("café-key");
+    }
 }
 
 /// Set the Nexus Mods API key (store in state and optionally in keyring).

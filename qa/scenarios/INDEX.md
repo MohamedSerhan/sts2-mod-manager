@@ -7,6 +7,11 @@
 | [003](003-pin-survives-modpack-apply.md) | Pinned mod survives a modpack apply | 1 | player | 7, 11 | — | active |
 | [004](004-downloads-watcher-respects-pin.md) | Downloads-watcher respects pin | 1 | player | 4, 7 | #32 | active |
 | [005](005-install-pipeline-preserves-bom-version.md) | install_mod_from_zip preserves BOM-manifest version | 1 | player | 3, 4 | #2 | active |
+| [006](006-toggle-moves-mod-to-disabled.md) | Toggling a mod off moves it to mods_disabled/ | 2 | player | 5 | — | active |
+| [007](007-audit-count-against-cassette.md) | Audit reports the cassette's expected pending count | 2 | player | 9 | — | active |
+| [008](008-pin-suppresses-pending-update.md) | Pinning drops a mod from the audit pending count | 2 | player | 7, 9 | — | active |
+| [009](009-delete-mod-removes-from-disk.md) | Deleting a mod removes both row and folder | 2 | player | 6 | — | active |
+| [010](010-create-profile-via-ui.md) | "New profile" creates a profile and shows it in the list | 2 | player | 10 | — | active |
 
 ## Coverage map
 
@@ -16,13 +21,15 @@ Cross-referenced against [walkthrough-findings.md](../walkthrough-findings.md):
 - Flow 1 (first-time setup) — 001, 002
 - Flow 3 (Quick Add GitHub) — 001, 005
 - Flow 4 (Nexus download → watcher) — 004, 005
-- Flow 5 (toggle on/off) — 002
-- Flow 6 (delete) — 002
-- Flow 7 (pin survives apply) — 003, 004
+- Flow 5 (toggle on/off) — 002, 006
+- Flow 6 (delete) — 002, 009
+- Flow 7 (pin survives apply) — 003, 004, 008
 - Flow 8 (update single mod) — 001
+- Flow 9 (audit / Check for updates) — 007, 008
+- Flow 10 (snapshot / create profile) — 010
 - Flow 11 (switch profiles) — 003
 
-Flows still uncovered (priority for next batch): 2 (share code import), 9 (audit), 10 (snapshot create), 12 (share publish), 13 (repair), 14 (drag-drop), 15 (restore backup), 16 (launch), 17 (onboarding), 18 (deep link), 19 (subscription), 20 (bulk).
+Flows still uncovered (priority for next batch): 2 (share code import), 12 (share publish), 13 (repair), 14 (drag-drop), 15 (restore backup), 16 (launch), 17 (onboarding), 18 (deep link), 19 (subscription), 20 (bulk).
 
 ### Mod-author flows
 None yet covered. Priority next:

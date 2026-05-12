@@ -44,6 +44,41 @@ Conceptually:
    - Reads the `## Assert` block and verifies on-disk state, command return values, and (where applicable) screenshot diffs.
 4. Reports pass/fail with reproduction notes.
 
+## Local QA entry points
+
+| What | How | Time |
+|---|---|---|
+| Rust unit + integration | `npm run qa:rust` (or `cargo test --manifest-path=src-tauri/Cargo.toml`) | ~10s |
+| Rust cassette integration | `npm run qa:rust:cassette` | ~15s |
+| Backend coverage report | `cargo llvm-cov --manifest-path src-tauri/Cargo.toml --summary-only` | ~30s |
+| Frontend unit tests | `npm run qa:unit` | ~5s |
+| Frontend coverage + gate | `npm run qa:coverage` (enforces vitest.config.ts thresholds) | ~10s |
+| WebDriver smoke (no cassette) | `npm run qa:smoke` | ~30s |
+| WebDriver smoke (cassette) | `npm run qa:smoke:cassette` | ~30s |
+| Fast feedback loop | `npm test` (Rust + Vitest only) | ~15s |
+| Full QA suite | `npm run qa` (all of the above) | ~3-5 min |
+
+`scripts/release.sh` runs all five before any version bump. Set
+`SKIP_QA=1` to bypass for emergency hotfixes (and accept the risk).
+
+## Harness env vars
+
+The WebDriver smoke uses these to keep its state isolated. Each
+defaults to "use real OS detection / config dir / cache dir" when
+unset, so a production build behaves identically without them:
+
+- `STS2_FIXTURE_GAME_PATH` — point the manager at a fake STS2
+  install (tempdir tree with `release_info.json` + `mods/` + the
+  Godot `.pck` marker file). Overrides `game::detect_game`.
+- `STS2_CONFIG_DIR` — relocate `mod_sources.json`, profiles,
+  active-profile state, and the log file. Defaults to
+  `<dirs::config_dir>/sts2-mod-manager`.
+- `STS2_CACHE_DIR` — relocate downloaded release zips. Defaults to
+  `<dirs::cache_dir>/sts2-mod-manager`.
+- `STS2_CASSETTE_DIR` — when the binary is built with `--features
+  qa-cassette`, route outbound GitHub + Nexus GETs to this dir
+  instead of the wire. Production builds ignore this entirely.
+
 ## Driving the app — three tiers
 
 Pick the right tier for the scenario:

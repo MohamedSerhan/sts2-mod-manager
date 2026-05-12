@@ -18,7 +18,15 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "test": "npm run qa:rust && npm run qa:unit",
+    "qa": "npm run qa:rust && npm run qa:rust:cassette && npm run qa:coverage && npm run qa:smoke && npm run qa:smoke:cassette",
+    "qa:rust": "cargo test --manifest-path=src-tauri/Cargo.toml",
+    "qa:rust:cassette": "cargo test --manifest-path=src-tauri/Cargo.toml --features qa-cassette",
+    "qa:unit": "vitest run",
+    "qa:unit:watch": "vitest",
+    "qa:coverage": "vitest run --coverage",
     "qa:smoke": "node qa/runner/smoke.mjs",
+    "qa:smoke:cassette": "cross-env CASSETTE=1 node qa/runner/smoke.mjs",
     "release": "bash scripts/release.sh"
   },
   "dependencies": {
@@ -37,12 +45,19 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.4",
     "@tauri-apps/cli": "^2",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
+    "@vitest/coverage-v8": "^4.1.6",
+    "cross-env": "^10.1.0",
+    "jsdom": "^29.1.1",
     "selenium-webdriver": "^4.43.0",
     "tailwindcss": "^4.2.4",
     "typescript": "~5.8.3",
-    "vite": "^7.0.4"
+    "vite": "^7.0.4",
+    "vitest": "^4.1.6"
   }
 }

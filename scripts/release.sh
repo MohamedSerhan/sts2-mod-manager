@@ -19,6 +19,13 @@ set -euo pipefail
 # local main is in sync with origin/main (auto-pulls if behind, errors on
 # divergence). This prevents the "ghost release on stale main" failure mode
 # that produced the v0.7.4/v0.7.5 mess.
+#
+# QA gate: after pre-flight, runs the full QA suite (Rust tests + Vitest +
+# WebDriver smoke in cassette + non-cassette modes). The gate blocks the
+# release on any failure. Set SKIP_QA=1 to bypass for emergency hotfixes,
+# but understand that's how past regressions shipped — the v1.3.1
+# vunknown bug and the duplicate same-name mod collapse both made it to
+# users because nobody ran the existing tests.
 
 # --- Pre-flight ---
 
@@ -121,6 +128,54 @@ if [[ "$LOCAL" != "$REMOTE" ]]; then
     echo "Error: local main and origin/main have diverged. Resolve manually." >&2
     exit 1
   fi
+fi
+
+# --- QA suite gate ---
+#
+# The QA harness is our last line of defence before users see bugs.
+# It runs four suites:
+#   1. Rust unit + integration tests (default features)
+#   2. Rust integration tests with `qa-cassette` (proves the HTTP
+#      intercept didn't regress)
+#   3. Frontend parser unit tests via Vitest
+#   4. WebDriver smoke against a built binary, in both modes
+#      (non-cassette + CASSETTE=1)
+#
+# This blocks a release if anything is red. To bypass for an
+# emergency hotfix, set SKIP_QA=1. Use it sparingly — past releases
+# that skipped pre-flight checks produced the v0.7.4/v0.7.5 mess and
+# the v1.3.1 vunknown bug that 1.3.3 had to fix.
+
+if [[ "${SKIP_QA:-0}" == "1" ]]; then
+  echo "⚠  SKIP_QA=1 — skipping the QA suite. You are flying blind." >&2
+else
+  echo "==== QA suite ===="
+  echo "[1/4] Rust tests (default features)..."
+  cargo test --manifest-path=src-tauri/Cargo.toml --quiet
+
+  echo "[2/4] Rust tests (qa-cassette feature)..."
+  cargo test --manifest-path=src-tauri/Cargo.toml --features qa-cassette --quiet
+
+  echo "[3/4] Frontend unit tests + coverage gate (vitest)..."
+  # qa:coverage runs Vitest with the v8 coverage reporter AND enforces
+  # the thresholds declared in vitest.config.ts. A regression that
+  # drops coverage below the floor blocks the release.
+  npm run --silent qa:coverage
+
+  echo "[4/4] WebDriver smoke..."
+  # Ensure the matching msedgedriver is on disk. The auto-fetch
+  # detects the local WebView2 version and downloads the exact
+  # driver — idempotent if already current.
+  if [[ -f qa/runner/scripts/download-msedgedriver.mjs ]]; then
+    node qa/runner/scripts/download-msedgedriver.mjs
+  fi
+  # The smoke binary must be built with `qa-cassette` so the
+  # CASSETTE=1 pass exercises the intercept. Build once and reuse
+  # for both modes.
+  npm run tauri build -- --no-bundle --features qa-cassette
+  node qa/runner/smoke.mjs
+  CASSETTE=1 node qa/runner/smoke.mjs
+  echo "==== QA suite green — proceeding with release ===="
 fi
 
 # --- Determine bump type ---

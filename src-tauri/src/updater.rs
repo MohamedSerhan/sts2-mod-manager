@@ -995,6 +995,125 @@ pub async fn update_all_mods(
     Ok(results)
 }
 
+// ── Tests ───────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod version_helper_tests {
+    use super::*;
+
+    #[test]
+    fn parse_version_handles_v_prefix_and_partial() {
+        assert_eq!(parse_version("1.2.3").unwrap().to_string(), "1.2.3");
+        assert_eq!(parse_version("v1.2.3").unwrap().to_string(), "1.2.3");
+        // Partial versions get .0 padding.
+        assert_eq!(parse_version("1.2").unwrap().to_string(), "1.2.0");
+        assert_eq!(parse_version("1").unwrap().to_string(), "1.0.0");
+        // Whitespace tolerated.
+        assert_eq!(parse_version(" v1.2.3 ").unwrap().to_string(), "1.2.3");
+    }
+
+    #[test]
+    fn parse_version_returns_none_for_nonsense() {
+        assert!(parse_version("dev-build").is_none());
+        assert!(parse_version("nightly").is_none());
+        assert!(parse_version("").is_none());
+        assert!(parse_version("x.y.z").is_none());
+    }
+
+    #[test]
+    fn is_version_tag_filters_non_semver_tags() {
+        assert!(is_version_tag("1.0.0"));
+        assert!(is_version_tag("v3.1.2"));
+        assert!(!is_version_tag("dev-build"));
+        assert!(!is_version_tag("nightly"));
+        assert!(!is_version_tag(""));
+    }
+
+    #[test]
+    fn compare_versions_handles_v_prefix_and_returns_none_for_unparseable() {
+        use std::cmp::Ordering;
+        assert_eq!(compare_versions("1.0.0", "1.0.0"), Some(Ordering::Equal));
+        assert_eq!(compare_versions("1.0.0", "v2.0.0"), Some(Ordering::Less));
+        assert_eq!(compare_versions("v2.0.0", "1.0.0"), Some(Ordering::Greater));
+        assert_eq!(compare_versions("dev-build", "1.0.0"), None);
+    }
+
+    #[test]
+    fn is_newer_version_is_false_for_equal_and_downgrade() {
+        assert!(is_newer_version("1.0.0", "2.0.0"));
+        assert!(is_newer_version("1.0.0", "1.0.1"));
+        assert!(!is_newer_version("2.0.0", "1.0.0"));
+        assert!(!is_newer_version("1.0.0", "1.0.0"));
+        // Unparseable → false (fail closed for downgrade-prevention).
+        assert!(!is_newer_version("dev", "1.0.0"));
+    }
+
+    #[test]
+    fn game_version_satisfies_fails_open_on_parse_errors() {
+        // Strict happy path
+        assert!(game_version_satisfies("0.105.0", "0.103.0"));
+        assert!(game_version_satisfies("1.0.0", "1.0.0"));
+        assert!(!game_version_satisfies("0.103.0", "0.105.0"));
+        // Fail-open: any parse error makes the check pass so a quirky version
+        // string doesn't lock the user out of installing.
+        assert!(game_version_satisfies("dev", "0.105.0"));
+        assert!(game_version_satisfies("0.105.0", "unknown"));
+    }
+
+    #[test]
+    fn install_is_incompatible_only_flags_when_both_known_and_required_higher() {
+        use crate::mods::ModInfo;
+        let mk = |min: Option<&str>| ModInfo {
+            name: "x".into(),
+            version: "1.0".into(),
+            description: String::new(),
+            enabled: true,
+            files: vec![],
+            source: None,
+            hash: None,
+            dependencies: vec![],
+            size_bytes: 0,
+            folder_name: None,
+            mod_id: None,
+            github_url: None,
+            nexus_url: None,
+            pinned: false,
+            min_game_version: min.map(String::from),
+            author: None,
+        };
+        assert!(install_is_incompatible(&mk(Some("0.110.0")), Some("0.105.0")));
+        assert!(!install_is_incompatible(&mk(Some("0.100.0")), Some("0.105.0")));
+        // Either side missing → not incompatible (fail open).
+        assert!(!install_is_incompatible(&mk(None), Some("0.105.0")));
+        assert!(!install_is_incompatible(&mk(Some("0.110.0")), None));
+    }
+
+    #[test]
+    fn parse_github_source_extracts_owner_repo() {
+        assert_eq!(parse_github_source("github:foo/bar"), Some(("foo".into(), "bar".into())));
+        assert_eq!(parse_github_source("github:foo/"), None);
+        assert_eq!(parse_github_source("github:/bar"), None);
+        assert_eq!(parse_github_source("foo/bar"), None); // missing prefix
+    }
+
+    #[test]
+    fn parse_owner_repo_splits_or_fails() {
+        assert_eq!(parse_owner_repo("foo/bar"), Some(("foo".into(), "bar".into())));
+        assert_eq!(parse_owner_repo("foo/"), None);
+        assert_eq!(parse_owner_repo("/bar"), None);
+        assert_eq!(parse_owner_repo("just-one"), None);
+    }
+
+    #[test]
+    fn is_mod_asset_recognizes_supported_extensions() {
+        assert!(is_mod_asset("BaseLib.zip"));
+        assert!(is_mod_asset("mod.dll"));
+        assert!(is_mod_asset("art.pck"));
+        assert!(!is_mod_asset("README.md"));
+        assert!(!is_mod_asset("source.tar.gz"));
+    }
+}
+
 // ── Audit ───────────────────────────────────────────────────────────────────
 
 /// Detailed audit entry for a single mod's version status.

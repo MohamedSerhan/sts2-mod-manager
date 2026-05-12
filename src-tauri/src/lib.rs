@@ -12,11 +12,16 @@ pub mod mod_sources;
 pub mod mods;
 mod nexus;
 pub mod profiles;
+mod qa_cassette;
 mod quick_add;
 mod sharing;
 mod state;
 mod subscriptions;
-mod updater;
+// `updater` is pub for the same reason as `mods` / `mod_sources`: the
+// integration tests in `src-tauri/tests/` exercise check_all_updates +
+// audit_mod_versions directly so the qa-cassette playback layer can be
+// verified without spinning up a Tauri window.
+pub mod updater;
 
 use state::create_app_state;
 use state::AppState;
@@ -81,10 +86,41 @@ pub fn run() {
     );
     log::info!("Config dir: {}", config_dir.display());
 
+    // One-shot banner so a tester reading the log can confirm cassette
+    // playback is actually live for this run. The function returns false
+    // in any shipped build (the feature isn't compiled in), so the log
+    // line never appears in production user logs.
+    if qa_cassette::is_active() {
+        log::info!(
+            "QA cassette playback ENABLED — outbound GitHub/Nexus GETs will read from {}",
+            std::env::var("STS2_CASSETTE_DIR").unwrap_or_default(),
+        );
+    }
+
     let app_state = create_app_state();
 
-    // Auto-detect game path on startup
-    if let Some(game_path) = game::detect_game() {
+    // QA harness escape hatch: if STS2_FIXTURE_GAME_PATH is set, use
+    // that as the game path instead of auto-detecting. Lets the
+    // WebDriver harness point the manager at a tempdir tree it
+    // controls (with pre-installed mods, a fake release_info.json,
+    // etc.) so UI specs aren't at the mercy of whatever the developer
+    // happens to have on their real STS2 install. The path is taken
+    // verbatim — caller is responsible for creating the directory and
+    // populating it. Logged loudly so a misconfigured CI run is
+    // obvious in the log dump.
+    let fixture_game_path = std::env::var("STS2_FIXTURE_GAME_PATH")
+        .ok()
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.exists());
+    if let Some(p) = fixture_game_path {
+        log::info!(
+            "STS2_FIXTURE_GAME_PATH override — using {} (auto-detect skipped)",
+            p.display(),
+        );
+        if let Ok(mut s) = app_state.lock() {
+            s.set_game_path(p);
+        }
+    } else if let Some(game_path) = game::detect_game() {
         log::info!("Auto-detected game at: {}", game_path.display());
         if let Ok(mut s) = app_state.lock() {
             s.set_game_path(game_path);

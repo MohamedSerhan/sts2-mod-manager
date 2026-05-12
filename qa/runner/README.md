@@ -43,18 +43,23 @@ WebView2 runtime version).
      | Select-Object pv
    ```
 
-   On this machine right now: **147.0.3912.98**.
+   On this machine right now: **148.0.3967.54** (bumps every few
+   weeks as WebView2 auto-updates).
 
-   Download the matching driver from
+   Easiest: run the auto-fetcher, which reads the version out of the
+   registry and pulls the matching driver from Microsoft's CDN:
+
+   ```bash
+   node qa/runner/scripts/download-msedgedriver.mjs
+   ```
+
+   Idempotent — re-running with the right version already installed
+   prints "already at X — nothing to do." and exits.
+
+   Manual fallback: download the driver from
    <https://developer.microsoft.com/en-us/microsoft-edge/tools/webdriver/>
-   — pick the version that matches your WebView2 build, grab the
-   x64 zip, and extract `msedgedriver.exe` into this directory:
-
-   ```
-   qa/runner/msedgedriver.exe
-   ```
-
-   The runner expects it at exactly that path.
+   and extract `msedgedriver.exe` to `qa/runner/msedgedriver.exe`. The
+   runner expects it at exactly that path.
 
 3. **App build** — the runner drives the **release build** of the
    manager (not the dev server — webdriver against `tauri dev`
@@ -75,6 +80,31 @@ node qa/runner/smoke.mjs
 ```
 
 Exits 0 on success, non-zero with a stack trace on failure.
+
+### Cassette mode (CASSETTE=1)
+
+When `CASSETTE=1` is set, the runner exports
+`STS2_CASSETTE_DIR=<repo>/qa/fixtures` to the launched app and appends
+the cassette-only specs to the suite. The app binary MUST have been
+built with the `qa-cassette` Cargo feature, otherwise the env var is a
+no-op (the cfg gate in `qa_cassette::intercept_get` is compile-time):
+
+```bash
+npm run tauri build -- --no-bundle --features qa-cassette
+CASSETTE=1 node qa/runner/smoke.mjs
+```
+
+Confirm the cassette took effect by grepping the app log for
+`QA cassette playback ENABLED`. With it on, `audit_mod_versions` and
+`check_all_updates` will read responses from `qa/fixtures/github/` and
+`qa/fixtures/nexus/` instead of hitting the wire. See
+`qa/fixtures/README.md` for the URL→file mapping and how to capture
+new cassettes.
+
+The integration-test side of the same plumbing lives at
+`src-tauri/tests/qa_cassette.rs` (`cargo test --features qa-cassette
+--test qa_cassette`) — it doesn't need WebView2 and is the fastest way
+to verify the intercept didn't regress.
 
 ## What the smoke test does
 

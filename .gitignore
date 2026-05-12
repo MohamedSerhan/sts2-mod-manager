@@ -51,3 +51,10 @@ godot.log
 .claude/
 src-tauri/icons/_backup/
 src-tauri/icons/.icon-source.png
+
+# Vitest coverage reports — regenerated on every `npm run qa:coverage`
+coverage/
+
+# Cygwin/MSYS bash crash dumps (left behind by some shells when a
+# command segfaults). Not shipped, not useful in history.
+*.stackdump

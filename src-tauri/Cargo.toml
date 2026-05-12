@@ -9,6 +9,15 @@ edition = "2021"
 name = "sts2_mod_manager_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+default = []
+# Reroutes outbound GitHub + Nexus HTTP calls to disk fixtures under
+# `$STS2_CASSETTE_DIR`. Used only by the QA WebDriver harness so the
+# audit / update / subscription specs can run deterministically without
+# burning rate limits or coupling to upstream state. Never enabled for
+# shipped builds. See `qa/runner/README.md` and `src/qa_cassette.rs`.
+qa-cassette = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

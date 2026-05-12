@@ -123,6 +123,55 @@ pub fn resolve_nexus_url(url: &str) -> Result<(String, u64)> {
     }
 }
 
+#[cfg(test)]
+mod url_resolver_tests {
+    use super::*;
+
+    #[test]
+    fn resolve_github_url_handles_full_url_shorthand_and_subpaths() {
+        let (o, r) = resolve_github_url("https://github.com/foo/bar").unwrap();
+        assert_eq!((o.as_str(), r.as_str()), ("foo", "bar"));
+
+        let (o, r) = resolve_github_url("https://github.com/foo/bar/releases/tag/v1").unwrap();
+        assert_eq!((o.as_str(), r.as_str()), ("foo", "bar"));
+
+        let (o, r) = resolve_github_url("github:foo/bar").unwrap();
+        assert_eq!((o.as_str(), r.as_str()), ("foo", "bar"));
+
+        // www.github.com is accepted
+        let (o, r) = resolve_github_url("https://www.github.com/foo/bar").unwrap();
+        assert_eq!((o.as_str(), r.as_str()), ("foo", "bar"));
+    }
+
+    #[test]
+    fn resolve_github_url_rejects_non_github_urls() {
+        assert!(resolve_github_url("https://gitlab.com/foo/bar").is_err());
+        assert!(resolve_github_url("https://example.com/foo/bar").is_err());
+        assert!(resolve_github_url("not a url").is_err());
+        assert!(resolve_github_url("github:foo").is_err()); // missing slash
+        assert!(resolve_github_url("github:/bar").is_err()); // empty owner
+    }
+
+    #[test]
+    fn resolve_nexus_url_handles_full_and_shorthand() {
+        let (g, id) = resolve_nexus_url("https://www.nexusmods.com/slaythespire2/mods/123").unwrap();
+        assert_eq!(g.as_str(), "slaythespire2");
+        assert_eq!(id, 123);
+
+        let (g, id) = resolve_nexus_url("nexus:slaythespire2/mods/456").unwrap();
+        assert_eq!(g.as_str(), "slaythespire2");
+        assert_eq!(id, 456);
+    }
+
+    #[test]
+    fn resolve_nexus_url_rejects_invalid_inputs() {
+        assert!(resolve_nexus_url("https://github.com/foo/bar").is_err());
+        assert!(resolve_nexus_url("nexus:foo/posts/123").is_err()); // wrong path
+        assert!(resolve_nexus_url("nexus:foo/mods/not-a-number").is_err());
+        assert!(resolve_nexus_url("garbage").is_err());
+    }
+}
+
 // ── Tauri Commands ──────────────────────────────────────────────────────────
 
 /// Quick-add a mod from a URL. Accepts GitHub URLs/shorthands and Nexus URLs/shorthands.

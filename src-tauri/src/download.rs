@@ -84,11 +84,15 @@ pub async fn fetch_latest_release(
     repo: &str,
     token: Option<&str>,
 ) -> Result<GitHubRelease> {
-    let client = build_client(token);
     let url = format!(
         "https://api.github.com/repos/{}/{}/releases/latest",
         owner, repo
     );
+    if let Some(bytes) = crate::qa_cassette::intercept_get(&url) {
+        let release: GitHubRelease = serde_json::from_slice(&bytes)?;
+        return Ok(release);
+    }
+    let client = build_client(token);
     log::debug!("GitHub API: fetch latest release {}/{} (token={})", owner, repo, token.is_some());
     let resp = client.get(&url).send().await.map_err(|e| {
         log::warn!("GitHub fetch_latest_release request failed for {}/{}: {}", owner, repo, e);
@@ -112,11 +116,17 @@ pub async fn fetch_releases(
     per_page: u32,
     token: Option<&str>,
 ) -> Result<Vec<GitHubRelease>> {
-    let client = build_client(token);
     let url = format!(
         "https://api.github.com/repos/{}/{}/releases",
         owner, repo
     );
+    // Cassette layer strips query params, so paginated calls all resolve
+    // to the same on-disk file. The harness only ever needs page 1.
+    if let Some(bytes) = crate::qa_cassette::intercept_get(&url) {
+        let releases: Vec<GitHubRelease> = serde_json::from_slice(&bytes)?;
+        return Ok(releases);
+    }
+    let client = build_client(token);
     let resp = client
         .get(&url)
         .query(&[
@@ -137,11 +147,15 @@ pub async fn fetch_release_by_tag(
     tag: &str,
     token: Option<&str>,
 ) -> Result<GitHubRelease> {
-    let client = build_client(token);
     let url = format!(
         "https://api.github.com/repos/{}/{}/releases/tags/{}",
         owner, repo, tag
     );
+    if let Some(bytes) = crate::qa_cassette::intercept_get(&url) {
+        let release: GitHubRelease = serde_json::from_slice(&bytes)?;
+        return Ok(release);
+    }
+    let client = build_client(token);
     let resp = client.get(&url).send().await?.error_for_status()?;
     let release: GitHubRelease = resp.json().await?;
     Ok(release)
@@ -298,6 +312,21 @@ pub async fn download_file<F>(url: &str, dest: &Path, on_progress: F) -> Result<
 where
     F: Fn(u64, u64),
 {
+    // Cassette playback: zip assets and other binary downloads can be
+    // served from disk so the walk-back peek (peek_zip_min_game_version)
+    // gets the deterministic bytes a test wrote. The fixture path mirrors
+    // the URL — e.g. an asset hosted at github-releases.githubusercontent.
+    // com is routed via the GitHub bucket if mapped, or simply ignored
+    // here so the call falls through to the wire when there's no fixture.
+    if let Some(bytes) = crate::qa_cassette::intercept_get(url) {
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let total = bytes.len() as u64;
+        std::fs::write(dest, &bytes)?;
+        on_progress(total, total);
+        return Ok(());
+    }
     let client = reqwest::Client::builder()
         .user_agent(concat!("sts2-mod-manager/", env!("CARGO_PKG_VERSION")))
         .build()

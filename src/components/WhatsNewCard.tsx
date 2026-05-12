@@ -113,15 +113,16 @@ export function WhatsNewCard() {
   );
 }
 
-type Block =
+export type Block =
   | { kind: 'subhead'; text: string }
   | { kind: 'bullets'; items: string[] }
   | { kind: 'para'; text: string };
 
 /** A tiny markdown subset: `###` subheadings, `-` / `*` bullet lists, and
  *  paragraphs. Inline `code` spans get rendered as <code>. Anything else
- *  passes through as plain text. */
-function parseSimpleMarkdown(body: string): Block[] {
+ *  passes through as plain text. Exported for unit tests; the runtime
+ *  caller is `WhatsNewCard` below. */
+export function parseSimpleMarkdown(body: string): Block[] {
   const lines = body.split(/\r?\n/);
   const out: Block[] = [];
   let bullets: string[] | null = null;

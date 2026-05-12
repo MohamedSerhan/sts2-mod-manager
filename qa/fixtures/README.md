@@ -8,8 +8,8 @@ Realistic inputs for QA scenarios. Three rules: no synthetic happy-path content,
 |---|---|---|
 | `manifests/` | Hand-captured / hand-crafted `manifest.json` files for popular mods. Each file's leading comment names the source and the quirk it exhibits. | Drop in a new `.json`; write a provenance header before the JSON body. |
 | `zips/` | Pre-built `.zip` archives used by install-pipeline scenarios. Built lazily by `harness/build-fixtures.sh` (TODO). | Keep `.gitkeep`; don't check in large binaries. The build script reconstructs them from `manifests/` + placeholder DLL bytes. |
-| `nexus/` | HTTP cassettes from the Nexus API. One JSON file per request, named `mods-<id>.json`. | `cargo run --bin capture-nexus -- 103` (TODO) — would call the Nexus API once, save the response, redact the key. |
-| `github/` | HTTP cassettes from GitHub releases. One JSON file per repo, named `<owner>-<repo>.json`. | Same shape; capture via `gh api` + redaction. |
+| `nexus/` | HTTP cassettes from the Nexus API. Path mirrors the URL — e.g. `nexus/v1/games/slaythespire2/mods/103.json`. Served by `qa-cassette` when `$STS2_CASSETTE_DIR` points at `qa/fixtures`. | `curl -H "apikey: $NEXUS_API_KEY" <url> > <path>` once, then commit. |
+| `github/` | HTTP cassettes from the GitHub API. Path mirrors the URL — e.g. `github/repos/<owner>/<repo>/releases/latest.json`. Query params are stripped during lookup, so paginated calls all map to one file (e.g. `releases.json`). | `gh api repos/<owner>/<repo>/releases/latest > <path>`. |
 | `game/` | A directory tree mirroring a Slay the Spire 2 install (`release_info.json` + empty `mods/` + empty `mods_disabled/`). Cloned per scenario. | Update `release_info.json` when the game's manifest schema changes. |
 
 ## Provenance headers
@@ -26,6 +26,19 @@ JSON doesn't support comments, but the harness reads these files raw before any 
 
 - Capture once at the time of the bug report. Don't refresh on a schedule — yesterday's BaseLib manifest is the bug, today's might be fixed upstream.
 - When a mod author *fixes* their quirk (e.g. Alchyr strips the BOM from BaseLib's manifest in v3.1.3), do NOT update our fixture — it's still the manifest that broke the manager, and we want to keep proving we handle it. Add a new fixture for the fixed version if relevant.
+
+## Cassette playback (qa-cassette feature)
+
+When the manager is built with `--features qa-cassette` and the
+`STS2_CASSETTE_DIR` env var points at this directory, outbound GitHub
+and Nexus HTTP GETs are answered from disk instead of the wire. See
+`src-tauri/src/qa_cassette.rs` for the URL → path mapping and
+`qa/runner/README.md` for how the WebDriver harness uses it.
+
+The `qa-fixture/test-mod`, `qa-fixture/uptodate-mod`, and Nexus mod
+`99999` cassettes are synthesized (no real upstream — they exist to
+drive specific update-flow scenarios deterministically). Replace them
+with real captures the same way you'd add any other cassette.
 
 ## What doesn't live here
 

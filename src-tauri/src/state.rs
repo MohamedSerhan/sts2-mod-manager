@@ -112,13 +112,30 @@ pub type AppState = Arc<Mutex<AppStateInner>>;
 
 impl AppStateInner {
     pub fn new() -> Self {
-        let config_path = dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("sts2-mod-manager");
+        // QA harness escape hatch: $STS2_CONFIG_DIR / $STS2_CACHE_DIR
+        // redirect both directories to fresh tempdirs so the WebDriver
+        // smoke doesn't read the developer's real mod_sources.json /
+        // active_profile.txt / cached zips (which would tie test
+        // outcomes to whatever the dev had on disk and could leak real
+        // pinned-mod state into a deterministic test). When unset,
+        // behavior is unchanged from a normal user install.
+        let config_path = std::env::var("STS2_CONFIG_DIR")
+            .ok()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                dirs::config_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join("sts2-mod-manager")
+            });
 
-        let cache_path = dirs::cache_dir()
-            .unwrap_or_else(|| PathBuf::from(".cache"))
-            .join("sts2-mod-manager");
+        let cache_path = std::env::var("STS2_CACHE_DIR")
+            .ok()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                dirs::cache_dir()
+                    .unwrap_or_else(|| PathBuf::from(".cache"))
+                    .join("sts2-mod-manager")
+            });
 
         let profiles_path = config_path.join("profiles");
 

@@ -5,42 +5,104 @@ item lists what it costs to do and why we deferred it. Pick from
 here when there's a slow week or after a user reports something
 related.
 
-## Tier 2 WebDriver scenarios (UI specs, beyond the 6 smoke)
+## Tier 2 WebDriver scenarios (UI specs)
 
-The smoke suite proves the app launches and the new surfaces render.
-The next round drives the actual interactions:
+What's covered today (per `qa/scenarios/INDEX.md`):
+- Scenarios 006–010 — toggle / audit-count / pin / delete / create-
+  profile. All run from `qa/runner/smoke.mjs`. See the cassette +
+  fixture-game-path env vars below.
 
-- **Toggle a mod off → verify it's in `mods_disabled/`** — needs a
-  test mod set up in the fake game install before launch. Maybe 1
-  hour to wire up a fixture-game-path env var so the smoke harness
-  can point the manager at a tempdir.
-- **Pin a mod → click "Check for updates" → verify the row is
-  excluded from the pending count** — depends on audit running
-  against a cassette (see below).
-- **Drag-drop a .zip onto the window** — Selenium can dispatch the
+Still uncovered (priority order):
+
+- **Drag-drop a `.zip` onto the window** — Selenium can dispatch the
   Drop event but tauri's drag-drop intercept is at the OS level.
-  Might require computer-use MCP for this one.
-- **Click "Update available" pill → verify spinner appears, then
-  the row refreshes** — needs cassette playback so the GitHub fetch
-  is deterministic.
+  Likely requires computer-use MCP. Defer until reported.
+- **Click "Update available" pill → row refreshes** — exercises the
+  walk-back compat check + zip download + extraction. Needs a zip
+  cassette fixture (we'd cassette `github.com` redirects with a
+  Compress-Archive-built tiny manifest zip). ~2 hours.
+- **Profile switch + apply** — companion to scenario 010. Trickier
+  than create because we have to assert the active-profile indicator
+  AND that the apply ran without scrubbing pins (the v1.3.1 contract).
+- **Share-code import flow** — needs a stateful GitHub mock (Profile
+  sharing item below).
+- **Repair walk-back** — single mod, intentionally newer-than-game
+  cassette, click Repair, verify the walk-back tag installs.
+- **Subscription apply** — modpack curator pushes update, friend
+  applies. Needs the stateful mock.
+- **Drag-drop + launch + deep link** — all OS-level; either
+  computer-use MCP or new harness tier.
 
-## Cassette playback (deterministic network for WebDriver)
+## Cassette playback — DONE (v1.3.4 + qa-cassette feature)
 
-The audit + update + subscription flows all hit GitHub and Nexus.
-Real network calls in tests are flaky, rate-limited, and bind the
-test outcome to upstream state. Plan:
+GitHub + Nexus HTTP GETs are now intercepted by
+`src-tauri/src/qa_cassette.rs` when the binary is built with
+`--features qa-cassette` AND `$STS2_CASSETTE_DIR` is set. URL → file
+mapping is documented in that module + `qa/fixtures/README.md`.
 
-1. Capture real responses once via `gh api` and `curl` against
-   Nexus (with redacted API keys), save to `qa/fixtures/github/`
-   and `qa/fixtures/nexus/`.
-2. Add an HTTP intercept layer to the Rust backend gated behind
-   a build cfg (`#[cfg(feature = "qa-cassette")]`). When enabled,
-   the layer routes requests to the local cassette dir instead of
-   the wire.
-3. Build the QA target with `cargo tauri build --features qa-cassette`
-   and have the smoke harness use that binary.
+What landed:
+- Cargo feature `qa-cassette` (no-op when off; compile-time gate).
+- Cassette dir layout: `<dir>/github/<url-path>.json`,
+  `<dir>/nexus/<url-path>` (.json suffix is preserved when present).
+- Intercept wired into `fetch_latest_release`, `fetch_releases`,
+  `fetch_release_by_tag`, `download_file`, and the three Nexus
+  endpoints (`get_mod_info`, `get_mod_list`, `get_mod_files`).
+- Synthetic fixtures for one pending-update mod
+  (`qa-fixture/test-mod`), one already-current mod
+  (`qa-fixture/uptodate-mod`), and one Nexus mod (`99999`).
+- Integration test at `src-tauri/tests/qa_cassette.rs` exercising
+  `check_all_updates` end-to-end without WebView2 (run with
+  `cargo test --features qa-cassette --test qa_cassette`).
+- Smoke harness gains a `CASSETTE=1` env switch that sets
+  `STS2_CASSETTE_DIR` for the spawned tauri-driver.
 
-Half a day of work. Unlocks every test that touches the network.
+What's NOT done yet (deferred):
+- Downloads-watcher's blocking-reqwest path in
+  `downloads_watcher.rs::nexus_resolve_variant_version` is the only
+  Nexus call site that bypasses the intercept (uses
+  `reqwest::blocking` with an inline closure rather than
+  `NexusClient`). Audit flows don't touch it; subscription apply
+  does. Add a sibling intercept call when that flow gets a spec.
+- Profile-share GitHub POSTs in `sharing.rs` aren't routed —
+  cassette is GET-only by design. Those need a stateful mock
+  server (the "Profile sharing / subscription flows" section
+  below already calls this out).
+
+## msedgedriver / WebView2 version drift — AUTOMATED
+
+`qa/runner/scripts/download-msedgedriver.mjs` now reads the local
+WebView2 build out of the registry and downloads the matching driver
+from Microsoft's CDN. Idempotent. Run it after a WebView2 update
+broke the smoke:
+
+```bash
+node qa/runner/scripts/download-msedgedriver.mjs
+```
+
+The release-gate (`scripts/release.sh`) calls this automatically
+before the WebDriver smoke step.
+
+## Harness environment variables
+
+The smoke harness uses these to keep its state isolated from the
+developer's real install. Verified in `src-tauri/src/lib.rs::run`
+and `state.rs::new`.
+
+- `STS2_FIXTURE_GAME_PATH` — overrides auto-detect. Points at a
+  tempdir game tree with `release_info.json`, `mods/`, and
+  `mods_disabled/`. The smoke creates this per run and cleans it
+  up in `finally`.
+- `STS2_CONFIG_DIR` — overrides `dirs::config_dir() + "/sts2-mod-
+  manager"`. Catches `mod_sources.json`, `active_profile.txt`,
+  the log file, etc.
+- `STS2_CACHE_DIR` — overrides `dirs::cache_dir() + "/sts2-mod-
+  manager"`. Catches downloaded release zips.
+- `STS2_CASSETTE_DIR` — when the binary is built with `--features
+  qa-cassette`, redirects outbound GitHub + Nexus GETs to disk
+  fixtures under this path. See `src-tauri/src/qa_cassette.rs`.
+
+A shipped build (no feature, no env vars) behaves identically to
+v1.3.4 — these are pure escape hatches.
 
 ## Tier 2 scenarios for historical bugs
 
@@ -59,21 +121,61 @@ the running app can.
 - **#22 — Profile state is sticky after toggle.** Toggle a mod off.
   Switch to a different profile and back. Assert the toggle stuck.
 
-Each is ~30 min once the fixture-game-path env var exists.
+Each is ~30 min — the fixture-game-path env var already exists.
 
-## Frontend parser unit tests
+## Frontend coverage gate — current 70%, target 95%
 
-The TypeScript-only parsers have no tests:
-- `src/lib/changelog.ts::parseChangelog` — handles `[Unreleased]`,
-  versioned headings with dates, rollup headings without dates,
-  HR separators, link-reference footnotes.
-- `src/components/WhatsNewCard.tsx::parseSimpleMarkdown` — subheads,
-  bullets, paragraphs, inline `code`, HR drop.
+Vitest + jsdom + Testing Library + v8 coverage are wired. The
+release.sh QA gate enforces the thresholds declared in
+`vitest.config.ts` and drops the release if coverage regresses.
 
-Both are pure functions. The blocker is no JS test framework in the
-project. Cheapest path: `npm install --save-dev vitest` (~10 min),
-then write `*.test.ts` siblings to each file. Probably 1-2 hours
-end-to-end including CI wire-up.
+Current baseline (`npm run qa:coverage`):
+- Lines:      **70.15%**
+- Statements: 68.94%
+- Functions:  71.89%
+- Branches:   65.24%
+- 439 tests across 36 files
+
+Test counts per file (>0% are at least partially tested):
+
+| File group | Coverage today | Path to 95% |
+|---|---|---|
+| `src/lib/*` (parsers, utils) | 78% | almost there — `shareImport.tsx` higher-level functions need ConfirmFn-mocked tests |
+| `src/components/Primitives` | 70-100% | done for Toggle/Button/Card/Badge/Input/LaunchSpinner/KebabMenu |
+| `src/components/Forms+Modals` | 22-90% | OnboardingOverlay (18%) + PublishModal (22%) need deep tests; rest are 70%+ |
+| `src/contexts/*` | 89% | one branch in AppContext's polling loop |
+| `src/views/Tutorial.tsx` | 87% | almost done |
+| `src/views/Browse.tsx` | 61% | needs Nexus-trending error path + install-from-detail tests |
+| `src/views/Mods.tsx` | 47% | needs deep tests for advanced-mode forms, source editor, repair flow |
+| `src/views/Settings.tsx` | 36% | each tab body needs its own deep test suite |
+| `src/views/Profiles.tsx` | 29% | snapshot/repair/share kebab paths untested |
+| `src/views/Home.tsx` | 27% | share-code import, subscription banners, drift overlay |
+| `src/App.tsx` | 38% | top-bar resize handles, deep-link routing, OnboardingOverlay branches |
+
+Trajectory to 95%: write ~6 more test files per view (one per
+conditional render section). Estimated ~3-4 hours of focused
+work. WebDriver smoke specs already cover the **user flows**
+end-to-end (toggle / pin / delete / audit / profile create / share-
+code import) — these unit tests fill in the static branches the
+smoke can't easily reach.
+
+## Backend coverage gate — current 19%
+
+`cargo-llvm-cov` is wired. Run `cargo llvm-cov --manifest-path
+src-tauri/Cargo.toml --summary-only` for a per-file report.
+
+Current state:
+- Lines: 19.12% overall
+- `mods.rs` 54% (most user-flow paths covered)
+- `qa_cassette.rs` 76%
+- `nexus.rs` 49%, `quick_add.rs` 51%, `updater.rs` 13%, `backup.rs` covered via new unit tests
+- 62 Rust unit tests + 13 integration + 3 cassette-feature = 78 backend tests
+
+Path to higher backend coverage: the big untested chunks are
+`download.rs` (547 lines, 0%), `sharing.rs` (926 lines, 4%), and
+`subscriptions.rs` (421 lines, 0%). Most of these need a stateful
+mock HTTP server to exercise (their pure helpers are mostly
+covered already).
 
 ## Linux + macOS support
 
@@ -126,18 +228,22 @@ qa-smoke:
     - uses: actions/checkout@v4
     - run: cargo install tauri-driver --version "^2"
     - run: npm install
-    - run: npm run tauri build -- --no-bundle
+    - run: npm run tauri build -- --no-bundle --features qa-cassette
     - run: node qa/runner/scripts/download-msedgedriver.mjs
     - run: node qa/runner/smoke.mjs
+    - run: CASSETTE=1 node qa/runner/smoke.mjs
 ```
 
-The `download-msedgedriver.mjs` script doesn't exist yet — write it
-to call `edgedriver`'s `download(WEBVIEW2_VERSION)` and place the
-binary at `qa/runner/msedgedriver.exe`. ~30 min.
+`scripts/release.sh` already runs the equivalent locally before
+every version bump — see the QA gate section there. The CI lane is
+just for catching regressions on PR branches before they hit `main`.
 
 ## Notes for the agent who picks this up
 
-- Start with **cassette playback**. It's blocking three other items.
+- Cassette + fixture-game-path + STS2_CONFIG_DIR + STS2_CACHE_DIR
+  overrides + Vitest are all wired. Pick from "Tier 2 WebDriver
+  scenarios" above for next coverage, or "Tier 2 scenarios for
+  historical bugs" for high-value regression locks.
 - The smoke harness is at `qa/runner/smoke.mjs`. Tests are an array
   of `[label, fn]` pairs near the bottom — add new specs there.
 - `screenshot()` + `last-failure.png` is invaluable for debugging.

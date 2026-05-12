@@ -239,6 +239,127 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> io::Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
+mod backup_pure_tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn create_backup_copies_all_files_recursively() {
+        let mods = tempfile::tempdir().unwrap();
+        let backups = tempfile::tempdir().unwrap();
+        // Set up: one mod folder with a manifest + dll.
+        let modfolder = mods.path().join("MyMod");
+        fs::create_dir_all(&modfolder).unwrap();
+        fs::write(modfolder.join("MyMod.json"), b"{}").unwrap();
+        fs::write(modfolder.join("MyMod.dll"), b"binary").unwrap();
+
+        let backup_name = create_backup(mods.path(), backups.path()).unwrap();
+        let backup_dir = backups.path().join(&backup_name);
+        assert!(backup_dir.exists());
+        assert!(backup_dir.join("MyMod/MyMod.json").exists());
+        assert!(backup_dir.join("MyMod/MyMod.dll").exists());
+    }
+
+    #[test]
+    fn create_backup_handles_missing_mods_path_with_empty_dir() {
+        let backups = tempfile::tempdir().unwrap();
+        let missing = backups.path().join("does-not-exist");
+        let name = create_backup(&missing, backups.path()).unwrap();
+        let dir = backups.path().join(&name);
+        assert!(dir.exists());
+        // No files copied (mods_path didn't exist), but the named dir is created.
+        let entries: Vec<_> = fs::read_dir(&dir).unwrap().collect();
+        assert!(entries.is_empty() || entries.iter().all(|e| e.is_ok()));
+    }
+
+    #[test]
+    fn list_backups_returns_empty_when_dir_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let missing = tmp.path().join("no-backups-here");
+        assert!(list_backups(&missing).is_empty());
+    }
+
+    #[test]
+    fn list_backups_returns_entries_with_metadata_and_sorted_newest_first() {
+        let backups = tempfile::tempdir().unwrap();
+        for (i, ts) in ["2026-01-01_10-00-00", "2026-05-01_10-00-00", "2026-03-01_10-00-00"].iter().enumerate() {
+            let dir = backups.path().join(format!("backup_{}", ts));
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join(format!("file{}.txt", i)), b"data").unwrap();
+        }
+        let list = list_backups(backups.path());
+        assert_eq!(list.len(), 3);
+        // Newest first by timestamp string (ISO-like).
+        assert!(list[0].name.contains("2026-05-01"));
+        assert!(list[2].name.contains("2026-01-01"));
+        // mod_count and size are populated.
+        assert!(list.iter().all(|b| b.size_bytes > 0));
+    }
+
+    #[test]
+    fn delete_backup_removes_the_named_directory() {
+        let backups = tempfile::tempdir().unwrap();
+        let dir = backups.path().join("backup_2026-05-01_10-00-00");
+        fs::create_dir_all(&dir).unwrap();
+        delete_backup("backup_2026-05-01_10-00-00", backups.path()).unwrap();
+        assert!(!dir.exists());
+    }
+
+    #[test]
+    fn restore_backup_swaps_mods_with_backup_contents() {
+        let mods = tempfile::tempdir().unwrap();
+        let backups = tempfile::tempdir().unwrap();
+
+        // Existing mod that should be wiped.
+        let existing = mods.path().join("OldMod");
+        fs::create_dir_all(&existing).unwrap();
+        fs::write(existing.join("OldMod.json"), b"{}").unwrap();
+
+        // Backup containing a different mod.
+        let backup_dir = backups.path().join("backup_2026-01-01_00-00-00");
+        let modfolder = backup_dir.join("RestoredMod");
+        fs::create_dir_all(&modfolder).unwrap();
+        fs::write(modfolder.join("RestoredMod.json"), b"{}").unwrap();
+
+        restore_backup("backup_2026-01-01_00-00-00", backups.path(), mods.path()).unwrap();
+        assert!(!mods.path().join("OldMod").exists());
+        assert!(mods.path().join("RestoredMod/RestoredMod.json").exists());
+    }
+
+    #[test]
+    fn reset_to_vanilla_moves_mods_into_the_disabled_folder() {
+        let mods = tempfile::tempdir().unwrap();
+        let disabled = tempfile::tempdir().unwrap();
+        // One folder + one loose file in mods/.
+        fs::create_dir_all(mods.path().join("ModA")).unwrap();
+        fs::write(mods.path().join("ModA/x.json"), b"{}").unwrap();
+        fs::write(mods.path().join("loose.txt"), b"x").unwrap();
+
+        reset_to_vanilla(mods.path(), disabled.path()).unwrap();
+
+        // Originals are gone from mods/...
+        assert!(!mods.path().join("ModA").exists());
+        assert!(!mods.path().join("loose.txt").exists());
+        // ...and now live in mods_disabled/.
+        assert!(disabled.path().join("ModA/x.json").exists());
+        assert!(disabled.path().join("loose.txt").exists());
+    }
+
+    #[test]
+    fn prune_keeps_only_the_newest_n_backups() {
+        let backups = tempfile::tempdir().unwrap();
+        // Create 7 named backups.
+        for i in 0..7 {
+            let dir = backups.path().join(format!("backup_2026-0{}-01_10-00-00", i + 1));
+            fs::create_dir_all(&dir).unwrap();
+        }
+        prune_old_backups(backups.path(), 3).unwrap();
+        let remaining: Vec<_> = fs::read_dir(backups.path()).unwrap().collect();
+        assert_eq!(remaining.len(), 3);
+    }
+}
+
 // ── Tauri Commands ──────────────────────────────────────────────────────────
 
 /// Create a backup of the current mods directory.

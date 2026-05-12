@@ -1,0 +1,10 @@
+{
+  "name": "Nexus QA Test Mod",
+  "summary": "QA cassette fixture — drives the Nexus side of audit_mod_versions / check_all_updates.",
+  "description": "Captured: synthesized 2026-05-12 against the NexusModInfo schema in src-tauri/src/nexus.rs. The test pretends a mod is installed at v1.0.0 with nexus_mod_id 99999; this response reports v3.0.0 so audit flags it as needs-update on the Nexus side.",
+  "version": "3.0.0",
+  "author": "QA Bot",
+  "category_id": 1,
+  "mod_id": 99999,
+  "picture_url": null
+}

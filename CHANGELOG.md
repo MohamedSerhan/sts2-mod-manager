@@ -1,8 +1,27 @@
 # Changelog
 
-All notable user-facing changes to STS2 Mod Manager are recorded here. Releases follow [Semantic Versioning](https://semver.org/) and entries follow the [Keep a Changelog](https://keepachangelog.com/) shape.
+What changed in each release, written for players — not developers.
 
-The `Unreleased` section is the working scratchpad for the next version. The release script (`scripts/release.sh`) renames it to the tagged version on bump.
+## Writing rules (read before editing `[Unreleased]`)
+
+These notes show up in two places, both seen by players:
+
+1. The **"What's new" card** on the Home view (in-app, fires once per version).
+2. The **GitHub release page** (auto-posted by `scripts/release.sh`).
+
+Players don't care about our codebase. Rules:
+
+- **Describe the change, not the implementation.** "The Mods view now shows which mods have updates" — yes. "Refactored audit state into a shared context provider" — no.
+- **Skip internal-only changes.** New tests, new directories, refactors that don't change behavior — those belong in commit messages, not here.
+- **Don't reference file paths, function names, or class names.** If you find yourself typing `src/...`, ``` `parse_manifest` ```, or "AppContext", stop and rewrite for what the player sees.
+- **One short sentence per bullet.** If a second sentence is needed, it should explain why the player cares.
+- **Active voice, present tense.** "Disabling a mod now moves it to..." not "Mods are now moved to..."
+
+The release script lints `[Unreleased]` for common dev-speak (file paths, words like "refactor"/"WebDriver"/"AppContext", etc.) and refuses to ship until it passes. Run `scripts/release.sh patch` to see what it caught.
+
+## Releases follow [Semantic Versioning](https://semver.org/); entries follow [Keep a Changelog](https://keepachangelog.com/).
+
+The `Unreleased` section is the working scratchpad for the next version. The release script renames it to the tagged version on bump.
 
 ## [Unreleased]
 
@@ -20,22 +39,16 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ### Added
 
-- `Changelog` system: this file, plus an in-app "What's new in vX.Y.Z" card on Home that shows the latest entry once per version.
-- Mod audit surface on the Mods view: a "Check for updates" button in the toolbar and a per-row "Update available → vX.Y.Z" pill on mods that have a newer compatible GitHub release. Audit results are shared with the Settings → Audit tab.
-- Internal QA harness under `qa/` (not shipped): user-flow scenarios, fixture mod zips, coverage-audit doc tracking 32 historical user-reported bugs.
-- 13 cross-module integration tests in `src-tauri/tests/qa_scenarios.rs` covering BaseLib BOM at the install layer, two-CardArtEditor collapse, pin-survives-apply (both with-pin and without-pin variants), folder-keyed watcher pin lookup, zip-slip refusal, RitsuLib mixed-layout zip wrapping, manifest-rename source migration (incl. don't-overwrite-existing-destination), profile snapshot+apply, kitchen-sink scan with every quirk simultaneously, DLL-only mod surfacing, `lookup_entry` precedence chain.
-- End-to-end WebDriver smoke test in `qa/runner/smoke.mjs` driving the real production binary via `tauri-driver 2.0.6` + `msedgedriver 147`. Six specs cover: main window renders, onboarding overlay dismisses, Mods nav reaches the new audit toolbar button, audit button clickable at rest, WhatsNewCard renders correctly, Settings → Audit tab still loads after the AppContext refactor.
-- `src-tauri/.tauriignore` documents which trees are dev-only and stops `tauri dev`'s file watcher from rebuilding on `qa/` / `dist/` / `target/` changes.
+- The Mods view now shows which of your installed mods have updates available. Look for a green "Update available" pill on the row; click it to update that mod in place without leaving the Mods view.
+- A "What's new" card on Home tells you about each new release in plain language. Dismiss it once you've read it; the next version brings it back.
 
 ### Changed
 
-- `Settings` and `Mods` now share a single audit state via `AppContext`, so running an audit from one surfaces the same results in the other.
+- Checking for updates now works from the Mods view too — same data as the Settings → Audit tab, no more tab-hopping just to see what's outdated.
 
 ### Fixed
 
-- `auditByKey` in the Mods view keyed on display name only — two same-named CardArtEditor rows would have shared one audit pill. Now keyed on `folder_name ?? mod_name` matching the row's React key.
-- `WhatsNewCard` markdown parser rendered `---` separators between CHANGELOG sections as literal "---" paragraphs. Horizontal rules are now dropped.
-- `scripts/release.sh` GitHub-release-body extraction used `[1.3.3]` as a regex which was being interpreted as a character class matching one of `1.3`. Now parses the version token explicitly via `match($0, /^## \[([^\]]+)\]/, m)`.
+- If you had two mods with the same name (e.g. two `CardArtEditor` installs), the "update available" notice would only appear on one row. Each one now gets its own.
 
 ---
 

@@ -64,6 +64,40 @@ if ! echo "$UNRELEASED_CONTENT" | grep -qE '^[[:space:]]*[-*][[:space:]]+\S'; th
   exit 1
 fi
 
+# --- Dev-speak lint ---
+#
+# The changelog is for PLAYERS, not developers. Block release if the
+# Unreleased section contains obvious dev-speak (file paths, refactor
+# vocabulary, internal type names). The patterns below catch the most
+# common ways internal-sounding language sneaks in. See the "Writing
+# rules" section at the top of CHANGELOG.md for the full guidance.
+#
+# False positive? Either rewrite the bullet for a player (preferred —
+# it almost always reads better), or delete the bullet entirely if
+# the change isn't user-visible.
+
+DEV_PATH_RE='`(src/|src-tauri/|qa/|tests/|scripts/|node_modules/|target/)'
+DEV_WORDS_RE='\b(refactor(ed|ing|s)?|integration test|unit test|harness|WebDriver|tauri-driver|msedgedriver|AppContext|IPC|Tauri command|cargo|serde|reqwest|tsx?|\.rs[^a-z]|\.tsx?[^a-z])\b'
+DEV_TYPES_RE='`(parse_manifest|lookup_entry|auditByKey|install_mod_from_zip|scan_mods|RawManifest|ModInfo|ModSourceEntry|qa_cassette)`'
+
+devspeak_hits=$(echo "$UNRELEASED_CONTENT" \
+  | grep -nE "$DEV_PATH_RE|$DEV_WORDS_RE|$DEV_TYPES_RE" \
+  | head -10 \
+  || true)
+
+if [[ -n "$devspeak_hits" ]]; then
+  echo "Error: CHANGELOG.md [Unreleased] contains dev-speak." >&2
+  echo >&2
+  echo "$devspeak_hits" | sed 's/^/  /' >&2
+  echo >&2
+  echo "Rewrite for players. Describe what they see or do, not how the code works." >&2
+  echo "See the 'Writing rules' section at the top of CHANGELOG.md." >&2
+  echo >&2
+  echo "(If a bullet doesn't have anything a player would notice, delete it." >&2
+  echo " Internal-only changes belong in commit messages, not the changelog.)" >&2
+  exit 1
+fi
+
 echo "Fetching origin..."
 # Fetch the branch ref, but NOT --tags. We don't need local tags in sync;
 # the collision check below uses `git ls-remote --tags origin` directly.

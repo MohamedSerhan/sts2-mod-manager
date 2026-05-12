@@ -8,6 +8,18 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Security
+
+---
+
+## [1.3.4] - 2026-05-12
+
+### Added
+
 - `Changelog` system: this file, plus an in-app "What's new in vX.Y.Z" card on Home that shows the latest entry once per version.
 - Mod audit surface on the Mods view: a "Check for updates" button in the toolbar and a per-row "Update available → vX.Y.Z" pill on mods that have a newer compatible GitHub release. Audit results are shared with the Settings → Audit tab.
 - Internal QA harness under `qa/` (not shipped): user-flow scenarios, fixture mod zips, coverage-audit doc tracking 32 historical user-reported bugs.

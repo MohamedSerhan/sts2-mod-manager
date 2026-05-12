@@ -545,7 +545,12 @@ async fn apply_subscription_update_inner(
                 }
                 None
             }).or_else(|| {
-                mod_sources_db.mods.get(&pm.name).and_then(|e| e.github_repo.clone())
+                crate::mod_sources::lookup_entry(
+                    &mod_sources_db.mods,
+                    pm.folder_name.as_deref(),
+                    &pm.name,
+                    pm.mod_id.as_deref(),
+                ).and_then(|e| e.github_repo.clone())
             });
 
             if let Some(repo) = github_repo {

@@ -217,7 +217,12 @@ fn snapshot_current_inner(
     // Add enabled mods
     for m in enabled_mods {
         let source = m.source.clone().or_else(|| {
-            sources_db.mods.get(&m.name)
+            crate::mod_sources::lookup_entry(
+                &sources_db.mods,
+                m.folder_name.as_deref(),
+                &m.name,
+                m.mod_id.as_deref(),
+            )
                 .and_then(|e| e.github_repo.as_ref())
                 .map(|repo| format!("github:{}", repo))
         });
@@ -238,7 +243,12 @@ fn snapshot_current_inner(
     // Add disabled mods
     for m in disabled_mods {
         let source = m.source.clone().or_else(|| {
-            sources_db.mods.get(&m.name)
+            crate::mod_sources::lookup_entry(
+                &sources_db.mods,
+                m.folder_name.as_deref(),
+                &m.name,
+                m.mod_id.as_deref(),
+            )
                 .and_then(|e| e.github_repo.as_ref())
                 .map(|repo| format!("github:{}", repo))
         });
@@ -712,7 +722,12 @@ pub async fn switch_profile(
                 }
                 None
             }).or_else(|| {
-                mod_sources_db.mods.get(&pm.name).and_then(|e| e.github_repo.clone())
+                crate::mod_sources::lookup_entry(
+                    &mod_sources_db.mods,
+                    pm.folder_name.as_deref(),
+                    &pm.name,
+                    pm.mod_id.as_deref(),
+                ).and_then(|e| e.github_repo.clone())
             });
 
             if let Some(repo) = github_repo {

@@ -16,6 +16,10 @@ export interface ModInfo {
   /** Minimum STS2 build the mod's manifest declares (e.g. "0.105.0").
    *  null when the mod doesn't care about game version. */
   min_game_version?: string | null;
+  /** Author from the manifest, used as a disambiguation subtitle when
+   *  two installed mods share a display name. null when the manifest
+   *  didn't declare one. */
+  author?: string | null;
 }
 
 export interface Profile {
@@ -184,6 +188,10 @@ export interface BackupInfo {
 
 export interface ModAuditEntry {
   mod_name: string;
+  /** On-disk folder name for this mod. Used to disambiguate two installed
+   *  mods that share a display name — pin/unpin keys by folder when present
+   *  so the two same-named rows can be pinned independently. */
+  folder_name?: string | null;
   github_repo: string | null;
   installed_version: string;
   latest_release_tag: string | null;

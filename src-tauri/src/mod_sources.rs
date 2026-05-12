@@ -41,10 +41,35 @@ pub struct ModSourceEntry {
 
 fn is_false(v: &bool) -> bool { !*v }
 
-/// The entire mod sources database, keyed by mod name.
+/// The entire mod sources database. Entries are keyed either by
+/// `folder_name` (newer write path; preferred since folders are unique
+/// on disk) or by display name (legacy). See `lookup_entry` for the
+/// resolution order.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ModSourcesDb {
     pub mods: HashMap<String, ModSourceEntry>,
+}
+
+/// Folder-first source-entry lookup. Use this instead of `db.mods.get(&m.name)`
+/// at every read site so two mods sharing a display name don't share state
+/// in the sources DB (pin, installed_version, github_repo, nexus_url).
+///
+/// Order matters:
+///   1. `folder_name` — unique on disk; matches new pin writes
+///   2. display `name` — matches legacy pin writes and any external
+///      tooling that still keys by name
+///   3. `mod_id` — last resort, used by mods that ship a stable id in
+///      their manifest
+pub fn lookup_entry<'a>(
+    db: &'a HashMap<String, ModSourceEntry>,
+    folder_name: Option<&str>,
+    display_name: &str,
+    mod_id: Option<&str>,
+) -> Option<&'a ModSourceEntry> {
+    folder_name
+        .and_then(|f| db.get(f))
+        .or_else(|| db.get(display_name))
+        .or_else(|| mod_id.and_then(|i| db.get(i)))
 }
 
 /// Result of auto-detecting sources for mods.
@@ -175,10 +200,15 @@ pub fn migrate_source_entry(old_name: &str, new_name: &str, config_path: &Path) 
 pub fn enrich_mods_with_sources(mods: &mut [ModInfo], config_path: &Path) {
     let db = load_sources(config_path);
     for m in mods.iter_mut() {
-        // Look up the source entry by name, folder_name, or mod_id — pinning
-        // can be set against any of these identifiers.
-        let entry = db.mods.get(&m.name)
-            .or_else(|| m.folder_name.as_ref().and_then(|f| db.mods.get(f)))
+        // Look up by folder_name FIRST, then display name, then mod_id.
+        //
+        // Folder-first matters when two mods share a display name: each
+        // mod's folder is unique on disk, so pinning state stays per-folder
+        // instead of leaking across both rows. Display-name lookup is kept
+        // as a fallback for legacy entries created before pin_mod started
+        // saving by folder.
+        let entry = m.folder_name.as_ref().and_then(|f| db.mods.get(f))
+            .or_else(|| db.mods.get(&m.name))
             .or_else(|| m.mod_id.as_ref().and_then(|i| db.mods.get(i)));
         if let Some(entry) = entry {
             // Only set from sources DB if not already extracted from manifest
@@ -311,14 +341,24 @@ pub fn get_mod_sources(
 #[tauri::command]
 pub fn set_mod_source(
     mod_name: String,
+    folder_name: Option<String>,
     source_url: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ModSourceEntry, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     let mut db = load_sources(&s.config_path);
+    // Write under folder_name when provided so two same-named mods can
+    // each carry independent source links. Falls back to display name
+    // for legacy callers / mods with no folder.
+    let key = folder_name.clone().unwrap_or_else(|| mod_name.clone());
 
     if source_url.trim().is_empty() {
-        db.mods.remove(&mod_name);
+        // Clear both the new folder-keyed entry AND any legacy name-keyed
+        // entry that might shadow it on read.
+        db.mods.remove(&key);
+        if key != mod_name {
+            db.mods.remove(&mod_name);
+        }
         save_sources(&db, &s.config_path).map_err(|e| e.to_string())?;
         return Ok(ModSourceEntry::default());
     }
@@ -331,7 +371,7 @@ pub fn set_mod_source(
     })?;
 
     // Merge with existing entry (so setting GitHub doesn't erase Nexus and vice versa)
-    let existing = db.mods.entry(mod_name.clone()).or_default();
+    let existing = db.mods.entry(key).or_default();
     if entry.github_repo.is_some() {
         existing.github_repo = entry.github_repo;
         existing.github_auto_detected = false; // manually set by user
@@ -351,6 +391,7 @@ pub fn set_mod_source(
 #[tauri::command]
 pub fn set_mod_sources_full(
     mod_name: String,
+    folder_name: Option<String>,
     github_repo: Option<String>,
     nexus_url: Option<String>,
     state: tauri::State<'_, AppState>,
@@ -373,48 +414,82 @@ pub fn set_mod_sources_full(
         }
     }
 
-    db.mods.insert(mod_name, entry.clone());
+    // Write under folder_name when provided (preserves pin state on the
+    // same key); otherwise legacy display-name key.
+    let key = folder_name.unwrap_or(mod_name);
+    db.mods.insert(key, entry.clone());
     save_sources(&db, &s.config_path).map_err(|e| e.to_string())?;
     Ok(entry)
 }
 
-/// Remove source links for a mod.
+/// Remove source links for a mod. Removes both the folder-keyed entry
+/// (when folder_name is provided) AND any legacy name-keyed entry so a
+/// "clear" action actually clears.
 #[tauri::command]
 pub fn remove_mod_source(
     mod_name: String,
+    folder_name: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<bool, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     let mut db = load_sources(&s.config_path);
+    if let Some(ref folder) = folder_name {
+        db.mods.remove(folder);
+    }
     db.mods.remove(&mod_name);
     save_sources(&db, &s.config_path).map_err(|e| e.to_string())?;
     Ok(true)
 }
 
 /// Pin a mod — excludes it from update checks, audit flags, and auto-install.
+///
+/// `folder_name` (when provided) is the preferred DB key, so two mods that
+/// share a display name can be pinned independently. The `enrich_mods_with_sources`
+/// lookup already falls back through name → folder_name → mod_id, so reads
+/// of folder-keyed entries still resolve to the right ModInfo on display.
 #[tauri::command]
 pub fn pin_mod(
     mod_name: String,
+    folder_name: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<bool, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     let mut db = load_sources(&s.config_path);
-    let entry = db.mods.entry(mod_name).or_default();
+    let key = folder_name.unwrap_or(mod_name);
+    let entry = db.mods.entry(key).or_default();
     entry.pinned = true;
     save_sources(&db, &s.config_path).map_err(|e| e.to_string())?;
     Ok(true)
 }
 
 /// Unpin a mod — re-enables update checks and auto-install for it.
+///
+/// Tries the folder-name key first (current pin path), then falls back to
+/// the display-name key for entries created by older versions of pin_mod.
 #[tauri::command]
 pub fn unpin_mod(
     mod_name: String,
+    folder_name: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<bool, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     let mut db = load_sources(&s.config_path);
+    let mut changed = false;
+    if let Some(ref folder) = folder_name {
+        if let Some(entry) = db.mods.get_mut(folder) {
+            if entry.pinned {
+                entry.pinned = false;
+                changed = true;
+            }
+        }
+    }
     if let Some(entry) = db.mods.get_mut(&mod_name) {
-        entry.pinned = false;
+        if entry.pinned {
+            entry.pinned = false;
+            changed = true;
+        }
+    }
+    if changed {
         save_sources(&db, &s.config_path).map_err(|e| e.to_string())?;
     }
     Ok(true)
@@ -427,6 +502,7 @@ pub fn unpin_mod(
 #[tauri::command]
 pub async fn find_github_from_nexus(
     mod_name: String,
+    folder_name: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Option<String>, String> {
     let (config_path, nexus_key, github_token) = {
@@ -436,7 +512,12 @@ pub async fn find_github_from_nexus(
     };
 
     let db = load_sources(&config_path);
-    let entry = db.mods.get(&mod_name).ok_or(format!("No source entry for '{}'", mod_name))?;
+    // Folder-first read so we resolve the right entry when two mods share
+    // a display name. Write key for the new github_repo follows the same
+    // preference so we don't fragment the entry across two keys.
+    let entry = lookup_entry(&db.mods, folder_name.as_deref(), &mod_name, None)
+        .ok_or(format!("No source entry for '{}'", mod_name))?;
+    let write_key = folder_name.clone().unwrap_or_else(|| mod_name.clone());
 
     let game_domain = entry.nexus_game_domain.clone().unwrap_or_else(|| "slaythespire2".to_string());
     let mod_id = entry.nexus_mod_id.ok_or("No Nexus mod ID for this mod. Set a Nexus URL first.")?;
@@ -446,7 +527,7 @@ pub async fn find_github_from_nexus(
 
     if let Some(ref repo) = repo {
         let mut db = load_sources(&config_path);
-        let entry = db.mods.entry(mod_name).or_default();
+        let entry = db.mods.entry(write_key.clone()).or_default();
         entry.github_repo = Some(repo.clone());
         entry.github_auto_detected = true;
         save_sources(&db, &config_path).map_err(|e| e.to_string())?;
@@ -482,7 +563,7 @@ pub async fn find_github_from_nexus(
                 if norm_repo.contains(&norm_name) || norm_name.contains(&norm_repo) {
                     let repo = r.full_name.clone();
                     let mut db = load_sources(&config_path);
-                    let entry = db.mods.entry(mod_name).or_default();
+                    let entry = db.mods.entry(write_key.clone()).or_default();
                     entry.github_repo = Some(repo.clone());
                     entry.github_auto_detected = true;
                     save_sources(&db, &config_path).map_err(|e| e.to_string())?;
@@ -808,9 +889,7 @@ pub async fn auto_detect_sources(
     // never had a source set — manifest-declared URLs are author-intent,
     // not a guess, so initial population is OK.
     for m in &installed {
-        let already_linked = db
-            .mods
-            .get(&m.name)
+        let already_linked = lookup_entry(&db.mods, m.folder_name.as_deref(), &m.name, m.mod_id.as_deref())
             .map(|e| {
                 e.github_repo.is_some()
                     || e.nexus_url.is_some()
@@ -821,7 +900,12 @@ pub async fn auto_detect_sources(
             continue;
         }
 
-        let entry = db.mods.entry(m.name.clone()).or_default();
+        // Write under folder_name when available so the new entry sits
+        // alongside any other folder-keyed state for this mod. Falls back
+        // to display name for mods scanned without a folder (shouldn't
+        // happen post-1.3.0 but defensive).
+        let key = m.folder_name.clone().unwrap_or_else(|| m.name.clone());
+        let entry = db.mods.entry(key).or_default();
         let mut changed = false;
 
         // Save manifest-extracted GitHub URL
@@ -886,7 +970,7 @@ pub async fn auto_detect_sources(
         // Nexus link OR a GitHub repo, we leave the mod alone. The user
         // can still trigger a manual re-link from the Mods view if they
         // genuinely want a different source.
-        if let Some(entry) = db.mods.get(&m.name) {
+        if let Some(entry) = lookup_entry(&db.mods, m.folder_name.as_deref(), &m.name, m.mod_id.as_deref()) {
             let has_github = entry.github_repo.is_some();
             let has_nexus = entry.nexus_mod_id.is_some() || entry.nexus_url.is_some();
             if has_github || has_nexus {
@@ -1029,7 +1113,8 @@ pub async fn auto_detect_sources(
                     "medium"
                 };
 
-                let entry = db.mods.entry(m.name.clone()).or_default();
+                let key = m.folder_name.clone().unwrap_or_else(|| m.name.clone());
+                let entry = db.mods.entry(key).or_default();
                 entry.github_repo = Some(full_name.clone());
                 entry.github_auto_detected = true;
                 save_sources(&db, &config_path).map_err(|e| e.to_string())?;

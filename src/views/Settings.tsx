@@ -389,11 +389,11 @@ export function SettingsView() {
   // Update a single mod inline from the audit row. Only available for mods
   // whose source is GitHub — Nexus mods still require the user to download
   // through the browser via the existing "Download from Nexus" pill.
-  async function handleUpdateOne(modName: string) {
+  async function handleUpdateOne(modName: string, folderName: string | null) {
     if (updatingMod) return;
     setUpdatingMod(modName);
     try {
-      const info = await updateMod(modName);
+      const info = await updateMod(modName, folderName);
       toast.success(`Updated '${modName}' to v${info.version}`);
       await refreshAll();
       // Re-audit only this mod (and the manifest name if install_mod_from_zip
@@ -911,7 +911,7 @@ export function SettingsView() {
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleUpdateOne(entry.mod_name);
+                                  handleUpdateOne(entry.mod_name, entry.folder_name ?? null);
                                 }}
                                 disabled={updatingMod === entry.mod_name || updatingAll}
                                 className="gf-btn gf-btn-sm"
@@ -933,11 +933,16 @@ export function SettingsView() {
                               onClick={async (e) => {
                                 e.stopPropagation();
                                 try {
+                                  // Pass folder_name so two same-named
+                                  // mods are pinned independently. Falls
+                                  // back to display-name keying when the
+                                  // audit row didn't carry a folder.
+                                  const folder = entry.folder_name ?? null;
                                   if (entry.pinned) {
-                                    await unpinMod(entry.mod_name);
+                                    await unpinMod(entry.mod_name, folder);
                                     toast.success(`Unpinned '${entry.mod_name}' — updates will be checked again.`);
                                   } else {
-                                    await pinMod(entry.mod_name);
+                                    await pinMod(entry.mod_name, folder);
                                     toast.success(`Pinned '${entry.mod_name}' — version and on/off state locked.`);
                                   }
                                   // Pin/unpin only flips the `pinned` flag

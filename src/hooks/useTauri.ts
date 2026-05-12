@@ -62,12 +62,26 @@ export async function getInstalledMods(): Promise<ModInfo[]> {
   return invoke('get_installed_mods');
 }
 
-export async function toggleMod(name: string, enable: boolean): Promise<void> {
-  return invoke('toggle_mod', { name, enable });
+/**
+ * Toggle a mod's enabled state.
+ *
+ * `folderName` is the preferred disambiguator — two mods can share a
+ * display name but never share an on-disk folder. Pass `mod.folder_name`
+ * so the backend acts on the exact mod the user clicked, not whichever
+ * one happens to scan first when names collide.
+ */
+export async function toggleMod(name: string, folderName: string | null, enable: boolean): Promise<void> {
+  return invoke('toggle_mod', { name, folderName, enable });
 }
 
-export async function deleteMod(name: string): Promise<void> {
-  return invoke('delete_mod_cmd', { name });
+/**
+ * Permanently delete a mod from disk.
+ *
+ * Pass `folderName` (from `mod.folder_name`) so the backend can target
+ * the exact folder when two mods share a display name.
+ */
+export async function deleteMod(name: string, folderName: string | null): Promise<void> {
+  return invoke('delete_mod_cmd', { name, folderName });
 }
 
 export async function enableAllMods(): Promise<boolean> {
@@ -180,8 +194,8 @@ export async function checkForUpdates(): Promise<ModUpdate[]> {
   return invoke('check_for_updates');
 }
 
-export async function updateMod(name: string): Promise<ModInfo> {
-  return invoke('update_mod', { name });
+export async function updateMod(name: string, folderName: string | null = null): Promise<ModInfo> {
+  return invoke('update_mod', { name, folderName });
 }
 
 /**
@@ -189,9 +203,12 @@ export async function updateMod(name: string): Promise<ModInfo> {
  * install is in a broken state (manifest fails to parse, version reads
  * 'unknown', game won't load it, etc.) — same backend pipeline as
  * updateMod, just messaged differently in the UI.
+ *
+ * Pass `folderName` (from `mod.folder_name`) so two mods sharing a
+ * display name can be repaired independently.
  */
-export async function repairMod(name: string): Promise<ModInfo> {
-  return invoke('repair_mod', { name });
+export async function repairMod(name: string, folderName: string | null = null): Promise<ModInfo> {
+  return invoke('repair_mod', { name, folderName });
 }
 
 export async function updateAllMods(): Promise<ModInfo[]> {
@@ -220,36 +237,58 @@ export async function getModSources(): Promise<Record<string, ModSourceEntry>> {
   return invoke('get_mod_sources');
 }
 
-export async function setModSource(modName: string, sourceUrl: string): Promise<ModSourceEntry> {
-  return invoke('set_mod_source', { modName, sourceUrl });
+/**
+ * Set / clear a mod's source URL. Pass `folderName` (from `mod.folder_name`)
+ * so two mods sharing a display name carry independent source links.
+ */
+export async function setModSource(
+  modName: string,
+  sourceUrl: string,
+  folderName: string | null = null,
+): Promise<ModSourceEntry> {
+  return invoke('set_mod_source', { modName, folderName, sourceUrl });
 }
 
 export async function setModSourcesFull(
   modName: string,
   githubRepo: string | null,
   nexusUrl: string | null,
+  folderName: string | null = null,
 ): Promise<ModSourceEntry> {
-  return invoke('set_mod_sources_full', { modName, githubRepo, nexusUrl });
+  return invoke('set_mod_sources_full', { modName, folderName, githubRepo, nexusUrl });
 }
 
-export async function removeModSource(modName: string): Promise<boolean> {
-  return invoke('remove_mod_source', { modName });
+export async function removeModSource(
+  modName: string,
+  folderName: string | null = null,
+): Promise<boolean> {
+  return invoke('remove_mod_source', { modName, folderName });
 }
 
-export async function pinMod(modName: string): Promise<boolean> {
-  return invoke('pin_mod', { modName });
+/**
+ * Pin a mod so its enabled/disabled state and version survive modpack
+ * applies and update sweeps. Pass `folderName` (from `mod.folder_name`)
+ * so two mods with the same display name can be pinned independently.
+ * When omitted (legacy callers, e.g. the Settings audit table), the pin
+ * is keyed by display name and shared across same-named mods.
+ */
+export async function pinMod(modName: string, folderName: string | null = null): Promise<boolean> {
+  return invoke('pin_mod', { modName, folderName });
 }
 
-export async function unpinMod(modName: string): Promise<boolean> {
-  return invoke('unpin_mod', { modName });
+export async function unpinMod(modName: string, folderName: string | null = null): Promise<boolean> {
+  return invoke('unpin_mod', { modName, folderName });
 }
 
 export async function autoDetectSources(): Promise<AutoDetectResult> {
   return invoke('auto_detect_sources');
 }
 
-export async function findGithubFromNexus(modName: string): Promise<string | null> {
-  return invoke('find_github_from_nexus', { modName });
+export async function findGithubFromNexus(
+  modName: string,
+  folderName: string | null = null,
+): Promise<string | null> {
+  return invoke('find_github_from_nexus', { modName, folderName });
 }
 
 // ── Sharing ────────────────────────────────────────────────────────────────

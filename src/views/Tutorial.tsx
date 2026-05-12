@@ -335,8 +335,11 @@ function UserGuide({ onGoToSettings }: { onGoToSettings?: () => void }) {
 
           <Step n={5} title="Turning mods on/off">
             <p>
-              Mods tab. Toggle individual mods on/off. Disabled mods are kept on disk in{' '}
-              <Kbd>mods_disabled/</Kbd> — turning a mod back on is instant, no re-download.
+              Mods tab. Toggle individual mods on/off.{' '}
+              <strong>Disabling a mod doesn't delete it</strong> — its files are moved to{' '}
+              <Kbd>mods_disabled/</Kbd> alongside <Kbd>mods/</Kbd> in your game folder. Turning a mod
+              back on is instant, no re-download. To permanently remove a mod, use the kebab menu →{' '}
+              <Kbd>Remove mod…</Kbd>.
             </p>
           </Step>
 

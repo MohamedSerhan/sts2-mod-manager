@@ -66,9 +66,11 @@ exist elsewhere:
 
 ## Status
 
-**Feature-complete and usable for daily play.** The author isn't planning regular
-updates — if you'd like changes or fixes, fork the repo and open a PR. The
-codebase is small enough that most additions are straightforward.
+**Feature-complete and usable for daily play.** Designed to keep working through
+the Slay the Spire 2 1.0 launch and beyond without needing a manager update —
+the game-version, mod-source, and share pipelines all read what the game and
+mods ship today rather than baking in current values. PRs welcome; the codebase
+is small enough that most additions are straightforward.
 
 If you hit a bug, the **Home footer → Generate support bundle** button
 copies a redacted text report (recent logs, mod list, profile state) to your

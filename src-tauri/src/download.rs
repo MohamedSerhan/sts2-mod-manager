@@ -599,6 +599,7 @@ pub async fn download_and_install_github_mod(
             mod_id: None,
             pinned: false,
             min_game_version: None,
+            author: None,
         })
     } else {
         Err(AppError::Other(format!(
@@ -661,9 +662,12 @@ pub async fn download_github_mod(
         info
     };
 
-    // Auto-save the GitHub source link so updates work later
+    // Auto-save the GitHub source link so updates work later. Key by
+    // folder_name when available so two same-named mods with different
+    // GitHub origins each retain their own source link.
     let mut db = crate::mod_sources::load_sources(&config_path);
-    let entry = db.mods.entry(mod_info.name.clone()).or_default();
+    let key = mod_info.folder_name.clone().unwrap_or_else(|| mod_info.name.clone());
+    let entry = db.mods.entry(key).or_default();
     entry.github_repo = Some(format!("{}/{}", owner, repo));
     let _ = crate::mod_sources::save_sources(&db, &config_path);
 
@@ -736,6 +740,7 @@ pub async fn download_url_mod(
             nexus_url: None,
             pinned: false,
             min_game_version: None,
+            author: None,
         })
     } else {
         Err(format!("Unsupported file type: {}", file_name))

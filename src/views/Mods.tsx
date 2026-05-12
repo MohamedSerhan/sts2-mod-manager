@@ -97,9 +97,9 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
   const disabledCount = mods.filter((m) => !m.enabled).length;
   const linkedCount = mods.filter((m) => m.github_url || m.nexus_url).length;
 
-  async function handleToggle(name: string, enable: boolean) {
+  async function handleToggle(name: string, folderName: string | null, enable: boolean) {
     try {
-      await toggleMod(name, enable);
+      await toggleMod(name, folderName, enable);
       await refreshMods();
       toast.success(`${name} ${enable ? 'enabled' : 'disabled'}`);
     } catch (e) {
@@ -107,13 +107,13 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
     }
   }
 
-  async function handleTogglePin(name: string, pinned: boolean) {
+  async function handleTogglePin(name: string, folderName: string | null, pinned: boolean) {
     try {
       if (pinned) {
-        await unpinMod(name);
+        await unpinMod(name, folderName);
         toast.success(`Unpinned ${name}`);
       } else {
-        await pinMod(name);
+        await pinMod(name, folderName);
         toast.success(`Pinned ${name} — its enabled state will survive modpack updates`);
       }
       await refreshMods();
@@ -127,7 +127,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
   // 'unknown', game won't load it). Confirms first because it nukes the
   // current on-disk install before re-extracting.
   const [repairingMod, setRepairingMod] = useState<string | null>(null);
-  async function handleRepair(name: string, hasGithub: boolean) {
+  async function handleRepair(name: string, folderName: string | null, hasGithub: boolean) {
     if (!hasGithub) {
       toast.error(
         `'${name}' has no GitHub source linked — repair fetches from GitHub. ` +
@@ -144,9 +144,12 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
       confirmLabel: 'Repair now',
     });
     if (!ok) return;
-    setRepairingMod(name);
+    // Track the in-progress repair by folder key so the spinner shows on
+    // the exact row when two mods share a display name.
+    const repairKey = folderName ?? name;
+    setRepairingMod(repairKey);
     try {
-      const info = await repairMod(name);
+      const info = await repairMod(name, folderName);
       toast.success(`Repaired '${info.name}' (v${info.version})`);
       await refreshAll();
     } catch (e) {
@@ -156,7 +159,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
     }
   }
 
-  async function handleDelete(name: string) {
+  async function handleDelete(name: string, folderName: string | null) {
     const ok = await confirm({
       title: `Delete "${name}"?`,
       body: 'This permanently removes the mod files from disk. This cannot be undone.',
@@ -165,7 +168,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
     });
     if (!ok) return;
     try {
-      await deleteMod(name);
+      await deleteMod(name, folderName);
       await refreshMods();
       toast.success(`Deleted: ${name}`);
     } catch (e) {
@@ -282,9 +285,9 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
     }
   }
 
-  async function handleClearSource(modName: string) {
+  async function handleClearSource(modName: string, folderName: string | null) {
     try {
-      await setModSource(modName, '');
+      await setModSource(modName, '', folderName);
       await refreshMods();
       toast.info(`Source link cleared for ${modName}`);
     } catch (e) {
@@ -292,8 +295,8 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
     }
   }
 
-  function startEditSource(modName: string) {
-    setExpandedMod(modName);
+  function startEditSource(rowKey: string) {
+    setExpandedMod(rowKey);
   }
 
   function formatBytes(bytes: number): string {
@@ -307,6 +310,18 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
   const filtered = mods.filter((m) =>
     m.name.toLowerCase().includes(filter.toLowerCase()),
   );
+
+  // Display names that appear on more than one installed mod. These rows
+  // get a folder/author subtitle so the user can tell two same-named
+  // mods apart (e.g. two CardArtEditor installs in different folders).
+  const duplicateNames = new Set<string>();
+  {
+    const seen = new Set<string>();
+    for (const m of mods) {
+      if (seen.has(m.name)) duplicateNames.add(m.name);
+      seen.add(m.name);
+    }
+  }
 
   return (
     <div className="gf-body">
@@ -434,19 +449,29 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
       ) : (
         <div className="space-y-2">
           {filtered.map((mod) => {
-            const isExpanded = expandedMod === mod.name;
+            // Row key uses folder_name when present — two mods sharing a
+            // display name MUST have distinct keys or React will fuse them.
+            const rowKey = mod.folder_name ?? mod.name;
+            const isExpanded = expandedMod === rowKey;
             const hasLinks = mod.github_url || mod.nexus_url;
+            const isDuplicate = duplicateNames.has(mod.name);
+            // When two mods share a display name, show a subtitle so the
+            // user can tell them apart. Prefer author, fall back to the
+            // on-disk folder name.
+            const disambiguator = isDuplicate
+              ? (mod.author?.trim() || mod.folder_name || null)
+              : null;
 
             return (
               <Card
-                key={mod.name}
+                key={rowKey}
                 className={`hover:bg-surface-hover transition-colors ${mod.pinned ? 'gf-mod-pinned' : ''}`}
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-4 min-w-0">
                     <Toggle
                       checked={mod.enabled}
-                      onChange={(checked) => handleToggle(mod.name, checked)}
+                      onChange={(checked) => handleToggle(mod.name, mod.folder_name, checked)}
                       disabled={gameRunning}
                     />
                     <div className="min-w-0 flex-1">
@@ -454,6 +479,14 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                         <span className="text-sm font-medium text-text truncate">
                           {mod.name}
                         </span>
+                        {disambiguator && (
+                          <span
+                            className="text-xs text-text-dim"
+                            title={`Two installed mods are named "${mod.name}". This one is identified by ${mod.author ? `author: ${mod.author}` : `folder: ${mod.folder_name}`}.`}
+                          >
+                            · {disambiguator}
+                          </span>
+                        )}
                         <span className="text-sm text-text-dim">v{mod.version}</span>
                         {mod.pinned && (
                           <span
@@ -528,7 +561,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                       <KebabSection>
                         <KebabItem
                           icon={mod.pinned ? <PinOff size={12} /> : <Pin size={12} />}
-                          onClick={() => handleTogglePin(mod.name, mod.pinned)}
+                          onClick={() => handleTogglePin(mod.name, mod.folder_name, mod.pinned)}
                           description={
                             mod.pinned
                               ? "Modpacks can update or replace this mod again."
@@ -559,7 +592,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                             <KebabItem
                               icon={<Link size={12} />}
                               onClick={() =>
-                                isExpanded ? setExpandedMod(null) : startEditSource(mod.name)
+                                isExpanded ? setExpandedMod(null) : startEditSource(rowKey)
                               }
                             >
                               {isExpanded ? 'Close source editor' : 'Edit sources…'}
@@ -585,8 +618,8 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                                 icon={<GitBranch size={12} />}
                                 onClick={async () => {
                                   try {
-                                    setFindingGithub(mod.name);
-                                    const repo = await findGithubFromNexus(mod.name);
+                                    setFindingGithub(rowKey);
+                                    const repo = await findGithubFromNexus(mod.name, mod.folder_name);
                                     if (repo) {
                                       await refreshMods();
                                       toast.success(`Found GitHub repo: ${repo}`);
@@ -608,13 +641,13 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                           <KebabSection head="Recovery">
                             <KebabItem
                               icon={
-                                repairingMod === mod.name ? (
+                                repairingMod === rowKey ? (
                                   <RefreshCw size={12} className="animate-spin" />
                                 ) : (
                                   <Wrench size={12} />
                                 )
                               }
-                              onClick={() => handleRepair(mod.name, !!mod.github_url)}
+                              onClick={() => handleRepair(mod.name, mod.folder_name, !!mod.github_url)}
                               disabled={
                                 gameRunning ||
                                 repairingMod !== null ||
@@ -626,7 +659,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                                   : 'Link a GitHub source first via "Edit sources…" — repair fetches from GitHub.'
                               }
                             >
-                              {repairingMod === mod.name ? 'Repairing…' : 'Repair this mod'}
+                              {repairingMod === rowKey ? 'Repairing…' : 'Repair this mod'}
                             </KebabItem>
                           </KebabSection>
                         </>
@@ -635,7 +668,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                       <KebabItem
                         danger
                         icon={<Trash2 size={12} />}
-                        onClick={() => handleDelete(mod.name)}
+                        onClick={() => handleDelete(mod.name, mod.folder_name)}
                         disabled={gameRunning}
                       >
                         Remove mod…
@@ -648,13 +681,13 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                 {advancedMode && isExpanded && (
                   <SourceEditor
                     mod={mod}
-                    findingGithub={findingGithub === mod.name}
+                    findingGithub={findingGithub === rowKey}
                     onClose={() => setExpandedMod(null)}
-                    onClear={() => handleClearSource(mod.name)}
+                    onClear={() => handleClearSource(mod.name, mod.folder_name)}
                     onFindGithub={async () => {
                       try {
-                        setFindingGithub(mod.name);
-                        const repo = await findGithubFromNexus(mod.name);
+                        setFindingGithub(rowKey);
+                        const repo = await findGithubFromNexus(mod.name, mod.folder_name);
                         if (repo) {
                           await refreshMods();
                           toast.success(`Found GitHub repo: ${repo}`);
@@ -670,7 +703,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                     onSave={async (gh, nx) => {
                       try {
                         setSavingSource(true);
-                        await setModSourcesFull(mod.name, gh.trim() || null, nx.trim() || null);
+                        await setModSourcesFull(mod.name, gh.trim() || null, nx.trim() || null, mod.folder_name);
                         await refreshMods();
                         toast.success(`Sources saved for ${mod.name}`);
                         setExpandedMod(null);

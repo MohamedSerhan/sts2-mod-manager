@@ -47,6 +47,10 @@ pub struct ModInfo {
     /// release.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_game_version: Option<String>,
+    /// Author from the manifest, surfaced for UI disambiguation when two
+    /// mods share a display name. None when the manifest didn't declare one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
 }
 
 /// One dependency entry in a mod manifest.
@@ -219,6 +223,58 @@ fn collect_mod_files(manifest_path: &Path, base_dir: &Path) -> Vec<String> {
     files
 }
 
+/// Last-resort extraction of the fields the UI cares most about (version,
+/// name, description, author, id) when strict struct deserialization fails.
+///
+/// Strict serde_json parsing can fail the WHOLE manifest on one bad field
+/// — e.g. a dependency entry in an unexpected shape, or a numeric version
+/// where we expect a string. Pre-this-helper the failure silently turned
+/// into `version: "unknown"` in the UI, which is the "vunknown after
+/// auto-update" bug reported by users. Now: salvage what we can, log
+/// loudly so we can still spot real schema drift, and let the install
+/// surface real data.
+fn parse_manifest_lenient(content: &str) -> Option<RawManifest> {
+    let v: serde_json::Value = serde_json::from_str(content).ok()?;
+    let obj = v.as_object()?;
+
+    // Case-insensitive lookup against the small set of aliases we
+    // already support in RawManifest's serde annotations.
+    let pluck_str = |aliases: &[&str]| -> Option<String> {
+        for k in aliases {
+            if let Some(val) = obj.get(*k).and_then(|x| x.as_str()) {
+                if !val.is_empty() {
+                    return Some(val.to_string());
+                }
+            }
+        }
+        None
+    };
+
+    let mut raw = RawManifest::default();
+    if let Some(name) = pluck_str(&["name", "Name"]) {
+        raw.name = name;
+    }
+    if let Some(version) = pluck_str(&["version", "Version"]) {
+        raw.version = version;
+    }
+    if let Some(desc) = pluck_str(&["description", "Description"]) {
+        raw.description = desc;
+    }
+    raw.author = pluck_str(&["author", "Author"]);
+    raw.id = pluck_str(&["id", "Id", "ID"]);
+    raw.pck_name = pluck_str(&["pck_name", "PckName"]);
+    raw.source = pluck_str(&["source", "Source"]);
+    raw.homepage = pluck_str(&["homepage", "Homepage"]);
+    raw.repository = pluck_str(&["repository", "Repository", "repo", "Repo"]);
+    raw.url = pluck_str(&["url", "Url", "URL"]);
+    raw.min_game_version = pluck_str(&["min_game_version", "MinGameVersion"]);
+    // Dependencies are intentionally skipped — they're the most common
+    // cause of strict-parse failure, and the lenient fallback is about
+    // rescuing user-visible fields, not full schema parity.
+
+    Some(raw)
+}
+
 /// Parse a single manifest JSON into a ModInfo.
 fn parse_manifest(manifest_path: &Path, base_dir: &Path, enabled: bool) -> Option<ModInfo> {
     let content = match fs::read_to_string(manifest_path) {
@@ -234,19 +290,31 @@ fn parse_manifest(manifest_path: &Path, base_dir: &Path, enabled: bool) -> Optio
     let raw: RawManifest = match serde_json::from_str(&content) {
         Ok(r) => r,
         Err(e) => {
-            // The mod's manifest exists on disk but doesn't match our struct.
-            // Loud-log the path + parse error so we can spot new manifest
-            // format drift instead of silently falling back to a broken
-            // dll-only stub.
-            log::warn!(
-                "parse_manifest: failed to deserialize '{}': {} — \
-                 the mod will fall through to the DLL-only path and show \
-                 with version 'unknown'. This is almost always a manifest \
-                 schema change upstream; please open an issue with the \
-                 manifest contents.",
-                manifest_path.display(), e,
-            );
-            return None;
+            // Strict parse failed — likely a new manifest field shape or a
+            // dependency entry that doesn't match either of the variants
+            // RawDependency accepts. Salvage version/name/etc via a lenient
+            // Value-based pass so the user doesn't see "vunknown".
+            match parse_manifest_lenient(&content) {
+                Some(partial) => {
+                    log::warn!(
+                        "parse_manifest: strict deserialize failed for '{}': {} — \
+                         recovered name='{}' version='{}' via lenient fallback. \
+                         File this as a schema drift report with the manifest contents.",
+                        manifest_path.display(), e, partial.name, partial.version,
+                    );
+                    partial
+                }
+                None => {
+                    log::warn!(
+                        "parse_manifest: strict deserialize failed for '{}': {} — \
+                         lenient fallback could not extract version/name either. \
+                         The mod will fall through to the DLL-only path and show \
+                         with version 'unknown'.",
+                        manifest_path.display(), e,
+                    );
+                    return None;
+                }
+            }
         }
     };
 
@@ -358,6 +426,7 @@ fn parse_manifest(manifest_path: &Path, base_dir: &Path, enabled: bool) -> Optio
         nexus_url,
         pinned: false,
         min_game_version: raw.min_game_version,
+        author: raw.author,
     })
 }
 
@@ -410,6 +479,7 @@ fn dll_only_mod(dll_path: &Path, base_dir: &Path, enabled: bool) -> ModInfo {
         nexus_url: None,
         pinned: false,
         min_game_version: None,
+        author: None,
     }
 }
 
@@ -509,17 +579,40 @@ fn mod_quality(info: &ModInfo) -> u32 {
     score
 }
 
-/// Add `info` to `mods`, but if another entry with a normalized-equivalent
-/// name is already present, keep whichever has the richer manifest. Logs a
-/// warning either way so the user knows there are duplicate files on disk.
+/// Identity key for a mod entry — used for dedup within a single scan pass.
+///
+/// Keyed by `folder_name` (the actual on-disk folder/file stem the manager
+/// found the mod under). Two mods that happen to share a manifest `name`
+/// but live in different folders MUST stay distinct — collapsing them was
+/// the silent-data-loss bug where toggling one of two "CardArtEditor" mods
+/// moved the wrong copy to `mods_disabled/`.
+///
+/// Falls back to normalized display name only when `folder_name` is None,
+/// which shouldn't happen for any code path that builds a `ModInfo`
+/// (parse_manifest, dll_only_mod, install_mod_from_zip all set it). The
+/// fallback is defensive — if a future code path forgets, we still get
+/// SOME dedup rather than infinite duplicates.
+fn dedup_key(info: &ModInfo) -> String {
+    info.folder_name
+        .clone()
+        .unwrap_or_else(|| normalize_name(&info.name))
+}
+
+/// Add `info` to `mods`, but if another entry from the SAME folder is
+/// already present (typically the result of an interrupted operation or
+/// a half-applied profile switch leaving stale files), keep whichever has
+/// the richer manifest. Two mods in DIFFERENT folders are kept as
+/// distinct entries even if their display names match — that's the whole
+/// point of folder-based identity.
 fn upsert_mod_dedup(mods: &mut Vec<ModInfo>, info: ModInfo, source_hint: &str) {
-    let key = normalize_name(&info.name);
-    if let Some(pos) = mods.iter().position(|m| normalize_name(&m.name) == key) {
+    let key = dedup_key(&info);
+    if let Some(pos) = mods.iter().position(|m| dedup_key(m) == key) {
         let existing_quality = mod_quality(&mods[pos]);
         let new_quality = mod_quality(&info);
         if new_quality > existing_quality {
             log::warn!(
-                "Replacing duplicate mod '{}' (existing) with '{}' from {} — better manifest. Clean up the older copy in your mods folder.",
+                "Replacing duplicate mod from folder '{}' (existing: '{}') with '{}' from {} — better manifest. Clean up stale files.",
+                key,
                 mods[pos].name,
                 info.name,
                 source_hint,
@@ -527,10 +620,10 @@ fn upsert_mod_dedup(mods: &mut Vec<ModInfo>, info: ModInfo, source_hint: &str) {
             mods[pos] = info;
         } else {
             log::warn!(
-                "Skipping duplicate mod '{}' from {} — '{}' already loaded with a richer manifest. Clean up the older copy in your mods folder.",
+                "Skipping duplicate mod '{}' from {} — folder '{}' already loaded with a richer manifest. Clean up stale files.",
                 info.name,
                 source_hint,
-                mods[pos].name,
+                key,
             );
         }
         return;
@@ -1341,6 +1434,7 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
                 nexus_url: None,
                 pinned: false,
                 min_game_version: None,
+                author: None,
             })
         }
     }
@@ -1371,18 +1465,23 @@ pub fn get_installed_mods(state: tauri::State<'_, AppState>) -> std::result::Res
         .map(|p| scan_disabled_mods(p))
         .unwrap_or_default();
 
-    // Build a lookup of active names by NORMALIZED key so disabled mods
-    // with whitespace / case differences (e.g. "BetterSpire2 Lite" vs
-    // "BetterSpire2Lite") still collapse to a single entry.
+    // Build a lookup of active mods by FOLDER identity so the overlap
+    // check only fires when the SAME folder appears in both `mods/` and
+    // `mods_disabled/` (the half-toggled / interrupted-operation case).
+    //
+    // Keying by display name here would suppress legitimately distinct
+    // mods that happen to share a manifest `name` — e.g. two CardArtEditor
+    // installs where the user disabled one. We want both to appear in
+    // the UI as separate rows.
     let active_keys: std::collections::HashSet<String> =
-        active_mods.iter().map(|m| normalize_name(&m.name)).collect();
+        active_mods.iter().map(dedup_key).collect();
 
     let mut all_mods = active_mods;
     for d in disabled_mods {
-        if active_keys.contains(&normalize_name(&d.name)) {
+        if active_keys.contains(&dedup_key(&d)) {
             log::warn!(
-                "Mod '{}' has files in BOTH active and disabled folders — showing the active copy only. Re-toggle or repair the profile to clean this up.",
-                d.name
+                "Mod folder '{}' has files in BOTH active and disabled folders — showing the active copy only. Re-toggle or repair the profile to clean this up.",
+                dedup_key(&d)
             );
             continue;
         }
@@ -1397,6 +1496,11 @@ pub fn get_installed_mods(state: tauri::State<'_, AppState>) -> std::result::Res
 
 /// Toggle a mod between enabled and disabled.
 ///
+/// `folder_name` (when provided) is the preferred identity — two mods can
+/// share a display name but never share a folder. The UI always passes
+/// folder_name. The optional shape keeps any out-of-band callers using
+/// the old name-only contract working.
+///
 /// After the file move succeeds, re-snapshots the active profile so its
 /// manifest reflects the new state immediately. This makes "the profile is
 /// the complete state" actually true — without it, a toggle would only
@@ -1405,7 +1509,12 @@ pub fn get_installed_mods(state: tauri::State<'_, AppState>) -> std::result::Res
 /// the user's toggle, which is the source of the "switching profiles
 /// doesn't remember state" complaint.
 #[tauri::command]
-pub fn toggle_mod(name: String, enable: bool, state: tauri::State<'_, AppState>) -> std::result::Result<bool, String> {
+pub fn toggle_mod(
+    name: String,
+    folder_name: Option<String>,
+    enable: bool,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
     crate::game::ensure_game_not_running()?;
     let (mods_path, disabled_path) = {
         let s = state.lock().map_err(|e| e.to_string())?;
@@ -1421,20 +1530,36 @@ pub fn toggle_mod(name: String, enable: bool, state: tauri::State<'_, AppState>)
         (mods_path.as_path(), disabled_path.as_path())
     };
 
-    // First try the simple name-based move; fall back to scanning for the
-    // actual ModInfo and using its file list when the name doesn't match a
-    // top-level file (e.g. mod is in a subfolder).
-    let move_result = move_mod_files(&name, src, dest).or_else(|_| {
+    // Disambiguation: when folder_name is given, find the EXACT mod by
+    // folder identity and move only its files. Two mods sharing a display
+    // name will have different folders, so name-only matching (the old
+    // path) could move the wrong copy.
+    let move_result = if let Some(ref folder) = folder_name {
         let mods_in_src = scan_mods_inner(src, enable);
-        let mod_info = mods_in_src.iter().find(|m| m.name == name).cloned();
-        match mod_info {
+        match mods_in_src.iter().find(|m| m.folder_name.as_deref() == Some(folder.as_str())).cloned() {
             Some(info) => move_mod_by_info(&info, src, dest),
             None => Err(crate::error::AppError::ModNotFound(format!(
-                "No files found for mod '{}' in {}",
-                name, src.display()
+                "No mod with folder '{}' (display name '{}') in {}",
+                folder, name, src.display()
             ))),
         }
-    });
+    } else {
+        // Legacy fallback: name-based move, then scan-by-name as a second try.
+        // Still subject to the original same-name ambiguity if two folders
+        // share a manifest name — but only reachable from callers that
+        // don't pass folder_name (no current UI does).
+        move_mod_files(&name, src, dest).or_else(|_| {
+            let mods_in_src = scan_mods_inner(src, enable);
+            let mod_info = mods_in_src.iter().find(|m| m.name == name).cloned();
+            match mod_info {
+                Some(info) => move_mod_by_info(&info, src, dest),
+                None => Err(crate::error::AppError::ModNotFound(format!(
+                    "No files found for mod '{}' in {}",
+                    name, src.display()
+                ))),
+            }
+        })
+    };
     move_result.map_err(|e| e.to_string())?;
 
     refresh_active_profile_manifest(&state);
@@ -1472,21 +1597,37 @@ fn refresh_active_profile_manifest(state: &tauri::State<'_, AppState>) {
 }
 
 /// Permanently delete a mod.
+///
+/// `folder_name` (when provided) disambiguates between two mods that share
+/// a display name. Without it, the first scan match wins — which on a
+/// system with two same-named folders could delete the wrong one.
 #[tauri::command]
-pub fn delete_mod_cmd(name: String, state: tauri::State<'_, AppState>) -> std::result::Result<bool, String> {
+pub fn delete_mod_cmd(
+    name: String,
+    folder_name: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
     crate::game::ensure_game_not_running()?;
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?.clone();
     let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?.clone();
     drop(s);
 
-    // Scan to find the mod by its manifest name and get its actual file paths
+    // Scan to find the mod and get its actual file paths. Match by
+    // folder_name first (unique on disk), then by display name as a
+    // fallback for legacy callers.
     let all_mods: Vec<ModInfo> = scan_mods(&mods_path)
         .into_iter()
         .chain(scan_disabled_mods(&disabled_path).into_iter())
         .collect();
 
-    if let Some(info) = all_mods.iter().find(|m| m.name == name) {
+    let found = if let Some(ref folder) = folder_name {
+        all_mods.iter().find(|m| m.folder_name.as_deref() == Some(folder.as_str()))
+    } else {
+        all_mods.iter().find(|m| m.name == name)
+    };
+
+    if let Some(info) = found {
         let base_path = if info.enabled { &mods_path } else { &disabled_path };
 
         // Collect parent dirs to clean up later
@@ -1820,6 +1961,338 @@ mod path_safety_tests {
         let root = Path::new("/tmp/mods");
         assert!(path_is_inside(&root.join("./foo"), root));
         assert!(path_is_inside(&root.join("foo/./bar"), root));
+    }
+}
+
+#[cfg(test)]
+mod lenient_parse_tests {
+    use super::parse_manifest_lenient;
+
+    /// The reported "vunknown after update" path: the manifest is otherwise
+    /// fine but a field deeper in the JSON (e.g. dependencies in a new shape)
+    /// breaks strict parsing. We should still surface a real version.
+    #[test]
+    fn pulls_version_when_strict_parse_would_fail() {
+        let json = r#"{
+            "name": "BaseLib",
+            "version": "1.4.2",
+            "description": "Core utilities",
+            "dependencies": [{"id": "OtherLib", "min_version": "1.0", "extra_field_we_dont_know": {"nested": true}}]
+        }"#;
+        let raw = parse_manifest_lenient(json).expect("lenient parse must extract fields");
+        assert_eq!(raw.name, "BaseLib");
+        assert_eq!(raw.version, "1.4.2");
+        assert_eq!(raw.description, "Core utilities");
+    }
+
+    /// Case-insensitive aliases match RawManifest's serde annotations so the
+    /// lenient path is at parity for the field names we care about.
+    #[test]
+    fn handles_capitalized_field_aliases() {
+        let json = r#"{ "Name": "Foo", "Version": "0.9", "Author": "alice" }"#;
+        let raw = parse_manifest_lenient(json).expect("lenient parse");
+        assert_eq!(raw.name, "Foo");
+        assert_eq!(raw.version, "0.9");
+        assert_eq!(raw.author.as_deref(), Some("alice"));
+    }
+
+    /// If the file isn't even valid JSON, lenient parse must give up
+    /// cleanly — we don't want to manufacture fake mod metadata.
+    #[test]
+    fn returns_none_on_invalid_json() {
+        assert!(parse_manifest_lenient("not json").is_none());
+        assert!(parse_manifest_lenient("{").is_none());
+    }
+}
+
+/// End-to-end tests that mirror the bug scenarios the user reported:
+/// two CardArtEditor mods in different folders + a manifest whose strict
+/// parse fails. These touch the real filesystem (tempdirs) and run the
+/// same scan / move / parse code paths the live app uses.
+#[cfg(test)]
+mod user_scenario_tests {
+    use super::{
+        move_mod_by_info, parse_manifest, scan_disabled_mods, scan_mods,
+    };
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn write(path: &std::path::Path, content: &str) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(path, content).unwrap();
+    }
+
+    /// Set up a mods/ directory containing two distinct mods that both
+    /// declare `name: "Card Art Editor"` in their manifests but live in
+    /// different folders — exact mirror of JadeDemon's reported scenario.
+    fn make_two_cardarteditor_fixture() -> TempDir {
+        let tmp = tempfile::tempdir().unwrap();
+        let mods = tmp.path();
+
+        let a = mods.join("card_art_editor");
+        write(
+            &a.join("manifest.json"),
+            r#"{ "name": "Card Art Editor", "version": "1.0.0", "author": "alice" }"#,
+        );
+        write(&a.join("card_art_editor.dll"), "fake-binary-A");
+
+        let b = mods.join("card_art_editor_v2");
+        write(
+            &b.join("manifest.json"),
+            r#"{ "name": "Card Art Editor", "version": "2.0.0", "author": "bob" }"#,
+        );
+        write(&b.join("card_art_editor.dll"), "fake-binary-B");
+
+        tmp
+    }
+
+    /// Scan returns BOTH same-named mods as distinct entries.
+    /// Pre-fix: one collapsed into the other via normalized-name dedup
+    /// and the user saw only one row. Post-fix: folder identity keeps
+    /// them separate.
+    #[test]
+    fn scan_keeps_two_same_named_mods_in_different_folders() {
+        let tmp = make_two_cardarteditor_fixture();
+        let mods = scan_mods(tmp.path());
+
+        let card_mods: Vec<_> = mods
+            .iter()
+            .filter(|m| m.name == "Card Art Editor")
+            .collect();
+        assert_eq!(
+            card_mods.len(),
+            2,
+            "expected both CardArtEditor folders to surface as distinct mods, got {} (mods on disk: {:?})",
+            card_mods.len(),
+            mods.iter().map(|m| (&m.name, &m.folder_name)).collect::<Vec<_>>(),
+        );
+
+        let folders: std::collections::HashSet<&str> = card_mods
+            .iter()
+            .filter_map(|m| m.folder_name.as_deref())
+            .collect();
+        assert!(folders.contains("card_art_editor"));
+        assert!(folders.contains("card_art_editor_v2"));
+
+        // Distinct versions — confirms each row carries its own manifest
+        // data rather than reusing one entry for both folders.
+        let versions: std::collections::HashSet<&str> =
+            card_mods.iter().map(|m| m.version.as_str()).collect();
+        assert!(versions.contains("1.0.0"));
+        assert!(versions.contains("2.0.0"));
+
+        // Author flows through for the UI disambiguation subtitle.
+        let authors: std::collections::HashSet<&str> = card_mods
+            .iter()
+            .filter_map(|m| m.author.as_deref())
+            .collect();
+        assert!(authors.contains("alice"));
+        assert!(authors.contains("bob"));
+    }
+
+    /// Disabling ONE of two same-named mods (by folder_name) moves only
+    /// that folder. The other CardArtEditor stays active.
+    ///
+    /// Pre-fix: the toggle's name-based match could move either copy
+    /// (whichever scanned first), causing the "wrong mod disappeared"
+    /// surprise JadeDemon reported.
+    #[test]
+    fn disabling_one_same_named_mod_leaves_the_other_active() {
+        let tmp = make_two_cardarteditor_fixture();
+        let mods_path = tmp.path();
+        let disabled_path = tmp.path().parent().unwrap().join("mods_disabled_test_for_scenario");
+        fs::create_dir_all(&disabled_path).unwrap();
+        // Drop-handler cleanup so a failed assertion doesn't leak a
+        // sibling directory next to the tempdir.
+        struct DisabledGuard(std::path::PathBuf);
+        impl Drop for DisabledGuard {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+        let _guard = DisabledGuard(disabled_path.clone());
+
+        let installed = scan_mods(mods_path);
+        let target = installed
+            .iter()
+            .find(|m| m.folder_name.as_deref() == Some("card_art_editor_v2"))
+            .expect("v2 fixture must scan");
+
+        move_mod_by_info(target, mods_path, &disabled_path).unwrap();
+
+        let still_active = scan_mods(mods_path);
+        let now_disabled = scan_disabled_mods(&disabled_path);
+
+        let active_folders: Vec<&str> = still_active
+            .iter()
+            .filter_map(|m| m.folder_name.as_deref())
+            .collect();
+        let disabled_folders: Vec<&str> = now_disabled
+            .iter()
+            .filter_map(|m| m.folder_name.as_deref())
+            .collect();
+
+        assert_eq!(
+            active_folders, vec!["card_art_editor"],
+            "only the untouched CardArtEditor should remain active"
+        );
+        assert_eq!(
+            disabled_folders, vec!["card_art_editor_v2"],
+            "only the disabled CardArtEditor should be in mods_disabled"
+        );
+
+        // The active copy must keep its v1 manifest contents.
+        let active_v1 = still_active
+            .iter()
+            .find(|m| m.folder_name.as_deref() == Some("card_art_editor"))
+            .unwrap();
+        assert_eq!(active_v1.version, "1.0.0");
+        assert_eq!(active_v1.author.as_deref(), Some("alice"));
+    }
+
+    /// JadeDemon's "vunknown after BaseLib auto-update" report: a manifest
+    /// that's valid JSON with a real `version` string but a `dependencies`
+    /// entry the strict struct parse can't handle. Pre-fix the version was
+    /// silently replaced with "unknown"; post-fix the lenient fallback
+    /// surfaces the real value.
+    #[test]
+    fn manifest_with_unparseable_dependencies_still_yields_version() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        // `dependencies` contains a raw number — neither the
+        // `Name(String)` nor the `Structured { id }` variant of
+        // RawDependency accepts that, so strict parse fails the whole
+        // struct.
+        let manifest_path = base.join("baselib").join("manifest.json");
+        write(
+            &manifest_path,
+            r#"{
+                "name": "BaseLib",
+                "version": "1.4.2",
+                "description": "Core utilities",
+                "author": "Curator",
+                "dependencies": [123, {"id": "OtherLib"}]
+            }"#,
+        );
+        write(&base.join("baselib").join("baselib.dll"), "fake-dll");
+
+        let parsed = parse_manifest(&manifest_path, base, true)
+            .expect("lenient fallback must surface a ModInfo even when strict parse fails");
+        assert_eq!(parsed.name, "BaseLib");
+        assert_eq!(
+            parsed.version, "1.4.2",
+            "version must be the manifest's real value, not 'unknown'"
+        );
+        assert_eq!(parsed.description, "Core utilities");
+        assert_eq!(parsed.author.as_deref(), Some("Curator"));
+        // folder_name still resolves to the parent dir even when the
+        // strict parse stumbled on a sibling field.
+        assert_eq!(parsed.folder_name.as_deref(), Some("baselib"));
+    }
+
+    /// Sanity: a well-formed manifest still goes through the strict path
+    /// (the lenient fallback is a recovery hatch, not the default).
+    #[test]
+    fn well_formed_manifest_parses_via_strict_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let manifest_path = base.join("good").join("manifest.json");
+        write(
+            &manifest_path,
+            r#"{
+                "name": "GoodMod",
+                "version": "3.1.4",
+                "dependencies": [{"id": "Dep", "min_version": "1.0"}, "PlainDep"]
+            }"#,
+        );
+        write(&base.join("good").join("good.dll"), "");
+
+        let parsed = parse_manifest(&manifest_path, base, true).unwrap();
+        assert_eq!(parsed.name, "GoodMod");
+        assert_eq!(parsed.version, "3.1.4");
+        assert_eq!(parsed.dependencies, vec!["Dep", "PlainDep"]);
+    }
+}
+
+#[cfg(test)]
+mod dedup_identity_tests {
+    use super::{upsert_mod_dedup, ModInfo};
+
+    fn mod_with(name: &str, folder: Option<&str>, version: &str) -> ModInfo {
+        ModInfo {
+            name: name.to_string(),
+            version: version.to_string(),
+            description: String::new(),
+            enabled: true,
+            files: Vec::new(),
+            source: None,
+            hash: None,
+            dependencies: Vec::new(),
+            size_bytes: 0,
+            folder_name: folder.map(|s| s.to_string()),
+            mod_id: None,
+            github_url: None,
+            nexus_url: None,
+            pinned: false,
+            min_game_version: None,
+            author: None,
+        }
+    }
+
+    /// The CardArtEditor bug. Two mods declare manifest name "Card Art Editor"
+    /// but live in different folders. They MUST stay as two distinct entries —
+    /// collapsing them is the silent-data-loss the refactor fixes.
+    #[test]
+    fn keeps_same_name_mods_with_different_folders() {
+        let mut mods = Vec::new();
+        upsert_mod_dedup(
+            &mut mods,
+            mod_with("Card Art Editor", Some("card_art_editor"), "1.0.0"),
+            "test",
+        );
+        upsert_mod_dedup(
+            &mut mods,
+            mod_with("Card Art Editor", Some("card_art_editor_v2"), "2.0.0"),
+            "test",
+        );
+        assert_eq!(mods.len(), 2, "Same-name mods in different folders must NOT collapse");
+        assert_eq!(mods[0].folder_name.as_deref(), Some("card_art_editor"));
+        assert_eq!(mods[1].folder_name.as_deref(), Some("card_art_editor_v2"));
+    }
+
+    /// Two scan passes finding the same folder (e.g. PASS 1 picks up the
+    /// json manifest, PASS 3 then finds the orphan dll fallback) MUST
+    /// collapse — that's the legitimate dedup case the function exists for.
+    #[test]
+    fn collapses_same_folder_keeps_richer_manifest() {
+        let mut mods = Vec::new();
+        // First insert: rich manifest with a real version
+        upsert_mod_dedup(
+            &mut mods,
+            mod_with("MyMod", Some("MyMod"), "1.5.0"),
+            "manifest pass",
+        );
+        // Second insert: dll-only fallback with version "unknown" — should lose
+        upsert_mod_dedup(
+            &mut mods,
+            mod_with("MyMod", Some("MyMod"), "unknown"),
+            "dll pass",
+        );
+        assert_eq!(mods.len(), 1, "Same folder must dedup to one entry");
+        assert_eq!(mods[0].version, "1.5.0", "Richer manifest must win");
+    }
+
+    /// When folder_name is missing (defensive fallback), normalized display
+    /// name is the dedup key — preserves the legacy behavior for any code
+    /// path that hasn't been updated to populate folder_name.
+    #[test]
+    fn falls_back_to_normalized_name_when_folder_missing() {
+        let mut mods = Vec::new();
+        upsert_mod_dedup(&mut mods, mod_with("My Mod", None, "1.0.0"), "test");
+        upsert_mod_dedup(&mut mods, mod_with("my-mod", None, "1.0.0"), "test");
+        assert_eq!(mods.len(), 1, "Normalized-name dedup must still apply when folder is missing");
     }
 }
 

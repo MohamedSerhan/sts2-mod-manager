@@ -156,10 +156,20 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                             disabled_path.as_deref(),
                         );
 
-                        // If the existing mod is pinned, skip auto-install entirely
+                        // If the existing mod is pinned, skip auto-install entirely.
+                        // Folder-first lookup — without it, a pin saved under
+                        // folder_name (the post-1.3.0 write key) wouldn't be
+                        // found and the watcher would happily overwrite a
+                        // pinned install.
                         if let Some(ref existing) = existing_mod {
                             let sources_db = crate::mod_sources::load_sources(&config_path);
-                            if let Some(entry) = sources_db.mods.get(&existing.name) {
+                            let entry = crate::mod_sources::lookup_entry(
+                                &sources_db.mods,
+                                existing.folder_name.as_deref(),
+                                &existing.name,
+                                existing.mod_id.as_deref(),
+                            );
+                            if let Some(entry) = entry {
                                 if entry.pinned {
                                     log::info!(
                                         "Downloads watcher: skipping '{}' — mod is pinned",
@@ -221,8 +231,14 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                     let version_to_store = nexus_ver
                                         .unwrap_or_else(|| mod_info.version.clone());
                                     if version_to_store != "unknown" && version_to_store != "0.0.0" {
+                                        // Folder-first key so installed_version is stored
+                                        // under the same DB key the folder-first read
+                                        // path (enrich/audit/pin) uses.
+                                        let install_key = mod_info.folder_name
+                                            .as_deref()
+                                            .unwrap_or(mod_info.name.as_str());
                                         crate::mod_sources::update_installed_version(
-                                            &mod_info.name,
+                                            install_key,
                                             &version_to_store,
                                             &config_path,
                                         );

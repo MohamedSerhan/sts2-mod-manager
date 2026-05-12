@@ -84,6 +84,11 @@ pub fn install_is_incompatible(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModUpdate {
     pub mod_name: String,
+    /// On-disk folder of the mod that needs an update. Carries through so
+    /// `update_all_mods` (and any single-mod follow-up) can target the
+    /// exact install when two mods share a display name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder_name: Option<String>,
     pub current_version: String,
     pub latest_version: String,
     /// "github" or "nexus"
@@ -162,8 +167,11 @@ pub async fn check_all_updates(
     nexus_api_key: Option<&str>,
 ) -> Result<Vec<ModUpdate>> {
     let mut updates = Vec::new();
-    // Track which mods already got a GitHub update so we don't double-list
+    // Track which mods already got a GitHub update so we don't double-list.
+    // Keyed by folder_name (falling back to display name) so two mods sharing
+    // a display name don't suppress each other from the Nexus pass.
     let mut github_updated: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let dedup_id = |m: &ModInfo| m.folder_name.clone().unwrap_or_else(|| m.name.clone());
 
     // --- Phase 1: GitHub checks (existing logic, untouched) ---
     for m in mods {
@@ -242,9 +250,10 @@ pub async fn check_all_updates(
             .map(|a| a.browser_download_url.clone())
             .unwrap_or_else(|| release.html_url.clone());
 
-        github_updated.insert(m.name.clone());
+        github_updated.insert(dedup_id(m));
         updates.push(ModUpdate {
             mod_name: m.name.clone(),
+            folder_name: m.folder_name.clone(),
             current_version: m.version.clone(),
             latest_version: release.tag_name.clone(),
             source_type: "github".to_string(),
@@ -259,7 +268,7 @@ pub async fn check_all_updates(
 
         for m in mods {
             // Skip if already flagged via GitHub
-            if github_updated.contains(&m.name) {
+            if github_updated.contains(&dedup_id(m)) {
                 continue;
             }
 
@@ -308,6 +317,7 @@ pub async fn check_all_updates(
                         {
                             updates.push(ModUpdate {
                                 mod_name: m.name.clone(),
+                                folder_name: m.folder_name.clone(),
                                 current_version: m.version.clone(),
                                 latest_version: nv.clone(),
                                 source_type: "nexus".to_string(),
@@ -366,6 +376,7 @@ pub async fn check_for_updates(
 #[tauri::command]
 pub async fn update_mod(
     name: String,
+    folder_name: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ModInfo, String> {
     crate::game::ensure_game_not_running()?;
@@ -382,10 +393,15 @@ pub async fn update_mod(
     let installed = scan_mods(&mods_path);
     let sources_db = load_sources(&config_path);
 
-    let mod_info = installed
-        .iter()
-        .find(|m| m.name == name)
-        .ok_or_else(|| format!("Mod '{}' not found", name))?;
+    // Folder-first lookup so update_mod targets the exact install when two
+    // mods share a display name (e.g. two CardArtEditor installs with
+    // different GitHub sources).
+    let mod_info = if let Some(ref folder) = folder_name {
+        installed.iter().find(|m| m.folder_name.as_deref() == Some(folder.as_str()))
+    } else {
+        installed.iter().find(|m| m.name == name)
+    }
+    .ok_or_else(|| format!("Mod '{}' not found", name))?;
 
     let (owner, repo) = resolve_github_repo(mod_info, &sources_db.mods)
         .ok_or_else(|| format!("Mod '{}' has no GitHub source linked. Link one in the Mods view.", name))?;
@@ -459,8 +475,15 @@ pub async fn update_mod(
 
     // Delete the old mod files before installing the update to prevent duplicates
     // (e.g., old mod in "ModConfig-v0.2.1/" and new one in "ModConfig-v0.2.2/").
+    // Reuse the same folder-first resolution so two same-named mods don't
+    // step on each other.
     {
-        if let Some(old_info) = installed.iter().find(|m| m.name == name) {
+        let old_info = if let Some(ref folder) = folder_name {
+            installed.iter().find(|m| m.folder_name.as_deref() == Some(folder.as_str()))
+        } else {
+            installed.iter().find(|m| m.name == name)
+        };
+        if let Some(old_info) = old_info {
             let mut parent_dirs = std::collections::HashSet::new();
             for file_rel in &old_info.files {
                 let normalized = file_rel.replace('\\', "/");
@@ -510,7 +533,10 @@ pub async fn update_mod(
     // which version was last working).
     let install_healthy = info.version != "unknown" && !info.version.is_empty();
     if install_healthy {
-        update_installed_version(&name, &chosen_tag, &config_path);
+        // Write under folder_name when available so the installed_version
+        // travels with the same DB key the pin lookup uses (folder-first).
+        let install_key = info.folder_name.as_deref().unwrap_or(name.as_str());
+        update_installed_version(install_key, &chosen_tag, &config_path);
         if info.name != name {
             // When the install renamed the mod (manifest's Name field changed
             // between releases — e.g. "STS2-ShowPlayerHandCards" → "Highlight
@@ -559,9 +585,13 @@ pub async fn update_mod(
 #[tauri::command]
 pub async fn repair_mod(
     name: String,
+    folder_name: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ModInfo, String> {
-    log::info!("repair_mod: walk-back repair requested for '{}'", name);
+    log::info!(
+        "repair_mod: walk-back repair requested for '{}' (folder: {:?})",
+        name, folder_name,
+    );
     crate::game::ensure_game_not_running()?;
 
     let (mods_path, cache_path, config_path, token, game_version) = {
@@ -576,10 +606,16 @@ pub async fn repair_mod(
 
     let installed = scan_mods(&mods_path);
     let sources_db = load_sources(&config_path);
-    let mod_info = installed
-        .iter()
-        .find(|m| m.name == name)
-        .ok_or_else(|| format!("Mod '{}' not found", name))?;
+    // Folder-first lookup so repair targets the exact install when two
+    // mods share a display name. Without this, repair would delete and
+    // re-extract whichever copy happens to scan first, possibly nuking
+    // the mod the user wasn't trying to fix.
+    let mod_info = if let Some(ref folder) = folder_name {
+        installed.iter().find(|m| m.folder_name.as_deref() == Some(folder.as_str()))
+    } else {
+        installed.iter().find(|m| m.name == name)
+    }
+    .ok_or_else(|| format!("Mod '{}' not found", name))?;
     let (owner, repo) = resolve_github_repo(mod_info, &sources_db.mods)
         .ok_or_else(|| format!("Mod '{}' has no GitHub source linked. Link one in the Mods view.", name))?;
 
@@ -603,9 +639,15 @@ pub async fn repair_mod(
         chosen.min_game_version.as_deref().unwrap_or("none"),
     );
 
-    // Now safe to delete the broken install.
+    // Now safe to delete the broken install. Reuse the same folder-first
+    // lookup we did above so we delete the exact mod we resolved earlier.
     {
-        if let Some(old_info) = installed.iter().find(|m| m.name == name) {
+        let old_info = if let Some(ref folder) = folder_name {
+            installed.iter().find(|m| m.folder_name.as_deref() == Some(folder.as_str()))
+        } else {
+            installed.iter().find(|m| m.name == name)
+        };
+        if let Some(old_info) = old_info {
             let mut parent_dirs = std::collections::HashSet::new();
             for file_rel in &old_info.files {
                 let normalized = file_rel.replace('\\', "/");
@@ -646,7 +688,9 @@ pub async fn repair_mod(
     // when the manifest parsed cleanly.
     let install_healthy = info.version != "unknown" && !info.version.is_empty();
     if install_healthy {
-        crate::mod_sources::update_installed_version(&name, &chosen.tag, &config_path);
+        // Folder-first key for the same reason as update_mod above.
+        let install_key = info.folder_name.as_deref().unwrap_or(name.as_str());
+        crate::mod_sources::update_installed_version(install_key, &chosen.tag, &config_path);
         if info.name != name {
             crate::mod_sources::migrate_source_entry(&name, &info.name, &config_path);
             crate::mod_sources::update_installed_version(&info.name, &chosen.tag, &config_path);
@@ -816,17 +860,22 @@ pub async fn update_all_mods(
             .await
             {
                 Ok(c) => {
-                    let installed_tag = sources_db
-                        .mods
-                        .get(&update.mod_name)
+                    // Resolve installed_version + manifest version folder-first so
+                    // we compare against the EXACT mod we'd be updating, not
+                    // whichever same-named mod scans first.
+                    let installed_tag = update.folder_name.as_ref()
+                        .and_then(|f| sources_db.mods.get(f))
+                        .or_else(|| sources_db.mods.get(&update.mod_name))
                         .and_then(|e| e.installed_version.as_deref())
                         .map(|s| s.trim_start_matches('v'))
                         .unwrap_or("");
-                    let manifest_ver = installed
-                        .iter()
-                        .find(|m| m.name == update.mod_name)
-                        .map(|m| m.version.trim_start_matches('v'))
-                        .unwrap_or("");
+                    let manifest_ver = if let Some(ref folder) = update.folder_name {
+                        installed.iter().find(|m| m.folder_name.as_deref() == Some(folder.as_str()))
+                    } else {
+                        installed.iter().find(|m| m.name == update.mod_name)
+                    }
+                    .map(|m| m.version.trim_start_matches('v'))
+                    .unwrap_or("");
                     let chosen_ver = c.tag.trim_start_matches('v');
                     if chosen_ver == installed_tag || chosen_ver == manifest_ver {
                         log::info!(
@@ -868,8 +917,14 @@ pub async fn update_all_mods(
         };
 
         // Delete old files before extracting the new zip — same shape as
-        // update_mod / repair_mod.
-        if let Some(old_info) = installed.iter().find(|m| m.name == update.mod_name) {
+        // update_mod / repair_mod. Folder-first lookup so two same-named
+        // mods don't accidentally share or steal each other's installs.
+        let old_info_opt = if let Some(ref folder) = update.folder_name {
+            installed.iter().find(|m| m.folder_name.as_deref() == Some(folder.as_str()))
+        } else {
+            installed.iter().find(|m| m.name == update.mod_name)
+        };
+        if let Some(old_info) = old_info_opt {
             let mut parent_dirs = std::collections::HashSet::new();
             for file_rel in &old_info.files {
                 let normalized = file_rel.replace('\\', "/");
@@ -921,7 +976,11 @@ pub async fn update_all_mods(
                     );
                 }
                 let mut db = load_sources(&config_path);
-                let entry = db.mods.entry(info.name.clone()).or_default();
+                // Write under folder_name when available — keeps two
+                // same-named mods independent in the sources DB and matches
+                // the folder-first read path in enrich_mods_with_sources.
+                let key = info.folder_name.clone().unwrap_or_else(|| info.name.clone());
+                let entry = db.mods.entry(key).or_default();
                 entry.github_repo = Some(format!("{}/{}", owner, repo));
                 entry.installed_version = Some(chosen_tag.clone());
                 let _ = save_sources(&db, &config_path);
@@ -942,6 +1001,12 @@ pub async fn update_all_mods(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModAuditEntry {
     pub mod_name: String,
+    /// On-disk folder name for the installed mod. Surfaced so the UI can
+    /// disambiguate (and pin/unpin) two mods that share a display name
+    /// but live in different folders — without this, Settings would pin
+    /// both same-named entries simultaneously.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder_name: Option<String>,
     pub github_repo: Option<String>,
     pub installed_version: String,
     /// The tag from /releases/latest (may have no assets).
@@ -1064,7 +1129,15 @@ pub async fn audit_mod_versions(
     };
 
     for m in &all_mods {
-        let source_entry = sources_db.mods.get(&m.name);
+        // Source-entry lookup is folder-first to match enrich_mods_with_sources
+        // and the pin_mod write path. Otherwise a mod pinned from the Mods view
+        // (saved under its folder_name) wouldn't show as pinned in this audit,
+        // and the Settings unpin click would no-op because we'd hand back a
+        // pinned=false to the UI for an entry that IS pinned in the DB.
+        let source_entry = m.folder_name.as_ref()
+            .and_then(|f| sources_db.mods.get(f))
+            .or_else(|| sources_db.mods.get(&m.name))
+            .or_else(|| m.mod_id.as_ref().and_then(|i| sources_db.mods.get(i)));
         let is_pinned = source_entry.map(|e| e.pinned).unwrap_or(false);
         let github_pair = resolve_github_repo(m, &sources_db.mods);
 
@@ -1371,6 +1444,7 @@ pub async fn audit_mod_versions(
         if !has_any_source {
             results.push(ModAuditEntry {
                 mod_name: m.name.clone(),
+                folder_name: m.folder_name.clone(),
                 github_repo: None,
                 installed_version: m.version.clone(),
                 latest_release_tag: None,
@@ -1430,6 +1504,7 @@ pub async fn audit_mod_versions(
         };
         results.push(ModAuditEntry {
             mod_name: m.name.clone(),
+            folder_name: m.folder_name.clone(),
             github_repo: display_github,
             installed_version: m.version.clone(),
             latest_release_tag,

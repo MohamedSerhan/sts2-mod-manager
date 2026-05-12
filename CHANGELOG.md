@@ -12,6 +12,8 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 - Mod audit surface on the Mods view: a "Check for updates" button in the toolbar and a per-row "Update available → vX.Y.Z" pill on mods that have a newer compatible GitHub release. Audit results are shared with the Settings → Audit tab.
 - Internal QA harness under `qa/` (not shipped): user-flow scenarios, fixture mod zips, coverage-audit doc tracking 32 historical user-reported bugs.
 - 13 cross-module integration tests in `src-tauri/tests/qa_scenarios.rs` covering BaseLib BOM at the install layer, two-CardArtEditor collapse, pin-survives-apply (both with-pin and without-pin variants), folder-keyed watcher pin lookup, zip-slip refusal, RitsuLib mixed-layout zip wrapping, manifest-rename source migration (incl. don't-overwrite-existing-destination), profile snapshot+apply, kitchen-sink scan with every quirk simultaneously, DLL-only mod surfacing, `lookup_entry` precedence chain.
+- End-to-end WebDriver smoke test in `qa/runner/smoke.mjs` driving the real production binary via `tauri-driver 2.0.6` + `msedgedriver 147`. Six specs cover: main window renders, onboarding overlay dismisses, Mods nav reaches the new audit toolbar button, audit button clickable at rest, WhatsNewCard renders correctly, Settings → Audit tab still loads after the AppContext refactor.
+- `src-tauri/.tauriignore` documents which trees are dev-only and stops `tauri dev`'s file watcher from rebuilding on `qa/` / `dist/` / `target/` changes.
 
 ### Changed
 

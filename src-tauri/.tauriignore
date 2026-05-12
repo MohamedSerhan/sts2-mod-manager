@@ -1,0 +1,36 @@
+# Files the Tauri CLI's file-watcher ignores during `tauri dev`.
+#
+# IMPORTANT: this file controls dev-mode reload behavior, NOT bundling.
+# Bundling in Tauri 2 is opt-IN via `tauri.conf.json -> bundle.resources`,
+# so anything not listed there is already excluded from shipped binaries.
+# `.tauriignore` exists here for two reasons:
+#
+#  1. Faster dev iterations — touching qa/ scenarios or fixtures shouldn't
+#     trigger a Tauri rebuild. Without this, editing a markdown scenario
+#     was triggering a full incremental recompile.
+#  2. Documents intent — readers can see at a glance which trees are
+#     dev-only and must never reach a user.
+
+# Internal QA harness — scenarios, fixtures, WebDriver runner.
+# Lives outside src/ and src-tauri/src/, never reaches the bundle.
+/qa/
+
+# Rust integration tests — compiled only by `cargo test`, never by
+# `cargo build` / `tauri build`. Listed defensively.
+/src-tauri/tests/
+
+# Build outputs that the watcher would otherwise chase its own tail on.
+/dist/
+/src-tauri/target/
+
+# Documentation that isn't shipped.
+/CHANGELOG.md
+/README.md
+/docs/
+
+# Working files / OS junk.
+/.git/
+/node_modules/
+*.log
+.DS_Store
+Thumbs.db

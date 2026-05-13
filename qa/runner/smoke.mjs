@@ -92,6 +92,11 @@ function seedFixtureGameTree({ game, config, cache }) {
   // audit unless CASSETTE_MODE is set.)
   seedQaTestMod(join(game, 'mods', 'QaTestMod'));
   seedUpToDateMod(join(game, 'mods', 'UpToDateMod'));
+  // WalkbackMod is deliberately NOT seeded here — it would be flagged
+  // "needs update" by the audit and break specAuditAgainstCassettesShows
+  // OnePending's "1 update" count. The repair walk-back spec seeds it
+  // on demand via seedWalkbackMod() and triggers a re-scan by nav'ing
+  // to Mods after writing.
 }
 
 /**
@@ -166,6 +171,39 @@ function seedUpToDateMod(dir) {
     ),
   );
   writeFileSync(join(dir, 'UpToDateMod.dll'), Buffer.from([0]));
+}
+
+/**
+ * Repair walk-back fixture mod. Seeded on disk at v2.0.0 — an "in-between"
+ * state with no matching GitHub release. The cassette at
+ * qa/fixtures/github/repos/qa-fixture/walkback-mod/ publishes:
+ *   - v3.0.0 (latest, min_game_version 999.0.0 — incompatible)
+ *   - v1.0.0 (older, min_game_version 0.100.0 — compatible with the
+ *     fixture game's v0.105.0)
+ * specRepairWalkback clicks Repair on this row and asserts the walk-back
+ * lands on v1.0.0 (both via the success toast text and the on-disk
+ * manifest's version field after install).
+ */
+function seedWalkbackMod(dir) {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, 'WalkbackMod.json'),
+    JSON.stringify(
+      {
+        id: 'WalkbackMod',
+        name: 'WalkbackMod',
+        version: '2.0.0',
+        author: 'QA Bot',
+        description: 'Smoke fixture: broken between-state — declares v2.0.0 (no matching release). Repair walks back to v1.0.0.',
+        min_game_version: '0.100.0',
+        source: 'github:qa-fixture/walkback-mod',
+        dependencies: [],
+      },
+      null,
+      2,
+    ),
+  );
+  writeFileSync(join(dir, 'WalkbackMod.dll'), Buffer.from([0]));
 }
 
 /* ── Pre-flight ─────────────────────────────────────────────────── */
@@ -1160,6 +1198,145 @@ async function specAuditAgainstCassettesShowsOnePending(driver) {
   );
 }
 
+/**
+ * Cassette spec: Repair walk-back installs the older compatible tag
+ * when the latest GitHub release requires a newer game build than the
+ * user has.
+ *
+ * Fixture state:
+ *   - WalkbackMod seeded on disk with manifest version "2.0.0" — an
+ *     in-between state that doesn't match any published release tag.
+ *   - GitHub cassette publishes v3.0.0 (latest, min_game_version
+ *     999.0.0 → incompatible with fixture game v0.105.0) and v1.0.0
+ *     (older, min_game_version 0.100.0 → compatible).
+ *
+ * Flow:
+ *   1. Seed WalkbackMod on disk and force a Refresh so the Mods view
+ *      picks it up.
+ *   2. Flip the Advanced toggle so the kebab's "Repair this mod" item
+ *      surfaces (it lives under the Advanced-only Recovery section in
+ *      Mods.tsx).
+ *   3. Open the WalkbackMod kebab → click "Repair this mod" → confirm
+ *      via the modal's "Repair now" button.
+ *   4. Wait for the success toast: handleRepair surfaces
+ *      "Repaired 'WalkbackMod' (v1.0.0)" — the v1.0.0 in the literal is
+ *      the load-bearing assertion proving the walk-back picked the
+ *      older compatible release rather than the blocked latest.
+ *   5. Verify on disk: mods/WalkbackMod/WalkbackMod.json has version
+ *      "1.0.0" (install_mod_from_zip wrote the v1.0.0 zip's manifest
+ *      into the live folder).
+ */
+async function specRepairWalkback(driver) {
+  // Step 1: seed the fixture mod on disk + trigger a re-scan. Clear any
+  // lingering toasts from the preceding spec first — they absolute-
+  // position over the lower viewport and would intercept clicks on the
+  // kebab items further down the page.
+  await waitForToastsToClear(driver);
+  seedWalkbackMod(join(FIXTURE_DIRS.game, 'mods', 'WalkbackMod'));
+  await navToMods(driver);
+  const refreshBtn = await waitForElement(
+    driver,
+    By.xpath("//button[normalize-space(.)='Refresh' or contains(., 'Refresh')]"),
+    'Mods toolbar Refresh button',
+  );
+  await refreshBtn.click();
+  await waitForElement(
+    driver,
+    By.xpath("//*[normalize-space(text())='WalkbackMod']"),
+    'WalkbackMod row (post-seed re-scan)',
+  );
+
+  // Step 2: enable Advanced mode so the kebab Recovery section renders.
+  // The toggle is a `gf-adv-toggle` button labelled "Advanced". If it's
+  // already on (a developer's localStorage might persist it across runs),
+  // clicking would turn it OFF and hide Repair — guard against that by
+  // checking the `on` class first.
+  const advToggle = await waitForElement(
+    driver,
+    By.css('button.gf-adv-toggle'),
+    'Advanced-mode toggle',
+  );
+  const advClass = await advToggle.getAttribute('class');
+  if (!advClass.includes(' on')) {
+    await advToggle.click();
+  }
+
+  // Step 3: open WalkbackMod kebab → "Repair this mod" → confirm.
+  const kebab = await waitForElement(
+    driver,
+    By.xpath(
+      "//*[normalize-space(text())='WalkbackMod']/ancestor::*[.//button[@title='Mod actions']][1]//button[@title='Mod actions']",
+    ),
+    'WalkbackMod kebab button',
+  );
+  await kebab.click();
+
+  const repairItem = await waitForElement(
+    driver,
+    By.xpath("//button[@role='menuitem'][contains(., 'Repair this mod')]"),
+    '"Repair this mod" kebab item',
+  );
+  await repairItem.click();
+
+  // Confirm modal — handleRepair calls confirm({ title: "Repair 'WalkbackMod'?",
+  // confirmLabel: 'Repair now' }). Scope the button to the modal foot so we
+  // don't accidentally hit a banner/inline "Repair" button elsewhere.
+  await waitForElement(
+    driver,
+    By.xpath("//*[contains(@class, 'gf-modal-title') and contains(., 'WalkbackMod')]"),
+    'Repair-mod confirm modal',
+  );
+  const confirmBtn = await waitForElement(
+    driver,
+    By.xpath("//*[contains(@class, 'gf-modal-foot')]//button[normalize-space(.)='Repair now']"),
+    'Confirm "Repair now" button in modal',
+  );
+  await confirmBtn.click();
+
+  // Step 4: wait for the success toast. Walk-back installs v1.0.0, so the
+  // literal "v1.0.0" in the toast is what disambiguates a working walk-
+  // back from a "Repaired … (v3.0.0)" toast (which would mean the compat
+  // check silently failed open and installed the blocked latest).
+  //
+  // We watch for ANY WalkbackMod toast first — repair_mod can fail loudly
+  // via toast.error and we want a useful error message, not a 60s timeout.
+  let toastText = '';
+  await driver.wait(
+    async () => {
+      const toasts = await driver.findElements(By.css('.gf-toast'));
+      for (const t of toasts) {
+        const txt = (await t.getText().catch(() => '')).trim();
+        if (txt.includes('WalkbackMod')) {
+          toastText = txt;
+          return true;
+        }
+      }
+      return false;
+    },
+    60_000,
+    'No WalkbackMod-related toast surfaced after Repair (success or error)',
+  );
+  if (!/Repaired.*WalkbackMod.*v1\.0\.0/i.test(toastText)) {
+    throw new Error(
+      `Repair walk-back: expected toast "Repaired 'WalkbackMod' (v1.0.0)", got "${toastText}"`,
+    );
+  }
+
+  // Step 5: disk-state assertion — the freshly-extracted v1.0.0 manifest
+  // landed at mods/WalkbackMod/WalkbackMod.json with version "1.0.0".
+  const manifestPath = join(FIXTURE_DIRS.game, 'mods', 'WalkbackMod', 'WalkbackMod.json');
+  let parsed;
+  try {
+    const raw = readFileSync(manifestPath, 'utf8');
+    parsed = JSON.parse(raw.replace(/^﻿/, ''));
+  } catch (e) {
+    throw new Error(
+      `Failed to read/parse post-repair manifest at ${manifestPath}: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+  assertEqual(parsed.version, '1.0.0', 'WalkbackMod manifest version after repair walk-back');
+}
+
 const BASE_SPECS = [
   ['main window renders', specMainWindowRenders],
   ['onboarding overlay dismisses cleanly', dismissOnboardingIfPresent],
@@ -1172,6 +1349,7 @@ const BASE_SPECS = [
 const CASSETTE_SPECS = [
   ['audit shows "1 update" with cassette + fixture mods', specAuditAgainstCassettesShowsOnePending],
   ['pin on QaTestMod suppresses its pending update', specPinSuppressesPendingUpdate],
+  ['repair walk-back installs older compatible tag', specRepairWalkback],
 ];
 
 // Specs that mutate fixture state (disk + app config dir) and therefore

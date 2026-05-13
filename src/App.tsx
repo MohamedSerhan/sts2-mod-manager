@@ -7,6 +7,7 @@ import {
   Home,
   Package,
   Search,
+  Boxes,
   Layers,
   Settings,
   Play,
@@ -34,12 +35,13 @@ import { ProfileSwitcher } from './components/ProfileSwitcher';
 import { HomeView } from './views/Home';
 import { ModsView } from './views/Mods';
 import { BrowseView } from './views/Browse';
+import { BrowseModpacksView } from './views/BrowseModpacks';
 import { ProfilesView } from './views/Profiles';
 import { SettingsView } from './views/Settings';
 import { TutorialView } from './views/Tutorial';
 import { launchGame, launchVanilla, installModFromFile } from './hooks/useTauri';
 
-type View = 'home' | 'profiles' | 'mods' | 'browse' | 'tutorial' | 'settings';
+type View = 'home' | 'profiles' | 'mods' | 'browse-mods' | 'browse-modpacks' | 'tutorial' | 'settings';
 type ResizeDirection = 'East' | 'North' | 'NorthEast' | 'NorthWest' | 'South' | 'SouthEast' | 'SouthWest' | 'West';
 
 // v5 IA — 4 main nav items, Tutorial+Settings in the foot. Backups absorbed
@@ -48,7 +50,8 @@ const NAV: { id: View; label: string; icon: typeof Home }[] = [
   { id: 'home',     label: 'Home',     icon: Home },
   { id: 'profiles', label: 'Profiles', icon: Layers },
   { id: 'mods',     label: 'Mods',     icon: Package },
-  { id: 'browse',   label: 'Browse',   icon: Search },
+  { id: 'browse-mods',     label: 'Browse Mods',     icon: Search },
+  { id: 'browse-modpacks', label: 'Browse Modpacks', icon: Boxes },
 ];
 const FOOT_NAV: { id: View; label: string; icon: typeof Home }[] = [
   { id: 'tutorial', label: 'Tutorial', icon: GraduationCap },
@@ -689,7 +692,10 @@ function AppInner() {
             )}
             {activeView === 'profiles' && <ProfilesView onGoToSettings={() => setActiveView('settings')} />}
             {activeView === 'mods' && <ModsView />}
-            {activeView === 'browse' && <BrowseView onGoToSettings={() => setActiveView('settings')} />}
+            {activeView === 'browse-mods' && <BrowseView onGoToSettings={() => setActiveView('settings')} />}
+            {activeView === 'browse-modpacks' && (
+              <BrowseModpacksView onGoToProfiles={() => setActiveView('profiles')} />
+            )}
             {activeView === 'tutorial' && <TutorialView onGoToSettings={() => setActiveView('settings')} />}
             {activeView === 'settings' && <SettingsView />}
 

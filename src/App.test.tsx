@@ -48,7 +48,8 @@ describe('<App>', () => {
     expect(getNavButton('Home')).toBeInTheDocument();
     expect(getNavButton('Profiles')).toBeInTheDocument();
     expect(getNavButton('Mods')).toBeInTheDocument();
-    expect(getNavButton('Browse')).toBeInTheDocument();
+    expect(getNavButton('Browse Mods')).toBeInTheDocument();
+    expect(getNavButton('Browse Modpacks')).toBeInTheDocument();
     expect(getNavButton('Tutorial')).toBeInTheDocument();
     expect(getNavButton('Settings')).toBeInTheDocument();
   });
@@ -78,13 +79,13 @@ describe('<App>', () => {
     });
   });
 
-  it('clicking Browse swaps to the Browse view', async () => {
+  it('clicking Browse Mods swaps to the Browse view', async () => {
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     const skip = screen.queryByRole('button', { name: /Skip setup/i });
     if (skip) await user.click(skip);
-    await user.click(getNavButton('Browse'));
+    await user.click(getNavButton('Browse Mods'));
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /GitHub/i })).toBeInTheDocument();
     });

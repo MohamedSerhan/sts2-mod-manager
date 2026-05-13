@@ -16,6 +16,13 @@ pub struct ModAutoInstalled {
     pub file_name: String,
     /// If this was an update to an existing mod, the old name
     pub replaced: Option<String>,
+    /// Config files we carried forward from the previous install
+    /// because the user had edited them. Drives the post-update
+    /// "preserved N files" toast. Empty list when this was a fresh
+    /// install, when the mod has no tracked configs, or when nothing
+    /// was actually user-edited.
+    #[serde(default)]
+    pub preserved_configs: Vec<String>,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -187,27 +194,72 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                             }
                         }
 
-                        // If we found an existing mod, remove old files first.
-                        //
-                        // Capture BOTH the old display name and the old folder
-                        // name. The folder is the canonical source-entry key
-                        // post-1.3.0; without it we can't carry the source
-                        // entry across an update where the folder happens to
-                        // rename (user-reported "Nexus link reset" bug).
-                        let replaced_identity = if let Some(ref existing) = existing_mod {
+                        // Two flows: fresh install vs. update. For updates we
+                        // read user-edited configs BEFORE deleting the old
+                        // install, run the existing delete+install pipeline
+                        // unchanged, then overlay the preserved bytes onto
+                        // the new folder. Fresh installs just snapshot the
+                        // post-install state so the FIRST update preserves
+                        // things.
+                        let replaced_identity = existing_mod.as_ref().map(|e| {
+                            (e.name.clone(), e.folder_name.clone())
+                        });
+
+                        // Step 1 (update only): read user-edited configs.
+                        // Must happen BEFORE remove_existing_mod_files —
+                        // that helper deletes the wrap folder, after which
+                        // there's nothing left to preserve.
+                        let pre_update_preserved = existing_mod.as_ref().map(|existing| {
+                            let old_folder = existing.folder_name.clone()
+                                .unwrap_or_else(|| existing.name.clone());
+                            crate::mods::prepare_update_with_preserved_configs(
+                                &old_folder,
+                                &existing.name,
+                                &mods_path,
+                                &config_path,
+                            )
+                        }).unwrap_or_default();
+
+                        if let Some(ref existing) = existing_mod {
                             log::info!(
-                                "Downloads watcher: updating existing mod '{}' (folder: {:?})",
+                                "Downloads watcher: updating existing mod '{}' (folder: {:?}, preserving {} config files)",
                                 existing.name,
-                                existing.folder_name
+                                existing.folder_name,
+                                pre_update_preserved.len(),
                             );
                             remove_existing_mod_files(existing, &mods_path, disabled_path.as_deref());
-                            Some((existing.name.clone(), existing.folder_name.clone()))
-                        } else {
-                            None
-                        };
+                        }
 
-                        match install_mod_from_archive(path, &mods_path) {
-                            Ok(mod_info) => {
+                        let install_outcome: std::result::Result<
+                            (crate::mods::ModInfo, Vec<String>),
+                            String,
+                        > = install_mod_from_archive(path, &mods_path)
+                            .map_err(|e| e.to_string())
+                            .and_then(|info| {
+                                if existing_mod.is_some() {
+                                    // Update path: overlay user edits +
+                                    // snapshot the post-restore state.
+                                    crate::mods::finalize_update_with_preserved_configs(
+                                        &info,
+                                        &mods_path,
+                                        pre_update_preserved,
+                                        &config_path,
+                                    )
+                                    .map(|names| (info, names))
+                                    .map_err(|e| e.to_string())
+                                } else {
+                                    // Fresh install: just snapshot. No
+                                    // preservation possible (nothing to
+                                    // preserve from).
+                                    crate::mods::snapshot_after_fresh_install(
+                                        &info, &mods_path, &config_path,
+                                    );
+                                    Ok((info, Vec::new()))
+                                }
+                            });
+
+                        match install_outcome {
+                            Ok((mod_info, preserved_configs)) => {
                                 let file_name = path
                                     .file_name()
                                     .unwrap_or_default()
@@ -283,6 +335,7 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                         mod_name: mod_info.name,
                                         file_name,
                                         replaced: replaced_name,
+                                        preserved_configs,
                                     },
                                 );
                             }

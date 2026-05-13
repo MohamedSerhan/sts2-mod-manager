@@ -378,6 +378,7 @@ pub async fn check_for_updates(
 pub async fn update_mod(
     name: String,
     folder_name: Option<String>,
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ModInfo, String> {
     crate::game::ensure_game_not_running()?;
@@ -474,6 +475,24 @@ pub async fn update_mod(
         chosen_tag = tag;
     }
 
+    // Read user-edited configs BEFORE the destructive delete pass. Empty
+    // when the mod has no snapshot (rollout case) or no edits.
+    let pre_update_preserved = {
+        let old_info = if let Some(ref folder) = folder_name {
+            installed.iter().find(|m| m.folder_name.as_deref() == Some(folder.as_str()))
+        } else {
+            installed.iter().find(|m| m.name == name)
+        };
+        old_info
+            .and_then(|m| m.folder_name.clone().or_else(|| Some(m.name.clone())))
+            .map(|folder| {
+                crate::mods::prepare_update_with_preserved_configs(
+                    &folder, &name, &mods_path, &config_path,
+                )
+            })
+            .unwrap_or_default()
+    };
+
     // Delete the old mod files before installing the update to prevent duplicates
     // (e.g., old mod in "ModConfig-v0.2.1/" and new one in "ModConfig-v0.2.2/").
     // Reuse the same folder-first resolution so two same-named mods don't
@@ -518,10 +537,11 @@ pub async fn update_mod(
     }
 
     log::info!(
-        "update_mod: installing {}/{}@{} for {} (game v{}, min_game_version={})",
+        "update_mod: installing {}/{}@{} for {} (game v{}, min_game_version={}, preserving {} configs)",
         owner, repo, chosen_tag, name,
         game_version.as_deref().unwrap_or("?"),
         chosen_mgv.as_deref().unwrap_or("none"),
+        pre_update_preserved.len(),
     );
     let info = crate::mods::install_mod_from_zip(&chosen_zip, &mods_path)
         .map_err(|e| e.to_string())?;
@@ -547,6 +567,15 @@ pub async fn update_mod(
             crate::mod_sources::migrate_source_entry(&name, &info.name, &config_path);
             update_installed_version(&info.name, &chosen_tag, &config_path);
         }
+
+        // Overlay user-edited configs + refresh snapshot. Emits the
+        // mod-configs-preserved event for the toast when anything was
+        // actually preserved.
+        let preserved_names = crate::mods::finalize_update_with_preserved_configs(
+            &info, &mods_path, pre_update_preserved, &config_path,
+        )
+        .map_err(|e| e.to_string())?;
+        crate::mod_sources::emit_configs_preserved(&app, &info.name, &preserved_names);
     } else {
         log::warn!(
             "update_mod: install of '{}' from {}/{}@{} produced an unhealthy ModInfo (version='{}'); \
@@ -587,6 +616,7 @@ pub async fn update_mod(
 pub async fn repair_mod(
     name: String,
     folder_name: Option<String>,
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ModInfo, String> {
     log::info!(
@@ -640,6 +670,18 @@ pub async fn repair_mod(
         chosen.min_game_version.as_deref().unwrap_or("none"),
     );
 
+    // Read user-edited configs BEFORE the destructive delete pass.
+    let pre_update_preserved = mod_info
+        .folder_name
+        .clone()
+        .or_else(|| Some(mod_info.name.clone()))
+        .map(|folder| {
+            crate::mods::prepare_update_with_preserved_configs(
+                &folder, &name, &mods_path, &config_path,
+            )
+        })
+        .unwrap_or_default();
+
     // Now safe to delete the broken install. Reuse the same folder-first
     // lookup we did above so we delete the exact mod we resolved earlier.
     {
@@ -677,7 +719,10 @@ pub async fn repair_mod(
                     let _ = std::fs::remove_dir_all(&folder_path);
                 }
             }
-            log::info!("repair_mod: deleted old files for '{}'", name);
+            log::info!(
+                "repair_mod: deleted old files for '{}' (preserving {} configs)",
+                name, pre_update_preserved.len(),
+            );
         }
     }
 
@@ -696,6 +741,16 @@ pub async fn repair_mod(
             crate::mod_sources::migrate_source_entry(&name, &info.name, &config_path);
             crate::mod_sources::update_installed_version(&info.name, &chosen.tag, &config_path);
         }
+
+        // Overlay user-edited configs + refresh snapshot. Repair is a
+        // walk-back (re-install of an older release), so preservation
+        // matters the same way it does for forward updates — user's
+        // tweaks shouldn't die just because they fixed a broken install.
+        let preserved_names = crate::mods::finalize_update_with_preserved_configs(
+            &info, &mods_path, pre_update_preserved, &config_path,
+        )
+        .map_err(|e| e.to_string())?;
+        crate::mod_sources::emit_configs_preserved(&app, &info.name, &preserved_names);
     } else {
         log::warn!(
             "repair_mod: install of '{}' from {}/{}@{} produced an unhealthy ModInfo (version='{}'); \
@@ -813,6 +868,7 @@ pub async fn pick_compatible_release(
 /// logged but don't fail the batch.
 #[tauri::command]
 pub async fn update_all_mods(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Vec<ModInfo>, String> {
     crate::game::ensure_game_not_running()?;
@@ -917,14 +973,25 @@ pub async fn update_all_mods(
             (update.latest_version.clone(), zip)
         };
 
-        // Delete old files before extracting the new zip — same shape as
-        // update_mod / repair_mod. Folder-first lookup so two same-named
-        // mods don't accidentally share or steal each other's installs.
+        // Read user-edited configs BEFORE the destructive delete pass —
+        // same prepare/finalize pattern as update_mod / repair_mod.
         let old_info_opt = if let Some(ref folder) = update.folder_name {
             installed.iter().find(|m| m.folder_name.as_deref() == Some(folder.as_str()))
         } else {
             installed.iter().find(|m| m.name == update.mod_name)
         };
+        let pre_update_preserved = old_info_opt
+            .and_then(|m| m.folder_name.clone().or_else(|| Some(m.name.clone())))
+            .map(|folder| {
+                crate::mods::prepare_update_with_preserved_configs(
+                    &folder, &update.mod_name, &mods_path, &config_path,
+                )
+            })
+            .unwrap_or_default();
+
+        // Delete old files before extracting the new zip — same shape as
+        // update_mod / repair_mod. Folder-first lookup so two same-named
+        // mods don't accidentally share or steal each other's installs.
         if let Some(old_info) = old_info_opt {
             let mut parent_dirs = std::collections::HashSet::new();
             for file_rel in &old_info.files {
@@ -985,6 +1052,27 @@ pub async fn update_all_mods(
                 entry.github_repo = Some(format!("{}/{}", owner, repo));
                 entry.installed_version = Some(chosen_tag.clone());
                 let _ = save_sources(&db, &config_path);
+
+                // Overlay user-edited configs + refresh snapshot. Emits
+                // the mod-configs-preserved event per mod, so a bulk
+                // update produces one toast per affected mod (acceptable
+                // for the typical 1-2 preserve-affected mods in a batch).
+                match crate::mods::finalize_update_with_preserved_configs(
+                    &info, &mods_path, pre_update_preserved, &config_path,
+                ) {
+                    Ok(preserved_names) => {
+                        crate::mod_sources::emit_configs_preserved(
+                            &app, &info.name, &preserved_names,
+                        );
+                    }
+                    Err(e) => {
+                        log::error!(
+                            "update_all_mods: finalize preserve for '{}' failed: {}",
+                            info.name, e,
+                        );
+                    }
+                }
+
                 results.push(info);
             }
             Err(e) => {

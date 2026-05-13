@@ -29,6 +29,18 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ### Changed
 
+### Fixed
+
+### Security
+
+---
+
+## [1.3.6] - 2026-05-13
+
+### Added
+
+### Changed
+
 - Settings and the onboarding wizard now spell out which GitHub token permissions you need to publish modpacks, instead of hiding them until after you've saved a token.
 
 ### Fixed

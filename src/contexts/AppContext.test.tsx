@@ -285,6 +285,6 @@ describe('<AppProvider>', () => {
 
     expect(updateAllCalls).toBe(1);
     // Targeted re-audit happens after the bulk update completes.
-    expect(auditCalls).toBeGreaterThanOrEqual(1);
+    expect(auditCalls).toBe(1);
   });
 });

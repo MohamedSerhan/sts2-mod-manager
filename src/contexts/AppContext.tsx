@@ -245,7 +245,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       );
       await refreshAuditEntries(names);
     } catch (e) {
-      toast.error(`Update all failed: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(`Update failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setUpdatingAll(false);
     }

@@ -99,10 +99,15 @@ export function BrowseView({ onGoToSettings }: BrowseViewProps = {}) {
     const fetcher = tab === 'nexus_trending' ? nexusGetTrending : nexusGetLatestAdded;
     fetcher()
       .then((mods) => {
+        // uncovered: cancelled-branch races useEffect cleanup against promise
+        // resolution. High-cost, low-value to drive deterministically; the
+        // happy path through this resolver is covered.
         if (cancelled) return;
         setNexusMods(mods);
       })
       .catch((e) => {
+        // uncovered: cancelled-branch races useEffect cleanup against promise
+        // rejection. Happy error paths through this handler are covered.
         if (cancelled) return;
         const msg = e instanceof Error ? e.message : String(e);
         if (msg.includes('Nexus API key not set')) {
@@ -112,6 +117,8 @@ export function BrowseView({ onGoToSettings }: BrowseViewProps = {}) {
         }
       })
       .finally(() => {
+        // uncovered: cancelled-branch only fires when the tab is switched
+        // mid-flight. Non-cancelled path (the common case) is covered.
         if (!cancelled) setNexusLoading(false);
       });
     return () => {

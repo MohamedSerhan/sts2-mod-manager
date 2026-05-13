@@ -102,10 +102,8 @@ describe('<BrowseView>', () => {
     expect(screen.getByText(/Search for mods to get started/i)).toBeInTheDocument();
   });
 
-  it('GitHub search with no matches shows the "no mods" toast and falls back to the backend list', async () => {
-    // Backend returns one row whose tokens don't match the query at all,
-    // so fuzzyRerank drops it; the fallback (`repos`) is used and toast still fires? -
-    // Actually toast.info fires only when finalList.length === 0. Force a real empty list.
+  it('GitHub search with no matches shows the "no mods" toast', async () => {
+    // toast.info fires only when finalList.length === 0; force a real empty list.
     registerInvokeHandler('search_github_mods', () => []);
     const user = userEvent.setup();
     render(<Wrap />);
@@ -619,6 +617,24 @@ describe('<BrowseView>', () => {
     });
     // No "No mods found" toast — we did get results from the fallback.
     expect(screen.queryByText(/No mods found/i)).not.toBeInTheDocument();
+  });
+
+  it('GitHub card with null description shows the "No description" fallback', async () => {
+    // Drives both the fuzzy-rerank text builder (`r.description ?? ''`)
+    // and the card body fallback (`repo.description || 'No description'`).
+    registerInvokeHandler('search_github_mods', () => [
+      ghRepo({ description: null }),
+    ]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    const search = await screen.findByPlaceholderText(/Search/i);
+    await user.type(search, 'autopath{Enter}');
+    // The card heading proves the result rendered.
+    await waitFor(() => {
+      expect(screen.getByText('autopath-sts2')).toBeInTheDocument();
+    });
+    // And the description fallback is the GitHub-card body copy.
+    expect(screen.getByText(/No description/i)).toBeInTheDocument();
   });
 
   it('Nexus card with null name falls back to "Mod #<id>"', async () => {

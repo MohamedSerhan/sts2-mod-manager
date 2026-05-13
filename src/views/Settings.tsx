@@ -110,7 +110,6 @@ export function SettingsView() {
     getLaunchMode().then(setLaunchModeValue).catch(() => {});
   }, []);
 
-  // When a mod is auto-installed by the Downloads watcher (NXM link or
   // The `mod-auto-installed` event handler that auto-refreshes audit rows
   // after a Downloads-folder catch moved to AppContext (so the Mods view
   // gets the same behavior without re-binding the listener here).

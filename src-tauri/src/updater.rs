@@ -1251,7 +1251,6 @@ pub async fn audit_mod_versions(
     }
 
     let sources_db = load_sources(&config_path);
-    let mut results: Vec<ModAuditEntry> = Vec::new();
 
     // Collect Nexus API key + the user's detected game version. The game
     // version drives the per-row "won't load on your build" flag — None
@@ -1263,405 +1262,422 @@ pub async fn audit_mod_versions(
         (s.nexus_api_key.clone(), s.game_version.clone())
     };
 
+    let ctx = AuditCtx {
+        sources_db: &sources_db,
+        nexus_api_key: nexus_api_key.as_deref(),
+        user_game_version: user_game_version.as_deref(),
+        cache_path: &cache_path,
+        token: token.as_deref(),
+    };
+
+    let mut results: Vec<ModAuditEntry> = Vec::with_capacity(all_mods.len());
     for m in &all_mods {
-        // Source-entry lookup is folder-first to match enrich_mods_with_sources
-        // and the pin_mod write path. Otherwise a mod pinned from the Mods view
-        // (saved under its folder_name) wouldn't show as pinned in this audit,
-        // and the Settings unpin click would no-op because we'd hand back a
-        // pinned=false to the UI for an entry that IS pinned in the DB.
-        let source_entry = m.folder_name.as_ref()
-            .and_then(|f| sources_db.mods.get(f))
-            .or_else(|| sources_db.mods.get(&m.name))
-            .or_else(|| m.mod_id.as_ref().and_then(|i| sources_db.mods.get(i)));
-        let is_pinned = source_entry.map(|e| e.pinned).unwrap_or(false);
-        let github_pair = resolve_github_repo(m, &sources_db.mods);
-
-        // Also get auto-detected GitHub repo for display (even though it's not used for updates)
-        let auto_detected_github = source_entry
-            .filter(|e| e.github_auto_detected && e.github_repo.is_some())
-            .and_then(|e| e.github_repo.clone());
-        let is_auto_detected = auto_detected_github.is_some() && github_pair.is_none();
-
-        // Resolve Nexus info from sources DB or manifest
-        let nexus_url = source_entry
-            .and_then(|e| e.nexus_url.clone())
-            .or_else(|| m.nexus_url.clone());
-        let nexus_game_domain = source_entry.and_then(|e| e.nexus_game_domain.clone());
-        let nexus_mod_id = source_entry.and_then(|e| e.nexus_mod_id);
-
-        let has_github = github_pair.is_some();
-        let has_nexus = nexus_mod_id.is_some();
-        let has_any_source = has_github || has_nexus || auto_detected_github.is_some() || nexus_url.is_some();
-
-        // --- GitHub version check ---
-        let mut github_repo_str: Option<String> = None;
-        let mut latest_release_tag: Option<String> = None;
-        let mut latest_release_with_assets_tag: Option<String> = None;
-        let mut latest_has_mod_assets = false;
-        let mut github_needs_update = false;
-        let mut asset_names: Vec<String> = Vec::new();
-        let mut total_scanned: u32 = 0;
-        let mut github_error: Option<String> = None;
-        // Walk-back / compat fields. Populated below when we have an
-        // actionable github_needs_update on a row whose latest release
-        // declares a min_game_version higher than the user's STS2 build.
-        let mut latest_release_min_game_version: Option<String> = None;
-        let mut latest_release_blocked_by_game_version = false;
-        let mut latest_compatible_tag: Option<String> = None;
-
-        if let Some((owner, repo)) = github_pair {
-            let full_name = format!("{}/{}", owner, repo);
-            github_repo_str = Some(full_name.clone());
-
-            match fetch_latest_release(&owner, &repo, token.as_deref()).await {
-                Ok(r) => {
-                    latest_release_tag = Some(r.tag_name.clone());
-                    latest_has_mod_assets = r.assets.iter().any(|a| is_mod_asset(&a.name));
-                }
-                Err(e) => {
-                    github_error = Some(format!("Failed to fetch latest release: {}", e));
-                }
-            };
-
-            if github_error.is_none() {
-                // Scan paginated releases for first one with assets AND a valid version tag
-                let max_pages: u32 = 3;
-                let per_page: u32 = 30;
-
-                'outer: for page in 1..=max_pages {
-                    let releases = match fetch_releases(&owner, &repo, page, per_page, token.as_deref()).await {
-                        Ok(r) => r,
-                        Err(_) => break,
-                    };
-                    if releases.is_empty() { break; }
-
-                    for release in &releases {
-                        total_scanned += 1;
-                        // Skip non-version tags (e.g. "dev-build", "nightly")
-                        if !is_version_tag(&release.tag_name) {
-                            continue;
-                        }
-                        if release.assets.iter().any(|a| is_mod_asset(&a.name)) {
-                            latest_release_with_assets_tag = Some(release.tag_name.clone());
-                            asset_names = release.assets.iter()
-                                .filter(|a| is_mod_asset(&a.name))
-                                .map(|a| a.name.clone())
-                                .collect();
-                            break 'outer;
-                        }
-                    }
-                }
-
-                // Determine if a GitHub update is needed using semver
-                if let Some(ref assets_tag) = latest_release_with_assets_tag {
-                    let latest_ver = assets_tag.trim_start_matches('v');
-                    let current_ver = m.version.trim_start_matches('v');
-
-                    let installed_ver_matches = sources_db
-                        .mods
-                        .get(&m.name)
-                        .and_then(|e| e.installed_version.as_deref())
-                        .map(|iv| iv.trim_start_matches('v') == latest_ver)
-                        .unwrap_or(false);
-
-                    if !installed_ver_matches
-                        && current_ver != "unknown"
-                        && current_ver != "0.0.0"
-                    {
-                        // Use semver comparison — only flag if latest > current
-                        github_needs_update = is_newer_version(current_ver, latest_ver);
-                    }
-                }
-
-                // Compat walk-back — runs only when the basic GitHub check
-                // already says an update is available. Cheap when nothing's
-                // pending; one zip download (cached) when something is.
-                //
-                // We peek the latest release with assets first. If its
-                // declared min_game_version is satisfied, we're done — that
-                // tag is what Update will install. If it's too high for
-                // the user's STS2 build, we walk back to find the newest
-                // compatible tag and flag the row so the UI can show
-                // "Latest vY needs game vZ; will install vX (compatible)".
-                if github_needs_update {
-                    if let Some(ref assets_tag) = latest_release_with_assets_tag.clone() {
-                        match crate::download::download_release_zip_to_cache(
-                            &owner, &repo, assets_tag, &cache_path, token.as_deref(),
-                        )
-                        .await
-                        {
-                            Ok(zip_path) => {
-                                let peeked = crate::download::peek_zip_min_game_version(&zip_path)
-                                    .ok()
-                                    .flatten();
-                                latest_release_min_game_version = peeked.clone();
-                                let compatible = match (user_game_version.as_deref(), peeked.as_deref()) {
-                                    (_, None) => true,
-                                    (None, Some(_)) => true,
-                                    (Some(gv), Some(req)) => game_version_satisfies(gv, req),
-                                };
-                                if compatible {
-                                    latest_compatible_tag = Some(assets_tag.clone());
-                                } else {
-                                    latest_release_blocked_by_game_version = true;
-                                    // Walk back from latest. Reuses cache,
-                                    // so we don't re-download what we
-                                    // already peeked.
-                                    match pick_compatible_release(
-                                        &owner, &repo,
-                                        user_game_version.as_deref(),
-                                        &cache_path, token.as_deref(),
-                                    )
-                                    .await
-                                    {
-                                        Ok(walk) => {
-                                            // Re-evaluate whether the walked-
-                                            // back tag is actually newer than
-                                            // installed. If not, drop the
-                                            // update flag — the user already
-                                            // has the newest compatible
-                                            // release; the only thing newer
-                                            // is the blocked latest. Setting
-                                            // latest_compatible_tag = None in
-                                            // that case signals "no installable
-                                            // GitHub update" to the UI, which
-                                            // hides the Update button and
-                                            // switches the hint copy to
-                                            // "you're already on the newest
-                                            // compatible".
-                                            let installed_tag = sources_db
-                                                .mods
-                                                .get(&m.name)
-                                                .and_then(|e| e.installed_version.as_deref())
-                                                .map(|s| s.trim_start_matches('v'))
-                                                .unwrap_or("");
-                                            let manifest_ver = m.version.trim_start_matches('v');
-                                            let walk_ver = walk.tag.trim_start_matches('v');
-                                            if walk_ver == installed_tag || walk_ver == manifest_ver {
-                                                github_needs_update = false;
-                                                latest_compatible_tag = None;
-                                            } else {
-                                                latest_compatible_tag = Some(walk.tag.clone());
-                                            }
-                                        }
-                                        Err(e) => {
-                                            log::warn!(
-                                                "audit: walk-back failed for {}/{} (game v{}): {}",
-                                                owner, repo,
-                                                user_game_version.as_deref().unwrap_or("?"), e,
-                                            );
-                                            // Couldn't find a compatible
-                                            // release — drop the update flag
-                                            // since clicking Update would
-                                            // produce a broken install.
-                                            github_needs_update = false;
-                                        }
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                log::warn!(
-                                    "audit: failed to peek {}/{}@{} for compat check: {}",
-                                    owner, repo, assets_tag, e,
-                                );
-                                // Peek failed → keep github_needs_update as
-                                // the basic check decided. Update flow has
-                                // its own walk-back as a final safety net.
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // --- Nexus version check ---
-        let mut nexus_version: Option<String> = None;
-        let mut nexus_update_available = false;
-
-        if let (Some(ref domain), Some(mod_id)) = (nexus_game_domain, nexus_mod_id) {
-            if let Some(ref nkey) = nexus_api_key {
-                let client = crate::nexus::NexusClient::new(nkey);
-                match client.get_mod_info(domain, mod_id).await {
-                    Ok(info) => {
-                        // For mod pages that host multiple variants under one
-                        // mod_id (e.g. "BetterSpire2" + "BetterSpire2Lite"),
-                        // the page-level `version` field is one number for
-                        // the latest-uploaded file regardless of variant.
-                        // Look at the file list and pick the version that
-                        // matches the LOCAL mod's flavor — otherwise the
-                        // user's lite install gets compared against the
-                        // non-lite version and shows a bogus mismatch.
-                        let mut effective_version = info.version.clone();
-                        match client.get_mod_files(domain, mod_id).await {
-                            Ok(files) => {
-                                if let Some(picked) =
-                                    crate::nexus::pick_version_for_local_mod(&files, &m.name)
-                                {
-                                    if effective_version.as_deref() != Some(picked.as_str()) {
-                                        log::debug!(
-                                            "Nexus variant pick for '{}' (mod_id {}): page version {:?} → file version {:?}",
-                                            m.name, mod_id, info.version, picked
-                                        );
-                                    }
-                                    effective_version = Some(picked);
-                                }
-                            }
-                            Err(e) => {
-                                log::warn!(
-                                    "Nexus files lookup failed for '{}' (mod {}): {} — falling back to page version",
-                                    m.name, mod_id, e
-                                );
-                            }
-                        }
-
-                        if let Some(ref nv) = effective_version {
-                            nexus_version = Some(nv.clone());
-                            // Use the best known version: check mod_sources installed_version
-                            // first (tracks what was actually downloaded), then fall back to
-                            // the manifest version on disk (which mod authors don't always update).
-                            let sources_ver = source_entry
-                                .and_then(|e| e.installed_version.as_deref())
-                                .unwrap_or("");
-                            let manifest_ver = m.version.trim_start_matches('v');
-                            let current_ver = if !sources_ver.is_empty() {
-                                // Use whichever is higher: sources DB or manifest
-                                let sv = sources_ver.trim_start_matches('v');
-                                if is_newer_version(manifest_ver, sv) { sv } else { manifest_ver }
-                            } else {
-                                manifest_ver
-                            };
-                            let nexus_ver = nv.trim_start_matches('v');
-                            if current_ver != "unknown" && current_ver != "0.0.0" {
-                                nexus_update_available = is_newer_version(current_ver, nexus_ver);
-                            }
-                            // Nexus and GitHub typically host the same
-                            // mod release at the same version. If the
-                            // GitHub side proved that release is blocked
-                            // by min_game_version, the Nexus zip is the
-                            // same incompatible build — suppress the
-                            // "Download from Nexus" prompt so we don't
-                            // send the user to install something we
-                            // know won't load. We require the version
-                            // numbers to match (≥, since Nexus could
-                            // have an even newer one in flight, but
-                            // that's rare); a stricter equality check
-                            // would miss the simple case where mod
-                            // authors round-trip the same vX.Y.Z to
-                            // both hosts.
-                            if nexus_update_available
-                                && latest_release_blocked_by_game_version
-                                && !is_newer_version(
-                                    latest_release_with_assets_tag
-                                        .as_deref()
-                                        .unwrap_or("")
-                                        .trim_start_matches('v'),
-                                    nexus_ver,
-                                )
-                            {
-                                log::info!(
-                                    "audit: suppressing Nexus update for '{}' — Nexus v{} matches \
-                                     GitHub's game-version-blocked latest v{}",
-                                    m.name, nexus_ver,
-                                    latest_release_with_assets_tag.as_deref().unwrap_or("?"),
-                                );
-                                nexus_update_available = false;
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        log::warn!("Nexus API check failed for {} (mod {}): {}", m.name, mod_id, e);
-                    }
-                }
-            }
-        }
-
-        // If no source at all, still include in report
-        if !has_any_source {
-            results.push(ModAuditEntry {
-                mod_name: m.name.clone(),
-                folder_name: m.folder_name.clone(),
-                github_repo: None,
-                installed_version: m.version.clone(),
-                latest_release_tag: None,
-                latest_release_with_assets_tag: None,
-                latest_has_assets: false,
-                needs_update: false,
-                asset_names: Vec::new(),
-                releases_scanned: 0,
-                error: None,
-                nexus_url: None,
-                nexus_version: None,
-                nexus_update_available: false,
-                update_source: None,
-                github_auto_detected: false,
-                pinned: is_pinned,
-                min_game_version: m.min_game_version.clone(),
-                game_version_too_old: matches!(
-                    (user_game_version.as_deref(), m.min_game_version.as_deref()),
-                    (Some(gv), Some(req)) if !game_version_satisfies(gv, req)
-                ),
-                latest_release_min_game_version: None,
-                latest_release_blocked_by_game_version: false,
-                latest_compatible_tag: None,
-            });
-            continue;
-        }
-
-        // For display: use the verified GitHub repo, or fall back to auto-detected for informational display
-        let display_github = github_repo_str.clone().or(auto_detected_github);
-
-        // If GitHub errored (e.g. 404) but we have Nexus data, suppress the GitHub error —
-        // the Nexus check is the authority. Also mark as auto-detected so UI treats it as informational.
-        let (final_error, final_auto_detected) = if github_error.is_some() && (nexus_url.is_some() || nexus_version.is_some()) {
-            (None, true) // suppress error, mark GitHub as informational
-        } else {
-            (github_error, is_auto_detected)
-        };
-
-        let min_game_version = m.min_game_version.clone();
-        let game_version_too_old = matches!(
-            (user_game_version.as_deref(), min_game_version.as_deref()),
-            (Some(gv), Some(req)) if !game_version_satisfies(gv, req)
-        );
-        // Compute needs_update + update_source AFTER the walk-back has had
-        // a chance to drop github_needs_update (it does so when the only
-        // newer release is incompatible, or when the walked-back tag is
-        // already what's installed).
-        let needs_update = !is_pinned && (github_needs_update || nexus_update_available);
-        let update_source = if github_needs_update && nexus_update_available {
-            Some("both".to_string())
-        } else if github_needs_update {
-            Some("github".to_string())
-        } else if nexus_update_available {
-            Some("nexus".to_string())
-        } else {
-            None
-        };
-        results.push(ModAuditEntry {
-            mod_name: m.name.clone(),
-            folder_name: m.folder_name.clone(),
-            github_repo: display_github,
-            installed_version: m.version.clone(),
-            latest_release_tag,
-            latest_release_with_assets_tag,
-            latest_has_assets: latest_has_mod_assets,
-            needs_update,
-            asset_names,
-            releases_scanned: total_scanned,
-            error: final_error,
-            nexus_url,
-            nexus_version,
-            nexus_update_available,
-            update_source,
-            github_auto_detected: final_auto_detected,
-            pinned: is_pinned,
-            min_game_version,
-            game_version_too_old,
-            latest_release_min_game_version,
-            latest_release_blocked_by_game_version,
-            latest_compatible_tag,
-        });
+        results.push(audit_one_mod(m, &ctx).await);
     }
 
     Ok(results)
+}
+
+/// Audit one mod. Returns an entry even for mods with no source linked.
+/// Errors at the per-source level (GitHub 404, Nexus rate-limit, etc.) are
+/// captured into `ModAuditEntry.error` — this function returns `ModAuditEntry`
+/// rather than `Result` because a single mod failing must not cancel the
+/// rest of the stream when this is called concurrently.
+async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
+    // Source-entry lookup is folder-first to match enrich_mods_with_sources
+    // and the pin_mod write path. Otherwise a mod pinned from the Mods view
+    // (saved under its folder_name) wouldn't show as pinned in this audit,
+    // and the Settings unpin click would no-op because we'd hand back a
+    // pinned=false to the UI for an entry that IS pinned in the DB.
+    let source_entry = m.folder_name.as_ref()
+        .and_then(|f| ctx.sources_db.mods.get(f))
+        .or_else(|| ctx.sources_db.mods.get(&m.name))
+        .or_else(|| m.mod_id.as_ref().and_then(|i| ctx.sources_db.mods.get(i)));
+    let is_pinned = source_entry.map(|e| e.pinned).unwrap_or(false);
+    let github_pair = resolve_github_repo(m, &ctx.sources_db.mods);
+
+    // Also get auto-detected GitHub repo for display (even though it's not used for updates)
+    let auto_detected_github = source_entry
+        .filter(|e| e.github_auto_detected && e.github_repo.is_some())
+        .and_then(|e| e.github_repo.clone());
+    let is_auto_detected = auto_detected_github.is_some() && github_pair.is_none();
+
+    // Resolve Nexus info from sources DB or manifest
+    let nexus_url = source_entry
+        .and_then(|e| e.nexus_url.clone())
+        .or_else(|| m.nexus_url.clone());
+    let nexus_game_domain = source_entry.and_then(|e| e.nexus_game_domain.clone());
+    let nexus_mod_id = source_entry.and_then(|e| e.nexus_mod_id);
+
+    let has_github = github_pair.is_some();
+    let has_nexus = nexus_mod_id.is_some();
+    let has_any_source = has_github || has_nexus || auto_detected_github.is_some() || nexus_url.is_some();
+
+    // --- GitHub version check ---
+    let mut github_repo_str: Option<String> = None;
+    let mut latest_release_tag: Option<String> = None;
+    let mut latest_release_with_assets_tag: Option<String> = None;
+    let mut latest_has_mod_assets = false;
+    let mut github_needs_update = false;
+    let mut asset_names: Vec<String> = Vec::new();
+    let mut total_scanned: u32 = 0;
+    let mut github_error: Option<String> = None;
+    // Walk-back / compat fields. Populated below when we have an
+    // actionable github_needs_update on a row whose latest release
+    // declares a min_game_version higher than the user's STS2 build.
+    let mut latest_release_min_game_version: Option<String> = None;
+    let mut latest_release_blocked_by_game_version = false;
+    let mut latest_compatible_tag: Option<String> = None;
+
+    if let Some((owner, repo)) = github_pair {
+        let full_name = format!("{}/{}", owner, repo);
+        github_repo_str = Some(full_name.clone());
+
+        match fetch_latest_release(&owner, &repo, ctx.token).await {
+            Ok(r) => {
+                latest_release_tag = Some(r.tag_name.clone());
+                latest_has_mod_assets = r.assets.iter().any(|a| is_mod_asset(&a.name));
+            }
+            Err(e) => {
+                github_error = Some(format!("Failed to fetch latest release: {}", e));
+            }
+        };
+
+        if github_error.is_none() {
+            // Scan paginated releases for first one with assets AND a valid version tag
+            let max_pages: u32 = 3;
+            let per_page: u32 = 30;
+
+            'outer: for page in 1..=max_pages {
+                let releases = match fetch_releases(&owner, &repo, page, per_page, ctx.token).await {
+                    Ok(r) => r,
+                    Err(_) => break,
+                };
+                if releases.is_empty() { break; }
+
+                for release in &releases {
+                    total_scanned += 1;
+                    // Skip non-version tags (e.g. "dev-build", "nightly")
+                    if !is_version_tag(&release.tag_name) {
+                        continue;
+                    }
+                    if release.assets.iter().any(|a| is_mod_asset(&a.name)) {
+                        latest_release_with_assets_tag = Some(release.tag_name.clone());
+                        asset_names = release.assets.iter()
+                            .filter(|a| is_mod_asset(&a.name))
+                            .map(|a| a.name.clone())
+                            .collect();
+                        break 'outer;
+                    }
+                }
+            }
+
+            // Determine if a GitHub update is needed using semver
+            if let Some(ref assets_tag) = latest_release_with_assets_tag {
+                let latest_ver = assets_tag.trim_start_matches('v');
+                let current_ver = m.version.trim_start_matches('v');
+
+                let installed_ver_matches = ctx.sources_db
+                    .mods
+                    .get(&m.name)
+                    .and_then(|e| e.installed_version.as_deref())
+                    .map(|iv| iv.trim_start_matches('v') == latest_ver)
+                    .unwrap_or(false);
+
+                if !installed_ver_matches
+                    && current_ver != "unknown"
+                    && current_ver != "0.0.0"
+                {
+                    // Use semver comparison — only flag if latest > current
+                    github_needs_update = is_newer_version(current_ver, latest_ver);
+                }
+            }
+
+            // Compat walk-back — runs only when the basic GitHub check
+            // already says an update is available. Cheap when nothing's
+            // pending; one zip download (cached) when something is.
+            //
+            // We peek the latest release with assets first. If its
+            // declared min_game_version is satisfied, we're done — that
+            // tag is what Update will install. If it's too high for
+            // the user's STS2 build, we walk back to find the newest
+            // compatible tag and flag the row so the UI can show
+            // "Latest vY needs game vZ; will install vX (compatible)".
+            if github_needs_update {
+                if let Some(ref assets_tag) = latest_release_with_assets_tag.clone() {
+                    match crate::download::download_release_zip_to_cache(
+                        &owner, &repo, assets_tag, ctx.cache_path, ctx.token,
+                    )
+                    .await
+                    {
+                        Ok(zip_path) => {
+                            let peeked = crate::download::peek_zip_min_game_version(&zip_path)
+                                .ok()
+                                .flatten();
+                            latest_release_min_game_version = peeked.clone();
+                            let compatible = match (ctx.user_game_version, peeked.as_deref()) {
+                                (_, None) => true,
+                                (None, Some(_)) => true,
+                                (Some(gv), Some(req)) => game_version_satisfies(gv, req),
+                            };
+                            if compatible {
+                                latest_compatible_tag = Some(assets_tag.clone());
+                            } else {
+                                latest_release_blocked_by_game_version = true;
+                                // Walk back from latest. Reuses cache,
+                                // so we don't re-download what we
+                                // already peeked.
+                                match pick_compatible_release(
+                                    &owner, &repo,
+                                    ctx.user_game_version,
+                                    ctx.cache_path, ctx.token,
+                                )
+                                .await
+                                {
+                                    Ok(walk) => {
+                                        // Re-evaluate whether the walked-
+                                        // back tag is actually newer than
+                                        // installed. If not, drop the
+                                        // update flag — the user already
+                                        // has the newest compatible
+                                        // release; the only thing newer
+                                        // is the blocked latest. Setting
+                                        // latest_compatible_tag = None in
+                                        // that case signals "no installable
+                                        // GitHub update" to the UI, which
+                                        // hides the Update button and
+                                        // switches the hint copy to
+                                        // "you're already on the newest
+                                        // compatible".
+                                        let installed_tag = ctx.sources_db
+                                            .mods
+                                            .get(&m.name)
+                                            .and_then(|e| e.installed_version.as_deref())
+                                            .map(|s| s.trim_start_matches('v'))
+                                            .unwrap_or("");
+                                        let manifest_ver = m.version.trim_start_matches('v');
+                                        let walk_ver = walk.tag.trim_start_matches('v');
+                                        if walk_ver == installed_tag || walk_ver == manifest_ver {
+                                            github_needs_update = false;
+                                            latest_compatible_tag = None;
+                                        } else {
+                                            latest_compatible_tag = Some(walk.tag.clone());
+                                        }
+                                    }
+                                    Err(e) => {
+                                        log::warn!(
+                                            "audit: walk-back failed for {}/{} (game v{}): {}",
+                                            owner, repo,
+                                            ctx.user_game_version.unwrap_or("?"), e,
+                                        );
+                                        // Couldn't find a compatible
+                                        // release — drop the update flag
+                                        // since clicking Update would
+                                        // produce a broken install.
+                                        github_needs_update = false;
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "audit: failed to peek {}/{}@{} for compat check: {}",
+                                owner, repo, assets_tag, e,
+                            );
+                            // Peek failed → keep github_needs_update as
+                            // the basic check decided. Update flow has
+                            // its own walk-back as a final safety net.
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // --- Nexus version check ---
+    let mut nexus_version: Option<String> = None;
+    let mut nexus_update_available = false;
+
+    if let (Some(ref domain), Some(mod_id)) = (nexus_game_domain, nexus_mod_id) {
+        if let Some(nkey) = ctx.nexus_api_key {
+            let client = crate::nexus::NexusClient::new(nkey);
+            match client.get_mod_info(domain, mod_id).await {
+                Ok(info) => {
+                    // For mod pages that host multiple variants under one
+                    // mod_id (e.g. "BetterSpire2" + "BetterSpire2Lite"),
+                    // the page-level `version` field is one number for
+                    // the latest-uploaded file regardless of variant.
+                    // Look at the file list and pick the version that
+                    // matches the LOCAL mod's flavor — otherwise the
+                    // user's lite install gets compared against the
+                    // non-lite version and shows a bogus mismatch.
+                    let mut effective_version = info.version.clone();
+                    match client.get_mod_files(domain, mod_id).await {
+                        Ok(files) => {
+                            if let Some(picked) =
+                                crate::nexus::pick_version_for_local_mod(&files, &m.name)
+                            {
+                                if effective_version.as_deref() != Some(picked.as_str()) {
+                                    log::debug!(
+                                        "Nexus variant pick for '{}' (mod_id {}): page version {:?} → file version {:?}",
+                                        m.name, mod_id, info.version, picked
+                                    );
+                                }
+                                effective_version = Some(picked);
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "Nexus files lookup failed for '{}' (mod {}): {} — falling back to page version",
+                                m.name, mod_id, e
+                            );
+                        }
+                    }
+
+                    if let Some(ref nv) = effective_version {
+                        nexus_version = Some(nv.clone());
+                        // Use the best known version: check mod_sources installed_version
+                        // first (tracks what was actually downloaded), then fall back to
+                        // the manifest version on disk (which mod authors don't always update).
+                        let sources_ver = source_entry
+                            .and_then(|e| e.installed_version.as_deref())
+                            .unwrap_or("");
+                        let manifest_ver = m.version.trim_start_matches('v');
+                        let current_ver = if !sources_ver.is_empty() {
+                            // Use whichever is higher: sources DB or manifest
+                            let sv = sources_ver.trim_start_matches('v');
+                            if is_newer_version(manifest_ver, sv) { sv } else { manifest_ver }
+                        } else {
+                            manifest_ver
+                        };
+                        let nexus_ver = nv.trim_start_matches('v');
+                        if current_ver != "unknown" && current_ver != "0.0.0" {
+                            nexus_update_available = is_newer_version(current_ver, nexus_ver);
+                        }
+                        // Nexus and GitHub typically host the same
+                        // mod release at the same version. If the
+                        // GitHub side proved that release is blocked
+                        // by min_game_version, the Nexus zip is the
+                        // same incompatible build — suppress the
+                        // "Download from Nexus" prompt so we don't
+                        // send the user to install something we
+                        // know won't load. We require the version
+                        // numbers to match (≥, since Nexus could
+                        // have an even newer one in flight, but
+                        // that's rare); a stricter equality check
+                        // would miss the simple case where mod
+                        // authors round-trip the same vX.Y.Z to
+                        // both hosts.
+                        if nexus_update_available
+                            && latest_release_blocked_by_game_version
+                            && !is_newer_version(
+                                latest_release_with_assets_tag
+                                    .as_deref()
+                                    .unwrap_or("")
+                                    .trim_start_matches('v'),
+                                nexus_ver,
+                            )
+                        {
+                            log::info!(
+                                "audit: suppressing Nexus update for '{}' — Nexus v{} matches \
+                                 GitHub's game-version-blocked latest v{}",
+                                m.name, nexus_ver,
+                                latest_release_with_assets_tag.as_deref().unwrap_or("?"),
+                            );
+                            nexus_update_available = false;
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Nexus API check failed for {} (mod {}): {}", m.name, mod_id, e);
+                }
+            }
+        }
+    }
+
+    // If no source at all, still include in report
+    if !has_any_source {
+        return ModAuditEntry {
+            mod_name: m.name.clone(),
+            folder_name: m.folder_name.clone(),
+            github_repo: None,
+            installed_version: m.version.clone(),
+            latest_release_tag: None,
+            latest_release_with_assets_tag: None,
+            latest_has_assets: false,
+            needs_update: false,
+            asset_names: Vec::new(),
+            releases_scanned: 0,
+            error: None,
+            nexus_url: None,
+            nexus_version: None,
+            nexus_update_available: false,
+            update_source: None,
+            github_auto_detected: false,
+            pinned: is_pinned,
+            min_game_version: m.min_game_version.clone(),
+            game_version_too_old: matches!(
+                (ctx.user_game_version, m.min_game_version.as_deref()),
+                (Some(gv), Some(req)) if !game_version_satisfies(gv, req)
+            ),
+            latest_release_min_game_version: None,
+            latest_release_blocked_by_game_version: false,
+            latest_compatible_tag: None,
+        };
+    }
+
+    // For display: use the verified GitHub repo, or fall back to auto-detected for informational display
+    let display_github = github_repo_str.clone().or(auto_detected_github);
+
+    // If GitHub errored (e.g. 404) but we have Nexus data, suppress the GitHub error —
+    // the Nexus check is the authority. Also mark as auto-detected so UI treats it as informational.
+    let (final_error, final_auto_detected) = if github_error.is_some() && (nexus_url.is_some() || nexus_version.is_some()) {
+        (None, true) // suppress error, mark GitHub as informational
+    } else {
+        (github_error, is_auto_detected)
+    };
+
+    let min_game_version = m.min_game_version.clone();
+    let game_version_too_old = matches!(
+        (ctx.user_game_version, min_game_version.as_deref()),
+        (Some(gv), Some(req)) if !game_version_satisfies(gv, req)
+    );
+    // Compute needs_update + update_source AFTER the walk-back has had
+    // a chance to drop github_needs_update (it does so when the only
+    // newer release is incompatible, or when the walked-back tag is
+    // already what's installed).
+    let needs_update = !is_pinned && (github_needs_update || nexus_update_available);
+    let update_source = if github_needs_update && nexus_update_available {
+        Some("both".to_string())
+    } else if github_needs_update {
+        Some("github".to_string())
+    } else if nexus_update_available {
+        Some("nexus".to_string())
+    } else {
+        None
+    };
+    ModAuditEntry {
+        mod_name: m.name.clone(),
+        folder_name: m.folder_name.clone(),
+        github_repo: display_github,
+        installed_version: m.version.clone(),
+        latest_release_tag,
+        latest_release_with_assets_tag,
+        latest_has_assets: latest_has_mod_assets,
+        needs_update,
+        asset_names,
+        releases_scanned: total_scanned,
+        error: final_error,
+        nexus_url,
+        nexus_version,
+        nexus_update_available,
+        update_source,
+        github_auto_detected: final_auto_detected,
+        pinned: is_pinned,
+        min_game_version,
+        game_version_too_old,
+        latest_release_min_game_version,
+        latest_release_blocked_by_game_version,
+        latest_compatible_tag,
+    }
 }

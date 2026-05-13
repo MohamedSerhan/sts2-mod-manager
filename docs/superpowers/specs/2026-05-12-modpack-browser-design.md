@@ -92,6 +92,7 @@ pub struct BrowserCard {
     pub name: String,       // profile.name
     pub mod_count: usize,
     pub created_at: String, // ISO timestamp from profile.created_at
+    pub updated_at: String, // ISO timestamp from profile.updated_at (re-share refreshes this)
 }
 ```
 
@@ -124,7 +125,7 @@ pub struct BrowserCard {
 **Browse Modpacks view** (`src/views/BrowseModpacks.tsx`):
 
 - Vertical card list using the existing `gf-card` visual vocabulary.
-- Each card: pack name, curator (`@username`), mod count, "Created 3d ago" (relative time from `created_at`). "Last updated" deferred until the manifest carries an `updated_at` field.
+- Each card: pack name, curator (`@username`), mod count, "Updated 3d ago" (relative time from `updated_at` — `Profile` already carries this; `reshare_profile` refreshes it via the snapshot).
 - Top-right of the view: manual refresh icon + small "Last refreshed Xm ago" label driven by `fetched_at`.
 - Skeleton cards while loading.
 - Empty state when search returns no public packs: *"No public modpacks found yet — be the first to share one!"* with a link to Profiles → Share.
@@ -135,7 +136,7 @@ pub struct BrowserCard {
 
 - Full mod list (name + version per row).
 - Curator link (opens `https://github.com/{owner}`).
-- "Created" timestamp from manifest.
+- "Created" + "Updated" timestamps from manifest.
 - Install button at the bottom → calls `install_shared_profile("{owner}/{code}")`.
 - Smart-import logic kicks in automatically (already-have / update / install / already-on-it toasts) — no UI work here, the existing path handles it.
 

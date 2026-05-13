@@ -608,7 +608,200 @@ async function specCreateProfile(driver) {
   );
 }
 
+/**
+ * v1.3.1 contract: a mod pinned while one profile is active still
+ * shows the "Pinned" pill after the user round-trips through another
+ * profile and back. Pin state lives in mod_sources.json (config dir),
+ * not the profile manifest, so any future refactor that accidentally
+ * folds pins into the per-profile snapshot — or has switch_profile
+ * stomp on mod_sources during apply — would break this assertion.
+ *
+ * Flow:
+ *   1. Profiles → create + activate "Orig" profile (becomes active).
+ *   2. Mods → pin QaTestMod via kebab. Verify "Pinned" pill rendered.
+ *   3. Profiles → create + activate "Other" profile.
+ *   4. Profiles → switch back to "Orig".
+ *   5. Mods → assert QaTestMod still shows the "Pinned" pill.
+ */
+async function specProfileSwitchPreservesPins(driver) {
+  const suffix = Date.now().toString(36);
+  const origName = `QA Orig ${suffix}`;
+  const otherName = `QA Switch ${suffix}`;
+
+  await navToProfiles(driver);
+  await createProfileNamed(driver, origName);
+  await waitForToastsToClear(driver);
+  await activateProfile(driver, origName);
+  await waitForToastsToClear(driver);
+
+  // Pin QaTestMod from the Mods view.
+  await navToMods(driver);
+  await waitForElement(
+    driver,
+    By.xpath("//*[normalize-space(text())='QaTestMod']"),
+    'QaTestMod row before pin',
+  );
+  const kebab = await waitForElement(
+    driver,
+    By.xpath(
+      "//*[normalize-space(text())='QaTestMod']/ancestor::*[.//button[@title='Mod actions']][1]//button[@title='Mod actions']",
+    ),
+    'QaTestMod kebab button',
+  );
+  await kebab.click();
+  const pinItem = await waitForElement(
+    driver,
+    By.xpath("//button[@role='menuitem'][contains(., 'Pin this mod')]"),
+    'Pin this mod menu item',
+  );
+  await pinItem.click();
+  // Wait for the durable indicator (Pinned pill) to render — proves the
+  // backend write landed and React picked up the source-list change.
+  await waitForElement(
+    driver,
+    By.xpath(
+      "//*[normalize-space(text())='QaTestMod']/ancestor::*[contains(@class,'gf-mod-pinned')][1]//*[normalize-space(text())='Pinned']",
+    ),
+    '"Pinned" pill on QaTestMod row after pin',
+    8_000,
+  );
+
+  // Now round-trip through a second profile and back.
+  await waitForToastsToClear(driver);
+  await navToProfiles(driver);
+  await createProfileNamed(driver, otherName);
+  await waitForToastsToClear(driver);
+  await activateProfile(driver, otherName);
+  await waitForToastsToClear(driver);
+  await activateProfile(driver, origName);
+  await waitForToastsToClear(driver);
+
+  // Verify the pin survived the switch round trip.
+  await navToMods(driver);
+  await waitForElement(
+    driver,
+    By.xpath(
+      "//*[normalize-space(text())='QaTestMod']/ancestor::*[contains(@class,'gf-mod-pinned')][1]//*[normalize-space(text())='Pinned']",
+    ),
+    '"Pinned" pill on QaTestMod row after profile-switch round trip',
+    10_000,
+  );
+}
+
 /* ── Helpers ────────────────────────────────────────────────────── */
+
+async function navToProfiles(driver) {
+  const nav = await waitForElement(
+    driver,
+    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Profiles']"),
+    'Sidebar Profiles nav button',
+  );
+  await nav.click();
+}
+
+async function navToMods(driver) {
+  const nav = await waitForElement(
+    driver,
+    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Mods']"),
+    'Sidebar Mods nav button',
+  );
+  await nav.click();
+}
+
+/**
+ * Wait for any open `gf-toast` notification pills to detach. Success/
+ * info toasts live 4s + 250ms fade (ToastContext.tsx FADE_MS), and the
+ * bottom-right stack absolutely-positions over the page body, so a
+ * lingering toast can intercept clicks on buttons in the lower half of
+ * the viewport. The profile flow fires toasts on every Create / Switch,
+ * so any spec that performs multiple consecutive profile actions needs
+ * this between them.
+ */
+async function waitForToastsToClear(driver) {
+  await driver.wait(
+    async () => (await driver.findElements(By.css('.gf-toast'))).length === 0,
+    8_000,
+    'Toast notification never dismissed',
+  );
+}
+
+/**
+ * Click "New profile" → type name → Create. Assumes we're already on
+ * the Profiles view. Waits for the resulting card to render.
+ */
+async function createProfileNamed(driver, profileName) {
+  const newBtn = await waitForElement(
+    driver,
+    By.xpath("//button[contains(., 'New profile')]"),
+    '"New profile" button',
+  );
+  await newBtn.click();
+  const input = await waitForElement(
+    driver,
+    By.css("input[placeholder='My Profile']"),
+    'Profile-name input',
+  );
+  await input.sendKeys(profileName);
+  const createBtn = await waitForElement(
+    driver,
+    By.xpath("//button[normalize-space(.)='Create']"),
+    'Create-profile submit button',
+  );
+  await createBtn.click();
+  await waitForElement(
+    driver,
+    By.xpath(`//h3[contains(normalize-space(.), '${profileName}')]`),
+    `Profile card for "${profileName}"`,
+    8_000,
+  );
+}
+
+/**
+ * Activate the named profile by clicking its "Switch to" button, then
+ * wait for the ACTIVE badge to appear on that same card. The badge is
+ * rendered inside the profile's <h3> next to the name (Profiles.tsx
+ * line ~663), and only one card has it at a time — so waiting on
+ * "ACTIVE badge on this row" disambiguates from any pre-existing
+ * active profile elsewhere in the list.
+ *
+ * Also waits for the switching overlay (`gf-loading-card`) to
+ * disappear before returning so the next interaction doesn't race a
+ * still-disabled button.
+ */
+async function activateProfile(driver, profileName) {
+  // Scope: row is a `gf-card` (Card component) whose h3 contains the
+  // profile name. From there, find the "Switch to" button.
+  const switchBtnXpath =
+    `//*[contains(@class,'gf-card')][.//h3[contains(normalize-space(.), '${profileName}')]]` +
+    `//button[normalize-space(.)='Switch to' or contains(., 'Switch to')]`;
+  const switchBtn = await waitForElement(
+    driver,
+    By.xpath(switchBtnXpath),
+    `"Switch to" button for profile "${profileName}"`,
+  );
+  await switchBtn.click();
+
+  // Switching overlay (gf-loading-card) appears while the backend
+  // applies the manifest. Wait for it to detach before checking the
+  // active badge — its presence also disables all profile buttons.
+  await driver.wait(
+    async () => (await driver.findElements(By.css('.gf-loading-card'))).length === 0,
+    30_000,
+    `Profile switch to "${profileName}" never settled (loading overlay stuck)`,
+  );
+
+  // ACTIVE badge must be on THIS profile's card, not just somewhere on
+  // the page. Scope under the row whose h3 has the name.
+  await waitForElement(
+    driver,
+    By.xpath(
+      `//*[contains(@class,'gf-card')][.//h3[contains(normalize-space(.), '${profileName}')]]` +
+        `//*[normalize-space(text())='ACTIVE']`,
+    ),
+    `ACTIVE badge on profile "${profileName}"`,
+    10_000,
+  );
+}
 
 function assertEqual(actual, expected, label) {
   if (actual !== expected) {
@@ -771,6 +964,7 @@ const STATE_SPECS = [
   ['toggle off moves QaTestMod to mods_disabled/', specToggleMovesQaTestModToDisabled],
   ['delete UpToDateMod via kebab → Remove mod…', specDeleteUpToDateMod],
   ['create profile via Profiles → New profile', specCreateProfile],
+  ['profile switch preserves pins (v1.3.1 contract)', specProfileSwitchPreservesPins],
 ];
 
 const SPECS = CASSETTE_MODE

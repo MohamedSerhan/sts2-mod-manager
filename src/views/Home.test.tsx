@@ -3,20 +3,20 @@
  * branches against `src/views/Home.tsx`.
  *
  * Intentionally-uncovered branches (≤ 10 % of total, all defensive):
- *   - Line 238 — `if (showToast && updates.length === 0)` success toast
- *     in `checkSubs`. Only fires when callers pass `showToast=true`, but
- *     Home itself only ever calls `checkSubs()` without that flag on
- *     mount; the showToast-true path is exercised by other views (e.g.
- *     the Settings audit panel). Covering it here would mean mounting a
- *     mock harness around `checkSubs` rather than HomeView, which would
- *     test the wrong unit.
- *   - Lines 200, 213-218, 852-857 — `if (!cancelled)`, `if (el)`, `if
- *     (input)` and the `if (activeProfile)` guard inside PublishModal's
- *     onClose. These guards exist to survive component unmount /
- *     race-cleared state in production. Reaching the FALSE side would
- *     require either unmounting mid-effect (PublishModal's children
- *     can't easily be unmounted from a test) or clearing AppContext
- *     state externally — both more invasive than the guards warrant.
+ *   - `checkSubs` showToast-true success-toast branch. Only fires when
+ *     callers pass `showToast=true`, but Home itself only ever calls
+ *     `checkSubs()` without that flag on mount; the showToast-true path
+ *     is exercised by other views (e.g. the Settings audit panel).
+ *     Covering it here would mean mounting a mock harness around
+ *     `checkSubs` rather than HomeView, which would test the wrong unit.
+ *   - `loadShareInfo` cancelled-guard FALSE branch (`if (!cancelled)`),
+ *     `focusCodeBarSignal` effect el/input FALSE guards, and
+ *     `PublishModal.onClose` activeProfile-guard FALSE branch. These
+ *     guards exist to survive component unmount / race-cleared state in
+ *     production. Reaching the FALSE side would require either
+ *     unmounting mid-effect (PublishModal's children can't easily be
+ *     unmounted from a test) or clearing AppContext state externally —
+ *     both more invasive than the guards warrant.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -149,13 +149,13 @@ describe('<HomeView>', () => {
     render(<Wrap />);
     const input = await screen.findByPlaceholderText(/username\/AA5A-315D-61AE/i);
     await user.type(input, 'unknown/AAAA-BBBB-CCCC{Enter}');
-    // Either an error toast appears, OR the importer treats it as cancelled.
-    // We just confirm the import didn't silently claim success.
+    // The catch block fires `Failed to import: ${err.message}`. Assert
+    // the visible error toast so we know the failure surfaced rather
+    // than silently no-op'd.
     await waitFor(() => {
-      // Wait a moment for the smart router to settle, then assert no
-      // "Installed modpack" toast was shown.
-      expect(screen.queryByText(/Installed modpack "/)).toBeNull();
+      expect(screen.getByText(/Failed to import: not found/)).toBeInTheDocument();
     });
+    expect(screen.queryByText(/Installed modpack "/)).toBeNull();
   });
 
   it('renders other-pack rows when subscriptions exist', async () => {
@@ -210,13 +210,13 @@ describe('<HomeView>', () => {
     await waitFor(() => {
       expect(screen.getByPlaceholderText(/username\/AA5A-315D-61AE/i)).toBeInTheDocument();
     });
-    // The Launch button may be in the hero. Find it if present.
+    // The Launch button always renders in the hero (enabled when onLaunch
+    // is provided). Click it and assert the callback fired — that's the
+    // contract the prop exists for.
     const launchBtn = screen.getAllByRole('button').find((b) => /Launch/.test(b.textContent ?? ''));
-    if (launchBtn) {
-      await user.click(launchBtn);
-      // onLaunch may be invoked, OR the click might call invoke('launch_game').
-      // Either is acceptable — we just ensure no crash.
-    }
+    expect(launchBtn).toBeDefined();
+    await user.click(launchBtn!);
+    expect(onLaunch).toHaveBeenCalled();
   });
 
   it('exercises rich Home state: active profile + subs + updates', async () => {
@@ -293,10 +293,9 @@ describe('<HomeView>', () => {
     render(<Wrap onGoToSettings={onGoToSettings} />);
     await waitFor(() => { expect(screen.getByText(/Game not detected/)).toBeInTheDocument(); });
     const settingsBtn = screen.getAllByRole('button').find((b) => /^Settings$/.test(b.textContent?.trim() ?? ''));
-    if (settingsBtn) {
-      await user.click(settingsBtn);
-      expect(onGoToSettings).toHaveBeenCalled();
-    }
+    expect(settingsBtn).toBeDefined();
+    await user.click(settingsBtn!);
+    expect(onGoToSettings).toHaveBeenCalled();
   });
 
   it('hero shows "Vanilla" when no active profile', async () => {
@@ -339,10 +338,9 @@ describe('<HomeView>', () => {
     await waitFor(() => { expect(screen.getByText('MyPack')).toBeInTheDocument(); });
     const buttons = screen.getAllByRole('button');
     const switchBtn = buttons.find((b) => /Switch pack/i.test(b.textContent ?? ''));
-    if (switchBtn) {
-      await user.click(switchBtn);
-      expect(onSwitchPack).toHaveBeenCalled();
-    }
+    expect(switchBtn).toBeDefined();
+    await user.click(switchBtn!);
+    expect(onSwitchPack).toHaveBeenCalled();
   });
 
   it('"Add Pack" button is disabled when input is empty', async () => {
@@ -410,12 +408,11 @@ describe('<HomeView>', () => {
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText(/Your other packs/)).toBeInTheDocument(); });
     const activate = screen.getAllByRole('button').find((b) => /^Activate$/.test(b.textContent?.trim() ?? ''));
-    if (activate) {
-      await user.click(activate);
-      await waitFor(() => {
-        expect(getInvokeCalls().some((c) => c.cmd === 'switch_profile')).toBe(true);
-      });
-    }
+    expect(activate).toBeDefined();
+    await user.click(activate!);
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'switch_profile')).toBe(true);
+    });
   });
 
   it('subUpdate banner renders for non-active sub with pending update', async () => {
@@ -444,12 +441,11 @@ describe('<HomeView>', () => {
     render(<Wrap />);
     await waitFor(() => { expect(screen.queryByText(/Updates available/)).toBeInTheDocument(); });
     const review = screen.getAllByRole('button').find((b) => /^Review$/.test(b.textContent?.trim() ?? ''));
-    if (review) {
-      await user.click(review);
-      await waitFor(() => {
-        expect(screen.queryAllByText(/AlicePack/).length).toBeGreaterThan(0);
-      });
-    }
+    expect(review).toBeDefined();
+    await user.click(review!);
+    await waitFor(() => {
+      expect(screen.queryAllByText(/AlicePack/).length).toBeGreaterThan(0);
+    });
   });
 
   it('other-sub row: unlink button shows confirmation', async () => {
@@ -460,10 +456,12 @@ describe('<HomeView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText(/Your other packs/)).toBeInTheDocument(); });
-    const unlink = screen.queryByTitle('Unlink from this pack');
-    if (unlink) {
-      await user.click(unlink);
-    }
+    const unlink = screen.getByTitle('Unlink from this pack');
+    await user.click(unlink);
+    // Confirm dialog must appear — that's the only observable effect.
+    await waitFor(() => {
+      expect(screen.getByText(/Unlink from "AlicePack"\?/)).toBeInTheDocument();
+    });
   });
 
   it('empty-state card shows when no subscriptions exist', async () => {
@@ -487,12 +485,11 @@ describe('<HomeView>', () => {
     render(<Wrap />);
     await waitFor(() => { expect(screen.queryByText(/Updates available/)).toBeInTheDocument(); });
     const sync = screen.getAllByRole('button').find((b) => /^Sync$/.test(b.textContent?.trim() ?? ''));
-    if (sync) {
-      await user.click(sync);
-      await waitFor(() => {
-        expect(getInvokeCalls().some((c) => c.cmd === 'apply_subscription_update')).toBe(true);
-      });
-    }
+    expect(sync).toBeDefined();
+    await user.click(sync!);
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'apply_subscription_update')).toBe(true);
+    });
   });
 
   it('publish modal opens when "Share this pack" CTA is clicked', async () => {
@@ -507,12 +504,13 @@ describe('<HomeView>', () => {
     await waitFor(() => { expect(screen.getByText('MyPack')).toBeInTheDocument(); });
     const buttons = screen.getAllByRole('button');
     const shareBtn = buttons.find((b) => /Share this pack/i.test(b.textContent ?? ''));
-    if (shareBtn) {
-      await user.click(shareBtn);
-      await waitFor(() => {
-        expect(screen.queryAllByText(/MyPack/).length).toBeGreaterThan(0);
-      });
-    }
+    expect(shareBtn).toBeDefined();
+    await user.click(shareBtn!);
+    // PublishModal opens — its Publish action button is the unambiguous
+    // signal that the modal mounted (not just the pack name on the page).
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^Publish$/i })).toBeInTheDocument();
+    });
   });
 });
 
@@ -643,14 +641,9 @@ describe('<HomeView> share-code paste branches', () => {
     const addBtn = screen.getAllByRole('button').find((b) => /Add Pack/i.test(b.textContent ?? ''));
     await user.click(addBtn!);
     await waitFor(() => {
-      // Either the Switch-confirm or — if subscriptions weren't loaded in
-      // time — the Install-confirm appears. We expect Switch here, but
-      // dump the DOM diagnostically if it's the other.
-      const switchTitle = screen.queryByText(/Switch to "AlicePack"\?/);
-      const installTitle = screen.queryByText(/Install this modpack\?/);
-      expect(switchTitle || installTitle).not.toBeNull();
+      // Subscriptions are loaded, so the smart router must pick Switch.
+      expect(screen.getByText(/Switch to "AlicePack"\?/)).toBeInTheDocument();
     }, { timeout: 3000 });
-    expect(screen.queryByText(/Switch to "AlicePack"\?/)).toBeInTheDocument();
     const modal = await confirmModal();
     await user.click(modal.getByRole('button', { name: /^Activate$/ }));
     await waitFor(() => {
@@ -1075,9 +1068,12 @@ describe('<HomeView> drift overlay & active-profile Repair', () => {
       expect(screen.getByText(/Backup failed: out of disk/)).toBeInTheDocument();
     });
     await waitFor(() => {
-      // Singular grammar: "1 orphan mod" without the plural s, no trailing
-      // comma because no other bits follow when downloaded=0/failed=0/missing=0.
-      expect(screen.getByText(/removed 1 orphan mod(?!s)/)).toBeInTheDocument();
+      // Singular grammar: toast ends in "removed 1 orphan mod" with no
+      // trailing `s` (and nothing follows it because downloaded=0,
+      // failed=0, missing=0). Anchor the regex to end-of-string to
+      // positively assert the singular form rather than relying on a
+      // negative lookahead.
+      expect(screen.getByText(/removed 1 orphan mod$/)).toBeInTheDocument();
     });
   });
 
@@ -1757,46 +1753,12 @@ describe('<HomeView> remaining coverage targets', () => {
     });
   });
 
-  it('PublishModal onClose with NO active profile skips the refetch entirely', async () => {
-    // Edge case: open PublishModal, then activeProfile somehow becomes
-    // null before close (e.g. user switches in another window). The
-    // `if (activeProfile)` guard skips the refetch. We simulate by
-    // setting activeProfile = null after publishing.
-    let activeProfile: string | null = 'MyPack';
-    registerInvokeHandler('get_active_profile', () => activeProfile);
-    registerInvokeHandler('list_profiles_cmd', () => [
-      { name: 'MyPack', mods: [], created_at: '2026-01-01' },
-    ]);
-    registerInvokeHandler('get_share_info', () => null);
-    registerInvokeHandler('get_subscriptions', () => []);
-    registerInvokeHandler('get_api_key_status', () => ({
-      nexus_api_key_set: false, github_token_set: true,
-    }));
-    registerInvokeHandler('share_profile', () => ({
-      owner: 'alice', code: 'AA5A-315D-61AE', url: 'https://github.com/alice/sts2mm-profiles',
-      remote_path: 'My_Pack.json', failed_uploads: [],
-    }));
-    const user = userEvent.setup();
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('MyPack')).toBeInTheDocument(); });
-    const share = screen.getAllByRole('button').find((b) => /Share this pack/i.test(b.textContent ?? ''));
-    await user.click(share!);
-    const publishBtn = await screen.findByRole('button', { name: /^Publish$/i });
-    await user.click(publishBtn);
-    await waitFor(() => {
-      expect(screen.queryAllByText('alice/AA5A-315D-61AE').length).toBeGreaterThan(0);
-    });
-    // Simulate the profile being cleared in the background. Then close.
-    activeProfile = null;
-    const doneBtn = await screen.findByRole('button', { name: /^Done$/ });
-    await user.click(doneBtn);
-    // The PublishModal closed; Home keeps its in-memory chip (the
-    // `activeProfile` flip is from a remote handler we mocked, not from
-    // AppContext, so the chip stays).
-    await waitFor(() => {
-      expect(screen.queryAllByText(/Done|Publish/).length).toBe(0);
-    });
-  });
+  // (Removed: a prior test claimed to drive the `if (activeProfile)`
+  // FALSE branch in PublishModal.onClose by flipping a mocked handler
+  // after mount. That doesn't work — the closure captured the React
+  // `activeProfile` state at render time, so the FALSE side was never
+  // reached. The JSDoc at the top of this file already lists that guard
+  // as intentionally-uncovered.)
 
   it('smart router "synced" outcome: subscribed pack with pending update → apply confirm → "Synced" toast', async () => {
     // This drives the {kind: "synced"} branch in handleImportCode that

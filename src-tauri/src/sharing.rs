@@ -93,6 +93,11 @@ struct ShareInfo {
     owner: String,
     /// SHA of the file in the repo (needed for updates)
     file_sha: Option<String>,
+    /// True if the curator ticked "don't ask me again" in the publish
+    /// prompt. When true, share/re-share skip the listing prompt and
+    /// preserve whatever the current manifest's `public` value is.
+    #[serde(default)]
+    dont_ask_again: bool,
 }
 
 /// GitHub Contents API response — we only need the SHA for upsert ops.
@@ -798,6 +803,7 @@ pub async fn share_profile(
         code: code.clone(),
         owner: username.clone(),
         file_sha: Some(file_sha),
+        dont_ask_again: false,
     };
     let share_info_path = profiles_path.join(format!("{}.share", name));
     std::fs::write(
@@ -993,6 +999,7 @@ pub async fn reshare_profile(
         code: share_info.code,
         owner: share_info.owner,
         file_sha: Some(file_sha),
+        dont_ask_again: share_info.dont_ask_again,
     };
     let _ = std::fs::write(
         &share_info_path,
@@ -1391,6 +1398,35 @@ fn parse_share_code(input: &str) -> Result<(String, String)> {
     Err(AppError::Other(
         "Invalid share code format. Expected: username/XXXX-XXXX-XXXX (the curator shares this code with you)".to_string(),
     ))
+}
+
+#[cfg(test)]
+mod share_info_tests {
+    use super::*;
+
+    #[test]
+    fn missing_dont_ask_again_defaults_false() {
+        let json = r#"{
+            "code": "AA5A-315D-61AE",
+            "owner": "octocat",
+            "file_sha": null
+        }"#;
+        let info: ShareInfo = serde_json::from_str(json).unwrap();
+        assert!(!info.dont_ask_again);
+    }
+
+    #[test]
+    fn dont_ask_again_roundtrips() {
+        let info = ShareInfo {
+            code: "AA5A-315D-61AE".into(),
+            owner: "octocat".into(),
+            file_sha: None,
+            dont_ask_again: true,
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        let back: ShareInfo = serde_json::from_str(&json).unwrap();
+        assert!(back.dont_ask_again);
+    }
 }
 
 #[cfg(test)]

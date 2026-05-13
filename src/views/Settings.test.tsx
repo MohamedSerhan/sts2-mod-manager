@@ -132,14 +132,13 @@ describe('<SettingsView>', () => {
     // Save button might be labeled "Save" or "Set"; use partial.
     const buttons = screen.getAllByRole('button');
     const saveBtn = buttons.find((b) => /^(Save|Set|Apply)$/i.test(b.textContent ?? ''));
-    if (saveBtn) {
-      await user.click(saveBtn);
-      await waitFor(() => {
-        expect(getInvokeCalls().some(
-          (c) => c.cmd === 'set_game_path' && c.args?.path === 'C:/games/STS2',
-        )).toBe(true);
-      });
-    }
+    expect(saveBtn).toBeDefined();
+    await user.click(saveBtn!);
+    await waitFor(() => {
+      expect(getInvokeCalls().some(
+        (c) => c.cmd === 'set_game_path' && c.args?.path === 'C:/games/STS2',
+      )).toBe(true);
+    });
   });
 
   it('Accounts tab shows the Nexus + GitHub key inputs (password fields)', async () => {
@@ -217,27 +216,35 @@ describe('<SettingsView>', () => {
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
     const autoBtns = screen.getAllByRole('button').filter((b) => /Auto-?detect/i.test(b.textContent ?? ''));
-    if (autoBtns.length > 0) {
-      await user.click(autoBtns[0]);
-      await waitFor(() => {
-        expect(getInvokeCalls().some((c) => c.cmd === 'detect_game_path')).toBe(true);
-      });
-    }
+    expect(autoBtns.length).toBeGreaterThan(0);
+    await user.click(autoBtns[0]);
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'detect_game_path')).toBe(true);
+    });
   });
 
   it('General tab Open game folder button invokes open_game_folder', async () => {
+    // Open game/mods folder links only render when gameInfo.valid is true.
+    registerInvokeHandler('get_game_info', () => ({
+      game_path: 'C:/Games/STS2',
+      mods_path: 'C:/Games/STS2/mods',
+      disabled_mods_path: 'C:/Games/STS2/mods_disabled',
+      mods_count: 0,
+      disabled_count: 0,
+      valid: true,
+      game_version: '0.105.0',
+    }));
     registerInvokeHandler('open_game_folder', () => true);
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
-    const allBtns = screen.getAllByRole('button');
+    const allBtns = await screen.findAllByRole('button');
     const openGameBtn = allBtns.find((b) => /Open game folder|Open install/i.test(b.textContent ?? ''));
-    if (openGameBtn) {
-      await user.click(openGameBtn);
-      await waitFor(() => {
-        expect(getInvokeCalls().some((c) => c.cmd === 'open_game_folder')).toBe(true);
-      });
-    }
+    expect(openGameBtn).toBeDefined();
+    await user.click(openGameBtn!);
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'open_game_folder')).toBe(true);
+    });
   });
 
   it('General tab Launch Mode radio group renders both Steam + Direct options', async () => {
@@ -256,14 +263,13 @@ describe('<SettingsView>', () => {
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
     const directRadio = screen.getAllByRole('radio').find((r) => (r as HTMLInputElement).value === 'direct');
-    if (directRadio) {
-      await user.click(directRadio);
-      await waitFor(() => {
-        expect(getInvokeCalls().some(
-          (c) => c.cmd === 'set_launch_mode' && c.args?.mode === 'direct',
-        )).toBe(true);
-      });
-    }
+    expect(directRadio).toBeDefined();
+    await user.click(directRadio!);
+    await waitFor(() => {
+      expect(getInvokeCalls().some(
+        (c) => c.cmd === 'set_launch_mode' && c.args?.mode === 'direct',
+      )).toBe(true);
+    });
   });
 
   it('Accounts tab Saved badge shows when keys are stored', async () => {
@@ -299,37 +305,35 @@ describe('<SettingsView>', () => {
     // the first one (Nexus is the first row).
     const allBtns = screen.getAllByRole('button');
     const saveBtns = allBtns.filter((b) => /^Save/.test(b.textContent?.trim() ?? ''));
-    if (saveBtns.length > 0) {
-      await user.click(saveBtns[0]);
-      await waitFor(() => {
-        expect(getInvokeCalls().some((c) => c.cmd === 'set_nexus_api_key')).toBe(true);
-      });
-    }
-  });
-
-  it('Advanced tab "Check for updates" button invokes the updater API', async () => {
-    const user = userEvent.setup();
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Advanced/ }));
-    const checkBtn = await screen.findByRole('button', { name: /Check for updates/i });
-    await user.click(checkBtn);
-    // No specific assert — just that no crash. The updater check is mocked
-    // to resolve null by default.
+    expect(saveBtns.length).toBeGreaterThan(0);
+    await user.click(saveBtns[0]);
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'set_nexus_api_key')).toBe(true);
+    });
   });
 
   it('General tab Open mods folder button invokes open_mods_folder', async () => {
+    // The Open mods folder link only renders when gameInfo.valid is true.
+    registerInvokeHandler('get_game_info', () => ({
+      game_path: 'C:/Games/STS2',
+      mods_path: 'C:/Games/STS2/mods',
+      disabled_mods_path: 'C:/Games/STS2/mods_disabled',
+      mods_count: 0,
+      disabled_count: 0,
+      valid: true,
+      game_version: '0.105.0',
+    }));
+    registerInvokeHandler('open_mods_folder', () => true);
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
-    const allBtns = screen.getAllByRole('button');
+    const allBtns = await screen.findAllByRole('button');
     const openModsBtn = allBtns.find((b) => /Open mods folder/i.test(b.textContent ?? ''));
-    if (openModsBtn) {
-      await user.click(openModsBtn);
-      await waitFor(() => {
-        expect(getInvokeCalls().some((c) => c.cmd === 'open_mods_folder')).toBe(true);
-      });
-    }
+    expect(openModsBtn).toBeDefined();
+    await user.click(openModsBtn!);
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'open_mods_folder')).toBe(true);
+    });
   });
 
   it('Audit empty-state copy is shown before any audit runs', async () => {
@@ -365,12 +369,11 @@ describe('<SettingsView>', () => {
     await user.click(run[0]);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
     const pinBtns = screen.getAllByRole('button').filter((b) => /Pin|pinned/i.test(b.textContent ?? '' ) || /Pin/i.test(b.getAttribute('title') ?? ''));
-    if (pinBtns.length > 0) {
-      await user.click(pinBtns[0]);
-      await waitFor(() => {
-        expect(getInvokeCalls().some((c) => c.cmd === 'pin_mod' || c.cmd === 'unpin_mod')).toBe(true);
-      });
-    }
+    expect(pinBtns.length).toBeGreaterThan(0);
+    await user.click(pinBtns[0]);
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'pin_mod' || c.cmd === 'unpin_mod')).toBe(true);
+    });
   });
 
   it('Audit table renders unlinked LED state when entry has no source', async () => {
@@ -456,6 +459,7 @@ describe('<SettingsView>', () => {
       pinned: false,
       nexus_update_available: false,
       github_repo: 'foo/bar',
+      update_source: 'github',
     }]);
     registerInvokeHandler('update_mod', () => ({ name: 'AutoPath', version: '2.0.0', enabled: true, files: [] }));
     const user = userEvent.setup();
@@ -467,12 +471,11 @@ describe('<SettingsView>', () => {
     await waitFor(() => { expect(screen.getByText('AutoPath')).toBeInTheDocument(); });
     // Look for an Update button somewhere on the audit table row.
     const updateBtn = screen.getAllByRole('button').find((b) => /^Update$/.test(b.textContent?.trim() ?? ''));
-    if (updateBtn) {
-      await user.click(updateBtn);
-      await waitFor(() => {
-        expect(getInvokeCalls().some((c) => c.cmd === 'update_mod')).toBe(true);
-      });
-    }
+    expect(updateBtn).toBeDefined();
+    await user.click(updateBtn!);
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'update_mod')).toBe(true);
+    });
   });
 
   it('Audit table shows pinned indicator for pinned rows', async () => {
@@ -534,35 +537,6 @@ describe('<SettingsView>', () => {
     await waitFor(() => {
       expect(screen.queryAllByText(/2026-05-12/).length).toBeGreaterThan(0);
     });
-  });
-
-  it('Audit Update-all button appears when audit has pending updates', async () => {
-    registerInvokeHandler('audit_mod_versions', () => [{
-      mod_name: 'X',
-      folder_name: 'X',
-      installed_version: '1.0',
-      latest_release_with_assets_tag: 'v2.0',
-      latest_compatible_tag: 'v2.0',
-      needs_update: true,
-      pinned: false,
-      asset_names: [],
-      releases_scanned: 1,
-      latest_has_assets: true,
-      github_auto_detected: false,
-      nexus_update_available: false,
-      github_repo: 'foo/bar',
-      update_source: 'github',
-    }]);
-    const user = userEvent.setup();
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Audit/ }));
-    const runBtns = await screen.findAllByRole('button', { name: /Run audit/i });
-    await user.click(runBtns[0]);
-    await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    // The Update-all button may not be shown if no updates are flagged in
-    // a way that triggers it. We just assert audit completed and rendered
-    // the mod row.
   });
 
   it('Advanced tab shows the in-app logs viewer', async () => {
@@ -747,12 +721,11 @@ describe('<SettingsView>', () => {
     await user.click(runBtns[0]);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
     const autoBtn = screen.getAllByRole('button').find((b) => /Auto-detect sources/i.test(b.textContent ?? ''));
-    if (autoBtn) {
-      await user.click(autoBtn);
-      await waitFor(() => {
-        expect(getInvokeCalls().some((c) => c.cmd === 'auto_detect_sources')).toBe(true);
-      });
-    }
+    expect(autoBtn).toBeDefined();
+    await user.click(autoBtn!);
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'auto_detect_sources')).toBe(true);
+    });
   });
 
   it('Re-audit button appears after a successful audit', async () => {
@@ -782,12 +755,11 @@ describe('<SettingsView>', () => {
     const input = screen.getByPlaceholderText(/SlayTheSpire2/);
     await user.type(input, 'C:/bogus');
     const saveBtn = screen.getAllByRole('button').find((b) => /^Save$/.test(b.textContent?.trim() ?? ''));
-    if (saveBtn) {
-      await user.click(saveBtn);
-      await waitFor(() => {
-        expect(screen.queryByText(/bad path/)).toBeInTheDocument();
-      });
-    }
+    expect(saveBtn).toBeDefined();
+    await user.click(saveBtn!);
+    await waitFor(() => {
+      expect(screen.queryByText(/bad path/)).toBeInTheDocument();
+    });
   });
 
   it('Auto-detect game error path surfaces toast', async () => {
@@ -796,12 +768,11 @@ describe('<SettingsView>', () => {
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
     const auto = screen.getAllByRole('button').find((b) => /Auto-?detect/i.test(b.textContent ?? ''));
-    if (auto) {
-      await user.click(auto);
-      await waitFor(() => {
-        expect(screen.queryByText(/detect boom/)).toBeInTheDocument();
-      });
-    }
+    expect(auto).toBeDefined();
+    await user.click(auto!);
+    await waitFor(() => {
+      expect(screen.queryByText(/detect boom/)).toBeInTheDocument();
+    });
   });
 
   it('Auto-detect game with invalid result shows manual-set message', async () => {
@@ -813,12 +784,11 @@ describe('<SettingsView>', () => {
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
     const auto = screen.getAllByRole('button').find((b) => /Auto-?detect/i.test(b.textContent ?? ''));
-    if (auto) {
-      await user.click(auto);
-      await waitFor(() => {
-        expect(screen.queryByText(/Could not auto-detect/i)).toBeInTheDocument();
-      });
-    }
+    expect(auto).toBeDefined();
+    await user.click(auto!);
+    await waitFor(() => {
+      expect(screen.queryByText(/Could not auto-detect/i)).toBeInTheDocument();
+    });
   });
 
   it('Browse... button uses the dialog plugin and applies the chosen path', async () => {
@@ -1921,12 +1891,16 @@ describe('<SettingsView>', () => {
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'auto_detect_sources')).toBe(true);
     });
+    // Modal must be visible before we attempt to close it.
+    const backdrops = document.querySelectorAll('.gf-modal-back');
+    expect(backdrops.length).toBeGreaterThan(0);
     // Click on the modal backdrop to close (AutoDetectModal closes on
     // backdrop click via onClick={onClose}).
-    const backdrops = document.querySelectorAll('.gf-modal-back');
-    if (backdrops.length > 0) {
-      await user.click(backdrops[backdrops.length - 1] as HTMLElement);
-    }
+    await user.click(backdrops[backdrops.length - 1] as HTMLElement);
+    // After onClose fires, the modal backdrop unmounts.
+    await waitFor(() => {
+      expect(document.querySelectorAll('.gf-modal-back').length).toBe(0);
+    });
   });
 
   // ── BrowseGamePath: invalid path branch returns early ─────────────

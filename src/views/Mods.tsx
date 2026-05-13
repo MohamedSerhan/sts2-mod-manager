@@ -657,7 +657,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                         )}
                         {auditRow && isUpToDate(auditRow) && (
                           <span
-                            className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300"
+                            className="gf-pill gf-pill-ok"
                             title="On the source's latest installable release."
                           >
                             <Check size={9} /> Latest

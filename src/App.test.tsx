@@ -19,6 +19,11 @@
  *    `if (launching) return` (lines 315, 330). Hitting this requires
  *    racing a synchronous-resolved promise inside an effect; the value
  *    of the test is low and the test fragile.
+ *
+ *  - `AppInner: deep-link route()` `if (!active) return` cleanup guard
+ *    (line 193). This branch only fires if the deep-link handler races
+ *    an unmount mid-route — exercising it requires racing async state
+ *    against `useEffect` cleanup, which is fragile and low-value.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -417,58 +422,33 @@ describe('<App>', () => {
   });
 
   it('mod-auto-install-failed event fires error toast', async () => {
-    const { listen } = await import('@tauri-apps/api/event');
-    let listener: ((evt: { payload: { file_name: string; error: string } }) => void) | null = null;
-    (listen as any).mockImplementation(async (event: string, handler: any) => {
-      if (event === 'mod-auto-install-failed') listener = handler;
-      return () => {};
-    });
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    if (listener) {
-      (listener as any)({ payload: { file_name: 'bad.zip', error: 'corrupt' } });
-      await waitFor(() => {
-        expect(screen.queryByText(/Failed to install bad.zip.*corrupt/)).toBeInTheDocument();
-      });
-    }
+    // fireTauriEvent throws if no listener is registered for the event,
+    // so a future refactor that drops the subscription fails loudly here.
+    await fireTauriEvent('mod-auto-install-failed', { file_name: 'bad.zip', error: 'corrupt' });
+    await waitFor(() => {
+      expect(screen.queryByText(/Failed to install bad.zip.*corrupt/)).toBeInTheDocument();
+    });
   });
 
   it('modpack-mods-skipped event fires info toast with skipped count', async () => {
-    const { listen } = await import('@tauri-apps/api/event');
-    let listener: any = null;
-    (listen as any).mockImplementation(async (event: string, handler: any) => {
-      if (event === 'modpack-mods-skipped') listener = handler;
-      return () => {};
-    });
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    if (listener) {
-      listener({
-        payload: {
-          profile_name: 'Pack',
-          skipped: [{ mod_name: 'TooNew', min_game_version: '999', user_game_version: '0.1' }],
-        },
-      });
-      await waitFor(() => {
-        expect(screen.queryByText(/Skipped 1 mod.*TooNew/)).toBeInTheDocument();
-      });
-    }
+    await fireTauriEvent('modpack-mods-skipped', {
+      profile_name: 'Pack',
+      skipped: [{ mod_name: 'TooNew', min_game_version: '999', user_game_version: '0.1' }],
+    });
+    await waitFor(() => {
+      expect(screen.queryByText(/Skipped 1 mod.*TooNew/)).toBeInTheDocument();
+    });
   });
 
-  it('modpack-mods-skipped with empty list is a no-op (no toast)', async () => {
-    const { listen } = await import('@tauri-apps/api/event');
-    let listener: any = null;
-    (listen as any).mockImplementation(async (event: string, handler: any) => {
-      if (event === 'modpack-mods-skipped') listener = handler;
-      return () => {};
-    });
-    render(<App />);
-    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    if (listener) {
-      listener({ payload: { profile_name: 'X', skipped: [] } });
-    }
-    expect(screen.queryByText(/Skipped/)).toBeNull();
-  });
+  // NOTE: the "modpack-mods-skipped with empty list is a no-op" case and
+  // the "deep link event routes through importShareCodeSmart" case were
+  // removed here — they are covered by the loud-assertion tests further
+  // down (search `modpack-mods-skipped with empty array returns early`
+  // and the deep-link route() success/cancellation/error tests).
 
   it('App-level listen() registers more than one event subscription', async () => {
     const { listen } = await import('@tauri-apps/api/event');
@@ -477,24 +457,6 @@ describe('<App>', () => {
     // App registers listeners for: mod-auto-installed, mod-auto-install-failed,
     // modpack-mods-skipped, sts2mm-open-url. AppContext adds more.
     expect((listen as any).mock.calls.length).toBeGreaterThan(2);
-  });
-
-  it('deep link event routes through importShareCodeSmart', async () => {
-    const { listen } = await import('@tauri-apps/api/event');
-    registerInvokeHandler('consume_pending_deep_link', () => null);
-    let dlListener: any = null;
-    (listen as any).mockImplementation(async (event: string, handler: any) => {
-      if (event === 'sts2mm-open-url') dlListener = handler;
-      return () => {};
-    });
-    registerInvokeHandler('fetch_shared_profile_cmd', () => ({ name: 'X', mods: [], created_at: '2026-01-01' }));
-    registerInvokeHandler('install_shared_profile', () => ({ name: 'X', mods: [], created_at: '2026-01-01' }));
-    render(<App />);
-    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    if (dlListener) {
-      dlListener({ payload: 'sts2mm://import/alice/AA5A-315D-61AE' });
-      // The router will switch view to Home and route through confirm-prompted install.
-    }
   });
 
   it('deep link cold-start path: consume_pending_deep_link gets called on mount', async () => {

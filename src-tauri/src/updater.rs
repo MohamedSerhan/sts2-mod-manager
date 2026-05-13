@@ -1,3 +1,4 @@
+use futures_util::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 
 use crate::download::{fetch_latest_release, fetch_releases};
@@ -1270,10 +1271,18 @@ pub async fn audit_mod_versions(
         token: token.as_deref(),
     };
 
-    let mut results: Vec<ModAuditEntry> = Vec::with_capacity(all_mods.len());
-    for m in &all_mods {
-        results.push(audit_one_mod(m, &ctx).await);
-    }
+    let futures: Vec<_> = all_mods.iter().map(|m| audit_one_mod(m, &ctx)).collect();
+    let mut results: Vec<ModAuditEntry> = stream::iter(futures)
+        .buffer_unordered(AUDIT_CONCURRENCY)
+        .collect()
+        .await;
+
+    // buffer_unordered yields results in completion order. Re-sort by the mod's
+    // display name so the UI render order is stable across audits (filesystem
+    // scan order was non-deterministic anyway).
+    results.sort_by(|a, b| {
+        a.mod_name.to_lowercase().cmp(&b.mod_name.to_lowercase())
+    });
 
     Ok(results)
 }

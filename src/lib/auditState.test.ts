@@ -98,4 +98,16 @@ describe('countGithubUpdates', () => {
     ];
     expect(countGithubUpdates(rows)).toBe(1);
   });
+
+  it('does not count a GitHub row that lacks installable assets', () => {
+    expect(countGithubUpdates([
+      entry({ github_repo: 'a/a', needs_update: true, latest_release_with_assets_tag: null }),
+    ])).toBe(0);
+  });
+
+  it('does not count a non-GitHub row even when needs_update is true', () => {
+    expect(countGithubUpdates([
+      entry({ nexus_url: 'x', needs_update: true }),
+    ])).toBe(0);
+  });
 });

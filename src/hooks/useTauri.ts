@@ -321,6 +321,10 @@ export async function getShareInfo(name: string): Promise<ShareResult | null> {
   return invoke('get_share_info', { name });
 }
 
+export async function getShareDontAskAgain(name: string): Promise<boolean> {
+  return invoke('get_share_dont_ask_again', { name });
+}
+
 export async function fetchModpackBrowserPage(
   page: number,
   forceRefresh: boolean,

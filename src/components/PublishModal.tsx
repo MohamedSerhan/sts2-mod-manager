@@ -3,7 +3,7 @@ import { AlertTriangle, Check, Copy, ExternalLink, Info, Link as LinkIcon, Messa
 import { listen } from '@tauri-apps/api/event';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type { Profile, ShareResult } from '../types';
-import { shareProfile, reshareProfile, getApiKeyStatus } from '../hooks/useTauri';
+import { shareProfile, reshareProfile, getApiKeyStatus, getShareDontAskAgain, setModpackListing } from '../hooks/useTauri';
 import { useToast } from '../contexts/ToastContext';
 import { buildShareMessage, buildShareLink } from '../lib/shareImport';
 
@@ -43,6 +43,10 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
   const [copied, setCopied] = useState<'code' | 'link' | 'msg' | null>(null);
   const [tokenSet, setTokenSet] = useState<boolean | null>(null);
   const [progress, setProgress] = useState<ShareProgress | null>(null);
+  const [promptShown, setPromptShown] = useState(false);
+  const [optInPublic, setOptInPublic] = useState(false);
+  const [dontAskAgain, setDontAskAgain] = useState(false);
+  const [dontAskAgainLoaded, setDontAskAgainLoaded] = useState<boolean | null>(null);
 
   // Refresh token status whenever the modal opens so we don't show stale
   // "token missing" state if the curator just set it in Settings.
@@ -51,14 +55,25 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
       setShared(null);
       setProgress(null);
       setBusy(false);
+      setPromptShown(false);
+      setOptInPublic(false);
+      setDontAskAgain(false);
+      setDontAskAgainLoaded(null);
       return;
     }
     let cancelled = false;
     getApiKeyStatus()
       .then((s) => { if (!cancelled) setTokenSet(s.github_token_set); })
       .catch(() => { if (!cancelled) setTokenSet(false); });
+    if (!profile?.name) {
+      setDontAskAgainLoaded(false);
+    } else {
+      getShareDontAskAgain(profile.name)
+        .then((flag) => { if (!cancelled) setDontAskAgainLoaded(flag); })
+        .catch(() => { if (!cancelled) setDontAskAgainLoaded(false); });
+    }
     return () => { cancelled = true; };
-  }, [open]);
+  }, [open, profile?.name]);
 
   // Live progress from the Rust publish loop. Cleared on stage=done; the
   // success state takes over from there.
@@ -86,6 +101,16 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
 
   async function handlePublish() {
     if (!profile) return;
+    if (dontAskAgainLoaded === true) {
+      await runPublish(null, false);
+      return;
+    }
+    setPromptShown(true);
+  }
+
+  async function runPublish(listPublic: boolean | null, dontAskAgainArg: boolean) {
+    if (!profile) return;
+    setPromptShown(false);
     setBusy(true);
     setProgress({
       profile_name: profile.name,
@@ -96,8 +121,8 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
     });
     try {
       const result = await (isReshare
-        ? reshareProfile(profile.name, null, false)
-        : shareProfile(profile.name, null, false));
+        ? reshareProfile(profile.name, listPublic, dontAskAgainArg)
+        : shareProfile(profile.name, listPublic, dontAskAgainArg));
       setShared(result);
       onShared?.(result);
 
@@ -142,6 +167,9 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
     setShared(null);
     setBusy(false);
     setProgress(null);
+    setPromptShown(false);
+    setOptInPublic(false);
+    setDontAskAgain(false);
     onClose();
   }
 
@@ -222,7 +250,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
             </div>
           )}
 
-          {!shared && !blockedByMissingToken && !busy && (
+          {!shared && !blockedByMissingToken && !busy && !promptShown && (
             <>
               <div className="gf-field">
                 <label className="gf-field-label">Pack name</label>
@@ -283,6 +311,33 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
                 </div>
               )}
             </>
+          )}
+
+          {promptShown && !busy && !shared && (
+            <div style={{ padding: '6px 2px' }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', marginBottom: 6 }}>
+                List this modpack on Browse Modpacks?
+              </div>
+              <div style={{ fontSize: 12.5, color: 'var(--ink-mute)', lineHeight: 1.55, marginBottom: 14 }}>
+                Anyone using the app can find and install it. Your share code still works either way — this only controls whether it's discoverable.
+              </div>
+              <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={optInPublic}
+                  onChange={(e) => setOptInPublic(e.target.checked)}
+                />
+                <span>List in Browse Modpacks</span>
+              </label>
+              <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input
+                  type="checkbox"
+                  checked={dontAskAgain}
+                  onChange={(e) => setDontAskAgain(e.target.checked)}
+                />
+                <span>Don't ask me again for this modpack</span>
+              </label>
+            </div>
           )}
 
           {/* Progress state — visible during the publish run. */}
@@ -419,12 +474,25 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
                   </div>
                 </div>
               )}
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, fontSize: 12 }}>
+                <span style={{ color: 'var(--ink-mute)' }}>Listed in Browse Modpacks:</span>
+                <ListingToggle profileName={profile.name} initial={profile.public ?? false} />
+              </div>
             </>
           )}
         </div>
 
         <div className="gf-modal-foot">
-          {!shared && !busy ? (
+          {promptShown && !busy && !shared ? (
+            <>
+              <button className="gf-btn-3" onClick={() => setPromptShown(false)}>Back</button>
+              <div style={{ flex: 1 }} />
+              <button className="gf-btn" onClick={() => runPublish(optInPublic, dontAskAgain)}>
+                Continue
+              </button>
+            </>
+          ) : !shared && !busy ? (
             <>
               <button className="gf-btn-3" onClick={handleDone}>Cancel</button>
               <div style={{ flex: 1 }} />
@@ -450,5 +518,30 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
         </div>
       </div>
     </div>
+  );
+}
+
+function ListingToggle({ profileName, initial }: { profileName: string; initial: boolean }) {
+  const toast = useToast();
+  const [on, setOn] = useState(initial);
+  const [busy, setBusy] = useState(false);
+  async function flip() {
+    if (busy) return;
+    const next = !on;
+    setBusy(true);
+    try {
+      await setModpackListing(profileName, next);
+      setOn(next);
+      toast.success(next ? 'Listed' : 'Hidden from Browse Modpacks');
+    } catch (e) {
+      toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <button className="gf-btn-3" onClick={flip} disabled={busy}>
+      {on ? 'On' : 'Off'}
+    </button>
   );
 }

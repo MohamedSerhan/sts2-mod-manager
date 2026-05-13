@@ -30,6 +30,19 @@ function Wrap(props: Partial<React.ComponentProps<typeof PublishModal>> = {}) {
   );
 }
 
+/** Loud lookup — fails the test loudly if the Publish/Re-share button is
+ *  missing, instead of silently skipping with `if (btn) { ... }`. */
+function getPublishButton(): HTMLButtonElement {
+  const buttons = screen.getAllByRole('button');
+  const btn = buttons.find((b) => /^(Publish|Push update|Re-share)/i.test(b.textContent?.trim() ?? ''));
+  if (!btn) {
+    throw new Error(
+      `Publish button not found. Buttons present: ${buttons.map((b) => `"${b.textContent}"`).join(', ')}`,
+    );
+  }
+  return btn as HTMLButtonElement;
+}
+
 describe('<PublishModal>', () => {
   it('renders nothing when open=false', () => {
     const { container } = render(<Wrap open={false} />);
@@ -46,6 +59,7 @@ describe('<PublishModal>', () => {
       nexus_api_key_set: false,
       github_token_set: true,
     }));
+    registerInvokeHandler('get_share_dont_ask_again', () => false);
     render(<Wrap />);
     await waitFor(() => {
       expect(screen.getByText(/My Pack/)).toBeInTheDocument();
@@ -57,6 +71,7 @@ describe('<PublishModal>', () => {
       nexus_api_key_set: false,
       github_token_set: false,
     }));
+    registerInvokeHandler('get_share_dont_ask_again', () => false);
     render(<Wrap />);
     await waitFor(() => {
       // Some warning copy about a missing GitHub token must surface
@@ -70,19 +85,23 @@ describe('<PublishModal>', () => {
       nexus_api_key_set: false,
       github_token_set: true,
     }));
+    registerInvokeHandler('get_share_dont_ask_again', () => false);
     render(<Wrap />);
     await waitFor(() => {
-      const buttons = screen.getAllByRole('button');
-      const publishBtn = buttons.find((b) => /Publish|Share/i.test(b.textContent ?? ''));
-      expect(publishBtn).toBeTruthy();
+      // Loud lookup — assert the Publish button is actually present.
+      getPublishButton();
     });
   });
 
-  it('Publish click invokes share_profile', async () => {
+  it('Publish click invokes share_profile when dont_ask_again is already true (skips prompt)', async () => {
     registerInvokeHandler('get_api_key_status', () => ({
       nexus_api_key_set: false,
       github_token_set: true,
     }));
+    // dont_ask_again = true short-circuits the listing prompt so a Publish
+    // click goes straight to share_profile, matching the curator's stored
+    // preference.
+    registerInvokeHandler('get_share_dont_ask_again', () => true);
     registerInvokeHandler('share_profile', () => ({
       owner: 'alice',
       code: 'AA5A-315D-61AE',
@@ -92,14 +111,11 @@ describe('<PublishModal>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText(/My Pack/)).toBeInTheDocument(); });
-    const buttons = screen.getAllByRole('button');
-    const publishBtn = buttons.find((b) => /Publish|^Share/i.test(b.textContent?.trim() ?? ''));
-    if (publishBtn) {
-      await user.click(publishBtn);
-      await waitFor(() => {
-        expect(getInvokeCalls().some((c) => c.cmd === 'share_profile')).toBe(true);
-      });
-    }
+    const publishBtn = getPublishButton();
+    await user.click(publishBtn);
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'share_profile')).toBe(true);
+    });
   });
 
   it('isReshare=true calls reshare_profile instead', async () => {
@@ -107,6 +123,7 @@ describe('<PublishModal>', () => {
       nexus_api_key_set: false,
       github_token_set: true,
     }));
+    registerInvokeHandler('get_share_dont_ask_again', () => true);
     registerInvokeHandler('reshare_profile', () => ({
       owner: 'alice',
       code: 'AA5A-315D-61AE',
@@ -116,14 +133,11 @@ describe('<PublishModal>', () => {
     const user = userEvent.setup();
     render(<Wrap isReshare />);
     await waitFor(() => { expect(screen.getByText(/My Pack/)).toBeInTheDocument(); });
-    const buttons = screen.getAllByRole('button');
-    const publishBtn = buttons.find((b) => /Publish|^Share|Re-share/i.test(b.textContent?.trim() ?? ''));
-    if (publishBtn) {
-      await user.click(publishBtn);
-      await waitFor(() => {
-        expect(getInvokeCalls().some((c) => c.cmd === 'reshare_profile')).toBe(true);
-      });
-    }
+    const publishBtn = getPublishButton();
+    await user.click(publishBtn);
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'reshare_profile')).toBe(true);
+    });
   });
 
   it('Open Settings button fires onGoToSettings when shown', async () => {
@@ -131,18 +145,19 @@ describe('<PublishModal>', () => {
       nexus_api_key_set: false,
       github_token_set: false,
     }));
+    registerInvokeHandler('get_share_dont_ask_again', () => false);
     const onGoToSettings = vi.fn();
     const user = userEvent.setup();
     render(<Wrap onGoToSettings={onGoToSettings} />);
     await waitFor(() => { expect(screen.getByText(/My Pack/)).toBeInTheDocument(); });
     const goBtn = screen.getAllByRole('button').find((b) => /Open Settings|Set token|Settings/i.test(b.textContent ?? ''));
-    if (goBtn) {
-      await user.click(goBtn);
-      expect(onGoToSettings).toHaveBeenCalled();
-    }
+    if (!goBtn) throw new Error('Open Settings button not found');
+    await user.click(goBtn);
+    expect(onGoToSettings).toHaveBeenCalled();
   });
 
   it('Close button calls onClose', async () => {
+    registerInvokeHandler('get_share_dont_ask_again', () => false);
     const onClose = vi.fn();
     const user = userEvent.setup();
     render(<Wrap onClose={onClose} />);
@@ -150,5 +165,38 @@ describe('<PublishModal>', () => {
     const xs = screen.getAllByTitle(/Close|Cancel/i);
     await user.click(xs[0]);
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('shows the listing prompt after clicking Publish when dont_ask_again is false', async () => {
+    registerInvokeHandler('get_api_key_status', () => ({
+      nexus_api_key_set: false,
+      github_token_set: true,
+    }));
+    registerInvokeHandler('get_share_dont_ask_again', () => false);
+    // share_profile shouldn't actually be invoked in this test (we stop at
+    // the prompt step), but register it so an accidental call fails loudly
+    // rather than silently returning null.
+    const shareCalls: unknown[] = [];
+    registerInvokeHandler('share_profile', (args) => {
+      shareCalls.push(args);
+      return {
+        owner: 'alice',
+        code: 'AA5A-315D-61AE',
+        url: 'https://github.com/alice/sts2mm-profiles',
+        remote_path: 'My_Pack.json',
+      };
+    });
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText(/My Pack/)).toBeInTheDocument(); });
+    const publishBtn = getPublishButton();
+    await user.click(publishBtn);
+    await waitFor(() => {
+      expect(screen.getByText(/List this modpack on Browse Modpacks/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Don't ask me again/i)).toBeInTheDocument();
+    // The prompt should NOT have published yet — share_profile only fires
+    // when the curator clicks Continue.
+    expect(shareCalls.length).toBe(0);
   });
 });

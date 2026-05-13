@@ -307,6 +307,7 @@ pub fn run() {
             sharing::share_profile,
             sharing::reshare_profile,
             sharing::set_modpack_listing,
+            sharing::get_share_dont_ask_again,
             sharing::get_share_info,
             sharing::fetch_shared_profile_cmd,
             sharing::install_shared_profile,

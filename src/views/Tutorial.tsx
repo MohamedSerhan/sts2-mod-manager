@@ -391,7 +391,9 @@ function CreatorGuide({ onGoToSettings }: { onGoToSettings?: () => void }) {
             "Tokens (classic)" — both work).
           </li>
           <li>
-            Give it <Kbd>repo</Kbd> access (classic) or <Kbd>Contents: Read and write</Kbd> (fine-grained).
+            Give it <Kbd>repo</Kbd> access (classic) or <Kbd>Contents: Read and write</Kbd> +{' '}
+            <Kbd>Administration: Read and write</Kbd> (fine-grained — Administration is only needed for
+            the one-time repo create, you can drop it after).
           </li>
           <li>
             Paste the token into{' '}

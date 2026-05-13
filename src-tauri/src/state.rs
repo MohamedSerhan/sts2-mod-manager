@@ -115,10 +115,6 @@ pub struct AppStateInner {
     /// How the Launch button and `Ctrl/⌘ L` should start STS2. Persisted
     /// in `<config>/launch_mode.txt`. Default `Steam`. See `LaunchMode`.
     pub launch_mode: LaunchMode,
-    /// GitHub username for the current token, looked up once and cached.
-    /// Cleared when `set_github_token` runs. Used by the modpack browser
-    /// to self-hide the curator's own packs.
-    pub cached_github_username: Option<String>,
     /// In-memory cache for `fetch_modpack_browser_page`. Keyed by page
     /// number. TTL is enforced in the command, not here.
     pub modpack_browser_cache: std::collections::HashMap<u32, CachedBrowserPage>,
@@ -176,7 +172,6 @@ impl AppStateInner {
             game_version: None,
             pending_deep_link: None,
             launch_mode: LaunchMode::default(),
-            cached_github_username: None,
             modpack_browser_cache: std::collections::HashMap::new(),
         }
     }

@@ -217,7 +217,7 @@ pub(crate) fn build_client(token: &str) -> reqwest::Client {
 }
 
 /// Get the authenticated user's GitHub username.
-pub(crate) async fn get_github_username(token: &str) -> Result<String> {
+async fn get_github_username(token: &str) -> Result<String> {
     let client = build_client(token);
     let resp = client.get("https://api.github.com/user").send().await?;
 

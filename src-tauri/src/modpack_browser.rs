@@ -1,7 +1,7 @@
 //! In-app modpack browser. Discovery via GitHub repo search for
 //! `q=sts2mm-profiles+in:name`, filtered to manifests where
-//! `public == Some(true)`. The curator's own packs are filtered out
-//! using the cached authed username.
+//! `public == Some(true)`. The curator's own packs are included —
+//! seeing your published pack in the list is part of the reward.
 
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -38,18 +38,11 @@ pub struct RawManifest {
     pub profile: Profile,
 }
 
-/// Filter raw manifests to public, non-self entries, and project them
-/// into `BrowserCard` shape. Pure function.
-pub fn filter_to_browser_cards(
-    raw: Vec<RawManifest>,
-    self_owner: Option<&str>,
-) -> Vec<BrowserCard> {
+/// Filter raw manifests to public entries and project them into
+/// `BrowserCard` shape. Pure function.
+pub fn filter_to_browser_cards(raw: Vec<RawManifest>) -> Vec<BrowserCard> {
     raw.into_iter()
         .filter(|r| r.profile.public == Some(true))
-        .filter(|r| match self_owner {
-            Some(me) => !r.owner.eq_ignore_ascii_case(me),
-            None => true,
-        })
         .map(|r| BrowserCard {
             owner: r.owner,
             code: filename_to_code(&r.filename),
@@ -183,10 +176,10 @@ pub async fn fetch_modpack_browser_page(
 ) -> Result<BrowserPage, String> {
     let now = chrono::Utc::now().timestamp();
 
-    let (token, cached, self_owner_cached) = {
+    let (token, cached) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let cached = s.modpack_browser_cache.get(&page).cloned();
-        (s.github_token.clone(), cached, s.cached_github_username.clone())
+        (s.github_token.clone(), cached)
     };
 
     if !force_refresh {
@@ -202,25 +195,6 @@ pub async fn fetch_modpack_browser_page(
             }
         }
     }
-
-    let self_owner = match (self_owner_cached, token.as_deref()) {
-        (Some(u), _) => Some(u),
-        (None, Some(t)) => {
-            match crate::sharing::get_github_username(t).await {
-                Ok(u) => {
-                    if let Ok(mut s) = state.lock() {
-                        s.cached_github_username = Some(u.clone());
-                    }
-                    Some(u)
-                }
-                Err(e) => {
-                    log::warn!("modpack-browser: username lookup failed: {}", e);
-                    None
-                }
-            }
-        }
-        (None, None) => None,
-    };
 
     let client = crate::sharing::build_client(token.as_deref().unwrap_or(""));
 
@@ -278,7 +252,7 @@ pub async fn fetch_modpack_browser_page(
         }
     }
 
-    let cards = filter_to_browser_cards(raw, self_owner.as_deref());
+    let cards = filter_to_browser_cards(raw);
 
     let entry = CachedBrowserPage {
         fetched_at: now,
@@ -330,33 +304,20 @@ mod tests {
             RawManifest { owner: "carol".into(), filename: "cc5a315d61ae.json".into(),
                 profile: make_profile("unlisted-false", Some(false)) },
         ];
-        let cards = filter_to_browser_cards(raw, None);
+        let cards = filter_to_browser_cards(raw);
         assert_eq!(cards.len(), 1);
         assert_eq!(cards[0].name, "listed");
     }
 
     #[test]
-    fn filter_drops_self_owner_case_insensitive() {
-        let raw = vec![
-            RawManifest { owner: "Alice".into(), filename: "aa5a315d61ae.json".into(),
-                profile: make_profile("mine", Some(true)) },
-            RawManifest { owner: "bob".into(), filename: "bb5a315d61ae.json".into(),
-                profile: make_profile("theirs", Some(true)) },
-        ];
-        let cards = filter_to_browser_cards(raw, Some("alice"));
-        assert_eq!(cards.len(), 1);
-        assert_eq!(cards[0].name, "theirs");
-    }
-
-    #[test]
-    fn filter_keeps_all_when_no_self_owner() {
+    fn filter_keeps_all_public_including_self() {
         let raw = vec![
             RawManifest { owner: "alice".into(), filename: "aa5a315d61ae.json".into(),
                 profile: make_profile("a", Some(true)) },
             RawManifest { owner: "bob".into(), filename: "bb5a315d61ae.json".into(),
                 profile: make_profile("b", Some(true)) },
         ];
-        let cards = filter_to_browser_cards(raw, None);
+        let cards = filter_to_browser_cards(raw);
         assert_eq!(cards.len(), 2);
     }
 

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { countGithubUpdates } from '../lib/auditState';
 import {
   Search,
   Upload,
@@ -73,7 +74,7 @@ function gameVersionSatisfies(current: string | null | undefined, required: stri
 }
 
 export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: boolean } = {}) {
-  const { mods, refreshMods, refreshAll, gameRunning, gameInfo, notifyNexusOpen, auditResults, auditing, runAudit, refreshAuditEntries } = useApp();
+  const { mods, refreshMods, refreshAll, gameRunning, gameInfo, notifyNexusOpen, auditResults, auditing, runAudit, refreshAuditEntries, updatingAll, updateAllGithub } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
   const [filter, setFilter] = useState('');
@@ -117,10 +118,6 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
     }
     return m;
   }, [auditResults]);
-
-  const auditPendingCount = auditResults
-    ? auditResults.filter((a) => a.needs_update && !a.pinned).length
-    : 0;
 
   async function handleCheckUpdates() {
     await runAudit();
@@ -408,26 +405,92 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
               </Button>
             </>
           )}
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleCheckUpdates}
-            disabled={auditing}
-            title={
-              auditResults === null
-                ? 'Check every linked mod against its GitHub / Nexus source for available updates.'
-                : `Re-check (${auditPendingCount} update${auditPendingCount === 1 ? '' : 's'} pending).`
+          {(() => {
+            const ghUpdateCount = auditResults ? countGithubUpdates(auditResults) : 0;
+            const ghUpdateNames = auditResults
+              ? auditResults
+                  .filter(r => r.needs_update && r.github_repo && r.latest_release_with_assets_tag)
+                  .map(r => r.mod_name)
+              : [];
+
+            if (auditing) {
+              return (
+                <Button variant="secondary" size="sm" disabled title="Checking each mod against its source…">
+                  <ClipboardCheck size={14} className="animate-pulse" />
+                  Auditing…
+                </Button>
+              );
             }
-          >
-            <ClipboardCheck size={14} className={auditing ? 'animate-pulse' : ''} />
-            {auditing
-              ? 'Checking…'
-              : auditResults === null
-                ? 'Check for updates'
-                : auditPendingCount > 0
-                  ? `${auditPendingCount} update${auditPendingCount === 1 ? '' : 's'}`
-                  : 'Up to date'}
-          </Button>
+
+            if (updatingAll) {
+              return (
+                <Button variant="primary" size="sm" disabled>
+                  <RefreshCw size={14} className="animate-spin" />
+                  Updating {ghUpdateCount}…
+                </Button>
+              );
+            }
+
+            if (auditResults === null) {
+              return (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleCheckUpdates}
+                  title="Check each mod against its source for updates."
+                >
+                  <ClipboardCheck size={14} />
+                  Audit mods
+                </Button>
+              );
+            }
+
+            if (ghUpdateCount === 0) {
+              return (
+                <>
+                  <span
+                    className="gf-pill gf-pill-ok"
+                    title="Every linked mod is on its source's latest installable release."
+                    style={{ padding: '6px 10px', fontSize: 13 }}
+                  >
+                    Up to date
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleCheckUpdates}
+                    title="Re-audit"
+                    aria-label="Re-audit"
+                  >
+                    <RefreshCw size={14} />
+                  </Button>
+                </>
+              );
+            }
+
+            return (
+              <>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => updateAllGithub(ghUpdateNames)}
+                  title="Update every GitHub-linked mod with a pending update. Pinned mods are skipped."
+                >
+                  <Download size={14} />
+                  Update {ghUpdateCount} mod{ghUpdateCount === 1 ? '' : 's'}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleCheckUpdates}
+                  title="Re-audit"
+                  aria-label="Re-audit"
+                >
+                  <RefreshCw size={14} />
+                </Button>
+              </>
+            );
+          })()}
           <Button size="sm" onClick={async () => {
             setRefreshing(true);
             try { await refreshMods(); }

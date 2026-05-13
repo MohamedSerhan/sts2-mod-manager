@@ -59,7 +59,6 @@ describe('<PublishModal>', () => {
       nexus_api_key_set: false,
       github_token_set: true,
     }));
-    registerInvokeHandler('get_share_dont_ask_again', () => false);
     render(<Wrap />);
     await waitFor(() => {
       expect(screen.getByText(/My Pack/)).toBeInTheDocument();
@@ -71,7 +70,6 @@ describe('<PublishModal>', () => {
       nexus_api_key_set: false,
       github_token_set: false,
     }));
-    registerInvokeHandler('get_share_dont_ask_again', () => false);
     render(<Wrap />);
     await waitFor(() => {
       // Some warning copy about a missing GitHub token must surface
@@ -85,7 +83,6 @@ describe('<PublishModal>', () => {
       nexus_api_key_set: false,
       github_token_set: true,
     }));
-    registerInvokeHandler('get_share_dont_ask_again', () => false);
     render(<Wrap />);
     await waitFor(() => {
       // Loud lookup — assert the Publish button is actually present.
@@ -93,15 +90,11 @@ describe('<PublishModal>', () => {
     });
   });
 
-  it('Publish click invokes share_profile when dont_ask_again is already true (skips prompt)', async () => {
+  it('Publish click invokes share_profile with listPublic=false by default', async () => {
     registerInvokeHandler('get_api_key_status', () => ({
       nexus_api_key_set: false,
       github_token_set: true,
     }));
-    // dont_ask_again = true short-circuits the listing prompt so a Publish
-    // click goes straight to share_profile, matching the curator's stored
-    // preference.
-    registerInvokeHandler('get_share_dont_ask_again', () => true);
     registerInvokeHandler('share_profile', () => ({
       owner: 'alice',
       code: 'AA5A-315D-61AE',
@@ -114,7 +107,11 @@ describe('<PublishModal>', () => {
     const publishBtn = getPublishButton();
     await user.click(publishBtn);
     await waitFor(() => {
-      expect(getInvokeCalls().some((c) => c.cmd === 'share_profile')).toBe(true);
+      const call = getInvokeCalls().find((c) => c.cmd === 'share_profile');
+      expect(call).toBeDefined();
+      // Default visibility is "Friends only" → listPublic is explicitly
+      // false (not null / undefined) so the backend never has to guess.
+      expect(call!.args).toEqual({ name: 'My Pack', listPublic: false });
     });
   });
 
@@ -123,7 +120,6 @@ describe('<PublishModal>', () => {
       nexus_api_key_set: false,
       github_token_set: true,
     }));
-    registerInvokeHandler('get_share_dont_ask_again', () => true);
     registerInvokeHandler('reshare_profile', () => ({
       owner: 'alice',
       code: 'AA5A-315D-61AE',
@@ -145,7 +141,6 @@ describe('<PublishModal>', () => {
       nexus_api_key_set: false,
       github_token_set: false,
     }));
-    registerInvokeHandler('get_share_dont_ask_again', () => false);
     const onGoToSettings = vi.fn();
     const user = userEvent.setup();
     render(<Wrap onGoToSettings={onGoToSettings} />);
@@ -157,7 +152,6 @@ describe('<PublishModal>', () => {
   });
 
   it('Close button calls onClose', async () => {
-    registerInvokeHandler('get_share_dont_ask_again', () => false);
     const onClose = vi.fn();
     const user = userEvent.setup();
     render(<Wrap onClose={onClose} />);
@@ -167,36 +161,52 @@ describe('<PublishModal>', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it('shows the listing prompt after clicking Publish when dont_ask_again is false', async () => {
+  it('shows the Visibility selector with two radio options in the publish form', async () => {
     registerInvokeHandler('get_api_key_status', () => ({
       nexus_api_key_set: false,
       github_token_set: true,
     }));
-    registerInvokeHandler('get_share_dont_ask_again', () => false);
-    // share_profile shouldn't actually be invoked in this test (we stop at
-    // the prompt step), but register it so an accidental call fails loudly
-    // rather than silently returning null.
-    const shareCalls: unknown[] = [];
-    registerInvokeHandler('share_profile', (args) => {
-      shareCalls.push(args);
-      return {
-        owner: 'alice',
-        code: 'AA5A-315D-61AE',
-        url: 'https://github.com/alice/sts2mm-profiles',
-        remote_path: 'My_Pack.json',
-      };
-    });
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText(/My Pack/)).toBeInTheDocument(); });
+    // Two radio inputs — Friends only (default) and Public.
+    const radios = screen.getAllByRole('radio');
+    expect(radios.length).toBe(2);
+    // Friends only is selected by default.
+    expect((radios[0] as HTMLInputElement).checked).toBe(true);
+    expect((radios[1] as HTMLInputElement).checked).toBe(false);
+    // Copy for both options is present.
+    expect(screen.getByText(/Friends only/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Public/i).length).toBeGreaterThan(0);
+  });
+
+  it('selecting Public then Publish calls share_profile with listPublic=true', async () => {
+    registerInvokeHandler('get_api_key_status', () => ({
+      nexus_api_key_set: false,
+      github_token_set: true,
+    }));
+    registerInvokeHandler('share_profile', () => ({
+      owner: 'alice',
+      code: 'AA5A-315D-61AE',
+      url: 'https://github.com/alice/sts2mm-profiles',
+      remote_path: 'My_Pack.json',
+    }));
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText(/My Pack/)).toBeInTheDocument(); });
+    const radios = screen.getAllByRole('radio');
+    if (radios.length < 2) {
+      throw new Error(`Expected 2 visibility radios, found ${radios.length}`);
+    }
+    // Click "Public" radio.
+    await user.click(radios[1]);
+    expect((radios[1] as HTMLInputElement).checked).toBe(true);
+    // Now click Publish.
     const publishBtn = getPublishButton();
     await user.click(publishBtn);
     await waitFor(() => {
-      expect(screen.getByText(/List this modpack on Browse Modpacks/i)).toBeInTheDocument();
+      const call = getInvokeCalls().find((c) => c.cmd === 'share_profile');
+      expect(call).toBeDefined();
+      expect(call!.args).toEqual({ name: 'My Pack', listPublic: true });
     });
-    expect(screen.getByText(/Don't ask me again/i)).toBeInTheDocument();
-    // The prompt should NOT have published yet — share_profile only fires
-    // when the curator clicks Continue.
-    expect(shareCalls.length).toBe(0);
   });
 });

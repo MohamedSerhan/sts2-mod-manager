@@ -135,9 +135,9 @@ clipboard for pasting into a GitHub issue.
 - **Browse Modpacks.** Sidebar → Browse Modpacks shows public modpacks
   people have opted into listing. Each pack is one click to install
   (same smart-import flow as paste-a-code). Your own packs default to
-  unlisted — when you Share or Re-share, the Publish dialog asks once
-  whether to list this pack on Browse Modpacks. You can flip the
-  answer anytime from the Publish dialog.
+  unlisted — when you Share or Re-share, the Publish dialog has a
+  Visibility option — Friends only (default) or Public. You can flip
+  it anytime from the Publish dialog.
 
 > **Nexus integration is free-tier only.** When you install a Nexus mod
 > via Quick Add or the Browse Mods view, the app opens the mod's Files page

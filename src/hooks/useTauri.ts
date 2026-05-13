@@ -296,17 +296,15 @@ export async function findGithubFromNexus(
 export async function shareProfile(
   name: string,
   listPublic: boolean | null,
-  dontAskAgain: boolean,
 ): Promise<ShareResult> {
-  return invoke('share_profile', { name, listPublic, dontAskAgain });
+  return invoke('share_profile', { name, listPublic });
 }
 
 export async function reshareProfile(
   name: string,
   listPublic: boolean | null,
-  dontAskAgain: boolean,
 ): Promise<ShareResult> {
-  return invoke('reshare_profile', { name, listPublic, dontAskAgain });
+  return invoke('reshare_profile', { name, listPublic });
 }
 
 export async function fetchSharedProfile(code: string): Promise<Profile> {
@@ -319,10 +317,6 @@ export async function installSharedProfile(code: string): Promise<Profile> {
 
 export async function getShareInfo(name: string): Promise<ShareResult | null> {
   return invoke('get_share_info', { name });
-}
-
-export async function getShareDontAskAgain(name: string): Promise<boolean> {
-  return invoke('get_share_dont_ask_again', { name });
 }
 
 export async function fetchModpackBrowserPage(

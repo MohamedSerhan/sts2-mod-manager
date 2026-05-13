@@ -93,11 +93,6 @@ struct ShareInfo {
     owner: String,
     /// SHA of the file in the repo (needed for updates)
     file_sha: Option<String>,
-    /// True if the curator ticked "don't ask me again" in the publish
-    /// prompt. When true, share/re-share skip the listing prompt and
-    /// preserve whatever the current manifest's `public` value is.
-    #[serde(default)]
-    dont_ask_again: bool,
 }
 
 /// GitHub Contents API response — we only need the SHA for upsert ops.
@@ -672,7 +667,6 @@ pub async fn fetch_shared_profile(
 pub async fn share_profile(
     name: String,
     list_public: Option<bool>,
-    dont_ask_again: bool,
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ShareResult, String> {
@@ -695,7 +689,7 @@ pub async fn share_profile(
     let share_info_path = profiles_path.join(format!("{}.share", name));
     if share_info_path.exists() {
         log::info!("Profile '{}' already shared, reusing code via reshare", name);
-        return reshare_profile(name, list_public, dont_ask_again, app_handle, state).await;
+        return reshare_profile(name, list_public, app_handle, state).await;
     }
 
     let _guard = ShareGuard::try_acquire(state.inner(), &name)?;
@@ -809,7 +803,6 @@ pub async fn share_profile(
         code: code.clone(),
         owner: username.clone(),
         file_sha: Some(file_sha),
-        dont_ask_again,
     };
     let share_info_path = profiles_path.join(format!("{}.share", name));
     std::fs::write(
@@ -884,7 +877,6 @@ pub fn get_share_info(
 pub async fn reshare_profile(
     name: String,
     list_public: Option<bool>,
-    dont_ask_again: bool,
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ShareResult, String> {
@@ -1011,7 +1003,6 @@ pub async fn reshare_profile(
         code: share_info.code,
         owner: share_info.owner,
         file_sha: Some(file_sha),
-        dont_ask_again: dont_ask_again || share_info.dont_ask_again,
     };
     let _ = std::fs::write(
         &share_info_path,
@@ -1464,58 +1455,6 @@ pub async fn set_modpack_listing(
     Ok(())
 }
 
-/// True if the curator ticked "don't ask me again" on this profile.
-/// Used by PublishModal to decide whether to show the listing prompt.
-#[tauri::command]
-pub fn get_share_dont_ask_again(
-    name: String,
-    state: tauri::State<'_, AppState>,
-) -> std::result::Result<bool, String> {
-    let profiles_path = {
-        let s = state.lock().map_err(|e| e.to_string())?;
-        s.profiles_path.clone()
-    };
-    let share_info_path = profiles_path.join(format!("{}.share", name));
-    let content = match std::fs::read_to_string(&share_info_path) {
-        Ok(c) => c,
-        Err(_) => return Ok(false),
-    };
-    let info: ShareInfo = match serde_json::from_str(&content) {
-        Ok(i) => i,
-        Err(_) => return Ok(false),
-    };
-    Ok(info.dont_ask_again)
-}
-
-#[cfg(test)]
-mod share_info_tests {
-    use super::*;
-
-    #[test]
-    fn missing_dont_ask_again_defaults_false() {
-        let json = r#"{
-            "code": "AA5A-315D-61AE",
-            "owner": "octocat",
-            "file_sha": null
-        }"#;
-        let info: ShareInfo = serde_json::from_str(json).unwrap();
-        assert!(!info.dont_ask_again);
-    }
-
-    #[test]
-    fn dont_ask_again_roundtrips() {
-        let info = ShareInfo {
-            code: "AA5A-315D-61AE".into(),
-            owner: "octocat".into(),
-            file_sha: None,
-            dont_ask_again: true,
-        };
-        let json = serde_json::to_string(&info).unwrap();
-        let back: ShareInfo = serde_json::from_str(&json).unwrap();
-        assert!(back.dont_ask_again);
-    }
-}
-
 #[cfg(test)]
 mod parse_share_code_tests {
     use super::is_valid_github_username;
@@ -1594,16 +1533,4 @@ mod listing_tests {
         assert_eq!(fresh.public, Some(false));
     }
 
-    #[test]
-    fn dont_ask_again_is_sticky() {
-        let prior = ShareInfo {
-            code: "AA5A-315D-61AE".into(),
-            owner: "octocat".into(),
-            file_sha: None,
-            dont_ask_again: true,
-        };
-        let caller_dont_ask_again = false;
-        let merged = caller_dont_ask_again || prior.dont_ask_again;
-        assert!(merged, "once set, dont_ask_again must not be cleared by a re-share that didn't prompt");
-    }
 }

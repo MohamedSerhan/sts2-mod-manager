@@ -3,7 +3,7 @@ import { AlertTriangle, Check, Copy, ExternalLink, Info, Link as LinkIcon, Messa
 import { listen } from '@tauri-apps/api/event';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type { Profile, ShareResult } from '../types';
-import { shareProfile, reshareProfile, getApiKeyStatus, getShareDontAskAgain, setModpackListing } from '../hooks/useTauri';
+import { shareProfile, reshareProfile, getApiKeyStatus, setModpackListing } from '../hooks/useTauri';
 import { useToast } from '../contexts/ToastContext';
 import { buildShareMessage, buildShareLink } from '../lib/shareImport';
 
@@ -43,10 +43,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
   const [copied, setCopied] = useState<'code' | 'link' | 'msg' | null>(null);
   const [tokenSet, setTokenSet] = useState<boolean | null>(null);
   const [progress, setProgress] = useState<ShareProgress | null>(null);
-  const [promptShown, setPromptShown] = useState(false);
-  const [optInPublic, setOptInPublic] = useState(false);
-  const [dontAskAgain, setDontAskAgain] = useState(false);
-  const [dontAskAgainLoaded, setDontAskAgainLoaded] = useState<boolean | null>(null);
+  const [visibility, setVisibility] = useState<'private' | 'public'>('private');
 
   // Refresh token status whenever the modal opens so we don't show stale
   // "token missing" state if the curator just set it in Settings.
@@ -55,25 +52,18 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
       setShared(null);
       setProgress(null);
       setBusy(false);
-      setPromptShown(false);
-      setOptInPublic(false);
-      setDontAskAgain(false);
-      setDontAskAgainLoaded(null);
       return;
     }
     let cancelled = false;
     getApiKeyStatus()
       .then((s) => { if (!cancelled) setTokenSet(s.github_token_set); })
       .catch(() => { if (!cancelled) setTokenSet(false); });
-    if (!profile?.name) {
-      setDontAskAgainLoaded(false);
-    } else {
-      getShareDontAskAgain(profile.name)
-        .then((flag) => { if (!cancelled) setDontAskAgainLoaded(flag); })
-        .catch(() => { if (!cancelled) setDontAskAgainLoaded(false); });
-    }
+    // Initialize the visibility selector from the profile's current
+    // listing state so re-shares pre-select what the curator chose
+    // last time. Default for first-time curators is "Friends only".
+    setVisibility(profile?.public === true ? 'public' : 'private');
     return () => { cancelled = true; };
-  }, [open, profile?.name]);
+  }, [open]);
 
   // Live progress from the Rust publish loop. Cleared on stage=done; the
   // success state takes over from there.
@@ -101,16 +91,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
 
   async function handlePublish() {
     if (!profile) return;
-    if (dontAskAgainLoaded === true) {
-      await runPublish(null, false);
-      return;
-    }
-    setPromptShown(true);
-  }
-
-  async function runPublish(listPublic: boolean | null, dontAskAgainArg: boolean) {
-    if (!profile) return;
-    setPromptShown(false);
+    const listPublic = visibility === 'public';
     setBusy(true);
     setProgress({
       profile_name: profile.name,
@@ -121,8 +102,8 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
     });
     try {
       const result = await (isReshare
-        ? reshareProfile(profile.name, listPublic, dontAskAgainArg)
-        : shareProfile(profile.name, listPublic, dontAskAgainArg));
+        ? reshareProfile(profile.name, listPublic)
+        : shareProfile(profile.name, listPublic));
       setShared(result);
       onShared?.(result);
 
@@ -167,9 +148,6 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
     setShared(null);
     setBusy(false);
     setProgress(null);
-    setPromptShown(false);
-    setOptInPublic(false);
-    setDontAskAgain(false);
     onClose();
   }
 
@@ -250,7 +228,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
             </div>
           )}
 
-          {!shared && !blockedByMissingToken && !busy && !promptShown && (
+          {!shared && !blockedByMissingToken && !busy && (
             <>
               <div className="gf-field">
                 <label className="gf-field-label">Pack name</label>
@@ -284,6 +262,73 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
                 </div>
               </div>
 
+              {/* Visibility — inline selector (YouTube / Steam Workshop /
+                  Thunderstore pattern). Default is "Friends only" so first-
+                  time curators don't accidentally publicly list a personal
+                  pack. The success view keeps a toggle for last-minute
+                  changes of mind. */}
+              <div className="gf-field">
+                <label className="gf-field-label">Visibility</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <label
+                    style={{
+                      display: 'flex',
+                      gap: 10,
+                      alignItems: 'flex-start',
+                      padding: '10px 12px',
+                      border: `1px solid ${visibility === 'private' ? 'var(--gf-line, var(--indigo-line))' : 'var(--indigo-line)'}`,
+                      borderRadius: 7,
+                      cursor: 'pointer',
+                      background: visibility === 'private' ? 'var(--indigo-elev)' : 'transparent',
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="visibility"
+                      checked={visibility === 'private'}
+                      onChange={() => setVisibility('private')}
+                      style={{ marginTop: 2 }}
+                    />
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>
+                        Friends only <span style={{ color: 'var(--ink-mute)', fontWeight: 400 }}>· default</span>
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--ink-mute)', lineHeight: 1.5, marginTop: 2 }}>
+                        Anyone with the code or link can install it. Not listed on Browse Modpacks.
+                      </div>
+                    </div>
+                  </label>
+                  <label
+                    style={{
+                      display: 'flex',
+                      gap: 10,
+                      alignItems: 'flex-start',
+                      padding: '10px 12px',
+                      border: `1px solid ${visibility === 'public' ? 'var(--gf-line, var(--indigo-line))' : 'var(--indigo-line)'}`,
+                      borderRadius: 7,
+                      cursor: 'pointer',
+                      background: visibility === 'public' ? 'var(--indigo-elev)' : 'transparent',
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="visibility"
+                      checked={visibility === 'public'}
+                      onChange={() => setVisibility('public')}
+                      style={{ marginTop: 2 }}
+                    />
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>
+                        Public
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--ink-mute)', lineHeight: 1.5, marginTop: 2 }}>
+                        Listed on Browse Modpacks. Anyone using the app can find and install it.
+                      </div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
               {/* Consent — first-time curators get a public repo on
                   their GitHub profile without ever being told. Tell
                   them up front, just once (re-shares skip this since
@@ -311,33 +356,6 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
                 </div>
               )}
             </>
-          )}
-
-          {promptShown && !busy && !shared && (
-            <div style={{ padding: '6px 2px' }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', marginBottom: 6 }}>
-                List this modpack on Browse Modpacks?
-              </div>
-              <div style={{ fontSize: 12.5, color: 'var(--ink-mute)', lineHeight: 1.55, marginBottom: 14 }}>
-                Anyone using the app can find and install it. Your share code still works either way — this only controls whether it's discoverable.
-              </div>
-              <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
-                <input
-                  type="checkbox"
-                  checked={optInPublic}
-                  onChange={(e) => setOptInPublic(e.target.checked)}
-                />
-                <span>List in Browse Modpacks</span>
-              </label>
-              <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <input
-                  type="checkbox"
-                  checked={dontAskAgain}
-                  onChange={(e) => setDontAskAgain(e.target.checked)}
-                />
-                <span>Don't ask me again for this modpack</span>
-              </label>
-            </div>
           )}
 
           {/* Progress state — visible during the publish run. */}
@@ -476,23 +494,15 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
               )}
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, fontSize: 12 }}>
-                <span style={{ color: 'var(--ink-mute)' }}>Listed in Browse Modpacks:</span>
-                <ListingToggle profileName={profile.name} initial={profile.public ?? false} />
+                <span style={{ color: 'var(--ink-mute)' }}>Listed publicly:</span>
+                <ListingToggle profileName={profile.name} initial={visibility === 'public'} />
               </div>
             </>
           )}
         </div>
 
         <div className="gf-modal-foot">
-          {promptShown && !busy && !shared ? (
-            <>
-              <button className="gf-btn-3" onClick={() => setPromptShown(false)}>Back</button>
-              <div style={{ flex: 1 }} />
-              <button className="gf-btn" onClick={() => runPublish(optInPublic, dontAskAgain)}>
-                Continue
-              </button>
-            </>
-          ) : !shared && !busy ? (
+          {!shared && !busy ? (
             <>
               <button className="gf-btn-3" onClick={handleDone}>Cancel</button>
               <div style={{ flex: 1 }} />
@@ -532,7 +542,7 @@ function ListingToggle({ profileName, initial }: { profileName: string; initial:
     try {
       await setModpackListing(profileName, next);
       setOn(next);
-      toast.success(next ? 'Listed' : 'Hidden from Browse Modpacks');
+      toast.success(next ? 'Listed on Browse Modpacks' : 'Hidden from Browse Modpacks');
     } catch (e) {
       toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -541,7 +551,7 @@ function ListingToggle({ profileName, initial }: { profileName: string; initial:
   }
   return (
     <button className="gf-btn-3" onClick={flip} disabled={busy}>
-      {on ? 'On' : 'Off'}
+      {on ? 'Yes' : 'No'}
     </button>
   );
 }

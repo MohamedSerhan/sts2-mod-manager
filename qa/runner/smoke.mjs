@@ -55,13 +55,25 @@ const CASSETTE_DIR = resolve(REPO_ROOT, 'qa', 'fixtures');
  *
  * The whole tree is removed in the runner's `finally` block.
  */
-let FIXTURE_DIRS = null; // { game, config, cache } — populated at startup
+let FIXTURE_DIRS = null; // { root, game, config, cache } — populated at startup
 
 function makeFixtureGameTree() {
   const root = mkdtempSync(join(tmpdir(), 'sts2mm-fixture-'));
   const game = join(root, 'game');
   const config = join(root, 'config');
   const cache = join(root, 'cache');
+  seedFixtureGameTree({ game, config, cache });
+  return { root, game, config, cache };
+}
+
+/**
+ * Populates the three fixture directories with a deterministic
+ * release_info.json + the two cassette-paired mods. Split out from
+ * `makeFixtureGameTree` so `rebuildFixtureTree` can re-seed in place
+ * without churning the tempdir paths the running app has captured via
+ * env vars (STS2_FIXTURE_GAME_PATH / STS2_CONFIG_DIR / STS2_CACHE_DIR).
+ */
+function seedFixtureGameTree({ game, config, cache }) {
   for (const d of [game, config, cache, join(game, 'mods'), join(game, 'mods_disabled')]) {
     mkdirSync(d, { recursive: true });
   }
@@ -80,7 +92,34 @@ function makeFixtureGameTree() {
   // audit unless CASSETTE_MODE is set.)
   seedQaTestMod(join(game, 'mods', 'QaTestMod'));
   seedUpToDateMod(join(game, 'mods', 'UpToDateMod'));
-  return { root, game, config, cache };
+}
+
+/**
+ * Tears down everything inside the fixture dirs and re-seeds the
+ * tree. Reuses the same paths the running app captured at startup,
+ * so STS2_FIXTURE_GAME_PATH / STS2_CONFIG_DIR / STS2_CACHE_DIR remain
+ * valid. Called before each STATE_SPECS entry so a stateful spec
+ * always sees the pristine fixture state regardless of which mutating
+ * specs ran before it.
+ *
+ * NOTE: the running app holds an in-memory snapshot of mods/profiles
+ * that this disk-level reset doesn't reach. Specs that need the app
+ * to re-scan should navigate to Mods (or trigger whatever refresh the
+ * surface they're testing already uses) — the same way the existing
+ * specs naturally pick up post-toggle disk state.
+ */
+function rebuildFixtureTree() {
+  if (!FIXTURE_DIRS) return;
+  for (const d of [FIXTURE_DIRS.game, FIXTURE_DIRS.config, FIXTURE_DIRS.cache]) {
+    if (existsSync(d)) {
+      rmSync(d, { recursive: true, force: true });
+    }
+  }
+  seedFixtureGameTree({
+    game: FIXTURE_DIRS.game,
+    config: FIXTURE_DIRS.config,
+    cache: FIXTURE_DIRS.cache,
+  });
 }
 
 function seedQaTestMod(dir) {
@@ -721,13 +760,14 @@ const CASSETTE_SPECS = [
   ['pin on QaTestMod suppresses its pending update', specPinSuppressesPendingUpdate],
 ];
 
-// The toggle spec runs in either mode — it doesn't need cassettes,
-// just the fixture game tree. But running it AFTER the cassette specs
-// (which interact with QaTestMod) would either no-op or fail; so we
-// only include it in non-cassette runs to keep the suites clean.
-// Future: split state-mutating specs into their own runner pass with
-// a fresh fixture tree.
-const TOGGLE_SPECS = [
+// Specs that mutate fixture state (disk + app config dir) and therefore
+// need a fresh fixture tree per run. The spec loop calls
+// `rebuildFixtureTree()` before each entry here so order-dependence
+// between them — toggle-then-delete-then-profile, or any future
+// additions — is eliminated at the source. Cassette-mode runs skip
+// these because the cassette specs already exercise QaTestMod and
+// running both groups would double-mutate the fixture.
+const STATE_SPECS = [
   ['toggle off moves QaTestMod to mods_disabled/', specToggleMovesQaTestModToDisabled],
   ['delete UpToDateMod via kebab → Remove mod…', specDeleteUpToDateMod],
   ['create profile via Profiles → New profile', specCreateProfile],
@@ -735,7 +775,7 @@ const TOGGLE_SPECS = [
 
 const SPECS = CASSETTE_MODE
   ? [...BASE_SPECS, ...CASSETTE_SPECS]
-  : [...BASE_SPECS, ...TOGGLE_SPECS];
+  : [...BASE_SPECS, ...STATE_SPECS];
 
 async function main() {
   preflight();
@@ -754,7 +794,14 @@ async function main() {
   let failed = false;
   try {
     driver = await buildDriver();
-    for (const [name, fn] of SPECS) {
+    for (const entry of SPECS) {
+      const [name, fn] = entry;
+      // STATE_SPECS mutate disk state; give each one a pristine
+      // fixture tree so order-of-execution can't hide bugs (or
+      // create false failures from leftover state).
+      if (STATE_SPECS.includes(entry)) {
+        rebuildFixtureTree();
+      }
       process.stdout.write(`▸ ${name} ... `);
       try {
         await fn(driver);

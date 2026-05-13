@@ -1199,6 +1199,22 @@ fn is_mod_asset(name: &str) -> bool {
 /// (.zip, .dll, .pck). This validates that the update-checking logic
 /// correctly skips empty releases.
 ///
+/// Immutable inputs the per-mod audit body needs. Held by reference so
+/// we can share it across the concurrent stream without cloning per mod.
+struct AuditCtx<'a> {
+    sources_db: &'a crate::mod_sources::ModSourcesDb,
+    nexus_api_key: Option<&'a str>,
+    user_game_version: Option<&'a str>,
+    cache_path: &'a std::path::Path,
+    token: Option<&'a str>,
+}
+
+/// How many per-mod audit tasks can run concurrently. 8 is empirically the
+/// sweet spot for GitHub's secondary rate limit on unauthenticated clients —
+/// high enough to mask network latency, low enough to stay under the
+/// 100/min secondary cap.
+const AUDIT_CONCURRENCY: usize = 8;
+
 /// `only` — optional whitelist of mod names. When `Some(names)` we audit
 /// only those mods (used by the UI to refresh just the rows that changed
 /// after a single-mod or bulk update, instead of forcing a full audit

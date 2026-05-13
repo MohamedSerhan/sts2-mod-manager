@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { countGithubUpdates } from '../lib/auditState';
+import { countGithubUpdates, isUpToDate } from '../lib/auditState';
 import {
   Search,
   Upload,
@@ -19,6 +19,7 @@ import {
   ClipboardCheck,
   Download,
   AlertTriangle,
+  Check,
 } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
@@ -652,6 +653,14 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                             title="Pinned — modpack updates will preserve this mod's enabled/disabled state and version"
                           >
                             <Pin size={9} /> Pinned
+                          </span>
+                        )}
+                        {auditRow && isUpToDate(auditRow) && (
+                          <span
+                            className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300"
+                            title="On the source's latest installable release."
+                          >
+                            <Check size={9} /> Latest
                           </span>
                         )}
                         {showUpdatePill && (

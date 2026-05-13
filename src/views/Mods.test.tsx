@@ -812,6 +812,47 @@ describe('<ModsView>', () => {
     });
   });
 
+  it('renders a "Latest" pill next to mods whose audit row is up-to-date', async () => {
+    seedMods([
+      baseMod({ name: 'CurrentMod', folder_name: 'CurrentMod', version: '2.0.0', github_url: 'https://github.com/foo/current' }),
+      baseMod({ name: 'OldMod', folder_name: 'OldMod', version: '1.0.0', github_url: 'https://github.com/foo/old' }),
+    ]);
+    registerInvokeHandler('audit_mod_versions', () => [
+      {
+        mod_name: 'CurrentMod', folder_name: 'CurrentMod',
+        installed_version: '2.0.0',
+        github_repo: 'foo/current',
+        latest_release_with_assets_tag: 'v2.0.0',
+        latest_has_assets: true,
+        needs_update: false,
+        asset_names: [], releases_scanned: 1,
+        github_auto_detected: false, pinned: false,
+        nexus_update_available: false,
+      },
+      {
+        mod_name: 'OldMod', folder_name: 'OldMod',
+        installed_version: '1.0.0',
+        github_repo: 'foo/old',
+        latest_release_with_assets_tag: 'v2.0.0',
+        latest_has_assets: true,
+        needs_update: true,
+        asset_names: [], releases_scanned: 1,
+        github_auto_detected: false, pinned: false,
+        nexus_update_available: false,
+        update_source: 'github',
+      },
+    ]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('CurrentMod')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Audit mods' }));
+    // Wait for audit to land — the per-row Update pill on OldMod is a reliable signal.
+    await screen.findByText(/Update available → v2\.0\.0/);
+    // The Latest pill should appear exactly once — on CurrentMod.
+    const latestPills = screen.getAllByText('Latest');
+    expect(latestPills).toHaveLength(1);
+  });
+
   it('Delete-all confirm with typed phrase fires delete_all_mods', async () => {
     seedMods([baseMod()]);
     registerInvokeHandler('delete_all_mods', () => 1);

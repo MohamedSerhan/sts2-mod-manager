@@ -61,7 +61,7 @@ pub struct PendingNexusInstall {
 #[derive(Debug, Clone)]
 pub struct CachedBrowserPage {
     pub fetched_at: i64,
-    pub cards: Vec<()>,  // temp placeholder until Task 4 creates `modpack_browser::BrowserCard`
+    pub cards: Vec<crate::modpack_browser::BrowserCard>,
     pub has_next_page: bool,
 }
 

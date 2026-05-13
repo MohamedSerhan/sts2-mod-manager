@@ -281,7 +281,7 @@ async function specModsNavReachable(driver) {
   await waitForElement(
     driver,
     By.xpath(
-      "//button[contains(., 'Check for updates') or contains(., 'updates pending') or contains(., 'Up to date') or contains(., 'updates')]",
+      "//button[contains(., 'Audit mods') or contains(., 'Update ') or contains(., 'Up to date')]",
     ),
     'Mods toolbar audit button',
   );
@@ -291,7 +291,7 @@ async function specAuditButtonClickable(driver) {
   const auditBtn = await waitForElement(
     driver,
     By.xpath(
-      "//button[contains(., 'Check for updates') or contains(., 'updates pending') or contains(., 'Up to date') or contains(., 'updates')]",
+      "//button[contains(., 'Audit mods') or contains(., 'Update ') or contains(., 'Up to date')]",
     ),
     'audit button',
   );
@@ -426,18 +426,39 @@ async function specPinSuppressesPendingUpdate(driver) {
 
   // Now re-run the audit; QaTestMod is pinned so its pending update
   // shouldn't count. The toolbar should read "Up to date".
+  //
+  // Target the ghost ↻ re-audit button by aria-label, NOT the generic
+  // "audit button" xpath. After specAuditShows1Update the toolbar is in
+  // the "Update 1 mod" state, which renders TWO buttons: the primary
+  // "Update 1 mod" action button AND a separate ghost re-audit icon.
+  // Picking the first by text content used to hit the action button
+  // and open the "Update 1 mod?" confirm modal — the test would then
+  // wait 30s for "Up to date" while the dialog blocked everything.
   const auditBtn = await waitForElement(
     driver,
-    By.xpath(
-      "//button[contains(., 'Check for updates') or contains(., ' update') or contains(., 'Up to date')]",
-    ),
-    'audit button',
+    By.css("button[aria-label='Re-audit']"),
+    're-audit (ghost ↻) button',
   );
   await auditBtn.click();
+  // Same stale-element story as the cassette-flow audit: re-query the
+  // button each tick because React replaces it across state changes.
   await driver.wait(
     async () => {
-      const txt = (await auditBtn.getText().catch(() => '')).trim();
-      return /^up to date$/i.test(txt);
+      const btns = await driver.findElements(
+        By.xpath(
+          "//button[contains(., 'Audit mods') or contains(., 'Update ') or contains(., 'Up to date')]",
+        ),
+      );
+      for (const b of btns) {
+        const txt = (await b.getText().catch(() => '')).trim();
+        if (/^up to date$/i.test(txt)) return true;
+      }
+      // The "Up to date" state actually renders the text in a <span>,
+      // not a button. Also accept that.
+      const spans = await driver.findElements(
+        By.xpath("//*[contains(@class,'gf-pill') and normalize-space(.)='Up to date']"),
+      );
+      return spans.length > 0;
     },
     30_000,
     'audit did not settle to "Up to date" after pinning QaTestMod',
@@ -675,25 +696,35 @@ async function specAuditAgainstCassettesShowsOnePending(driver) {
   const auditBtn = await waitForElement(
     driver,
     By.xpath(
-      "//button[contains(., 'Check for updates') or contains(., ' update') or contains(., 'Up to date')]",
+      "//button[contains(., 'Audit mods') or contains(., 'Update ') or contains(., 'Up to date')]",
     ),
     'audit button',
   );
   await auditBtn.click();
 
-  // After audit completes the toolbar button reads "1 update".
-  // We wait on the literal because "1 update" disambiguates from the
-  // 0-pending ("Up to date") and the pre-audit ("Check for updates")
-  // copy. If the cassette didn't load we'd either time out here OR
-  // see a much larger count from the real network's response — both
-  // are diagnostic.
+  // After audit completes the toolbar button reads "Update 1 mod".
+  // We re-query each tick because React replaces the Button when the
+  // toolbar state machine flips variants (secondary → primary). Holding
+  // the pre-click element ref returns a stale node after the swap and
+  // .getText() throws StaleElementReference. Two variants of the
+  // pre-audit copy now: "Audit mods" (initial) or "Update N mod(s)"
+  // (after the v1.3.4 toolbar refactor); both are diagnostic — anything
+  // OTHER than "Update 1 mod" means the cassette / fixture wiring is off.
   await driver.wait(
     async () => {
-      const txt = await auditBtn.getText().catch(() => '');
-      return /^1 update$/i.test(txt.trim());
+      const btns = await driver.findElements(
+        By.xpath(
+          "//button[contains(., 'Audit mods') or contains(., 'Update ') or contains(., 'Up to date')]",
+        ),
+      );
+      for (const b of btns) {
+        const txt = (await b.getText().catch(() => '')).trim();
+        if (/Update 1 mod$/i.test(txt)) return true;
+      }
+      return false;
     },
     30_000,
-    'audit button never settled to "1 update" — cassette/fixture wiring is off',
+    'audit button never settled to "Update 1 mod" — cassette/fixture wiring is off',
   );
 
   // Also assert the green "Update available" pill rendered on the

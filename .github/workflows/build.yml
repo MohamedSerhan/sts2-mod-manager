@@ -332,6 +332,4 @@ jobs:
           version:                      ${{ steps.meta.outputs.version }}
           file_category:                main
           archive_existing_file:        true
-          primary_mod_manager_download: false
-          allow_mod_manager_download:   false
           display_name:                 STS2 Mod Manager ${{ steps.meta.outputs.version }} (Windows Portable)

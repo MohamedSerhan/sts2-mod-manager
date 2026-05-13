@@ -916,6 +916,9 @@ pub fn set_github_token(
         let _ = entry.set_password(&token);
     }
 
+    s.cached_github_username = None;
+    s.modpack_browser_cache.clear();
+
     Ok(true)
 }
 

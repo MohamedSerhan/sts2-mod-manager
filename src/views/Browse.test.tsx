@@ -359,8 +359,8 @@ describe('<BrowseView>', () => {
   });
 
   it('Nexus tab shows loading state before the response resolves', async () => {
-    let resolve: ((v: unknown) => void) | null = null;
-    registerInvokeHandler('nexus_get_trending', () => new Promise((r) => { resolve = r; }));
+    let resolve: ((value: unknown) => void) | undefined;
+    registerInvokeHandler('nexus_get_trending', () => new Promise<unknown>((r) => { resolve = r; }));
     const user = userEvent.setup();
     render(<Wrap />);
     const trendingBtns = await screen.findAllByText(/Trending/i);
@@ -522,8 +522,8 @@ describe('<BrowseView>', () => {
   });
 
   it('Nexus Latest loading state uses the "latest" copy', async () => {
-    let resolve: ((v: unknown) => void) | null = null;
-    registerInvokeHandler('nexus_get_latest_added', () => new Promise((r) => { resolve = r; }));
+    let resolve: ((value: unknown) => void) | undefined;
+    registerInvokeHandler('nexus_get_latest_added', () => new Promise<unknown>((r) => { resolve = r; }));
     const user = userEvent.setup();
     render(<Wrap />);
     const latestBtns = await screen.findAllByText(/Latest/i);

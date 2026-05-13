@@ -969,7 +969,10 @@ describe('<ProfilesView>', () => {
     await waitFor(() => {
       expect(clipboardWrite).toHaveBeenCalled();
     });
-    expect((clipboardWrite.mock.calls.at(-1)?.[0] as string)).toMatch(/i\.html\?c=/);
+    {
+      const calls = clipboardWrite.mock.calls;
+      expect((calls[calls.length - 1]?.[0] as string)).toMatch(/i\.html\?c=/);
+    }
     await waitFor(() => {
       expect(screen.getByText(/Install link copied/)).toBeInTheDocument();
     });
@@ -1005,7 +1008,10 @@ describe('<ProfilesView>', () => {
     await waitFor(() => {
       expect(clipboardWrite).toHaveBeenCalled();
     });
-    expect((clipboardWrite.mock.calls.at(-1)?.[0] as string)).toMatch(/Join my Slay the Spire 2/);
+    {
+      const calls = clipboardWrite.mock.calls;
+      expect((calls[calls.length - 1]?.[0] as string)).toMatch(/Join my Slay the Spire 2/);
+    }
     await waitFor(() => {
       expect(screen.getByText(/Share message copied/)).toBeInTheDocument();
     });
@@ -1242,7 +1248,10 @@ describe('<ProfilesView>', () => {
     await waitFor(() => {
       expect(clipboardWrite).toHaveBeenCalled();
     });
-    expect((clipboardWrite.mock.calls.at(-1)?.[0] as string)).toMatch(/i\.html\?c=/);
+    {
+      const calls = clipboardWrite.mock.calls;
+      expect((calls[calls.length - 1]?.[0] as string)).toMatch(/i\.html\?c=/);
+    }
     await waitFor(() => {
       expect(screen.getByText(/Install link copied/)).toBeInTheDocument();
     });
@@ -1281,7 +1290,10 @@ describe('<ProfilesView>', () => {
     await waitFor(() => {
       expect(clipboardWrite).toHaveBeenCalled();
     });
-    expect((clipboardWrite.mock.calls.at(-1)?.[0] as string)).toMatch(/Join my Slay the Spire 2/);
+    {
+      const calls = clipboardWrite.mock.calls;
+      expect((calls[calls.length - 1]?.[0] as string)).toMatch(/Join my Slay the Spire 2/);
+    }
     await waitFor(() => {
       expect(screen.getByText(/Share message copied/)).toBeInTheDocument();
     });

@@ -930,13 +930,15 @@ describe('<HomeView> subscription banner & active-update banner', () => {
     // Copy link
     fireEvent.click(screen.getByTitle(/Copy install link/));
     await waitFor(() => {
-      expect((clipboardWrite.mock.calls.at(-1)?.[0] as string)).toMatch(/^https:\/\/.+\?c=alice/);
+      const calls = clipboardWrite.mock.calls;
+      expect((calls[calls.length - 1]?.[0] as string)).toMatch(/^https:\/\/.+\?c=alice/);
     });
     expect(screen.getByText(/Install link copied/)).toBeInTheDocument();
     // Copy message
     fireEvent.click(screen.getByTitle(/Copy full share message/));
     await waitFor(() => {
-      expect((clipboardWrite.mock.calls.at(-1)?.[0] as string)).toMatch(/Join my Slay the Spire 2 modpack "AlicePack"/);
+      const calls = clipboardWrite.mock.calls;
+      expect((calls[calls.length - 1]?.[0] as string)).toMatch(/Join my Slay the Spire 2 modpack "AlicePack"/);
     });
     expect(screen.getByText(/Share message copied/)).toBeInTheDocument();
   });
@@ -1586,8 +1588,8 @@ describe('<HomeView> remaining coverage targets', () => {
       { share_id: 'alice/abcd', profile_name: 'AlicePack', last_synced: '2026-05-01', last_known_remote_sha: 'sha', subscribed_at: '2026-01-01' },
     ]);
     // Block the repair call so the in-flight spinner renders.
-    let resolveRepair: ((v: any) => void) | null = null;
-    registerInvokeHandler('repair_modpack_subscription', () => new Promise((r) => { resolveRepair = r; }));
+    let resolveRepair: ((value: unknown) => void) | undefined;
+    registerInvokeHandler('repair_modpack_subscription', () => new Promise<unknown>((r) => { resolveRepair = r; }));
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText(/Your other packs/)).toBeInTheDocument(); });
@@ -1609,8 +1611,8 @@ describe('<HomeView> remaining coverage targets', () => {
       { name: 'MyPack', mods: [], created_at: '2026-01-01' },
     ]);
     registerInvokeHandler('get_profile_drift', () => ({ added: [], removed: [], modified: [] }));
-    let resolveRepair: ((v: any) => void) | null = null;
-    registerInvokeHandler('repair_profile', () => new Promise((r) => { resolveRepair = r; }));
+    let resolveRepair: ((value: unknown) => void) | undefined;
+    registerInvokeHandler('repair_profile', () => new Promise<unknown>((r) => { resolveRepair = r; }));
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('MyPack')).toBeInTheDocument(); });

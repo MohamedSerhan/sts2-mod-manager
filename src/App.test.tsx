@@ -194,7 +194,6 @@ describe('<App>', () => {
   });
 
   it('Vanilla button is rendered', async () => {
-    const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     // (Onboarding overlay is suppressed by default in beforeEach so we
@@ -265,7 +264,6 @@ describe('<App>', () => {
 
   it('Ctrl+L while typing in an input does NOT launch', async () => {
     registerInvokeHandler('launch_game', () => true);
-    const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     // (Onboarding overlay is suppressed by default in beforeEach so we
@@ -322,7 +320,6 @@ describe('<App>', () => {
 
   it('Launch button text includes the active profile name when set', async () => {
     registerInvokeHandler('get_active_profile', () => 'MyPack');
-    const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     // (Onboarding overlay is suppressed by default in beforeEach so we
@@ -368,7 +365,6 @@ describe('<App>', () => {
 
   it('Launch buttons are disabled when gameRunning=true', async () => {
     registerInvokeHandler('is_game_running_cmd', () => true);
-    const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     // (Onboarding overlay is suppressed by default in beforeEach so we

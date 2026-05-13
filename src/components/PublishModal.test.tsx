@@ -475,7 +475,8 @@ describe('<PublishModal>', () => {
     await waitFor(() => {
       expect(writeFn).toHaveBeenCalledTimes(1);
     });
-    const text = writeFn.mock.calls[0][0] as string;
+    const firstCall = writeFn.mock.calls[0] as unknown as [string];
+    const text = firstCall[0];
     expect(text).toContain(encodeURIComponent(`${shareOk.owner}/${shareOk.code}`));
   });
 
@@ -487,7 +488,8 @@ describe('<PublishModal>', () => {
     await waitFor(() => {
       expect(writeFn).toHaveBeenCalledTimes(1);
     });
-    const text = writeFn.mock.calls[0][0] as string;
+    const firstCall = writeFn.mock.calls[0] as unknown as [string];
+    const text = firstCall[0];
     expect(text).toContain('My Pack');
     expect(text).toContain(shareOk.code);
   });

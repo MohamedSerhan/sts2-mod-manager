@@ -29,6 +29,18 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ### Changed
 
+### Fixed
+
+### Security
+
+---
+
+## [1.3.7] - 2026-05-13
+
+### Added
+
+### Changed
+
 - Updates no longer overwrite config files you've edited. If you tweaked a mod's `.cfg`, `.ini`, `.toml`, or `.txt` after installing, your edits are kept across updates and a toast tells you which files survived. (Edits made before this release won't be detected once — the comparison starts fresh on your first update after upgrading.)
 
 ### Fixed

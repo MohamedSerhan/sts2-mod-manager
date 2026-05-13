@@ -16,7 +16,7 @@ Out of scope:
 - **Code signing.** SmartScreen "unknown publisher" still appears on first launch of the portable; only an EV cert would suppress it.
 - **macOS / Linux portable variants.** The current Nexus page is Windows-only.
 - **Mod page description / Posts tab.** Not exposed by the Nexus public API.
-- **Vortex/MO2 "download with manager" flag.** STS2 isn't Vortex-supported and the uploaded artifact *is* a mod manager: `allow_mod_manager_download: false`.
+- **Vortex/MO2 "download with manager" flag.** STS2 isn't a Vortex-supported game anyway, and the upload-action doesn't expose this knob (`primary_mod_manager_download` / `allow_mod_manager_download` are in the action's README but not in its `action.yml`). The flag is set per-mod-page in the Nexus UI if it ever becomes relevant.
 
 ## Architecture
 
@@ -141,15 +141,13 @@ publish-nexus:
         version:                      ${{ steps.meta.outputs.version }}
         file_category:                main
         archive_existing_file:        true
-        primary_mod_manager_download: false
-        allow_mod_manager_download:   false
         display_name:                 STS2 Mod Manager ${{ steps.meta.outputs.version }} (Windows Portable)
 ```
 
 Choices:
 - **`archive_existing_file: true`** keeps the Files tab tidy.
-- **`allow_mod_manager_download: false`** — Vortex/MO2 don't manage STS2 mods.
 - **`file_category: main`** — replaces the existing main file with the portable.
+- Vortex/MO2 "download with manager" flag is not passed because the action's `action.yml` doesn't accept it (the action README is misleading on this). Set per-mod in the Nexus UI if ever relevant.
 
 ## Secrets & one-time setup
 

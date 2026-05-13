@@ -27,6 +27,18 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Security
+
+---
+
+## [1.3.8] - 2026-05-13
+
+### Added
+
 - **Browse Modpacks.** A new sidebar tab that shows public modpacks people have shared. One click to install any pack — same smart-import flow as paste-a-code.
 - **Visibility on publish.** The Publish dialog now has a Friends-only / Public choice. Friends-only is the default — your share code still works either way, this only controls whether the pack is discoverable in Browse Modpacks. You can flip it anytime from the same dialog.
 

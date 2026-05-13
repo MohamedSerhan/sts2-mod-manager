@@ -149,6 +149,39 @@ jobs:
           includeUpdaterJson: false
           args: ${{ matrix.args }}
 
+      - name: Package portable zip (Windows only)
+        if: matrix.platform == 'windows-latest' && startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          $version = $env:TAG.TrimStart('v')
+
+          # Tauri's cargo binary is sts2-mod-manager.exe (from Cargo.toml).
+          # Filter out NSIS *-setup.exe and any build-script intermediates.
+          $candidates = Get-ChildItem 'src-tauri/target/release/*.exe' |
+                        Where-Object {
+                          $_.Name -notlike '*-setup.exe' -and
+                          $_.Name -notlike '*build-script*' -and
+                          $_.Name -notlike '*.tmp.exe'
+                        }
+          if ($candidates.Count -ne 1) {
+            Write-Error "Expected exactly one app exe in target/release, found $($candidates.Count): $($candidates.Name -join ', ')"
+            exit 1
+          }
+          $exe = $candidates[0]
+
+          $staging = 'portable-staging'
+          New-Item -ItemType Directory -Path $staging -Force | Out-Null
+          Copy-Item $exe.FullName (Join-Path $staging 'STS2 Mod Manager.exe')
+          Copy-Item scripts/portable-README.txt (Join-Path $staging 'README.txt')
+
+          $zip = "STS2.Mod.Manager_${version}_x64_portable.zip"
+          Compress-Archive -Path "$staging/*" -DestinationPath $zip -Force
+
+          gh release upload "$env:TAG" $zip --clobber
+
       - name: Patch AppImage AppRun (Arch/Wayland LD_PRELOAD fix)
         if: matrix.platform == 'ubuntu-22.04'
         env:
@@ -242,6 +275,7 @@ jobs:
           #### Windows
           $(link "STS2.Mod.Manager_${VERSION}_x64-setup.exe" "STS2.Mod.Manager_${VERSION}_x64-setup.exe" "Recommended. Double-click to install." true)
           $(link "STS2.Mod.Manager_${VERSION}_x64_en-US.msi" "STS2.Mod.Manager_${VERSION}_x64_en-US.msi" "Alternative MSI installer.")
+          $(link "STS2.Mod.Manager_${VERSION}_x64_portable.zip" "STS2.Mod.Manager_${VERSION}_x64_portable.zip" "Portable build (no installer, no auto-update). Used by the Nexus Mods page. Requires WebView2 Runtime.")
 
           > **Windows SmartScreen warning:** The installer isn't code-signed yet, so when you run it you'll see *\"Windows protected your PC\"* from Microsoft Defender SmartScreen. To install: click **More info**, then click **Run anyway**. Your browser may also flag the download as untrusted -- choose **Keep** (Edge/Chrome) to save the file.
 
@@ -266,3 +300,36 @@ jobs:
 
           # Update the release body
           gh release edit "$TAG" --notes "$BODY"
+
+  # Upload the portable Windows zip to Nexus Mods (mod 856).
+  # Runs in parallel with publish-updater + format-release so a Nexus
+  # outage cannot block the GitHub Release or the in-app updater.
+  # Re-run via "Re-run failed jobs" on the workflow run if Nexus is flaky.
+  publish-nexus:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve version + asset name
+        id: meta
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "filename=STS2.Mod.Manager_${VERSION}_x64_portable.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Download portable zip from GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release download "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" -p "${{ steps.meta.outputs.filename }}"
+
+      - name: Upload to Nexus Mods
+        uses: Nexus-Mods/upload-action@v1.0.0-beta.5
+        with:
+          api_key:                      ${{ secrets.NEXUS_API_KEY }}
+          file_group_id:                ${{ secrets.NEXUS_FILE_GROUP_ID }}
+          filename:                     ${{ steps.meta.outputs.filename }}
+          version:                      ${{ steps.meta.outputs.version }}
+          file_category:                main
+          archive_existing_file:        true
+          display_name:                 STS2 Mod Manager ${{ steps.meta.outputs.version }} (Windows Portable)

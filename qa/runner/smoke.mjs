@@ -789,6 +789,126 @@ async function specToggleStickyAcrossProfileSwitch(driver) {
   }
 }
 
+/**
+ * Regression spec for issue #20: profile Repair must delete orphan
+ * folders from BOTH `mods/` and `mods_disabled/`. The bug had Repair
+ * only sweeping `mods/`, leaving `mods_disabled/` orphans to keep
+ * surfacing as drift forever (since they're "installed but not in
+ * profile" → flagged as added each scan).
+ *
+ * Flow:
+ *   1. Profiles → create + activate a fresh profile. The snapshot
+ *      captures only the seeded fixture mods (QaTestMod + UpToDateMod).
+ *   2. Nav to Mods (so we leave the Profiles view and the drift
+ *      cache doesn't pre-empt step 4's refresh).
+ *   3. Seed `mods_disabled/OrphanMod/` on disk — directly, post-snapshot,
+ *      so the profile manifest does NOT list it.
+ *   4. Nav back to Profiles. The Profiles component remounts and runs
+ *      `loadProfiles` → drift effect picks up the orphan as `added` →
+ *      drift banner with "Repair" button renders.
+ *   5. Click Repair, confirm via the modal's "Repair" button.
+ *   6. Assert `mods_disabled/OrphanMod/` no longer exists on disk AND
+ *      the success toast surfaces.
+ */
+async function specRepairRemovesOrphanDisabled(driver) {
+  const suffix = Date.now().toString(36);
+  const profileName = `QA Repair ${suffix}`;
+
+  // Step 1: create + activate a fresh profile. The snapshot captures
+  // the two fixture mods but NOT (yet) any orphan in mods_disabled/.
+  await navToProfiles(driver);
+  await createProfileNamed(driver, profileName);
+  await waitForToastsToClear(driver);
+  await activateProfile(driver, profileName);
+  await waitForToastsToClear(driver);
+
+  // Step 2: leave Profiles so the next visit remounts the view and
+  // triggers a fresh drift fetch.
+  await navToMods(driver);
+
+  // Step 3: seed an orphan folder under mods_disabled/. A proper-ish
+  // manifest so `scan_disabled_mods` picks it up via PASS 2 (subdir
+  // walk → try_load_mod_from finds the json). A bare `{}` would also
+  // parse via the file-stem fallback, but giving it explicit fields
+  // makes the failure mode louder if the manifest schema ever moves.
+  const orphanDir = join(FIXTURE_DIRS.game, 'mods_disabled', 'OrphanMod');
+  mkdirSync(orphanDir, { recursive: true });
+  writeFileSync(
+    join(orphanDir, 'OrphanMod.json'),
+    JSON.stringify(
+      {
+        id: 'OrphanMod',
+        name: 'OrphanMod',
+        version: '1.0.0',
+        author: 'QA Bot',
+        description: 'Smoke fixture: orphan in mods_disabled/ that no profile manifest references.',
+        dependencies: [],
+      },
+      null,
+      2,
+    ),
+  );
+  writeFileSync(join(orphanDir, 'OrphanMod.dll'), Buffer.from([0]));
+  if (!existsSync(orphanDir)) {
+    throw new Error(`orphan seed failed: ${orphanDir} does not exist after mkdir/writeFile`);
+  }
+
+  // Step 4: nav back to Profiles. The component remounts → loadProfiles
+  // → useEffect on profiles fires → drift refresh sees OrphanMod as
+  // "added" (installed but not in the manifest) → drift banner with
+  // Repair button renders.
+  await navToProfiles(driver);
+  const repairBtn = await waitForElement(
+    driver,
+    By.xpath(
+      "//*[contains(@class,'gf-banner') and contains(@class,'gf-banner-warn')]" +
+        "//button[normalize-space(.)='Repair']",
+    ),
+    'Repair button on drift banner',
+    15_000,
+  );
+
+  // Step 5: click Repair, then confirm in the modal. The confirm
+  // dialog's primary action text is "Repair" (handleRepairDrift's
+  // confirmLabel) — disambiguate from the banner Repair button by
+  // scoping to the modal foot.
+  await repairBtn.click();
+  await waitForElement(
+    driver,
+    By.xpath(
+      `//*[contains(@class, 'gf-modal-title') and contains(., 'Repair') and contains(., '${profileName}')]`,
+    ),
+    'Repair-profile confirm modal',
+  );
+  const confirmBtn = await waitForElement(
+    driver,
+    By.xpath("//*[contains(@class, 'gf-modal-foot')]//button[normalize-space(.)='Repair']"),
+    'Confirm "Repair" button in modal',
+  );
+  await confirmBtn.click();
+
+  // Step 6a: disk assertion — orphan folder must be gone.
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    if (!existsSync(orphanDir)) break;
+    await delay(200);
+  }
+  if (existsSync(orphanDir)) {
+    throw new Error(
+      `bug #20 regression: ${orphanDir} still exists after Repair — orphan in mods_disabled/ was not deleted`,
+    );
+  }
+
+  // Step 6b: UI assertion — Repair success toast surfaces. ToastContext
+  // pills are `gf-toast`; the success copy starts with "Repaired".
+  await waitForElement(
+    driver,
+    By.xpath("//*[contains(@class, 'gf-toast') and contains(., 'Repaired')]"),
+    'Repair-success toast',
+    10_000,
+  );
+}
+
 /* ── Helpers ────────────────────────────────────────────────────── */
 
 async function navToProfiles(driver) {
@@ -1067,6 +1187,7 @@ const STATE_SPECS = [
   ['create profile via Profiles → New profile', specCreateProfile],
   ['profile switch preserves pins (v1.3.1 contract)', specProfileSwitchPreservesPins],
   ['#22: toggle state sticky across profile switch', specToggleStickyAcrossProfileSwitch],
+  ['#20: profile repair removes orphan mods_disabled folders', specRepairRemovesOrphanDisabled],
 ];
 
 const SPECS = CASSETTE_MODE

@@ -149,6 +149,38 @@ jobs:
           includeUpdaterJson: false
           args: ${{ matrix.args }}
 
+      - name: Package portable zip (Windows only)
+        if: matrix.platform == 'windows-latest' && startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = '${{ github.ref_name }}'.TrimStart('v')
+
+          # Tauri's cargo binary is sts2-mod-manager.exe (from Cargo.toml).
+          # Filter out NSIS *-setup.exe and any build-script intermediates.
+          $candidates = Get-ChildItem 'src-tauri/target/release/*.exe' |
+                        Where-Object {
+                          $_.Name -notlike '*-setup.exe' -and
+                          $_.Name -notlike '*build-script*' -and
+                          $_.Name -notlike '*.tmp.exe'
+                        }
+          if ($candidates.Count -ne 1) {
+            Write-Error "Expected exactly one app exe in target/release, found $($candidates.Count): $($candidates.Name -join ', ')"
+            exit 1
+          }
+          $exe = $candidates[0]
+
+          $staging = 'portable-staging'
+          New-Item -ItemType Directory -Path $staging -Force | Out-Null
+          Copy-Item $exe.FullName (Join-Path $staging 'STS2 Mod Manager.exe')
+          Copy-Item scripts/portable-README.txt (Join-Path $staging 'README.txt')
+
+          $zip = "STS2.Mod.Manager_${version}_x64_portable.zip"
+          Compress-Archive -Path "$staging/*" -DestinationPath $zip -Force
+
+          gh release upload "${{ github.ref_name }}" $zip --clobber
+
       - name: Patch AppImage AppRun (Arch/Wayland LD_PRELOAD fix)
         if: matrix.platform == 'ubuntu-22.04'
         env:

@@ -16,7 +16,7 @@ Three issues are tangled in the current "Check for updates" flow:
 
 - Audit completes in roughly `(N / 8)` × per-mod-latency rather than `N` × per-mod-latency.
 - The toolbar button's verb always matches what clicking it does.
-- A user with multiple pending updates can update them all from the Mods view in one click (today this only exists in Settings).
+- A user with one or more pending updates can update them from the Mods view toolbar in one click (today the Mods view button only re-audits; bulk update only exists in Settings, and only when N≥2).
 - Up-to-date rows carry a visible "Latest" badge in both the Mods view audit data and the Settings → Audit tab.
 
 ## Non-goals
@@ -84,7 +84,7 @@ Replace the single button with a button-group whose composition depends on audit
 | Never audited | `Audit mods` (calls `runAudit`) | — |
 | Auditing | `Auditing…` (disabled, spinner icon) | — |
 | Done, N=0 | `Up to date` (subtle, non-clickable; styled as a status pill rather than a button) | icon-only ↻ button "Re-audit" (calls `runAudit`) |
-| Done, N>0 | `Update N mod(s)` (primary, calls new `handleUpdateAll`) | icon-only ↻ button "Re-audit" (calls `runAudit`) |
+| Done, N>0 | `Update N mods` (primary, calls `updateAllGithub`) | icon-only ↻ button "Re-audit" (calls `runAudit`) |
 | Updating | `Updating N…` (disabled, spinner) | — |
 
 Tooltips:
@@ -93,9 +93,9 @@ Tooltips:
 - `Update N mods` → `Update every GitHub-linked mod with a pending update. Pinned mods are skipped.`
 - ↻ → `Re-audit`
 
-### `handleUpdateAll` extraction
+### `updateAllGithub` extraction
 
-The bulk-update logic in `src/views/Settings.tsx:299` (`handleUpdateAll`) is moved verbatim into `AppContext` so both views share it. Behavior preserved:
+The bulk-update logic in `src/views/Settings.tsx:299` (`handleUpdateAll`) is moved into `AppContext` as `updateAllGithub` so both views share it. Behavior preserved:
 
 - Confirms before kicking off (multi-download, modifies disk).
 - Iterates updates via `updateMod`, collects successes.
@@ -149,18 +149,19 @@ CSS — add `.gf-pill-latest` to `src/styles.css` mirroring the existing pill to
 
 ### Current state
 
-`Settings.tsx:760` — `<Button variant="secondary">` for `Re-audit` / `Run audit`.
-`Settings.tsx` — `Update all` button (the green one in the toolbar above the rows) is rendered as a secondary action.
+`Settings.tsx:742–755` — `Update all (N)` already renders as `variant="primary"` **but only when `ghUpdates.length ≥ 2`** (the inline per-row Update button is considered sufficient for a single update).
+`Settings.tsx:760` — `Re-audit` / `Run audit` renders as `variant="secondary"`.
 
 ### Change
 
-Mirror the Mods view hierarchy:
+Three small adjustments:
 
-- When `N > 0`, `Update all (N)` becomes the **primary** variant and `Re-audit` demotes to `ghost` / `secondary`.
-- When `N == 0` or `auditResults == null`, the audit-trigger button stays as today.
-- The Latest badge from Section 3 renders on each row.
+1. **Keep the N≥2 gate.** The Settings audit tab has per-row Update buttons next to every row, so a single pending update is already a one-click action there. The bulk "Update all" button is only worth surfacing when there are 2+ updates to batch. (This intentionally differs from the Mods view toolbar in Section 2, which has no per-row update affordance and must offer the action for any N≥1 to fix the verb/noun collision.)
+2. **Demote `Re-audit` to `variant="ghost"` when the bulk button is showing (N≥2).** The primary visual weight goes to the action verb. When `N < 2` or `auditResults == null`, `Re-audit` / `Run audit` keeps its current `variant="secondary"`.
+3. **Unify the bulk-update label** to `Update N mods` (drop the "all" wording, drop the parenthetical) so both views read identically when the bulk action is shown. Update the `confirmLabel` in the existing confirm dialog to match (`Update N mods` instead of `Update all`).
+4. The Latest badge from Section 3 renders on each row.
 
-No backend changes, no copy changes beyond the variant swap. The `Update all` confirm-and-toast flow is unchanged because it's the same function the Mods view will now also call.
+No backend changes. The `handleUpdateAll` body is unchanged — it just moves to AppContext as `updateAllGithub` per Section 2.
 
 ## Architecture summary
 
@@ -170,7 +171,7 @@ No backend changes, no copy changes beyond the variant swap. The `Update all` co
                      │  ───────────────────   │
                      │  runAudit              │
                      │  refreshAuditEntries   │
-                     │  updateAllGithub  ◀──┐ │  (NEW — extracted from Settings)
+                     │  updateAllGithub  ◀──┐ │  (NEW — extracted from Settings.handleUpdateAll)
                      │  ...                 │ │
                      └──────────────────────┼─┘
                                             │

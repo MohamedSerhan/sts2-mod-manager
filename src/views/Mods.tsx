@@ -20,6 +20,7 @@ import {
   Download,
   AlertTriangle,
   Check,
+  Clock,
 } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
@@ -44,6 +45,8 @@ import {
   openModsFolder,
   setModSource,
   setModSourcesFull,
+  setModExtras,
+  setModSnooze,
   findGithubFromNexus,
   pinMod,
   unpinMod,
@@ -614,6 +617,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
               !!auditRow &&
               auditRow.needs_update &&
               !auditRow.pinned &&
+              !auditRow.snoozed &&
               !auditRow.game_version_too_old &&
               !auditRow.latest_release_blocked_by_game_version &&
               !!compatibleTag &&
@@ -681,6 +685,14 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                             )}
                           </button>
                         )}
+                        {auditRow?.snoozed && (
+                          <span
+                            className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-500/20 text-slate-300"
+                            title={`Update suggestion snoozed at v${auditRow.latest_release_with_assets_tag?.replace(/^v/, '') ?? '?'}. Auto-expires when a newer release appears.`}
+                          >
+                            💤 Snoozed
+                          </span>
+                        )}
                         {auditRow?.latest_release_blocked_by_game_version && !auditRow.pinned && (
                           <span
                             className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300"
@@ -744,7 +756,21 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                             <Badge variant="nexus">Nexus</Badge>
                           </a>
                         ) : null}
-                        {advancedMode && !hasLinks && (
+                        {advancedMode && mod.custom_url ? (
+                          <a
+                            href={mod.custom_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex"
+                            title={`Open link: ${mod.custom_url}`}
+                          >
+                            <Badge variant="default">
+                              <ExternalLink size={10} className="mr-1" />
+                              Link
+                            </Badge>
+                          </a>
+                        ) : null}
+                        {advancedMode && !hasLinks && !mod.custom_url && (
                           <Badge variant={getSourceVariant(mod.source)}>
                             {mod.source ? 'Local' : 'Unlinked'}
                           </Badge>
@@ -756,6 +782,15 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                       {mod.description && (
                         <p className="text-sm text-text-muted mt-1 truncate">
                           {mod.description}
+                        </p>
+                      )}
+                      {mod.note && (
+                        <p
+                          className="text-xs text-text-dim mt-1 truncate"
+                          title={mod.note}
+                          style={{ fontStyle: 'italic' }}
+                        >
+                          📝 {mod.note}
                         </p>
                       )}
                     </div>
@@ -788,6 +823,51 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                         <KebabItem icon={<FolderOpen size={12} />} onClick={handleOpenFolder}>
                           Open mods folder
                         </KebabItem>
+                        {auditRow?.snoozed ? (
+                          <KebabItem
+                            icon={<Check size={12} />}
+                            onClick={async () => {
+                              try {
+                                await setModSnooze(mod.name, null, mod.folder_name);
+                                await refreshAuditEntries([mod.name]);
+                                toast.success(`Unsnoozed ${mod.name}`);
+                              } catch (e) {
+                                toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+                              }
+                            }}
+                            description="Show the update suggestion again for the current upstream release."
+                          >
+                            Unsnooze update
+                          </KebabItem>
+                        ) : (
+                          auditRow?.needs_update && !!auditRow.latest_release_with_assets_tag && (
+                            <KebabItem
+                              icon={<Clock size={12} />}
+                              onClick={async () => {
+                                try {
+                                  await setModSnooze(
+                                    mod.name,
+                                    auditRow.latest_release_with_assets_tag ?? null,
+                                    mod.folder_name,
+                                  );
+                                  await refreshAuditEntries([mod.name]);
+                                  toast.success(
+                                    `Snoozed ${mod.name} until next release`,
+                                  );
+                                } catch (e) {
+                                  toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+                                }
+                              }}
+                              description={
+                                `Hide the update suggestion until a newer release appears upstream ` +
+                                `(currently v${auditRow.latest_release_with_assets_tag?.replace(/^v/, '') ?? '?'}). ` +
+                                `Use this when the website's announced version doesn't match the file's actual version.`
+                              }
+                            >
+                              Snooze update suggestion
+                            </KebabItem>
+                          )
+                        )}
                       </KebabSection>
                       {advancedMode && (
                         <>
@@ -904,10 +984,16 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                         setFindingGithub(null);
                       }
                     }}
-                    onSave={async (gh, nx) => {
+                    onSave={async (gh, nx, note, customUrl) => {
                       try {
                         setSavingSource(true);
+                        // Two separate commands by design: setModSourcesFull
+                        // owns the GitHub/Nexus link fields (clearing nulls
+                        // clears those links), setModExtras owns the
+                        // free-form note + custom URL. They write to the
+                        // same source entry but don't clobber each other.
                         await setModSourcesFull(mod.name, gh.trim() || null, nx.trim() || null, mod.folder_name);
+                        await setModExtras(mod.name, note.trim() || null, customUrl.trim() || null, mod.folder_name);
                         await refreshMods();
                         toast.success(`Sources saved for ${mod.name}`);
                         setExpandedMod(null);

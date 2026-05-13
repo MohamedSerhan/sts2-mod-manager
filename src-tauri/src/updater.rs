@@ -1,3 +1,4 @@
+use futures_util::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 
 use crate::download::{fetch_latest_release, fetch_releases};
@@ -1080,6 +1081,8 @@ mod version_helper_tests {
             pinned: false,
             min_game_version: min.map(String::from),
             author: None,
+            note: None,
+            custom_url: None,
         };
         assert!(install_is_incompatible(&mk(Some("0.110.0")), Some("0.105.0")));
         assert!(!install_is_incompatible(&mk(Some("0.100.0")), Some("0.105.0")));
@@ -1185,6 +1188,16 @@ pub struct ModAuditEntry {
     /// compatible (the row falls back to "Repair" semantics).
     #[serde(default)]
     pub latest_compatible_tag: Option<String>,
+    /// True when the user has snoozed the update suggestion for this mod
+    /// at its current `latest_release_with_assets_tag`. The audit still
+    /// runs and the entry still appears in the list; the UI suppresses
+    /// the "update available" badge and excludes the row from the audit
+    /// count. When the upstream tag advances past the snoozed one the
+    /// flag flips back to false automatically — the snooze auto-expires.
+    /// Distinct from `pinned`: pinning is a hard freeze on auto-update,
+    /// snoozing is "stop nagging me about THIS specific release."
+    #[serde(default)]
+    pub snoozed: bool,
 }
 
 /// Valid mod asset extensions for STS2 mods.
@@ -1270,10 +1283,18 @@ pub async fn audit_mod_versions(
         token: token.as_deref(),
     };
 
-    let mut results: Vec<ModAuditEntry> = Vec::with_capacity(all_mods.len());
-    for m in &all_mods {
-        results.push(audit_one_mod(m, &ctx).await);
-    }
+    let futures: Vec<_> = all_mods.iter().map(|m| audit_one_mod(m, &ctx)).collect();
+    let mut results: Vec<ModAuditEntry> = stream::iter(futures)
+        .buffer_unordered(AUDIT_CONCURRENCY)
+        .collect()
+        .await;
+
+    // buffer_unordered yields results in completion order. Re-sort by the mod's
+    // display name so the UI render order is stable across audits (filesystem
+    // scan order was non-deterministic anyway).
+    results.sort_by(|a, b| {
+        a.mod_name.to_lowercase().cmp(&b.mod_name.to_lowercase())
+    });
 
     Ok(results)
 }
@@ -1294,6 +1315,7 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
         .or_else(|| ctx.sources_db.mods.get(&m.name))
         .or_else(|| m.mod_id.as_ref().and_then(|i| ctx.sources_db.mods.get(i)));
     let is_pinned = source_entry.map(|e| e.pinned).unwrap_or(false);
+    let snoozed_until_tag = source_entry.and_then(|e| e.snoozed_until_tag.clone());
     let github_pair = resolve_github_repo(m, &ctx.sources_db.mods);
 
     // Also get auto-detected GitHub repo for display (even though it's not used for updates)
@@ -1623,6 +1645,7 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
             latest_release_min_game_version: None,
             latest_release_blocked_by_game_version: false,
             latest_compatible_tag: None,
+            snoozed: false,
         };
     }
 
@@ -1656,6 +1679,14 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
     } else {
         None
     };
+    // Snooze is matched against the upstream tag the user would actually
+    // be prompted to install. When that tag advances (upstream cuts a new
+    // release) `snoozed` flips false and the suggestion comes back — the
+    // snooze auto-expires.
+    let snoozed = match (snoozed_until_tag.as_deref(), latest_release_with_assets_tag.as_deref()) {
+        (Some(snooze), Some(latest)) => snooze == latest,
+        _ => false,
+    };
     ModAuditEntry {
         mod_name: m.name.clone(),
         folder_name: m.folder_name.clone(),
@@ -1679,5 +1710,6 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
         latest_release_min_game_version,
         latest_release_blocked_by_game_version,
         latest_compatible_tag,
+        snoozed,
     }
 }

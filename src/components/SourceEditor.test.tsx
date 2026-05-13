@@ -61,11 +61,12 @@ describe('<SourceEditor>', () => {
   it('"empty" badge shows when a field is blank, "OK" when filled', async () => {
     const user = userEvent.setup();
     renderEditor(baseMod());
-    // Initially both empty
-    expect(screen.getAllByText('empty')).toHaveLength(2);
+    // Three fields carry status badges: GitHub, Nexus, Other-link.
+    // (Note has hint text only — it's free-form, no "filled vs empty" UX.)
+    expect(screen.getAllByText('empty')).toHaveLength(3);
     await user.type(screen.getByPlaceholderText('owner/repo'), 'foo/bar');
     expect(screen.getByText(/OK/)).toBeInTheDocument();
-    expect(screen.getAllByText('empty')).toHaveLength(1);
+    expect(screen.getAllByText('empty')).toHaveLength(2);
   });
 
   it('clear button next to GitHub clears the field', async () => {
@@ -108,7 +109,46 @@ describe('<SourceEditor>', () => {
       'https://www.nexusmods.com/sts2/mods/99',
     );
     await user.click(screen.getByRole('button', { name: /Save sources/ }));
-    expect(onSave).toHaveBeenCalledWith('foo/bar', 'https://www.nexusmods.com/sts2/mods/99');
+    expect(onSave).toHaveBeenCalledWith(
+      'foo/bar',
+      'https://www.nexusmods.com/sts2/mods/99',
+      '',
+      '',
+    );
+  });
+
+  it('Note and Other-link fields round-trip through onSave', async () => {
+    const onSave = vi.fn();
+    const user = userEvent.setup();
+    renderEditor(baseMod(), { onSave });
+    await user.type(
+      screen.getByPlaceholderText(/downloaded from Patreon/),
+      'got this from a friend',
+    );
+    await user.type(
+      screen.getByPlaceholderText(/Patreon, X, Discord/),
+      'https://example.com/post/1',
+    );
+    await user.click(screen.getByRole('button', { name: /Save sources/ }));
+    expect(onSave).toHaveBeenCalledWith(
+      '',
+      '',
+      'got this from a friend',
+      'https://example.com/post/1',
+    );
+  });
+
+  it('initial Note + custom_url come from mod fields', () => {
+    renderEditor(
+      baseMod({
+        note: 'compat patch for v1.8 build',
+        custom_url: 'https://example.com/post/1',
+      }),
+    );
+    const noteEl = screen.getByPlaceholderText(/downloaded from Patreon/) as HTMLTextAreaElement;
+    expect(noteEl.value).toBe('compat patch for v1.8 build');
+    const urlEl = screen.getByPlaceholderText(/Patreon, X, Discord/) as HTMLInputElement;
+    expect(urlEl.value).toBe('https://example.com/post/1');
   });
 
   it('Save shows "Saving…" + disables when saving=true', () => {

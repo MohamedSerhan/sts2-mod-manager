@@ -37,6 +37,30 @@ pub struct ModSourceEntry {
     /// and auto-install from Downloads. Must be updated manually.
     #[serde(default, skip_serializing_if = "is_false")]
     pub pinned: bool,
+    /// Free-form user note about the mod. Surfaces in the mod row so the user
+    /// can remember things like "downloaded from Patreon" or "compat patch
+    /// for the v1.8 build". Not used for matching, search, or update logic —
+    /// purely informational.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// A non-GitHub, non-Nexus URL the user wants to remember for this mod
+    /// (Patreon page, Discord thread, an X post — whatever they got the mod
+    /// from). Surfaces as an external-link button alongside the existing
+    /// GitHub/Nexus chips. Single URL by design; a typed list can be added
+    /// later without breaking this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_url: Option<String>,
+    /// When set and equal to the audit's `latest_release_with_assets_tag`,
+    /// the audit's update suggestion is suppressed for this mod. The user
+    /// uses this when the website's announced version doesn't actually
+    /// match what's inside the file (Nexus version drift is the common case),
+    /// or when they've decided to skip a specific release. When a NEWER
+    /// release appears upstream, this auto-expires — `snoozed_until_tag`
+    /// is matched against the actual current tag, so a new tag stops the
+    /// match and the suggestion comes back. Distinct from `pinned`, which
+    /// is a hard freeze on auto-update entirely.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snoozed_until_tag: Option<String>,
 }
 
 fn is_false(v: &bool) -> bool { !*v }
@@ -179,6 +203,15 @@ pub fn migrate_source_entry(old_name: &str, new_name: &str, config_path: &Path) 
     if dest.installed_version.is_none() {
         dest.installed_version = old.installed_version;
     }
+    if dest.note.is_none() {
+        dest.note = old.note;
+    }
+    if dest.custom_url.is_none() {
+        dest.custom_url = old.custom_url;
+    }
+    if dest.snoozed_until_tag.is_none() {
+        dest.snoozed_until_tag = old.snoozed_until_tag;
+    }
     if let Err(e) = save_sources(&db, config_path) {
         log::error!(
             "Failed to migrate source entry from '{}' to '{}': {}",
@@ -244,6 +277,15 @@ pub fn carry_source_entry(
     }
     if dest.installed_version.is_none() {
         dest.installed_version = old.installed_version;
+    }
+    if dest.note.is_none() {
+        dest.note = old.note;
+    }
+    if dest.custom_url.is_none() {
+        dest.custom_url = old.custom_url;
+    }
+    if dest.snoozed_until_tag.is_none() {
+        dest.snoozed_until_tag = old.snoozed_until_tag;
     }
     if let Err(e) = save_sources(&db, config_path) {
         log::error!(
@@ -318,6 +360,10 @@ pub fn enrich_mods_with_sources(mods: &mut [ModInfo], config_path: &Path) {
                 m.nexus_url = entry.nexus_url.clone();
             }
             m.pinned = entry.pinned;
+            // User-saved extras: surface on the row so they show up next
+            // to the GitHub/Nexus chips and the kebab menu.
+            m.note = entry.note.clone();
+            m.custom_url = entry.custom_url.clone();
         }
         // Also try to infer from the legacy `source` field if no explicit link
         if m.github_url.is_none() {
@@ -484,6 +530,12 @@ pub fn set_mod_source(
 }
 
 /// Set both GitHub and Nexus sources for a mod at once.
+///
+/// MERGE semantics: only `github_repo` and the Nexus fields are touched.
+/// Pre-existing `pinned`, `installed_version`, `note`, `custom_url`, and
+/// `snoozed_until_tag` survive. The previous implementation overwrote the
+/// whole entry with a fresh one — that silently destroyed pin state and
+/// notes every time the user opened SourceEditor and clicked Save.
 #[tauri::command]
 pub fn set_mod_sources_full(
     mod_name: String,
@@ -495,12 +547,15 @@ pub fn set_mod_sources_full(
     let s = state.lock().map_err(|e| e.to_string())?;
     let mut db = load_sources(&s.config_path);
 
-    let mut entry = ModSourceEntry::default();
+    // Folder-first write key matches the rest of the codebase. Fall back
+    // to display name for legacy callers / mods scanned without a folder.
+    let key = folder_name.unwrap_or(mod_name);
+    let entry = db.mods.entry(key).or_default();
+
     entry.github_repo = github_repo;
     entry.github_auto_detected = false; // manually set by user
 
     if let Some(ref nurl) = nexus_url {
-        // Parse Nexus URL to extract game domain and mod ID
         if let Some(parsed) = parse_source_url(nurl) {
             entry.nexus_url = parsed.nexus_url.or(Some(nurl.clone()));
             entry.nexus_game_domain = parsed.nexus_game_domain;
@@ -508,14 +563,72 @@ pub fn set_mod_sources_full(
         } else {
             entry.nexus_url = Some(nurl.clone());
         }
+    } else {
+        // Explicit clear: the SourceEditor's `null` means "remove this link".
+        entry.nexus_url = None;
+        entry.nexus_game_domain = None;
+        entry.nexus_mod_id = None;
     }
 
-    // Write under folder_name when provided (preserves pin state on the
-    // same key); otherwise legacy display-name key.
-    let key = folder_name.unwrap_or(mod_name);
-    db.mods.insert(key, entry.clone());
+    let result = entry.clone();
     save_sources(&db, &s.config_path).map_err(|e| e.to_string())?;
-    Ok(entry)
+    Ok(result)
+}
+
+/// Set or clear a mod's free-form note and/or custom (non-GitHub/Nexus)
+/// link. Empty strings clear the corresponding field. Folder-first write.
+/// Other fields on the entry (github, nexus, pin, snooze, version) are
+/// untouched.
+#[tauri::command]
+pub fn set_mod_extras(
+    mod_name: String,
+    folder_name: Option<String>,
+    note: Option<String>,
+    custom_url: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<ModSourceEntry, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let mut db = load_sources(&s.config_path);
+    let key = folder_name.unwrap_or(mod_name);
+    let entry = db.mods.entry(key).or_default();
+
+    entry.note = note.and_then(|s| {
+        let t = s.trim().to_string();
+        if t.is_empty() { None } else { Some(t) }
+    });
+    entry.custom_url = custom_url.and_then(|s| {
+        let t = s.trim().to_string();
+        if t.is_empty() { None } else { Some(t) }
+    });
+
+    let result = entry.clone();
+    save_sources(&db, &s.config_path).map_err(|e| e.to_string())?;
+    Ok(result)
+}
+
+/// Snooze update suggestions for this mod until a release tag newer than
+/// `latest_tag` appears. Passing an empty string or None clears the snooze.
+/// Folder-first write. Distinct from pin (which is a hard freeze): a
+/// snoozed mod can still be updated manually, and the snooze auto-expires
+/// when upstream advances past `latest_tag`.
+#[tauri::command]
+pub fn set_mod_snooze(
+    mod_name: String,
+    folder_name: Option<String>,
+    latest_tag: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<ModSourceEntry, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let mut db = load_sources(&s.config_path);
+    let key = folder_name.unwrap_or(mod_name);
+    let entry = db.mods.entry(key).or_default();
+    entry.snoozed_until_tag = latest_tag.and_then(|s| {
+        let t = s.trim().to_string();
+        if t.is_empty() { None } else { Some(t) }
+    });
+    let result = entry.clone();
+    save_sources(&db, &s.config_path).map_err(|e| e.to_string())?;
+    Ok(result)
 }
 
 /// Remove source links for a mod. Removes both the folder-keyed entry

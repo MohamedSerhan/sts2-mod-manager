@@ -51,6 +51,14 @@ pub struct ModInfo {
     /// mods share a display name. None when the manifest didn't declare one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub author: Option<String>,
+    /// Free-form user note from the source DB. Populated by
+    /// `mod_sources::enrich_mods_with_sources`. Surfaces in the mod row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// User-saved non-GitHub/non-Nexus URL (Patreon, X, Discord, etc).
+    /// Populated by `mod_sources::enrich_mods_with_sources`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_url: Option<String>,
 }
 
 /// One dependency entry in a mod manifest.
@@ -441,6 +449,8 @@ fn parse_manifest(manifest_path: &Path, base_dir: &Path, enabled: bool) -> Optio
         pinned: false,
         min_game_version: raw.min_game_version,
         author: raw.author,
+        note: None,
+        custom_url: None,
     })
 }
 
@@ -494,6 +504,8 @@ fn dll_only_mod(dll_path: &Path, base_dir: &Path, enabled: bool) -> ModInfo {
         pinned: false,
         min_game_version: None,
         author: None,
+        note: None,
+        custom_url: None,
     }
 }
 
@@ -1449,6 +1461,8 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
                 pinned: false,
                 min_game_version: None,
                 author: None,
+                note: None,
+                custom_url: None,
             })
         }
     }
@@ -2410,6 +2424,8 @@ mod dedup_identity_tests {
             pinned: false,
             min_game_version: None,
             author: None,
+            note: None,
+            custom_url: None,
         }
     }
 

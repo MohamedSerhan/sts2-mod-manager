@@ -26,6 +26,7 @@ function entry(over: Partial<ModAuditEntry>): ModAuditEntry {
     latest_release_min_game_version: null,
     latest_release_blocked_by_game_version: false,
     latest_compatible_tag: null,
+    snoozed: false,
     ...over,
   };
 }
@@ -109,5 +110,43 @@ describe('countGithubUpdates', () => {
     expect(countGithubUpdates([
       entry({ nexus_url: 'x', needs_update: true }),
     ])).toBe(0);
+  });
+});
+
+describe('snooze', () => {
+  it('treats a snoozed mod as up-to-date even when needs_update is true', () => {
+    // Audit's needs_update reflects upstream truth (a newer tag exists).
+    // Snooze is the user's "stop bugging me" override — isUpToDate
+    // honors it so the row shows the Latest pill, not the update badge.
+    const row = entry({
+      github_repo: 'a/b',
+      needs_update: true,
+      latest_release_with_assets_tag: 'v2',
+      snoozed: true,
+    });
+    expect(isUpToDate(row)).toBe(true);
+  });
+
+  it('excludes snoozed rows from the GitHub update count', () => {
+    const rows: ModAuditEntry[] = [
+      entry({ mod_name: 'A', github_repo: 'a/a', needs_update: true, latest_release_with_assets_tag: 'v2' }),
+      entry({ mod_name: 'B', github_repo: 'b/b', needs_update: true, latest_release_with_assets_tag: 'v2', snoozed: true }),
+    ];
+    expect(countGithubUpdates(rows)).toBe(1);
+  });
+
+  it('reverts to "needs update" once snoozed is false (auto-expiry happens on backend)', () => {
+    // The audit clears the `snoozed` flag when upstream advances past
+    // `snoozed_until_tag`. From the TS side that means the entry simply
+    // arrives with snoozed=false again — and the existing needs_update
+    // path takes over without any extra TS bookkeeping.
+    const row = entry({
+      github_repo: 'a/b',
+      needs_update: true,
+      latest_release_with_assets_tag: 'v3',
+      snoozed: false,
+    });
+    expect(isUpToDate(row)).toBe(false);
+    expect(countGithubUpdates([row])).toBe(1);
   });
 });

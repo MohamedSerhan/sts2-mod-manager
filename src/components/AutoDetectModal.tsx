@@ -55,6 +55,9 @@ export function AutoDetectModal({ open, onClose, onApplied }: Props) {
   }
 
   async function handleApply() {
+    // uncovered: render guard at line 197 (`{willApply.length > 0 && ...}`) keeps the
+    // Apply button out of the DOM when willApply is empty, so this defensive early-exit
+    // is unreachable from user interaction.
     if (willApply.length === 0) return;
     setApplying(true);
     let ok = 0;

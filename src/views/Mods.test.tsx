@@ -1449,22 +1449,10 @@ describe('<ModsView>', () => {
   });
 
   // ── Repair "no github" pre-check ─────────────────────────────────
-
-  it('Repair pre-check toast fires when handleRepair runs without github link', async () => {
-    // The kebab item is disabled when github_url is missing, but the
-    // pre-check inside handleRepair still has its own no-source guard.
-    // We can exercise it by clicking the inline Update pill flow that
-    // uses the same handler indirectly — easier path: bypass disabled
-    // by allowing the item to be clickable. We assert kebab disable
-    // separately in another test; here we cover the early-return guard
-    // by directly invoking ModsView's handler isn't possible from the
-    // test (closure). Skip — the path is already counted as disabled
-    // button branch coverage via the existing kebab-disabled test, and
-    // the early-return path is unreachable from a non-disabled kebab.
-    // uncovered: Mods.tsx lines 184-189 — handleRepair early-return is
-    // gated by the disabled kebab item, so no UI path reaches it.
-    expect(true).toBe(true);
-  });
+  // The handleRepair early-return (Mods.tsx lines 184-189) is defensive:
+  // the kebab item is independently disabled when github_url is null, so
+  // no UI path reaches the guard. Covered by the kebab-disabled assertion
+  // in "Repair early-return surfaces 'no source linked' toast" below.
 
   // ── Toggle advanced-mode persistence (localStorage path) ─────────
 
@@ -1939,19 +1927,11 @@ describe('<ModsView>', () => {
   });
 
   // ── min-game warning when game_version is null (?? 'unknown') ────
-
-  it('min-game-version warning text includes "unknown" when game_version is null', async () => {
-    // Game info missing version → tooltip surfaces "v unknown". But the
-    // warning itself never renders if gameVersionSatisfies(null, X)→true
-    // (fail-open). To trigger the warning AND null game_version is
-    // impossible with current logic — we cover the `?? 'unknown'`
-    // tooltip path indirectly via the title attribute.
-    // uncovered: Mods.tsx line 642 — `?? 'unknown'` fallback is only
-    // reachable when the warning renders, which requires a non-null
-    // game_version to fail the satisfies check. The branch is logically
-    // dead in current code paths.
-    expect(true).toBe(true);
-  });
+  // The `?? 'unknown'` fallback at Mods.tsx:642 is dead in current logic:
+  // gameVersionSatisfies(null|undefined, X) returns true (fail-open), so
+  // the warning span only renders when game_version is a real string. We
+  // keep the fallback as defensive code; see the inline `// uncovered:`
+  // comment in Mods.tsx for the rationale.
 
   // ── Source editor "Close source editor" label after open ─────────
 

@@ -181,6 +181,9 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
   // current on-disk install before re-extracting.
   const [repairingMod, setRepairingMod] = useState<string | null>(null);
   async function handleRepair(name: string, folderName: string | null, hasGithub: boolean) {
+    // uncovered: this guard is defensive — the kebab item is independently
+    // disabled when github_url is null (see ModRow render), so no UI path
+    // reaches it. Covered indirectly by the "kebab disabled" test instead.
     if (!hasGithub) {
       toast.error(
         `'${name}' has no GitHub source linked — repair fetches from GitHub. ` +
@@ -639,6 +642,10 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                             }}
                             title={
                               `This mod's manifest declares min_game_version=${mod.min_game_version}. ` +
+                              // uncovered: `?? 'unknown'` fallback is dead in current logic.
+                              // gameVersionSatisfies(null|undef, X) fails open (returns true), so
+                              // the warning span only renders when game_version is a real string.
+                              // Kept as defensive code in case satisfies-semantics change later.
                               `Your STS2 is v${gameInfo?.game_version ?? 'unknown'}. ` +
                               `The game's loader will silently skip this mod until you update STS2 or switch beta branches. ` +
                               `Use Repair (advanced kebab) to roll back to a compatible release.`

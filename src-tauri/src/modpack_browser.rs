@@ -156,6 +156,148 @@ pub async fn list_manifest_filenames(
     Ok(files)
 }
 
+use crate::state::{AppState, CachedBrowserPage};
+use futures::stream::{FuturesUnordered, StreamExt};
+
+const CACHE_TTL_SECS: i64 = 60 * 60; // 1h
+const CONCURRENCY: usize = 8;
+
+/// Fetch a single manifest from one curator's repo. Returns `None` if
+/// the file 404s or fails to parse — the caller silently drops them.
+async fn fetch_one_manifest(
+    owner: String,
+    filename: String,
+    token: Option<String>,
+) -> Option<RawManifest> {
+    let profile = crate::sharing::fetch_shared_profile(&owner, &filename, token.as_deref())
+        .await
+        .ok()?;
+    Some(RawManifest { owner, filename, profile })
+}
+
+#[tauri::command]
+pub async fn fetch_modpack_browser_page(
+    page: u32,
+    force_refresh: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<BrowserPage, String> {
+    let now = chrono::Utc::now().timestamp();
+
+    let (token, cached, self_owner_cached) = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        let cached = s.modpack_browser_cache.get(&page).cloned();
+        (s.github_token.clone(), cached, s.cached_github_username.clone())
+    };
+
+    if !force_refresh {
+        if let Some(c) = &cached {
+            if is_cache_fresh(c.fetched_at, now, CACHE_TTL_SECS) {
+                return Ok(BrowserPage {
+                    cards: c.cards.clone(),
+                    page,
+                    has_next_page: c.has_next_page,
+                    stale: false,
+                    fetched_at: c.fetched_at,
+                });
+            }
+        }
+    }
+
+    let self_owner = match (self_owner_cached, token.as_deref()) {
+        (Some(u), _) => Some(u),
+        (None, Some(t)) => {
+            match crate::sharing::get_github_username(t).await {
+                Ok(u) => {
+                    if let Ok(mut s) = state.lock() {
+                        s.cached_github_username = Some(u.clone());
+                    }
+                    Some(u)
+                }
+                Err(e) => {
+                    log::warn!("modpack-browser: username lookup failed: {}", e);
+                    None
+                }
+            }
+        }
+        (None, None) => None,
+    };
+
+    let client = crate::sharing::build_client(token.as_deref().unwrap_or(""));
+
+    let search_result = search_profiles_repos(&client, page).await;
+    let (owners, has_next_page) = match search_result {
+        Ok(t) => t,
+        Err(e) => {
+            if let Some(c) = cached {
+                return Ok(BrowserPage {
+                    cards: c.cards,
+                    page,
+                    has_next_page: c.has_next_page,
+                    stale: true,
+                    fetched_at: c.fetched_at,
+                });
+            }
+            return Err(e);
+        }
+    };
+
+    let mut list_tasks = FuturesUnordered::new();
+    for (owner, repo) in owners {
+        let client = client.clone();
+        list_tasks.push(async move {
+            let files = list_manifest_filenames(&client, &owner, &repo).await.unwrap_or_default();
+            (owner, files)
+        });
+    }
+    let mut owner_files: Vec<(String, Vec<String>)> = Vec::new();
+    while let Some(t) = list_tasks.next().await {
+        owner_files.push(t);
+    }
+
+    let mut all_manifest_tasks: Vec<(String, String)> = Vec::new();
+    for (owner, files) in owner_files {
+        for f in files {
+            all_manifest_tasks.push((owner.clone(), f));
+        }
+    }
+
+    let mut raw: Vec<RawManifest> = Vec::new();
+    let mut iter = all_manifest_tasks.into_iter();
+    let mut inflight = FuturesUnordered::new();
+    for _ in 0..CONCURRENCY {
+        if let Some((o, f)) = iter.next() {
+            inflight.push(fetch_one_manifest(o, f, token.clone()));
+        }
+    }
+    while let Some(result) = inflight.next().await {
+        if let Some(r) = result {
+            raw.push(r);
+        }
+        if let Some((o, f)) = iter.next() {
+            inflight.push(fetch_one_manifest(o, f, token.clone()));
+        }
+    }
+
+    let cards = filter_to_browser_cards(raw, self_owner.as_deref());
+
+    let entry = CachedBrowserPage {
+        fetched_at: now,
+        cards: cards.clone(),
+        has_next_page,
+    };
+    if let Ok(mut s) = state.lock() {
+        s.modpack_browser_cache.insert(page, entry);
+    }
+
+    Ok(BrowserPage {
+        cards,
+        page,
+        has_next_page,
+        stale: false,
+        fetched_at: now,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,5 +387,34 @@ mod tests {
         // search_profiles_repos (uses eq_ignore_ascii_case). Network-bound
         // testing of that filter is covered by manual smoke; the pure
         // assertion here is the parser shape.
+    }
+
+    // No-network smoke test: cache hit short-circuits the orchestrator.
+    // (Wrapping AppState into tauri::State requires more setup than we
+    // want here; the pure helpers carry the real test load.)
+    #[tokio::test]
+    async fn cache_hit_returns_cached_cards() {
+        let state = crate::state::create_app_state();
+        let now = chrono::Utc::now().timestamp();
+        {
+            let mut s = state.lock().unwrap();
+            s.modpack_browser_cache.insert(1, CachedBrowserPage {
+                fetched_at: now,
+                cards: vec![BrowserCard {
+                    owner: "alice".into(),
+                    code: "AA5A-315D-61AE".into(),
+                    name: "Demo".into(),
+                    mod_count: 3,
+                    created_at: "2026-01-01T00:00:00Z".into(),
+                    updated_at: "2026-01-01T00:00:00Z".into(),
+                }],
+                has_next_page: false,
+            });
+        }
+        let cached = state.lock().unwrap().modpack_browser_cache.get(&1).cloned();
+        assert!(cached.is_some());
+        let cached = cached.unwrap();
+        assert_eq!(cached.cards.len(), 1);
+        assert_eq!(cached.cards[0].name, "Demo");
     }
 }

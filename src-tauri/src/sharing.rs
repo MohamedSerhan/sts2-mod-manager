@@ -196,7 +196,7 @@ fn format_code(raw: &str) -> String {
 
 // ── GitHub API Helpers ─────────────────────────────────────────────────────
 
-fn build_client(token: &str) -> reqwest::Client {
+pub(crate) fn build_client(token: &str) -> reqwest::Client {
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
         reqwest::header::ACCEPT,
@@ -222,7 +222,7 @@ fn build_client(token: &str) -> reqwest::Client {
 }
 
 /// Get the authenticated user's GitHub username.
-async fn get_github_username(token: &str) -> Result<String> {
+pub(crate) async fn get_github_username(token: &str) -> Result<String> {
     let client = build_client(token);
     let resp = client.get("https://api.github.com/user").send().await?;
 

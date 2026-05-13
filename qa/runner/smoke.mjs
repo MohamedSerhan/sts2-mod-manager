@@ -206,6 +206,35 @@ function seedWalkbackMod(dir) {
   writeFileSync(join(dir, 'WalkbackMod.dll'), Buffer.from([0]));
 }
 
+/**
+ * Bug #21 fixture: a mod whose manifest declares a `min_game_version` HIGHER
+ * than the fixture game's `release_info.json` reports (0.105.0). The mod's
+ * files live on disk so `scan_mods` picks them up, but the mod is incompatible
+ * with the running game — `install_is_incompatible` returns true. Seeded inline
+ * by specSkippedModAbsentFromSnapshot (NOT from seedFixtureGameTree) so other
+ * specs' audit counts don't change.
+ */
+function seedSkippedMod(dir) {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, 'SkippedMod.json'),
+    JSON.stringify(
+      {
+        id: 'SkippedMod',
+        name: 'SkippedMod',
+        version: '1.0.0',
+        author: 'QA Bot',
+        description: 'Smoke fixture: declares min_game_version 999.0.0 — incompatible with fixture game v0.105.0.',
+        min_game_version: '999.0.0',
+        dependencies: [],
+      },
+      null,
+      2,
+    ),
+  );
+  writeFileSync(join(dir, 'SkippedMod.dll'), Buffer.from([0]));
+}
+
 /* ── Pre-flight ─────────────────────────────────────────────────── */
 
 function preflight() {
@@ -1337,6 +1366,166 @@ async function specRepairWalkback(driver) {
   assertEqual(parsed.version, '1.0.0', 'WalkbackMod manifest version after repair walk-back');
 }
 
+/**
+ * Regression spec for issue #21: a mod whose `min_game_version` is above the
+ * current game version is "skipped" — when the user creates a snapshot profile
+ * AFTER applying, the skipped mod must NOT appear as an ENABLED entry in the
+ * saved profile JSON. The game's loader silently skips it on launch anyway, so
+ * a profile that records SkippedMod as enabled is lying about what's actually
+ * running — and the diff against future remote updates ("Apply Update" prompt)
+ * would then say "no change" even when the user has finally upgraded STS2 to a
+ * compatible build. (See commit 37df97f for the matching fix on the
+ * subscription apply path.)
+ *
+ * Flow:
+ *   1. Create + activate a fresh profile BEFORE seeding the incompatible mod.
+ *      The initial snapshot then captures only the seeded fixture mods (no
+ *      SkippedMod entry at all).
+ *   2. Seed SkippedMod on disk under mods/ (manifest declares
+ *      min_game_version: '999.0.0', fixture game reports v0.105.0).
+ *   3. Nav to Mods → Refresh → assert the "needs game ≥ v999.0.0" pill renders,
+ *      proving the manager sees this mod as incompatible at the UI layer.
+ *   4. Re-apply the active profile (refresh icon on the active row). The apply
+ *      path sees SkippedMod is NOT in the profile manifest, so it disables it
+ *      — physically moves the folder from mods/ to mods_disabled/. That is the
+ *      manager's "skip" gesture: don't let an incompatible mod load.
+ *   5. Read the profile JSON off disk and assert SkippedMod is NOT listed with
+ *      `enabled: true`. If it appears at all, it must be `enabled: false`
+ *      (matching its disabled-on-disk state). If it's `enabled: true`, that's
+ *      the #21 bug: the snapshot says the mod is active even though the apply
+ *      path skipped it.
+ */
+async function specSkippedModAbsentFromSnapshot(driver) {
+  // Step 1: create + activate a fresh profile BEFORE seeding SkippedMod. The
+  // initial snapshot taken by createProfile captures only QaTestMod +
+  // UpToDateMod — no SkippedMod in the manifest. Unique suffix avoids
+  // sanitized-filename collisions on re-runs against the same config dir.
+  const suffix = Date.now().toString(36);
+  const profileName = `QA Skipped ${suffix}`;
+
+  await waitForToastsToClear(driver);
+  await navToProfiles(driver);
+  await createProfileNamed(driver, profileName);
+  await waitForToastsToClear(driver);
+  await activateProfile(driver, profileName);
+  await waitForToastsToClear(driver);
+
+  // Step 2: seed SkippedMod on disk. Inline (not in seedFixtureGameTree)
+  // so other specs' audit/profile counts don't shift.
+  seedSkippedMod(join(FIXTURE_DIRS.game, 'mods', 'SkippedMod'));
+
+  // Step 3: Mods → Refresh → confirm the incompatibility pill renders.
+  await navToMods(driver);
+  const refreshBtn = await waitForElement(
+    driver,
+    By.xpath("//button[normalize-space(.)='Refresh' or contains(., 'Refresh')]"),
+    'Mods toolbar Refresh button',
+  );
+  await refreshBtn.click();
+  await waitForElement(
+    driver,
+    By.xpath("//*[normalize-space(text())='SkippedMod']"),
+    'SkippedMod row (post-seed re-scan)',
+  );
+  // The compat-warning pill on the SkippedMod row — proves the manager sees
+  // this mod's min_game_version as too high. Mods.tsx renders "⚠ needs game ≥
+  // v<min>" when gameVersionSatisfies is false. React renders the interpolated
+  // version as a separate text node, so we use the whole element's text via
+  // `.` rather than `text()` (which only matches the first node).
+  await waitForElement(
+    driver,
+    By.xpath(
+      "//*[normalize-space(text())='SkippedMod']/ancestor::*[contains(@class,'gf-mod-row') or contains(@class,'gf-card')][1]" +
+        "//*[contains(., 'needs game') and contains(., '999.0.0')]",
+    ),
+    'SkippedMod incompatibility pill ("needs game ≥ v999.0.0")',
+    10_000,
+  );
+
+  // Step 4: re-apply the active profile by clicking its refresh button. That
+  // re-runs `switch_profile` → `apply_profile_with_pins`, which sees SkippedMod
+  // is on disk but NOT in the profile manifest → disables it (moves folder
+  // from mods/ to mods_disabled/). This is the manager's "skip" gesture for
+  // incompatible local mods.
+  await waitForToastsToClear(driver);
+  await navToProfiles(driver);
+  const reapplyBtn = await waitForElement(
+    driver,
+    By.xpath(
+      `//*[contains(@class,'gf-card')][.//h3[contains(normalize-space(.), '${profileName}')]]` +
+        `//button[@title='Re-apply this profile to match the manifest']`,
+    ),
+    `Re-apply button on active profile "${profileName}"`,
+  );
+  await reapplyBtn.click();
+  // Loading overlay shows during the switch_profile call.
+  await driver.wait(
+    async () => (await driver.findElements(By.css('.gf-loading-card'))).length === 0,
+    30_000,
+    `Re-apply of "${profileName}" never settled (loading overlay stuck)`,
+  );
+  // Wait for SkippedMod's folder to physically move to mods_disabled/.
+  const enabledDir = join(FIXTURE_DIRS.game, 'mods', 'SkippedMod');
+  const disabledDir = join(FIXTURE_DIRS.game, 'mods_disabled', 'SkippedMod');
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    if (existsSync(disabledDir) && !existsSync(enabledDir)) break;
+    await delay(150);
+  }
+  if (!existsSync(disabledDir)) {
+    throw new Error(
+      `apply did not move SkippedMod to mods_disabled/ within 10s — apply_profile_with_pins should disable on-disk mods not in the manifest`,
+    );
+  }
+
+  // Step 5: read the profile JSON off disk. save_profile writes to
+  // <profiles_path>/<sanitized_name>.json. sanitize_filename replaces
+  // anything not alphanumeric/dash/underscore/dot with '_', so spaces
+  // become underscores. profiles_path is <config>/profiles.
+  //
+  // The profile file is overwritten by switch_profile's auto-snapshot on the
+  // PREVIOUS profile, but the active profile itself isn't re-snapshotted by
+  // the refresh path — we read what createProfile saved + any mutations the
+  // apply path performed. (No re-snapshot is needed for this assertion: we
+  // care about what the recorded profile manifest says, not what a future
+  // user-triggered snapshot would say.)
+  const sanitized = profileName.replace(/[^A-Za-z0-9._-]/g, '_');
+  const profilePath = join(FIXTURE_DIRS.config, 'profiles', `${sanitized}.json`);
+  let profile;
+  try {
+    const raw = readFileSync(profilePath, 'utf8');
+    profile = JSON.parse(raw.replace(/^﻿/, ''));
+  } catch (e) {
+    throw new Error(
+      `Failed to read/parse profile at ${profilePath}: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+  if (!Array.isArray(profile.mods)) {
+    throw new Error(
+      `Profile ${profilePath} has no \`mods\` array — shape is unexpected. Keys: ${Object.keys(profile).join(', ')}`,
+    );
+  }
+
+  // The load-bearing assertion: SkippedMod must NOT appear as enabled in the
+  // saved profile. The mod is incompatible with the current game version and
+  // was skipped during apply (moved to mods_disabled). A profile that records
+  // it as enabled lies about what's actually running, and breaks future
+  // diff/Repair cycles (commit 37df97f did the matching fix for subscriptions).
+  // Match on `name` OR `folder_name` since either field could carry the label.
+  const enabledEntry = profile.mods.find(
+    (m) => (m.name === 'SkippedMod' || m.folder_name === 'SkippedMod') && m.enabled === true,
+  );
+  if (enabledEntry) {
+    throw new Error(
+      `bug #21 regression: profile at ${profilePath} lists SkippedMod as enabled ` +
+        `(min_game_version 999.0.0, fixture game v0.105.0). Entry: ` +
+        `${JSON.stringify(enabledEntry)}. After apply, SkippedMod should be either ` +
+        `absent from the manifest or recorded with enabled=false (matching its ` +
+        `on-disk mods_disabled/ location).`,
+    );
+  }
+}
+
 const BASE_SPECS = [
   ['main window renders', specMainWindowRenders],
   ['onboarding overlay dismisses cleanly', dismissOnboardingIfPresent],
@@ -1366,6 +1555,7 @@ const STATE_SPECS = [
   ['profile switch preserves pins (v1.3.1 contract)', specProfileSwitchPreservesPins],
   ['#22: toggle state sticky across profile switch', specToggleStickyAcrossProfileSwitch],
   ['#20: profile repair removes orphan mods_disabled folders', specRepairRemovesOrphanDisabled],
+  ['#21: skipped mods not in fresh snapshot', specSkippedModAbsentFromSnapshot],
 ];
 
 const SPECS = CASSETTE_MODE

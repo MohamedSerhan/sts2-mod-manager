@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { ModsView } from './Mods';
@@ -106,8 +106,8 @@ describe('<ModsView>', () => {
     expect(screen.getByRole('button', { name: /Quick add URL/ })).toBeInTheDocument();
   });
 
-  it('Check-for-updates button transitions to "1 update" when audit returns one pending', async () => {
-    seedMods([baseMod({ name: 'BaseLib', folder_name: 'BaseLib' })]);
+  it('Audit mods button transitions to "Update 1 mod" when audit returns one pending GitHub update', async () => {
+    seedMods([baseMod({ name: 'BaseLib', folder_name: 'BaseLib', github_url: 'https://github.com/foo/bar' })]);
     registerInvokeHandler('audit_mod_versions', () => [
       {
         mod_name: 'BaseLib',
@@ -121,6 +121,7 @@ describe('<ModsView>', () => {
         github_auto_detected: false,
         pinned: false,
         nexus_update_available: false,
+        github_repo: 'foo/bar',
       },
     ]);
     const user = userEvent.setup();
@@ -128,13 +129,13 @@ describe('<ModsView>', () => {
     await waitFor(() => {
       expect(screen.getByText('BaseLib')).toBeInTheDocument();
     });
-    await user.click(screen.getByRole('button', { name: 'Check for updates' }));
+    await user.click(screen.getByRole('button', { name: 'Audit mods' }));
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /^1 update$/ })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Update 1 mod$/ })).toBeInTheDocument();
     });
   });
 
-  it('Check-for-updates button reads "Up to date" when audit returns zero pending', async () => {
+  it('Audit mods button shows "Up to date" pill + Re-audit button when audit returns zero GitHub updates', async () => {
     seedMods([baseMod({ name: 'BaseLib', folder_name: 'BaseLib' })]);
     registerInvokeHandler('audit_mod_versions', () => [
       {
@@ -156,13 +157,14 @@ describe('<ModsView>', () => {
     await waitFor(() => {
       expect(screen.getByText('BaseLib')).toBeInTheDocument();
     });
-    await user.click(screen.getByRole('button', { name: 'Check for updates' }));
+    await user.click(screen.getByRole('button', { name: 'Audit mods' }));
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Up to date' })).toBeInTheDocument();
+      expect(screen.getByText('Up to date')).toBeInTheDocument();
     });
+    expect(screen.getByRole('button', { name: 'Re-audit' })).toBeInTheDocument();
   });
 
-  it('pinned mods are excluded from the pending count', async () => {
+  it('pinned mods with needs_update are excluded from the GitHub update count (no github_repo)', async () => {
     seedMods([baseMod({ name: 'BaseLib', folder_name: 'BaseLib', pinned: true })]);
     registerInvokeHandler('audit_mod_versions', () => [
       {
@@ -182,9 +184,9 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Check for updates' }));
+    await user.click(screen.getByRole('button', { name: 'Audit mods' }));
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Up to date' })).toBeInTheDocument();
+      expect(screen.getByText('Up to date')).toBeInTheDocument();
     });
   });
 
@@ -366,7 +368,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Check for updates' }));
+    await user.click(screen.getByRole('button', { name: 'Audit mods' }));
     await waitFor(() => {
       expect(screen.getByText(/Audit failed.*rate-limited/)).toBeInTheDocument();
     });
@@ -413,7 +415,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('AutoPath')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Check for updates' }));
+    await user.click(screen.getByRole('button', { name: 'Audit mods' }));
     await waitFor(() => {
       expect(screen.getByText(/Update available → v3\.2\.0/)).toBeInTheDocument();
     });
@@ -439,7 +441,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('AutoPath')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Check for updates' }));
+    await user.click(screen.getByRole('button', { name: 'Audit mods' }));
     const pill = await screen.findByText(/Update available → v3\.2\.0/);
     await user.click(pill);
     await waitFor(() => {
@@ -469,7 +471,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('BumpyMod')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Check for updates' }));
+    await user.click(screen.getByRole('button', { name: 'Audit mods' }));
     await waitFor(() => {
       expect(screen.getByText(/Update blocked by game version/)).toBeInTheDocument();
     });
@@ -493,7 +495,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('ErrorMod')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Check for updates' }));
+    await user.click(screen.getByRole('button', { name: 'Audit mods' }));
     await waitFor(() => {
       expect(screen.getByText(/Audit error/)).toBeInTheDocument();
     });
@@ -615,7 +617,7 @@ describe('<ModsView>', () => {
     expect(link).toBeTruthy();
   });
 
-  it('Nexus update available pill shows from audit', async () => {
+  it('Nexus update available pill shows from audit (toolbar shows "Up to date" — Nexus not bulk-updatable)', async () => {
     seedMods([baseMod({ name: 'NexMod', folder_name: 'NexMod', nexus_url: 'https://www.nexusmods.com/sts2/mods/103' })]);
     registerInvokeHandler('audit_mod_versions', () => [{
       mod_name: 'NexMod',
@@ -633,10 +635,14 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('NexMod')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Check for updates' }));
+    await user.click(screen.getByRole('button', { name: 'Audit mods' }));
+    // Nexus-only updates are not bulk-updatable via GitHub path, so the
+    // toolbar shows "Up to date" (countGithubUpdates returns 0) while the
+    // per-row pill still surfaces the Nexus update info.
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /^1 update$/ })).toBeInTheDocument();
+      expect(screen.getByText('Up to date')).toBeInTheDocument();
     });
+    expect(screen.queryByRole('button', { name: /Update \d+ mod/ })).toBeNull();
   });
 
   it('Refresh button is rendered', async () => {
@@ -736,6 +742,115 @@ describe('<ModsView>', () => {
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'find_github_from_nexus')).toBe(true);
     });
+  });
+
+  it('clicking "Update N mods" triggers update_all_mods, not a re-audit', async () => {
+    seedMods([baseMod({ name: 'BaseLib', folder_name: 'BaseLib', github_url: 'https://github.com/foo/bar' })]);
+    registerInvokeHandler('audit_mod_versions', () => [
+      {
+        mod_name: 'BaseLib',
+        folder_name: 'BaseLib',
+        installed_version: '3.1.2',
+        latest_release_with_assets_tag: 'v3.2.0',
+        latest_has_assets: true,
+        needs_update: true,
+        asset_names: [],
+        releases_scanned: 1,
+        github_auto_detected: false,
+        github_repo: 'foo/bar',
+        pinned: false,
+        nexus_update_available: false,
+        update_source: 'github',
+      },
+    ]);
+    registerInvokeHandler('update_all_mods', () => [
+      { name: 'BaseLib', version: '3.2.0', enabled: true, files: [] },
+    ]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Audit mods' }));
+    const updateBtn = await screen.findByRole('button', { name: /^Update 1 mod$/ });
+    await user.click(updateBtn);
+    // Confirm dialog appears with the title "Update 1 mod?". Scope the
+    // button query to the modal so we don't race the toolbar button.
+    const modal = (await screen.findByText(/Update 1 mod\?/)).closest('.gf-modal')!;
+    await user.click(within(modal).getByRole('button', { name: /^Update 1 mod$/ }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some(c => c.cmd === 'update_all_mods')).toBe(true);
+    });
+  });
+
+  it('the ↻ re-audit icon button calls audit_mod_versions', async () => {
+    seedMods([baseMod({ name: 'BaseLib', folder_name: 'BaseLib', github_url: 'https://github.com/foo/bar' })]);
+    registerInvokeHandler('audit_mod_versions', () => [
+      {
+        mod_name: 'BaseLib',
+        folder_name: 'BaseLib',
+        installed_version: '3.1.2',
+        latest_release_with_assets_tag: 'v3.1.2',
+        latest_has_assets: true,
+        needs_update: false,
+        asset_names: [],
+        releases_scanned: 1,
+        github_auto_detected: false,
+        github_repo: 'foo/bar',
+        pinned: false,
+        nexus_update_available: false,
+      },
+    ]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Audit mods' }));
+    await screen.findByText('Up to date');
+    const callsBefore = getInvokeCalls().filter(c => c.cmd === 'audit_mod_versions').length;
+    await user.click(screen.getByRole('button', { name: 'Re-audit' }));
+    await waitFor(() => {
+      const after = getInvokeCalls().filter(c => c.cmd === 'audit_mod_versions').length;
+      expect(after).toBeGreaterThan(callsBefore);
+    });
+  });
+
+  it('renders a "Latest" pill next to mods whose audit row is up-to-date', async () => {
+    seedMods([
+      baseMod({ name: 'CurrentMod', folder_name: 'CurrentMod', version: '2.0.0', github_url: 'https://github.com/foo/current' }),
+      baseMod({ name: 'OldMod', folder_name: 'OldMod', version: '1.0.0', github_url: 'https://github.com/foo/old' }),
+    ]);
+    registerInvokeHandler('audit_mod_versions', () => [
+      {
+        mod_name: 'CurrentMod', folder_name: 'CurrentMod',
+        installed_version: '2.0.0',
+        github_repo: 'foo/current',
+        latest_release_with_assets_tag: 'v2.0.0',
+        latest_has_assets: true,
+        needs_update: false,
+        asset_names: [], releases_scanned: 1,
+        github_auto_detected: false, pinned: false,
+        nexus_update_available: false,
+      },
+      {
+        mod_name: 'OldMod', folder_name: 'OldMod',
+        installed_version: '1.0.0',
+        github_repo: 'foo/old',
+        latest_release_with_assets_tag: 'v2.0.0',
+        latest_has_assets: true,
+        needs_update: true,
+        asset_names: [], releases_scanned: 1,
+        github_auto_detected: false, pinned: false,
+        nexus_update_available: false,
+        update_source: 'github',
+      },
+    ]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('CurrentMod')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Audit mods' }));
+    // Wait for audit to land — the per-row Update pill on OldMod is a reliable signal.
+    await screen.findByText(/Update available → v2\.0\.0/);
+    // The Latest pill should appear exactly once — on CurrentMod.
+    const latestPills = screen.getAllByText('Latest');
+    expect(latestPills).toHaveLength(1);
   });
 
   it('Delete-all confirm with typed phrase fires delete_all_mods', async () => {

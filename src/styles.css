@@ -600,6 +600,7 @@ body {
 .gf-pill-update { background: var(--gf-tint); color: var(--gf); border: 1px solid var(--gf-line); }
 .gf-pill-active { background: var(--gf-tint); color: var(--gf); border: 1px solid var(--gf-line); }
 .gf-pill-ok { background: oklch(0.74 0.11 165 / 0.18); color: var(--ok); }
+.gf-pill-toolbar { padding: 6px 10px; font-size: 13px; }
 
 /* ── Browse grid ──────────────────────────────────────────────────── */
 .gf-browse-grid {

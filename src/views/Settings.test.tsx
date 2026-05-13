@@ -709,7 +709,7 @@ describe('<SettingsView>', () => {
     const runBtns = await screen.findAllByRole('button', { name: /Run audit/i });
     await user.click(runBtns[0]);
     await waitFor(() => { expect(screen.getByText('A')).toBeInTheDocument(); });
-    expect(screen.queryByText(/Update all \(2\)/)).toBeInTheDocument();
+    expect(screen.queryByText(/Update 2 mods/)).toBeInTheDocument();
   });
 
   it('Audit empty-state shows when audit returns []', async () => {
@@ -791,5 +791,53 @@ describe('<SettingsView>', () => {
     await waitFor(() => {
       expect(screen.queryByText(/newest compatible/i)).toBeInTheDocument();
     });
+  });
+
+  it('renders a "Latest" pill on rows whose audit row is up-to-date', async () => {
+    registerInvokeHandler('audit_mod_versions', () => [
+      {
+        mod_name: 'A', folder_name: 'A', installed_version: '1.0',
+        needs_update: false, pinned: false, asset_names: [],
+        releases_scanned: 1, latest_has_assets: true,
+        latest_release_with_assets_tag: 'v1.0',
+        github_repo: 'foo/a', github_auto_detected: false,
+        nexus_update_available: false,
+      },
+    ]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: /Audit/ }));
+    const runBtns = await screen.findAllByRole('button', { name: /Run audit/i });
+    await user.click(runBtns[0]);
+    await waitFor(() => { expect(screen.getByText('A')).toBeInTheDocument(); });
+    expect(screen.getByText('Latest')).toBeInTheDocument();
+  });
+
+  it('Re-audit button uses ghost variant when 2+ GitHub updates are pending', async () => {
+    registerInvokeHandler('audit_mod_versions', () => [
+      { mod_name: 'A', folder_name: 'A', installed_version: '1.0',
+        needs_update: true, pinned: false, asset_names: [],
+        releases_scanned: 1, latest_has_assets: true,
+        latest_release_with_assets_tag: 'v2.0',
+        github_repo: 'foo/a', github_auto_detected: false,
+        nexus_update_available: false, update_source: 'github' },
+      { mod_name: 'B', folder_name: 'B', installed_version: '1.0',
+        needs_update: true, pinned: false, asset_names: [],
+        releases_scanned: 1, latest_has_assets: true,
+        latest_release_with_assets_tag: 'v2.0',
+        github_repo: 'foo/b', github_auto_detected: false,
+        nexus_update_available: false, update_source: 'github' },
+    ]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: /Audit/ }));
+    const runBtns = await screen.findAllByRole('button', { name: /Run audit/i });
+    await user.click(runBtns[0]);
+    await waitFor(() => { expect(screen.getByText('A')).toBeInTheDocument(); });
+    const reAuditBtn = await screen.findByRole('button', { name: /^Re-audit$/ });
+    // ghost variant maps to gf-btn-3 in Button.tsx
+    expect(reAuditBtn.className).toMatch(/gf-btn-3/);
   });
 });

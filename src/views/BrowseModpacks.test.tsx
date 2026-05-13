@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { BrowseModpacksView } from './BrowseModpacks';
 import { AllProviders } from '../__test__/providers';
-import { registerInvokeHandler } from '../__test__/setup';
-import type { BrowserPage } from '../types';
+import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
+import type { BrowserPage, Profile } from '../types';
 
 function Wrap() {
   return (
@@ -94,5 +94,71 @@ describe('<BrowseModpacksView>', () => {
     await waitFor(() => {
       expect(screen.getByText(/cached results/i)).toBeInTheDocument();
     });
+  });
+
+  it('opens the detail panel when a card is clicked, fetching the shared profile', async () => {
+    registerInvokeHandler('fetch_modpack_browser_page', () =>
+      makePage({
+        cards: [
+          {
+            owner: 'somebody',
+            code: 'AA5A-315D-61AE',
+            name: 'Click Me Pack',
+            mod_count: 2,
+            created_at: '2026-05-01T00:00:00Z',
+            updated_at: '2026-05-10T00:00:00Z',
+          },
+        ],
+      }),
+    );
+
+    const profile: Profile = {
+      name: 'Click Me Pack',
+      game_version: null,
+      created_by: 'somebody',
+      mods: [
+        {
+          name: 'Mod Alpha',
+          version: '1.0.0',
+          source: null,
+          hash: null,
+          files: [],
+          enabled: true,
+          bundle_url: null,
+          folder_name: null,
+          mod_id: null,
+        },
+        {
+          name: 'Mod Beta',
+          version: '2.3.1',
+          source: null,
+          hash: null,
+          files: [],
+          enabled: true,
+          bundle_url: null,
+          folder_name: null,
+          mod_id: null,
+        },
+      ],
+      created_at: '2026-05-01T00:00:00Z',
+      updated_at: '2026-05-10T00:00:00Z',
+    };
+    registerInvokeHandler('fetch_shared_profile_cmd', () => profile);
+
+    render(<Wrap />);
+
+    // Wait for the card to render — loud lookup, no if-guard.
+    const card = await screen.findByRole('button', { name: /Click Me Pack/ });
+    fireEvent.click(card);
+
+    // The detail panel renders the mod list once fetch resolves.
+    expect(await screen.findByText('Mod Alpha')).toBeInTheDocument();
+    expect(screen.getByText('Mod Beta')).toBeInTheDocument();
+    expect(screen.getByText('1.0.0')).toBeInTheDocument();
+
+    // And we actually called the backend with the owner/code shape.
+    const calls = getInvokeCalls().filter((c) => c.cmd === 'fetch_shared_profile_cmd');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.args).toEqual({ code: 'somebody/AA5A-315D-61AE' });
   });
 });

@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react';
 import { RefreshCw, Search, Plus } from 'lucide-react';
 
 import { fetchModpackBrowserPage } from '../hooks/useTauri';
+import { BrowseModpackDetail } from '../components/BrowseModpackDetail';
 import type { BrowserCard, BrowserPage } from '../types';
 
 interface Props {
-  onSelect?: (card: BrowserCard) => void;
   onGoToProfiles?: () => void;
 }
 
@@ -24,11 +24,12 @@ function isRateLimit(err: unknown): boolean {
   return /\b(403|429)\b/.test(m) || /rate limit/i.test(m);
 }
 
-export function BrowseModpacksView({ onSelect, onGoToProfiles }: Props = {}) {
+export function BrowseModpacksView({ onGoToProfiles }: Props = {}) {
   const [page, setPage] = useState<BrowserPage | null>(null);
   const [loading, setLoading] = useState(true);
   const [rateLimited, setRateLimited] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<BrowserCard | null>(null);
 
   async function load(force = false) {
     setLoading(true);
@@ -54,7 +55,8 @@ export function BrowseModpacksView({ onSelect, onGoToProfiles }: Props = {}) {
   }, []);
 
   return (
-    <div className="gf-view">
+    <>
+      <div className="gf-view">
       <div className="gf-view-head">
         <h2 className="gf-view-title">Browse Modpacks</h2>
         <button
@@ -112,7 +114,7 @@ export function BrowseModpacksView({ onSelect, onGoToProfiles }: Props = {}) {
             <button
               key={`${c.owner}/${c.code}`}
               className="gf-card gf-card-clickable"
-              onClick={() => onSelect?.(c)}
+              onClick={() => setSelected(c)}
             >
               <div className="gf-card-title">{c.name}</div>
               <div className="gf-card-sub">
@@ -123,6 +125,13 @@ export function BrowseModpacksView({ onSelect, onGoToProfiles }: Props = {}) {
           ))}
         </div>
       )}
-    </div>
+      </div>
+      {selected && (
+        <BrowseModpackDetail
+          card={selected}
+          onClose={() => setSelected(null)}
+        />
+      )}
+    </>
   );
 }

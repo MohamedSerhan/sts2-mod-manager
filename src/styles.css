@@ -1276,6 +1276,23 @@ body {
   display: flex; align-items: center; gap: 6px;
 }
 
+/* Mod list rendered inside BrowseModpackDetail — one row per mod with
+ * version aligned to the right. Kept lightweight to match the
+ * read-only "preview before install" framing. */
+.gf-mod-list {
+  display: flex; flex-direction: column;
+  border: 1px solid var(--indigo-line);
+  border-radius: 7px; overflow: hidden;
+  background: oklch(0.20 0.025 270 / 0.5);
+}
+.gf-mod-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 7px 12px; font-size: 12.5px; color: var(--ink);
+  border-bottom: 1px solid var(--indigo-line);
+}
+.gf-mod-row:last-child { border-bottom: 0; }
+.gf-dim { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+
 .gf-field { margin-bottom: 12px; }
 .gf-field-label { display: block; font-size: 11.5px; color: var(--ink-mute); margin-bottom: 5px; font-weight: 500; }
 .gf-includes { background: oklch(0.20 0.025 270 / 0.5); border: 1px solid var(--indigo-line); border-radius: 7px; padding: 9px 12px; }

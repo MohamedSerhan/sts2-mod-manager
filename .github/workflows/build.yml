@@ -300,3 +300,38 @@ jobs:
 
           # Update the release body
           gh release edit "$TAG" --notes "$BODY"
+
+  # Upload the portable Windows zip to Nexus Mods (mod 856).
+  # Runs in parallel with publish-updater + format-release so a Nexus
+  # outage cannot block the GitHub Release or the in-app updater.
+  # Re-run via "Re-run failed jobs" on the workflow run if Nexus is flaky.
+  publish-nexus:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve version + asset name
+        id: meta
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "filename=STS2.Mod.Manager_${VERSION}_x64_portable.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Download portable zip from GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release download "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" -p "${{ steps.meta.outputs.filename }}"
+
+      - name: Upload to Nexus Mods
+        uses: Nexus-Mods/upload-action@v1.0.0-beta.5
+        with:
+          api_key:                      ${{ secrets.NEXUS_API_KEY }}
+          file_group_id:                ${{ secrets.NEXUS_FILE_GROUP_ID }}
+          filename:                     ${{ steps.meta.outputs.filename }}
+          version:                      ${{ steps.meta.outputs.version }}
+          file_category:                main
+          archive_existing_file:        true
+          primary_mod_manager_download: false
+          allow_mod_manager_download:   false
+          display_name:                 STS2 Mod Manager ${{ steps.meta.outputs.version }} (Windows Portable)

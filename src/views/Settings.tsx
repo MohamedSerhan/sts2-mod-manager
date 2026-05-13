@@ -577,29 +577,28 @@ export function SettingsView() {
                     Save
                   </Button>
                 </div>
-                {githubTokenSaved && !githubToken ? (
+                {githubTokenSaved && !githubToken && (
                   <div className="gf-help ok">
                     <span>✓</span><span>Saved · raises API rate limit to 5,000 req/hr.</span>
                   </div>
-                ) : (
-                  <div className="gf-help muted">
-                    <span>
-                      Optional for browsing GitHub mods (raises rate limit to 5,000 req/hr from
-                      60/hr without auth). <b>Required</b> if you want to publish modpacks.
-                      <br />
-                      Scopes for sharing:
-                      <ul style={{ margin: '4px 0 0 14px', padding: 0, listStyle: 'disc' }}>
-                        <li><b>Classic PAT</b> — check the <code>repo</code> scope.</li>
-                        <li>
-                          <b>Fine-grained PAT</b> — repository access scoped to <code>sts2mm-profiles</code>{' '}
-                          (or "All repositories"), with{' '}
-                          <b>Contents: Read and write</b> + <b>Administration: Read and write</b>{' '}
-                          (Administration is only needed for the one-time repo create; you can drop it after).
-                        </li>
-                      </ul>
-                    </span>
-                  </div>
                 )}
+                <div className="gf-help muted">
+                  <span>
+                    Optional for browsing GitHub mods (raises rate limit to 5,000 req/hr from
+                    60/hr without auth). <b>Required</b> if you want to publish modpacks.
+                    <br />
+                    Scopes for sharing:
+                    <ul style={{ margin: '4px 0 0 14px', padding: 0, listStyle: 'disc' }}>
+                      <li><b>Classic PAT</b> — check the <code>repo</code> scope.</li>
+                      <li>
+                        <b>Fine-grained PAT</b> — repository access scoped to <code>sts2mm-profiles</code>{' '}
+                        (or "All repositories"), with{' '}
+                        <b>Contents: Read and write</b> + <b>Administration: Read and write</b>{' '}
+                        (Administration is only needed for the one-time repo create; you can drop it after).
+                      </li>
+                    </ul>
+                  </span>
+                </div>
               </div>
             </Card>
           </>

@@ -688,6 +688,107 @@ async function specProfileSwitchPreservesPins(driver) {
   );
 }
 
+/**
+ * Regression spec for issue #22: toggling a mod off must survive a
+ * profile-switch round trip. The bug had `switch_profile` re-apply the
+ * source list in a way that resurrected toggled-off mods back into
+ * `mods/` because the profile snapshot didn't carry the disabled state.
+ *
+ * Flow:
+ *   1. Mods → toggle QaTestMod off; assert UI (aria-checked=false) and
+ *      disk (folder moved to `mods_disabled/`).
+ *   2. Profiles → create "Other", activate it, then switch back to the
+ *      starting profile via the Default profile card.
+ *   3. Mods → assert QaTestMod toggle still reads aria-checked=false
+ *      AND the folder is still in `mods_disabled/`, not resurrected
+ *      into `mods/`.
+ */
+async function specToggleStickyAcrossProfileSwitch(driver) {
+  // Step 1: toggle QaTestMod off from the Mods view.
+  await navToMods(driver);
+  const toggle = await waitForElement(
+    driver,
+    By.xpath(
+      "//*[normalize-space(text())='QaTestMod']/ancestor::*[.//button[@role='switch']][1]//button[@role='switch']",
+    ),
+    'QaTestMod toggle switch',
+  );
+  const before = await toggle.getAttribute('aria-checked');
+  if (before !== 'true') {
+    throw new Error(`expected QaTestMod toggle to start aria-checked=true, got ${before}`);
+  }
+  await toggle.click();
+
+  // Wait for the disk move + UI state change.
+  const enabledDir = join(FIXTURE_DIRS.game, 'mods', 'QaTestMod');
+  const disabledDir = join(FIXTURE_DIRS.game, 'mods_disabled', 'QaTestMod');
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    if (existsSync(disabledDir) && !existsSync(enabledDir)) break;
+    await delay(150);
+  }
+  if (!existsSync(disabledDir)) {
+    throw new Error(`mods_disabled/QaTestMod did not appear within 10s after toggle-off`);
+  }
+  if (existsSync(enabledDir)) {
+    throw new Error(`mods/QaTestMod still exists after toggle-off — move was a copy?`);
+  }
+  const afterToggle = await toggle.getAttribute('aria-checked');
+  if (afterToggle !== 'false') {
+    throw new Error(`expected QaTestMod toggle aria-checked=false after click, got ${afterToggle}`);
+  }
+
+  // Step 2: round-trip through a second profile. The fixture starts
+  // with a "Default" profile active (Profiles.tsx auto-creates one);
+  // we create "Other", activate it, then activate "Default" again.
+  const suffix = Date.now().toString(36);
+  const otherName = `QA Other ${suffix}`;
+  const origName = `QA Orig ${suffix}`;
+
+  await waitForToastsToClear(driver);
+  await navToProfiles(driver);
+  // Create the starting profile we'll return to. We don't activate it
+  // first because whatever profile is currently active works as the
+  // "origin"; what matters is that we explicitly switch away and back.
+  await createProfileNamed(driver, origName);
+  await waitForToastsToClear(driver);
+  await activateProfile(driver, origName);
+  await waitForToastsToClear(driver);
+  await createProfileNamed(driver, otherName);
+  await waitForToastsToClear(driver);
+  await activateProfile(driver, otherName);
+  await waitForToastsToClear(driver);
+  await activateProfile(driver, origName);
+  await waitForToastsToClear(driver);
+
+  // Step 3: back on Mods, the toggle must still read off AND the
+  // folder must still be in mods_disabled/ (not resurrected into mods/).
+  await navToMods(driver);
+  const toggleAfter = await waitForElement(
+    driver,
+    By.xpath(
+      "//*[normalize-space(text())='QaTestMod']/ancestor::*[.//button[@role='switch']][1]//button[@role='switch']",
+    ),
+    'QaTestMod toggle switch after profile round trip',
+  );
+  const finalChecked = await toggleAfter.getAttribute('aria-checked');
+  if (finalChecked !== 'false') {
+    throw new Error(
+      `bug #22 regression: QaTestMod toggle resurrected to aria-checked=${finalChecked} after profile switch round trip (expected false)`,
+    );
+  }
+  if (!existsSync(disabledDir)) {
+    throw new Error(
+      `bug #22 regression: mods_disabled/QaTestMod vanished after profile switch round trip`,
+    );
+  }
+  if (existsSync(enabledDir)) {
+    throw new Error(
+      `bug #22 regression: mods/QaTestMod reappeared on disk after profile switch round trip`,
+    );
+  }
+}
+
 /* ── Helpers ────────────────────────────────────────────────────── */
 
 async function navToProfiles(driver) {
@@ -965,6 +1066,7 @@ const STATE_SPECS = [
   ['delete UpToDateMod via kebab → Remove mod…', specDeleteUpToDateMod],
   ['create profile via Profiles → New profile', specCreateProfile],
   ['profile switch preserves pins (v1.3.1 contract)', specProfileSwitchPreservesPins],
+  ['#22: toggle state sticky across profile switch', specToggleStickyAcrossProfileSwitch],
 ];
 
 const SPECS = CASSETTE_MODE

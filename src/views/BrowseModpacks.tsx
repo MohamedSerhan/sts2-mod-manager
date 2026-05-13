@@ -109,21 +109,46 @@ export function BrowseModpacksView({ onGoToProfiles }: Props = {}) {
       )}
 
       {page && page.cards.length > 0 && (
-        <div className="gf-card-list">
-          {page.cards.map((c) => (
-            <button
-              key={`${c.owner}/${c.code}`}
-              className="gf-card gf-card-clickable"
-              onClick={() => setSelected(c)}
-            >
-              <div className="gf-card-title">{c.name}</div>
-              <div className="gf-card-sub">
-                @{c.owner} · {c.mod_count} mod{c.mod_count === 1 ? '' : 's'} · Updated{' '}
-                {relativeTime(c.updated_at)}
-              </div>
-            </button>
-          ))}
-        </div>
+        <>
+          <div
+            style={{
+              marginBottom: 12,
+              padding: '10px 14px',
+              fontSize: 12.5,
+              color: 'var(--ink-mute)',
+              lineHeight: 1.55,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              flexWrap: 'wrap',
+            }}
+          >
+            <span>
+              Want yours here too? Publish a new pack — or re-share an existing one — from
+              Profiles and pick <b style={{ color: 'var(--ink)' }}>Public</b> visibility.
+            </span>
+            {onGoToProfiles && (
+              <button className="gf-btn-3" onClick={onGoToProfiles}>
+                <Plus size={12} /> Go to Profiles
+              </button>
+            )}
+          </div>
+          <div className="gf-card-list">
+            {page.cards.map((c) => (
+              <button
+                key={`${c.owner}/${c.code}`}
+                className="gf-card gf-card-clickable"
+                onClick={() => setSelected(c)}
+              >
+                <div className="gf-card-title">{c.name}</div>
+                <div className="gf-card-sub">
+                  @{c.owner} · {c.mod_count} mod{c.mod_count === 1 ? '' : 's'} · Updated{' '}
+                  {relativeTime(c.updated_at)}
+                </div>
+              </button>
+            ))}
+          </div>
+        </>
       )}
       </div>
       {selected && (

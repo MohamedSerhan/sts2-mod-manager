@@ -13,7 +13,9 @@ import {
   RotateCcw,
   Trash2,
   Play,
+  Check,
 } from 'lucide-react';
+import { isUpToDate } from '../lib/auditState';
 import { open } from '@tauri-apps/plugin-dialog';
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
@@ -36,7 +38,6 @@ import {
   pinMod,
   unpinMod,
   updateMod,
-  updateAllMods,
   createBackup,
   listBackups,
   restoreBackup,
@@ -52,7 +53,7 @@ type Tab = 'general' | 'accounts' | 'backups' | 'audit' | 'advanced';
 // v5 — tabbed Settings shell. Tabs are stateful; tab content is rendered
 // inline beneath the tab strip. All existing handlers preserved.
 export function SettingsView() {
-  const { gameInfo, refreshAll, auditResults, auditing, runAudit, refreshAuditEntries } = useApp();
+  const { gameInfo, refreshAll, auditResults, auditing, runAudit, refreshAuditEntries, updatingAll, updateAllGithub } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
   const [tab, setTab] = useState<Tab>('general');
@@ -73,7 +74,6 @@ export function SettingsView() {
   // AppContext so the Mods view can share it. Keep updatingMod local —
   // it's a Settings-only UI spinner.
   const [updatingMod, setUpdatingMod] = useState<string | null>(null);
-  const [updatingAll, setUpdatingAll] = useState(false);
 
   // ── Backups ─────────────────────────────────────────
   const [backups, setBackups] = useState<BackupInfo[]>([]);
@@ -291,43 +291,6 @@ export function SettingsView() {
 
   // runAudit + refreshAuditEntries now live in AppContext as runAudit
   // and refreshAuditEntries. Settings consumes them directly via useApp().
-
-  // Update every GitHub-sourced mod with a pending update in one shot.
-  // Pinned mods are skipped on the backend, so this only touches things
-  // the audit was already flagging. We confirm first because it kicks off
-  // multiple downloads and modifies the install on disk.
-  async function handleUpdateAll(githubUpdateNames: string[]) {
-    if (updatingAll || githubUpdateNames.length === 0) return;
-    const ok = await confirm({
-      title: `Update ${githubUpdateNames.length} mod${githubUpdateNames.length === 1 ? '' : 's'}?`,
-      body:
-        `This will download and re-install the latest GitHub release for each. ` +
-        `Pinned mods are skipped. Make sure STS2 is closed first.`,
-      confirmLabel: 'Update all',
-    });
-    if (!ok) return;
-    setUpdatingAll(true);
-    try {
-      const updated = await updateAllMods();
-      toast.success(
-        updated.length === 0
-          ? 'Nothing to update.'
-          : `Updated ${updated.length} mod${updated.length === 1 ? '' : 's'}.`,
-      );
-      await refreshAll();
-      // Targeted re-audit of just the rows we touched. Mod names can shift
-      // after install (manifest renames), so audit by both the requested
-      // set and what came back — the union covers both pre- and post-rename.
-      const names = Array.from(
-        new Set([...githubUpdateNames, ...updated.map((m) => m.name)]),
-      );
-      await refreshAuditEntries(names);
-    } catch (e) {
-      toast.error(`Update all failed: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setUpdatingAll(false);
-    }
-  }
 
   // Update a single mod inline from the audit row. Only available for mods
   // whose source is GitHub — Nexus mods still require the user to download
@@ -742,7 +705,7 @@ export function SettingsView() {
                       <Button
                         variant="primary"
                         size="sm"
-                        onClick={() => handleUpdateAll(ghUpdates)}
+                        onClick={() => updateAllGithub(ghUpdates)}
                         disabled={updatingAll || updatingMod !== null}
                         title={`Update ${ghUpdates.length} GitHub-sourced mods (skips pinned)`}
                       >
@@ -751,13 +714,20 @@ export function SettingsView() {
                         ) : (
                           <Download size={14} />
                         )}
-                        {updatingAll ? 'Updating…' : `Update all (${ghUpdates.length})`}
+                        {updatingAll
+                          ? `Updating ${ghUpdates.length}…`
+                          : `Update ${ghUpdates.length} mod${ghUpdates.length === 1 ? '' : 's'}`}
                       </Button>
                     )}
                     <Button variant="ghost" size="sm" onClick={() => setShowAutoDetect(true)} disabled={updatingAll}>
                       Auto-detect sources
                     </Button>
-                    <Button variant="secondary" size="sm" onClick={runAudit} disabled={auditing || updatingAll}>
+                    <Button
+                      variant={ghUpdates.length >= 2 ? 'ghost' : 'secondary'}
+                      size="sm"
+                      onClick={runAudit}
+                      disabled={auditing || updatingAll}
+                    >
                       <ClipboardCheck size={14} className={auditing ? 'animate-pulse' : ''} />
                       {auditing ? 'Auditing...' : auditResults ? 'Re-audit' : 'Run audit'}
                     </Button>
@@ -829,6 +799,11 @@ export function SettingsView() {
                           <span className="font-medium flex items-center gap-2" style={{ color: 'var(--ink)' }}>
                             <span className={`gf-audit-led ${ledClass}`} />
                             {entry.mod_name}
+                            {isUpToDate(entry) && (
+                              <span className="gf-pill gf-pill-ok" title="On the source's latest installable release.">
+                                <Check size={9} /> Latest
+                              </span>
+                            )}
                             {entry.pinned && (
                               <span className="gf-pill" style={{ background: 'var(--indigo-elev)', color: 'var(--ink-mute)' }}>
                                 <Pin size={9} /> PINNED
@@ -1042,13 +1017,7 @@ export function SettingsView() {
                 </div>
                 {(() => {
                   const incompatibleCount = auditResults.filter(r => r.game_version_too_old).length;
-                  const okCount = auditResults.filter(r =>
-                    (r.github_repo || r.nexus_url) &&
-                    !r.needs_update &&
-                    !(r.error && !r.github_auto_detected) &&
-                    !(r.latest_release_tag && !r.latest_release_with_assets_tag) &&
-                    !r.game_version_too_old
-                  ).length;
+                  const okCount = auditResults.filter(isUpToDate).length;
                   const updateCount = auditResults.filter(r => r.needs_update).length;
                   const goneCount = auditResults.filter(r =>
                     !(r.error && !r.github_auto_detected) &&

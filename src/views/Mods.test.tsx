@@ -774,7 +774,7 @@ describe('<ModsView>', () => {
     await user.click(updateBtn);
     // Confirm dialog appears with the title "Update 1 mod?". Scope the
     // button query to the modal so we don't race the toolbar button.
-    const modal = (await screen.findByText(/Update 1 mod\?/)).closest('.gf-modal')!;
+    const modal = (await screen.findByText(/Update 1 mod\?/)).closest('.gf-modal') as HTMLElement;
     await user.click(within(modal).getByRole('button', { name: /^Update 1 mod$/ }));
     await waitFor(() => {
       expect(getInvokeCalls().some(c => c.cmd === 'update_all_mods')).toBe(true);

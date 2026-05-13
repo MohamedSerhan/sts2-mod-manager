@@ -403,7 +403,10 @@ function AppInner() {
       if (!files || files.length === 0) return;
 
       for (const file of Array.from(files)) {
-        if (file.name.endsWith('.zip')) {
+        const lower = file.name.toLowerCase();
+        const isSupportedArchive =
+          lower.endsWith('.zip') || lower.endsWith('.7z') || lower.endsWith('.rar');
+        if (isSupportedArchive) {
           try {
             // @ts-expect-error -- Tauri exposes file.path on dropped files
             const filePath = file.path as string;
@@ -416,7 +419,7 @@ function AppInner() {
             toast.error(`Failed to install ${file.name}: ${err instanceof Error ? err.message : String(err)}`);
           }
         } else {
-          toast.error(`Unsupported file: ${file.name}. Only .zip files are supported.`);
+          toast.error(`Unsupported file: ${file.name}. Use .zip, .7z, or .rar.`);
         }
       }
     }

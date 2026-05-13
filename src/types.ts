@@ -20,6 +20,13 @@ export interface ModInfo {
    *  two installed mods share a display name. null when the manifest
    *  didn't declare one. */
   author?: string | null;
+  /** Free-form user note saved to mod_sources.json. Shown on the mod row
+   *  so the user can remember where the mod came from (e.g. "downloaded
+   *  from Patreon") or other context. */
+  note?: string | null;
+  /** User-saved non-GitHub/non-Nexus URL (Patreon, X, Discord, etc).
+   *  Shown as an external-link chip alongside GitHub/Nexus on the row. */
+  custom_url?: string | null;
 }
 
 export interface Profile {
@@ -137,6 +144,9 @@ export interface ModSourceEntry {
   nexus_url: string | null;
   nexus_game_domain: string | null;
   nexus_mod_id: number | null;
+  note?: string | null;
+  custom_url?: string | null;
+  snoozed_until_tag?: string | null;
 }
 
 export interface AutoDetectResult {
@@ -226,5 +236,10 @@ export interface ModAuditEntry {
    *  game). When `latest_release_blocked_by_game_version` is true,
    *  this names the older fallback so the UI can preview it. */
   latest_compatible_tag?: string | null;
+  /** True when the user snoozed update suggestions for this mod at its
+   *  current `latest_release_with_assets_tag`. Auto-expires when the
+   *  upstream tag advances. Distinct from `pinned`: snooze suppresses
+   *  the "update available" badge but doesn't block manual updates. */
+  snoozed?: boolean;
 }
 

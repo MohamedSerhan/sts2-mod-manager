@@ -1,5 +1,6 @@
 use std::fs;
 use std::io;
+use std::io::Write as IoWrite;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -51,6 +52,14 @@ pub struct ModInfo {
     /// mods share a display name. None when the manifest didn't declare one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub author: Option<String>,
+    /// Free-form user note from the source DB. Populated by
+    /// `mod_sources::enrich_mods_with_sources`. Surfaces in the mod row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// User-saved non-GitHub/non-Nexus URL (Patreon, X, Discord, etc).
+    /// Populated by `mod_sources::enrich_mods_with_sources`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_url: Option<String>,
 }
 
 /// One dependency entry in a mod manifest.
@@ -441,6 +450,8 @@ fn parse_manifest(manifest_path: &Path, base_dir: &Path, enabled: bool) -> Optio
         pinned: false,
         min_game_version: raw.min_game_version,
         author: raw.author,
+        note: None,
+        custom_url: None,
     })
 }
 
@@ -494,6 +505,8 @@ fn dll_only_mod(dll_path: &Path, base_dir: &Path, enabled: bool) -> ModInfo {
         pinned: false,
         min_game_version: None,
         author: None,
+        note: None,
+        custom_url: None,
     }
 }
 
@@ -1218,6 +1231,138 @@ fn peek_manifest_name(archive: &mut zip::ZipArchive<fs::File>) -> Option<String>
     None
 }
 
+/// Install a mod from any supported archive format into the mods directory.
+///
+/// Dispatches by file extension:
+/// - `.zip` → existing zip pipeline (no behavior change for the legacy path)
+/// - `.7z` → decompress via `sevenz-rust2`, repackage as zip, run zip pipeline
+/// - `.rar` → decompress via `unrar`, repackage as zip, run zip pipeline
+///
+/// Repackaging through zip is intentional: it keeps the wrap-folder logic,
+/// zip-slip safety checks, manifest discovery, and rename-aware install
+/// behavior in one place (`install_mod_from_zip`). The cost is a single
+/// temp file write/read pass per non-zip install, which is invisible at
+/// mod sizes (<= 50 MB typical).
+///
+/// User-feedback batch (May 2026): users were hitting the manager with
+/// `.rar.rar` (Nexus double-wrap) and `.7z` downloads and having to extract
+/// + rezip manually before the manager would touch them. This routes both
+/// through the existing install pipeline.
+pub fn install_mod_from_archive(archive_path: &Path, mods_path: &Path) -> Result<ModInfo> {
+    let ext = archive_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    match ext.as_str() {
+        "zip" => install_mod_from_zip(archive_path, mods_path),
+        "7z" => {
+            let staging = tempfile::tempdir().map_err(|e| {
+                AppError::Other(format!("Could not create temp staging dir for 7z extract: {}", e))
+            })?;
+            extract_7z_to_dir(archive_path, staging.path())?;
+            let repack_zip = staging.path().join("__sts2mm_repack.zip");
+            repack_dir_as_zip(staging.path(), &repack_zip)?;
+            install_mod_from_zip(&repack_zip, mods_path)
+        }
+        "rar" => {
+            let staging = tempfile::tempdir().map_err(|e| {
+                AppError::Other(format!("Could not create temp staging dir for rar extract: {}", e))
+            })?;
+            extract_rar_to_dir(archive_path, staging.path())?;
+            let repack_zip = staging.path().join("__sts2mm_repack.zip");
+            repack_dir_as_zip(staging.path(), &repack_zip)?;
+            install_mod_from_zip(&repack_zip, mods_path)
+        }
+        other => Err(AppError::Other(format!(
+            "Unsupported archive format: '.{}'. Supported: .zip, .7z, .rar",
+            other
+        ))),
+    }
+}
+
+/// Decompress a `.7z` file into `dest_dir`. Preserves the archive's
+/// internal relative paths verbatim — the wrap-folder logic downstream
+/// expects to see whatever structure the author shipped.
+fn extract_7z_to_dir(seven_z_path: &Path, dest_dir: &Path) -> Result<()> {
+    sevenz_rust2::decompress_file(seven_z_path, dest_dir)
+        .map_err(|e| AppError::Other(format!("Failed to extract 7z archive: {}", e)))
+}
+
+/// Decompress a `.rar` file into `dest_dir`. Skips macOS junk
+/// (`__MACOSX/`, `._*`) the same way the zip path does — both formats
+/// pick up these turds when archives get repackaged on macOS.
+fn extract_rar_to_dir(rar_path: &Path, dest_dir: &Path) -> Result<()> {
+    let mut archive = unrar::Archive::new(rar_path).open_for_processing()
+        .map_err(|e| AppError::Other(format!("Failed to open rar archive: {}", e)))?;
+    while let Some(header) = archive.read_header()
+        .map_err(|e| AppError::Other(format!("Failed to read rar header: {}", e)))?
+    {
+        let entry_name = header.entry().filename.to_string_lossy().to_string();
+        if entry_name.starts_with("__MACOSX") || entry_name.contains("/._") || entry_name.starts_with("._") {
+            archive = header.skip()
+                .map_err(|e| AppError::Other(format!("Failed to skip rar entry '{}': {}", entry_name, e)))?;
+            continue;
+        }
+        if header.entry().is_directory() {
+            archive = header.skip()
+                .map_err(|e| AppError::Other(format!("Failed to skip rar directory '{}': {}", entry_name, e)))?;
+            continue;
+        }
+        // Use unrar's destination-aware extract so the C library handles
+        // path traversal sanitization. install_mod_from_zip's enclosed_name
+        // gate then re-checks at the final destination boundary.
+        archive = header.extract_with_base(dest_dir)
+            .map_err(|e| AppError::Other(format!("Failed to extract rar entry '{}': {}", entry_name, e)))?;
+    }
+    Ok(())
+}
+
+/// Walk a directory and produce a stored-compression zip of its contents,
+/// rooted at `src_dir`. Used by the non-zip install path to funnel 7z and
+/// rar extractions back into install_mod_from_zip so the wrap-folder /
+/// zip-slip / manifest-discovery code only lives in one place.
+///
+/// Note: skips its own output file (`__sts2mm_repack.zip`) so an in-place
+/// repack doesn't try to include the partially-written zip in itself —
+/// would otherwise truncate to zero on the first read pass.
+fn repack_dir_as_zip(src_dir: &Path, dest_zip: &Path) -> Result<()> {
+    let dest_file = fs::File::create(dest_zip)
+        .map_err(|e| AppError::Other(format!("Could not create repack zip at {:?}: {}", dest_zip, e)))?;
+    let mut writer = zip::ZipWriter::new(dest_file);
+    let opts: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Stored);
+    let dest_name = dest_zip.file_name().unwrap_or_default().to_os_string();
+
+    for entry in WalkDir::new(src_dir).into_iter().flatten() {
+        let path = entry.path();
+        if path == dest_zip || path.file_name() == Some(&dest_name) {
+            continue;
+        }
+        if entry.file_type().is_dir() {
+            continue;
+        }
+        let rel = match path.strip_prefix(src_dir) {
+            Ok(r) => r.to_string_lossy().replace('\\', "/"),
+            Err(_) => continue,
+        };
+        if rel.is_empty() {
+            continue;
+        }
+        writer
+            .start_file(&rel, opts)
+            .map_err(|e| AppError::Other(format!("Repack: start_file failed for {}: {}", rel, e)))?;
+        let bytes = fs::read(path)
+            .map_err(|e| AppError::Other(format!("Repack: read failed for {:?}: {}", path, e)))?;
+        IoWrite::write_all(&mut writer, &bytes)
+            .map_err(|e| AppError::Other(format!("Repack: write failed for {}: {}", rel, e)))?;
+    }
+    writer
+        .finish()
+        .map_err(|e| AppError::Other(format!("Repack: finalize failed: {}", e)))?;
+    Ok(())
+}
+
 /// Install a mod from a zip archive into the mods directory.
 pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo> {
     let file = fs::File::open(zip_path)?;
@@ -1449,6 +1594,8 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
                 pinned: false,
                 min_game_version: None,
                 author: None,
+                note: None,
+                custom_url: None,
             })
         }
     }
@@ -1853,7 +2000,7 @@ pub fn delete_all_mods(state: tauri::State<'_, AppState>) -> std::result::Result
     Ok(count)
 }
 
-/// Install a mod from a local file (zip archive).
+/// Install a mod from a local file (zip / 7z / rar archive).
 #[tauri::command]
 pub fn install_mod_from_file(path: String, state: tauri::State<'_, AppState>) -> std::result::Result<ModInfo, String> {
     crate::game::ensure_game_not_running()?;
@@ -1861,8 +2008,8 @@ pub fn install_mod_from_file(path: String, state: tauri::State<'_, AppState>) ->
         let s = state.lock().map_err(|e| e.to_string())?;
         s.mods_path.as_ref().ok_or("Game path not set")?.clone()
     };
-    let zip_path = PathBuf::from(&path);
-    let result = install_mod_from_zip(&zip_path, &mods_path).map_err(|e| e.to_string())?;
+    let archive_path = PathBuf::from(&path);
+    let result = install_mod_from_archive(&archive_path, &mods_path).map_err(|e| e.to_string())?;
     refresh_active_profile_manifest(&state);
     Ok(result)
 }
@@ -2410,6 +2557,8 @@ mod dedup_identity_tests {
             pinned: false,
             min_game_version: None,
             author: None,
+            note: None,
+            custom_url: None,
         }
     }
 
@@ -2465,6 +2614,113 @@ mod dedup_identity_tests {
         upsert_mod_dedup(&mut mods, mod_with("My Mod", None, "1.0.0"), "test");
         upsert_mod_dedup(&mut mods, mod_with("my-mod", None, "1.0.0"), "test");
         assert_eq!(mods.len(), 1, "Normalized-name dedup must still apply when folder is missing");
+    }
+}
+
+#[cfg(test)]
+mod archive_dispatch_tests {
+    //! Coverage for the user-feedback batch (May 2026) that taught the
+    //! install pipeline to read .7z and .rar in addition to .zip. The
+    //! integration path is `install_mod_from_archive` → format-specific
+    //! extractor → repack to a stored-compression zip → `install_mod_from_zip`.
+    //!
+    //! .7z is exercised end-to-end because sevenz-rust2 provides
+    //! both compression and decompression, so the fixture is built in the
+    //! test itself.
+    //!
+    //! .rar is exercised at the dispatch boundary only: the `unrar` crate
+    //! is decompress-only (it wraps RARLab's freeware unrar source), so
+    //! the test confirms the right extractor is selected without trying
+    //! to fabricate a RAR file at runtime. A full RAR round-trip would
+    //! require an external `rar.exe`, which isn't part of CI.
+
+    use super::*;
+
+    #[test]
+    fn install_mod_from_archive_dispatch_rejects_unsupported_extension() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bogus = tmp.path().join("mod.tar.gz");
+        fs::write(&bogus, b"not a real archive").unwrap();
+        let mods_tmp = tempfile::tempdir().unwrap();
+        let err = install_mod_from_archive(&bogus, mods_tmp.path()).unwrap_err();
+        let msg = format!("{}", err);
+        assert!(
+            msg.contains("Unsupported archive format") && msg.contains(".zip") && msg.contains(".7z") && msg.contains(".rar"),
+            "rejection error should list the three supported formats, got: {}",
+            msg,
+        );
+    }
+
+    #[test]
+    fn install_mod_from_archive_extracts_a_7z_through_the_zip_pipeline() {
+        // Build a real .7z fixture in a tempdir using sevenz-rust2's
+        // compression. The layout matches the canonical "one wrap folder"
+        // STS2 mod shape: ModName/ModName.json + ModName/ModName.dll.
+        let src_tmp = tempfile::tempdir().unwrap();
+        let manifest_dir = src_tmp.path().join("Stagger");
+        fs::create_dir_all(&manifest_dir).unwrap();
+        fs::write(
+            manifest_dir.join("Stagger.json"),
+            br#"{
+  "id": "Stagger",
+  "name": "Stagger",
+  "version": "0.4.1",
+  "author": "Tester",
+  "dependencies": [],
+  "has_pck": false,
+  "has_dll": true,
+  "affects_gameplay": false
+}"#,
+        )
+        .unwrap();
+        fs::write(manifest_dir.join("Stagger.dll"), b"fake-dll").unwrap();
+
+        let seven_z_path = src_tmp.path().join("Stagger.7z");
+        sevenz_rust2::compress_to_path(&manifest_dir, &seven_z_path)
+            .expect("compress test fixture to .7z");
+
+        // sevenz-rust2's compress_to_path strips the wrapping folder when
+        // given a directory, so re-create it manually if needed.
+        // (Some versions preserve it. We don't assert layout here — the
+        // install pipeline handles both cases via its wrap-folder logic.)
+
+        let mods_tmp = tempfile::tempdir().unwrap();
+        let info = install_mod_from_archive(&seven_z_path, mods_tmp.path())
+            .expect(".7z install must succeed for a well-formed fixture");
+
+        // Either name (manifest's "Stagger") or the wrap-folder name —
+        // both are valid post-install identities. The strong assertion is
+        // that we got a real ModInfo, not the "unknown" stub install_mod_from_zip
+        // falls through to when manifest parsing fails.
+        assert_eq!(
+            info.version, "0.4.1",
+            ".7z extract→repack→install must surface the manifest version, not 'unknown'"
+        );
+        assert_eq!(info.name, "Stagger");
+        assert!(
+            info.files.iter().any(|f| f.ends_with(".dll")),
+            "the .dll from the .7z must end up on the file list, got files: {:?}",
+            info.files,
+        );
+    }
+
+    #[test]
+    fn install_mod_from_archive_propagates_a_useful_error_for_a_corrupt_rar() {
+        // Confirms .rar dispatch routes through the rar extractor and
+        // surfaces a real failure (vs panicking) when the file isn't a
+        // valid RAR archive. A clean round-trip test isn't possible
+        // without external tooling — see module docstring.
+        let tmp = tempfile::tempdir().unwrap();
+        let fake_rar = tmp.path().join("mod.rar");
+        fs::write(&fake_rar, b"this is not a rar file").unwrap();
+        let mods_tmp = tempfile::tempdir().unwrap();
+        let err = install_mod_from_archive(&fake_rar, mods_tmp.path()).unwrap_err();
+        let msg = format!("{}", err);
+        assert!(
+            msg.to_lowercase().contains("rar"),
+            "error should make clear the rar extractor rejected the file, got: {}",
+            msg,
+        );
     }
 }
 

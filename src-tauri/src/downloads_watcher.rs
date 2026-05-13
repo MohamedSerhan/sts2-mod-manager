@@ -5,8 +5,8 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
-use crate::mod_sources::{load_sources, save_sources};
-use crate::mods::{install_mod_from_zip, scan_mods, scan_disabled_mods, ModInfo};
+use crate::mod_sources::load_sources;
+use crate::mods::{install_mod_from_archive, scan_mods, scan_disabled_mods, ModInfo};
 use crate::state::AppState;
 
 /// Payload emitted to the frontend when a mod is auto-installed from Downloads.
@@ -76,7 +76,10 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                             .and_then(|e| e.to_str())
                             .unwrap_or("")
                             .to_lowercase();
-                        if ext != "zip" {
+                        // Accept the three archive formats the install
+                        // pipeline knows how to read. .7z and .rar route
+                        // through extract → repack → zip pipeline.
+                        if !matches!(ext.as_str(), "zip" | "7z" | "rar") {
                             continue;
                         }
 
@@ -184,20 +187,26 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                             }
                         }
 
-                        // If we found an existing mod, remove old files first
-                        let replaced_name = if let Some(ref existing) = existing_mod {
+                        // If we found an existing mod, remove old files first.
+                        //
+                        // Capture BOTH the old display name and the old folder
+                        // name. The folder is the canonical source-entry key
+                        // post-1.3.0; without it we can't carry the source
+                        // entry across an update where the folder happens to
+                        // rename (user-reported "Nexus link reset" bug).
+                        let replaced_identity = if let Some(ref existing) = existing_mod {
                             log::info!(
                                 "Downloads watcher: updating existing mod '{}' (folder: {:?})",
                                 existing.name,
                                 existing.folder_name
                             );
                             remove_existing_mod_files(existing, &mods_path, disabled_path.as_deref());
-                            Some(existing.name.clone())
+                            Some((existing.name.clone(), existing.folder_name.clone()))
                         } else {
                             None
                         };
 
-                        match install_mod_from_zip(path, &mods_path) {
+                        match install_mod_from_archive(path, &mods_path) {
                             Ok(mod_info) => {
                                 let file_name = path
                                     .file_name()
@@ -205,17 +214,27 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                     .to_string_lossy()
                                     .to_string();
 
-                                // Transfer mod_sources entry from old name to new name
-                                if let Some(ref old_name) = replaced_name {
-                                    if old_name != &mod_info.name {
-                                        transfer_mod_sources(old_name, &mod_info.name, &config_path);
-                                    }
+                                // Carry the source entry forward across the
+                                // install. Folder-first lookup + folder-first
+                                // write means the new entry sits at the same
+                                // key the rest of the codebase reads from —
+                                // fixes the "Nexus link reset after update"
+                                // bug.
+                                if let Some((ref old_name, ref old_folder)) = replaced_identity {
+                                    crate::mod_sources::carry_source_entry(
+                                        old_folder.as_deref(),
+                                        old_name,
+                                        mod_info.folder_name.as_deref(),
+                                        &mod_info.name,
+                                        &config_path,
+                                    );
                                 }
 
                                 // If the user just queued this mod via Quick Add (Nexus),
                                 // attach the Nexus URL to the mod's source entry now.
                                 attach_pending_nexus_source(
                                     &mod_info.name,
+                                    mod_info.folder_name.as_deref(),
                                     &file_name,
                                     &config_path,
                                     &state,
@@ -250,6 +269,7 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                     }
                                 }
 
+                                let replaced_name = replaced_identity.map(|(name, _)| name);
                                 log::info!(
                                     "Auto-installed mod '{}' from {} (replaced: {:?})",
                                     mod_info.name,
@@ -577,20 +597,11 @@ fn remove_existing_mod_files(
 }
 
 /// Transfer mod_sources entry from old mod name to new mod name.
-fn transfer_mod_sources(old_name: &str, new_name: &str, config_path: &Path) {
-    let mut db = load_sources(config_path);
-    if let Some(entry) = db.mods.remove(old_name) {
-        log::info!(
-            "Transferring mod sources from '{}' to '{}'",
-            old_name,
-            new_name
-        );
-        db.mods.insert(new_name.to_string(), entry);
-        if let Err(e) = save_sources(&db, config_path) {
-            log::error!("Failed to save mod sources after transfer: {}", e);
-        }
-    }
-}
+// The previous `transfer_mod_sources(old_name, new_name, …)` was removed in
+// favor of `mod_sources::carry_source_entry`, which is folder-first on both
+// read and write. The display-name-only variant left folder-keyed entries
+// stranded after a Nexus update — that was the user-reported "link reset"
+// bug.
 
 /// Query the Nexus API (blocking) for the current version of a mod.
 /// Returns None if the mod has no Nexus source or if the API call fails.
@@ -663,6 +674,7 @@ fn fetch_nexus_version_blocking(
 /// Nexus URL to the mod's source entry and consume the pending hint.
 fn attach_pending_nexus_source(
     installed_name: &str,
+    installed_folder: Option<&str>,
     file_name: &str,
     config_path: &Path,
     state: &AppState,
@@ -696,52 +708,69 @@ fn attach_pending_nexus_source(
 
     let Some(pending) = consumed else { return };
 
-    let mut db = crate::mod_sources::load_sources(config_path);
-    let entry = db.mods.entry(installed_name.to_string()).or_default();
-    entry.nexus_url = Some(pending.nexus_url);
-    entry.nexus_game_domain = Some(pending.game_domain);
-    entry.nexus_mod_id = Some(pending.mod_id);
-    match crate::mod_sources::save_sources(&db, config_path) {
-        Ok(_) => log::info!(
-            "Auto-attached Nexus source to '{}' (mod_id {})",
-            installed_name,
-            pending.mod_id
-        ),
-        Err(e) => log::warn!(
-            "Failed to persist auto-attached Nexus source for '{}': {}",
-            installed_name,
-            e
-        ),
-    }
+    let mod_id = pending.mod_id;
+    crate::mod_sources::attach_nexus_source(
+        installed_name,
+        installed_folder,
+        pending.nexus_url,
+        pending.game_domain,
+        pending.mod_id,
+        config_path,
+    );
+    log::info!(
+        "Auto-attached Nexus source to '{}' (folder {:?}, mod_id {})",
+        installed_name,
+        installed_folder,
+        mod_id
+    );
 }
 
-/// Quick check: does the zip contain at least one .dll, .pck, or mod .json file?
+/// Quick check: does the archive contain at least one .dll, .pck, or mod .json file?
+///
+/// For .zip we walk the central directory in-place (cheap).
+/// For .7z and .rar we accept-all and let the install pipeline make the
+/// real decision after extracting — a "peek" pass would require fully
+/// decompressing the archive, defeating the point. False positives just
+/// produce a friendly install-failed toast; safe enough.
 fn looks_like_mod_zip(path: &Path) -> bool {
-    let file = match std::fs::File::open(path) {
-        Ok(f) => f,
-        Err(_) => return false,
-    };
-    let mut archive = match zip::ZipArchive::new(file) {
-        Ok(a) => a,
-        Err(_) => return false,
-    };
-    for i in 0..archive.len() {
-        if let Ok(entry) = archive.by_index(i) {
-            let name = entry.name().to_lowercase();
-            if name.ends_with(".dll") || name.ends_with(".pck") {
-                return true;
-            }
-            // A .json at root or one level deep that isn't package.json etc.
-            if name.ends_with(".json")
-                && !name.contains("package.json")
-                && !name.contains("tsconfig")
-            {
-                // Check if it looks like a mod manifest
-                if name.split('/').count() <= 2 {
-                    return true;
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    match ext.as_str() {
+        "zip" => {
+            let file = match std::fs::File::open(path) {
+                Ok(f) => f,
+                Err(_) => return false,
+            };
+            let mut archive = match zip::ZipArchive::new(file) {
+                Ok(a) => a,
+                Err(_) => return false,
+            };
+            for i in 0..archive.len() {
+                if let Ok(entry) = archive.by_index(i) {
+                    let name = entry.name().to_lowercase();
+                    if name.ends_with(".dll") || name.ends_with(".pck") {
+                        return true;
+                    }
+                    if name.ends_with(".json")
+                        && !name.contains("package.json")
+                        && !name.contains("tsconfig")
+                        && name.split('/').count() <= 2
+                    {
+                        return true;
+                    }
                 }
             }
+            false
         }
+        // Optimistic for non-zip formats — the install pipeline either
+        // succeeds (good) or emits a `mod-auto-install-failed` event the
+        // user sees as a toast (no harm). The auto-install ext gate at
+        // the top of the watcher already filters out everything that
+        // isn't a known archive extension.
+        "7z" | "rar" => true,
+        _ => false,
     }
-    false
 }

@@ -629,6 +629,8 @@ pub async fn download_and_install_github_mod(
             pinned: false,
             min_game_version: None,
             author: None,
+            note: None,
+            custom_url: None,
         })
     } else {
         Err(AppError::Other(format!(
@@ -770,6 +772,8 @@ pub async fn download_url_mod(
             pinned: false,
             min_game_version: None,
             author: None,
+            note: None,
+            custom_url: None,
         })
     } else {
         Err(format!("Unsupported file type: {}", file_name))

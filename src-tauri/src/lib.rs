@@ -288,6 +288,8 @@ pub fn run() {
             mod_sources::get_mod_sources,
             mod_sources::set_mod_source,
             mod_sources::set_mod_sources_full,
+            mod_sources::set_mod_extras,
+            mod_sources::set_mod_snooze,
             mod_sources::remove_mod_source,
             mod_sources::pin_mod,
             mod_sources::unpin_mod,

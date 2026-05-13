@@ -266,6 +266,35 @@ export async function removeModSource(
 }
 
 /**
+ * Set / clear a mod's free-form note and "other link" URL — used for mods
+ * that don't live on GitHub or Nexus (Patreon, X, Discord, etc.) or just
+ * for remembering where you got the file. Empty strings clear. Folder-keyed
+ * write so the data sits next to the rest of the mod's source-entry state.
+ */
+export async function setModExtras(
+  modName: string,
+  note: string | null,
+  customUrl: string | null,
+  folderName: string | null = null,
+): Promise<ModSourceEntry> {
+  return invoke('set_mod_extras', { modName, folderName, note, customUrl });
+}
+
+/**
+ * Snooze update suggestions for this mod at a specific upstream tag. When
+ * upstream advances past that tag the snooze auto-expires. Pass `null` or
+ * an empty string for `latestTag` to clear the snooze. Distinct from pin,
+ * which is a hard freeze.
+ */
+export async function setModSnooze(
+  modName: string,
+  latestTag: string | null,
+  folderName: string | null = null,
+): Promise<ModSourceEntry> {
+  return invoke('set_mod_snooze', { modName, folderName, latestTag });
+}
+
+/**
  * Pin a mod so its enabled/disabled state and version survive modpack
  * applies and update sweeps. Pass `folderName` (from `mod.folder_name`)
  * so two mods with the same display name can be pinned independently.

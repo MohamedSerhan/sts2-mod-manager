@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ModInfo, Profile, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, RepairProfileResult, ModAuditEntry, NexusModInfo } from '../types';
+import type { ModInfo, Profile, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, RepairProfileResult, ModAuditEntry, NexusModInfo, BrowserPage } from '../types';
 
 // ── Game Detection & QOL ───────────────────────────────────────────────────
 
@@ -322,12 +322,18 @@ export async function findGithubFromNexus(
 
 // ── Sharing ────────────────────────────────────────────────────────────────
 
-export async function shareProfile(name: string): Promise<ShareResult> {
-  return invoke('share_profile', { name });
+export async function shareProfile(
+  name: string,
+  listPublic: boolean | null,
+): Promise<ShareResult> {
+  return invoke('share_profile', { name, listPublic });
 }
 
-export async function reshareProfile(name: string): Promise<ShareResult> {
-  return invoke('reshare_profile', { name });
+export async function reshareProfile(
+  name: string,
+  listPublic: boolean | null,
+): Promise<ShareResult> {
+  return invoke('reshare_profile', { name, listPublic });
 }
 
 export async function fetchSharedProfile(code: string): Promise<Profile> {
@@ -340,6 +346,20 @@ export async function installSharedProfile(code: string): Promise<Profile> {
 
 export async function getShareInfo(name: string): Promise<ShareResult | null> {
   return invoke('get_share_info', { name });
+}
+
+export async function fetchModpackBrowserPage(
+  page: number,
+  forceRefresh: boolean,
+): Promise<BrowserPage> {
+  return invoke('fetch_modpack_browser_page', { page, forceRefresh });
+}
+
+export async function setModpackListing(
+  name: string,
+  public_: boolean,
+): Promise<void> {
+  return invoke('set_modpack_listing', { name, public: public_ });
 }
 
 export async function launchVanilla(): Promise<boolean> {

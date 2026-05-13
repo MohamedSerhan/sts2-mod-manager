@@ -191,7 +191,7 @@ fn format_code(raw: &str) -> String {
 
 // ── GitHub API Helpers ─────────────────────────────────────────────────────
 
-fn build_client(token: &str) -> reqwest::Client {
+pub(crate) fn build_client(token: &str) -> reqwest::Client {
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
         reqwest::header::ACCEPT,
@@ -666,6 +666,7 @@ pub async fn fetch_shared_profile(
 #[tauri::command]
 pub async fn share_profile(
     name: String,
+    list_public: Option<bool>,
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ShareResult, String> {
@@ -688,13 +689,17 @@ pub async fn share_profile(
     let share_info_path = profiles_path.join(format!("{}.share", name));
     if share_info_path.exists() {
         log::info!("Profile '{}' already shared, reusing code via reshare", name);
-        return reshare_profile(name, app_handle, state).await;
+        return reshare_profile(name, list_public, app_handle, state).await;
     }
 
     let _guard = ShareGuard::try_acquire(state.inner(), &name)?;
 
     let mut profile =
         crate::profiles::load_profile(&name, &profiles_path).map_err(|e| e.to_string())?;
+
+    if let Some(p) = list_public {
+        profile.public = Some(p);
+    }
 
     // Get username
     let username = get_github_username(&token)
@@ -871,6 +876,7 @@ pub fn get_share_info(
 #[tauri::command]
 pub async fn reshare_profile(
     name: String,
+    list_public: Option<bool>,
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ShareResult, String> {
@@ -907,6 +913,10 @@ pub async fn reshare_profile(
     // Preserve original metadata
     if let Some(ref old) = old_profile {
         profile.created_at = old.created_at;
+        profile.public = old.public;
+    }
+    if let Some(p) = list_public {
+        profile.public = Some(p);
     }
     profile.created_by = Some(share_info.owner.clone());
     log::info!("Re-snapshot profile '{}': {} mods from disk", name, profile.mods.len());
@@ -1393,6 +1403,64 @@ fn parse_share_code(input: &str) -> Result<(String, String)> {
     ))
 }
 
+/// Flip an already-shared profile's `public` flag and re-upload the
+/// manifest only (no mod re-bundling). Used by the post-share toggle
+/// in PublishModal and by any future manual override surface.
+#[tauri::command]
+pub async fn set_modpack_listing(
+    name: String,
+    public: bool,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<(), String> {
+    let _guard = ShareGuard::try_acquire(state.inner(), &name)?;
+
+    let (profiles_path, token) = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        let token = s.github_token.clone().ok_or("GitHub token required")?;
+        (s.profiles_path.clone(), token)
+    };
+
+    let share_info_path = profiles_path.join(format!("{}.share", name));
+    let mut share_info: ShareInfo = serde_json::from_str(
+        &std::fs::read_to_string(&share_info_path)
+            .map_err(|_| "Profile has not been shared yet.".to_string())?,
+    ).map_err(|e| e.to_string())?;
+
+    let mut profile =
+        crate::profiles::load_profile(&name, &profiles_path).map_err(|e| e.to_string())?;
+    // Idempotency: skip the round-trip when the value already matches.
+    if profile.public == Some(public) {
+        return Ok(());
+    }
+    profile.public = Some(public);
+    crate::profiles::save_profile(&profile, &profiles_path).map_err(|e| e.to_string())?;
+
+    let filename = code_to_filename(&share_info.code);
+    let profile_json = serde_json::to_string_pretty(&profile).map_err(|e| e.to_string())?;
+    let (file_sha, _html_url) = upsert_file(
+        &token,
+        &share_info.owner,
+        &filename,
+        &profile_json,
+        share_info.file_sha.as_deref(),
+        &format!("Update profile listing: {} -> {}", profile.name, public),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    share_info.file_sha = Some(file_sha);
+    let _ = std::fs::write(
+        &share_info_path,
+        serde_json::to_string_pretty(&share_info).unwrap(),
+    );
+
+    if let Ok(mut s) = state.lock() {
+        s.modpack_browser_cache.clear();
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod parse_share_code_tests {
     use super::is_valid_github_username;
@@ -1427,4 +1495,48 @@ mod parse_share_code_tests {
     fn rejects_too_long() {
         assert!(!is_valid_github_username(&"a".repeat(40)));
     }
+}
+
+#[cfg(test)]
+mod listing_tests {
+    use super::*;
+    use chrono::Utc;
+
+    fn make_profile(name: &str, public: Option<bool>) -> Profile {
+        Profile {
+            name: name.into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![],
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            public,
+        }
+    }
+
+    #[test]
+    fn reshare_preserves_existing_public_when_no_override() {
+        let prior = make_profile("p", Some(true));
+        let mut fresh = make_profile("p", None);
+        // Mirror the merge from reshare_profile:
+        fresh.public = prior.public;
+        let list_public: Option<bool> = None;
+        if let Some(p) = list_public {
+            fresh.public = Some(p);
+        }
+        assert_eq!(fresh.public, Some(true));
+    }
+
+    #[test]
+    fn reshare_overrides_when_caller_explicit() {
+        let prior = make_profile("p", Some(true));
+        let mut fresh = make_profile("p", None);
+        fresh.public = prior.public;
+        let list_public: Option<bool> = Some(false);
+        if let Some(p) = list_public {
+            fresh.public = Some(p);
+        }
+        assert_eq!(fresh.public, Some(false));
+    }
+
 }

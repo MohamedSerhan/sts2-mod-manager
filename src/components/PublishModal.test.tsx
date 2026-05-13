@@ -30,6 +30,19 @@ function Wrap(props: Partial<React.ComponentProps<typeof PublishModal>> = {}) {
   );
 }
 
+/** Loud lookup — fails the test loudly if the Publish/Re-share button is
+ *  missing, instead of silently skipping with `if (btn) { ... }`. */
+function getPublishButton(): HTMLButtonElement {
+  const buttons = screen.getAllByRole('button');
+  const btn = buttons.find((b) => /^(Publish|Push update|Re-share)/i.test(b.textContent?.trim() ?? ''));
+  if (!btn) {
+    throw new Error(
+      `Publish button not found. Buttons present: ${buttons.map((b) => `"${b.textContent}"`).join(', ')}`,
+    );
+  }
+  return btn as HTMLButtonElement;
+}
+
 describe('<PublishModal>', () => {
   it('renders nothing when open=false', () => {
     const { container } = render(<Wrap open={false} />);
@@ -72,13 +85,12 @@ describe('<PublishModal>', () => {
     }));
     render(<Wrap />);
     await waitFor(() => {
-      const buttons = screen.getAllByRole('button');
-      const publishBtn = buttons.find((b) => /Publish|Share/i.test(b.textContent ?? ''));
-      expect(publishBtn).toBeTruthy();
+      // Loud lookup — assert the Publish button is actually present.
+      getPublishButton();
     });
   });
 
-  it('Publish click invokes share_profile', async () => {
+  it('Publish click invokes share_profile with listPublic=false by default', async () => {
     registerInvokeHandler('get_api_key_status', () => ({
       nexus_api_key_set: false,
       github_token_set: true,
@@ -92,14 +104,15 @@ describe('<PublishModal>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText(/My Pack/)).toBeInTheDocument(); });
-    const buttons = screen.getAllByRole('button');
-    const publishBtn = buttons.find((b) => /Publish|^Share/i.test(b.textContent?.trim() ?? ''));
-    if (publishBtn) {
-      await user.click(publishBtn);
-      await waitFor(() => {
-        expect(getInvokeCalls().some((c) => c.cmd === 'share_profile')).toBe(true);
-      });
-    }
+    const publishBtn = getPublishButton();
+    await user.click(publishBtn);
+    await waitFor(() => {
+      const call = getInvokeCalls().find((c) => c.cmd === 'share_profile');
+      expect(call).toBeDefined();
+      // Default visibility is "Friends only" → listPublic is explicitly
+      // false (not null / undefined) so the backend never has to guess.
+      expect(call!.args).toEqual({ name: 'My Pack', listPublic: false });
+    });
   });
 
   it('isReshare=true calls reshare_profile instead', async () => {
@@ -116,14 +129,11 @@ describe('<PublishModal>', () => {
     const user = userEvent.setup();
     render(<Wrap isReshare />);
     await waitFor(() => { expect(screen.getByText(/My Pack/)).toBeInTheDocument(); });
-    const buttons = screen.getAllByRole('button');
-    const publishBtn = buttons.find((b) => /Publish|^Share|Re-share/i.test(b.textContent?.trim() ?? ''));
-    if (publishBtn) {
-      await user.click(publishBtn);
-      await waitFor(() => {
-        expect(getInvokeCalls().some((c) => c.cmd === 'reshare_profile')).toBe(true);
-      });
-    }
+    const publishBtn = getPublishButton();
+    await user.click(publishBtn);
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'reshare_profile')).toBe(true);
+    });
   });
 
   it('Open Settings button fires onGoToSettings when shown', async () => {
@@ -136,10 +146,9 @@ describe('<PublishModal>', () => {
     render(<Wrap onGoToSettings={onGoToSettings} />);
     await waitFor(() => { expect(screen.getByText(/My Pack/)).toBeInTheDocument(); });
     const goBtn = screen.getAllByRole('button').find((b) => /Open Settings|Set token|Settings/i.test(b.textContent ?? ''));
-    if (goBtn) {
-      await user.click(goBtn);
-      expect(onGoToSettings).toHaveBeenCalled();
-    }
+    if (!goBtn) throw new Error('Open Settings button not found');
+    await user.click(goBtn);
+    expect(onGoToSettings).toHaveBeenCalled();
   });
 
   it('Close button calls onClose', async () => {
@@ -150,5 +159,54 @@ describe('<PublishModal>', () => {
     const xs = screen.getAllByTitle(/Close|Cancel/i);
     await user.click(xs[0]);
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('shows the Visibility selector with two radio options in the publish form', async () => {
+    registerInvokeHandler('get_api_key_status', () => ({
+      nexus_api_key_set: false,
+      github_token_set: true,
+    }));
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText(/My Pack/)).toBeInTheDocument(); });
+    // Two radio inputs — Friends only (default) and Public.
+    const radios = screen.getAllByRole('radio');
+    expect(radios.length).toBe(2);
+    // Friends only is selected by default.
+    expect((radios[0] as HTMLInputElement).checked).toBe(true);
+    expect((radios[1] as HTMLInputElement).checked).toBe(false);
+    // Copy for both options is present.
+    expect(screen.getByText(/Friends only/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Public/i).length).toBeGreaterThan(0);
+  });
+
+  it('selecting Public then Publish calls share_profile with listPublic=true', async () => {
+    registerInvokeHandler('get_api_key_status', () => ({
+      nexus_api_key_set: false,
+      github_token_set: true,
+    }));
+    registerInvokeHandler('share_profile', () => ({
+      owner: 'alice',
+      code: 'AA5A-315D-61AE',
+      url: 'https://github.com/alice/sts2mm-profiles',
+      remote_path: 'My_Pack.json',
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText(/My Pack/)).toBeInTheDocument(); });
+    const radios = screen.getAllByRole('radio');
+    if (radios.length < 2) {
+      throw new Error(`Expected 2 visibility radios, found ${radios.length}`);
+    }
+    // Click "Public" radio.
+    await user.click(radios[1]);
+    expect((radios[1] as HTMLInputElement).checked).toBe(true);
+    // Now click Publish.
+    const publishBtn = getPublishButton();
+    await user.click(publishBtn);
+    await waitFor(() => {
+      const call = getInvokeCalls().find((c) => c.cmd === 'share_profile');
+      expect(call).toBeDefined();
+      expect(call!.args).toEqual({ name: 'My Pack', listPublic: true });
+    });
   });
 });

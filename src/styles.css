@@ -1277,6 +1277,23 @@ body {
   display: flex; align-items: center; gap: 6px;
 }
 
+/* Mod list rendered inside BrowseModpackDetail — one row per mod with
+ * version aligned to the right. Kept lightweight to match the
+ * read-only "preview before install" framing. */
+.gf-mod-list {
+  display: flex; flex-direction: column;
+  border: 1px solid var(--indigo-line);
+  border-radius: 7px; overflow: hidden;
+  background: oklch(0.20 0.025 270 / 0.5);
+}
+.gf-mod-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 7px 12px; font-size: 12.5px; color: var(--ink);
+  border-bottom: 1px solid var(--indigo-line);
+}
+.gf-mod-row:last-child { border-bottom: 0; }
+.gf-dim { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+
 .gf-field { margin-bottom: 12px; }
 .gf-field-label { display: block; font-size: 11.5px; color: var(--ink-mute); margin-bottom: 5px; font-weight: 500; }
 .gf-includes { background: oklch(0.20 0.025 270 / 0.5); border: 1px solid var(--indigo-line); border-radius: 7px; padding: 9px 12px; }
@@ -1814,3 +1831,37 @@ body {
 .gf-whatsnew-bullets { margin: 0 0 8px 0; padding-left: 18px; list-style: disc; }
 .gf-whatsnew-bullets li { margin-bottom: 4px; }
 .gf-whatsnew-note { margin-top: 8px; font-size: 11px; color: var(--ink-dim); font-style: italic; }
+
+/* ── Browse Modpacks view ─────────────────────────────────────────── */
+.gf-view { padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
+.gf-view-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.gf-view-title { font-size: 18px; font-weight: 700; color: var(--ink); margin: 0; }
+.gf-banner-error {
+  background: oklch(0.55 0.18 25 / 0.12);
+  border-color: oklch(0.55 0.18 25 / 0.4);
+  color: oklch(0.85 0.12 25);
+}
+.gf-card-list { display: flex; flex-direction: column; gap: 10px; }
+.gf-card-clickable {
+  width: 100%; text-align: left; cursor: pointer;
+  background: var(--indigo-elev); border: 1px solid var(--indigo-line);
+  color: var(--ink); padding: 12px 14px; border-radius: 8px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.gf-card-clickable:hover { border-color: oklch(0.40 0.06 280); }
+.gf-card-title { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.gf-card-sub { font-size: 12px; color: var(--ink-mute); }
+.gf-skeleton {
+  background: linear-gradient(90deg, var(--indigo-elev) 0%, oklch(0.30 0.05 280) 50%, var(--indigo-elev) 100%);
+  background-size: 200% 100%;
+  animation: gf-skeleton-shimmer 1.4s linear infinite;
+  border-radius: 8px;
+}
+@keyframes gf-skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.gf-spin { animation: gf-spin 1s linear infinite; }
+@keyframes gf-spin {
+  to { transform: rotate(360deg); }
+}

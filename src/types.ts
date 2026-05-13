@@ -36,6 +36,9 @@ export interface Profile {
   mods: ProfileMod[];
   created_at: string;
   updated_at: string;
+  /** Opt-in flag for the in-app Browse Modpacks tab.
+   *  true = listed; null / false = unlisted. */
+  public?: boolean | null;
 }
 
 export interface ProfileMod {
@@ -245,5 +248,22 @@ export interface ModAuditEntry {
    *  upstream tag advances. Distinct from `pinned`: snooze suppresses
    *  the "update available" badge but doesn't block manual updates. */
   snoozed?: boolean;
+}
+
+export interface BrowserCard {
+  owner: string;
+  code: string;           // "AA5A-315D-61AE"
+  name: string;
+  mod_count: number;
+  created_at: string;     // ISO
+  updated_at: string;     // ISO
+}
+
+export interface BrowserPage {
+  cards: BrowserCard[];
+  page: number;
+  has_next_page: boolean;
+  stale: boolean;
+  fetched_at: number;     // unix seconds
 }
 

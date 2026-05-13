@@ -10,6 +10,7 @@ mod game;
 // tests tractable.
 pub mod mod_sources;
 pub mod mods;
+mod modpack_browser;
 mod nexus;
 pub mod profiles;
 mod qa_cassette;
@@ -307,9 +308,11 @@ pub fn run() {
             // Sharing
             sharing::share_profile,
             sharing::reshare_profile,
+            sharing::set_modpack_listing,
             sharing::get_share_info,
             sharing::fetch_shared_profile_cmd,
             sharing::install_shared_profile,
+            modpack_browser::fetch_modpack_browser_page,
             // Deep link
             consume_pending_deep_link,
             // Subscriptions (friend sync)

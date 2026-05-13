@@ -27,6 +27,18 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Security
+
+---
+
+## [1.3.5] - 2026-05-13
+
+### Added
+
 - Install mods packaged as `.7z` or `.rar`, not just `.zip`. Drag-drop, the file picker, and the Downloads watcher all accept the new formats; the manager unpacks them the same way it handles a zip.
 - Per-mod note + "Other link" fields. Open a mod's source editor in advanced mode to jot down where you got the file (Patreon, X, Discord) and stash a URL. The note shows up under the mod's description and the link becomes a clickable chip on the row.
 - Snooze an "update available" suggestion for one mod from its kebab menu. Useful when the website's version number doesn't actually match what's inside the file. The snooze clears itself the next time the source publishes a newer release.

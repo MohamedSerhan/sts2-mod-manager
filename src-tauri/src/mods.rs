@@ -1231,6 +1231,259 @@ fn peek_manifest_name(archive: &mut zip::ZipArchive<fs::File>) -> Option<String>
     None
 }
 
+// ── Config-overwrite detection ─────────────────────────────────────────────
+
+/// Extensions we hash on install and preserve on update. Intentionally
+/// excludes `.json` — in the STS2 ecosystem, JSON is always game-readable
+/// manifest data, never user-tunable settings. Preserving a stale
+/// manifest would lie to the loader / our audit about the installed
+/// version.
+const TRACKED_CONFIG_EXTENSIONS: &[&str] = &["cfg", "ini", "toml", "txt"];
+
+/// Don't try to preserve a "config" larger than this. Real STS2 configs
+/// are kilobytes; multi-MB files with these extensions are almost
+/// certainly packaged data. Cap also bounds memory during the
+/// read → delete → restore window.
+const MAX_TRACKED_CONFIG_BYTES: u64 = 1024 * 1024;
+
+fn is_tracked_config_path(rel_name: &str) -> bool {
+    // Skip our own sidecar / backup directories regardless of extension.
+    if rel_name.starts_with(".sts2mm-") || rel_name.contains("/.sts2mm-") {
+        return false;
+    }
+    let ext = Path::new(rel_name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    TRACKED_CONFIG_EXTENSIONS.iter().any(|e| *e == ext)
+}
+
+/// Hash every tracked config file under `mod_folder` (recursive). Returns
+/// `{forward-slash relative path: hex SHA256}`. Empty when the folder has
+/// no tracked configs.
+pub fn snapshot_mod_configs(mod_folder: &Path) -> std::collections::HashMap<String, String> {
+    let mut out = std::collections::HashMap::new();
+    if !mod_folder.is_dir() {
+        return out;
+    }
+    for entry in WalkDir::new(mod_folder).into_iter().flatten() {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let path = entry.path();
+        let rel = match path.strip_prefix(mod_folder) {
+            Ok(r) => r.to_string_lossy().replace('\\', "/"),
+            Err(_) => continue,
+        };
+        if !is_tracked_config_path(&rel) {
+            continue;
+        }
+        let len = entry.metadata().map(|m| m.len()).unwrap_or(0);
+        if len > MAX_TRACKED_CONFIG_BYTES {
+            continue;
+        }
+        if let Some(hash) = hash_file(path) {
+            out.insert(rel, hash);
+        }
+    }
+    out
+}
+
+/// A user-edited config file that needs to survive an update. Held in
+/// memory between the pre-extract delete and the post-extract restore.
+#[derive(Debug, Clone)]
+pub struct PreservedConfig {
+    /// Forward-slash path relative to the mod folder root. Matches the
+    /// key shape in `ModSourceEntry.config_hashes`.
+    pub rel_path: String,
+    pub bytes: Vec<u8>,
+}
+
+/// Read every config file under `mod_folder` that the user has edited
+/// (hash differs from `snapshot`) OR created since install (present on
+/// disk but not in `snapshot`). Returns the file bytes ready to be
+/// restored after extract.
+///
+/// Returns an empty list when `snapshot` is empty — that's the
+/// "installed before this feature shipped" case; we have no baseline to
+/// compare against and conservatively let the update proceed as before.
+pub fn read_user_edited_configs(
+    mod_folder: &Path,
+    snapshot: &std::collections::HashMap<String, String>,
+) -> Vec<PreservedConfig> {
+    let mut preserved = Vec::new();
+    if !mod_folder.is_dir() || snapshot.is_empty() {
+        return preserved;
+    }
+    for entry in WalkDir::new(mod_folder).into_iter().flatten() {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let path = entry.path();
+        let rel = match path.strip_prefix(mod_folder) {
+            Ok(r) => r.to_string_lossy().replace('\\', "/"),
+            Err(_) => continue,
+        };
+        if !is_tracked_config_path(&rel) {
+            continue;
+        }
+        let len = entry.metadata().map(|m| m.len()).unwrap_or(0);
+        if len > MAX_TRACKED_CONFIG_BYTES {
+            continue;
+        }
+        let current_hash = match hash_file(path) {
+            Some(h) => h,
+            None => continue,
+        };
+        let edited = match snapshot.get(&rel) {
+            Some(stored) => stored != &current_hash,
+            // File present on disk but not in snapshot → user created
+            // it after install (e.g. their own override.cfg).
+            None => true,
+        };
+        if !edited {
+            continue;
+        }
+        let bytes = match fs::read(path) {
+            Ok(b) => b,
+            Err(e) => {
+                log::warn!(
+                    "Skipping preserve of '{}' under {:?}: read failed: {}",
+                    rel, mod_folder, e
+                );
+                continue;
+            }
+        };
+        preserved.push(PreservedConfig { rel_path: rel, bytes });
+    }
+    preserved
+}
+
+/// Write every preserved config back into `mod_folder`, creating parent
+/// directories as needed. Each restore overwrites whatever the new
+/// install put at that path — which is exactly the point.
+pub fn restore_preserved_configs(
+    mod_folder: &Path,
+    preserved: &[PreservedConfig],
+) -> Result<()> {
+    for p in preserved {
+        let dest = mod_folder.join(&p.rel_path);
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent).map_err(AppError::from)?;
+        }
+        fs::write(&dest, &p.bytes).map_err(AppError::from)?;
+        log::info!("Restored user-edited config '{}' under {:?}", p.rel_path, mod_folder);
+    }
+    Ok(())
+}
+
+/// Prepare-half of the "update with config preservation" flow. Reads
+/// the stored snapshot and the user-edited config bytes BEFORE any
+/// destructive operation. The caller is responsible for deleting the
+/// old install however they normally would (wrap folder, disabled
+/// folder, legacy flat files) — none of those steps need to know
+/// about preservation.
+///
+/// Returns an empty vec when the mod has no snapshot (rollout case)
+/// or no user edits — in which case `finalize_update_with_preserved_configs`
+/// is still safe to call but won't actually restore anything; it'll
+/// just snapshot the new install.
+///
+/// Split into prepare/finalize so the existing remove_existing_mod_files
+/// logic in the downloads watcher (which handles disabled-folder +
+/// legacy flat files in addition to the wrap folder) can run between
+/// the read and the install without us re-implementing all of it.
+pub fn prepare_update_with_preserved_configs(
+    old_folder_name: &str,
+    old_display_name: &str,
+    mods_path: &Path,
+    config_path: &Path,
+) -> Vec<PreservedConfig> {
+    let snapshot = crate::mod_sources::load_config_snapshot(
+        Some(old_folder_name),
+        old_display_name,
+        config_path,
+    );
+    if snapshot.is_empty() {
+        // Rollout case: mod was installed before this feature shipped.
+        // Skip preservation; the update proceeds as it did pre-feature
+        // and finalize will snapshot the fresh install.
+        return Vec::new();
+    }
+    let old_folder_abs = mods_path.join(old_folder_name);
+    read_user_edited_configs(&old_folder_abs, &snapshot)
+}
+
+/// Finalize-half of the "update with config preservation" flow. Run
+/// after the caller has deleted the old install AND extracted the new
+/// archive. Overlays the preserved bytes onto the freshly-installed
+/// folder and refreshes the snapshot from the post-restore state.
+///
+/// Returns the list of relative paths that were restored — the
+/// downloads watcher / updater command forwards this to the frontend
+/// so the post-update toast can name what was kept. Empty list when
+/// `preserved` was empty (rollout or no edits).
+pub fn finalize_update_with_preserved_configs(
+    new_info: &ModInfo,
+    mods_path: &Path,
+    preserved: Vec<PreservedConfig>,
+    config_path: &Path,
+) -> Result<Vec<String>> {
+    let new_folder_name = new_info
+        .folder_name
+        .clone()
+        .unwrap_or_else(|| new_info.name.clone());
+    let new_folder_abs = mods_path.join(&new_folder_name);
+
+    let preserved_names: Vec<String> = preserved.iter().map(|p| p.rel_path.clone()).collect();
+
+    if !preserved.is_empty() {
+        if let Err(e) = restore_preserved_configs(&new_folder_abs, &preserved) {
+            log::error!(
+                "Failed to restore preserved configs for '{}' after update: {}. \
+                 User edits to {:?} are LOST.",
+                new_info.name, e, preserved_names,
+            );
+            return Err(e);
+        }
+    }
+
+    // Refresh the snapshot from the post-restore on-disk state. Critical
+    // that this fires AFTER restore — otherwise we'd snapshot the
+    // upstream's shipped configs and the very next update would treat
+    // the still-present user edits as fresh and not preserve them.
+    let new_snapshot = snapshot_mod_configs(&new_folder_abs);
+    crate::mod_sources::save_config_snapshot(
+        Some(&new_folder_name),
+        &new_info.name,
+        new_snapshot,
+        config_path,
+    );
+
+    Ok(preserved_names)
+}
+
+/// Snapshot the configs of a freshly-installed mod (first-time install
+/// path; no old folder to preserve from). Folder-first write key.
+pub fn snapshot_after_fresh_install(info: &ModInfo, mods_path: &Path, config_path: &Path) {
+    let folder_name = info
+        .folder_name
+        .clone()
+        .unwrap_or_else(|| info.name.clone());
+    let folder_abs = mods_path.join(&folder_name);
+    let snapshot = snapshot_mod_configs(&folder_abs);
+    if snapshot.is_empty() {
+        return; // mod ships no tracked configs; skip the empty write
+    }
+    crate::mod_sources::save_config_snapshot(
+        Some(&folder_name),
+        &info.name,
+        snapshot,
+        config_path,
+    );
+}
+
 /// Install a mod from any supported archive format into the mods directory.
 ///
 /// Dispatches by file extension:
@@ -2004,12 +2257,18 @@ pub fn delete_all_mods(state: tauri::State<'_, AppState>) -> std::result::Result
 #[tauri::command]
 pub fn install_mod_from_file(path: String, state: tauri::State<'_, AppState>) -> std::result::Result<ModInfo, String> {
     crate::game::ensure_game_not_running()?;
-    let mods_path = {
+    let (mods_path, config_path) = {
         let s = state.lock().map_err(|e| e.to_string())?;
-        s.mods_path.as_ref().ok_or("Game path not set")?.clone()
+        let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?.clone();
+        let config_path = s.config_path.clone();
+        (mods_path, config_path)
     };
     let archive_path = PathBuf::from(&path);
     let result = install_mod_from_archive(&archive_path, &mods_path).map_err(|e| e.to_string())?;
+    // First-time install: snapshot configs so the next update preserves
+    // any edits the user makes in the meantime. No preservation pass
+    // happens here — there's nothing to preserve from.
+    snapshot_after_fresh_install(&result, &mods_path, &config_path);
     refresh_active_profile_manifest(&state);
     Ok(result)
 }
@@ -2720,6 +2979,252 @@ mod archive_dispatch_tests {
             msg.to_lowercase().contains("rar"),
             "error should make clear the rar extractor rejected the file, got: {}",
             msg,
+        );
+    }
+}
+
+#[cfg(test)]
+mod config_snapshot_tests {
+    //! Coverage for the config-overwrite-detection feature (#35).
+    //!
+    //! These tests exercise the pure helpers in isolation. The
+    //! end-to-end "install → edit → update → preserved" flow goes
+    //! through the wrapper functions in mod_sources.rs + the call
+    //! sites in updater.rs / downloads_watcher.rs; those are
+    //! exercised by integration tests in `tests/qa_scenarios.rs`
+    //! (added in this same change).
+    use super::*;
+    use std::collections::HashMap;
+    use tempfile::tempdir;
+
+    fn write_at(root: &Path, rel: &str, content: &[u8]) {
+        let abs = root.join(rel);
+        if let Some(parent) = abs.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(&abs, content).unwrap();
+    }
+
+    #[test]
+    fn snapshot_picks_up_tracked_extensions_only() {
+        let tmp = tempdir().unwrap();
+        let folder = tmp.path();
+        write_at(folder, "settings.cfg", b"k=v");
+        write_at(folder, "lang.ini", b"[en]");
+        write_at(folder, "options.toml", b"opt=1");
+        write_at(folder, "notes.txt", b"hello");
+        // .json is explicitly NOT tracked — STS2 uses it for manifests.
+        write_at(folder, "manifest.json", b"{}");
+        // .dll / .pck are content, never config.
+        write_at(folder, "code.dll", b"binary");
+        write_at(folder, "art.pck", b"resourcepack");
+        let snap = snapshot_mod_configs(folder);
+        let keys: std::collections::HashSet<&String> = snap.keys().collect();
+        assert!(keys.iter().any(|k| k.as_str() == "settings.cfg"));
+        assert!(keys.iter().any(|k| k.as_str() == "lang.ini"));
+        assert!(keys.iter().any(|k| k.as_str() == "options.toml"));
+        assert!(keys.iter().any(|k| k.as_str() == "notes.txt"));
+        assert!(
+            !keys.iter().any(|k| k.as_str() == "manifest.json"),
+            ".json must be excluded — STS2 manifest, not user-tunable config"
+        );
+        assert!(!keys.iter().any(|k| k.as_str() == "code.dll"));
+        assert!(!keys.iter().any(|k| k.as_str() == "art.pck"));
+        assert_eq!(snap.len(), 4);
+    }
+
+    #[test]
+    fn snapshot_walks_subdirectories_with_forward_slash_keys() {
+        let tmp = tempdir().unwrap();
+        let folder = tmp.path();
+        write_at(folder, "lang/en.ini", b"hello");
+        write_at(folder, "lang/fr.ini", b"bonjour");
+        let snap = snapshot_mod_configs(folder);
+        assert_eq!(snap.len(), 2);
+        // Must use forward slashes regardless of OS — matches the rest
+        // of the codebase's path conventions.
+        assert!(snap.contains_key("lang/en.ini"));
+        assert!(snap.contains_key("lang/fr.ini"));
+    }
+
+    #[test]
+    fn snapshot_skips_our_own_sidecar_directories() {
+        let tmp = tempdir().unwrap();
+        let folder = tmp.path();
+        write_at(folder, "settings.cfg", b"real");
+        write_at(folder, ".sts2mm-backup/old.cfg", b"backup");
+        let snap = snapshot_mod_configs(folder);
+        assert_eq!(snap.len(), 1, "must not hash our own sidecar artifacts");
+        assert!(snap.contains_key("settings.cfg"));
+    }
+
+    #[test]
+    fn snapshot_skips_oversized_files() {
+        let tmp = tempdir().unwrap();
+        let folder = tmp.path();
+        // Real config — small, included.
+        write_at(folder, "small.cfg", b"k=v");
+        // Same extension, oversize → packaged data, excluded.
+        let big: Vec<u8> = vec![0u8; (MAX_TRACKED_CONFIG_BYTES + 1) as usize];
+        write_at(folder, "big.cfg", &big);
+        let snap = snapshot_mod_configs(folder);
+        assert_eq!(snap.len(), 1);
+        assert!(snap.contains_key("small.cfg"));
+        assert!(!snap.contains_key("big.cfg"));
+    }
+
+    #[test]
+    fn snapshot_handles_missing_folder_gracefully() {
+        let tmp = tempdir().unwrap();
+        let absent = tmp.path().join("does-not-exist");
+        let snap = snapshot_mod_configs(&absent);
+        assert!(snap.is_empty(), "missing folder must return empty, not panic");
+    }
+
+    #[test]
+    fn read_user_edited_returns_files_whose_hash_changed() {
+        let tmp = tempdir().unwrap();
+        let folder = tmp.path();
+        write_at(folder, "config.cfg", b"original=true");
+        // Snapshot the original state.
+        let snap = snapshot_mod_configs(folder);
+        // User "edits" the file.
+        write_at(folder, "config.cfg", b"original=false");
+        let preserved = read_user_edited_configs(folder, &snap);
+        assert_eq!(preserved.len(), 1);
+        assert_eq!(preserved[0].rel_path, "config.cfg");
+        assert_eq!(preserved[0].bytes, b"original=false");
+    }
+
+    #[test]
+    fn read_user_edited_skips_files_matching_snapshot() {
+        let tmp = tempdir().unwrap();
+        let folder = tmp.path();
+        write_at(folder, "config.cfg", b"same");
+        let snap = snapshot_mod_configs(folder);
+        // No edit. Preserved list must be empty so the next update can
+        // happily overwrite with upstream's possibly-improved defaults.
+        let preserved = read_user_edited_configs(folder, &snap);
+        assert!(preserved.is_empty());
+    }
+
+    #[test]
+    fn read_user_edited_includes_user_created_files_not_in_snapshot() {
+        let tmp = tempdir().unwrap();
+        let folder = tmp.path();
+        write_at(folder, "shipped.cfg", b"vendor");
+        let snap = snapshot_mod_configs(folder);
+        // User drops in a custom override the mod author never shipped.
+        write_at(folder, "override.cfg", b"custom");
+        let preserved = read_user_edited_configs(folder, &snap);
+        let names: std::collections::HashSet<&str> =
+            preserved.iter().map(|p| p.rel_path.as_str()).collect();
+        assert!(names.contains("override.cfg"), "user-created files must be preserved");
+        assert!(
+            !names.contains("shipped.cfg"),
+            "untouched shipped configs stay as-is so upstream defaults can be refreshed"
+        );
+    }
+
+    #[test]
+    fn read_user_edited_with_empty_snapshot_returns_nothing() {
+        // Rollout case: mod installed before this feature shipped. No
+        // baseline → we can't tell what's user-edited → preserve nothing.
+        // (The very next update populates a snapshot, after which the
+        // preservation actually kicks in.)
+        let tmp = tempdir().unwrap();
+        let folder = tmp.path();
+        write_at(folder, "config.cfg", b"could-be-edited-could-be-vendor");
+        let empty: HashMap<String, String> = HashMap::new();
+        let preserved = read_user_edited_configs(folder, &empty);
+        assert!(preserved.is_empty(), "no snapshot = no preservation");
+    }
+
+    #[test]
+    fn restore_writes_bytes_back_creating_parent_dirs() {
+        let tmp = tempdir().unwrap();
+        let folder = tmp.path();
+        let preserved = vec![
+            PreservedConfig {
+                rel_path: "lang/custom.ini".into(),
+                bytes: b"[user]\nhello=world".to_vec(),
+            },
+            PreservedConfig {
+                rel_path: "settings.cfg".into(),
+                bytes: b"k=2".to_vec(),
+            },
+        ];
+        restore_preserved_configs(folder, &preserved).unwrap();
+        assert_eq!(fs::read(folder.join("lang/custom.ini")).unwrap(), b"[user]\nhello=world");
+        assert_eq!(fs::read(folder.join("settings.cfg")).unwrap(), b"k=2");
+    }
+
+    #[test]
+    fn round_trip_install_edit_update_preserves_edits() {
+        // End-to-end happy path of the snapshot → edit → preserve →
+        // restore cycle (without going through the actual install
+        // pipeline). Mimics what install_update_preserving_configs
+        // orchestrates in production.
+        let tmp = tempdir().unwrap();
+        let mod_folder = tmp.path().join("MyMod");
+        fs::create_dir_all(&mod_folder).unwrap();
+
+        // 1. Initial install ships these configs.
+        write_at(&mod_folder, "settings.cfg", b"vendor-default");
+        write_at(&mod_folder, "lang/en.ini", b"hello");
+
+        // 2. We snapshot at install time.
+        let snapshot = snapshot_mod_configs(&mod_folder);
+
+        // 3. User edits one of the configs.
+        write_at(&mod_folder, "settings.cfg", b"user-edited");
+
+        // 4. Pre-update: we read user edits BEFORE the destructive
+        //    delete that would otherwise nuke them.
+        let preserved = read_user_edited_configs(&mod_folder, &snapshot);
+        assert_eq!(preserved.len(), 1);
+        assert_eq!(preserved[0].rel_path, "settings.cfg");
+
+        // 5. Simulate the update's "delete old folder, extract new"
+        //    pair. The new release ships an UPDATED vendor default —
+        //    say a new key the author added.
+        fs::remove_dir_all(&mod_folder).unwrap();
+        fs::create_dir_all(&mod_folder).unwrap();
+        write_at(&mod_folder, "settings.cfg", b"vendor-default-v2-with-new-keys");
+        write_at(&mod_folder, "lang/en.ini", b"hello");
+        write_at(&mod_folder, "lang/de.ini", b"hallo"); // brand new locale shipped upstream
+
+        // 6. Restore the user's edits.
+        restore_preserved_configs(&mod_folder, &preserved).unwrap();
+
+        // 7. settings.cfg now holds the user's edit again — upstream's
+        //    new keys are lost (a known limitation; see the spec's
+        //    "Out of scope: three-way merge"). The new locale file
+        //    survives because the user didn't touch it.
+        assert_eq!(
+            fs::read(mod_folder.join("settings.cfg")).unwrap(),
+            b"user-edited",
+            "user's edit must survive the update"
+        );
+        assert_eq!(
+            fs::read(mod_folder.join("lang/de.ini")).unwrap(),
+            b"hallo",
+            "upstream's newly-shipped locale file must remain"
+        );
+
+        // 8. Snapshot the post-restore state — this is what
+        //    finalize_update_with_preserved_configs writes back.
+        //    Critical that the snapshot reflects the user-edited
+        //    file's hash, not the upstream's hash. Otherwise the
+        //    very next update would treat the still-present user
+        //    edit as new and not preserve it.
+        let next_snapshot = snapshot_mod_configs(&mod_folder);
+        let stored = next_snapshot.get("settings.cfg").unwrap();
+        let user_hash = hash_file(&mod_folder.join("settings.cfg")).unwrap();
+        assert_eq!(
+            stored, &user_hash,
+            "post-update snapshot must reflect the actual on-disk file (user's edit), \
+             not the upstream's shipped default"
         );
     }
 }

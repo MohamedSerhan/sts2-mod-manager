@@ -147,6 +147,10 @@ export interface ModSourceEntry {
   note?: string | null;
   custom_url?: string | null;
   snoozed_until_tag?: string | null;
+  /** SHA256 of each tracked config file at install time. Backend-only
+   *  bookkeeping driving the post-update "preserved N files" toast —
+   *  frontend doesn't read this directly. */
+  config_hashes?: Record<string, string>;
 }
 
 export interface AutoDetectResult {

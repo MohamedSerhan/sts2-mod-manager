@@ -61,6 +61,24 @@ pub struct ModSourceEntry {
     /// is a hard freeze on auto-update entirely.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snoozed_until_tag: Option<String>,
+    /// SHA256 of each tracked config file at install time, keyed by the
+    /// file's path relative to the mod folder (forward-slash separators,
+    /// even on Windows, to match the rest of the codebase).
+    ///
+    /// Compared against on-disk hashes during the next update to decide
+    /// which files the user has edited and must be preserved. Rewritten
+    /// at the end of every install — short-lived rolling cache, not a
+    /// permanent audit log. Empty when the mod was last installed before
+    /// this feature shipped, in which case no preservation runs (update
+    /// behaves as it did pre-v1.3.6).
+    ///
+    /// Tracked extensions are restricted to actual config formats —
+    /// .cfg, .ini, .toml, .txt. STS2's .json files are game-readable
+    /// manifest data, never user-tunable, so they're intentionally
+    /// excluded to avoid preserving a stale manifest into a fresh
+    /// install.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub config_hashes: HashMap<String, String>,
 }
 
 fn is_false(v: &bool) -> bool { !*v }
@@ -163,6 +181,75 @@ pub fn update_installed_version(mod_name: &str, version: &str, config_path: &Pat
     }
 }
 
+/// Tauri event payload emitted whenever a mod update preserved one or
+/// more user-edited config files. Frontend listens and shows a
+/// non-blocking toast naming what was kept.
+#[derive(Debug, Clone, Serialize)]
+pub struct ConfigsPreservedEvent {
+    pub mod_name: String,
+    pub files: Vec<String>,
+}
+
+/// Emit `mod-configs-preserved` when an update finalized with a
+/// non-empty preserved list. No-op for empty lists so the frontend
+/// doesn't need a separate "nothing to report" branch.
+pub fn emit_configs_preserved<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    mod_name: &str,
+    files: &[String],
+) {
+    use tauri::Emitter;
+    if files.is_empty() {
+        return;
+    }
+    let _ = app.emit("mod-configs-preserved", ConfigsPreservedEvent {
+        mod_name: mod_name.to_string(),
+        files: files.to_vec(),
+    });
+}
+
+/// Read a mod's stored config-file hash snapshot. Returns an empty map
+/// when the mod has no entry, no snapshot, or was last installed before
+/// the config-overwrite-detection feature shipped — in any of those
+/// cases the caller treats it as "no preservation possible" and the
+/// update path behaves as it did pre-feature.
+///
+/// Lookup is folder-first (matches `enrich_mods_with_sources` and
+/// every other read site) so a mod pinned / linked under its folder
+/// name resolves to the same entry the snapshot was written under.
+pub fn load_config_snapshot(
+    folder_name: Option<&str>,
+    mod_name: &str,
+    config_path: &Path,
+) -> HashMap<String, String> {
+    let db = load_sources(config_path);
+    lookup_entry(&db.mods, folder_name, mod_name, None)
+        .map(|e| e.config_hashes.clone())
+        .unwrap_or_default()
+}
+
+/// Replace a mod's config-file hash snapshot with a fresh one (called
+/// after every successful install / update). Folder-first write key.
+pub fn save_config_snapshot(
+    folder_name: Option<&str>,
+    mod_name: &str,
+    snapshot: HashMap<String, String>,
+    config_path: &Path,
+) {
+    let mut db = load_sources(config_path);
+    let key = folder_name
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| mod_name.to_string());
+    let entry = db.mods.entry(key).or_default();
+    entry.config_hashes = snapshot;
+    if let Err(e) = save_sources(&db, config_path) {
+        log::error!(
+            "Failed to save config snapshot for '{}' (folder {:?}): {}",
+            mod_name, folder_name, e
+        );
+    }
+}
+
 /// Carry a mod's source bindings (github repo, nexus link, pin state) from
 /// `old_name` to `new_name` after the install renamed the mod.
 ///
@@ -211,6 +298,12 @@ pub fn migrate_source_entry(old_name: &str, new_name: &str, config_path: &Path) 
     }
     if dest.snoozed_until_tag.is_none() {
         dest.snoozed_until_tag = old.snoozed_until_tag;
+    }
+    // config_hashes is a rolling cache: take old's only when dest doesn't
+    // already have its own. The next install_update_preserving_configs
+    // pass will refresh it from the post-install on-disk state.
+    if dest.config_hashes.is_empty() {
+        dest.config_hashes = old.config_hashes;
     }
     if let Err(e) = save_sources(&db, config_path) {
         log::error!(
@@ -286,6 +379,12 @@ pub fn carry_source_entry(
     }
     if dest.snoozed_until_tag.is_none() {
         dest.snoozed_until_tag = old.snoozed_until_tag;
+    }
+    // config_hashes is a rolling cache: take old's only when dest doesn't
+    // already have its own. The next install_update_preserving_configs
+    // pass will refresh it from the post-install on-disk state.
+    if dest.config_hashes.is_empty() {
+        dest.config_hashes = old.config_hashes;
     }
     if let Err(e) = save_sources(&db, config_path) {
         log::error!(

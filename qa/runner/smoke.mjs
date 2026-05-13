@@ -9,6 +9,7 @@
 
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import { createConnection } from 'node:net';
 import { tmpdir } from 'node:os';
 import { basename, dirname, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -176,6 +177,24 @@ function reapZombieProcesses() {
 }
 
 /* ── Driver lifecycle ───────────────────────────────────────────── */
+
+// Poll a TCP port until something is listening (or timeout). Replaces a
+// fixed sleep that became flaky when tauri-driver took longer than 1.5s
+// to bind on cold starts — the WebDriver client would then ECONNREFUSED
+// before tauri-driver was ready.
+async function waitForPort(port, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const ok = await new Promise((res) => {
+      const sock = createConnection({ host: '127.0.0.1', port });
+      sock.once('connect', () => { sock.end(); res(true); });
+      sock.once('error', () => { res(false); });
+    });
+    if (ok) return;
+    await delay(200);
+  }
+  throw new Error(`tauri-driver never started listening on port ${port} within ${timeoutMs}ms`);
+}
 
 function startTauriDriver() {
   // tauri-driver 2.0.6 is the intermediary: it launches the app, spawns
@@ -779,7 +798,7 @@ async function main() {
   FIXTURE_DIRS = makeFixtureGameTree();
 
   const driverProc = startTauriDriver();
-  await delay(1500);
+  await waitForPort(DRIVER_PORT, 15_000);
 
   let driver;
   let failed = false;

@@ -10,7 +10,6 @@ mod game;
 // tests tractable.
 pub mod mod_sources;
 pub mod mods;
-mod modpack_browser;
 mod nexus;
 pub mod profiles;
 mod qa_cassette;

@@ -544,7 +544,6 @@ fn flow_11_apply_profile_pins_override_profile_state() {
         }],
         created_at: now,
         updated_at: now,
-        public: None,
     };
 
     let mut pinned = std::collections::HashSet::new();
@@ -689,7 +688,6 @@ fn flow_11_apply_profile_without_pin_moves_mod_as_directed() {
         }],
         created_at: now,
         updated_at: now,
-        public: None,
     };
 
     let empty_pins = std::collections::HashSet::new();

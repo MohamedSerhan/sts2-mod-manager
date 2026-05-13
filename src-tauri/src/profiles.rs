@@ -47,10 +47,6 @@ pub struct Profile {
     pub mods: Vec<ProfileMod>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
-    /// Whether this profile is listed in the modpack browser.
-    /// None or Some(false) means unlisted (private). Some(true) means public.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub public: Option<bool>,
 }
 
 // ── Core Functions ──────────────────────────────────────────────────────────
@@ -95,7 +91,6 @@ pub fn list_profiles(profiles_path: &Path) -> Vec<Profile> {
                         mods: vec![],
                         created_at: chrono::Utc::now(),
                         updated_at: chrono::Utc::now(),
-                        public: None,
                     });
                     seen_names.insert(stem);
                 }
@@ -279,7 +274,6 @@ fn snapshot_current_inner(
         mods: profile_mods,
         created_at: existing_profile.as_ref().map(|p| p.created_at).unwrap_or(now),
         updated_at: now,
-        public: existing_profile.as_ref().and_then(|p| p.public),
     };
 
     save_profile(&profile, profiles_path)?;

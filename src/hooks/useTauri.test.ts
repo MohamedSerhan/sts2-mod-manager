@@ -321,9 +321,12 @@ describe('useTauri wrappers — command names + arg shapes', () => {
 
   it('sharing + subscriptions', async () => {
     registerInvokeFallback(() => null);
-    await shareProfile('My Pack');
-    expect(lastCall()).toEqual({ cmd: 'share_profile', args: { name: 'My Pack' } });
-    await reshareProfile('My Pack');
+    await shareProfile('My Pack', null, false);
+    expect(lastCall()).toEqual({
+      cmd: 'share_profile',
+      args: { name: 'My Pack', listPublic: null, dontAskAgain: false },
+    });
+    await reshareProfile('My Pack', null, false);
     expect(lastCall().cmd).toBe('reshare_profile');
     await fetchSharedProfile('alice/abcd1234');
     expect(lastCall()).toEqual({

@@ -95,7 +95,9 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
       mod_name: null,
     });
     try {
-      const result = await (isReshare ? reshareProfile(profile.name) : shareProfile(profile.name));
+      const result = await (isReshare
+        ? reshareProfile(profile.name, null, false)
+        : shareProfile(profile.name, null, false));
       setShared(result);
       onShared?.(result);
 

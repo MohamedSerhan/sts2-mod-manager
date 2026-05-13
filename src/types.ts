@@ -231,3 +231,20 @@ export interface ModAuditEntry {
   latest_compatible_tag?: string | null;
 }
 
+export interface BrowserCard {
+  owner: string;
+  code: string;           // "AA5A-315D-61AE"
+  name: string;
+  mod_count: number;
+  created_at: string;     // ISO
+  updated_at: string;     // ISO
+}
+
+export interface BrowserPage {
+  cards: BrowserCard[];
+  page: number;
+  has_next_page: boolean;
+  stale: boolean;
+  fetched_at: number;     // unix seconds
+}
+

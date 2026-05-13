@@ -47,6 +47,12 @@ pub struct Profile {
     pub mods: Vec<ProfileMod>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Opt-in flag for the in-app Browse Modpacks tab.
+    /// `Some(true)` = listed; `None` / `Some(false)` = unlisted.
+    /// Defensive default so any manifest already in a curator's
+    /// `sts2mm-profiles` repo (no field present) is treated as opted out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public: Option<bool>,
 }
 
 // ── Core Functions ──────────────────────────────────────────────────────────
@@ -91,6 +97,7 @@ pub fn list_profiles(profiles_path: &Path) -> Vec<Profile> {
                         mods: vec![],
                         created_at: chrono::Utc::now(),
                         updated_at: chrono::Utc::now(),
+                        public: None,
                     });
                     seen_names.insert(stem);
                 }
@@ -274,6 +281,7 @@ fn snapshot_current_inner(
         mods: profile_mods,
         created_at: existing_profile.as_ref().map(|p| p.created_at).unwrap_or(now),
         updated_at: now,
+        public: existing_profile.as_ref().and_then(|p| p.public),
     };
 
     save_profile(&profile, profiles_path)?;
@@ -1044,4 +1052,55 @@ pub async fn repair_profile(
         failed_downloads: switch_result.failed_downloads,
         deleted_orphans,
     })
+}
+
+#[cfg(test)]
+mod public_field_tests {
+    use super::*;
+
+    #[test]
+    fn missing_field_deserializes_as_none() {
+        let json = r#"{
+            "name": "test",
+            "game_version": null,
+            "created_by": null,
+            "mods": [],
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z"
+        }"#;
+        let profile: Profile = serde_json::from_str(json).unwrap();
+        assert_eq!(profile.public, None);
+    }
+
+    #[test]
+    fn none_value_is_omitted_in_serialized_json() {
+        let profile = Profile {
+            name: "test".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+        };
+        let json = serde_json::to_string(&profile).unwrap();
+        assert!(!json.contains("\"public\""), "got: {}", json);
+    }
+
+    #[test]
+    fn true_value_roundtrips() {
+        let profile = Profile {
+            name: "test".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: Some(true),
+        };
+        let json = serde_json::to_string(&profile).unwrap();
+        assert!(json.contains("\"public\":true"));
+        let back: Profile = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.public, Some(true));
+    }
 }

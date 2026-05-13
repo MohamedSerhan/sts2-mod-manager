@@ -29,6 +29,9 @@ export interface Profile {
   mods: ProfileMod[];
   created_at: string;
   updated_at: string;
+  /** Opt-in flag for the in-app Browse Modpacks tab.
+   *  true = listed; null / false = unlisted. */
+  public?: boolean | null;
 }
 
 export interface ProfileMod {

@@ -449,9 +449,8 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
               return (
                 <>
                   <span
-                    className="gf-pill gf-pill-ok"
+                    className="gf-pill gf-pill-ok gf-pill-toolbar"
                     title="Every linked mod is on its source's latest installable release."
-                    style={{ padding: '6px 10px', fontSize: 13 }}
                   >
                     Up to date
                   </span>

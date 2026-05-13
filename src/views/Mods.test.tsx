@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { ModsView } from './Mods';
@@ -772,10 +772,10 @@ describe('<ModsView>', () => {
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
     const updateBtn = await screen.findByRole('button', { name: /^Update 1 mod$/ });
     await user.click(updateBtn);
-    // Confirm dialog appears with primary button "Update 1 mod" — click it.
-    const confirmBtn = await screen.findAllByRole('button', { name: /^Update 1 mod$/ });
-    // The confirm button is the second one to appear (modal); click whichever is in the dialog.
-    await user.click(confirmBtn[confirmBtn.length - 1]);
+    // Confirm dialog appears with the title "Update 1 mod?". Scope the
+    // button query to the modal so we don't race the toolbar button.
+    const modal = (await screen.findByText(/Update 1 mod\?/)).closest('.gf-modal')!;
+    await user.click(within(modal).getByRole('button', { name: /^Update 1 mod$/ }));
     await waitFor(() => {
       expect(getInvokeCalls().some(c => c.cmd === 'update_all_mods')).toBe(true);
     });

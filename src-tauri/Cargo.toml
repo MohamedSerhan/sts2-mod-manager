@@ -47,6 +47,22 @@ tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", features = ["json", "stream", "blocking"] }
 sha2 = "0.10"
 zip = "2"
+# Multi-format archive support. STS2 mods get shared as .zip most of the
+# time but Patreon/Discord drops sometimes use .7z (smaller) or .rar (older
+# packagers); without these the install gives users a "not a supported
+# archive" error and they have to extract + repack manually. See user
+# feedback batch (May 2026) and docs/superpowers/specs/2026-05-12-feedback-fixes-design.md.
+#
+# sevenz-rust2: pure-Rust 7z decompressor. No system lib.
+# unrar: thin wrapper over RARLab's official decompression C source
+# (compiled statically via the sister `unrar_sys` crate). RARLab's
+# license permits decompression; the Rust wrapper layer is MIT/Apache.
+sevenz-rust2 = "0.21"
+unrar = "0.5"
+# Promoted from dev-dep so the install pipeline can stage 7z/rar
+# extractions to a self-cleaning temp dir before re-packaging them as a
+# zip for the existing install_mod_from_zip pipeline to consume.
+tempfile = "3"
 dirs = "5"
 url = "2"
 thiserror = "2"

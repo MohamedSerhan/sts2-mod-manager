@@ -234,7 +234,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
     try {
       const selected = await open({
         multiple: false,
-        filters: [{ name: 'Mod Archives', extensions: ['zip'] }],
+        filters: [{ name: 'Mod Archives', extensions: ['zip', '7z', 'rar'] }],
       });
       if (!selected) return;
       const path = typeof selected === 'string' ? selected : selected;

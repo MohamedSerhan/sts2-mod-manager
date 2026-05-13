@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
 use crate::mod_sources::load_sources;
-use crate::mods::{install_mod_from_zip, scan_mods, scan_disabled_mods, ModInfo};
+use crate::mods::{install_mod_from_archive, scan_mods, scan_disabled_mods, ModInfo};
 use crate::state::AppState;
 
 /// Payload emitted to the frontend when a mod is auto-installed from Downloads.
@@ -76,7 +76,10 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                             .and_then(|e| e.to_str())
                             .unwrap_or("")
                             .to_lowercase();
-                        if ext != "zip" {
+                        // Accept the three archive formats the install
+                        // pipeline knows how to read. .7z and .rar route
+                        // through extract → repack → zip pipeline.
+                        if !matches!(ext.as_str(), "zip" | "7z" | "rar") {
                             continue;
                         }
 
@@ -203,7 +206,7 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                             None
                         };
 
-                        match install_mod_from_zip(path, &mods_path) {
+                        match install_mod_from_archive(path, &mods_path) {
                             Ok(mod_info) => {
                                 let file_name = path
                                     .file_name()
@@ -722,33 +725,52 @@ fn attach_pending_nexus_source(
     );
 }
 
-/// Quick check: does the zip contain at least one .dll, .pck, or mod .json file?
+/// Quick check: does the archive contain at least one .dll, .pck, or mod .json file?
+///
+/// For .zip we walk the central directory in-place (cheap).
+/// For .7z and .rar we accept-all and let the install pipeline make the
+/// real decision after extracting — a "peek" pass would require fully
+/// decompressing the archive, defeating the point. False positives just
+/// produce a friendly install-failed toast; safe enough.
 fn looks_like_mod_zip(path: &Path) -> bool {
-    let file = match std::fs::File::open(path) {
-        Ok(f) => f,
-        Err(_) => return false,
-    };
-    let mut archive = match zip::ZipArchive::new(file) {
-        Ok(a) => a,
-        Err(_) => return false,
-    };
-    for i in 0..archive.len() {
-        if let Ok(entry) = archive.by_index(i) {
-            let name = entry.name().to_lowercase();
-            if name.ends_with(".dll") || name.ends_with(".pck") {
-                return true;
-            }
-            // A .json at root or one level deep that isn't package.json etc.
-            if name.ends_with(".json")
-                && !name.contains("package.json")
-                && !name.contains("tsconfig")
-            {
-                // Check if it looks like a mod manifest
-                if name.split('/').count() <= 2 {
-                    return true;
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    match ext.as_str() {
+        "zip" => {
+            let file = match std::fs::File::open(path) {
+                Ok(f) => f,
+                Err(_) => return false,
+            };
+            let mut archive = match zip::ZipArchive::new(file) {
+                Ok(a) => a,
+                Err(_) => return false,
+            };
+            for i in 0..archive.len() {
+                if let Ok(entry) = archive.by_index(i) {
+                    let name = entry.name().to_lowercase();
+                    if name.ends_with(".dll") || name.ends_with(".pck") {
+                        return true;
+                    }
+                    if name.ends_with(".json")
+                        && !name.contains("package.json")
+                        && !name.contains("tsconfig")
+                        && name.split('/').count() <= 2
+                    {
+                        return true;
+                    }
                 }
             }
+            false
         }
+        // Optimistic for non-zip formats — the install pipeline either
+        // succeeds (good) or emits a `mod-auto-install-failed` event the
+        // user sees as a toast (no harm). The auto-install ext gate at
+        // the top of the watcher already filters out everything that
+        // isn't a known archive extension.
+        "7z" | "rar" => true,
+        _ => false,
     }
-    false
 }

@@ -1412,6 +1412,8 @@ pub async fn set_modpack_listing(
     public: bool,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<(), String> {
+    let _guard = ShareGuard::try_acquire(state.inner(), &name)?;
+
     let (profiles_path, token) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let token = s.github_token.clone().ok_or("GitHub token required")?;
@@ -1426,6 +1428,10 @@ pub async fn set_modpack_listing(
 
     let mut profile =
         crate::profiles::load_profile(&name, &profiles_path).map_err(|e| e.to_string())?;
+    // Idempotency: skip the round-trip when the value already matches.
+    if profile.public == Some(public) {
+        return Ok(());
+    }
     profile.public = Some(public);
     crate::profiles::save_profile(&profile, &profiles_path).map_err(|e| e.to_string())?;
 

@@ -137,8 +137,16 @@ pub async fn list_manifest_filenames(
         owner, repo
     );
     let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        return Ok(vec![]); // missing or rate-limited -> treat as empty
+    let status = resp.status();
+    if !status.is_success() {
+        // Missing repo (404), rate-limited (403/429), or auth-blocked (401) —
+        // treat as empty so one bad owner can't sink the page. Log so the
+        // partial-failure cause is recoverable from logs.
+        log::warn!(
+            "modpack-browser: list_manifest_filenames {}/{} returned {}",
+            owner, repo, status,
+        );
+        return Ok(vec![]);
     }
     let entries: Vec<ContentsListEntry> = resp.json().await.map_err(|e| e.to_string())?;
     let files = entries
@@ -215,6 +223,11 @@ pub async fn fetch_modpack_browser_page(
         }
     };
 
+    // Captured before the fan-out moves `owners`; used after the filter
+    // step to distinguish "GitHub had nothing" (legitimate empty) from
+    // "fan-out was rate-limited mid-page" (don't clobber prior cache).
+    let owners_was_empty = owners.is_empty();
+
     let mut list_tasks = FuturesUnordered::new();
     for (owner, repo) in owners {
         let client = client.clone();
@@ -253,6 +266,21 @@ pub async fn fetch_modpack_browser_page(
     }
 
     let cards = filter_to_browser_cards(raw);
+
+    // If the fan-out produced an empty result despite GitHub search returning
+    // owners, it's almost certainly a partial rate-limit storm. Don't clobber
+    // a previously good cache; surface what we had with a stale flag instead.
+    if cards.is_empty() && !owners_was_empty {
+        if let Some(c) = cached {
+            return Ok(BrowserPage {
+                cards: c.cards,
+                page,
+                has_next_page: c.has_next_page,
+                stale: true,
+                fetched_at: c.fetched_at,
+            });
+        }
+    }
 
     let entry = CachedBrowserPage {
         fetched_at: now,

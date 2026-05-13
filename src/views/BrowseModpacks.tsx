@@ -20,8 +20,11 @@ function relativeTime(iso: string): string {
 }
 
 function isRateLimit(err: unknown): boolean {
+  // Only treat as rate-limit when the message actually says so, or it's a
+  // 429. Bare 403s also come from auth/permission errors which need a
+  // different message, not "rate-limiting us."
   const m = err instanceof Error ? err.message : String(err);
-  return /\b(403|429)\b/.test(m) || /rate limit/i.test(m);
+  return /\b429\b/.test(m) || /rate limit/i.test(m);
 }
 
 export function BrowseModpacksView({ onGoToProfiles }: Props = {}) {

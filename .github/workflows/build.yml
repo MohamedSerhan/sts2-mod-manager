@@ -154,8 +154,9 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
         run: |
-          $version = '${{ github.ref_name }}'.TrimStart('v')
+          $version = $env:TAG.TrimStart('v')
 
           # Tauri's cargo binary is sts2-mod-manager.exe (from Cargo.toml).
           # Filter out NSIS *-setup.exe and any build-script intermediates.
@@ -179,7 +180,7 @@ jobs:
           $zip = "STS2.Mod.Manager_${version}_x64_portable.zip"
           Compress-Archive -Path "$staging/*" -DestinationPath $zip -Force
 
-          gh release upload "${{ github.ref_name }}" $zip --clobber
+          gh release upload "$env:TAG" $zip --clobber
 
       - name: Patch AppImage AppRun (Arch/Wayland LD_PRELOAD fix)
         if: matrix.platform == 'ubuntu-22.04'
@@ -274,6 +275,7 @@ jobs:
           #### Windows
           $(link "STS2.Mod.Manager_${VERSION}_x64-setup.exe" "STS2.Mod.Manager_${VERSION}_x64-setup.exe" "Recommended. Double-click to install." true)
           $(link "STS2.Mod.Manager_${VERSION}_x64_en-US.msi" "STS2.Mod.Manager_${VERSION}_x64_en-US.msi" "Alternative MSI installer.")
+          $(link "STS2.Mod.Manager_${VERSION}_x64_portable.zip" "STS2.Mod.Manager_${VERSION}_x64_portable.zip" "Portable build (no installer, no auto-update). Used by the Nexus Mods page. Requires WebView2 Runtime.")
 
           > **Windows SmartScreen warning:** The installer isn't code-signed yet, so when you run it you'll see *\"Windows protected your PC\"* from Microsoft Defender SmartScreen. To install: click **More info**, then click **Run anyway**. Your browser may also flag the download as untrusted -- choose **Keep** (Edge/Chrome) to save the file.
 

@@ -712,4 +712,175 @@ describe('<PublishModal>', () => {
       expect(call!.args).toEqual({ name: 'My Pack', listPublic: true });
     });
   });
+
+  it('clicking Public then Friends only re-selects private (covers Friends-only onChange)', async () => {
+    tokenIsSet(true);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText(/My Pack/)).toBeInTheDocument(); });
+    const radios = screen.getAllByRole('radio') as HTMLInputElement[];
+    if (radios.length < 2) {
+      throw new Error(`Expected 2 visibility radios, found ${radios.length}`);
+    }
+    // First select Public so the default-private state is no longer in
+    // effect; then re-select the Friends only radio to fire its onChange.
+    await user.click(radios[1]);
+    expect(radios[1].checked).toBe(true);
+    expect(radios[0].checked).toBe(false);
+    await user.click(radios[0]);
+    expect(radios[0].checked).toBe(true);
+    expect(radios[1].checked).toBe(false);
+  });
+
+  it('pre-selects Public when profile.public is true and publishes with listPublic=true', async () => {
+    tokenIsSet(true);
+    registerInvokeHandler('share_profile', () => shareOk);
+    const user = userEvent.setup();
+    render(<Wrap profile={{ ...profile, public: true }} />);
+    await waitFor(() => { expect(screen.getByText(/My Pack/)).toBeInTheDocument(); });
+    const radios = screen.getAllByRole('radio') as HTMLInputElement[];
+    // Public is pre-selected because the profile was previously published
+    // with listing=on.
+    expect(radios[1].checked).toBe(true);
+    expect(radios[0].checked).toBe(false);
+    const publishBtn = getPublishButton();
+    await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
+    await user.click(publishBtn);
+    await waitFor(() => {
+      const call = getInvokeCalls().find((c) => c.cmd === 'share_profile');
+      expect(call).toBeDefined();
+      expect(call!.args).toEqual({ name: 'My Pack', listPublic: true });
+    });
+  });
+
+  // ── ListingToggle (success-state Browse Modpacks listing toggle) ───
+
+  /** Drives the publish flow through to success so the ListingToggle is
+   *  mounted in the DOM. `visibility` controls whether the toggle starts
+   *  in "Yes" (true) or "No" (false) state. */
+  async function renderInSuccessWithVisibility(visibility: 'private' | 'public') {
+    tokenIsSet(true);
+    registerInvokeHandler('share_profile', () => shareOk);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    const publishBtn = await screen.findByRole('button', { name: /Publish/ });
+    await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
+    if (visibility === 'public') {
+      const radios = screen.getAllByRole('radio') as HTMLInputElement[];
+      await user.click(radios[1]);
+    }
+    await user.click(publishBtn);
+    await waitForModalTitle('Profile published');
+    return user;
+  }
+
+  /** Find the ListingToggle button (label is "Yes" or "No"). The Done
+   *  footer button has a different name, so this lookup is unambiguous. */
+  function getListingToggle(): HTMLButtonElement {
+    const buttons = screen.getAllByRole('button') as HTMLButtonElement[];
+    const btn = buttons.find((b) => /^(Yes|No)$/.test(b.textContent?.trim() ?? ''));
+    if (!btn) {
+      throw new Error(
+        `ListingToggle button (Yes/No) not found. Buttons: ${buttons.map((b) => `"${b.textContent}"`).join(', ')}`,
+      );
+    }
+    return btn;
+  }
+
+  it('ListingToggle shows "No" when published with visibility=private', async () => {
+    await renderInSuccessWithVisibility('private');
+    const btn = getListingToggle();
+    expect(btn.textContent?.trim()).toBe('No');
+    expect(btn).not.toBeDisabled();
+  });
+
+  it('ListingToggle shows "Yes" when published with visibility=public', async () => {
+    await renderInSuccessWithVisibility('public');
+    const btn = getListingToggle();
+    expect(btn.textContent?.trim()).toBe('Yes');
+  });
+
+  it('ListingToggle: clicking "No" toggles to "Yes" and toasts "Listed on Browse Modpacks"', async () => {
+    registerInvokeHandler('set_modpack_listing', () => null);
+    const user = await renderInSuccessWithVisibility('private');
+    const btn = getListingToggle();
+    expect(btn.textContent?.trim()).toBe('No');
+    await user.click(btn);
+    await waitFor(() => {
+      expect(getListingToggle().textContent?.trim()).toBe('Yes');
+    });
+    // Backend invoked with (name, public=true).
+    const call = getInvokeCalls().find((c) => c.cmd === 'set_modpack_listing');
+    expect(call).toBeDefined();
+    expect(call!.args).toEqual({ name: 'My Pack', public: true });
+    // Success toast surfaces.
+    expect(screen.getByText('Listed on Browse Modpacks')).toBeInTheDocument();
+  });
+
+  it('ListingToggle: clicking "Yes" toggles to "No" and toasts "Hidden from Browse Modpacks"', async () => {
+    registerInvokeHandler('set_modpack_listing', () => null);
+    const user = await renderInSuccessWithVisibility('public');
+    const btn = getListingToggle();
+    expect(btn.textContent?.trim()).toBe('Yes');
+    await user.click(btn);
+    await waitFor(() => {
+      expect(getListingToggle().textContent?.trim()).toBe('No');
+    });
+    const call = getInvokeCalls().find((c) => c.cmd === 'set_modpack_listing');
+    expect(call).toBeDefined();
+    expect(call!.args).toEqual({ name: 'My Pack', public: false });
+    expect(screen.getByText('Hidden from Browse Modpacks')).toBeInTheDocument();
+  });
+
+  it('ListingToggle: button is disabled while set_modpack_listing is in flight (blocks re-clicks)', async () => {
+    let resolveListing!: () => void;
+    registerInvokeHandler(
+      'set_modpack_listing',
+      () => new Promise<void>((res) => { resolveListing = () => res(); }),
+    );
+    const user = await renderInSuccessWithVisibility('private');
+    const btn = getListingToggle();
+    await user.click(btn);
+    // While busy, the button is disabled. Use a loud lookup, then
+    // assert it is the same node (no re-mount races) and is disabled.
+    await waitFor(() => {
+      expect(getListingToggle()).toBeDisabled();
+    });
+    // Label hasn't flipped yet (state updates only on resolve).
+    expect(getListingToggle().textContent?.trim()).toBe('No');
+    // Resolve the in-flight call and verify the toggle settles.
+    resolveListing();
+    await waitFor(() => {
+      expect(getListingToggle().textContent?.trim()).toBe('Yes');
+    });
+    expect(getListingToggle()).not.toBeDisabled();
+  });
+
+  it('ListingToggle: setModpackListing rejection surfaces "Failed: …" toast and keeps prior label', async () => {
+    registerInvokeHandler('set_modpack_listing', () => {
+      throw new Error('rate limit');
+    });
+    const user = await renderInSuccessWithVisibility('private');
+    const btn = getListingToggle();
+    await user.click(btn);
+    await waitFor(() => {
+      expect(screen.getByText(/Failed: rate limit/)).toBeInTheDocument();
+    });
+    // Label stays "No" — failure doesn't flip the optimistic state.
+    expect(getListingToggle().textContent?.trim()).toBe('No');
+    expect(getListingToggle()).not.toBeDisabled();
+  });
+
+  it('ListingToggle: non-Error rejection is stringified into the failure toast', async () => {
+    registerInvokeHandler('set_modpack_listing', () => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
+      throw 'offline';
+    });
+    const user = await renderInSuccessWithVisibility('private');
+    const btn = getListingToggle();
+    await user.click(btn);
+    await waitFor(() => {
+      expect(screen.getByText(/Failed: offline/)).toBeInTheDocument();
+    });
+  });
 });

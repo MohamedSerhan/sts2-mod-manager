@@ -79,6 +79,11 @@ regex = "1"
 semver = "1"
 base64 = "0.22"
 sysinfo = { version = "0.32", default-features = false, features = ["system"] }
+# Used by sharing.rs::upload_release_asset to safely encode asset
+# filenames into the `?name=<...>` query param of GitHub's release-asset
+# upload endpoint. Pure-Rust, no transitive bloat — smaller than pulling
+# in a full url-builder.
+urlencoding = "2"
 
 # Windows: read Steam's install path out of the registry so auto-detect
 # works for users who installed Steam to a non-default drive (D:, E:, etc.).
@@ -89,3 +94,8 @@ winreg = "0.55"
 
 [dev-dependencies]
 tempfile = "3"
+# In-process HTTP server for testing sharing.rs upload paths. The
+# qa-cassette layer (src/qa_cassette.rs) is GET-only by design — wiremock
+# covers POST/PUT/PATCH/DELETE so the release uploader has E2E coverage
+# without burning real GitHub rate limits.
+wiremock = "0.6"

@@ -191,6 +191,19 @@ fn format_code(raw: &str) -> String {
 
 // ── GitHub API Helpers ─────────────────────────────────────────────────────
 
+/// Base URL for GitHub's REST API. Tests override via the
+/// `STS2_GITHUB_API_BASE` env var so wiremock can intercept; production
+/// always reads the literal default (the env var is only set by tests).
+///
+/// Pulled out instead of threading a `base_url: &str` parameter through
+/// every upload helper because (a) the prod code never varies it and (b)
+/// the helpers already form URLs by `format!`, so a single base swap is
+/// the minimum surface change for testability.
+pub(crate) fn github_api_base() -> String {
+    std::env::var("STS2_GITHUB_API_BASE")
+        .unwrap_or_else(|_| "https://api.github.com".to_string())
+}
+
 pub(crate) fn build_client(token: &str) -> reqwest::Client {
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
@@ -219,7 +232,7 @@ pub(crate) fn build_client(token: &str) -> reqwest::Client {
 /// Get the authenticated user's GitHub username.
 async fn get_github_username(token: &str) -> Result<String> {
     let client = build_client(token);
-    let resp = client.get("https://api.github.com/user").send().await?;
+    let resp = client.get(&format!("{}/user", github_api_base())).send().await?;
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -241,8 +254,8 @@ async fn ensure_profiles_repo(token: &str, username: &str) -> Result<()> {
     // Check if repo exists
     let resp = client
         .get(&format!(
-            "https://api.github.com/repos/{}/{}",
-            username, PROFILES_REPO
+            "{}/repos/{}/{}",
+            github_api_base(), username, PROFILES_REPO
         ))
         .send()
         .await?;
@@ -260,7 +273,7 @@ async fn ensure_profiles_repo(token: &str, username: &str) -> Result<()> {
     });
 
     let resp = client
-        .post("https://api.github.com/user/repos")
+        .post(&format!("{}/user/repos", github_api_base()))
         .json(&body)
         .send()
         .await?;
@@ -293,8 +306,8 @@ async fn upsert_file(
 ) -> Result<(String, String)> {
     let client = build_client(token);
     let url = format!(
-        "https://api.github.com/repos/{}/{}/contents/{}",
-        username, PROFILES_REPO, filename
+        "{}/repos/{}/{}/contents/{}",
+        github_api_base(), username, PROFILES_REPO, filename
     );
 
     // If we don't have the SHA, try to get it (needed for updates)
@@ -411,8 +424,8 @@ async fn upload_mod_bundle(
         .collect::<String>();
     let filename = format!("mods/{}_{}.zip", safe_name, safe_ver);
     let url = format!(
-        "https://api.github.com/repos/{}/{}/contents/{}",
-        username, PROFILES_REPO, filename
+        "{}/repos/{}/{}/contents/{}",
+        github_api_base(), username, PROFILES_REPO, filename
     );
 
     let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, zip_data);
@@ -492,8 +505,8 @@ pub async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::P
         if parts.len() >= 4 {
             let (owner, repo, _branch, path) = (parts[0], parts[1], parts[2], parts[3]);
             let api_url = format!(
-                "https://api.github.com/repos/{}/{}/contents/{}",
-                owner, repo, path
+                "{}/repos/{}/{}/contents/{}",
+                github_api_base(), owner, repo, path
             );
             log::info!("Downloading bundle '{}' via GitHub API: {}", mod_name, api_url);
 
@@ -588,8 +601,8 @@ pub async fn fetch_shared_profile(
 
     // Primary: use GitHub Contents API with raw accept header to bypass CDN cache.
     let api_url = format!(
-        "https://api.github.com/repos/{}/{}/contents/{}",
-        owner, PROFILES_REPO, filename
+        "{}/repos/{}/{}/contents/{}",
+        github_api_base(), owner, PROFILES_REPO, filename
     );
     log::info!(
         "Fetching shared profile via GitHub API ({}): {}",

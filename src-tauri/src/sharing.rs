@@ -627,14 +627,20 @@ pub(crate) async fn upload_mod_bundle_via_release(
     use sha2::{Digest, Sha256};
 
     let client = build_client(token);
+    // ASCII-only sanitization. `is_alphanumeric()` returns true for Unicode
+    // alphanumeric chars (e.g. Chinese ideographs in "皮皮统计: Skada"), but
+    // GitHub's asset-list response round-trips non-ASCII names differently
+    // than our POST URL-encoding, so the `find(|a| a.name == asset_name)`
+    // lookup misses → fall through to POST → 422 already_exists. Stick to
+    // ASCII so the round-trip is byte-stable.
     let safe_name = mod_name
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
         .collect::<String>();
     let safe_ver = version
         .trim_start_matches('v')
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '.' || c == '-' { c } else { '_' })
+        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' { c } else { '_' })
         .collect::<String>();
     let asset_name = format!("{}_v{}.zip", safe_name, safe_ver);
 
@@ -1042,7 +1048,7 @@ async fn share_profile_impl(
                         log::info!("Bundled mod '{}' successfully ({} bytes)", pm.name, zip_data.len());
                     }
                     Err(e) => {
-                        log::warn!("Failed to upload bundle for '{}': {}", pm.name, e);
+                        log::error!("Failed to upload bundle for '{}': {}", pm.name, e);
                         // If bundling fails AND there's no GitHub source either, the
                         // mod isn't recoverable for friends. Track either way so the
                         // curator sees a clear "X of N failed" toast — they can
@@ -1055,7 +1061,7 @@ async fn share_profile_impl(
                 }
             }
             Err(e) => {
-                log::warn!("Failed to zip mod '{}': {}", pm.name, e);
+                log::error!("Failed to zip mod '{}': {}", pm.name, e);
                 failed_uploads.push(pm.name.clone());
             }
         }
@@ -1262,13 +1268,13 @@ pub async fn reshare_profile(
                         log::info!("Re-bundled mod '{}' successfully ({} bytes)", pm.name, zip_data.len());
                     }
                     Err(e) => {
-                        log::warn!("Failed to upload bundle for '{}': {}", pm.name, e);
+                        log::error!("Failed to upload bundle for '{}': {}", pm.name, e);
                         failed_uploads.push(pm.name.clone());
                     }
                 }
             }
             Err(e) => {
-                log::warn!("Failed to zip mod '{}': {}", pm.name, e);
+                log::error!("Failed to zip mod '{}': {}", pm.name, e);
                 failed_uploads.push(pm.name.clone());
             }
         }
@@ -1583,13 +1589,13 @@ pub async fn install_shared_profile(
                         continue;
                     }
                     Err(e) => {
-                        log::warn!("GitHub download also failed for '{}': {}", pm.name, e);
+                        log::error!("GitHub download also failed for '{}': {}", pm.name, e);
                     }
                 }
             }
         }
 
-        log::warn!("No download source for mod '{}' -- skipping", pm.name);
+        log::error!("No download source for mod '{}' -- skipping", pm.name);
         download_failures.push(pm.name.clone());
     }
 
@@ -2354,6 +2360,49 @@ mod release_upload_tests {
         let _ = upload_mod_bundle_via_release(
             "test-token", "octo", "My Cool/Mod", "v1.2.3", b"data", None
         ).await.expect("ok");
+    }
+
+    /// Regression test: mod names with non-ASCII characters (Chinese
+    /// ideographs, accents, etc.) must produce ASCII-only asset names.
+    /// GitHub's asset-list response round-trips non-ASCII names through
+    /// a normalization that doesn't match our POST URL-encoding, so the
+    /// orchestrator's find-by-name lookup would miss the existing asset
+    /// and fall through to POST → 422 already_exists. The fix is to use
+    /// `is_ascii_alphanumeric` instead of `is_alphanumeric` so the asset
+    /// name is round-trip stable.
+    #[tokio::test]
+    async fn upload_mod_bundle_via_release_sanitizes_non_ascii_to_underscores() {
+        let (server, _env_guard) = mock_github().await;
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 42,
+                "upload_url": format!("{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}", server.uri()),
+                "assets": []
+            })))
+            .mount(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&server).await;
+
+        // "皮皮极速: SpeedX" → 4 ideographs + ":" + " " all map to _ each.
+        // Then "SpeedX" passes through. Final: "______SpeedX_v0.11.7.zip".
+        // Six underscores total (4 ideographs + colon + space).
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("name", "______SpeedX_v0.11.7.zip"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": 100,
+                "name": "______SpeedX_v0.11.7.zip",
+                "browser_download_url": "https://github.com/octo/sts2mm-profiles/releases/download/bundles/______SpeedX_v0.11.7.zip"
+            })))
+            .expect(1)
+            .mount(&server).await;
+
+        let _ = upload_mod_bundle_via_release(
+            "test-token", "octo", "皮皮极速: SpeedX", "0.11.7", b"data", None
+        ).await.expect("non-ascii mod name must sanitize to ASCII-only asset name");
     }
 
     /// Regression for Bug A through the orchestrator: an asset on page 2

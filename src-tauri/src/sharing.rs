@@ -109,6 +109,25 @@ struct UserResponse {
     login: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct ReleaseResponse {
+    id: u64,
+    /// Template like `https://uploads.github.com/repos/<o>/<r>/releases/<id>/assets{?name,label}`.
+    /// We strip the `{?name,label}` suffix and append `?name=<filename>` ourselves.
+    upload_url: String,
+    #[serde(default)]
+    assets: Vec<ReleaseAsset>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ReleaseAsset {
+    id: u64,
+    name: String,
+    browser_download_url: String,
+}
+
+const BUNDLES_RELEASE_TAG: &str = "bundles";
+
 /// Per-step status emitted to the frontend while a share / re-share is
 /// running. Lets the PublishModal show "Bundling mod 5 of 20…" instead
 /// of an opaque "Publishing…" spinner — bundling 20 mods of any real
@@ -476,6 +495,225 @@ async fn upload_mod_bundle(
             mod_name, status, text
         )));
     }
+}
+
+/// Ensure the rolling `bundles` release exists on the profiles repo,
+/// creating it on first share. Returns the release as it exists after
+/// this call — assets included so the caller can dedupe without a
+/// second round-trip.
+///
+/// Why a single rolling release instead of one per share: asset names
+/// carry the version (`<mod>_v<ver>.zip`), so versioning happens at the
+/// asset layer. One release = one stable tag (`bundles`) = one stable
+/// URL prefix for every shared bundle.
+async fn ensure_bundles_release(
+    client: &reqwest::Client,
+    owner: &str,
+    repo: &str,
+) -> Result<ReleaseResponse> {
+    let base = github_api_base();
+    let tag_url = format!("{}/repos/{}/{}/releases/tags/{}", base, owner, repo, BUNDLES_RELEASE_TAG);
+
+    let resp = client.get(&tag_url).send().await?;
+    if resp.status().is_success() {
+        return Ok(resp.json::<ReleaseResponse>().await?);
+    }
+    if resp.status().as_u16() != 404 {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(AppError::Other(format!(
+            "Could not check for bundles release on {}/{} ({}): {}",
+            owner, repo, status, text
+        )));
+    }
+
+    let create_url = format!("{}/repos/{}/{}/releases", base, owner, repo);
+    let body = serde_json::json!({
+        "tag_name": BUNDLES_RELEASE_TAG,
+        "name": "Mod bundles",
+        "body": "Auto-managed by STS2 Mod Manager. Holds binary mod bundles attached to shared profiles.",
+        "draft": false,
+        "prerelease": false,
+    });
+    let resp = client.post(&create_url).json(&body).send().await?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(AppError::Other(format!(
+            "Could not create bundles release on {}/{} ({}): {}",
+            owner, repo, status, text
+        )));
+    }
+    Ok(resp.json::<ReleaseResponse>().await?)
+}
+
+/// Upload a single binary asset to a release. `upload_url_template` is
+/// the `upload_url` field returned by the GitHub release endpoint —
+/// a URI Template like `https://uploads.github.com/.../assets{?name,label}`.
+/// We strip the `{?name,label}` suffix and append `?name=<filename>`.
+///
+/// Returns the freshly-created `ReleaseAsset` (caller wants `.browser_download_url`
+/// for the manifest, but also `.id` and `.name` for any subsequent
+/// rename/replace flow — see `upload_mod_bundle_via_release` below).
+///
+/// Unlike the Contents API, this endpoint takes raw bytes (no base64).
+/// That's what removes the ~50 MiB Contents-API ceiling: the asset
+/// endpoint accepts up to 2 GB per file.
+async fn upload_release_asset(
+    client: &reqwest::Client,
+    upload_url_template: &str,
+    filename: &str,
+    data: &[u8],
+) -> Result<ReleaseAsset> {
+    let base = upload_url_template
+        .split_once('{')
+        .map(|(b, _)| b)
+        .unwrap_or(upload_url_template);
+    let encoded_name = urlencoding::encode(filename);
+    let url = format!("{}?name={}", base, encoded_name);
+
+    let resp = client
+        .post(&url)
+        .header(reqwest::header::CONTENT_TYPE, "application/zip")
+        .body(data.to_vec())
+        .send()
+        .await?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(AppError::Other(format!(
+            "Failed to upload release asset '{}' ({}): {}",
+            filename, status, text
+        )));
+    }
+    Ok(resp.json::<ReleaseAsset>().await?)
+}
+
+/// PATCH a release asset's name. Used by the replace-via-rename flow
+/// to free the canonical name without ever DELETEing the old asset
+/// (which would create an atomicity gap during which the URL 404s).
+async fn rename_release_asset(
+    client: &reqwest::Client,
+    owner: &str,
+    repo: &str,
+    asset_id: u64,
+    new_name: &str,
+) -> Result<ReleaseAsset> {
+    let url = format!(
+        "{}/repos/{}/{}/releases/assets/{}",
+        github_api_base(), owner, repo, asset_id
+    );
+    let body = serde_json::json!({ "name": new_name });
+    let resp = client.patch(&url).json(&body).send().await?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(AppError::Other(format!(
+            "Failed to rename release asset {} to '{}': {} {}",
+            asset_id, new_name, status, text
+        )));
+    }
+    Ok(resp.json::<ReleaseAsset>().await?)
+}
+
+/// Replace a release asset without a DELETE atomicity gap. Used only
+/// when a mod author iterates locally without bumping `version` (the
+/// hash differs but the asset name is still occupied).
+///
+/// Steps:
+///   1. POST new bytes under `<canonical>.new`
+///   2. PATCH old asset to `<canonical>.stale` (frees the canonical name)
+///   3. PATCH new asset to `<canonical>` (claims it)
+///
+/// If step 3 fails, the canonical name briefly resolves to a 404 — but
+/// the old `bundle_url` in any already-distributed manifest still points
+/// at the old asset, which now lives at `<canonical>.stale` and *no*
+/// shared manifest references that name. So the worst case is one
+/// orphan asset until the next re-share, never a broken URL for friends.
+async fn replace_release_asset_via_rename(
+    client: &reqwest::Client,
+    owner: &str,
+    repo: &str,
+    upload_url_template: &str,
+    canonical_name: &str,
+    old_asset_id: u64,
+    data: &[u8],
+) -> Result<String> {
+    let new_tmp_name = format!("{}.new", canonical_name);
+    let stale_name = format!("{}.stale", canonical_name);
+
+    let new_asset = upload_release_asset(client, upload_url_template, &new_tmp_name, data).await?;
+    rename_release_asset(client, owner, repo, old_asset_id, &stale_name).await?;
+    let renamed = rename_release_asset(client, owner, repo, new_asset.id, canonical_name).await?;
+    Ok(renamed.browser_download_url)
+}
+
+/// Upload a mod's zip bundle as a release asset on the curator's
+/// `sts2mm-profiles` repo. Returns (download_url, sha256_hex) so the
+/// caller can persist the hash to the profile manifest for next-share
+/// content-addressing.
+///
+/// Skip semantics:
+///   - If `prior_sha256` is Some AND matches the freshly-computed local
+///     hash AND the canonical asset name is present in the release →
+///     skip the upload entirely, return the existing browser_download_url.
+///   - If the name collides but the hash differs (or no prior hash to
+///     compare to) → replace via the POST-then-rename flow.
+///   - If the name doesn't exist on the release → POST under canonical name.
+pub(crate) async fn upload_mod_bundle_via_release(
+    token: &str,
+    username: &str,
+    mod_name: &str,
+    version: &str,
+    zip_data: &[u8],
+    prior_sha256: Option<&str>,
+) -> Result<(String, String)> {
+    use sha2::{Digest, Sha256};
+
+    let client = build_client(token);
+    let safe_name = mod_name
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect::<String>();
+    let safe_ver = version
+        .trim_start_matches('v')
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '.' || c == '-' { c } else { '_' })
+        .collect::<String>();
+    let asset_name = format!("{}_v{}.zip", safe_name, safe_ver);
+
+    let mut hasher = Sha256::new();
+    hasher.update(zip_data);
+    let local_hash = format!("{:x}", hasher.finalize());
+
+    let release = ensure_bundles_release(&client, username, PROFILES_REPO).await?;
+
+    if let Some(existing) = release.assets.iter().find(|a| a.name == asset_name) {
+        let hash_matches = prior_sha256.map(|p| p == local_hash.as_str()).unwrap_or(false);
+        if hash_matches {
+            log::info!(
+                "Bundle for '{}' v{} unchanged (sha256 match) — reusing existing release asset",
+                mod_name, version
+            );
+            return Ok((existing.browser_download_url.clone(), local_hash));
+        }
+        // Name collision but content differs (or we can't prove it doesn't).
+        // Replace via rename so the canonical URL never 404s.
+        log::info!(
+            "Bundle for '{}' v{} content changed since last share — replacing release asset",
+            mod_name, version
+        );
+        let url = replace_release_asset_via_rename(
+            &client, username, PROFILES_REPO, &release.upload_url,
+            &asset_name, existing.id, zip_data,
+        ).await?;
+        return Ok((url, local_hash));
+    }
+
+    // Net-new upload.
+    let asset = upload_release_asset(&client, &release.upload_url, &asset_name, zip_data).await?;
+    Ok((asset.browser_download_url, local_hash))
 }
 
 async fn fetch_existing_sha(client: &reqwest::Client, url: &str) -> Option<String> {
@@ -1552,4 +1790,383 @@ mod listing_tests {
         assert_eq!(fresh.public, Some(false));
     }
 
+}
+
+#[cfg(test)]
+mod release_upload_tests {
+    use super::*;
+    use tokio::sync::{Mutex, MutexGuard};
+    use wiremock::matchers::{header, method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// `STS2_GITHUB_API_BASE` is process-global. `cargo test` runs `#[tokio::test]`
+    /// tests in parallel by default, so without serialization two tests can race
+    /// and send requests to each other's mock server. Each test takes this lock
+    /// at the top of its body and holds it for the test's lifetime — cheap, and
+    /// avoids forcing callers to pass `--test-threads=1`. We use `tokio::sync::Mutex`
+    /// rather than `std::sync::Mutex` so the guard is `Send` and can live across
+    /// `.await` points on the multi-thread runtime that `#[tokio::test]` uses.
+    static ENV_LOCK: Mutex<()> = Mutex::const_new(());
+
+    /// Helper: spin up a mock GitHub API and point sharing.rs at it via env.
+    /// Caller must hold `ENV_LOCK` for the duration of the test (the env var
+    /// is process-global). Each test still gets its own MockServer on a
+    /// random port, so they're isolated once the lock orders them.
+    async fn mock_github() -> (MockServer, MutexGuard<'static, ()>) {
+        let guard = ENV_LOCK.lock().await;
+        let server = MockServer::start().await;
+        std::env::set_var("STS2_GITHUB_API_BASE", server.uri());
+        (server, guard)
+    }
+
+    /// Compute the SHA256 hex digest the same way the uploader does.
+    /// Test helper so each test can assert on the returned hash.
+    fn sha256_hex(bytes: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        h.update(bytes);
+        format!("{:x}", h.finalize())
+    }
+
+    #[tokio::test]
+    async fn ensure_bundles_release_creates_release_when_404() {
+        let (server, _env_guard) = mock_github().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": 42,
+                "upload_url": format!("{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}", server.uri()),
+                "assets": []
+            })))
+            .mount(&server)
+            .await;
+
+        let client = build_client("test-token");
+        let release = ensure_bundles_release(&client, "octo", "sts2mm-profiles")
+            .await
+            .expect("should create release");
+        assert_eq!(release.id, 42);
+        assert!(release.assets.is_empty());
+    }
+
+    #[tokio::test]
+    async fn ensure_bundles_release_reuses_when_200() {
+        let (server, _env_guard) = mock_github().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 7,
+                "upload_url": format!("{}/repos/octo/sts2mm-profiles/releases/7/assets{{?name,label}}", server.uri()),
+                "assets": [{
+                    "id": 100,
+                    "name": "OldMod_v0.1.zip",
+                    "browser_download_url": "https://example/old"
+                }]
+            })))
+            .mount(&server)
+            .await;
+
+        let client = build_client("test-token");
+        let release = ensure_bundles_release(&client, "octo", "sts2mm-profiles")
+            .await
+            .expect("should reuse release");
+        assert_eq!(release.id, 7);
+        assert_eq!(release.assets.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn upload_release_asset_posts_raw_bytes_with_filename_query() {
+        let (server, _env_guard) = mock_github().await;
+
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("name", "TheCursedMod_v0.2.7.zip"))
+            .and(header("content-type", "application/zip"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": 999,
+                "name": "TheCursedMod_v0.2.7.zip",
+                "browser_download_url": "https://github.com/octo/sts2mm-profiles/releases/download/bundles/TheCursedMod_v0.2.7.zip"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let upload_url_template = format!(
+            "{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}",
+            server.uri()
+        );
+        let client = build_client("test-token");
+        let asset = upload_release_asset(
+            &client,
+            &upload_url_template,
+            "TheCursedMod_v0.2.7.zip",
+            b"PK\x03\x04...fake-zip-bytes",
+        ).await.expect("upload should succeed");
+        assert_eq!(
+            asset.browser_download_url,
+            "https://github.com/octo/sts2mm-profiles/releases/download/bundles/TheCursedMod_v0.2.7.zip"
+        );
+    }
+
+    #[tokio::test]
+    async fn replace_release_asset_via_rename_swaps_old_for_new() {
+        let (server, _env_guard) = mock_github().await;
+        let upload_url_template = format!(
+            "{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}",
+            server.uri()
+        );
+
+        // Upload of the new asset under a temp name (`-new` suffix).
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("name", "TheCursed_v0.2.7.zip.new"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": 1001,
+                "name": "TheCursed_v0.2.7.zip.new",
+                "browser_download_url": "https://example/new"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        // Rename the old asset out of the way.
+        Mock::given(method("PATCH"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/assets/555"))
+            .and(wiremock::matchers::body_json_string(
+                r#"{"name":"TheCursed_v0.2.7.zip.stale"}"#,
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 555,
+                "name": "TheCursed_v0.2.7.zip.stale",
+                "browser_download_url": "https://example/old-renamed"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        // Rename the new asset onto the canonical name.
+        Mock::given(method("PATCH"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/assets/1001"))
+            .and(wiremock::matchers::body_json_string(
+                r#"{"name":"TheCursed_v0.2.7.zip"}"#,
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 1001,
+                "name": "TheCursed_v0.2.7.zip",
+                "browser_download_url": "https://github.com/octo/sts2mm-profiles/releases/download/bundles/TheCursed_v0.2.7.zip"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = build_client("test-token");
+        let url = replace_release_asset_via_rename(
+            &client, "octo", "sts2mm-profiles", &upload_url_template,
+            "TheCursed_v0.2.7.zip", 555, b"new-bytes"
+        ).await.expect("rename swap should succeed");
+        assert!(url.contains("releases/download/bundles/TheCursed_v0.2.7.zip"));
+    }
+
+    #[tokio::test]
+    async fn upload_mod_bundle_via_release_first_upload_records_hash() {
+        let (server, _env_guard) = mock_github().await;
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 42,
+                "upload_url": format!("{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}", server.uri()),
+                "assets": []
+            })))
+            .mount(&server).await;
+
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("name", "TheCursedMod_v0.2.7.zip"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": 100,
+                "name": "TheCursedMod_v0.2.7.zip",
+                "browser_download_url": "https://github.com/octo/sts2mm-profiles/releases/download/bundles/TheCursedMod_v0.2.7.zip"
+            })))
+            .expect(1)
+            .mount(&server).await;
+
+        let bytes = b"fake-zip-bytes";
+        let (url, hash) = upload_mod_bundle_via_release(
+            "test-token", "octo", "TheCursedMod", "0.2.7", bytes, None
+        ).await.expect("first upload should succeed");
+        assert!(url.contains("releases/download/bundles/TheCursedMod_v0.2.7.zip"));
+        assert_eq!(hash, sha256_hex(bytes));
+    }
+
+    #[tokio::test]
+    async fn upload_mod_bundle_via_release_skips_when_hash_matches() {
+        let (server, _env_guard) = mock_github().await;
+        let bytes = b"fake-zip-bytes";
+        let prior_hash = sha256_hex(bytes);
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 42,
+                "upload_url": format!("{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}", server.uri()),
+                "assets": [{
+                    "id": 555,
+                    "name": "TheCursedMod_v0.2.7.zip",
+                    "browser_download_url": "https://github.com/octo/sts2mm-profiles/releases/download/bundles/TheCursedMod_v0.2.7.zip"
+                }]
+            })))
+            .mount(&server).await;
+
+        // CRITICAL: any POST/PATCH means we regressed. wiremock fails on
+        // unstubbed requests, so if the orchestrator tries to upload we'll
+        // see it fail.
+
+        let (url, hash) = upload_mod_bundle_via_release(
+            "test-token", "octo", "TheCursedMod", "0.2.7", bytes, Some(&prior_hash)
+        ).await.expect("skip should succeed");
+        assert_eq!(url, "https://github.com/octo/sts2mm-profiles/releases/download/bundles/TheCursedMod_v0.2.7.zip");
+        assert_eq!(hash, prior_hash, "hash returned to caller must match what was on disk");
+    }
+
+    #[tokio::test]
+    async fn upload_mod_bundle_via_release_replaces_when_hash_differs_but_name_matches() {
+        // The mod-author case: edited locally without bumping version.
+        let (server, _env_guard) = mock_github().await;
+        let bytes = b"fresh-bytes-after-edit";
+        let stale_prior_hash = sha256_hex(b"original-bytes");
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 42,
+                "upload_url": format!("{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}", server.uri()),
+                "assets": [{
+                    "id": 555,
+                    "name": "TheCursedMod_v0.2.7.zip",
+                    "browser_download_url": "https://example/old"
+                }]
+            })))
+            .mount(&server).await;
+
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("name", "TheCursedMod_v0.2.7.zip.new"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": 1001,
+                "name": "TheCursedMod_v0.2.7.zip.new",
+                "browser_download_url": "https://example/new-tmp"
+            })))
+            .expect(1)
+            .mount(&server).await;
+
+        Mock::given(method("PATCH"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/assets/555"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 555, "name": "TheCursedMod_v0.2.7.zip.stale", "browser_download_url": "x"
+            })))
+            .expect(1)
+            .mount(&server).await;
+
+        Mock::given(method("PATCH"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/assets/1001"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 1001, "name": "TheCursedMod_v0.2.7.zip",
+                "browser_download_url": "https://github.com/octo/sts2mm-profiles/releases/download/bundles/TheCursedMod_v0.2.7.zip"
+            })))
+            .expect(1)
+            .mount(&server).await;
+
+        let (url, hash) = upload_mod_bundle_via_release(
+            "test-token", "octo", "TheCursedMod", "0.2.7", bytes, Some(&stale_prior_hash)
+        ).await.expect("replace path should succeed");
+        assert!(url.contains("releases/download/bundles/TheCursedMod_v0.2.7.zip"));
+        assert_eq!(hash, sha256_hex(bytes));
+    }
+
+    #[tokio::test]
+    async fn upload_mod_bundle_via_release_re_uploads_when_no_prior_hash_but_name_collision() {
+        // Edge case: fresh install (no prior hash in profile JSON) but
+        // canonical name already exists on the release (curator re-installed
+        // app and lost local manifest). Must take the replace path, not
+        // the skip path — we can't trust an asset's hash without checking it.
+        let (server, _env_guard) = mock_github().await;
+        let bytes = b"data";
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 42,
+                "upload_url": format!("{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}", server.uri()),
+                "assets": [{
+                    "id": 555,
+                    "name": "TheCursedMod_v0.2.7.zip",
+                    "browser_download_url": "https://example/whatever"
+                }]
+            })))
+            .mount(&server).await;
+
+        // Expect the replace flow (POST.new, PATCH old, PATCH new).
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": 1001, "name": "TheCursedMod_v0.2.7.zip.new",
+                "browser_download_url": "https://example/new"
+            })))
+            .expect(1)
+            .mount(&server).await;
+        Mock::given(method("PATCH"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/assets/555"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 555, "name": "TheCursedMod_v0.2.7.zip.stale",
+                "browser_download_url": "x"
+            })))
+            .expect(1)
+            .mount(&server).await;
+        Mock::given(method("PATCH"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/assets/1001"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 1001, "name": "TheCursedMod_v0.2.7.zip",
+                "browser_download_url": "https://github.com/octo/sts2mm-profiles/releases/download/bundles/TheCursedMod_v0.2.7.zip"
+            })))
+            .expect(1)
+            .mount(&server).await;
+
+        let (_, _) = upload_mod_bundle_via_release(
+            "test-token", "octo", "TheCursedMod", "0.2.7", bytes, None
+        ).await.expect("no-prior-hash + name-collision must replace");
+    }
+
+    #[tokio::test]
+    async fn upload_mod_bundle_via_release_sanitizes_filename() {
+        let (server, _env_guard) = mock_github().await;
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 42,
+                "upload_url": format!("{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}", server.uri()),
+                "assets": []
+            })))
+            .mount(&server).await;
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("name", "My_Cool_Mod_v1.2.3.zip"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": 999, "name": "My_Cool_Mod_v1.2.3.zip",
+                "browser_download_url": "https://github.com/octo/sts2mm-profiles/releases/download/bundles/My_Cool_Mod_v1.2.3.zip"
+            })))
+            .expect(1)
+            .mount(&server).await;
+
+        let _ = upload_mod_bundle_via_release(
+            "test-token", "octo", "My Cool/Mod", "v1.2.3", b"data", None
+        ).await.expect("ok");
+    }
 }

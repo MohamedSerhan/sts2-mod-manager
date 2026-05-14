@@ -492,6 +492,7 @@ fn flow_10_profile_snapshot_captures_folder_identity_and_source() {
         disabled_tmp.path(),
         profiles_tmp.path(),
         Some(config_tmp.path()),
+        None,
     )
     .expect("snapshot must succeed");
 
@@ -657,6 +658,169 @@ fn migrate_source_entry_does_not_overwrite_existing_destination() {
     // The pinned + installed_version fields were empty on dest → migrated.
     assert!(new_entry.pinned);
     assert_eq!(new_entry.installed_version.as_deref(), Some("v0.1.0"));
+}
+
+/// Drop a fake mod into `mods_path` whose manifest declares a
+/// `min_game_version` higher than any plausible current build. Used by
+/// the snapshot-filter regression tests.
+fn install_future_mod(mods_path: &Path, name: &str, min_game_version: &str) {
+    let dir = mods_path.join(name);
+    fs::create_dir_all(&dir).unwrap();
+    let manifest = format!(
+        r#"{{
+  "id": "{name}",
+  "name": "{name}",
+  "author": "future",
+  "version": "v1.0.0",
+  "min_game_version": "{min_game_version}",
+  "has_pck": false,
+  "has_dll": true,
+  "dependencies": []
+}}"#,
+        name = name,
+        min_game_version = min_game_version,
+    );
+    fs::write(dir.join(format!("{}.json", name)), manifest).unwrap();
+    fs::write(dir.join(format!("{}.dll", name)), b"future-dll-bytes").unwrap();
+}
+
+/// Bug-#21 — `snapshot_current_with_paths` strips a mod whose
+/// `min_game_version` exceeds the supplied build when the filter is
+/// enabled (Some), and preserves it when disabled (None).
+///
+/// This is the "filter is on the right toggle" test. If someone
+/// regresses the parameter to a no-op, this fails immediately.
+#[test]
+fn snapshot_filter_strips_incompatible_when_enabled_preserves_when_none() {
+    use sts2_mod_manager_lib::profiles::snapshot_current_with_paths;
+
+    let mods_tmp = tempfile::tempdir().unwrap();
+    let disabled_tmp = tempfile::tempdir().unwrap();
+    let profiles_tmp = tempfile::tempdir().unwrap();
+
+    install_baselib_with_bom(mods_tmp.path());
+    install_future_mod(mods_tmp.path(), "FutureMod", "999.0.0");
+
+    // Filter ON: incompatible mod must be stripped.
+    let filtered = snapshot_current_with_paths(
+        "publish-pack",
+        mods_tmp.path(),
+        disabled_tmp.path(),
+        profiles_tmp.path(),
+        None,
+        Some("0.105.0"),
+    )
+    .expect("snapshot must succeed");
+    assert!(
+        filtered.mods.iter().any(|m| m.name == "BaseLib"),
+        "BaseLib (no min_game_version) must always survive."
+    );
+    assert!(
+        !filtered.mods.iter().any(|m| m.name == "FutureMod"),
+        "FutureMod (min_game_version=999.0.0) MUST be stripped when filter is on (Some('0.105.0'))."
+    );
+
+    // Filter OFF: incompatible mod must survive.
+    let preserved = snapshot_current_with_paths(
+        "auto-snapshot",
+        mods_tmp.path(),
+        disabled_tmp.path(),
+        profiles_tmp.path(),
+        None,
+        None,
+    )
+    .expect("snapshot must succeed");
+    assert!(
+        preserved.mods.iter().any(|m| m.name == "BaseLib"),
+        "BaseLib must survive."
+    );
+    assert!(
+        preserved.mods.iter().any(|m| m.name == "FutureMod"),
+        "FutureMod MUST survive when filter is off (None) — \
+         this is the auto-snapshot path used by refresh_active_profile_manifest \
+         and switch_profile, where stripping = silent data loss."
+    );
+}
+
+/// Bug-1 regression — `refresh_active_profile_manifest`'s code path
+/// (the post-mutation re-snapshot fired after every toggle / install /
+/// delete) MUST NOT strip an incompatible mod that's already part of
+/// the profile.
+///
+/// Pre-fix, the filter ran from every caller of
+/// `snapshot_current_with_paths`, including the refresh path. After
+/// one toggle, the incompatible mod vanished from the JSON. Drift then
+/// flagged it as `added`. Repair then deleted it from disk. Silent
+/// data loss.
+///
+/// This test asserts the contract: the refresh-style call (filter=None)
+/// preserves an on-disk incompatible mod even if the existing profile
+/// JSON already listed it.
+#[test]
+fn refresh_active_profile_manifest_preserves_incompatible_mod_already_in_profile() {
+    use sts2_mod_manager_lib::profiles::{
+        load_profile, save_profile, snapshot_current_with_paths, Profile, ProfileMod,
+    };
+
+    let mods_tmp = tempfile::tempdir().unwrap();
+    let disabled_tmp = tempfile::tempdir().unwrap();
+    let profiles_tmp = tempfile::tempdir().unwrap();
+
+    // Set the stage: an incompatible mod is installed and already
+    // recorded in the active profile (e.g. user installed it from an
+    // older game build, then the game updated to a newer version that
+    // still works for them but no longer satisfies min_game_version
+    // for this particular mod's manifest).
+    install_baselib_with_bom(mods_tmp.path());
+    install_future_mod(mods_tmp.path(), "FutureMod", "999.0.0");
+
+    let now = chrono::Utc::now();
+    let existing = Profile {
+        name: "active".into(),
+        game_version: None,
+        created_by: None,
+        mods: vec![ProfileMod {
+            name: "FutureMod".into(),
+            version: "v1.0.0".into(),
+            source: None,
+            hash: None,
+            files: Vec::new(),
+            folder_name: Some("FutureMod".into()),
+            mod_id: Some("FutureMod".into()),
+            enabled: true,
+            bundle_url: None,
+        }],
+        created_at: now,
+        updated_at: now,
+    };
+    save_profile(&existing, profiles_tmp.path()).expect("seed profile");
+
+    // Simulate refresh_active_profile_manifest's call: filter = None.
+    let refreshed = snapshot_current_with_paths(
+        "active",
+        mods_tmp.path(),
+        disabled_tmp.path(),
+        profiles_tmp.path(),
+        None,
+        None,
+    )
+    .expect("refresh snapshot must succeed");
+
+    assert!(
+        refreshed.mods.iter().any(|m| m.name == "FutureMod"),
+        "FutureMod was already in the profile and is still on disk — \
+         refresh MUST NOT strip it (filter=None). Stripping here \
+         causes the toggle → drift → Repair-deletes silent data loss \
+         loop described in the bug report."
+    );
+
+    // Re-load from disk to make sure the on-disk JSON also contains it
+    // (snapshot writes through save_profile internally).
+    let on_disk = load_profile("active", profiles_tmp.path()).expect("reload");
+    assert!(
+        on_disk.mods.iter().any(|m| m.name == "FutureMod"),
+        "FutureMod must persist in the on-disk profile JSON after refresh."
+    );
 }
 
 /// Flow 11 negative case — same profile apply without the pin actually

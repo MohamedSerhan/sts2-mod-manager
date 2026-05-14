@@ -877,14 +877,21 @@ pub async fn reshare_profile(
     use tauri::Emitter;
     let _guard = ShareGuard::try_acquire(state.inner(), &name)?;
 
-    let (profiles_path, mods_path, disabled_path, config_path, token) = {
+    let (profiles_path, mods_path, disabled_path, config_path, token, game_version) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let token = s.github_token.clone().ok_or(
             "GitHub token required. Set it in Settings."
         )?;
         let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
         let disabled_path = s.disabled_mods_path.clone().ok_or("Game path not set")?;
-        (s.profiles_path.clone(), mods_path, disabled_path, s.config_path.clone(), token)
+        (
+            s.profiles_path.clone(),
+            mods_path,
+            disabled_path,
+            s.config_path.clone(),
+            token,
+            s.game_version.clone(),
+        )
     };
 
     // Load existing share info
@@ -900,9 +907,18 @@ pub async fn reshare_profile(
 
     // Re-snapshot current mods from disk so removed mods are excluded
     // and newly added mods are included. Use explicit disabled path from state.
+    // Reshare is an explicit publish — apply the bug-#21 filter using
+    // the cached game_version so an incompatible install doesn't get
+    // pushed out to other users.
     let mut profile = crate::profiles::snapshot_current_with_paths(
-        &name, &mods_path, &disabled_path, &profiles_path, Some(&config_path),
-    ).map_err(|e| e.to_string())?;
+        &name,
+        &mods_path,
+        &disabled_path,
+        &profiles_path,
+        Some(&config_path),
+        game_version.as_deref(),
+    )
+    .map_err(|e| e.to_string())?;
 
     // Preserve original metadata
     if let Some(ref old) = old_profile {

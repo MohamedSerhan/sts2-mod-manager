@@ -161,28 +161,55 @@ pub fn delete_profile(name: &str, profiles_path: &Path) -> Result<()> {
 
 /// Create a snapshot with optional source enrichment from config_path.
 /// Captures BOTH enabled and disabled mods with their current state.
+///
+/// `game_version_for_filter` controls the bug-#21 incompatibility filter:
+///   - `Some(v)` — strip mods whose `min_game_version` exceeds `v`. Use
+///     this only when the snapshot is an *explicit* user action (kebab →
+///     Snapshot, share/re-share). Pass the cached `AppState.game_version`
+///     so the platform-specific mods/release_info layout is irrelevant.
+///   - `None` — preserve every scanned mod. Use this for *implicit*
+///     auto-snapshots (refresh-after-mutation, switch-profile pre-save)
+///     where stripping would silently lose user data.
 pub fn snapshot_current_with_sources(
     name: &str,
     mods_path: &Path,
     profiles_path: &Path,
     config_path: Option<&Path>,
+    game_version_for_filter: Option<&str>,
 ) -> Result<Profile> {
     // Derive disabled path as sibling of mods_path (consistent with state.rs)
     let disabled_path = mods_path.parent()
         .unwrap_or(mods_path)
         .join("mods_disabled");
-    snapshot_current_inner(name, mods_path, &disabled_path, profiles_path, config_path)
+    snapshot_current_inner(
+        name,
+        mods_path,
+        &disabled_path,
+        profiles_path,
+        config_path,
+        game_version_for_filter,
+    )
 }
 
-/// Create a snapshot with an explicit disabled mods path.
+/// Create a snapshot with an explicit disabled mods path. See
+/// `snapshot_current_with_sources` for the meaning of
+/// `game_version_for_filter`.
 pub fn snapshot_current_with_paths(
     name: &str,
     mods_path: &Path,
     disabled_path: &Path,
     profiles_path: &Path,
     config_path: Option<&Path>,
+    game_version_for_filter: Option<&str>,
 ) -> Result<Profile> {
-    snapshot_current_inner(name, mods_path, disabled_path, profiles_path, config_path)
+    snapshot_current_inner(
+        name,
+        mods_path,
+        disabled_path,
+        profiles_path,
+        config_path,
+        game_version_for_filter,
+    )
 }
 
 fn snapshot_current_inner(
@@ -191,34 +218,42 @@ fn snapshot_current_inner(
     disabled_path: &Path,
     profiles_path: &Path,
     config_path: Option<&Path>,
+    game_version_for_filter: Option<&str>,
 ) -> Result<Profile> {
     let enabled_mods = scan_mods(mods_path);
     let disabled_mods = scan_disabled_mods(disabled_path);
     let now = Utc::now();
 
-    // Bug #21 mirror: exclude mods whose `min_game_version` exceeds the
-    // current game build from the manual snapshot. The subscription-side
-    // fix (build_synced_profile_snapshot in subscriptions.rs, commit
-    // 37df97f) filters via the SkippedMod list collected during the
-    // download phase; here we don't have that list, so we check each
-    // scanned mod's manifest directly with the same compat helper
-    // (updater::install_is_incompatible).
+    // Bug #21 mirror: when this snapshot represents an explicit user
+    // intent to publish state (kebab → Snapshot, share/re-share), strip
+    // mods whose `min_game_version` exceeds the user's current build.
+    // The subscription-side fix (build_synced_profile_snapshot in
+    // subscriptions.rs, commit 37df97f) filters via the SkippedMod list
+    // collected during the download phase; here we don't have that
+    // list, so we check each scanned mod's manifest directly with the
+    // same compat helper (updater::install_is_incompatible).
     //
-    // game_version comes from `<game>/release_info.json` — derived from
-    // `mods_path.parent()` so this function stays signature-compatible
-    // with all existing callers (manual Snapshot kebab, auto-snapshot on
-    // profile switch, sharing re-snapshot, and the post-mutation
-    // refresh_active_profile_manifest). When release_info.json is absent
-    // or unparseable, game_version is None and install_is_incompatible
-    // fails open (returns false), so the filter is a no-op — matching
-    // the existing fail-open behavior used everywhere else compat is
-    // checked. The filter is therefore SAFE for the unit tests that
-    // snapshot from a tempdir with no release_info.json.
-    let game_version: Option<String> = mods_path
-        .parent()
-        .and_then(crate::state::read_release_info_version);
+    // Auto-snapshots (refresh_active_profile_manifest after every
+    // toggle / install / delete, and switch_profile's pre-save) pass
+    // `None` so the filter is a no-op — those flows must preserve every
+    // mod that's currently part of the profile, otherwise an
+    // incompatible mod already in the profile gets silently stripped on
+    // the next mutation, drift then flags it as `added`, and Repair
+    // deletes it from disk.
+    //
+    // The game_version source is the caller's responsibility. It must
+    // be the cached `AppState.game_version` (set by `set_game_path`
+    // against the canonical game root) rather than something derived
+    // from `mods_path.parent()` — on macOS mods live under
+    // `<game>/SlayTheSpire2.app/Contents/MacOS/mods`, so a parent-based
+    // derivation looks for `release_info.json` in the wrong directory
+    // and silently disables the filter.
     let is_incompatible = |info: &crate::mods::ModInfo| -> bool {
-        crate::updater::install_is_incompatible(info, game_version.as_deref())
+        if let Some(game_version) = game_version_for_filter {
+            crate::updater::install_is_incompatible(info, Some(game_version))
+        } else {
+            false
+        }
     };
 
     // Load mod sources DB if config_path provided, to enrich profile with download links
@@ -248,7 +283,7 @@ fn snapshot_current_inner(
                 name,
                 m.name,
                 m.min_game_version.as_deref().unwrap_or("?"),
-                game_version.as_deref().unwrap_or("?"),
+                game_version_for_filter.unwrap_or("?"),
             );
             filtered_incompatible += 1;
             continue;
@@ -285,7 +320,7 @@ fn snapshot_current_inner(
                 name,
                 m.name,
                 m.min_game_version.as_deref().unwrap_or("?"),
-                game_version.as_deref().unwrap_or("?"),
+                game_version_for_filter.unwrap_or("?"),
             );
             filtered_incompatible += 1;
             continue;
@@ -319,7 +354,7 @@ fn snapshot_current_inner(
             "Snapshot '{}': filtered {} game-version-incompatible mod(s) (user game v{})",
             name,
             filtered_incompatible,
-            game_version.as_deref().unwrap_or("?"),
+            game_version_for_filter.unwrap_or("?"),
         );
     }
 
@@ -521,7 +556,19 @@ pub fn create_profile(
 ) -> std::result::Result<Profile, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
-    snapshot_current_with_sources(&name, mods_path, &s.profiles_path, Some(&s.config_path)).map_err(|e| e.to_string())
+    // Explicit user action — apply the bug-#21 filter using the cached
+    // game_version so incompatible mods don't get published into a
+    // shared profile. AppState.game_version is set on the canonical
+    // game root, so this is also the macOS-correct source.
+    let game_version = s.game_version.clone();
+    snapshot_current_with_sources(
+        &name,
+        mods_path,
+        &s.profiles_path,
+        Some(&s.config_path),
+        game_version.as_deref(),
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -594,11 +641,27 @@ pub async fn switch_profile(
         if let Some(ref current_name) = current_profile_name {
             if current_name != &name {
                 log::info!("Auto-snapshotting current state as '{}' before switching to '{}'", current_name, name);
-                let _ = snapshot_current_with_sources(current_name, &mods_path, &profiles_path, Some(&config_path));
+                // Auto-snapshot — pass None so an already-incompatible
+                // mod in the profile survives the snapshot. The user
+                // didn't ask us to publish; we're just preserving disk.
+                let _ = snapshot_current_with_sources(
+                    current_name,
+                    &mods_path,
+                    &profiles_path,
+                    Some(&config_path),
+                    None,
+                );
             }
         } else {
             log::info!("No active profile -- saving current state as '_Previous State'");
-            let _ = snapshot_current_with_sources("_Previous State", &mods_path, &profiles_path, Some(&config_path));
+            // Same rationale as above — preserve everything on disk.
+            let _ = snapshot_current_with_sources(
+                "_Previous State",
+                &mods_path,
+                &profiles_path,
+                Some(&config_path),
+                None,
+            );
         }
     } else {
         log::info!("Skipping auto-snapshot: no mods on disk to preserve");
@@ -870,7 +933,17 @@ pub fn snapshot_profile(
 ) -> std::result::Result<Profile, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
-    snapshot_current_with_sources(&name, mods_path, &s.profiles_path, Some(&s.config_path)).map_err(|e| e.to_string())
+    // Explicit user action (kebab → Snapshot) — apply the bug-#21
+    // filter using the cached game_version (macOS-correct source).
+    let game_version = s.game_version.clone();
+    snapshot_current_with_sources(
+        &name,
+        mods_path,
+        &s.profiles_path,
+        Some(&s.config_path),
+        game_version.as_deref(),
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

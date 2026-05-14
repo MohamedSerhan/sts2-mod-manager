@@ -1593,12 +1593,22 @@ fn refresh_active_profile_manifest(state: &tauri::State<'_, AppState>) {
     let config_path = s.config_path.clone();
     drop(s);
 
+    // Pass `None` for the incompatibility filter: this auto-refresh
+    // fires after every toggle / install / delete, so an
+    // already-incompatible mod that the user installed deliberately
+    // (or that was sitting in the profile from an older game build)
+    // must survive the refresh. If we filtered, the mod would vanish
+    // from the JSON on the next mutation, drift would flag it as
+    // `added`, and Repair would delete it from disk — silent data
+    // loss. The filter is only applied at explicit publish points
+    // (kebab → Snapshot, share/re-share).
     if let Err(e) = crate::profiles::snapshot_current_with_paths(
         &active_name,
         &mods_path,
         &disabled_path,
         &profiles_path,
         Some(&config_path),
+        None,
     ) {
         log::warn!(
             "Failed to refresh active profile manifest for '{}' after mutation: {} \

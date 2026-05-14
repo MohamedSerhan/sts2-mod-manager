@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { importShareCodeSmart } from './shareImport';
-import { registerInvokeHandler } from '../__test__/setup';
+import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
 
 /**
  * Tests the smart-import router. It branches across four states based
@@ -51,7 +51,14 @@ describe('importShareCodeSmart', () => {
     expect(outcome.kind).toBe('cancelled');
   });
 
-  it('Case 2: already subscribed + active + no update → already-active', async () => {
+  it('Case 2: already subscribed + active + no update → re-applies active pack', async () => {
+    registerInvokeHandler('switch_profile', () => ({
+      applied: true,
+      downloaded: 1,
+      missing_mods: [],
+      failed_downloads: [],
+    }));
+
     const outcome = await importShareCodeSmart('alice/AA5A-315D-61AE', {
       confirm: confirmAccept,
       subscriptions: [{
@@ -64,10 +71,12 @@ describe('importShareCodeSmart', () => {
       activeProfile: 'Imported',
       subUpdates: [],
     });
-    expect(outcome.kind).toBe('already-active');
-    if (outcome.kind === 'already-active') {
+    expect(outcome.kind).toBe('reapplied');
+    if (outcome.kind === 'reapplied') {
       expect(outcome.profileName).toBe('Imported');
+      expect(outcome.result.downloaded).toBe(1);
     }
+    expect(getInvokeCalls().filter((c) => c.cmd === 'switch_profile')).toHaveLength(1);
   });
 
   it('Case 3: subscribed but not active → activated outcome after confirm', async () => {

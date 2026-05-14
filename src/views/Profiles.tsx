@@ -349,6 +349,12 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
         );
       } else if (outcome.kind === 'activated') {
         toastCtx.success(`Switched to "${outcome.profileName}"`);
+      } else if (outcome.kind === 'reapplied') {
+        const parts: string[] = [];
+        if (outcome.result.downloaded > 0) parts.push(`${outcome.result.downloaded} downloaded`);
+        if (outcome.result.failed_downloads.length > 0) parts.push(`${outcome.result.failed_downloads.length} failed`);
+        if (outcome.result.missing_mods.length > 0) parts.push(`${outcome.result.missing_mods.length} still missing`);
+        toastCtx.info(parts.length ? `Re-applied "${outcome.profileName}" - ${parts.join(', ')}.` : `Re-applied "${outcome.profileName}".`);
       } else if (outcome.kind === 'synced') {
         toastCtx.success(`Synced "${outcome.profileName}" — you're up to date!`);
       } else if (outcome.kind === 'already-active') {

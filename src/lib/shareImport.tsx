@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { Profile, Subscription, SubscriptionUpdate } from '../types';
+import type { Profile, Subscription, SubscriptionUpdate, SwitchProfileResult } from '../types';
 import {
   fetchSharedProfile,
   installSharedProfile,
@@ -110,6 +110,7 @@ export function buildShareMessage(packName: string, code: string): string {
 export type ImportOutcome =
   | { kind: 'installed'; profile: Profile }
   | { kind: 'activated'; profileName: string }
+  | { kind: 'reapplied'; profileName: string; result: SwitchProfileResult }
   | { kind: 'synced'; profileName: string }
   | { kind: 'already-active'; profileName: string }
   | { kind: 'cancelled' };
@@ -218,9 +219,10 @@ interface SmartImportOpts {
  *
  *   1. Brand-new pack → falls through to installSharedProfileWithConfirm
  *      (the source-host consent dialog you've seen before).
- *   2. Already subscribed AND active AND no update pending → friendly
- *      "you're already on this" toast via the {already-active} outcome.
- *      No dialog, no work; the caller can show a single line.
+ *   2. Already subscribed AND active AND no update pending → re-apply
+ *      the local manifest via switchProfile. This is intentionally not a
+ *      no-op: if the user deleted a bundled mod manually, re-importing the
+ *      same code should restore the missing files.
  *   3. Already subscribed but not active (no update) → confirm dialog
  *      "Switch to '<name>'?" then switchProfile.
  *   4. Already subscribed with an update available (active or not) →
@@ -332,9 +334,13 @@ export async function importShareCodeSmart(
     return { kind: 'synced', profileName: match.profile_name };
   }
 
-  // Case 2: already active, no pending update — nothing to do.
+  // Case 2: already active, no pending update — re-apply. A friend may
+  // paste/click the same share code after manually deleting one bundled
+  // mod; switchProfile is the Rust path that restores missing bundle_url
+  // entries from the saved manifest.
   if (isActive) {
-    return { kind: 'already-active', profileName: match.profile_name };
+    const result = await switchProfile(match.profile_name);
+    return { kind: 'reapplied', profileName: match.profile_name, result };
   }
 
   // Case 3: subscribed but not active — offer to switch.

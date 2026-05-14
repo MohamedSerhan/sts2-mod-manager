@@ -50,27 +50,22 @@ export default defineConfig({
       // the gate — but a meaningful regression (e.g. someone deletes a
       // test file or rips out a tested branch) still trips it.
       //
-      // Actual coverage at the time of writing:
-      //   Lines: 70.87%   · gate 68
-      //   Funcs: 72.45%   · gate 70
-      //   Branches: 65.62% · gate 63
-      //   Statements: 69.65% · gate 67
+      // Live coverage as of 2026-05-13:
+      //   Lines:      97.8%  · gate 95
+      //   Funcs:      97.03% · gate 95
+      //   Branches:   91.9%  · gate 90
+      //   Statements: 96.69% · gate 95
       //
-      // Target trajectory (per `qa/whats-left.md`):
-      //   - Lines:      68 (gate) → 80 → 95 (goal)
-      //   - Branches:   63 → 75 → 90
-      //   - Functions:  70 → 85 → 95
-      //   - Statements: 67 → 80 → 95
-      //
-      // The WebDriver smoke covers user *flows* end-to-end already;
-      // these line-level gates protect the static branches the smoke
-      // can't easily reach (empty states, error paths, advanced-mode
-      // conditionals).
+      // The trajectory ladder from `qa/whats-left.md` has now landed at
+      // its top rung (95/90/95/95). The WebDriver smoke covers user
+      // *flows* end-to-end already; these line-level gates protect the
+      // static branches the smoke can't easily reach (empty states,
+      // error paths, advanced-mode conditionals).
       thresholds: {
-        lines: 68,
-        functions: 70,
-        branches: 63,
-        statements: 67,
+        lines: 95,
+        functions: 95,
+        branches: 90,
+        statements: 95,
       },
     },
   },

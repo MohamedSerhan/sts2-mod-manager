@@ -31,9 +31,13 @@
 //! harness only needs one cassette per logical endpoint; we don't
 //! generally need to capture page 2.
 //!
-//! Paths that have no extension on the wire (e.g. `/releases/latest`)
-//! get `.json` appended on disk. Paths that already end in `.json` (the
-//! Nexus convention) are used as-is.
+//! GitHub-bucket paths always get `.json` appended unless they end in a
+//! known binary-payload extension (`.zip`, `.tar.gz`, `.tgz`, `.tar`,
+//! `.gz` — release-asset downloads). PathBuf::extension() treats version
+//! tags like `v1.0.0` as having an extension of `"0"`, so we can't rely
+//! on it; we use an explicit allow-list of binary suffixes instead.
+//! Nexus-bucket paths already end in `.json` by convention and are used
+//! as-is.
 
 use std::path::PathBuf;
 
@@ -101,18 +105,38 @@ fn url_to_path(dir: &std::path::Path, url: &str) -> Option<PathBuf> {
     let path = parsed.path().trim_start_matches('/');
     let mut full = dir.join(bucket).join(path);
 
-    // Paths with no file extension (`/repos/foo/bar/releases/latest`) get
-    // a `.json` suffix on disk. Paths that already end in `.json` (the
-    // Nexus convention, e.g. `/v1/games/x/mods/123.json`) are used as-is.
-    // Paths that end in `.zip` are passed through too — that's how a
-    // release-asset download maps to a fixture zip.
-    let has_ext = full.extension().is_some();
-    if !has_ext {
+    // Decide whether to append `.json` on disk.
+    //
+    // We can't use PathBuf::extension() here: a tag-path like
+    // `/releases/tags/v1.0.0` makes PathBuf report extension "0", which
+    // would cause us to silently miss `<tag>.json` fixtures. Instead we
+    // use an explicit allow-list of binary-payload suffixes — release
+    // asset downloads (`.zip`, `.tar.gz`, etc.) pass through as-is, and
+    // the existing `.json` Nexus paths are already covered by the
+    // `.json` suffix check. Everything else in the GitHub bucket is a
+    // JSON API response, so we always append `.json`.
+    let lower = path.to_ascii_lowercase();
+    let already_json = lower.ends_with(".json");
+    let is_binary = looks_like_binary_payload(&lower);
+    if !already_json && !is_binary {
         let mut s = full.into_os_string();
         s.push(".json");
         full = PathBuf::from(s);
     }
     Some(full)
+}
+
+/// True if the URL path ends in a suffix that signals a binary payload
+/// (release-asset downloads). Lower-case comparison so URL casing
+/// doesn't matter. Kept as an explicit allow-list so unrecognised
+/// suffixes (including version-tag "extensions" like `v1.0.0`) fall
+/// through to the JSON branch — see the note in `url_to_path`.
+fn looks_like_binary_payload(lower_path: &str) -> bool {
+    lower_path.ends_with(".zip")
+        || lower_path.ends_with(".tar.gz")
+        || lower_path.ends_with(".tgz")
+        || lower_path.ends_with(".tar")
+        || lower_path.ends_with(".gz")
 }
 
 #[cfg(test)]
@@ -152,6 +176,68 @@ mod tests {
         assert_eq!(
             p,
             Path::new("/fixtures/nexus/v1/games/slaythespire2/mods/123.json"),
+        );
+    }
+
+    #[test]
+    fn maps_github_release_by_tag_appends_json_despite_version_dotted_segments() {
+        // Regression: PathBuf::extension() reports "0" for `v1.0.0`, so
+        // an extension-based check would skip the `.json` suffix and
+        // miss the fixture file at `<tag>.json`. Verify the explicit
+        // allow-list still appends `.json` here.
+        let dir = Path::new("/fixtures");
+        let p = url_to_path(
+            dir,
+            "https://api.github.com/repos/foo/bar/releases/tags/v1.0.0",
+        )
+        .unwrap();
+        assert_eq!(
+            p,
+            Path::new("/fixtures/github/repos/foo/bar/releases/tags/v1.0.0.json"),
+        );
+    }
+
+    #[test]
+    fn maps_github_release_asset_zip_passes_through_without_json_suffix() {
+        let dir = Path::new("/fixtures");
+        let p = url_to_path(
+            dir,
+            "https://api.github.com/repos/foo/bar/releases/download/v1.0.0/Foo-v1.0.0.zip",
+        )
+        .unwrap();
+        assert_eq!(
+            p,
+            Path::new("/fixtures/github/repos/foo/bar/releases/download/v1.0.0/Foo-v1.0.0.zip"),
+        );
+    }
+
+    #[test]
+    fn maps_github_release_asset_tar_gz_passes_through_without_json_suffix() {
+        let dir = Path::new("/fixtures");
+        let p = url_to_path(
+            dir,
+            "https://api.github.com/repos/foo/bar/releases/download/v1.0.0/Foo.tar.gz",
+        )
+        .unwrap();
+        assert_eq!(
+            p,
+            Path::new("/fixtures/github/repos/foo/bar/releases/download/v1.0.0/Foo.tar.gz"),
+        );
+    }
+
+    #[test]
+    fn binary_suffix_check_is_case_insensitive() {
+        // URLs are case-sensitive on the wire, but the allow-list
+        // shouldn't trip over upstreams that serve `.ZIP`.
+        let dir = Path::new("/fixtures");
+        let p = url_to_path(
+            dir,
+            "https://api.github.com/repos/foo/bar/releases/download/v1.0.0/Foo.ZIP",
+        )
+        .unwrap();
+        assert_eq!(
+            p,
+            Path::new("/fixtures/github/repos/foo/bar/releases/download/v1.0.0/Foo.ZIP"),
         );
     }
 

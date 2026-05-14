@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { SourceEditor } from './SourceEditor';
@@ -165,6 +165,45 @@ describe('<SourceEditor>', () => {
     onClose.mockClear();
     await user.click(screen.getByTitle('Close editor'));
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('clear button next to Nexus clears the nexus input', async () => {
+    const user = userEvent.setup();
+    renderEditor(baseMod({ nexus_url: 'https://www.nexusmods.com/sts2/mods/77' }));
+    const nexusInput = screen.getByPlaceholderText(/nexusmods\.com\/sts2\/mods\/123/) as HTMLInputElement;
+    expect(nexusInput.value).toBe('https://www.nexusmods.com/sts2/mods/77');
+    const nexusField = nexusInput.closest('.gf-src-edit-field') as HTMLElement;
+    expect(nexusField).not.toBeNull();
+    await user.click(within(nexusField).getByText('clear'));
+    expect(nexusInput.value).toBe('');
+  });
+
+  it('clear button next to Note clears the textarea', async () => {
+    const user = userEvent.setup();
+    renderEditor(baseMod({ note: 'sticky note text' }));
+    const noteEl = screen.getByPlaceholderText(/downloaded from Patreon/) as HTMLTextAreaElement;
+    expect(noteEl.value).toBe('sticky note text');
+    const noteField = noteEl.closest('.gf-src-edit-field') as HTMLElement;
+    expect(noteField).not.toBeNull();
+    await user.click(within(noteField).getByText('clear'));
+    expect(noteEl.value).toBe('');
+  });
+
+  it('clear button next to Other-link clears the custom_url input', async () => {
+    const user = userEvent.setup();
+    renderEditor(baseMod({ custom_url: 'https://example.com/somewhere' }));
+    const urlEl = screen.getByPlaceholderText(/Patreon, X, Discord/) as HTMLInputElement;
+    expect(urlEl.value).toBe('https://example.com/somewhere');
+    const urlField = urlEl.closest('.gf-src-edit-field') as HTMLElement;
+    expect(urlField).not.toBeNull();
+    await user.click(within(urlField).getByText('clear'));
+    expect(urlEl.value).toBe('');
+  });
+
+  it('github_url that is not a github.com URL falls back to the raw string', () => {
+    renderEditor(baseMod({ github_url: 'some-arbitrary-non-url-string' }));
+    const input = screen.getByPlaceholderText('owner/repo') as HTMLInputElement;
+    expect(input.value).toBe('some-arbitrary-non-url-string');
   });
 
   it('"Clear all links" only renders when at least one source exists', () => {

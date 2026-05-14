@@ -86,4 +86,47 @@ describe('<AboutCard>', () => {
       expect(candidates.length).toBeGreaterThan(1); // toolbar button + modal content
     });
   });
+
+  it('falls back to "v—" when getVersion rejects', async () => {
+    const app = await import('@tauri-apps/api/app');
+    (app.getVersion as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('boom'));
+    render(<Wrapped />);
+    // The footer reads "v—" when getVersion fails; the catch handler
+    // swallows the error and leaves appVersion as the empty default.
+    await waitFor(() => {
+      expect(screen.getByText(/v—/)).toBeInTheDocument();
+    });
+  });
+
+  it('"Check for updates" stringifies a non-Error rejection', async () => {
+    const updater = await import('@tauri-apps/plugin-updater');
+    // Reject with a non-Error value to exercise the `String(e)` branch
+    // of the ternary in the catch handler.
+    (updater.check as ReturnType<typeof vi.fn>).mockRejectedValueOnce('rough-string');
+    const user = userEvent.setup();
+    render(<Wrapped />);
+    await user.click(screen.getByRole('button', { name: 'Check for updates' }));
+    await waitFor(() => {
+      expect(screen.getByText(/Update check failed: rough-string/)).toBeInTheDocument();
+    });
+  });
+
+  it('"Check for updates" with an available update installs and relaunches', async () => {
+    const updater = await import('@tauri-apps/plugin-updater');
+    const proc = await import('@tauri-apps/plugin-process');
+    const downloadAndInstall = vi.fn(async () => {});
+    (updater.check as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      version: '2.0.0',
+      currentVersion: '1.2.3',
+      downloadAndInstall,
+    } as never);
+    const user = userEvent.setup();
+    render(<Wrapped />);
+    await user.click(screen.getByRole('button', { name: 'Check for updates' }));
+    await waitFor(() => {
+      expect(screen.getByText(/v2\.0\.0 available — installing/)).toBeInTheDocument();
+    });
+    expect(downloadAndInstall).toHaveBeenCalled();
+    expect(proc.relaunch).toHaveBeenCalled();
+  });
 });

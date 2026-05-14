@@ -873,6 +873,7 @@ pub async fn download_url_mod(
 #[cfg(test)]
 mod asset_selection_tests {
     use super::*;
+    use std::path::Path;
 
     fn asset(name: &str) -> GitHubAsset {
         GitHubAsset {
@@ -894,6 +895,103 @@ mod asset_selection_tests {
             assets: names.iter().map(|name| asset(name)).collect(),
             html_url: "https://example.com/release".to_string(),
         }
+    }
+
+    fn make_owner() -> GitHubOwner {
+        GitHubOwner {
+            login: "octocat".to_string(),
+            avatar_url: "https://example.invalid/avatar.png".to_string(),
+        }
+    }
+
+    fn make_repo(
+        full_name: &str,
+        name: &str,
+        description: Option<&str>,
+        topics: &[&str],
+    ) -> GitHubRepo {
+        GitHubRepo {
+            full_name: full_name.to_string(),
+            name: name.to_string(),
+            description: description.map(|s| s.to_string()),
+            html_url: format!("https://github.com/{}", full_name),
+            stargazers_count: 0,
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+            owner: make_owner(),
+            topics: topics.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn slugify_preserves_ascii_alphanumeric_and_allowed_punctuation() {
+        let out = slugify("AutoPath-STS2_v1.0");
+        assert_eq!(out, "AutoPath-STS2_v1.0");
+    }
+
+    #[test]
+    fn slugify_replaces_spaces_slashes_and_special_characters() {
+        assert_eq!(slugify("foo bar/baz\\qux"), "foo_bar_baz_qux");
+        assert_eq!(slugify("user@host:path?q=1#frag!"), "user_host_path_q_1_frag_");
+    }
+
+    #[test]
+    fn slugify_replaces_non_ascii_with_underscore() {
+        assert_eq!(slugify("café"), "caf_");
+    }
+
+    #[test]
+    fn slugify_empty_string_returns_empty() {
+        assert_eq!(slugify(""), "");
+    }
+
+    #[test]
+    fn repo_mentions_sts2_detects_supported_signals() {
+        assert!(repo_mentions_sts2(&make_repo(
+            "foo/autopath-sts2",
+            "autopath-sts2",
+            None,
+            &[]
+        )));
+        assert!(repo_mentions_sts2(&make_repo(
+            "foo/bar",
+            "bar",
+            Some("A mod for Slay the Spire 2"),
+            &[]
+        )));
+        assert!(repo_mentions_sts2(&make_repo(
+            "foo/bar",
+            "bar",
+            None,
+            &["slay-the-spire-2"]
+        )));
+        assert!(repo_mentions_sts2(&make_repo(
+            "foo/bar",
+            "bar",
+            Some("Slay The Spire II tools"),
+            &[]
+        )));
+        assert!(repo_mentions_sts2(&make_repo(
+            "acme/sts2-utility",
+            "utility",
+            None,
+            &[]
+        )));
+    }
+
+    #[test]
+    fn repo_mentions_sts2_rejects_sts1_and_unrelated_repos() {
+        assert!(!repo_mentions_sts2(&make_repo(
+            "foo/stsmod",
+            "stsmod",
+            Some("A mod for Slay the Spire"),
+            &["slay-the-spire"]
+        )));
+        assert!(!repo_mentions_sts2(&make_repo(
+            "foo/rustlib",
+            "rustlib",
+            Some("A general-purpose library"),
+            &["rust", "library"]
+        )));
     }
 
     #[test]
@@ -944,5 +1042,60 @@ mod asset_selection_tests {
              pick the lowest incompatible compat asset rather than the plain latest asset. \
              The walk-back layer can then reject the release from that asset's manifest."
         );
+    }
+
+    #[test]
+    fn asset_selection_prefers_zip_over_other_extensions() {
+        let release = release(&["readme.txt", "AutoPath.dll", "AutoPath-v1.0.0.zip"]);
+        let chosen = find_best_asset_for_game_version(&release, None).expect("expected an asset");
+        assert_eq!(chosen.name, "AutoPath-v1.0.0.zip");
+    }
+
+    #[test]
+    fn asset_selection_returns_first_zip_when_multiple_zips() {
+        let release = release(&["first.zip", "second.zip"]);
+        let chosen = find_best_asset_for_game_version(&release, None).expect("expected an asset");
+        assert_eq!(chosen.name, "first.zip");
+    }
+
+    #[test]
+    fn asset_selection_falls_back_to_first_when_no_zip() {
+        let release = release(&["readme.txt", "AutoPath.dll"]);
+        let chosen = find_best_asset_for_game_version(&release, None).expect("expected an asset");
+        assert_eq!(chosen.name, "readme.txt");
+    }
+
+    #[test]
+    fn asset_selection_returns_none_for_empty_release() {
+        let release = release(&[]);
+        assert!(find_best_asset_for_game_version(&release, None).is_none());
+    }
+
+    #[test]
+    fn peek_zip_min_game_version_reads_manifest_field() {
+        let path = Path::new("tests/fixtures/min_game_version.zip");
+        let out = peek_zip_min_game_version(path)
+            .expect("peek_zip_min_game_version should succeed on fixture zip");
+        assert_eq!(out.as_deref(), Some("0.105.0"));
+    }
+
+    #[test]
+    fn peek_zip_min_game_version_returns_none_when_field_absent() {
+        let path = Path::new("tests/fixtures/no_min_game_version.zip");
+        let out = peek_zip_min_game_version(path)
+            .expect("peek_zip_min_game_version should succeed without min_game_version");
+        assert!(out.is_none());
+    }
+
+    #[test]
+    fn peek_zip_min_game_version_errors_on_missing_file() {
+        let path = Path::new("tests/fixtures/does_not_exist.zip");
+        assert!(peek_zip_min_game_version(path).is_err());
+    }
+
+    #[test]
+    fn peek_zip_min_game_version_errors_on_non_zip_file() {
+        let path = Path::new("src/download.rs");
+        assert!(peek_zip_min_game_version(path).is_err());
     }
 }

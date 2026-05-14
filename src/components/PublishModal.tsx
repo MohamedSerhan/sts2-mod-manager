@@ -56,6 +56,9 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
     }
     let cancelled = false;
     getApiKeyStatus()
+      // uncovered: `cancelled` true-branch fires only if the modal unmounts
+      // between this then/catch's scheduling and resolution — a StrictMode-
+      // style race that jsdom's single-mount test runner can't reliably hit.
       .then((s) => { if (!cancelled) setTokenSet(s.github_token_set); })
       .catch(() => { if (!cancelled) setTokenSet(false); });
     // Initialize the visibility selector from the profile's current
@@ -90,6 +93,8 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
   const totalCount = profile.mods.length;
 
   async function handlePublish() {
+    // uncovered: dead at runtime — line 77 already short-circuits the render
+    // when !profile, so the Publish button only exists when profile is truthy.
     if (!profile) return;
     const listPublic = visibility === 'public';
     setBusy(true);
@@ -129,6 +134,8 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
   }
 
   async function handleCopy(kind: 'code' | 'link' | 'msg') {
+    // uncovered: Copy buttons only render inside `{shared && (...)}` and after
+    // the `!profile` early-return above, so both checks are dead at runtime.
     if (!shared || !profile) return;
     const codeStr = `${shared.owner}/${shared.code}`;
     const text =
@@ -152,6 +159,8 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
   }
 
   async function openRepo() {
+    // uncovered: Open-repo button only renders inside `{shared.repo_url && (...)}`,
+    // so this guard is dead at runtime.
     if (!shared?.repo_url) return;
     try { await openUrl(shared.repo_url); }
     catch (e) { toast.error(`Couldn't open browser: ${e instanceof Error ? e.message : String(e)}`); }

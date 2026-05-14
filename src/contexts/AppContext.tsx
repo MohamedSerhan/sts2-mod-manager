@@ -92,6 +92,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // The toast has been up for too long without an install firing.
       // The user probably backed out; clean up so they don't see a
       // stale prompt.
+      // uncovered (else branch): `dismissNexusPending()` always
+      // `clearTimeout`s this handle before it can fire (both the
+      // mod-auto-installed listener and a subsequent `notifyNexusOpen`
+      // route through dismissNexusPending). The only path that reaches
+      // this callback is one where nexusPendingRef.current still
+      // points at the entry we just stored, so the id check is true.
+      // The check is defensive against a hypothetical race that
+      // single-threaded JS cannot produce here.
       if (nexusPendingRef.current?.id === id) {
         nexusPendingRef.current = null;
         toast.dismiss(id);

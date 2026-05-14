@@ -56,13 +56,25 @@ const CASSETTE_DIR = resolve(REPO_ROOT, 'qa', 'fixtures');
  *
  * The whole tree is removed in the runner's `finally` block.
  */
-let FIXTURE_DIRS = null; // { game, config, cache } — populated at startup
+let FIXTURE_DIRS = null; // { root, game, config, cache } — populated at startup
 
 function makeFixtureGameTree() {
   const root = mkdtempSync(join(tmpdir(), 'sts2mm-fixture-'));
   const game = join(root, 'game');
   const config = join(root, 'config');
   const cache = join(root, 'cache');
+  seedFixtureGameTree({ game, config, cache });
+  return { root, game, config, cache };
+}
+
+/**
+ * Populates the three fixture directories with a deterministic
+ * release_info.json + the two cassette-paired mods. Split out from
+ * `makeFixtureGameTree` so `rebuildFixtureTree` can re-seed in place
+ * without churning the tempdir paths the running app has captured via
+ * env vars (STS2_FIXTURE_GAME_PATH / STS2_CONFIG_DIR / STS2_CACHE_DIR).
+ */
+function seedFixtureGameTree({ game, config, cache }) {
   for (const d of [game, config, cache, join(game, 'mods'), join(game, 'mods_disabled')]) {
     mkdirSync(d, { recursive: true });
   }
@@ -81,7 +93,39 @@ function makeFixtureGameTree() {
   // audit unless CASSETTE_MODE is set.)
   seedQaTestMod(join(game, 'mods', 'QaTestMod'));
   seedUpToDateMod(join(game, 'mods', 'UpToDateMod'));
-  return { root, game, config, cache };
+  // WalkbackMod is deliberately NOT seeded here — it would be flagged
+  // "needs update" by the audit and break specAuditAgainstCassettesShows
+  // OnePending's "1 update" count. The repair walk-back spec seeds it
+  // on demand via seedWalkbackMod() and triggers a re-scan by nav'ing
+  // to Mods after writing.
+}
+
+/**
+ * Tears down everything inside the fixture dirs and re-seeds the
+ * tree. Reuses the same paths the running app captured at startup,
+ * so STS2_FIXTURE_GAME_PATH / STS2_CONFIG_DIR / STS2_CACHE_DIR remain
+ * valid. Called before each STATE_SPECS entry so a stateful spec
+ * always sees the pristine fixture state regardless of which mutating
+ * specs ran before it.
+ *
+ * NOTE: the running app holds an in-memory snapshot of mods/profiles
+ * that this disk-level reset doesn't reach. Specs that need the app
+ * to re-scan should navigate to Mods (or trigger whatever refresh the
+ * surface they're testing already uses) — the same way the existing
+ * specs naturally pick up post-toggle disk state.
+ */
+function rebuildFixtureTree() {
+  if (!FIXTURE_DIRS) return;
+  for (const d of [FIXTURE_DIRS.game, FIXTURE_DIRS.config, FIXTURE_DIRS.cache]) {
+    if (existsSync(d)) {
+      rmSync(d, { recursive: true, force: true });
+    }
+  }
+  seedFixtureGameTree({
+    game: FIXTURE_DIRS.game,
+    config: FIXTURE_DIRS.config,
+    cache: FIXTURE_DIRS.cache,
+  });
 }
 
 function seedQaTestMod(dir) {
@@ -128,6 +172,68 @@ function seedUpToDateMod(dir) {
     ),
   );
   writeFileSync(join(dir, 'UpToDateMod.dll'), Buffer.from([0]));
+}
+
+/**
+ * Repair walk-back fixture mod. Seeded on disk at v2.0.0 — an "in-between"
+ * state with no matching GitHub release. The cassette at
+ * qa/fixtures/github/repos/qa-fixture/walkback-mod/ publishes:
+ *   - v3.0.0 (latest, min_game_version 999.0.0 — incompatible)
+ *   - v1.0.0 (older, min_game_version 0.100.0 — compatible with the
+ *     fixture game's v0.105.0)
+ * specRepairWalkback clicks Repair on this row and asserts the walk-back
+ * lands on v1.0.0 (both via the success toast text and the on-disk
+ * manifest's version field after install).
+ */
+function seedWalkbackMod(dir) {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, 'WalkbackMod.json'),
+    JSON.stringify(
+      {
+        id: 'WalkbackMod',
+        name: 'WalkbackMod',
+        version: '2.0.0',
+        author: 'QA Bot',
+        description: 'Smoke fixture: broken between-state — declares v2.0.0 (no matching release). Repair walks back to v1.0.0.',
+        min_game_version: '0.100.0',
+        source: 'github:qa-fixture/walkback-mod',
+        dependencies: [],
+      },
+      null,
+      2,
+    ),
+  );
+  writeFileSync(join(dir, 'WalkbackMod.dll'), Buffer.from([0]));
+}
+
+/**
+ * Bug #21 fixture: a mod whose manifest declares a `min_game_version` HIGHER
+ * than the fixture game's `release_info.json` reports (0.105.0). The mod's
+ * files live on disk so `scan_mods` picks them up, but the mod is incompatible
+ * with the running game — `install_is_incompatible` returns true. Seeded inline
+ * by specSkippedModAbsentFromSnapshot (NOT from seedFixtureGameTree) so other
+ * specs' audit counts don't change.
+ */
+function seedSkippedMod(dir) {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, 'SkippedMod.json'),
+    JSON.stringify(
+      {
+        id: 'SkippedMod',
+        name: 'SkippedMod',
+        version: '1.0.0',
+        author: 'QA Bot',
+        description: 'Smoke fixture: declares min_game_version 999.0.0 — incompatible with fixture game v0.105.0.',
+        min_game_version: '999.0.0',
+        dependencies: [],
+      },
+      null,
+      2,
+    ),
+  );
+  writeFileSync(join(dir, 'SkippedMod.dll'), Buffer.from([0]));
 }
 
 /* ── Pre-flight ─────────────────────────────────────────────────── */
@@ -609,7 +715,421 @@ async function specCreateProfile(driver) {
   );
 }
 
+/**
+ * v1.3.1 contract: a mod pinned while one profile is active still
+ * shows the "Pinned" pill after the user round-trips through another
+ * profile and back. Pin state lives in mod_sources.json (config dir),
+ * not the profile manifest, so any future refactor that accidentally
+ * folds pins into the per-profile snapshot — or has switch_profile
+ * stomp on mod_sources during apply — would break this assertion.
+ *
+ * Flow:
+ *   1. Profiles → create + activate "Orig" profile (becomes active).
+ *   2. Mods → pin QaTestMod via kebab. Verify "Pinned" pill rendered.
+ *   3. Profiles → create + activate "Other" profile.
+ *   4. Profiles → switch back to "Orig".
+ *   5. Mods → assert QaTestMod still shows the "Pinned" pill.
+ */
+async function specProfileSwitchPreservesPins(driver) {
+  const suffix = Date.now().toString(36);
+  const origName = `QA Orig ${suffix}`;
+  const otherName = `QA Switch ${suffix}`;
+
+  await navToProfiles(driver);
+  await createProfileNamed(driver, origName);
+  await waitForToastsToClear(driver);
+  await activateProfile(driver, origName);
+  await waitForToastsToClear(driver);
+
+  // Pin QaTestMod from the Mods view.
+  await navToMods(driver);
+  await waitForElement(
+    driver,
+    By.xpath("//*[normalize-space(text())='QaTestMod']"),
+    'QaTestMod row before pin',
+  );
+  const kebab = await waitForElement(
+    driver,
+    By.xpath(
+      "//*[normalize-space(text())='QaTestMod']/ancestor::*[.//button[@title='Mod actions']][1]//button[@title='Mod actions']",
+    ),
+    'QaTestMod kebab button',
+  );
+  await kebab.click();
+  const pinItem = await waitForElement(
+    driver,
+    By.xpath("//button[@role='menuitem'][contains(., 'Pin this mod')]"),
+    'Pin this mod menu item',
+  );
+  await pinItem.click();
+  // Wait for the durable indicator (Pinned pill) to render — proves the
+  // backend write landed and React picked up the source-list change.
+  await waitForElement(
+    driver,
+    By.xpath(
+      "//*[normalize-space(text())='QaTestMod']/ancestor::*[contains(@class,'gf-mod-pinned')][1]//*[normalize-space(text())='Pinned']",
+    ),
+    '"Pinned" pill on QaTestMod row after pin',
+    8_000,
+  );
+
+  // Now round-trip through a second profile and back.
+  await waitForToastsToClear(driver);
+  await navToProfiles(driver);
+  await createProfileNamed(driver, otherName);
+  await waitForToastsToClear(driver);
+  await activateProfile(driver, otherName);
+  await waitForToastsToClear(driver);
+  await activateProfile(driver, origName);
+  await waitForToastsToClear(driver);
+
+  // Verify the pin survived the switch round trip.
+  await navToMods(driver);
+  await waitForElement(
+    driver,
+    By.xpath(
+      "//*[normalize-space(text())='QaTestMod']/ancestor::*[contains(@class,'gf-mod-pinned')][1]//*[normalize-space(text())='Pinned']",
+    ),
+    '"Pinned" pill on QaTestMod row after profile-switch round trip',
+    10_000,
+  );
+}
+
+/**
+ * Regression spec for issue #22: toggling a mod off must survive a
+ * profile-switch round trip. The bug had `switch_profile` re-apply the
+ * source list in a way that resurrected toggled-off mods back into
+ * `mods/` because the profile snapshot didn't carry the disabled state.
+ *
+ * Flow:
+ *   1. Mods → toggle QaTestMod off; assert UI (aria-checked=false) and
+ *      disk (folder moved to `mods_disabled/`).
+ *   2. Profiles → create "Other", activate it, then switch back to the
+ *      starting profile via the Default profile card.
+ *   3. Mods → assert QaTestMod toggle still reads aria-checked=false
+ *      AND the folder is still in `mods_disabled/`, not resurrected
+ *      into `mods/`.
+ */
+async function specToggleStickyAcrossProfileSwitch(driver) {
+  // Step 1: toggle QaTestMod off from the Mods view.
+  await navToMods(driver);
+  const toggle = await waitForElement(
+    driver,
+    By.xpath(
+      "//*[normalize-space(text())='QaTestMod']/ancestor::*[.//button[@role='switch']][1]//button[@role='switch']",
+    ),
+    'QaTestMod toggle switch',
+  );
+  const before = await toggle.getAttribute('aria-checked');
+  if (before !== 'true') {
+    throw new Error(`expected QaTestMod toggle to start aria-checked=true, got ${before}`);
+  }
+  await toggle.click();
+
+  // Wait for the disk move + UI state change.
+  const enabledDir = join(FIXTURE_DIRS.game, 'mods', 'QaTestMod');
+  const disabledDir = join(FIXTURE_DIRS.game, 'mods_disabled', 'QaTestMod');
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    if (existsSync(disabledDir) && !existsSync(enabledDir)) break;
+    await delay(150);
+  }
+  if (!existsSync(disabledDir)) {
+    throw new Error(`mods_disabled/QaTestMod did not appear within 10s after toggle-off`);
+  }
+  if (existsSync(enabledDir)) {
+    throw new Error(`mods/QaTestMod still exists after toggle-off — move was a copy?`);
+  }
+  const afterToggle = await toggle.getAttribute('aria-checked');
+  if (afterToggle !== 'false') {
+    throw new Error(`expected QaTestMod toggle aria-checked=false after click, got ${afterToggle}`);
+  }
+
+  // Step 2: round-trip through a second profile. The fixture starts
+  // with a "Default" profile active (Profiles.tsx auto-creates one);
+  // we create "Other", activate it, then activate "Default" again.
+  const suffix = Date.now().toString(36);
+  const otherName = `QA Other ${suffix}`;
+  const origName = `QA Orig ${suffix}`;
+
+  await waitForToastsToClear(driver);
+  await navToProfiles(driver);
+  // Create the starting profile we'll return to. We don't activate it
+  // first because whatever profile is currently active works as the
+  // "origin"; what matters is that we explicitly switch away and back.
+  await createProfileNamed(driver, origName);
+  await waitForToastsToClear(driver);
+  await activateProfile(driver, origName);
+  await waitForToastsToClear(driver);
+  await createProfileNamed(driver, otherName);
+  await waitForToastsToClear(driver);
+  await activateProfile(driver, otherName);
+  await waitForToastsToClear(driver);
+  await activateProfile(driver, origName);
+  await waitForToastsToClear(driver);
+
+  // Step 3: back on Mods, the toggle must still read off AND the
+  // folder must still be in mods_disabled/ (not resurrected into mods/).
+  await navToMods(driver);
+  const toggleAfter = await waitForElement(
+    driver,
+    By.xpath(
+      "//*[normalize-space(text())='QaTestMod']/ancestor::*[.//button[@role='switch']][1]//button[@role='switch']",
+    ),
+    'QaTestMod toggle switch after profile round trip',
+  );
+  const finalChecked = await toggleAfter.getAttribute('aria-checked');
+  if (finalChecked !== 'false') {
+    throw new Error(
+      `bug #22 regression: QaTestMod toggle resurrected to aria-checked=${finalChecked} after profile switch round trip (expected false)`,
+    );
+  }
+  if (!existsSync(disabledDir)) {
+    throw new Error(
+      `bug #22 regression: mods_disabled/QaTestMod vanished after profile switch round trip`,
+    );
+  }
+  if (existsSync(enabledDir)) {
+    throw new Error(
+      `bug #22 regression: mods/QaTestMod reappeared on disk after profile switch round trip`,
+    );
+  }
+}
+
+/**
+ * Regression spec for issue #20: profile Repair must delete orphan
+ * folders from BOTH `mods/` and `mods_disabled/`. The bug had Repair
+ * only sweeping `mods/`, leaving `mods_disabled/` orphans to keep
+ * surfacing as drift forever (since they're "installed but not in
+ * profile" → flagged as added each scan).
+ *
+ * Flow:
+ *   1. Profiles → create + activate a fresh profile. The snapshot
+ *      captures only the seeded fixture mods (QaTestMod + UpToDateMod).
+ *   2. Nav to Mods (so we leave the Profiles view and the drift
+ *      cache doesn't pre-empt step 4's refresh).
+ *   3. Seed `mods_disabled/OrphanMod/` on disk — directly, post-snapshot,
+ *      so the profile manifest does NOT list it.
+ *   4. Nav back to Profiles. The Profiles component remounts and runs
+ *      `loadProfiles` → drift effect picks up the orphan as `added` →
+ *      drift banner with "Repair" button renders.
+ *   5. Click Repair, confirm via the modal's "Repair" button.
+ *   6. Assert `mods_disabled/OrphanMod/` no longer exists on disk AND
+ *      the success toast surfaces.
+ */
+async function specRepairRemovesOrphanDisabled(driver) {
+  const suffix = Date.now().toString(36);
+  const profileName = `QA Repair ${suffix}`;
+
+  // Step 1: create + activate a fresh profile. The snapshot captures
+  // the two fixture mods but NOT (yet) any orphan in mods_disabled/.
+  await navToProfiles(driver);
+  await createProfileNamed(driver, profileName);
+  await waitForToastsToClear(driver);
+  await activateProfile(driver, profileName);
+  await waitForToastsToClear(driver);
+
+  // Step 2: leave Profiles so the next visit remounts the view and
+  // triggers a fresh drift fetch.
+  await navToMods(driver);
+
+  // Step 3: seed an orphan folder under mods_disabled/. A proper-ish
+  // manifest so `scan_disabled_mods` picks it up via PASS 2 (subdir
+  // walk → try_load_mod_from finds the json). A bare `{}` would also
+  // parse via the file-stem fallback, but giving it explicit fields
+  // makes the failure mode louder if the manifest schema ever moves.
+  const orphanDir = join(FIXTURE_DIRS.game, 'mods_disabled', 'OrphanMod');
+  mkdirSync(orphanDir, { recursive: true });
+  writeFileSync(
+    join(orphanDir, 'OrphanMod.json'),
+    JSON.stringify(
+      {
+        id: 'OrphanMod',
+        name: 'OrphanMod',
+        version: '1.0.0',
+        author: 'QA Bot',
+        description: 'Smoke fixture: orphan in mods_disabled/ that no profile manifest references.',
+        dependencies: [],
+      },
+      null,
+      2,
+    ),
+  );
+  writeFileSync(join(orphanDir, 'OrphanMod.dll'), Buffer.from([0]));
+  if (!existsSync(orphanDir)) {
+    throw new Error(`orphan seed failed: ${orphanDir} does not exist after mkdir/writeFile`);
+  }
+
+  // Step 4: nav back to Profiles. The component remounts → loadProfiles
+  // → useEffect on profiles fires → drift refresh sees OrphanMod as
+  // "added" (installed but not in the manifest) → drift banner with
+  // Repair button renders.
+  await navToProfiles(driver);
+  const repairBtn = await waitForElement(
+    driver,
+    By.xpath(
+      "//*[contains(@class,'gf-banner') and contains(@class,'gf-banner-warn')]" +
+        "//button[normalize-space(.)='Repair']",
+    ),
+    'Repair button on drift banner',
+    15_000,
+  );
+
+  // Step 5: click Repair, then confirm in the modal. The confirm
+  // dialog's primary action text is "Repair" (handleRepairDrift's
+  // confirmLabel) — disambiguate from the banner Repair button by
+  // scoping to the modal foot.
+  await repairBtn.click();
+  await waitForElement(
+    driver,
+    By.xpath(
+      `//*[contains(@class, 'gf-modal-title') and contains(., 'Repair') and contains(., '${profileName}')]`,
+    ),
+    'Repair-profile confirm modal',
+  );
+  const confirmBtn = await waitForElement(
+    driver,
+    By.xpath("//*[contains(@class, 'gf-modal-foot')]//button[normalize-space(.)='Repair']"),
+    'Confirm "Repair" button in modal',
+  );
+  await confirmBtn.click();
+
+  // Step 6a: disk assertion — orphan folder must be gone.
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    if (!existsSync(orphanDir)) break;
+    await delay(200);
+  }
+  if (existsSync(orphanDir)) {
+    throw new Error(
+      `bug #20 regression: ${orphanDir} still exists after Repair — orphan in mods_disabled/ was not deleted`,
+    );
+  }
+
+  // Step 6b: UI assertion — Repair success toast surfaces. ToastContext
+  // pills are `gf-toast`; the success copy starts with "Repaired".
+  await waitForElement(
+    driver,
+    By.xpath("//*[contains(@class, 'gf-toast') and contains(., 'Repaired')]"),
+    'Repair-success toast',
+    10_000,
+  );
+}
+
 /* ── Helpers ────────────────────────────────────────────────────── */
+
+async function navToProfiles(driver) {
+  const nav = await waitForElement(
+    driver,
+    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Profiles']"),
+    'Sidebar Profiles nav button',
+  );
+  await nav.click();
+}
+
+async function navToMods(driver) {
+  const nav = await waitForElement(
+    driver,
+    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Mods']"),
+    'Sidebar Mods nav button',
+  );
+  await nav.click();
+}
+
+/**
+ * Wait for any open `gf-toast` notification pills to detach. Success/
+ * info toasts live 4s + 250ms fade (ToastContext.tsx FADE_MS), and the
+ * bottom-right stack absolutely-positions over the page body, so a
+ * lingering toast can intercept clicks on buttons in the lower half of
+ * the viewport. The profile flow fires toasts on every Create / Switch,
+ * so any spec that performs multiple consecutive profile actions needs
+ * this between them.
+ */
+async function waitForToastsToClear(driver) {
+  await driver.wait(
+    async () => (await driver.findElements(By.css('.gf-toast'))).length === 0,
+    8_000,
+    'Toast notification never dismissed',
+  );
+}
+
+/**
+ * Click "New profile" → type name → Create. Assumes we're already on
+ * the Profiles view. Waits for the resulting card to render.
+ */
+async function createProfileNamed(driver, profileName) {
+  const newBtn = await waitForElement(
+    driver,
+    By.xpath("//button[contains(., 'New profile')]"),
+    '"New profile" button',
+  );
+  await newBtn.click();
+  const input = await waitForElement(
+    driver,
+    By.css("input[placeholder='My Profile']"),
+    'Profile-name input',
+  );
+  await input.sendKeys(profileName);
+  const createBtn = await waitForElement(
+    driver,
+    By.xpath("//button[normalize-space(.)='Create']"),
+    'Create-profile submit button',
+  );
+  await createBtn.click();
+  await waitForElement(
+    driver,
+    By.xpath(`//h3[contains(normalize-space(.), '${profileName}')]`),
+    `Profile card for "${profileName}"`,
+    8_000,
+  );
+}
+
+/**
+ * Activate the named profile by clicking its "Switch to" button, then
+ * wait for the ACTIVE badge to appear on that same card. The badge is
+ * rendered inside the profile's <h3> next to the name (Profiles.tsx
+ * line ~663), and only one card has it at a time — so waiting on
+ * "ACTIVE badge on this row" disambiguates from any pre-existing
+ * active profile elsewhere in the list.
+ *
+ * Also waits for the switching overlay (`gf-loading-card`) to
+ * disappear before returning so the next interaction doesn't race a
+ * still-disabled button.
+ */
+async function activateProfile(driver, profileName) {
+  // Scope: row is a `gf-card` (Card component) whose h3 contains the
+  // profile name. From there, find the "Switch to" button.
+  const switchBtnXpath =
+    `//*[contains(@class,'gf-card')][.//h3[contains(normalize-space(.), '${profileName}')]]` +
+    `//button[normalize-space(.)='Switch to' or contains(., 'Switch to')]`;
+  const switchBtn = await waitForElement(
+    driver,
+    By.xpath(switchBtnXpath),
+    `"Switch to" button for profile "${profileName}"`,
+  );
+  await switchBtn.click();
+
+  // Switching overlay (gf-loading-card) appears while the backend
+  // applies the manifest. Wait for it to detach before checking the
+  // active badge — its presence also disables all profile buttons.
+  await driver.wait(
+    async () => (await driver.findElements(By.css('.gf-loading-card'))).length === 0,
+    30_000,
+    `Profile switch to "${profileName}" never settled (loading overlay stuck)`,
+  );
+
+  // ACTIVE badge must be on THIS profile's card, not just somewhere on
+  // the page. Scope under the row whose h3 has the name.
+  await waitForElement(
+    driver,
+    By.xpath(
+      `//*[contains(@class,'gf-card')][.//h3[contains(normalize-space(.), '${profileName}')]]` +
+        `//*[normalize-space(text())='ACTIVE']`,
+    ),
+    `ACTIVE badge on profile "${profileName}"`,
+    10_000,
+  );
+}
 
 function assertEqual(actual, expected, label) {
   if (actual !== expected) {
@@ -757,6 +1277,295 @@ async function specAuditAgainstCassettesShowsOnePending(driver) {
   );
 }
 
+/**
+ * Cassette spec: Repair walk-back installs the older compatible tag
+ * when the latest GitHub release requires a newer game build than the
+ * user has.
+ *
+ * Fixture state:
+ *   - WalkbackMod seeded on disk with manifest version "2.0.0" — an
+ *     in-between state that doesn't match any published release tag.
+ *   - GitHub cassette publishes v3.0.0 (latest, min_game_version
+ *     999.0.0 → incompatible with fixture game v0.105.0) and v1.0.0
+ *     (older, min_game_version 0.100.0 → compatible).
+ *
+ * Flow:
+ *   1. Seed WalkbackMod on disk and force a Refresh so the Mods view
+ *      picks it up.
+ *   2. Flip the Advanced toggle so the kebab's "Repair this mod" item
+ *      surfaces (it lives under the Advanced-only Recovery section in
+ *      Mods.tsx).
+ *   3. Open the WalkbackMod kebab → click "Repair this mod" → confirm
+ *      via the modal's "Repair now" button.
+ *   4. Wait for the success toast: handleRepair surfaces
+ *      "Repaired 'WalkbackMod' (v1.0.0)" — the v1.0.0 in the literal is
+ *      the load-bearing assertion proving the walk-back picked the
+ *      older compatible release rather than the blocked latest.
+ *   5. Verify on disk: mods/WalkbackMod/WalkbackMod.json has version
+ *      "1.0.0" (install_mod_from_zip wrote the v1.0.0 zip's manifest
+ *      into the live folder).
+ */
+async function specRepairWalkback(driver) {
+  // Step 1: seed the fixture mod on disk + trigger a re-scan. Clear any
+  // lingering toasts from the preceding spec first — they absolute-
+  // position over the lower viewport and would intercept clicks on the
+  // kebab items further down the page.
+  await waitForToastsToClear(driver);
+  seedWalkbackMod(join(FIXTURE_DIRS.game, 'mods', 'WalkbackMod'));
+  await navToMods(driver);
+  const refreshBtn = await waitForElement(
+    driver,
+    By.xpath("//button[normalize-space(.)='Refresh' or contains(., 'Refresh')]"),
+    'Mods toolbar Refresh button',
+  );
+  await refreshBtn.click();
+  await waitForElement(
+    driver,
+    By.xpath("//*[normalize-space(text())='WalkbackMod']"),
+    'WalkbackMod row (post-seed re-scan)',
+  );
+
+  // Step 2: enable Advanced mode so the kebab Recovery section renders.
+  // The toggle is a `gf-adv-toggle` button labelled "Advanced". If it's
+  // already on (a developer's localStorage might persist it across runs),
+  // clicking would turn it OFF and hide Repair — guard against that by
+  // checking the `on` class first.
+  const advToggle = await waitForElement(
+    driver,
+    By.css('button.gf-adv-toggle'),
+    'Advanced-mode toggle',
+  );
+  const advClass = await advToggle.getAttribute('class');
+  if (!advClass.includes(' on')) {
+    await advToggle.click();
+  }
+
+  // Step 3: open WalkbackMod kebab → "Repair this mod" → confirm.
+  const kebab = await waitForElement(
+    driver,
+    By.xpath(
+      "//*[normalize-space(text())='WalkbackMod']/ancestor::*[.//button[@title='Mod actions']][1]//button[@title='Mod actions']",
+    ),
+    'WalkbackMod kebab button',
+  );
+  await kebab.click();
+
+  const repairItem = await waitForElement(
+    driver,
+    By.xpath("//button[@role='menuitem'][contains(., 'Repair this mod')]"),
+    '"Repair this mod" kebab item',
+  );
+  await repairItem.click();
+
+  // Confirm modal — handleRepair calls confirm({ title: "Repair 'WalkbackMod'?",
+  // confirmLabel: 'Repair now' }). Scope the button to the modal foot so we
+  // don't accidentally hit a banner/inline "Repair" button elsewhere.
+  await waitForElement(
+    driver,
+    By.xpath("//*[contains(@class, 'gf-modal-title') and contains(., 'WalkbackMod')]"),
+    'Repair-mod confirm modal',
+  );
+  const confirmBtn = await waitForElement(
+    driver,
+    By.xpath("//*[contains(@class, 'gf-modal-foot')]//button[normalize-space(.)='Repair now']"),
+    'Confirm "Repair now" button in modal',
+  );
+  await confirmBtn.click();
+
+  // Step 4: wait for the success toast. Walk-back installs v1.0.0, so the
+  // literal "v1.0.0" in the toast is what disambiguates a working walk-
+  // back from a "Repaired … (v3.0.0)" toast (which would mean the compat
+  // check silently failed open and installed the blocked latest).
+  //
+  // We watch for ANY WalkbackMod toast first — repair_mod can fail loudly
+  // via toast.error and we want a useful error message, not a 60s timeout.
+  let toastText = '';
+  await driver.wait(
+    async () => {
+      const toasts = await driver.findElements(By.css('.gf-toast'));
+      for (const t of toasts) {
+        const txt = (await t.getText().catch(() => '')).trim();
+        if (txt.includes('WalkbackMod')) {
+          toastText = txt;
+          return true;
+        }
+      }
+      return false;
+    },
+    60_000,
+    'No WalkbackMod-related toast surfaced after Repair (success or error)',
+  );
+  if (!/Repaired.*WalkbackMod.*v1\.0\.0/i.test(toastText)) {
+    throw new Error(
+      `Repair walk-back: expected toast "Repaired 'WalkbackMod' (v1.0.0)", got "${toastText}"`,
+    );
+  }
+
+  // Step 5: disk-state assertion — the freshly-extracted v1.0.0 manifest
+  // landed at mods/WalkbackMod/WalkbackMod.json with version "1.0.0".
+  const manifestPath = join(FIXTURE_DIRS.game, 'mods', 'WalkbackMod', 'WalkbackMod.json');
+  let parsed;
+  try {
+    const raw = readFileSync(manifestPath, 'utf8');
+    parsed = JSON.parse(raw.replace(/^﻿/, ''));
+  } catch (e) {
+    throw new Error(
+      `Failed to read/parse post-repair manifest at ${manifestPath}: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+  assertEqual(parsed.version, '1.0.0', 'WalkbackMod manifest version after repair walk-back');
+}
+
+/**
+ * Regression spec for issue #21: when a mod's `min_game_version` is above the
+ * current game version, the user's manual Snapshot (kebab → "Snapshot from
+ * current install") must NOT include it in the saved profile JSON. The bug:
+ * `snapshot_current_with_sources` scans `mods/` + `mods_disabled/` indiscriminately,
+ * so an on-disk incompatible mod ended up pinned into the manifest as
+ * enabled=true. That's the same footgun commit 37df97f fixed for the
+ * subscription path (`build_synced_profile_snapshot`) — this spec exercises
+ * the manual-snapshot path which was missed.
+ *
+ * Flow:
+ *   1. Seed SkippedMod on disk in mods/ (manifest declares min_game_version:
+ *      '999.0.0', fixture game reports v0.105.0).
+ *   2. Nav to Mods → Refresh → assert the "needs game ≥ v999.0.0" pill renders,
+ *      proving the manager sees this mod as incompatible at the UI layer.
+ *   3. Nav to Profiles. Override window.prompt via executeScript to return a
+ *      deterministic snapshot name (so the kebab → Snapshot dialog resolves
+ *      headlessly — no interactive prompt is supported in tauri-driver).
+ *   4. Click the page-level "Snapshot current" button (or kebab Snapshot
+ *      item) to invoke snapshot_profile with our deterministic name.
+ *   5. Wait for the success toast confirming snapshot was created.
+ *   6. Read the profile JSON off disk and assert SkippedMod is NOT in the
+ *      mods array at all. The filter must drop it entirely (matching
+ *      build_synced_profile_snapshot's semantics) — not record it as
+ *      enabled=false. enabled=false would still lie about disk state for
+ *      a mod that's literally incompatible with the current game.
+ */
+async function specSkippedModAbsentFromSnapshot(driver) {
+  // Use a unique suffix so re-runs against the same config dir don't collide
+  // on the sanitized snapshot filename.
+  const suffix = Date.now().toString(36);
+  const snapshotName = `QA Snap ${suffix}`;
+
+  await waitForToastsToClear(driver);
+
+  // Step 1: seed SkippedMod on disk. Inline (not in seedFixtureGameTree)
+  // so other specs' audit/profile counts don't shift.
+  seedSkippedMod(join(FIXTURE_DIRS.game, 'mods', 'SkippedMod'));
+
+  // Step 2: Mods → Refresh → confirm the incompatibility pill renders.
+  // This both rescans the disk (so backend caches see SkippedMod) and
+  // proves the manager UI knows the mod is incompatible — the same compat
+  // gate (install_is_incompatible) the snapshot filter relies on.
+  await navToMods(driver);
+  const refreshBtn = await waitForElement(
+    driver,
+    By.xpath("//button[normalize-space(.)='Refresh' or contains(., 'Refresh')]"),
+    'Mods toolbar Refresh button',
+  );
+  await refreshBtn.click();
+  await waitForElement(
+    driver,
+    By.xpath("//*[normalize-space(text())='SkippedMod']"),
+    'SkippedMod row (post-seed re-scan)',
+  );
+  await waitForElement(
+    driver,
+    By.xpath(
+      "//*[normalize-space(text())='SkippedMod']/ancestor::*[contains(@class,'gf-mod-row') or contains(@class,'gf-card')][1]" +
+        "//*[contains(., 'needs game') and contains(., '999.0.0')]",
+    ),
+    'SkippedMod incompatibility pill ("needs game ≥ v999.0.0")',
+    10_000,
+  );
+
+  // Step 3: nav to Profiles + override window.prompt. handleSnapshot in
+  // Profiles.tsx calls native `prompt('Enter snapshot name:')` — tauri-driver
+  // can't interact with that browser dialog, so we replace prompt with a
+  // function that returns our deterministic name. Must be set BEFORE the
+  // Snapshot click. (Refresh of the page would reset this; we don't navigate
+  // away after this point until after the click + toast.)
+  await waitForToastsToClear(driver);
+  await navToProfiles(driver);
+  await driver.executeScript(`window.prompt = function(){ return ${JSON.stringify(snapshotName)}; };`);
+
+  // Step 4: click the page-level "Snapshot current" button. (The same
+  // handleSnapshot is bound to a per-card kebab "Snapshot from current
+  // install" item, but the top-level button avoids opening a popover and
+  // is unambiguous regardless of which card is active — both paths exercise
+  // the same `snapshotProfile` command.)
+  const snapshotBtn = await waitForElement(
+    driver,
+    By.xpath("//button[normalize-space(.)='Snapshot current' or contains(., 'Snapshot current')]"),
+    'Profiles "Snapshot current" button',
+  );
+  await snapshotBtn.click();
+
+  // Step 5: wait for the success toast. handleSnapshot surfaces
+  // toastCtx.success(`Snapshot "<name>" created with <n> mods`).
+  await waitForElement(
+    driver,
+    By.xpath(
+      `//*[contains(@class, 'gf-toast') and contains(., 'Snapshot') and contains(., ${JSON.stringify(snapshotName)})]`,
+    ),
+    `Snapshot success toast for "${snapshotName}"`,
+    15_000,
+  );
+
+  // Step 6: read the saved profile JSON off disk. save_profile writes to
+  // <profiles_path>/<sanitized_name>.json. sanitize_filename replaces
+  // anything not alphanumeric/dash/underscore/dot with '_', so spaces
+  // become underscores. profiles_path is <config>/profiles.
+  const sanitized = snapshotName.replace(/[^A-Za-z0-9._-]/g, '_');
+  const profilePath = join(FIXTURE_DIRS.config, 'profiles', `${sanitized}.json`);
+  let profile;
+  try {
+    const raw = readFileSync(profilePath, 'utf8');
+    profile = JSON.parse(raw.replace(/^﻿/, ''));
+  } catch (e) {
+    throw new Error(
+      `Failed to read/parse snapshot profile at ${profilePath}: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+  if (!Array.isArray(profile.mods)) {
+    throw new Error(
+      `Profile ${profilePath} has no \`mods\` array — shape is unexpected. Keys: ${Object.keys(profile).join(', ')}`,
+    );
+  }
+
+  // The load-bearing assertion: SkippedMod must NOT be in the snapshot at
+  // all (neither enabled nor disabled). The mod's min_game_version (999.0.0)
+  // is above the fixture game v0.105.0, so the filter in
+  // snapshot_current_inner must drop it entirely — matching
+  // build_synced_profile_snapshot's semantics on the subscription path.
+  // Match on `name` OR `folder_name` since either could carry the label.
+  const stillPresent = profile.mods.find(
+    (m) => m.name === 'SkippedMod' || m.folder_name === 'SkippedMod',
+  );
+  if (stillPresent) {
+    throw new Error(
+      `bug #21 regression: kebab→Snapshot profile at ${profilePath} contains SkippedMod ` +
+        `(min_game_version 999.0.0, fixture game v0.105.0). Entry: ` +
+        `${JSON.stringify(stillPresent)}. snapshot_current_with_sources must filter ` +
+        `mods whose min_game_version exceeds the current game version — see ` +
+        `build_synced_profile_snapshot in subscriptions.rs (commit 37df97f) for ` +
+        `the matching fix on the subscription path.`,
+    );
+  }
+
+  // Defensive cleanup: take SkippedMod back off disk so later specs (e.g.,
+  // any future appended STATE_SPEC) see a fixture matching the seedFixture
+  // baseline. The current spec ordering puts this last so it's belt+braces.
+  try {
+    rmSync(join(FIXTURE_DIRS.game, 'mods', 'SkippedMod'), { recursive: true, force: true });
+    rmSync(join(FIXTURE_DIRS.game, 'mods_disabled', 'SkippedMod'), { recursive: true, force: true });
+  } catch {
+    // Best-effort — fixture tree gets nuked in the runner's finally anyway.
+  }
+}
+
 const BASE_SPECS = [
   ['main window renders', specMainWindowRenders],
   ['onboarding overlay dismisses cleanly', dismissOnboardingIfPresent],
@@ -777,23 +1586,29 @@ const CASSETTE_SPECS = [
   // share-import / friend-install WebDriver spec exists yet to clone from
   // — Rust-side coverage at src-tauri/tests/qa_scenarios.rs::
   // scenario_005_install_from_release_url is sufficient for shipping.
+  ['repair walk-back installs older compatible tag', specRepairWalkback],
 ];
 
-// The toggle spec runs in either mode — it doesn't need cassettes,
-// just the fixture game tree. But running it AFTER the cassette specs
-// (which interact with QaTestMod) would either no-op or fail; so we
-// only include it in non-cassette runs to keep the suites clean.
-// Future: split state-mutating specs into their own runner pass with
-// a fresh fixture tree.
-const TOGGLE_SPECS = [
+// Specs that mutate fixture state (disk + app config dir) and therefore
+// need a fresh fixture tree per run. The spec loop calls
+// `rebuildFixtureTree()` before each entry here so order-dependence
+// between them — toggle-then-delete-then-profile, or any future
+// additions — is eliminated at the source. Cassette-mode runs skip
+// these because the cassette specs already exercise QaTestMod and
+// running both groups would double-mutate the fixture.
+const STATE_SPECS = [
   ['toggle off moves QaTestMod to mods_disabled/', specToggleMovesQaTestModToDisabled],
   ['delete UpToDateMod via kebab → Remove mod…', specDeleteUpToDateMod],
   ['create profile via Profiles → New profile', specCreateProfile],
+  ['profile switch preserves pins (v1.3.1 contract)', specProfileSwitchPreservesPins],
+  ['#22: toggle state sticky across profile switch', specToggleStickyAcrossProfileSwitch],
+  ['#20: profile repair removes orphan mods_disabled folders', specRepairRemovesOrphanDisabled],
+  ['#21: skipped mods not in fresh snapshot', specSkippedModAbsentFromSnapshot],
 ];
 
 const SPECS = CASSETTE_MODE
   ? [...BASE_SPECS, ...CASSETTE_SPECS]
-  : [...BASE_SPECS, ...TOGGLE_SPECS];
+  : [...BASE_SPECS, ...STATE_SPECS];
 
 async function main() {
   preflight();
@@ -812,7 +1627,14 @@ async function main() {
   let failed = false;
   try {
     driver = await buildDriver();
-    for (const [name, fn] of SPECS) {
+    for (const entry of SPECS) {
+      const [name, fn] = entry;
+      // STATE_SPECS mutate disk state; give each one a pristine
+      // fixture tree so order-of-execution can't hide bugs (or
+      // create false failures from leftover state).
+      if (STATE_SPECS.includes(entry)) {
+        rebuildFixtureTree();
+      }
       process.stdout.write(`▸ ${name} ... `);
       try {
         await fn(driver);

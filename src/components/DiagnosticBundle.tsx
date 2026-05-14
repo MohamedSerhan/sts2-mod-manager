@@ -33,12 +33,22 @@ export function DiagnosticBundle({ open, onClose }: Props) {
   }
 
   async function generate() {
+    // uncovered: Defensive re-entrancy guard. The only caller is the
+    // "Generate bundle" button at the bottom of the modal, which sets
+    // `disabled={busy}` (see the JSX below) — React refuses to
+    // dispatch onClick to disabled buttons, so this branch is
+    // unreachable from the UI.
+    /* v8 ignore start */
     if (busy) return;
+    /* v8 ignore stop */
     setBusy(true);
     try {
       const logs = await readLogTail(500).catch(() => '');
       const logPath = await getLogPath().catch(() => '<unknown>');
-      const platform = typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown';
+      // uncovered (false branch): jsdom and every supported browser
+      // define `navigator`. The `'unknown'` fallback exists to keep
+      // tsc honest for non-browser hosts.
+      const platform = /* v8 ignore next */ typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown';
 
       const report = [
         '=== STS2 Mod Manager — Support Bundle ===',
@@ -77,7 +87,13 @@ export function DiagnosticBundle({ open, onClose }: Props) {
   }
 
   async function openInBrowser() {
+    // uncovered: The "Open GitHub issue" button is only rendered while
+    // `generated` is truthy (see `{generated && (<button onClick={openInBrowser}...`
+    // in the foot below), so this defensive null-check cannot run from
+    // the UI.
+    /* v8 ignore start */
     if (!generated) return;
+    /* v8 ignore stop */
     const body = encodeURIComponent(generated.slice(0, 6000));
     const title = encodeURIComponent('Bug report from STS2 Mod Manager');
     window.open(`https://github.com/MohamedSerhan/sts2-mod-manager/issues/new?title=${title}&body=${body}`, '_blank');

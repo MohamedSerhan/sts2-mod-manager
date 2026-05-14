@@ -492,6 +492,7 @@ fn flow_10_profile_snapshot_captures_folder_identity_and_source() {
         disabled_tmp.path(),
         profiles_tmp.path(),
         Some(config_tmp.path()),
+        None,
     )
     .expect("snapshot must succeed");
 
@@ -711,6 +712,133 @@ async fn scenario_005_install_from_release_url() {
 /// Flow 11 negative case — same profile apply without the pin actually
 /// moves the mod. Proves apply is doing real work and the pin test is
 /// not a false positive (e.g. apply silently no-oping).
+fn install_future_mod(mods_path: &Path, name: &str, min_game_version: &str) {
+    let dir = mods_path.join(name);
+    fs::create_dir_all(&dir).unwrap();
+    let manifest = format!(
+        r#"{{
+  "id": "{name}",
+  "name": "{name}",
+  "author": "future",
+  "version": "v1.0.0",
+  "min_game_version": "{min_game_version}",
+  "has_pck": false,
+  "has_dll": true,
+  "dependencies": []
+}}"#,
+        name = name,
+        min_game_version = min_game_version,
+    );
+    fs::write(dir.join(format!("{}.json", name)), manifest).unwrap();
+    fs::write(dir.join(format!("{}.dll", name)), b"future-dll-bytes").unwrap();
+}
+
+#[test]
+fn snapshot_filter_strips_incompatible_when_enabled_preserves_when_none() {
+    use sts2_mod_manager_lib::profiles::snapshot_current_with_paths;
+
+    let mods_tmp = tempfile::tempdir().unwrap();
+    let disabled_tmp = tempfile::tempdir().unwrap();
+    let profiles_tmp = tempfile::tempdir().unwrap();
+
+    install_baselib_with_bom(mods_tmp.path());
+    install_future_mod(mods_tmp.path(), "FutureMod", "999.0.0");
+
+    let filtered = snapshot_current_with_paths(
+        "publish-pack",
+        mods_tmp.path(),
+        disabled_tmp.path(),
+        profiles_tmp.path(),
+        None,
+        Some("0.105.0"),
+    )
+    .expect("snapshot must succeed");
+    assert!(
+        filtered.mods.iter().any(|m| m.name == "BaseLib"),
+        "BaseLib (no min_game_version) must always survive."
+    );
+    assert!(
+        !filtered.mods.iter().any(|m| m.name == "FutureMod"),
+        "FutureMod must be stripped when the publish-time filter is enabled."
+    );
+
+    let preserved = snapshot_current_with_paths(
+        "non-publishing-snapshot",
+        mods_tmp.path(),
+        disabled_tmp.path(),
+        profiles_tmp.path(),
+        None,
+        None,
+    )
+    .expect("snapshot must succeed");
+    assert!(
+        preserved.mods.iter().any(|m| m.name == "BaseLib"),
+        "BaseLib must survive."
+    );
+    assert!(
+        preserved.mods.iter().any(|m| m.name == "FutureMod"),
+        "FutureMod must survive when the filter is disabled for a non-publishing snapshot."
+    );
+}
+
+#[test]
+fn non_publishing_snapshot_preserves_incompatible_mod_already_in_profile() {
+    use sts2_mod_manager_lib::profiles::{
+        load_profile, save_profile, snapshot_current_with_paths, Profile, ProfileMod,
+    };
+
+    let mods_tmp = tempfile::tempdir().unwrap();
+    let disabled_tmp = tempfile::tempdir().unwrap();
+    let profiles_tmp = tempfile::tempdir().unwrap();
+
+    install_baselib_with_bom(mods_tmp.path());
+    install_future_mod(mods_tmp.path(), "FutureMod", "999.0.0");
+
+    let now = chrono::Utc::now();
+    let existing = Profile {
+        name: "active".into(),
+        game_version: None,
+        created_by: None,
+        mods: vec![ProfileMod {
+            name: "FutureMod".into(),
+            version: "v1.0.0".into(),
+            source: None,
+            hash: None,
+            files: Vec::new(),
+            folder_name: Some("FutureMod".into()),
+            mod_id: Some("FutureMod".into()),
+            enabled: true,
+            bundle_url: None,
+            bundle_sha256: None,
+        }],
+        created_at: now,
+        updated_at: now,
+        public: None,
+    };
+    save_profile(&existing, profiles_tmp.path()).expect("seed profile");
+
+    let refreshed = snapshot_current_with_paths(
+        "active",
+        mods_tmp.path(),
+        disabled_tmp.path(),
+        profiles_tmp.path(),
+        None,
+        None,
+    )
+    .expect("snapshot must succeed");
+
+    assert!(
+        refreshed.mods.iter().any(|m| m.name == "FutureMod"),
+        "FutureMod was already in the profile and is still on disk, so a non-publishing snapshot must preserve it."
+    );
+
+    let on_disk = load_profile("active", profiles_tmp.path()).expect("reload");
+    assert!(
+        on_disk.mods.iter().any(|m| m.name == "FutureMod"),
+        "FutureMod must persist in the on-disk profile JSON after the snapshot."
+    );
+}
+
 #[test]
 fn flow_11_apply_profile_without_pin_moves_mod_as_directed() {
     use sts2_mod_manager_lib::profiles::{apply_profile_with_pins, Profile, ProfileMod};

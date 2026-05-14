@@ -363,8 +363,13 @@ fn slugify(s: &str) -> String {
 }
 
 /// Download a specific tagged release's primary zip asset into a cache
-/// path scoped by owner/repo/tag. Returns the cached path. Used by the
-/// Repair walk-back (which downloads multiple candidate releases and
+/// path scoped by owner/repo/tag. When `game_version` is known, releases
+/// with per-game compatibility assets (for example RitsuLib's
+/// `Compat.0.103.2...github.zip`) choose the best asset for that game
+/// build instead of blindly taking the first zip.
+///
+/// Returns the cached path. Used by the Repair walk-back (which downloads
+/// multiple candidate releases and
 /// peeks their manifests to find a compatible one) — keeping each
 /// candidate at a distinct path means parallel walk-backs of the same
 /// repo don't clobber each other and the cache survives across runs.
@@ -376,10 +381,11 @@ pub async fn download_release_zip_to_cache(
     repo: &str,
     tag: &str,
     cache_path: &Path,
+    game_version: Option<&str>,
     token: Option<&str>,
 ) -> Result<PathBuf> {
     let release = fetch_release_by_tag(owner, repo, tag, token).await?;
-    let asset = find_best_asset(&release).ok_or_else(|| {
+    let asset = find_best_asset_for_game_version(&release, game_version).ok_or_else(|| {
         AppError::Other(format!(
             "Release {} for {}/{} has no downloadable asset",
             tag, owner, repo
@@ -531,20 +537,104 @@ pub async fn install_compatible_github_mod(
     Ok((info, chosen.tag, walked_back))
 }
 
-/// Find the best asset to download from a release (prefer .zip containing mod files).
-fn find_best_asset(release: &GitHubRelease) -> Option<&GitHubAsset> {
-    // Prefer zip files
-    let zip_asset = release
+/// Find the best asset to download from a release.
+///
+/// Most STS2 mods publish exactly one `.zip`, but RitsuLib-style releases
+/// publish several variants in one tag:
+///
+/// - `*.variant-pack.zip` — a bundle of variants, not the install target.
+/// - `*.github.zip` — the default/latest-game asset.
+/// - `*.Compat.<game-version>.*.github.zip` — install target for a specific
+///   STS2 build line.
+///
+/// If we know the user's game version, prefer the newest compatible
+/// `Compat.X.Y.Z` asset. Otherwise prefer the normal GitHub zip and avoid
+/// variant packs.
+fn find_best_asset_for_game_version<'a>(
+    release: &'a GitHubRelease,
+    game_version: Option<&str>,
+) -> Option<&'a GitHubAsset> {
+    let zip_assets: Vec<&GitHubAsset> = release
         .assets
         .iter()
-        .find(|a| a.name.ends_with(".zip"));
+        .filter(|a| a.name.to_ascii_lowercase().ends_with(".zip"))
+        .collect();
 
-    if zip_asset.is_some() {
-        return zip_asset;
+    if let Some(current) = game_version.and_then(parse_asset_version) {
+        let compat_assets: Vec<(&GitHubAsset, semver::Version)> = zip_assets
+            .iter()
+            .filter_map(|asset| {
+                let required = compat_version_from_asset_name(&asset.name)
+                    .and_then(|v| parse_asset_version(&v))?;
+                Some((*asset, required))
+            })
+            .collect();
+
+        if let Some(asset) = compat_assets
+            .iter()
+            .filter(|(_, required)| &current >= required)
+            .max_by(|(_, a), (_, b)| a.cmp(b))
+            .map(|(asset, _)| *asset)
+        {
+            return Some(asset);
+        }
+
+        if let Some(asset) = compat_assets
+            .iter()
+            .min_by(|(_, a), (_, b)| a.cmp(b))
+            .map(|(asset, _)| *asset)
+        {
+            return Some(asset);
+        }
     }
 
-    // Fall back to any asset
-    release.assets.first()
+    let normal_github_zip = zip_assets.iter().copied().find(|a| {
+        let name = a.name.to_ascii_lowercase();
+        name.ends_with(".github.zip")
+            && !name.contains(".compat.")
+            && !name.contains("variant-pack")
+    });
+    if normal_github_zip.is_some() {
+        return normal_github_zip;
+    }
+
+    let non_variant_zip = zip_assets
+        .iter()
+        .copied()
+        .find(|a| !a.name.to_ascii_lowercase().contains("variant-pack"));
+    if non_variant_zip.is_some() {
+        return non_variant_zip;
+    }
+
+    zip_assets.first().copied().or_else(|| release.assets.first())
+}
+
+fn parse_asset_version(version: &str) -> Option<semver::Version> {
+    let trimmed = version.trim().trim_start_matches('v');
+    let mut parts = trimmed.split('.');
+    let major = parts.next()?.parse::<u64>().ok()?;
+    let minor = parts.next().unwrap_or("0").parse::<u64>().ok()?;
+    let patch = parts.next().unwrap_or("0").parse::<u64>().ok()?;
+    Some(semver::Version::new(major, minor, patch))
+}
+
+fn compat_version_from_asset_name(name: &str) -> Option<String> {
+    let lower = name.to_ascii_lowercase();
+    let marker = ".compat.";
+    let idx = lower.find(marker)? + marker.len();
+    let rest = &name[idx..];
+    let mut parts = rest.split('.');
+    let major = parts.next()?;
+    let minor = parts.next()?;
+    let patch = parts.next()?;
+    if [major, minor, patch]
+        .iter()
+        .all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()))
+    {
+        Some(format!("{}.{}.{}", major, minor, patch))
+    } else {
+        None
+    }
 }
 
 /// Download and install a mod from a GitHub release.
@@ -566,7 +656,7 @@ pub async fn download_and_install_github_mod(
         None => fetch_latest_release(owner, repo, token).await?,
     };
 
-    let asset = find_best_asset(&release).ok_or_else(|| {
+    let asset = find_best_asset_for_game_version(&release, None).ok_or_else(|| {
         log::error!(
             "No downloadable assets in release {} for {}/{} (assets: {:?})",
             release.tag_name, owner, repo,
@@ -777,5 +867,82 @@ pub async fn download_url_mod(
         })
     } else {
         Err(format!("Unsupported file type: {}", file_name))
+    }
+}
+
+#[cfg(test)]
+mod asset_selection_tests {
+    use super::*;
+
+    fn asset(name: &str) -> GitHubAsset {
+        GitHubAsset {
+            name: name.to_string(),
+            size: 1,
+            browser_download_url: format!("https://example.com/{name}"),
+            content_type: "application/zip".to_string(),
+            download_count: 0,
+        }
+    }
+
+    fn release(names: &[&str]) -> GitHubRelease {
+        GitHubRelease {
+            tag_name: "v0.2.31".to_string(),
+            name: None,
+            body: None,
+            prerelease: false,
+            published_at: None,
+            assets: names.iter().map(|name| asset(name)).collect(),
+            html_url: "https://example.com/release".to_string(),
+        }
+    }
+
+    #[test]
+    fn game_version_asset_selection_prefers_matching_compat_zip() {
+        let release = release(&[
+            "STS2-RitsuLib.0.2.31.variant-pack.zip",
+            "STS2.RitsuLib.0.2.31.github.zip",
+            "STS2.RitsuLib.Compat.0.103.2.0.2.31.github.zip",
+            "STS2.RitsuLib.Compat.0.104.0.0.2.31.github.zip",
+        ]);
+
+        let chosen = find_best_asset_for_game_version(&release, Some("0.103.2"))
+            .expect("should choose a zip");
+
+        assert_eq!(
+            chosen.name,
+            "STS2.RitsuLib.Compat.0.103.2.0.2.31.github.zip"
+        );
+    }
+
+    #[test]
+    fn default_asset_selection_skips_variant_pack_when_normal_github_zip_exists() {
+        let release = release(&[
+            "STS2-RitsuLib.0.2.31.variant-pack.zip",
+            "STS2.RitsuLib.0.2.31.github.zip",
+        ]);
+
+        let chosen = find_best_asset_for_game_version(&release, None)
+            .expect("should choose a zip");
+
+        assert_eq!(chosen.name, "STS2.RitsuLib.0.2.31.github.zip");
+    }
+
+    #[test]
+    fn game_version_asset_selection_uses_incompatible_compat_zip_over_plain_for_rejection() {
+        let release = release(&[
+            "STS2.RitsuLib.0.2.31.github.zip",
+            "STS2.RitsuLib.Compat.0.104.0.0.2.31.github.zip",
+        ]);
+
+        let chosen = find_best_asset_for_game_version(&release, Some("0.103.2"))
+            .expect("should choose a zip");
+
+        assert_eq!(
+            chosen.name,
+            "STS2.RitsuLib.Compat.0.104.0.0.2.31.github.zip",
+            "when a release has compat-specific assets but none support the user's game, \
+             pick the lowest incompatible compat asset rather than the plain latest asset. \
+             The walk-back layer can then reject the release from that asset's manifest."
+        );
     }
 }

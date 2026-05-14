@@ -465,7 +465,7 @@ pub async fn update_mod(
             owner, repo, tag,
         );
         chosen_zip = crate::download::download_release_zip_to_cache(
-            &owner, &repo, &tag, &cache_path, token.as_deref(),
+            &owner, &repo, &tag, &cache_path, None, token.as_deref(),
         )
         .await
         .map_err(|e| e.to_string())?;
@@ -803,7 +803,7 @@ pub async fn pick_compatible_release(
     for release in releases.iter().take(MAX_RELEASES_TO_WALK) {
         let tag = release.tag_name.as_str();
         let zip_path = match crate::download::download_release_zip_to_cache(
-            owner, repo, tag, cache_path, token,
+            owner, repo, tag, cache_path, game_version, token,
         )
         .await
         {
@@ -957,7 +957,7 @@ pub async fn update_all_mods(
                 owner, repo, update.latest_version,
             );
             let zip = match crate::download::download_release_zip_to_cache(
-                &owner, &repo, &update.latest_version, &cache_path, token.as_deref(),
+                &owner, &repo, &update.latest_version, &cache_path, None, token.as_deref(),
             )
             .await
             {
@@ -1516,7 +1516,7 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
             if github_needs_update {
                 if let Some(ref assets_tag) = latest_release_with_assets_tag.clone() {
                     match crate::download::download_release_zip_to_cache(
-                        &owner, &repo, assets_tag, ctx.cache_path, ctx.token,
+                        &owner, &repo, assets_tag, ctx.cache_path, ctx.user_game_version, ctx.token,
                     )
                     .await
                     {

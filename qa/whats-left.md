@@ -7,10 +7,19 @@ related.
 
 ## Tier 2 WebDriver scenarios (UI specs)
 
-What's covered today (per `qa/scenarios/INDEX.md`):
+**Updated 2026-05-13:** Phase 2 of the frontend-coverage-95 work
+landed `specProfileSwitchPreservesPins` and `specRepairWalkback`
+(see `qa/runner/smoke.mjs`). Walk-back uses a new cassette under
+`qa/fixtures/github/repos/qa-fixture/walkback-mod/`.
+
+What's covered today (per `qa/scenarios/INDEX.md` + the smoke
+harness):
 - Scenarios 006–010 — toggle / audit-count / pin / delete / create-
-  profile. All run from `qa/runner/smoke.mjs`. See the cassette +
-  fixture-game-path env vars below.
+  profile.
+- ~~Profile switch + apply (the v1.3.1 pin-preservation contract)~~
+  — **DONE (2026-05-13)**.
+- ~~Repair walk-back — newer-than-game cassette, click Repair,
+  verify the walk-back tag installs~~ — **DONE (2026-05-13)**.
 
 Still uncovered (priority order):
 
@@ -21,13 +30,8 @@ Still uncovered (priority order):
   walk-back compat check + zip download + extraction. Needs a zip
   cassette fixture (we'd cassette `github.com` redirects with a
   Compress-Archive-built tiny manifest zip). ~2 hours.
-- **Profile switch + apply** — companion to scenario 010. Trickier
-  than create because we have to assert the active-profile indicator
-  AND that the apply ran without scrubbing pins (the v1.3.1 contract).
 - **Share-code import flow** — needs a stateful GitHub mock (Profile
   sharing item below).
-- **Repair walk-back** — single mod, intentionally newer-than-game
-  cassette, click Repair, verify the walk-back tag installs.
 - **Subscription apply** — modpack curator pushes update, friend
   applies. Needs the stateful mock.
 - **Drag-drop + launch + deep link** — all OS-level; either
@@ -104,60 +108,64 @@ and `state.rs::new`.
 A shipped build (no feature, no env vars) behaves identically to
 v1.3.4 — these are pure escape hatches.
 
-## Tier 2 scenarios for historical bugs
+## Tier 2 scenarios for historical bugs — DONE (2026-05-13)
 
-These are tracked in `walkthrough-findings.md` as ⚠️ "fix shipped
-but no test guards it". They need Tauri state + AppHandle, which
-the Rust integration tests can't easily produce. WebDriver against
-the running app can.
+These were tracked in `walkthrough-findings.md` as ⚠️ "fix shipped
+but no test guards it". All three now have WebDriver specs under
+`qa/runner/smoke.mjs`:
 
-- **#20 — Profile Repair deletes orphan disabled files.** Set up a
-  mod in `mods_disabled/` that isn't in the profile manifest. Click
-  Repair. Assert the file is gone.
-- **#21 — Game-version-skipped mods don't pollute the saved
-  snapshot.** Install a mod whose `min_game_version` exceeds the
-  fake game version. Apply a profile. Re-snapshot. Assert the
-  skipped mod isn't in the new snapshot.
-- **#22 — Profile state is sticky after toggle.** Toggle a mod off.
-  Switch to a different profile and back. Assert the toggle stuck.
+- ~~**#20 — Profile Repair deletes orphan disabled files.**~~ —
+  covered by `specRepairRemovesOrphanDisabled`.
+- ~~**#21 — Game-version-skipped mods don't pollute the saved
+  snapshot.**~~ — covered by `specSkippedModAbsentFromSnapshot`.
+  **Caveat:** the spec drives the apply-time skip path
+  (`switch_profile` correctly disables incompatible mods on disk and
+  records `enabled: false` in the profile JSON). The companion
+  *manual-snapshot* path in `src-tauri/src/profiles.rs::snapshot_current_with_sources`
+  does NOT mirror the bug-#21 filter that landed in
+  `subscriptions.rs::build_synced_profile_snapshot`. A re-snapshot
+  via the Profiles kebab will still include incompatible mods. New
+  follow-up item logged in the `Phase 2 follow-ups` section below.
+- ~~**#22 — Profile state is sticky after toggle.**~~ — covered by
+  `specToggleStickyAcrossProfileSwitch`.
 
-Each is ~30 min — the fixture-game-path env var already exists.
+## Phase 2 follow-ups (logged 2026-05-13)
 
-## Frontend coverage gate — current 70%, target 95%
+- **Bug #21 second half — manual snapshot doesn't filter
+  incompatible mods.** `snapshot_current_with_sources` (profiles.rs
+  ~L188) loops every on-disk mod and writes them into the snapshot
+  regardless of `min_game_version`. The `build_synced_profile_snapshot`
+  in subscriptions.rs has the correct filter (commit 37df97f). Mirror
+  the filter into the plain-snapshot path, then upgrade
+  `specSkippedModAbsentFromSnapshot` to drive the kebab → Snapshot
+  flow and assert the skipped mod is absent. ~1 hour.
+- **Cassette URL→path quirk with version tags.** `qa_cassette::url_to_path`
+  uses `PathBuf::extension()` to decide whether to append `.json`,
+  but `v3.0.0` has `Some("0")` as extension. Per-tag fixtures must
+  be stored without the `.json` suffix (see `qa/fixtures/github/repos/
+  qa-fixture/walkback-mod/releases/tags/v1.0.0` for the workaround).
+  Real fix: always append `.json` for the GitHub bucket unless the
+  path ends in `.zip` / `.tar.gz`. ~15 min.
+
+## Frontend coverage gate — DONE (2026-05-13, 95/90/95/95 landed)
 
 Vitest + jsdom + Testing Library + v8 coverage are wired. The
 release.sh QA gate enforces the thresholds declared in
 `vitest.config.ts` and drops the release if coverage regresses.
 
-Current baseline (`npm run qa:coverage`):
-- Lines:      **70.15%**
-- Statements: 68.94%
-- Functions:  71.89%
-- Branches:   65.24%
-- 439 tests across 36 files
+Live coverage (`npm run qa:coverage`):
+- Lines:      **97.8%**   · gate 95
+- Statements: **96.69%**  · gate 95
+- Functions:  **97.03%**  · gate 95
+- Branches:   **91.9%**   · gate 90
+- 878 tests across 36 files
 
-Test counts per file (>0% are at least partially tested):
-
-| File group | Coverage today | Path to 95% |
-|---|---|---|
-| `src/lib/*` (parsers, utils) | 78% | almost there — `shareImport.tsx` higher-level functions need ConfirmFn-mocked tests |
-| `src/components/Primitives` | 70-100% | done for Toggle/Button/Card/Badge/Input/LaunchSpinner/KebabMenu |
-| `src/components/Forms+Modals` | 22-90% | OnboardingOverlay (18%) + PublishModal (22%) need deep tests; rest are 70%+ |
-| `src/contexts/*` | 89% | one branch in AppContext's polling loop |
-| `src/views/Tutorial.tsx` | 87% | almost done |
-| `src/views/Browse.tsx` | 61% | needs Nexus-trending error path + install-from-detail tests |
-| `src/views/Mods.tsx` | 47% | needs deep tests for advanced-mode forms, source editor, repair flow |
-| `src/views/Settings.tsx` | 36% | each tab body needs its own deep test suite |
-| `src/views/Profiles.tsx` | 29% | snapshot/repair/share kebab paths untested |
-| `src/views/Home.tsx` | 27% | share-code import, subscription banners, drift overlay |
-| `src/App.tsx` | 38% | top-bar resize handles, deep-link routing, OnboardingOverlay branches |
-
-Trajectory to 95%: write ~6 more test files per view (one per
-conditional render section). Estimated ~3-4 hours of focused
-work. WebDriver smoke specs already cover the **user flows**
-end-to-end (toggle / pin / delete / audit / profile create / share-
-code import) — these unit tests fill in the static branches the
-smoke can't easily reach.
+The trajectory ladder (68/63/70/67 → 80/75/85/80 → 95/90/95/95) is
+fully landed. Per-file priority surfaces (App / Home / Mods /
+Browse / Profiles / Settings / OnboardingOverlay / PublishModal /
+AutoDetectModal / DiagnosticBundle / AppContext) all sit at ≥95%
+lines / ≥90% branches with documented `// uncovered:` annotations
+for any dead-code defensive guards.
 
 ## Backend coverage gate — current 19%
 
@@ -165,17 +173,19 @@ smoke can't easily reach.
 src-tauri/Cargo.toml --summary-only` for a per-file report.
 
 Current state:
-- Lines: 19.12% overall
+- Lines: 19.12% overall (pre-Task 19)
 - `mods.rs` 54% (most user-flow paths covered)
 - `qa_cassette.rs` 76%
 - `nexus.rs` 49%, `quick_add.rs` 51%, `updater.rs` 13%, `backup.rs` covered via new unit tests
-- 62 Rust unit tests + 13 integration + 3 cassette-feature = 78 backend tests
+- 82 Rust unit tests (+20 from Task 19's `download.rs` pure-helper
+  coverage on 2026-05-13: `slugify`, `repo_mentions_sts2`,
+  `find_best_asset`, `peek_zip_min_game_version`) + 13 integration
+  + 3 cassette-feature = 98 backend tests
 
 Path to higher backend coverage: the big untested chunks are
-`download.rs` (547 lines, 0%), `sharing.rs` (926 lines, 4%), and
-`subscriptions.rs` (421 lines, 0%). Most of these need a stateful
-mock HTTP server to exercise (their pure helpers are mostly
-covered already).
+`download.rs`'s I/O paths (the pure helpers are now covered),
+`sharing.rs` (926 lines, 4%), and `subscriptions.rs` (421 lines,
+0%). Most of these need a stateful mock HTTP server to exercise.
 
 ## Linux + macOS support
 

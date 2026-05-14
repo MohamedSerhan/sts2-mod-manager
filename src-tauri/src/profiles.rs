@@ -32,6 +32,14 @@ pub struct ProfileMod {
     /// Set automatically when sharing for mods without a GitHub source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bundle_url: Option<String>,
+    /// SHA256 hex digest of the bundle zip's bytes at upload time. Used
+    /// by re-share to skip uploads when the bundle hasn't changed
+    /// (content-addressing — mod authors who edit a mod without bumping
+    /// `version` still get a fresh upload because the hash differs).
+    /// `None` for mods without a bundle, or for profiles written by
+    /// manager versions before v1.4.0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle_sha256: Option<String>,
 }
 
 fn default_enabled() -> bool {
@@ -244,6 +252,7 @@ fn snapshot_current_inner(
             mod_id: m.mod_id,
             enabled: true,
             bundle_url,
+            bundle_sha256: None,
         });
     }
 
@@ -270,6 +279,7 @@ fn snapshot_current_inner(
             mod_id: m.mod_id,
             enabled: false,
             bundle_url,
+            bundle_sha256: None,
         });
     }
 
@@ -1102,5 +1112,71 @@ mod public_field_tests {
         assert!(json.contains("\"public\":true"));
         let back: Profile = serde_json::from_str(&json).unwrap();
         assert_eq!(back.public, Some(true));
+    }
+}
+
+#[cfg(test)]
+mod profile_schema_compat_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_profile_without_bundle_sha256_deserializes() {
+        let legacy = r#"{
+            "name": "test",
+            "version": "1.0.0",
+            "source": null,
+            "hash": null,
+            "files": [],
+            "bundle_url": "https://raw.githubusercontent.com/x/y/main/mods/a.zip"
+        }"#;
+        let pm: ProfileMod = serde_json::from_str(legacy).expect("legacy deserializes");
+        assert_eq!(pm.bundle_sha256, None);
+        assert_eq!(
+            pm.bundle_url.as_deref(),
+            Some("https://raw.githubusercontent.com/x/y/main/mods/a.zip")
+        );
+    }
+
+    #[test]
+    fn profile_without_sha_serializes_without_the_field() {
+        let pm = ProfileMod {
+            name: "test".into(),
+            version: "1.0.0".into(),
+            source: None,
+            hash: None,
+            files: vec![],
+            folder_name: None,
+            mod_id: None,
+            enabled: true,
+            bundle_url: None,
+            bundle_sha256: None,
+        };
+        let json = serde_json::to_string(&pm).unwrap();
+        assert!(
+            !json.contains("bundle_sha256"),
+            "expected field to be omitted: {}",
+            json
+        );
+    }
+
+    #[test]
+    fn profile_with_sha_round_trips() {
+        let pm = ProfileMod {
+            name: "test".into(),
+            version: "1.0.0".into(),
+            source: None,
+            hash: None,
+            files: vec![],
+            folder_name: None,
+            mod_id: None,
+            enabled: true,
+            bundle_url: Some(
+                "https://github.com/x/y/releases/download/bundles/a_v1.0.0.zip".into(),
+            ),
+            bundle_sha256: Some("deadbeef".into()),
+        };
+        let json = serde_json::to_string(&pm).unwrap();
+        let round: ProfileMod = serde_json::from_str(&json).unwrap();
+        assert_eq!(round.bundle_sha256.as_deref(), Some("deadbeef"));
     }
 }

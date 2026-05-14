@@ -206,7 +206,7 @@ impl AppStateInner {
 /// comparisons against mod manifests (which usually omit the "v") match.
 /// Returns None on any read / parse error — caller should treat that as
 /// "we don't know" and skip compatibility checks.
-fn read_release_info_version(game_path: &Path) -> Option<String> {
+pub fn read_release_info_version(game_path: &Path) -> Option<String> {
     let path = game_path.join("release_info.json");
     let content = std::fs::read_to_string(&path).ok()?;
     let value: serde_json::Value = serde_json::from_str(&content).ok()?;

@@ -196,6 +196,31 @@ fn snapshot_current_inner(
     let disabled_mods = scan_disabled_mods(disabled_path);
     let now = Utc::now();
 
+    // Bug #21 mirror: exclude mods whose `min_game_version` exceeds the
+    // current game build from the manual snapshot. The subscription-side
+    // fix (build_synced_profile_snapshot in subscriptions.rs, commit
+    // 37df97f) filters via the SkippedMod list collected during the
+    // download phase; here we don't have that list, so we check each
+    // scanned mod's manifest directly with the same compat helper
+    // (updater::install_is_incompatible).
+    //
+    // game_version comes from `<game>/release_info.json` — derived from
+    // `mods_path.parent()` so this function stays signature-compatible
+    // with all existing callers (manual Snapshot kebab, auto-snapshot on
+    // profile switch, sharing re-snapshot, and the post-mutation
+    // refresh_active_profile_manifest). When release_info.json is absent
+    // or unparseable, game_version is None and install_is_incompatible
+    // fails open (returns false), so the filter is a no-op — matching
+    // the existing fail-open behavior used everywhere else compat is
+    // checked. The filter is therefore SAFE for the unit tests that
+    // snapshot from a tempdir with no release_info.json.
+    let game_version: Option<String> = mods_path
+        .parent()
+        .and_then(crate::state::read_release_info_version);
+    let is_incompatible = |info: &crate::mods::ModInfo| -> bool {
+        crate::updater::install_is_incompatible(info, game_version.as_deref())
+    };
+
     // Load mod sources DB if config_path provided, to enrich profile with download links
     let sources_db = config_path
         .map(|p| crate::mod_sources::load_sources(p))
@@ -213,9 +238,21 @@ fn snapshot_current_inner(
         .unwrap_or_default();
 
     let mut profile_mods: Vec<ProfileMod> = Vec::new();
+    let mut filtered_incompatible: u32 = 0;
 
     // Add enabled mods
     for m in enabled_mods {
+        if is_incompatible(&m) {
+            log::info!(
+                "Snapshot '{}': filtering enabled mod '{}' — needs game v{}, user has v{}",
+                name,
+                m.name,
+                m.min_game_version.as_deref().unwrap_or("?"),
+                game_version.as_deref().unwrap_or("?"),
+            );
+            filtered_incompatible += 1;
+            continue;
+        }
         let source = m.source.clone().or_else(|| {
             crate::mod_sources::lookup_entry(
                 &sources_db.mods,
@@ -242,6 +279,17 @@ fn snapshot_current_inner(
 
     // Add disabled mods
     for m in disabled_mods {
+        if is_incompatible(&m) {
+            log::info!(
+                "Snapshot '{}': filtering disabled mod '{}' — needs game v{}, user has v{}",
+                name,
+                m.name,
+                m.min_game_version.as_deref().unwrap_or("?"),
+                game_version.as_deref().unwrap_or("?"),
+            );
+            filtered_incompatible += 1;
+            continue;
+        }
         let source = m.source.clone().or_else(|| {
             crate::mod_sources::lookup_entry(
                 &sources_db.mods,
@@ -264,6 +312,15 @@ fn snapshot_current_inner(
             enabled: false,
             bundle_url,
         });
+    }
+
+    if filtered_incompatible > 0 {
+        log::info!(
+            "Snapshot '{}': filtered {} game-version-incompatible mod(s) (user game v{})",
+            name,
+            filtered_incompatible,
+            game_version.as_deref().unwrap_or("?"),
+        );
     }
 
     let profile = Profile {

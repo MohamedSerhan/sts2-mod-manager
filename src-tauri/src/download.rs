@@ -775,3 +775,275 @@ pub async fn download_url_mod(
         Err(format!("Unsupported file type: {}", file_name))
     }
 }
+
+// ── Tests ───────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_owner() -> GitHubOwner {
+        GitHubOwner {
+            login: "octocat".to_string(),
+            avatar_url: "https://example.invalid/avatar.png".to_string(),
+        }
+    }
+
+    fn make_repo(
+        full_name: &str,
+        name: &str,
+        description: Option<&str>,
+        topics: &[&str],
+    ) -> GitHubRepo {
+        GitHubRepo {
+            full_name: full_name.to_string(),
+            name: name.to_string(),
+            description: description.map(|s| s.to_string()),
+            html_url: format!("https://github.com/{}", full_name),
+            stargazers_count: 0,
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+            owner: make_owner(),
+            topics: topics.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    fn make_asset(name: &str) -> GitHubAsset {
+        GitHubAsset {
+            name: name.to_string(),
+            size: 42,
+            browser_download_url: format!("https://example.invalid/{}", name),
+            content_type: "application/octet-stream".to_string(),
+            download_count: 0,
+        }
+    }
+
+    fn make_release(assets: Vec<GitHubAsset>) -> GitHubRelease {
+        GitHubRelease {
+            tag_name: "v1.0.0".to_string(),
+            name: Some("v1.0.0".to_string()),
+            body: None,
+            prerelease: false,
+            published_at: Some("2026-01-01T00:00:00Z".to_string()),
+            assets,
+            html_url: "https://example.invalid/release".to_string(),
+        }
+    }
+
+    // ── slugify ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn slugify_preserves_ascii_alphanumeric_and_allowed_punctuation() {
+        // ASCII alphanumeric plus '-', '_', '.' are preserved verbatim.
+        let s = "AutoPath-STS2_v1.0";
+        let out = slugify(s);
+        assert_eq!(out, "AutoPath-STS2_v1.0", "actual: {:?}", out);
+    }
+
+    #[test]
+    fn slugify_replaces_spaces_and_slashes_with_underscore() {
+        // Spaces, forward slashes, backslashes are NOT in the allow-list
+        // and must be replaced with '_'.
+        let out = slugify("foo bar/baz\\qux");
+        assert_eq!(out, "foo_bar_baz_qux", "actual: {:?}", out);
+    }
+
+    #[test]
+    fn slugify_replaces_special_characters_with_underscore() {
+        // Punctuation like ':', '@', '!', '?', '#' must all become '_'.
+        let out = slugify("user@host:path?q=1#frag!");
+        assert_eq!(out, "user_host_path_q_1_frag_", "actual: {:?}", out);
+    }
+
+    #[test]
+    fn slugify_replaces_non_ascii_with_underscore() {
+        // is_ascii_alphanumeric() rejects non-ASCII letters — they fall
+        // through to the '_' branch. Each char produces one '_'.
+        let out = slugify("café");
+        assert_eq!(out, "caf_", "actual: {:?}", out);
+    }
+
+    #[test]
+    fn slugify_empty_string_returns_empty() {
+        let out = slugify("");
+        assert_eq!(out, "", "actual: {:?}", out);
+    }
+
+    // ── repo_mentions_sts2 ──────────────────────────────────────────────────
+
+    #[test]
+    fn repo_mentions_sts2_detects_sts2_token_in_name() {
+        let r = make_repo("foo/autopath-sts2", "autopath-sts2", None, &[]);
+        assert!(repo_mentions_sts2(&r), "expected sts2 in name to match");
+    }
+
+    #[test]
+    fn repo_mentions_sts2_detects_slaythespire2_in_description() {
+        // Multi-word phrase "Slay the Spire 2" collapses (after lowercase
+        // and separator removal) to "slaythespire2".
+        let r = make_repo(
+            "foo/bar",
+            "bar",
+            Some("A mod for Slay the Spire 2"),
+            &[],
+        );
+        assert!(
+            repo_mentions_sts2(&r),
+            "expected 'Slay the Spire 2' phrase to match"
+        );
+    }
+
+    #[test]
+    fn repo_mentions_sts2_detects_hyphenated_topic() {
+        let r = make_repo("foo/bar", "bar", None, &["slay-the-spire-2"]);
+        assert!(
+            repo_mentions_sts2(&r),
+            "expected topic slay-the-spire-2 to match"
+        );
+    }
+
+    #[test]
+    fn repo_mentions_sts2_detects_roman_numeral_variant() {
+        let r = make_repo(
+            "foo/bar",
+            "bar",
+            Some("Slay The Spire II tools"),
+            &[],
+        );
+        assert!(repo_mentions_sts2(&r), "expected 'Slay The Spire II' to match");
+    }
+
+    #[test]
+    fn repo_mentions_sts2_detects_full_name_signal() {
+        // owner/repo full_name carries the signal; name/description/topics
+        // are empty.
+        let r = make_repo("acme/sts2-utility", "utility", None, &[]);
+        assert!(
+            repo_mentions_sts2(&r),
+            "expected full_name 'acme/sts2-utility' to match"
+        );
+    }
+
+    #[test]
+    fn repo_mentions_sts2_rejects_sts1_only_repo() {
+        // The bug report: must NOT match a plain "Slay the Spire" (no 2)
+        // repo.
+        let r = make_repo(
+            "foo/stsmod",
+            "stsmod",
+            Some("A mod for Slay the Spire"),
+            &["slay-the-spire"],
+        );
+        assert!(
+            !repo_mentions_sts2(&r),
+            "expected StS-1 repo to be rejected"
+        );
+    }
+
+    #[test]
+    fn repo_mentions_sts2_rejects_unrelated_repo() {
+        let r = make_repo(
+            "foo/rustlib",
+            "rustlib",
+            Some("A general-purpose library"),
+            &["rust", "library"],
+        );
+        assert!(!repo_mentions_sts2(&r), "expected unrelated repo to be rejected");
+    }
+
+    // ── find_best_asset ─────────────────────────────────────────────────────
+
+    #[test]
+    fn find_best_asset_prefers_zip_over_other_extensions() {
+        let release = make_release(vec![
+            make_asset("readme.txt"),
+            make_asset("AutoPath.dll"),
+            make_asset("AutoPath-v1.0.0.zip"),
+        ]);
+        let chosen = find_best_asset(&release).expect("expected an asset");
+        assert_eq!(
+            chosen.name, "AutoPath-v1.0.0.zip",
+            "actual: {:?}",
+            chosen.name
+        );
+    }
+
+    #[test]
+    fn find_best_asset_returns_first_zip_when_multiple_zips() {
+        // find() takes the first matching asset in declaration order.
+        let release = make_release(vec![
+            make_asset("first.zip"),
+            make_asset("second.zip"),
+        ]);
+        let chosen = find_best_asset(&release).expect("expected an asset");
+        assert_eq!(chosen.name, "first.zip", "actual: {:?}", chosen.name);
+    }
+
+    #[test]
+    fn find_best_asset_falls_back_to_first_when_no_zip() {
+        let release = make_release(vec![
+            make_asset("readme.txt"),
+            make_asset("AutoPath.dll"),
+        ]);
+        let chosen = find_best_asset(&release).expect("expected an asset");
+        assert_eq!(chosen.name, "readme.txt", "actual: {:?}", chosen.name);
+    }
+
+    #[test]
+    fn find_best_asset_returns_none_for_empty_release() {
+        let release = make_release(vec![]);
+        assert!(
+            find_best_asset(&release).is_none(),
+            "expected None for empty release"
+        );
+    }
+
+    // ── peek_zip_min_game_version ───────────────────────────────────────────
+
+    #[test]
+    fn peek_zip_min_game_version_reads_manifest_field() {
+        // Fixture: FixtureMod.json with min_game_version = "0.105.0".
+        let path = Path::new("tests/fixtures/min_game_version.zip");
+        let out = peek_zip_min_game_version(path)
+            .expect("peek_zip_min_game_version should succeed on fixture zip");
+        assert_eq!(
+            out.as_deref(),
+            Some("0.105.0"),
+            "actual: {:?}",
+            out
+        );
+    }
+
+    #[test]
+    fn peek_zip_min_game_version_returns_none_when_field_absent() {
+        // Fixture: FixtureMod.json WITHOUT a min_game_version key. The
+        // function should report Ok(None), not Err — a mod without a
+        // minimum runs on any build.
+        let path = Path::new("tests/fixtures/no_min_game_version.zip");
+        let out = peek_zip_min_game_version(path)
+            .expect("peek_zip_min_game_version should succeed without min_game_version");
+        assert!(out.is_none(), "actual: {:?}", out);
+    }
+
+    #[test]
+    fn peek_zip_min_game_version_errors_on_missing_file() {
+        let path = Path::new("tests/fixtures/does_not_exist.zip");
+        let result = peek_zip_min_game_version(path);
+        assert!(
+            result.is_err(),
+            "expected Err for missing zip, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn peek_zip_min_game_version_errors_on_non_zip_file() {
+        // Point at a definitely-not-a-zip file (this source file itself).
+        let path = Path::new("src/download.rs");
+        let result = peek_zip_min_game_version(path);
+        assert!(
+            result.is_err(),
+            "expected Err for non-zip input, got: {:?}",
+            result
+        );
+    }
+}

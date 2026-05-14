@@ -56,6 +56,15 @@ pub struct PendingNexusInstall {
     pub queued_at: Instant,
 }
 
+/// One page of cached modpack-browser results.
+/// `fetched_at` is unix seconds since epoch.
+#[derive(Debug, Clone)]
+pub struct CachedBrowserPage {
+    pub fetched_at: i64,
+    pub cards: Vec<crate::modpack_browser::BrowserCard>,
+    pub has_next_page: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct AppStateInner {
     /// Detected or manually set game directory
@@ -106,6 +115,9 @@ pub struct AppStateInner {
     /// How the Launch button and `Ctrl/⌘ L` should start STS2. Persisted
     /// in `<config>/launch_mode.txt`. Default `Steam`. See `LaunchMode`.
     pub launch_mode: LaunchMode,
+    /// In-memory cache for `fetch_modpack_browser_page`. Keyed by page
+    /// number. TTL is enforced in the command, not here.
+    pub modpack_browser_cache: std::collections::HashMap<u32, CachedBrowserPage>,
 }
 
 pub type AppState = Arc<Mutex<AppStateInner>>;
@@ -160,6 +172,7 @@ impl AppStateInner {
             game_version: None,
             pending_deep_link: None,
             launch_mode: LaunchMode::default(),
+            modpack_browser_cache: std::collections::HashMap::new(),
         }
     }
 

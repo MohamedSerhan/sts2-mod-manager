@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ModInfo, Profile, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, RepairProfileResult, ModAuditEntry, NexusModInfo } from '../types';
+import type { ModInfo, Profile, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, RepairProfileResult, ModAuditEntry, NexusModInfo, BrowserPage } from '../types';
 
 // ── Game Detection & QOL ───────────────────────────────────────────────────
 
@@ -266,6 +266,35 @@ export async function removeModSource(
 }
 
 /**
+ * Set / clear a mod's free-form note and "other link" URL — used for mods
+ * that don't live on GitHub or Nexus (Patreon, X, Discord, etc.) or just
+ * for remembering where you got the file. Empty strings clear. Folder-keyed
+ * write so the data sits next to the rest of the mod's source-entry state.
+ */
+export async function setModExtras(
+  modName: string,
+  note: string | null,
+  customUrl: string | null,
+  folderName: string | null = null,
+): Promise<ModSourceEntry> {
+  return invoke('set_mod_extras', { modName, folderName, note, customUrl });
+}
+
+/**
+ * Snooze update suggestions for this mod at a specific upstream tag. When
+ * upstream advances past that tag the snooze auto-expires. Pass `null` or
+ * an empty string for `latestTag` to clear the snooze. Distinct from pin,
+ * which is a hard freeze.
+ */
+export async function setModSnooze(
+  modName: string,
+  latestTag: string | null,
+  folderName: string | null = null,
+): Promise<ModSourceEntry> {
+  return invoke('set_mod_snooze', { modName, folderName, latestTag });
+}
+
+/**
  * Pin a mod so its enabled/disabled state and version survive modpack
  * applies and update sweeps. Pass `folderName` (from `mod.folder_name`)
  * so two mods with the same display name can be pinned independently.
@@ -293,12 +322,18 @@ export async function findGithubFromNexus(
 
 // ── Sharing ────────────────────────────────────────────────────────────────
 
-export async function shareProfile(name: string): Promise<ShareResult> {
-  return invoke('share_profile', { name });
+export async function shareProfile(
+  name: string,
+  listPublic: boolean | null,
+): Promise<ShareResult> {
+  return invoke('share_profile', { name, listPublic });
 }
 
-export async function reshareProfile(name: string): Promise<ShareResult> {
-  return invoke('reshare_profile', { name });
+export async function reshareProfile(
+  name: string,
+  listPublic: boolean | null,
+): Promise<ShareResult> {
+  return invoke('reshare_profile', { name, listPublic });
 }
 
 export async function fetchSharedProfile(code: string): Promise<Profile> {
@@ -311,6 +346,20 @@ export async function installSharedProfile(code: string): Promise<Profile> {
 
 export async function getShareInfo(name: string): Promise<ShareResult | null> {
   return invoke('get_share_info', { name });
+}
+
+export async function fetchModpackBrowserPage(
+  page: number,
+  forceRefresh: boolean,
+): Promise<BrowserPage> {
+  return invoke('fetch_modpack_browser_page', { page, forceRefresh });
+}
+
+export async function setModpackListing(
+  name: string,
+  public_: boolean,
+): Promise<void> {
+  return invoke('set_modpack_listing', { name, public: public_ });
 }
 
 export async function launchVanilla(): Promise<boolean> {

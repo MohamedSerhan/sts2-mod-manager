@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { countGithubUpdates, isUpToDate } from '../lib/auditState';
 import {
   Search,
   Upload,
@@ -18,6 +19,8 @@ import {
   ClipboardCheck,
   Download,
   AlertTriangle,
+  Check,
+  Clock,
 } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
@@ -42,6 +45,8 @@ import {
   openModsFolder,
   setModSource,
   setModSourcesFull,
+  setModExtras,
+  setModSnooze,
   findGithubFromNexus,
   pinMod,
   unpinMod,
@@ -73,7 +78,7 @@ function gameVersionSatisfies(current: string | null | undefined, required: stri
 }
 
 export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: boolean } = {}) {
-  const { mods, refreshMods, refreshAll, gameRunning, gameInfo, notifyNexusOpen, auditResults, auditing, runAudit, refreshAuditEntries } = useApp();
+  const { mods, refreshMods, refreshAll, gameRunning, gameInfo, notifyNexusOpen, auditResults, auditing, runAudit, refreshAuditEntries, updatingAll, updateAllGithub } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
   const [filter, setFilter] = useState('');
@@ -117,10 +122,6 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
     }
     return m;
   }, [auditResults]);
-
-  const auditPendingCount = auditResults
-    ? auditResults.filter((a) => a.needs_update && !a.pinned).length
-    : 0;
 
   async function handleCheckUpdates() {
     await runAudit();
@@ -236,7 +237,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
     try {
       const selected = await open({
         multiple: false,
-        filters: [{ name: 'Mod Archives', extensions: ['zip'] }],
+        filters: [{ name: 'Mod Archives', extensions: ['zip', '7z', 'rar'] }],
       });
       if (!selected) return;
       const path = typeof selected === 'string' ? selected : selected;
@@ -411,26 +412,91 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
               </Button>
             </>
           )}
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleCheckUpdates}
-            disabled={auditing}
-            title={
-              auditResults === null
-                ? 'Check every linked mod against its GitHub / Nexus source for available updates.'
-                : `Re-check (${auditPendingCount} update${auditPendingCount === 1 ? '' : 's'} pending).`
+          {(() => {
+            const ghUpdateCount = auditResults ? countGithubUpdates(auditResults) : 0;
+            const ghUpdateNames = auditResults
+              ? auditResults
+                  .filter(r => r.needs_update && r.github_repo && r.latest_release_with_assets_tag)
+                  .map(r => r.mod_name)
+              : [];
+
+            if (auditing) {
+              return (
+                <Button variant="secondary" size="sm" disabled title="Checking each mod against its source…">
+                  <ClipboardCheck size={14} className="animate-pulse" />
+                  Auditing…
+                </Button>
+              );
             }
-          >
-            <ClipboardCheck size={14} className={auditing ? 'animate-pulse' : ''} />
-            {auditing
-              ? 'Checking…'
-              : auditResults === null
-                ? 'Check for updates'
-                : auditPendingCount > 0
-                  ? `${auditPendingCount} update${auditPendingCount === 1 ? '' : 's'}`
-                  : 'Up to date'}
-          </Button>
+
+            if (updatingAll) {
+              return (
+                <Button variant="primary" size="sm" disabled>
+                  <RefreshCw size={14} className="animate-spin" />
+                  Updating {ghUpdateCount}…
+                </Button>
+              );
+            }
+
+            if (auditResults === null) {
+              return (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleCheckUpdates}
+                  title="Check each mod against its source for updates."
+                >
+                  <ClipboardCheck size={14} />
+                  Audit mods
+                </Button>
+              );
+            }
+
+            if (ghUpdateCount === 0) {
+              return (
+                <>
+                  <span
+                    className="gf-pill gf-pill-ok gf-pill-toolbar"
+                    title="Every linked mod is on its source's latest installable release."
+                  >
+                    Up to date
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleCheckUpdates}
+                    title="Re-audit"
+                    aria-label="Re-audit"
+                  >
+                    <RefreshCw size={14} />
+                  </Button>
+                </>
+              );
+            }
+
+            return (
+              <>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => updateAllGithub(ghUpdateNames)}
+                  title="Update every GitHub-linked mod with a pending update. Pinned mods are skipped."
+                >
+                  <Download size={14} />
+                  Update {ghUpdateCount} mod{ghUpdateCount === 1 ? '' : 's'}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleCheckUpdates}
+                  title="Re-audit"
+                  aria-label="Re-audit"
+                >
+                  <RefreshCw size={14} />
+                </Button>
+              </>
+            );
+          })()}
           <Button size="sm" onClick={async () => {
             setRefreshing(true);
             try { await refreshMods(); }
@@ -554,6 +620,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
               !!auditRow &&
               auditRow.needs_update &&
               !auditRow.pinned &&
+              !auditRow.snoozed &&
               !auditRow.game_version_too_old &&
               !auditRow.latest_release_blocked_by_game_version &&
               !!compatibleTag &&
@@ -595,6 +662,14 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                             <Pin size={9} /> Pinned
                           </span>
                         )}
+                        {auditRow && isUpToDate(auditRow) && (
+                          <span
+                            className="gf-pill gf-pill-ok"
+                            title="On the source's latest installable release."
+                          >
+                            <Check size={9} /> Latest
+                          </span>
+                        )}
                         {showUpdatePill && (
                           <button
                             onClick={() => handleInlineUpdate(mod.name, mod.folder_name)}
@@ -612,6 +687,14 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                               <><Download size={9} /> Update available → v{compatibleTag?.replace(/^v/, '')}</>
                             )}
                           </button>
+                        )}
+                        {auditRow?.snoozed && (
+                          <span
+                            className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-500/20 text-slate-300"
+                            title={`Update suggestion snoozed at v${auditRow.latest_release_with_assets_tag?.replace(/^v/, '') ?? '?'}. Auto-expires when a newer release appears.`}
+                          >
+                            💤 Snoozed
+                          </span>
                         )}
                         {auditRow?.latest_release_blocked_by_game_version && !auditRow.pinned && (
                           <span
@@ -680,7 +763,21 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                             <Badge variant="nexus">Nexus</Badge>
                           </a>
                         ) : null}
-                        {advancedMode && !hasLinks && (
+                        {advancedMode && mod.custom_url ? (
+                          <a
+                            href={mod.custom_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex"
+                            title={`Open link: ${mod.custom_url}`}
+                          >
+                            <Badge variant="default">
+                              <ExternalLink size={10} className="mr-1" />
+                              Link
+                            </Badge>
+                          </a>
+                        ) : null}
+                        {advancedMode && !hasLinks && !mod.custom_url && (
                           <Badge variant={getSourceVariant(mod.source)}>
                             {mod.source ? 'Local' : 'Unlinked'}
                           </Badge>
@@ -692,6 +789,15 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                       {mod.description && (
                         <p className="text-sm text-text-muted mt-1 truncate">
                           {mod.description}
+                        </p>
+                      )}
+                      {mod.note && (
+                        <p
+                          className="text-xs text-text-dim mt-1 truncate"
+                          title={mod.note}
+                          style={{ fontStyle: 'italic' }}
+                        >
+                          📝 {mod.note}
                         </p>
                       )}
                     </div>
@@ -724,6 +830,51 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                         <KebabItem icon={<FolderOpen size={12} />} onClick={handleOpenFolder}>
                           Open mods folder
                         </KebabItem>
+                        {auditRow?.snoozed ? (
+                          <KebabItem
+                            icon={<Check size={12} />}
+                            onClick={async () => {
+                              try {
+                                await setModSnooze(mod.name, null, mod.folder_name);
+                                await refreshAuditEntries([mod.name]);
+                                toast.success(`Unsnoozed ${mod.name}`);
+                              } catch (e) {
+                                toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+                              }
+                            }}
+                            description="Show the update suggestion again for the current upstream release."
+                          >
+                            Unsnooze update
+                          </KebabItem>
+                        ) : (
+                          auditRow?.needs_update && !!auditRow.latest_release_with_assets_tag && (
+                            <KebabItem
+                              icon={<Clock size={12} />}
+                              onClick={async () => {
+                                try {
+                                  await setModSnooze(
+                                    mod.name,
+                                    auditRow.latest_release_with_assets_tag ?? null,
+                                    mod.folder_name,
+                                  );
+                                  await refreshAuditEntries([mod.name]);
+                                  toast.success(
+                                    `Snoozed ${mod.name} until next release`,
+                                  );
+                                } catch (e) {
+                                  toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+                                }
+                              }}
+                              description={
+                                `Hide the update suggestion until a newer release appears upstream ` +
+                                `(currently v${auditRow.latest_release_with_assets_tag?.replace(/^v/, '') ?? '?'}). ` +
+                                `Use this when the website's announced version doesn't match the file's actual version.`
+                              }
+                            >
+                              Snooze update suggestion
+                            </KebabItem>
+                          )
+                        )}
                       </KebabSection>
                       {advancedMode && (
                         <>
@@ -840,10 +991,16 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                         setFindingGithub(null);
                       }
                     }}
-                    onSave={async (gh, nx) => {
+                    onSave={async (gh, nx, note, customUrl) => {
                       try {
                         setSavingSource(true);
+                        // Two separate commands by design: setModSourcesFull
+                        // owns the GitHub/Nexus link fields (clearing nulls
+                        // clears those links), setModExtras owns the
+                        // free-form note + custom URL. They write to the
+                        // same source entry but don't clobber each other.
                         await setModSourcesFull(mod.name, gh.trim() || null, nx.trim() || null, mod.folder_name);
+                        await setModExtras(mod.name, note.trim() || null, customUrl.trim() || null, mod.folder_name);
                         await refreshMods();
                         toast.success(`Sources saved for ${mod.name}`);
                         setExpandedMod(null);

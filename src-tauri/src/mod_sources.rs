@@ -37,6 +37,48 @@ pub struct ModSourceEntry {
     /// and auto-install from Downloads. Must be updated manually.
     #[serde(default, skip_serializing_if = "is_false")]
     pub pinned: bool,
+    /// Free-form user note about the mod. Surfaces in the mod row so the user
+    /// can remember things like "downloaded from Patreon" or "compat patch
+    /// for the v1.8 build". Not used for matching, search, or update logic —
+    /// purely informational.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// A non-GitHub, non-Nexus URL the user wants to remember for this mod
+    /// (Patreon page, Discord thread, an X post — whatever they got the mod
+    /// from). Surfaces as an external-link button alongside the existing
+    /// GitHub/Nexus chips. Single URL by design; a typed list can be added
+    /// later without breaking this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_url: Option<String>,
+    /// When set and equal to the audit's `latest_release_with_assets_tag`,
+    /// the audit's update suggestion is suppressed for this mod. The user
+    /// uses this when the website's announced version doesn't actually
+    /// match what's inside the file (Nexus version drift is the common case),
+    /// or when they've decided to skip a specific release. When a NEWER
+    /// release appears upstream, this auto-expires — `snoozed_until_tag`
+    /// is matched against the actual current tag, so a new tag stops the
+    /// match and the suggestion comes back. Distinct from `pinned`, which
+    /// is a hard freeze on auto-update entirely.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snoozed_until_tag: Option<String>,
+    /// SHA256 of each tracked config file at install time, keyed by the
+    /// file's path relative to the mod folder (forward-slash separators,
+    /// even on Windows, to match the rest of the codebase).
+    ///
+    /// Compared against on-disk hashes during the next update to decide
+    /// which files the user has edited and must be preserved. Rewritten
+    /// at the end of every install — short-lived rolling cache, not a
+    /// permanent audit log. Empty when the mod was last installed before
+    /// this feature shipped, in which case no preservation runs (update
+    /// behaves as it did pre-v1.3.6).
+    ///
+    /// Tracked extensions are restricted to actual config formats —
+    /// .cfg, .ini, .toml, .txt. STS2's .json files are game-readable
+    /// manifest data, never user-tunable, so they're intentionally
+    /// excluded to avoid preserving a stale manifest into a fresh
+    /// install.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub config_hashes: HashMap<String, String>,
 }
 
 fn is_false(v: &bool) -> bool { !*v }
@@ -139,6 +181,75 @@ pub fn update_installed_version(mod_name: &str, version: &str, config_path: &Pat
     }
 }
 
+/// Tauri event payload emitted whenever a mod update preserved one or
+/// more user-edited config files. Frontend listens and shows a
+/// non-blocking toast naming what was kept.
+#[derive(Debug, Clone, Serialize)]
+pub struct ConfigsPreservedEvent {
+    pub mod_name: String,
+    pub files: Vec<String>,
+}
+
+/// Emit `mod-configs-preserved` when an update finalized with a
+/// non-empty preserved list. No-op for empty lists so the frontend
+/// doesn't need a separate "nothing to report" branch.
+pub fn emit_configs_preserved<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    mod_name: &str,
+    files: &[String],
+) {
+    use tauri::Emitter;
+    if files.is_empty() {
+        return;
+    }
+    let _ = app.emit("mod-configs-preserved", ConfigsPreservedEvent {
+        mod_name: mod_name.to_string(),
+        files: files.to_vec(),
+    });
+}
+
+/// Read a mod's stored config-file hash snapshot. Returns an empty map
+/// when the mod has no entry, no snapshot, or was last installed before
+/// the config-overwrite-detection feature shipped — in any of those
+/// cases the caller treats it as "no preservation possible" and the
+/// update path behaves as it did pre-feature.
+///
+/// Lookup is folder-first (matches `enrich_mods_with_sources` and
+/// every other read site) so a mod pinned / linked under its folder
+/// name resolves to the same entry the snapshot was written under.
+pub fn load_config_snapshot(
+    folder_name: Option<&str>,
+    mod_name: &str,
+    config_path: &Path,
+) -> HashMap<String, String> {
+    let db = load_sources(config_path);
+    lookup_entry(&db.mods, folder_name, mod_name, None)
+        .map(|e| e.config_hashes.clone())
+        .unwrap_or_default()
+}
+
+/// Replace a mod's config-file hash snapshot with a fresh one (called
+/// after every successful install / update). Folder-first write key.
+pub fn save_config_snapshot(
+    folder_name: Option<&str>,
+    mod_name: &str,
+    snapshot: HashMap<String, String>,
+    config_path: &Path,
+) {
+    let mut db = load_sources(config_path);
+    let key = folder_name
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| mod_name.to_string());
+    let entry = db.mods.entry(key).or_default();
+    entry.config_hashes = snapshot;
+    if let Err(e) = save_sources(&db, config_path) {
+        log::error!(
+            "Failed to save config snapshot for '{}' (folder {:?}): {}",
+            mod_name, folder_name, e
+        );
+    }
+}
+
 /// Carry a mod's source bindings (github repo, nexus link, pin state) from
 /// `old_name` to `new_name` after the install renamed the mod.
 ///
@@ -179,6 +290,21 @@ pub fn migrate_source_entry(old_name: &str, new_name: &str, config_path: &Path) 
     if dest.installed_version.is_none() {
         dest.installed_version = old.installed_version;
     }
+    if dest.note.is_none() {
+        dest.note = old.note;
+    }
+    if dest.custom_url.is_none() {
+        dest.custom_url = old.custom_url;
+    }
+    if dest.snoozed_until_tag.is_none() {
+        dest.snoozed_until_tag = old.snoozed_until_tag;
+    }
+    // config_hashes is a rolling cache: take old's only when dest doesn't
+    // already have its own. The next install_update_preserving_configs
+    // pass will refresh it from the post-install on-disk state.
+    if dest.config_hashes.is_empty() {
+        dest.config_hashes = old.config_hashes;
+    }
     if let Err(e) = save_sources(&db, config_path) {
         log::error!(
             "Failed to migrate source entry from '{}' to '{}': {}",
@@ -188,6 +314,117 @@ pub fn migrate_source_entry(old_name: &str, new_name: &str, config_path: &Path) 
         log::info!(
             "Migrated source entry on rename: '{}' → '{}'",
             old_name, new_name
+        );
+    }
+}
+
+/// Carry a mod's source entry forward across an install/update where the
+/// folder name and/or display name may have changed. The "fixed" cousin of
+/// `migrate_source_entry`: that one only knows about display names and
+/// strands folder-keyed entries, which was the documented Nexus-update
+/// "link reset" bug (user feedback v1.x).
+///
+/// Lookup order matches `lookup_entry` (folder-first → name → mod_id).
+/// Destination key prefers `new_folder` over `new_name` to match the
+/// folder-first write convention the rest of the codebase already follows.
+///
+/// Fields are MERGED rather than overwritten — we only fill an empty
+/// destination slot from the old entry. This matters when the new entry
+/// already exists (e.g. someone set a fresh Nexus link mid-install): we
+/// preserve their newer choice, only filling in fields they hadn't set.
+///
+/// We don't delete the old entry. Other parts of the app (subscriptions,
+/// modpacks) may still reference it by the old key; leaving it harmless
+/// is preferable to breaking those references. The new entry takes
+/// precedence on read because of the lookup order.
+pub fn carry_source_entry(
+    old_folder: Option<&str>,
+    old_name: &str,
+    new_folder: Option<&str>,
+    new_name: &str,
+    config_path: &Path,
+) {
+    if old_folder == new_folder && old_name == new_name {
+        return;
+    }
+    let mut db = load_sources(config_path);
+    let old = match lookup_entry(&db.mods, old_folder, old_name, None).cloned() {
+        Some(e) => e,
+        None => return,
+    };
+    let dest_key = new_folder
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| new_name.to_string());
+    let dest = db.mods.entry(dest_key).or_default();
+    if dest.github_repo.is_none() {
+        dest.github_repo = old.github_repo;
+        dest.github_auto_detected = old.github_auto_detected;
+    }
+    if dest.nexus_url.is_none() {
+        dest.nexus_url = old.nexus_url;
+        dest.nexus_game_domain = old.nexus_game_domain;
+        dest.nexus_mod_id = old.nexus_mod_id;
+    }
+    if !dest.pinned {
+        dest.pinned = old.pinned;
+    }
+    if dest.installed_version.is_none() {
+        dest.installed_version = old.installed_version;
+    }
+    if dest.note.is_none() {
+        dest.note = old.note;
+    }
+    if dest.custom_url.is_none() {
+        dest.custom_url = old.custom_url;
+    }
+    if dest.snoozed_until_tag.is_none() {
+        dest.snoozed_until_tag = old.snoozed_until_tag;
+    }
+    // config_hashes is a rolling cache: take old's only when dest doesn't
+    // already have its own. The next install_update_preserving_configs
+    // pass will refresh it from the post-install on-disk state.
+    if dest.config_hashes.is_empty() {
+        dest.config_hashes = old.config_hashes;
+    }
+    if let Err(e) = save_sources(&db, config_path) {
+        log::error!(
+            "Failed to carry source entry forward from ({:?}/{}) to ({:?}/{}): {}",
+            old_folder, old_name, new_folder, new_name, e
+        );
+    } else {
+        log::info!(
+            "Carried source entry forward: ({:?}/{}) → ({:?}/{})",
+            old_folder, old_name, new_folder, new_name
+        );
+    }
+}
+
+/// Attach a Nexus link to a mod's source entry. Folder-first write so the
+/// resulting entry sits at the same key the rest of the codebase reads from
+/// (`enrich_mods_with_sources`, audit, pin). The pre-fix path wrote keyed by
+/// display name only, which fragmented state across two keys when the mod
+/// already had a folder-keyed pin/version entry — the user-visible symptom
+/// was "I set a Nexus URL, audit still says no source".
+pub fn attach_nexus_source(
+    mod_name: &str,
+    folder_name: Option<&str>,
+    nexus_url: String,
+    game_domain: String,
+    mod_id: u64,
+    config_path: &Path,
+) {
+    let mut db = load_sources(config_path);
+    let key = folder_name
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| mod_name.to_string());
+    let entry = db.mods.entry(key).or_default();
+    entry.nexus_url = Some(nexus_url);
+    entry.nexus_game_domain = Some(game_domain);
+    entry.nexus_mod_id = Some(mod_id);
+    if let Err(e) = save_sources(&db, config_path) {
+        log::error!(
+            "Failed to attach Nexus source for '{}' (folder {:?}): {}",
+            mod_name, folder_name, e
         );
     }
 }
@@ -222,6 +459,10 @@ pub fn enrich_mods_with_sources(mods: &mut [ModInfo], config_path: &Path) {
                 m.nexus_url = entry.nexus_url.clone();
             }
             m.pinned = entry.pinned;
+            // User-saved extras: surface on the row so they show up next
+            // to the GitHub/Nexus chips and the kebab menu.
+            m.note = entry.note.clone();
+            m.custom_url = entry.custom_url.clone();
         }
         // Also try to infer from the legacy `source` field if no explicit link
         if m.github_url.is_none() {
@@ -388,6 +629,12 @@ pub fn set_mod_source(
 }
 
 /// Set both GitHub and Nexus sources for a mod at once.
+///
+/// MERGE semantics: only `github_repo` and the Nexus fields are touched.
+/// Pre-existing `pinned`, `installed_version`, `note`, `custom_url`, and
+/// `snoozed_until_tag` survive. The previous implementation overwrote the
+/// whole entry with a fresh one — that silently destroyed pin state and
+/// notes every time the user opened SourceEditor and clicked Save.
 #[tauri::command]
 pub fn set_mod_sources_full(
     mod_name: String,
@@ -399,12 +646,15 @@ pub fn set_mod_sources_full(
     let s = state.lock().map_err(|e| e.to_string())?;
     let mut db = load_sources(&s.config_path);
 
-    let mut entry = ModSourceEntry::default();
+    // Folder-first write key matches the rest of the codebase. Fall back
+    // to display name for legacy callers / mods scanned without a folder.
+    let key = folder_name.unwrap_or(mod_name);
+    let entry = db.mods.entry(key).or_default();
+
     entry.github_repo = github_repo;
     entry.github_auto_detected = false; // manually set by user
 
     if let Some(ref nurl) = nexus_url {
-        // Parse Nexus URL to extract game domain and mod ID
         if let Some(parsed) = parse_source_url(nurl) {
             entry.nexus_url = parsed.nexus_url.or(Some(nurl.clone()));
             entry.nexus_game_domain = parsed.nexus_game_domain;
@@ -412,14 +662,72 @@ pub fn set_mod_sources_full(
         } else {
             entry.nexus_url = Some(nurl.clone());
         }
+    } else {
+        // Explicit clear: the SourceEditor's `null` means "remove this link".
+        entry.nexus_url = None;
+        entry.nexus_game_domain = None;
+        entry.nexus_mod_id = None;
     }
 
-    // Write under folder_name when provided (preserves pin state on the
-    // same key); otherwise legacy display-name key.
-    let key = folder_name.unwrap_or(mod_name);
-    db.mods.insert(key, entry.clone());
+    let result = entry.clone();
     save_sources(&db, &s.config_path).map_err(|e| e.to_string())?;
-    Ok(entry)
+    Ok(result)
+}
+
+/// Set or clear a mod's free-form note and/or custom (non-GitHub/Nexus)
+/// link. Empty strings clear the corresponding field. Folder-first write.
+/// Other fields on the entry (github, nexus, pin, snooze, version) are
+/// untouched.
+#[tauri::command]
+pub fn set_mod_extras(
+    mod_name: String,
+    folder_name: Option<String>,
+    note: Option<String>,
+    custom_url: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<ModSourceEntry, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let mut db = load_sources(&s.config_path);
+    let key = folder_name.unwrap_or(mod_name);
+    let entry = db.mods.entry(key).or_default();
+
+    entry.note = note.and_then(|s| {
+        let t = s.trim().to_string();
+        if t.is_empty() { None } else { Some(t) }
+    });
+    entry.custom_url = custom_url.and_then(|s| {
+        let t = s.trim().to_string();
+        if t.is_empty() { None } else { Some(t) }
+    });
+
+    let result = entry.clone();
+    save_sources(&db, &s.config_path).map_err(|e| e.to_string())?;
+    Ok(result)
+}
+
+/// Snooze update suggestions for this mod until a release tag newer than
+/// `latest_tag` appears. Passing an empty string or None clears the snooze.
+/// Folder-first write. Distinct from pin (which is a hard freeze): a
+/// snoozed mod can still be updated manually, and the snooze auto-expires
+/// when upstream advances past `latest_tag`.
+#[tauri::command]
+pub fn set_mod_snooze(
+    mod_name: String,
+    folder_name: Option<String>,
+    latest_tag: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<ModSourceEntry, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let mut db = load_sources(&s.config_path);
+    let key = folder_name.unwrap_or(mod_name);
+    let entry = db.mods.entry(key).or_default();
+    entry.snoozed_until_tag = latest_tag.and_then(|s| {
+        let t = s.trim().to_string();
+        if t.is_empty() { None } else { Some(t) }
+    });
+    let result = entry.clone();
+    save_sources(&db, &s.config_path).map_err(|e| e.to_string())?;
+    Ok(result)
 }
 
 /// Remove source links for a mod. Removes both the folder-keyed entry
@@ -1151,4 +1459,230 @@ pub async fn auto_detect_sources(
         unmatched,
         skipped_already_linked,
     })
+}
+
+#[cfg(test)]
+mod carry_and_attach_tests {
+    //! Regression coverage for the user-reported "Nexus link reset on update" bug.
+    //!
+    //! Before the fix, source-entry transfer and Nexus-link attach both keyed
+    //! by display name only. When the rest of the codebase had moved to
+    //! folder-first keying, an update could leave the source entry stranded
+    //! at the old folder key while a fresh display-name-keyed entry got the
+    //! new Nexus URL — `enrich_mods_with_sources` would then read the empty
+    //! folder-keyed entry and the audit would report "no source".
+    //!
+    //! These tests exercise the folder-first variants directly. They run
+    //! against a real temp dir so the serialization round-trip is part of
+    //! the contract, not just the in-memory hashmap shape.
+    use super::*;
+    use tempfile::tempdir;
+
+    fn write_initial(config: &Path, key: &str, entry: ModSourceEntry) {
+        let mut db = ModSourcesDb::default();
+        db.mods.insert(key.to_string(), entry);
+        save_sources(&db, config).unwrap();
+    }
+
+    #[test]
+    fn carry_preserves_nexus_link_when_entry_is_folder_keyed_and_folder_unchanged() {
+        // Setup: a Nexus-linked mod stored under its folder name (the post-1.3
+        // write convention). The display name happens to differ from the
+        // folder — common when manifests show "Card Art Editor" but the
+        // folder is "CardArtEditor".
+        let tmp = tempdir().unwrap();
+        let config = tmp.path();
+        let folder = "CardArtEditor";
+        write_initial(
+            config,
+            folder,
+            ModSourceEntry {
+                nexus_url: Some("https://www.nexusmods.com/slaythespire2/mods/42".into()),
+                nexus_game_domain: Some("slaythespire2".into()),
+                nexus_mod_id: Some(42),
+                installed_version: Some("1.0.0".into()),
+                ..Default::default()
+            },
+        );
+
+        // Simulate update: display name renames "Card Art Editor" → "CardArtEditor"
+        // (the manifest field changed between releases), folder stays put.
+        carry_source_entry(
+            Some(folder),
+            "Card Art Editor",
+            Some(folder),
+            "CardArtEditor",
+            config,
+        );
+
+        // The folder-keyed entry must still expose the Nexus link unchanged.
+        let db = load_sources(config);
+        let entry = db.mods.get(folder).expect("folder-keyed entry must still exist");
+        assert_eq!(
+            entry.nexus_mod_id,
+            Some(42),
+            "Nexus mod ID must survive the carry — losing it is the user-reported bug"
+        );
+        assert!(entry.nexus_url.is_some(), "Nexus URL must survive the carry");
+    }
+
+    #[test]
+    fn carry_moves_entry_when_folder_renames_between_releases() {
+        let tmp = tempdir().unwrap();
+        let config = tmp.path();
+        write_initial(
+            config,
+            "OldFolder",
+            ModSourceEntry {
+                nexus_url: Some("https://www.nexusmods.com/slaythespire2/mods/7".into()),
+                nexus_game_domain: Some("slaythespire2".into()),
+                nexus_mod_id: Some(7),
+                pinned: true,
+                installed_version: Some("0.9.0".into()),
+                ..Default::default()
+            },
+        );
+
+        carry_source_entry(
+            Some("OldFolder"),
+            "SomeMod",
+            Some("NewFolder"),
+            "SomeMod",
+            config,
+        );
+
+        // The destination (new folder) must carry the full entry.
+        let db = load_sources(config);
+        let dest = db
+            .mods
+            .get("NewFolder")
+            .expect("new-folder destination must exist after carry");
+        assert_eq!(dest.nexus_mod_id, Some(7));
+        assert!(dest.pinned, "pinned state must survive the folder rename");
+        assert_eq!(dest.installed_version.as_deref(), Some("0.9.0"));
+    }
+
+    #[test]
+    fn carry_is_a_noop_when_old_entry_does_not_exist() {
+        let tmp = tempdir().unwrap();
+        let config = tmp.path();
+        // No initial DB write. Carry should not create a phantom destination.
+        carry_source_entry(
+            Some("NoSuchFolder"),
+            "NoSuchMod",
+            Some("Whatever"),
+            "Whatever",
+            config,
+        );
+        let db = load_sources(config);
+        assert!(
+            db.mods.is_empty() || !db.mods.contains_key("Whatever"),
+            "carry must not synthesize a destination entry when the source is missing"
+        );
+    }
+
+    #[test]
+    fn carry_does_not_clobber_existing_destination_fields() {
+        let tmp = tempdir().unwrap();
+        let config = tmp.path();
+        // Old folder-keyed entry has a GitHub link.
+        write_initial(
+            config,
+            "OldFolder",
+            ModSourceEntry {
+                github_repo: Some("user/old-repo".into()),
+                ..Default::default()
+            },
+        );
+        // Destination already has a DIFFERENT GitHub link (newer choice).
+        // Carry must NOT overwrite it.
+        {
+            let mut db = load_sources(config);
+            db.mods.insert(
+                "NewFolder".to_string(),
+                ModSourceEntry {
+                    github_repo: Some("user/new-repo".into()),
+                    ..Default::default()
+                },
+            );
+            save_sources(&db, config).unwrap();
+        }
+
+        carry_source_entry(
+            Some("OldFolder"),
+            "x",
+            Some("NewFolder"),
+            "x",
+            config,
+        );
+
+        let db = load_sources(config);
+        let dest = db.mods.get("NewFolder").unwrap();
+        assert_eq!(
+            dest.github_repo.as_deref(),
+            Some("user/new-repo"),
+            "destination's existing github_repo must win — merge fills empty slots only"
+        );
+    }
+
+    #[test]
+    fn attach_nexus_writes_under_folder_key_when_folder_is_known() {
+        let tmp = tempdir().unwrap();
+        let config = tmp.path();
+        // An existing folder-keyed entry (e.g. with installed_version set
+        // by an earlier install) must receive the Nexus link, not get a
+        // sibling display-name-keyed entry created next to it.
+        write_initial(
+            config,
+            "MyMod",
+            ModSourceEntry {
+                installed_version: Some("1.2.3".into()),
+                ..Default::default()
+            },
+        );
+
+        attach_nexus_source(
+            "MyMod Display Name",
+            Some("MyMod"),
+            "https://www.nexusmods.com/slaythespire2/mods/100".into(),
+            "slaythespire2".into(),
+            100,
+            config,
+        );
+
+        let db = load_sources(config);
+        assert_eq!(
+            db.mods.len(),
+            1,
+            "must reuse the existing folder-keyed entry, not split state across two keys — \
+             the split was the underlying bug behind 'I set a Nexus URL, audit still says no source'"
+        );
+        let entry = db.mods.get("MyMod").expect("folder-keyed entry must persist");
+        assert_eq!(entry.nexus_mod_id, Some(100));
+        assert_eq!(
+            entry.installed_version.as_deref(),
+            Some("1.2.3"),
+            "attach must not blow away pre-existing fields on the same entry"
+        );
+    }
+
+    #[test]
+    fn attach_nexus_falls_back_to_name_when_no_folder_known() {
+        let tmp = tempdir().unwrap();
+        let config = tmp.path();
+        attach_nexus_source(
+            "LegacyMod",
+            None,
+            "https://www.nexusmods.com/slaythespire2/mods/200".into(),
+            "slaythespire2".into(),
+            200,
+            config,
+        );
+        let db = load_sources(config);
+        assert_eq!(
+            db.mods.get("LegacyMod").and_then(|e| e.nexus_mod_id),
+            Some(200),
+            "without a folder hint, attach writes under display name"
+        );
+    }
 }

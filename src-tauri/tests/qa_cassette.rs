@@ -54,6 +54,8 @@ fn make_mod(name: &str, version: &str, folder: &str) -> ModInfo {
         pinned: false,
         min_game_version: None,
         author: None,
+        note: None,
+        custom_url: None,
     }
 }
 

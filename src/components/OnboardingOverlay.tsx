@@ -313,6 +313,10 @@ export function OnboardingOverlay({
                 {!ghSaved && (
                   <div className="gf-help muted">Skipping is fine — you'll just hit rate limits faster on Browse.</div>
                 )}
+                <div className="gf-help muted" style={{ marginTop: 4, fontSize: 11 }}>
+                  <b>Required to publish modpacks</b> — needs <code>repo</code> scope (classic PAT) or{' '}
+                  <code>Contents: R/W</code> + <code>Administration: R/W</code> (fine-grained).
+                </div>
               </div>
             </div>
           )}

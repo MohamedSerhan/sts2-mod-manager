@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { listen as listenMock } from '@tauri-apps/api/event';
 
 import { AppProvider, useApp } from './AppContext';
 import { ToastProvider } from './ToastContext';
+import { ConfirmProvider } from '../components/ConfirmDialog';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
 
 /** Locate the most-recent `listen(event, cb)` registration installed by
@@ -26,7 +28,9 @@ function getListenHandler<T>(event: string): (e: { payload: T }) => void {
 function Wrap({ children }: { children: React.ReactNode }) {
   return (
     <ToastProvider>
-      <AppProvider>{children}</AppProvider>
+      <ConfirmProvider>
+        <AppProvider>{children}</AppProvider>
+      </ConfirmProvider>
     </ToastProvider>
   );
 }
@@ -558,6 +562,51 @@ describe('<AppProvider>', () => {
     });
     // Only one name passed in (not duplicated) since replaced === mod_name.
     expect(lastArgs?.only).toEqual(['Same']);
+  });
+
+  it('updateAllGithub confirms, invokes update_all_mods, toasts, and refreshes audit rows', async () => {
+    registerInvokeHandler('get_installed_mods', () => [
+      { name: 'A', version: '1.0.0', enabled: true, files: [] },
+    ]);
+    registerInvokeHandler('get_game_info', () => ({
+      game_path: 'C:/games/STS2', mods_path: 'C:/games/STS2/mods',
+      disabled_mods_path: 'C:/games/STS2/mods_disabled',
+      mods_count: 1, disabled_count: 0, valid: true, game_version: '0.105.0',
+    }));
+    registerInvokeHandler('get_active_profile', () => null);
+    let updateAllCalls = 0;
+    registerInvokeHandler('update_all_mods', () => {
+      updateAllCalls += 1;
+      return [{ name: 'A', version: '2.0.0', enabled: true, files: [] }];
+    });
+    let auditCallsBulk = 0;
+    registerInvokeHandler('audit_mod_versions', () => {
+      auditCallsBulk += 1;
+      return [];
+    });
+
+    let bulkCaptured: ReturnType<typeof useApp> | null = null;
+    render(
+      <Wrap>
+        <Probe onCtx={(c) => { bulkCaptured = c; }} />
+      </Wrap>,
+    );
+    await waitFor(() => expect(bulkCaptured?.loading).toBe(false));
+
+    // Kick the bulk update — confirm dialog will appear, click its primary
+    // button to proceed.
+    const user = userEvent.setup();
+    let bulkPromise: Promise<void> | null = null;
+    act(() => {
+      bulkPromise = bulkCaptured!.updateAllGithub(['A']);
+    });
+    const confirmBtn = await screen.findByRole('button', { name: /^Update 1 mod$/ });
+    await user.click(confirmBtn);
+    await bulkPromise!;
+
+    expect(updateAllCalls).toBe(1);
+    // Targeted re-audit happens after the bulk update completes.
+    expect(auditCallsBulk).toBe(1);
   });
 
   it('mod-auto-installed event is ignored when no audit has been loaded', async () => {

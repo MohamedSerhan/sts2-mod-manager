@@ -20,6 +20,13 @@ export interface ModInfo {
    *  two installed mods share a display name. null when the manifest
    *  didn't declare one. */
   author?: string | null;
+  /** Free-form user note saved to mod_sources.json. Shown on the mod row
+   *  so the user can remember where the mod came from (e.g. "downloaded
+   *  from Patreon") or other context. */
+  note?: string | null;
+  /** User-saved non-GitHub/non-Nexus URL (Patreon, X, Discord, etc).
+   *  Shown as an external-link chip alongside GitHub/Nexus on the row. */
+  custom_url?: string | null;
 }
 
 export interface Profile {
@@ -29,6 +36,9 @@ export interface Profile {
   mods: ProfileMod[];
   created_at: string;
   updated_at: string;
+  /** Opt-in flag for the in-app Browse Modpacks tab.
+   *  true = listed; null / false = unlisted. */
+  public?: boolean | null;
 }
 
 export interface ProfileMod {
@@ -137,6 +147,13 @@ export interface ModSourceEntry {
   nexus_url: string | null;
   nexus_game_domain: string | null;
   nexus_mod_id: number | null;
+  note?: string | null;
+  custom_url?: string | null;
+  snoozed_until_tag?: string | null;
+  /** SHA256 of each tracked config file at install time. Backend-only
+   *  bookkeeping driving the post-update "preserved N files" toast —
+   *  frontend doesn't read this directly. */
+  config_hashes?: Record<string, string>;
 }
 
 export interface AutoDetectResult {
@@ -226,5 +243,27 @@ export interface ModAuditEntry {
    *  game). When `latest_release_blocked_by_game_version` is true,
    *  this names the older fallback so the UI can preview it. */
   latest_compatible_tag?: string | null;
+  /** True when the user snoozed update suggestions for this mod at its
+   *  current `latest_release_with_assets_tag`. Auto-expires when the
+   *  upstream tag advances. Distinct from `pinned`: snooze suppresses
+   *  the "update available" badge but doesn't block manual updates. */
+  snoozed?: boolean;
+}
+
+export interface BrowserCard {
+  owner: string;
+  code: string;           // "AA5A-315D-61AE"
+  name: string;
+  mod_count: number;
+  created_at: string;     // ISO
+  updated_at: string;     // ISO
+}
+
+export interface BrowserPage {
+  cards: BrowserCard[];
+  page: number;
+  has_next_page: boolean;
+  stale: boolean;
+  fetched_at: number;     // unix seconds
 }
 

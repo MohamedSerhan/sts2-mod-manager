@@ -35,6 +35,70 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ---
 
+## [1.3.8] - 2026-05-13
+
+### Added
+
+- **Browse Modpacks.** A new sidebar tab that shows public modpacks people have shared. One click to install any pack — same smart-import flow as paste-a-code.
+- **Visibility on publish.** The Publish dialog now has a Friends-only / Public choice. Friends-only is the default — your share code still works either way, this only controls whether the pack is discoverable in Browse Modpacks. You can flip it anytime from the same dialog.
+
+### Changed
+
+- The **Browse** sidebar tab is now **Browse Mods** to make room for **Browse Modpacks**.
+
+### Fixed
+
+### Security
+
+---
+
+## [1.3.7] - 2026-05-13
+
+### Added
+
+### Changed
+
+- Updates no longer overwrite config files you've edited. If you tweaked a mod's `.cfg`, `.ini`, `.toml`, or `.txt` after installing, your edits are kept across updates and a toast tells you which files survived. (Edits made before this release won't be detected once — the comparison starts fresh on your first update after upgrading.)
+
+### Fixed
+
+### Security
+
+---
+
+## [1.3.6] - 2026-05-13
+
+### Added
+
+### Changed
+
+- Settings and the onboarding wizard now spell out which GitHub token permissions you need to publish modpacks, instead of hiding them until after you've saved a token.
+
+### Fixed
+
+### Security
+
+---
+
+## [1.3.5] - 2026-05-13
+
+### Added
+
+- Install mods packaged as `.7z` or `.rar`, not just `.zip`. Drag-drop, the file picker, and the Downloads watcher all accept the new formats; the manager unpacks them the same way it handles a zip.
+- Per-mod note + "Other link" fields. Open a mod's source editor in advanced mode to jot down where you got the file (Patreon, X, Discord) and stash a URL. The note shows up under the mod's description and the link becomes a clickable chip on the row.
+- Snooze an "update available" suggestion for one mod from its kebab menu. Useful when the website's version number doesn't actually match what's inside the file. The snooze clears itself the next time the source publishes a newer release.
+
+### Changed
+
+### Fixed
+
+- Linking a mod to Nexus, then updating it from a fresh Nexus download, no longer wipes the Nexus link. The manager now tracks links by mod folder, so an update doesn't strand the old entry under a different key.
+- Saving sources in the editor preserves your pin and installed-version markers — previously a save would silently clear them.
+
+### Security
+
+---
+
 ## [1.3.4] - 2026-05-12
 
 ### Added

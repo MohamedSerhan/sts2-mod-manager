@@ -7,6 +7,7 @@ import {
   Home,
   Package,
   Search,
+  Boxes,
   Layers,
   Settings,
   Play,
@@ -34,12 +35,13 @@ import { ProfileSwitcher } from './components/ProfileSwitcher';
 import { HomeView } from './views/Home';
 import { ModsView } from './views/Mods';
 import { BrowseView } from './views/Browse';
+import { BrowseModpacksView } from './views/BrowseModpacks';
 import { ProfilesView } from './views/Profiles';
 import { SettingsView } from './views/Settings';
 import { TutorialView } from './views/Tutorial';
 import { launchGame, launchVanilla, installModFromFile } from './hooks/useTauri';
 
-type View = 'home' | 'profiles' | 'mods' | 'browse' | 'tutorial' | 'settings';
+type View = 'home' | 'profiles' | 'mods' | 'browse-mods' | 'browse-modpacks' | 'tutorial' | 'settings';
 type ResizeDirection = 'East' | 'North' | 'NorthEast' | 'NorthWest' | 'South' | 'SouthEast' | 'SouthWest' | 'West';
 
 // v5 IA — 4 main nav items, Tutorial+Settings in the foot. Backups absorbed
@@ -48,7 +50,8 @@ const NAV: { id: View; label: string; icon: typeof Home }[] = [
   { id: 'home',     label: 'Home',     icon: Home },
   { id: 'profiles', label: 'Profiles', icon: Layers },
   { id: 'mods',     label: 'Mods',     icon: Package },
-  { id: 'browse',   label: 'Browse',   icon: Search },
+  { id: 'browse-mods',     label: 'Browse Mods',     icon: Search },
+  { id: 'browse-modpacks', label: 'Browse Modpacks', icon: Boxes },
 ];
 const FOOT_NAV: { id: View; label: string; icon: typeof Home }[] = [
   { id: 'tutorial', label: 'Tutorial', icon: GraduationCap },
@@ -76,6 +79,20 @@ export default function App() {
       </ConfirmProvider>
     </ToastProvider>
   );
+}
+
+/** Build the "preserved N config files" toast message. Includes up to
+ *  three filenames inline so the user can see what was kept at a
+ *  glance; beyond that the count + "(and N more)" keeps it readable.
+ *  Used both for the downloads-watcher single-event flow AND for the
+ *  per-mod `mod-configs-preserved` event from update_mod / repair_mod /
+ *  update_all_mods.
+ */
+function formatPreservedConfigsMessage(modName: string, files: string[]): string {
+  const n = files.length;
+  const shown = files.slice(0, 3).join(', ');
+  const tail = n > 3 ? ` (and ${n - 3} more)` : '';
+  return `Preserved ${n} config file${n === 1 ? '' : 's'} you edited in "${modName}": ${shown}${tail}`;
 }
 
 function AppInner() {
@@ -114,18 +131,41 @@ function AppInner() {
 
   // Listen for auto-installed mods from the Downloads watcher
   useEffect(() => {
-    const unlisten1 = listen<{ mod_name: string; file_name: string; replaced: string | null }>('mod-auto-installed', (event) => {
-      const { mod_name, file_name, replaced } = event.payload;
+    const unlisten1 = listen<{
+      mod_name: string;
+      file_name: string;
+      replaced: string | null;
+      preserved_configs?: string[];
+    }>('mod-auto-installed', (event) => {
+      const { mod_name, file_name, replaced, preserved_configs } = event.payload;
       if (replaced) {
         toast.success(`Updated "${replaced}" → "${mod_name}" from ${file_name}`);
       } else {
         toast.success(`Mod "${mod_name}" auto-installed from ${file_name}`);
+      }
+      // Preserved-configs toast fires as its own event for non-watcher
+      // updates (update_mod / update_all_mods). The watcher inlines the
+      // list on the auto-installed event, so emit the toast here.
+      if (preserved_configs && preserved_configs.length > 0) {
+        toast.info(formatPreservedConfigsMessage(mod_name, preserved_configs));
       }
       refreshAll();
     });
     const unlisten2 = listen<{ file_name: string; error: string }>('mod-auto-install-failed', (event) => {
       toast.error(`Failed to install ${event.payload.file_name}: ${event.payload.error}`);
     });
+    // Emitted by update_mod / repair_mod / update_all_mods whenever an
+    // update carried forward user-edited config files. The downloads
+    // watcher path uses the inline `preserved_configs` field on
+    // `mod-auto-installed` instead (single event, simpler frontend).
+    const unlistenPreserve = listen<{ mod_name: string; files: string[] }>(
+      'mod-configs-preserved',
+      (event) => {
+        const { mod_name, files } = event.payload;
+        if (files.length === 0) return;
+        toast.info(formatPreservedConfigsMessage(mod_name, files));
+      },
+    );
     // Modpack apply / subscription update emits this when one or more
     // mods in the pack require a newer game version than the user's
     // STS2 ships. We've already deleted the offending files (the install
@@ -146,6 +186,7 @@ function AppInner() {
       unlisten1.then(f => f());
       unlisten2.then(f => f());
       unlisten3.then(f => f());
+      unlistenPreserve.then(f => f());
     };
   }, []);
 
@@ -403,7 +444,10 @@ function AppInner() {
       if (!files || files.length === 0) return;
 
       for (const file of Array.from(files)) {
-        if (file.name.endsWith('.zip')) {
+        const lower = file.name.toLowerCase();
+        const isSupportedArchive =
+          lower.endsWith('.zip') || lower.endsWith('.7z') || lower.endsWith('.rar');
+        if (isSupportedArchive) {
           try {
             // @ts-expect-error -- Tauri exposes file.path on dropped files
             const filePath = file.path as string;
@@ -416,7 +460,7 @@ function AppInner() {
             toast.error(`Failed to install ${file.name}: ${err instanceof Error ? err.message : String(err)}`);
           }
         } else {
-          toast.error(`Unsupported file: ${file.name}. Only .zip files are supported.`);
+          toast.error(`Unsupported file: ${file.name}. Use .zip, .7z, or .rar.`);
         }
       }
     }
@@ -689,7 +733,10 @@ function AppInner() {
             )}
             {activeView === 'profiles' && <ProfilesView onGoToSettings={() => setActiveView('settings')} />}
             {activeView === 'mods' && <ModsView />}
-            {activeView === 'browse' && <BrowseView onGoToSettings={() => setActiveView('settings')} />}
+            {activeView === 'browse-mods' && <BrowseView onGoToSettings={() => setActiveView('settings')} />}
+            {activeView === 'browse-modpacks' && (
+              <BrowseModpacksView onGoToProfiles={() => setActiveView('profiles')} />
+            )}
             {activeView === 'tutorial' && <TutorialView onGoToSettings={() => setActiveView('settings')} />}
             {activeView === 'settings' && <SettingsView />}
 

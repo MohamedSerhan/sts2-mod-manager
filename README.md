@@ -97,6 +97,17 @@ clipboard for pasting into a GitHub issue.
 - **Drift detection.** If your mods on disk diverge from the active profile's
   manifest, you get a banner with a one-click Repair (re-applies the manifest).
 
+> **Your `sts2mm-profiles` repo on GitHub stays public.** The manager
+> creates it that way and your share codes only work for friends
+> because the manifest is publicly fetchable. Don't flip it to private
+> on GitHub — your friends will get "Profile not found" when they try
+> to install your code.
+
+> **If you never publish a pack, no repo is created.** The
+> `sts2mm-profiles` repo only appears on your GitHub the first time
+> you hit Share. Solo users who only consume friends' packs never
+> have anything written to their account.
+
 ### Mods
 - **Toggle on/off** per-mod with instant effect.
 - **Auto-updates.** "Update all" pulls fresh GitHub releases; pinned mods
@@ -112,7 +123,7 @@ clipboard for pasting into a GitHub issue.
 - **Drag and drop** any `.zip` onto the window to install a mod.
 - **Quick Add by URL** for one-off installs from a GitHub or Nexus URL.
 
-### Browse
+### Browse Mods
 - **GitHub search.** Full text search of GitHub repos with a Slay the Spire 2
   topic.
 - **Nexus trending / latest.** Browse what's hot on Nexus directly inside the
@@ -121,9 +132,15 @@ clipboard for pasting into a GitHub issue.
   Added only.
 - **One-click install for GitHub cards.** Nexus cards open the mod's Files
   page in your browser — see the Nexus note below.
+- **Browse Modpacks.** Sidebar → Browse Modpacks shows public modpacks
+  people have opted into listing. Each pack is one click to install
+  (same smart-import flow as paste-a-code). Your own packs default to
+  unlisted — when you Share or Re-share, the Publish dialog has a
+  Visibility option — Friends only (default) or Public. You can flip
+  it anytime from the Publish dialog.
 
 > **Nexus integration is free-tier only.** When you install a Nexus mod
-> via Quick Add or the Browse view, the app opens the mod's Files page
+> via Quick Add or the Browse Mods view, the app opens the mod's Files page
 > in your browser. From there: click Nexus's **Slow Download** /
 > **Manual** button (the free one), wait the few seconds, and your
 > browser saves the zip to `~/Downloads`. The app's downloads-folder
@@ -294,7 +311,7 @@ and exposed to TS via [src/hooks/useTauri.ts](src/hooks/useTauri.ts).
 ```
 src/
   App.tsx                 # chrome (titlebar, sidebar, top bar, banners)
-  views/                  # Home / Profiles / Mods / Browse / Settings / Tutorial
+  views/                  # Home / Profiles / Mods / Browse Mods / Browse Modpacks / Settings / Tutorial
   components/             # Button, Card, Toggle, Badge, Input,
                           # ConfirmDialog, OnboardingOverlay,
                           # ProfileSwitcher, KebabMenu, PublishModal,

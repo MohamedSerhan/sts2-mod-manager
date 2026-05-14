@@ -1,9 +1,10 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
-import { getGameInfo, getInstalledMods, isGameRunning, checkSubscriptionUpdates, auditModVersions } from '../hooks/useTauri';
+import { getGameInfo, getInstalledMods, isGameRunning, checkSubscriptionUpdates, auditModVersions, updateAllMods } from '../hooks/useTauri';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { GameInfo, ModInfo, ModAuditEntry, SubscriptionUpdate } from '../types';
 import { useToast } from './ToastContext';
+import { useConfirm } from '../components/ConfirmDialog';
 
 interface AppContextType {
   gameInfo: GameInfo | null;
@@ -36,6 +37,13 @@ interface AppContextType {
    *  steps complete; this routes the dismissal to the actual completion
    *  signal instead. */
   notifyNexusOpen: (modName: string) => void;
+  /** True while updateAllGithub is in flight. Drives the toolbar's
+   *  "Updating N…" disabled state in both Mods and Settings views. */
+  updatingAll: boolean;
+  /** Run a bulk update across every GitHub-sourced row in `names`. Shows
+   *  a confirm, toasts a summary, then re-audits just the touched rows.
+   *  Safe to call with a single name. */
+  updateAllGithub: (githubUpdateNames: string[]) => Promise<void>;
 }
 
 /** Failsafe — if the watcher never fires (user closed the browser without
@@ -54,8 +62,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [subUpdates, setSubUpdates] = useState<SubscriptionUpdate[]>([]);
   const [auditResults, setAuditResults] = useState<ModAuditEntry[] | null>(null);
   const [auditing, setAuditing] = useState<boolean>(false);
+  const [updatingAll, setUpdatingAll] = useState<boolean>(false);
   const gameRunningRef = useRef<boolean>(false);
   const toast = useToast();
+  const confirm = useConfirm();
   // Tracks the active "Nexus pending install" sticky toast so we can
   // dismiss it when the watcher reports an install (or when the user
   // opens a different Nexus mod, which supersedes the previous prompt).
@@ -219,6 +229,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const updateAllGithub = useCallback(async (githubUpdateNames: string[]) => {
+    if (updatingAll || githubUpdateNames.length === 0) return;
+    const ok = await confirm({
+      title: `Update ${githubUpdateNames.length} mod${githubUpdateNames.length === 1 ? '' : 's'}?`,
+      body:
+        `This will download and re-install the latest GitHub release for each. ` +
+        `Pinned mods are skipped. Make sure STS2 is closed first.`,
+      confirmLabel: `Update ${githubUpdateNames.length} mod${githubUpdateNames.length === 1 ? '' : 's'}`,
+    });
+    if (!ok) return;
+    setUpdatingAll(true);
+    try {
+      const updated = await updateAllMods();
+      toast.success(
+        updated.length === 0
+          ? 'Nothing to update.'
+          : `Updated ${updated.length} mod${updated.length === 1 ? '' : 's'}.`,
+      );
+      await refreshAll();
+      const names = Array.from(
+        new Set([...githubUpdateNames, ...updated.map((m) => m.name)]),
+      );
+      await refreshAuditEntries(names);
+    } catch (e) {
+      toast.error(`Update failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setUpdatingAll(false);
+    }
+  }, [updatingAll, confirm, toast, refreshAll, refreshAuditEntries]);
+
   // Auto-refresh audit rows when the downloads watcher catches a new mod
   // — only if an audit is currently loaded (don't surprise the user by
   // populating a fresh audit they didn't ask for).
@@ -278,7 +318,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [refreshGameRunning, refreshMods]);
 
   return (
-    <AppContext.Provider value={{ gameInfo, mods, loading, activeProfile, gameRunning, subUpdates, auditResults, auditing, runAudit, refreshAuditEntries, refreshGameInfo, refreshMods, refreshAll, refreshGameRunning, refreshSubUpdates, setActiveProfile, notifyNexusOpen }}>
+    <AppContext.Provider value={{ gameInfo, mods, loading, activeProfile, gameRunning, subUpdates, auditResults, auditing, runAudit, refreshAuditEntries, updatingAll, updateAllGithub, refreshGameInfo, refreshMods, refreshAll, refreshGameRunning, refreshSubUpdates, setActiveProfile, notifyNexusOpen }}>
       {children}
     </AppContext.Provider>
   );

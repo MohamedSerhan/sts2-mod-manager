@@ -104,7 +104,8 @@ describe('<App>', () => {
     expect(getNavButton('Home')).toBeInTheDocument();
     expect(getNavButton('Profiles')).toBeInTheDocument();
     expect(getNavButton('Mods')).toBeInTheDocument();
-    expect(getNavButton('Browse')).toBeInTheDocument();
+    expect(getNavButton('Browse Mods')).toBeInTheDocument();
+    expect(getNavButton('Browse Modpacks')).toBeInTheDocument();
     expect(getNavButton('Tutorial')).toBeInTheDocument();
     expect(getNavButton('Settings')).toBeInTheDocument();
   });
@@ -134,13 +135,13 @@ describe('<App>', () => {
     });
   });
 
-  it('clicking Browse swaps to the Browse view', async () => {
+  it('clicking Browse Mods swaps to the Browse view', async () => {
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     // (Onboarding overlay is suppressed by default in beforeEach so we
     //  don't need a Skip-setup click.)
-    await user.click(getNavButton('Browse'));
+    await user.click(getNavButton('Browse Mods'));
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /GitHub/i })).toBeInTheDocument();
     });
@@ -1159,7 +1160,7 @@ describe('<App>', () => {
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    await user.click(getNavButton('Browse'));
+    await user.click(getNavButton('Browse Mods'));
     // Default Browse tab is github; switch to Nexus Trending so the
     // effect fires and surfaces the key-missing banner.
     const trendingTab = await screen.findByRole('button', { name: /Nexus Trending/i });

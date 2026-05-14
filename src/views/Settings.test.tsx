@@ -685,7 +685,7 @@ describe('<SettingsView>', () => {
     const runBtns = await screen.findAllByRole('button', { name: /Run audit/i });
     await user.click(runBtns[0]);
     await waitFor(() => { expect(screen.getByText('A')).toBeInTheDocument(); });
-    expect(screen.queryByText(/Update all \(2\)/)).toBeInTheDocument();
+    expect(screen.queryByText(/Update 2 mods/)).toBeInTheDocument();
   });
 
   it('Audit empty-state shows when audit returns []', async () => {
@@ -1197,9 +1197,14 @@ describe('<SettingsView>', () => {
     const runBtns = await screen.findAllByRole('button', { name: /Run audit/i });
     await user.click(runBtns[0]);
     await waitFor(() => { expect(screen.getByText('A')).toBeInTheDocument(); });
-    const updateAllBtn = await screen.findByRole('button', { name: /Update all \(2\)/ });
+    const updateAllBtn = await screen.findByRole('button', { name: /^Update 2 mods$/ });
     await user.click(updateAllBtn);
-    const confirmBtn = await screen.findByRole('button', { name: /Update all$/ });
+    const confirmBtn = await waitFor(() => {
+      const btns = screen.getAllByRole('button', { name: /^Update 2 mods$/ });
+      const dialogBtn = btns.find((b) => b.closest('.gf-modal') !== null);
+      if (!dialogBtn) throw new Error('confirm dialog Update button not found');
+      return dialogBtn as HTMLButtonElement;
+    });
     await user.click(confirmBtn);
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'update_all_mods')).toBe(true);
@@ -1228,7 +1233,7 @@ describe('<SettingsView>', () => {
     const runBtns = await screen.findAllByRole('button', { name: /Run audit/i });
     await user.click(runBtns[0]);
     await waitFor(() => { expect(screen.getByText('A')).toBeInTheDocument(); });
-    const updateAllBtn = await screen.findByRole('button', { name: /Update all \(2\)/ });
+    const updateAllBtn = await screen.findByRole('button', { name: /^Update 2 mods$/ });
     await user.click(updateAllBtn);
     const cancelBtns = await screen.findAllByRole('button', { name: /^Cancel$/ });
     const footerCancel = cancelBtns.find((b) => b.textContent?.trim() === 'Cancel');
@@ -1259,9 +1264,14 @@ describe('<SettingsView>', () => {
     const runBtns = await screen.findAllByRole('button', { name: /Run audit/i });
     await user.click(runBtns[0]);
     await waitFor(() => { expect(screen.getByText('A')).toBeInTheDocument(); });
-    const updateAllBtn = await screen.findByRole('button', { name: /Update all \(2\)/ });
+    const updateAllBtn = await screen.findByRole('button', { name: /^Update 2 mods$/ });
     await user.click(updateAllBtn);
-    const confirmBtn = await screen.findByRole('button', { name: /Update all$/ });
+    const confirmBtn = await waitFor(() => {
+      const btns = screen.getAllByRole('button', { name: /^Update 2 mods$/ });
+      const dialogBtn = btns.find((b) => b.closest('.gf-modal') !== null);
+      if (!dialogBtn) throw new Error('confirm dialog Update button not found');
+      return dialogBtn as HTMLButtonElement;
+    });
     await user.click(confirmBtn);
     await waitFor(() => {
       expect(screen.queryByText(/ua fail/)).toBeInTheDocument();
@@ -1291,9 +1301,14 @@ describe('<SettingsView>', () => {
     const runBtns = await screen.findAllByRole('button', { name: /Run audit/i });
     await user.click(runBtns[0]);
     await waitFor(() => { expect(screen.getByText('A')).toBeInTheDocument(); });
-    const updateAllBtn = await screen.findByRole('button', { name: /Update all \(2\)/ });
+    const updateAllBtn = await screen.findByRole('button', { name: /^Update 2 mods$/ });
     await user.click(updateAllBtn);
-    const confirmBtn = await screen.findByRole('button', { name: /Update all$/ });
+    const confirmBtn = await waitFor(() => {
+      const btns = screen.getAllByRole('button', { name: /^Update 2 mods$/ });
+      const dialogBtn = btns.find((b) => b.closest('.gf-modal') !== null);
+      if (!dialogBtn) throw new Error('confirm dialog Update button not found');
+      return dialogBtn as HTMLButtonElement;
+    });
     await user.click(confirmBtn);
     await waitFor(() => {
       expect(screen.queryByText(/Nothing to update/)).toBeInTheDocument();
@@ -1788,12 +1803,17 @@ describe('<SettingsView>', () => {
     const runBtns = await screen.findAllByRole('button', { name: /Run audit/i });
     await user.click(runBtns[0]);
     await waitFor(() => { expect(screen.getByText('A')).toBeInTheDocument(); });
-    const updateAllBtn = await screen.findByRole('button', { name: /Update all \(2\)/ });
+    const updateAllBtn = await screen.findByRole('button', { name: /^Update 2 mods$/ });
     await user.click(updateAllBtn);
-    const confirmBtn = await screen.findByRole('button', { name: /Update all$/ });
+    const confirmBtn = await waitFor(() => {
+      const btns = screen.getAllByRole('button', { name: /^Update 2 mods$/ });
+      const dialogBtn = btns.find((b) => b.closest('.gf-modal') !== null);
+      if (!dialogBtn) throw new Error('confirm dialog Update button not found');
+      return dialogBtn as HTMLButtonElement;
+    });
     await user.click(confirmBtn);
     await waitFor(() => {
-      expect(screen.queryByText(/Update all failed/)).toBeInTheDocument();
+      expect(screen.queryByText(/Update failed/)).toBeInTheDocument();
     });
   });
 
@@ -1995,9 +2015,14 @@ describe('<SettingsView>', () => {
     const runBtns = await screen.findAllByRole('button', { name: /Run audit/i });
     await user.click(runBtns[0]);
     await waitFor(() => { expect(screen.getByText('A')).toBeInTheDocument(); });
-    const updateAllBtn = await screen.findByRole('button', { name: /Update all \(2\)/ });
+    const updateAllBtn = await screen.findByRole('button', { name: /^Update 2 mods$/ });
     await user.click(updateAllBtn);
-    const confirmBtn = await screen.findByRole('button', { name: /Update all$/ });
+    const confirmBtn = await waitFor(() => {
+      const btns = screen.getAllByRole('button', { name: /^Update 2 mods$/ });
+      const dialogBtn = btns.find((b) => b.closest('.gf-modal') !== null);
+      if (!dialogBtn) throw new Error('confirm dialog Update button not found');
+      return dialogBtn as HTMLButtonElement;
+    });
     await user.click(confirmBtn);
     await waitFor(() => {
       expect(screen.queryByText(/Updated 1 mod\b/)).toBeInTheDocument();
@@ -2094,5 +2119,53 @@ describe('<SettingsView>', () => {
     await waitFor(() => {
       expect(screen.queryByText(/newest compatible/i)).toBeInTheDocument();
     });
+  });
+
+  it('renders a "Latest" pill on rows whose audit row is up-to-date', async () => {
+    registerInvokeHandler('audit_mod_versions', () => [
+      {
+        mod_name: 'A', folder_name: 'A', installed_version: '1.0',
+        needs_update: false, pinned: false, asset_names: [],
+        releases_scanned: 1, latest_has_assets: true,
+        latest_release_with_assets_tag: 'v1.0',
+        github_repo: 'foo/a', github_auto_detected: false,
+        nexus_update_available: false,
+      },
+    ]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: /Audit/ }));
+    const runBtns = await screen.findAllByRole('button', { name: /Run audit/i });
+    await user.click(runBtns[0]);
+    await waitFor(() => { expect(screen.getByText('A')).toBeInTheDocument(); });
+    expect(screen.getByText('Latest')).toBeInTheDocument();
+  });
+
+  it('Re-audit button uses ghost variant when 2+ GitHub updates are pending', async () => {
+    registerInvokeHandler('audit_mod_versions', () => [
+      { mod_name: 'A', folder_name: 'A', installed_version: '1.0',
+        needs_update: true, pinned: false, asset_names: [],
+        releases_scanned: 1, latest_has_assets: true,
+        latest_release_with_assets_tag: 'v2.0',
+        github_repo: 'foo/a', github_auto_detected: false,
+        nexus_update_available: false, update_source: 'github' },
+      { mod_name: 'B', folder_name: 'B', installed_version: '1.0',
+        needs_update: true, pinned: false, asset_names: [],
+        releases_scanned: 1, latest_has_assets: true,
+        latest_release_with_assets_tag: 'v2.0',
+        github_repo: 'foo/b', github_auto_detected: false,
+        nexus_update_available: false, update_source: 'github' },
+    ]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: /Audit/ }));
+    const runBtns = await screen.findAllByRole('button', { name: /Run audit/i });
+    await user.click(runBtns[0]);
+    await waitFor(() => { expect(screen.getByText('A')).toBeInTheDocument(); });
+    const reAuditBtn = await screen.findByRole('button', { name: /^Re-audit$/ });
+    // ghost variant maps to gf-btn-3 in Button.tsx
+    expect(reAuditBtn.className).toMatch(/gf-btn-3/);
   });
 });

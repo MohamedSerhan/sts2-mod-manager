@@ -1,11 +1,17 @@
 import { useState } from 'react';
-import { Check, X, GitBranch, ExternalLink, Search, Save } from 'lucide-react';
+import { Check, X, GitBranch, ExternalLink, Search, Save, StickyNote, Link as LinkIcon } from 'lucide-react';
 import type { ModInfo } from '../types';
 
 // v5 batch 2 — inline source editor drawer.
 // Two-field grid (GitHub repo + Nexus URL) with format hints, per-field
 // clear, status badge (ok/empty), and "Find GitHub from Nexus" hint when
 // only Nexus is set. Renders below an expanded mod row.
+//
+// Plus user-feedback batch additions: a free-form Note field and a single
+// "Other link" URL for mods that come from places that aren't GitHub or
+// Nexus (Patreon, X, Discord posts). Both are optional and saved through
+// the separate `setModExtras` command so they live on the same source
+// entry but don't get clobbered by GitHub/Nexus saves.
 
 interface Props {
   mod: ModInfo;
@@ -14,7 +20,12 @@ interface Props {
   onClose: () => void;
   onClear: () => void;
   onFindGithub: () => void;
-  onSave: (githubRepo: string, nexusUrl: string) => void | Promise<void>;
+  onSave: (
+    githubRepo: string,
+    nexusUrl: string,
+    note: string,
+    customUrl: string,
+  ) => void | Promise<void>;
 }
 
 function ghRepoFromUrl(url: string | null): string {
@@ -36,6 +47,8 @@ export function SourceEditor({
 }: Props) {
   const [github, setGithub] = useState<string>(ghRepoFromUrl(mod.github_url));
   const [nexus, setNexus] = useState<string>(mod.nexus_url ?? '');
+  const [note, setNote] = useState<string>(mod.note ?? '');
+  const [customUrl, setCustomUrl] = useState<string>(mod.custom_url ?? '');
 
   const ghOk = github.trim().length > 0;
   const nxOk = nexus.trim().length > 0;
@@ -124,6 +137,65 @@ export function SourceEditor({
         </div>
       </div>
 
+      <div className="gf-src-edit-grid">
+        {/* Free-form note */}
+        <div className="gf-src-edit-field">
+          <label className="gf-src-edit-label">
+            <StickyNote size={11} style={{ marginRight: 4 }} />
+            Note
+            {note && (
+              <button
+                type="button"
+                className="gf-src-edit-clear"
+                onClick={() => setNote('')}
+              >
+                clear
+              </button>
+            )}
+          </label>
+          <div className="gf-src-edit-input">
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="e.g. downloaded from Patreon, compat patch for v1.8 build"
+              rows={2}
+              style={{ resize: 'vertical', minHeight: 30, fontFamily: 'inherit' }}
+            />
+          </div>
+          <div className="gf-src-edit-hint">
+            <span>Free-form. Shown on the mod row so you remember where this came from.</span>
+          </div>
+        </div>
+
+        {/* Custom (non-GitHub/Nexus) URL */}
+        <div className="gf-src-edit-field">
+          <label className="gf-src-edit-label">
+            <LinkIcon size={11} style={{ marginRight: 4 }} />
+            Other link
+            {customUrl && (
+              <button
+                type="button"
+                className="gf-src-edit-clear"
+                onClick={() => setCustomUrl('')}
+              >
+                clear
+              </button>
+            )}
+          </label>
+          <div className="gf-src-edit-input">
+            <input
+              value={customUrl}
+              onChange={(e) => setCustomUrl(e.target.value)}
+              placeholder="https://… (Patreon, X, Discord, etc.)"
+            />
+            {statusBadge(customUrl.trim().length > 0)}
+          </div>
+          <div className="gf-src-edit-hint">
+            <span>For mods that don't live on GitHub or Nexus.</span>
+          </div>
+        </div>
+      </div>
+
       {onlyNexus && (
         <div
           style={{
@@ -160,7 +232,7 @@ export function SourceEditor({
         <button className="gf-btn-3" onClick={onClose}>Cancel</button>
         <button
           className="gf-btn gf-btn-sm"
-          onClick={() => onSave(github, nexus)}
+          onClick={() => onSave(github, nexus, note, customUrl)}
           disabled={saving}
         >
           <Save size={11} /> {saving ? 'Saving…' : 'Save sources'}

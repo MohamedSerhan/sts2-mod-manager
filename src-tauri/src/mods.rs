@@ -1348,7 +1348,7 @@ pub fn read_user_edited_configs(
         let bytes = match fs::read(path) {
             Ok(b) => b,
             Err(e) => {
-                log::warn!(
+                log::error!(
                     "Skipping preserve of '{}' under {:?}: read failed: {}",
                     rel, mod_folder, e
                 );
@@ -2000,7 +2000,7 @@ fn refresh_active_profile_manifest(state: &tauri::State<'_, AppState>) {
         &profiles_path,
         Some(&config_path),
     ) {
-        log::warn!(
+        log::error!(
             "Failed to refresh active profile manifest for '{}' after mutation: {} \
              — manifest is now stale; next profile switch will re-snapshot.",
             active_name, e
@@ -2167,7 +2167,7 @@ pub fn enable_all_mods(state: tauri::State<'_, AppState>) -> std::result::Result
     }
 
     if !errors.is_empty() {
-        log::warn!("Some mods failed to enable: {:?}", errors);
+        log::error!("Some mods failed to enable: {:?}", errors);
     }
     refresh_active_profile_manifest(&state);
     Ok(true)
@@ -2219,7 +2219,7 @@ pub fn disable_all_mods(state: tauri::State<'_, AppState>) -> std::result::Resul
     }
 
     if !errors.is_empty() {
-        log::warn!("Some mods failed to disable: {:?}", errors);
+        log::error!("Some mods failed to disable: {:?}", errors);
     }
     refresh_active_profile_manifest(&state);
     Ok(true)
@@ -3228,4 +3228,3 @@ mod config_snapshot_tests {
         );
     }
 }
-

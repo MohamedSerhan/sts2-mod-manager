@@ -852,7 +852,7 @@ pub fn set_launch_mode(
     s.launch_mode = mode;
     let path = s.config_path.join("launch_mode.txt");
     if let Err(e) = std::fs::write(&path, mode.as_str()) {
-        log::warn!("Couldn't persist launch_mode to {}: {}", path.display(), e);
+        log::error!("Couldn't persist launch_mode to {}: {}", path.display(), e);
     }
     log::info!("Launch mode set to {}", mode.as_str());
     Ok(mode)
@@ -1009,4 +1009,3 @@ pub fn read_log_tail(
     let start = collected.len().saturating_sub(want);
     Ok(collected[start..].join("\n"))
 }
-

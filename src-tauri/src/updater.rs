@@ -577,7 +577,7 @@ pub async fn update_mod(
         .map_err(|e| e.to_string())?;
         crate::mod_sources::emit_configs_preserved(&app, &info.name, &preserved_names);
     } else {
-        log::warn!(
+        log::error!(
             "update_mod: install of '{}' from {}/{}@{} produced an unhealthy ModInfo (version='{}'); \
              leaving installed_version untouched so the previously-recorded value survives for Repair walk-back.",
             name, owner, repo, chosen_tag, info.version,
@@ -752,7 +752,7 @@ pub async fn repair_mod(
         .map_err(|e| e.to_string())?;
         crate::mod_sources::emit_configs_preserved(&app, &info.name, &preserved_names);
     } else {
-        log::warn!(
+        log::error!(
             "repair_mod: install of '{}' from {}/{}@{} produced an unhealthy ModInfo (version='{}'); \
              leaving installed_version untouched.",
             name, owner, repo, chosen.tag, info.version,
@@ -1027,7 +1027,7 @@ pub async fn update_all_mods(
             Ok(info) => {
                 let install_healthy = info.version != "unknown" && !info.version.is_empty();
                 if !install_healthy {
-                    log::warn!(
+                    log::error!(
                         "update_all_mods: '{}' from {}/{}@{} produced an unhealthy ModInfo (version='{}'); \
                          leaving installed_version untouched.",
                         update.mod_name, owner, repo, chosen_tag, info.version,

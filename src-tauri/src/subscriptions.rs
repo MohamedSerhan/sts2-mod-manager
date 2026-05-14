@@ -356,7 +356,7 @@ fn wipe_directory_contents(dir: &Path) -> Result<()> {
             fs::remove_file(&path)
         };
         if let Err(e) = result {
-            log::warn!("Repair: failed to remove '{}': {}", path.display(), e);
+            log::error!("Repair: failed to remove '{}': {}", path.display(), e);
         }
     }
     Ok(())
@@ -579,7 +579,7 @@ async fn apply_subscription_update_inner(
                             }
                         }
                         Err(e) => {
-                            log::warn!("GitHub download also failed for '{}': {}", pm.name, e);
+                            log::error!("GitHub download also failed for '{}': {}", pm.name, e);
                         }
                     }
                 }
@@ -587,7 +587,7 @@ async fn apply_subscription_update_inner(
         }
 
         if !downloaded && !skipped_this_mod {
-            log::warn!("No download source for mod '{}' in subscription update", pm.name);
+            log::error!("No download source for mod '{}' in subscription update", pm.name);
         }
     }
 
@@ -617,7 +617,7 @@ async fn apply_subscription_update_inner(
         let mut s = state.lock().map_err(|e| e.to_string())?;
         s.active_profile = Some(remote.name.clone());
         if let Err(e) = std::fs::write(s.config_path.join("active_profile.txt"), &remote.name) {
-            log::warn!("Failed to persist active_profile.txt after subscription update: {}", e);
+            log::error!("Failed to persist active_profile.txt after subscription update: {}", e);
         }
         log::info!("Subscription update: active profile set to '{}'", remote.name);
     }

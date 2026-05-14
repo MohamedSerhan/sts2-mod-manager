@@ -1600,7 +1600,7 @@ pub async fn install_shared_profile(
     }
 
     if !download_failures.is_empty() {
-        log::warn!(
+        log::error!(
             "Could not download {} mods: {:?}. These need to be installed manually.",
             download_failures.len(),
             download_failures

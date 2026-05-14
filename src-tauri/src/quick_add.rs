@@ -216,7 +216,7 @@ pub async fn quick_add_mod(
         entry.github_repo = Some(format!("{}/{}", owner, repo));
         entry.github_auto_detected = false;
         if let Err(e) = save_sources(&db, &config_path) {
-            log::warn!("Quick add: failed to persist GitHub source for '{}': {}", mod_info.name, e);
+            log::error!("Quick add: failed to persist GitHub source for '{}': {}", mod_info.name, e);
         }
 
         return Ok(QuickAddResult::GithubInstalled { mod_info });

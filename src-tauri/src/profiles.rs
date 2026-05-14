@@ -430,7 +430,7 @@ pub fn apply_profile_with_pins(
                 || pm.folder_name.as_ref().map_or(false, |f| on_disk_ids.contains(f))
                 || pm.mod_id.as_ref().map_or(false, |i| on_disk_ids.contains(i));
             if !found {
-                log::warn!(
+                log::error!(
                     "Profile apply: profile expects '{}' enabled but no matching mod found on disk (folder={:?}, mod_id={:?})",
                     pm.name, pm.folder_name, pm.mod_id
                 );
@@ -760,7 +760,7 @@ pub async fn switch_profile(
                             downloaded = true;
                         }
                         Err(e) => {
-                            log::warn!("GitHub download also failed for '{}': {}", pm.name, e);
+                            log::error!("GitHub download also failed for '{}': {}", pm.name, e);
                         }
                     }
                 }
@@ -768,7 +768,7 @@ pub async fn switch_profile(
         }
 
         if !downloaded {
-            log::warn!("No download source for mod '{}' -- cannot restore", pm.name);
+            log::error!("No download source for mod '{}' -- cannot restore", pm.name);
             download_failures.push(pm.name.clone());
         }
     }

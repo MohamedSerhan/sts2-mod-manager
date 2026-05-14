@@ -346,7 +346,7 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                     .to_string_lossy()
                                     .to_string();
 
-                                log::warn!(
+                                log::error!(
                                     "Downloads watcher: failed to install {}: {}",
                                     file_name,
                                     e

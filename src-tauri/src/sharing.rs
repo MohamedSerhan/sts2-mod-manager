@@ -651,7 +651,30 @@ pub async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::P
 
     // Parse the raw.githubusercontent.com URL to extract owner/repo/path
     // Format: https://raw.githubusercontent.com/OWNER/REPO/main/PATH
-    let bytes = if url.contains("raw.githubusercontent.com") {
+    let bytes = if url.starts_with("https://github.com/") && url.contains("/releases/download/") {
+        // Release-asset download. github.com 302-redirects to
+        // objects.githubusercontent.com; reqwest follows redirects by
+        // default. No API auth needed — release assets in a public repo
+        // are public.
+        //
+        // For test interception we honor STS2_GITHUB_RELEASES_BASE — if set,
+        // we replace the `https://github.com` prefix with it so wiremock
+        // can answer. Production never sets this var.
+        let effective = if let Ok(base) = std::env::var("STS2_GITHUB_RELEASES_BASE") {
+            url.replacen("https://github.com", &base, 1)
+        } else {
+            url.to_string()
+        };
+        log::info!("Downloading release bundle '{}' from {}", mod_name, effective);
+        let resp = client.get(&effective).send().await?;
+        if !resp.status().is_success() {
+            return Err(AppError::Other(format!(
+                "Failed to download release bundle for '{}': {}",
+                mod_name, resp.status()
+            )));
+        }
+        resp.bytes().await?
+    } else if url.contains("raw.githubusercontent.com") {
         // Use GitHub API to avoid CDN caching issues
         let parts: Vec<&str> = url
             .trim_start_matches("https://raw.githubusercontent.com/")
@@ -2228,5 +2251,83 @@ mod share_via_releases_e2e_tests {
         assert!(m.bundle_url.as_deref().map(|u| u.contains("releases/download/bundles/TestMod_v1.0.0.zip")).unwrap_or(false),
             "expected release URL, got {:?}", m.bundle_url);
         assert!(m.bundle_sha256.is_some(), "expected hash to be persisted");
+    }
+}
+
+#[cfg(test)]
+mod download_bundle_url_routing_tests {
+    use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn make_tiny_zip(inner_name: &str) -> Vec<u8> {
+        let buf = std::io::Cursor::new(Vec::new());
+        let mut zw = zip::ZipWriter::new(buf);
+        zw.start_file(inner_name, zip::write::SimpleFileOptions::default()).unwrap();
+        zw.write_all(b"hello").unwrap();
+        zw.finish().unwrap().into_inner()
+    }
+
+    #[tokio::test]
+    async fn download_bundle_handles_raw_githubusercontent_url() {
+        // Sets STS2_GITHUB_API_BASE — share the env-var lock with the other suites.
+        let _env_guard = super::release_upload_tests::ENV_LOCK.lock().await;
+        let server = MockServer::start().await;
+        std::env::set_var("STS2_GITHUB_API_BASE", server.uri());
+
+        let zip_bytes = make_tiny_zip("OldMod.json");
+        Mock::given(method("GET"))
+            .and(path("/repos/owner/sts2mm-profiles/contents/mods/OldMod_v1.zip"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(zip_bytes))
+            .mount(&server).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        download_bundle(
+            "https://raw.githubusercontent.com/owner/sts2mm-profiles/main/mods/OldMod_v1.zip",
+            "OldMod", tmp.path()
+        ).await.expect("legacy URL must still work");
+
+        assert!(tmp.path().join("OldMod.json").exists());
+    }
+
+    #[tokio::test]
+    async fn download_bundle_handles_release_download_url() {
+        // Sets STS2_GITHUB_RELEASES_BASE — process-global env var, same lock.
+        let _env_guard = super::release_upload_tests::ENV_LOCK.lock().await;
+        let server = MockServer::start().await;
+        std::env::set_var("STS2_GITHUB_RELEASES_BASE", server.uri());
+
+        let zip_bytes = make_tiny_zip("NewMod.json");
+        Mock::given(method("GET"))
+            .and(path("/owner/sts2mm-profiles/releases/download/bundles/NewMod_v1.zip"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(zip_bytes))
+            .mount(&server).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        download_bundle(
+            "https://github.com/owner/sts2mm-profiles/releases/download/bundles/NewMod_v1.zip",
+            "NewMod", tmp.path()
+        ).await.expect("release URL must work");
+
+        assert!(tmp.path().join("NewMod.json").exists());
+    }
+
+    #[tokio::test]
+    async fn download_bundle_handles_arbitrary_https_url() {
+        // No env-var mutation here — direct URL into the mock server, so no lock needed.
+        let server = MockServer::start().await;
+        let zip_bytes = make_tiny_zip("ExternalMod.json");
+        Mock::given(method("GET"))
+            .and(path("/some/path/ExternalMod.zip"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(zip_bytes))
+            .mount(&server).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        download_bundle(
+            &format!("{}/some/path/ExternalMod.zip", server.uri()),
+            "ExternalMod", tmp.path()
+        ).await.expect("non-github URL must work");
+
+        assert!(tmp.path().join("ExternalMod.json").exists());
     }
 }

@@ -649,6 +649,48 @@ pub async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::P
         .build()
         .unwrap_or_default();
 
+    // QA-cassette interception for release-asset downloads. The cassette
+    // layer is GET-only and gated on `cfg!(feature = "qa-cassette")`, so
+    // `intercept_get` collapses to a no-op `None` in shipped builds and
+    // the compiler drops this entire block. The `github-releases` bucket
+    // mirrors github.com's URL path under $STS2_CASSETTE_DIR — see
+    // qa_cassette::url_to_path. Handled here ahead of the type-unified
+    // `let bytes = ...` block below because the cached value is a
+    // `Vec<u8>` and the network branches all return `reqwest::Bytes`;
+    // pulling cassette out keeps the type-unification clean and avoids
+    // pulling `bytes` in as a direct crate dep.
+    if url.starts_with("https://github.com/") && url.contains("/releases/download/") {
+        if let Some(cached) = crate::qa_cassette::intercept_get(url) {
+            log::info!(
+                "[cassette] serving release bundle '{}' from disk ({} bytes)",
+                mod_name,
+                cached.len()
+            );
+            let cursor = std::io::Cursor::new(cached);
+            let mut archive = zip::ZipArchive::new(cursor).map_err(|e| {
+                AppError::Other(format!("Invalid bundle zip for '{}': {}", mod_name, e))
+            })?;
+            for i in 0..archive.len() {
+                let mut file = archive
+                    .by_index(i)
+                    .map_err(|e| AppError::Other(e.to_string()))?;
+                let Some(outpath) = file.enclosed_name().map(|p| mods_path.join(p)) else {
+                    continue;
+                };
+                if file.name().ends_with('/') {
+                    std::fs::create_dir_all(&outpath)?;
+                } else {
+                    if let Some(parent) = outpath.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    let mut outfile = std::fs::File::create(&outpath)?;
+                    std::io::copy(&mut file, &mut outfile)?;
+                }
+            }
+            return Ok(());
+        }
+    }
+
     // Parse the raw.githubusercontent.com URL to extract owner/repo/path
     // Format: https://raw.githubusercontent.com/OWNER/REPO/main/PATH
     let bytes = if url.starts_with("https://github.com/") && url.contains("/releases/download/") {

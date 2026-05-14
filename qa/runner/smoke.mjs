@@ -769,6 +769,14 @@ const BASE_SPECS = [
 const CASSETTE_SPECS = [
   ['audit shows "1 update" with cassette + fixture mods', specAuditAgainstCassettesShowsOnePending],
   ['pin on QaTestMod suppresses its pending update', specPinSuppressesPendingUpdate],
+  // TODO scenario-005: drive a friend-install of a profile whose bundle_url
+  // points at a github.com release asset (e.g. the qa-fixture
+  // TheCursedMod_v0.2.7.zip under qa/fixtures/github-releases/...). Would
+  // exercise the share-import IPC end-to-end with cassette playback for
+  // the release-asset download path added in v1.4.0. Deferred because no
+  // share-import / friend-install WebDriver spec exists yet to clone from
+  // — Rust-side coverage at src-tauri/tests/qa_scenarios.rs::
+  // scenario_005_install_from_release_url is sufficient for shipping.
 ];
 
 // The toggle spec runs in either mode — it doesn't need cassettes,

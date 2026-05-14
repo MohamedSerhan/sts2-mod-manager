@@ -661,6 +661,53 @@ fn migrate_source_entry_does_not_overwrite_existing_destination() {
     assert_eq!(new_entry.installed_version.as_deref(), Some("v0.1.0"));
 }
 
+/// Scenario 005 — install a bundled mod from a github.com release-asset
+/// URL, served from the QA cassette.
+///
+/// This is the friend-install path for large bundles introduced in v1.4.0:
+/// the curator's profile manifest points `bundle_url` at
+/// `https://github.com/<owner>/sts2mm-profiles/releases/download/bundles/<name>.zip`,
+/// and on import the friend's manager calls `download_bundle(...)` against
+/// that URL. With `--features qa-cassette` and `STS2_CASSETTE_DIR` pointed
+/// at `qa/fixtures`, the network call short-circuits to a fixture zip
+/// under `github-releases/<owner>/sts2mm-profiles/releases/download/bundles/`.
+/// The test asserts the zip's inner file lands in the mods dir — proving
+/// the full release-URL download + extract path works end to end without
+/// touching the wire.
+///
+/// Gated on `qa-cassette` because outside that feature `intercept_get`
+/// returns `None` and the test would fall through to the network and fail.
+#[cfg(feature = "qa-cassette")]
+#[tokio::test]
+async fn scenario_005_install_from_release_url() {
+    use std::path::PathBuf;
+    use sts2_mod_manager_lib::sharing::download_bundle;
+
+    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("CARGO_MANIFEST_DIR (src-tauri) must have a parent (repo root)")
+        .join("qa")
+        .join("fixtures");
+    std::env::set_var("STS2_CASSETTE_DIR", &fixtures);
+
+    let tmp = tempfile::tempdir().unwrap();
+    download_bundle(
+        "https://github.com/qa-fixture/sts2mm-profiles/releases/download/bundles/TheCursedMod_v0.2.7.zip",
+        "TheCursedMod",
+        tmp.path(),
+    )
+    .await
+    .expect("cassette-backed release download must succeed");
+
+    assert!(
+        tmp.path().join("TheCursedMod").join("TheCursedMod.json").exists(),
+        "extract must produce TheCursedMod/TheCursedMod.json under the mods dir. \
+         If this fails: either the cassette URL→path mapping is off (see \
+         qa_cassette::url_to_path), the fixture zip is missing/empty, or the \
+         release-asset branch in download_bundle isn't honoring intercept_get."
+    );
+}
+
 /// Flow 11 negative case — same profile apply without the pin actually
 /// moves the mod. Proves apply is doing real work and the pin test is
 /// not a false positive (e.g. apply silently no-oping).

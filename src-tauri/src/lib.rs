@@ -15,7 +15,11 @@ mod nexus;
 pub mod profiles;
 mod qa_cassette;
 mod quick_add;
-mod sharing;
+// `sharing` is pub for the same reason as `mods` / `mod_sources` / `updater`:
+// integration tests in `src-tauri/tests/qa_scenarios.rs` exercise
+// `download_bundle` directly so the qa-cassette release-asset path can be
+// verified end-to-end without spinning up a Tauri window or a wiremock server.
+pub mod sharing;
 mod state;
 mod subscriptions;
 // `updater` is pub for the same reason as `mods` / `mod_sources`: the

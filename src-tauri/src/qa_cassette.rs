@@ -96,6 +96,7 @@ fn url_to_path(dir: &std::path::Path, url: &str) -> Option<PathBuf> {
         "api.github.com" => "github",
         "api.nexusmods.com" => "nexus",
         "raw.githubusercontent.com" => "github-raw",
+        "github.com" => "github-releases",
         _ => return None,
     };
     let path = parsed.path().trim_start_matches('/');
@@ -152,6 +153,20 @@ mod tests {
         assert_eq!(
             p,
             Path::new("/fixtures/nexus/v1/games/slaythespire2/mods/123.json"),
+        );
+    }
+
+    #[test]
+    fn maps_release_asset_download_to_github_releases_bucket() {
+        let dir = Path::new("/fixtures");
+        let p = url_to_path(
+            dir,
+            "https://github.com/octo/sts2mm-profiles/releases/download/bundles/TheCursed_v0.2.7.zip",
+        )
+        .unwrap();
+        assert_eq!(
+            p,
+            Path::new("/fixtures/github-releases/octo/sts2mm-profiles/releases/download/bundles/TheCursed_v0.2.7.zip"),
         );
     }
 

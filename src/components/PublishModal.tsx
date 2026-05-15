@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type { Profile, ShareResult } from '../types';
 import { shareProfile, reshareProfile, getApiKeyStatus, setModpackListing } from '../hooks/useTauri';
+import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { buildShareMessage, buildShareLink } from '../lib/shareImport';
 
@@ -38,6 +39,13 @@ interface ShareProgress {
 
 export function PublishModal({ open, profile, isReshare, onClose, onShared, onGoToSettings }: Props) {
   const toast = useToast();
+  // Live disk state — the Rust share/reshare path re-snapshots disk before
+  // uploading, so the modal's preview has to mirror disk, not the saved
+  // profile.mods (which is the last snapshot and may be days stale).
+  // Without this, a user who toggles mods then opens the modal sees the
+  // pre-toggle counts and worries their changes won't ship — happened in
+  // practice after an import-then-delete left the profile manifest drifted.
+  const { mods: installedMods } = useApp();
   const [busy, setBusy] = useState(false);
   const [shared, setShared] = useState<ShareResult | null>(null);
   const [copied, setCopied] = useState<'code' | 'link' | 'msg' | null>(null);
@@ -88,9 +96,16 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
   // without any `source` string, which used to make the modal say
   // "20 mods · 0 GitHub · 0 Nexus" and confuse first-time curators.
   // The honest summary is just total + enabled split.
-  const enabledCount = profile.mods.filter((m) => m.enabled).length;
-  const disabledCount = profile.mods.filter((m) => !m.enabled).length;
-  const totalCount = profile.mods.length;
+  //
+  // Counts come from the live disk scan (`installedMods`) — both
+  // `share_profile` and `reshare_profile` call `snapshot_current_with_paths`
+  // which re-scans `mods/` + `mods_disabled/` before uploading, so the
+  // preview must mirror the same source-of-truth. Reading from
+  // `profile.mods` would show whatever the last snapshot was, which can
+  // be many days stale (or worse — corrupted by a prior import).
+  const enabledCount = installedMods.filter((m) => m.enabled).length;
+  const disabledCount = installedMods.filter((m) => !m.enabled).length;
+  const totalCount = installedMods.length;
 
   async function handlePublish() {
     // uncovered: dead at runtime — line 77 already short-circuits the render
@@ -259,7 +274,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
                     {disabledCount > 0 && (
                       <>
                         {' · '}
-                        <span className="gf-includes-stat">{disabledCount}</span> disabled (will be excluded)
+                        <span className="gf-includes-stat">{disabledCount}</span> disabled (installed off)
                       </>
                     )}
                   </div>

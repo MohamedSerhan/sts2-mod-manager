@@ -43,6 +43,28 @@ function tokenIsSet(value: boolean) {
   }));
 }
 
+/** Helper: stub `get_installed_mods` for tests that exercise the
+ *  disk-count preview. The modal scans disk via AppContext rather than
+ *  reading `profile.mods`, because the Rust share/reshare path also
+ *  re-scans disk before uploading. */
+function installedModsAre(
+  mods: Array<{ name: string; enabled: boolean }>,
+) {
+  registerInvokeHandler('get_installed_mods', () =>
+    mods.map((m) => ({
+      name: m.name,
+      version: '1.0',
+      enabled: m.enabled,
+      files: [],
+      source: null,
+      hash: null,
+      dependencies: [],
+      size_bytes: 0,
+      pinned: false,
+    })),
+  );
+}
+
 /** Locate the modal title element (avoids matching toast copy that
  *  repeats the same string in a transient banner). */
 async function waitForModalTitle(text: string | RegExp) {
@@ -92,14 +114,61 @@ describe('<PublishModal>', () => {
 
   it('renders the pre-flight panel with profile name and counts', async () => {
     tokenIsSet(true);
+    installedModsAre([
+      { name: 'A', enabled: true },
+      { name: 'B', enabled: false },
+    ]);
     render(<Wrap />);
     await waitFor(() => {
       expect(screen.getByText(/Publish My Pack/)).toBeInTheDocument();
     });
-    // 2 mods total · 1 enabled · 1 disabled
-    expect(screen.getByText('2')).toBeInTheDocument();
+    // 2 mods total · 1 enabled · 1 disabled — driven by the live disk
+    // scan (`get_installed_mods`) not the stale `profile.mods`.
+    await waitFor(() => {
+      expect(screen.getByText(/disabled \(installed off\)/)).toBeInTheDocument();
+    });
     expect(screen.getByText(/active/)).toBeInTheDocument();
-    expect(screen.getByText(/disabled \(will be excluded\)/)).toBeInTheDocument();
+    expect(screen.getAllByText('1').length).toBeGreaterThan(0);
+  });
+
+  it('preview counts come from live disk, not from a stale profile.mods snapshot', async () => {
+    // Regression: a user with a corrupted profile JSON (e.g. left behind
+    // after a smart-import that didn't claim the active-profile slot) used
+    // to see "8 active · 18 disabled" in the publish modal even after
+    // they'd re-enabled all the mods on disk. The Rust reshare path scans
+    // disk fresh, so the modal preview must match disk — not whatever
+    // snapshot happens to be sitting in profile.mods.
+    tokenIsSet(true);
+    const stale = {
+      ...profile,
+      mods: [
+        { name: 'StaleEnabled', version: '1.0', enabled: true, files: [], source: null, hash: null, dependencies: [], size_bytes: 0 },
+        { name: 'StaleDisabled1', version: '1.0', enabled: false, files: [], source: null, hash: null, dependencies: [], size_bytes: 0 },
+        { name: 'StaleDisabled2', version: '1.0', enabled: false, files: [], source: null, hash: null, dependencies: [], size_bytes: 0 },
+      ],
+    };
+    installedModsAre([
+      { name: 'Real1', enabled: true },
+      { name: 'Real2', enabled: true },
+      { name: 'Real3', enabled: true },
+      { name: 'Real4', enabled: true },
+    ]);
+    render(<Wrap profile={stale} />);
+    await screen.findByText(/Publish My Pack/);
+    // Live disk: 4 total · 4 active · 0 disabled. The stale 3/1/2 split
+    // in profile.mods must NOT be what the user sees. Wait on the
+    // stat-span specifically so we don't false-positive on a stray "4"
+    // elsewhere on the page (icon viewBox, etc.).
+    await waitFor(() => {
+      const stats = Array.from(document.querySelectorAll('.gf-includes-stat'));
+      const totalSpan = stats.find((s) => s.textContent?.trim() === '4');
+      expect(totalSpan, `expected a stat span with "4" (total), got: ${stats.map((s) => `"${s.textContent}"`).join(', ')}`).toBeTruthy();
+    });
+    // Stale "3" total / "1" disabled must not leak into the visible stats.
+    const stats = Array.from(document.querySelectorAll('.gf-includes-stat'));
+    expect(stats.some((s) => s.textContent?.trim() === '3')).toBe(false);
+    // 4 active mods → disabled tail is suppressed.
+    expect(screen.queryByText(/disabled \(/)).toBeNull();
   });
 
   it('shows the GitHub-token-missing pre-flight warning when no token is set', async () => {
@@ -653,14 +722,12 @@ describe('<PublishModal>', () => {
     expect(screen.queryByText(/creates a public repo|will create a/)).toBeNull();
   });
 
-  it('all mods enabled hides the "disabled (will be excluded)" tail', async () => {
+  it('all mods enabled hides the "disabled (installed off)" tail', async () => {
     tokenIsSet(true);
-    const onlyEnabled = {
-      ...profile,
-      mods: [profile.mods[0]],
-    };
-    render(<Wrap profile={onlyEnabled} />);
+    installedModsAre([{ name: 'OnlyOne', enabled: true }]);
+    render(<Wrap />);
     await screen.findByText(/Publish My Pack/);
+    expect(screen.queryByText(/disabled \(installed off\)/)).toBeNull();
     expect(screen.queryByText(/disabled \(will be excluded\)/)).toBeNull();
   });
 

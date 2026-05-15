@@ -451,6 +451,85 @@ describe('<ModsView>', () => {
     });
   });
 
+  it('"Download from Nexus" pill renders when nexus_update_available=true and nexus_url is set', async () => {
+    // Standardized with Settings → Audit: any audit row flagged
+    // nexus_update_available must surface a Download-from-Nexus pill
+    // on the Mods row too. Previously the Mods page only rendered a
+    // GitHub-update pill (which required `mod.github_url`), so Nexus-
+    // only mods like BaseLib showed up as updateable in Settings but
+    // had no actionable affordance on Mods.
+    seedMods([
+      baseMod({
+        name: 'BaseLib',
+        folder_name: 'BaseLib',
+        version: '3.1.2',
+        nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/42',
+        github_url: null,
+      }),
+    ]);
+    registerInvokeHandler('audit_mod_versions', () => [{
+      mod_name: 'BaseLib',
+      folder_name: 'BaseLib',
+      installed_version: '3.1.2',
+      needs_update: true,
+      asset_names: [],
+      releases_scanned: 0,
+      latest_has_assets: false,
+      github_auto_detected: false,
+      pinned: false,
+      nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/42',
+      nexus_version: '3.2.0',
+      nexus_update_available: true,
+      update_source: 'nexus',
+    }]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Audit mods' }));
+    const pill = await screen.findByText(/Download from Nexus/);
+    // Must link to the Files tab — same URL shape Settings uses.
+    const anchor = pill.closest('a');
+    expect(anchor).not.toBeNull();
+    expect(anchor!.getAttribute('href')).toContain('?tab=files');
+  });
+
+  it('Nexus pill is suppressed when audit row is pinned or snoozed', async () => {
+    seedMods([
+      baseMod({
+        name: 'BaseLib',
+        folder_name: 'BaseLib',
+        nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/42',
+        github_url: null,
+        pinned: true,
+      }),
+    ]);
+    registerInvokeHandler('audit_mod_versions', () => [{
+      mod_name: 'BaseLib',
+      folder_name: 'BaseLib',
+      installed_version: '3.1.2',
+      needs_update: true,
+      asset_names: [],
+      releases_scanned: 0,
+      latest_has_assets: false,
+      github_auto_detected: false,
+      pinned: true,
+      nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/42',
+      nexus_version: '3.2.0',
+      nexus_update_available: true,
+      update_source: 'nexus',
+    }]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Audit mods' }));
+    // Audit ran (other state may render), but Download-from-Nexus pill
+    // is gated off for pinned mods — matching the GitHub pill's
+    // behaviour and avoiding "you should update this … wait but I pinned it".
+    await waitFor(() => {
+      expect(screen.queryByText(/Download from Nexus/)).toBeNull();
+    });
+  });
+
   it('"Update blocked by game version" badge renders when latest_release_blocked_by_game_version=true', async () => {
     seedMods([baseMod({ name: 'BumpyMod', folder_name: 'BumpyMod', github_url: 'https://github.com/x/y' })]);
     registerInvokeHandler('audit_mod_versions', () => [{

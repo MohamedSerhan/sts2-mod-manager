@@ -44,6 +44,10 @@ fn terminal_failure_messages_are_not_warn_level() {
             "Quick add: failed to persist GitHub source for",
         ),
         ("sharing.rs", "Could not download {} mods"),
+        (
+            "sharing.rs",
+            "Failed to persist active_profile.txt after install_shared_profile",
+        ),
         ("updater.rs", "produced an unhealthy ModInfo"),
     ];
 

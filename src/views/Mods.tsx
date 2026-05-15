@@ -609,6 +609,21 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
               !auditRow.latest_release_blocked_by_game_version &&
               !!compatibleTag &&
               !!mod.github_url;
+            // Nexus-update pill — mirrors the Settings → Audit row.
+            // `nexus_update_available` is already gated by the backend on
+            // game-version compatibility (see updater.rs: when the latest
+            // GitHub release is blocked by min_game_version AND Nexus has
+            // the same version, the flag is suppressed so we don't send
+            // the user to download an incompatible build). Pinned and
+            // snoozed states piggy-back on the GitHub pill's gates for
+            // consistency with what Settings shows.
+            const nexusFilesHref = mod.nexus_url ? nexusFilesUrl(mod.nexus_url) ?? `${mod.nexus_url}?tab=files` : null;
+            const showNexusUpdatePill =
+              !!auditRow &&
+              auditRow.nexus_update_available &&
+              !auditRow.pinned &&
+              !auditRow.snoozed &&
+              !!nexusFilesHref;
             const isUpdatingThisRow = updatingKey === rowKey;
             const auditError = auditRow?.error ?? null;
 
@@ -671,6 +686,21 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                               <><Download size={9} /> Update available → v{compatibleTag?.replace(/^v/, '')}</>
                             )}
                           </button>
+                        )}
+                        {showNexusUpdatePill && (
+                          <a
+                            href={nexusFilesHref!}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={() => notifyNexusOpen(mod.name)}
+                            className="gf-pill gf-pill-update inline-flex items-center gap-1 hover:underline"
+                            title={
+                              `Nexus has v${auditRow!.nexus_version ?? '?'} (you have v${mod.version}). ` +
+                              `Click to open the Nexus Files tab — pick "Slow Download" / "Manual" and the manager will auto-install the zip when it lands in Downloads.`
+                            }
+                          >
+                            <Download size={9} /> Download from Nexus
+                          </a>
                         )}
                         {auditRow?.snoozed && (
                           <span

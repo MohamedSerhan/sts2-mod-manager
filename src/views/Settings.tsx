@@ -16,6 +16,7 @@ import {
   Check,
 } from 'lucide-react';
 import { isUpToDate } from '../lib/auditState';
+import { nexusFilesUrl } from '../lib/nexusUrl';
 import { open } from '@tauri-apps/plugin-dialog';
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
@@ -930,7 +931,11 @@ export function SettingsView() {
                           )}
                           {entry.nexus_update_available && entry.nexus_url && (
                             <a
-                              href={`${entry.nexus_url}?tab=files`}
+                              // Use the shared `nexusFilesUrl` helper so the
+                              // Files-tab URL is built identically here and on
+                              // the Mods row — string concat could double-up
+                              // a `?` if the source URL already carried one.
+                              href={nexusFilesUrl(entry.nexus_url) ?? `${entry.nexus_url}?tab=files`}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="gf-pill gf-pill-update inline-flex items-center gap-1 hover:underline"

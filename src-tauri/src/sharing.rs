@@ -1892,7 +1892,29 @@ pub async fn install_shared_profile(
     crate::profiles::apply_profile_with_pins(&profile, &mods_path, &disabled_path, &pinned_set)
         .map_err(|e| e.to_string())?;
 
-    // ── STEP 3: Auto-subscribe for future updates ──
+    // ── STEP 3: Mark imported profile as active ──
+    // We just rewrote disk to match this profile. If we leave the
+    // previously-active profile in state, its saved manifest is now
+    // silently drifted from disk — every action that snapshots from
+    // disk (Re-share, "Save changes", Snapshot) will capture the
+    // imported loadout into the wrong profile's JSON.
+    //
+    // Mirrors the same step in `apply_subscription_update` (see
+    // subscriptions.rs). Both paths apply a foreign profile's loadout
+    // to disk, so both must claim ownership of the active slot.
+    {
+        let mut s = state.lock().map_err(|e| e.to_string())?;
+        s.active_profile = Some(profile.name.clone());
+        if let Err(e) = std::fs::write(s.config_path.join("active_profile.txt"), &profile.name) {
+            log::error!(
+                "Failed to persist active_profile.txt after install_shared_profile: {}",
+                e
+            );
+        }
+        log::info!("install_shared_profile: active profile set to '{}'", profile.name);
+    }
+
+    // ── STEP 4: Auto-subscribe for future updates ──
     // last_synced_profile is the snapshot future diffs are computed
     // against, so it has to match what's actually on disk. Mods we
     // skipped above for game-version incompatibility AREN'T on disk

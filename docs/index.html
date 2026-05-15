@@ -6,27 +6,26 @@
 <title>STS2 Mod Manager — Slay the Spire 2 mod manager</title>
 
 <!-- SEO -->
-<meta name="description" content="A free, open-source mod manager for Slay the Spire 2. Built around playing your friends' modpacks — share by code or one-click sts2mm:// link. Cross-platform for Windows, macOS, and Linux." />
-<meta name="keywords" content="slay the spire 2, slay the spire 2 mod manager, sts2 mod manager, sts2 mods, slay the spire 2 mods, mod loader slay the spire 2, slay the spire ii mods, slay the spire 2 modpack, sts2 mod loader" />
+<meta name="description" content="A free, open-source mod manager for Slay the Spire 2. Share modpacks with friends by code or one-click sts2mm:// link, or browse public packs from inside the app. Cross-platform for Windows, macOS, and Linux." />
+<meta name="keywords" content="slay the spire 2, slay the spire 2 mod manager, sts2 mod manager, sts2 mods, slay the spire 2 mods, mod loader slay the spire 2, slay the spire ii mods, slay the spire 2 modpack, sts2 mod loader, slay the spire 2 modpack browser, share slay the spire 2 modpacks" />
 <meta name="author" content="Mohamed Serhan" />
 <link rel="canonical" href="https://mohamedserhan.github.io/sts2-mod-manager/" />
 
-<!-- Google Search Console verification — replace the content value with the
-     code Google gives you when you add this site as a property, then commit. -->
-<!-- <meta name="google-site-verification" content="YOUR_GSC_CODE_HERE" /> -->
+<!-- Google Search Console verification -->
+<meta name="google-site-verification" content="K5wgb5R4vGpNe1PtS_1mNU9QBP1u91XV-4u8-CI04wQ" />
 
 <!-- OpenGraph / Twitter — drives previews when the link is shared on Discord,
      Reddit, Twitter, etc. -->
 <meta property="og:type" content="website" />
 <meta property="og:title" content="STS2 Mod Manager — Slay the Spire 2 mod manager" />
-<meta property="og:description" content="A free, open-source Slay the Spire 2 mod manager built around playing with friends. Share modpacks by code or one-click link. Cross-platform." />
+<meta property="og:description" content="A free, open-source Slay the Spire 2 mod manager built around playing with friends. Share modpacks by code, one-click link, or browse public packs from inside the app. Cross-platform." />
 <meta property="og:url" content="https://mohamedserhan.github.io/sts2-mod-manager/" />
 <meta property="og:image" content="https://mohamedserhan.github.io/sts2-mod-manager/screenshots/hero-home.png" />
 <meta property="og:image:width" content="1280" />
 <meta property="og:image:height" content="800" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="STS2 Mod Manager" />
-<meta name="twitter:description" content="A free, open-source Slay the Spire 2 mod manager. Share modpacks with friends by code or sts2mm:// link." />
+<meta name="twitter:description" content="A free, open-source Slay the Spire 2 mod manager. Share modpacks with friends by code, one-click link, or browse public packs in-app." />
 <meta name="twitter:image" content="https://mohamedserhan.github.io/sts2-mod-manager/screenshots/hero-home.png" />
 
 <!-- Schema.org SoftwareApplication — Google reads this for rich results -->
@@ -36,12 +35,12 @@
   "@type": "SoftwareApplication",
   "name": "STS2 Mod Manager",
   "alternateName": ["Slay the Spire 2 Mod Manager", "STS2MM"],
-  "description": "A cross-platform mod manager for Slay the Spire 2. Built around sharing modpacks with friends — paste a code or click an sts2mm:// link, the app handles the rest.",
+  "description": "A cross-platform mod manager for Slay the Spire 2. Built around sharing modpacks — paste a friend's code, click an sts2mm:// link, or browse public packs from inside the app. The app handles the rest.",
   "applicationCategory": "GameApplication",
   "operatingSystem": "Windows, macOS, Linux",
   "url": "https://github.com/MohamedSerhan/sts2-mod-manager",
   "downloadUrl": "https://github.com/MohamedSerhan/sts2-mod-manager/releases/latest",
-  "softwareVersion": "1.1.5",
+  "softwareVersion": "1.4.1",
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
   "screenshot": "https://mohamedserhan.github.io/sts2-mod-manager/screenshots/hero-home.png",
   "author": {
@@ -177,8 +176,9 @@
   <p class="lede">
     Built around playing your friends' modpacks. Share by code
     (<code>jess/AA5A-315D-61AE</code>) or one-click link
-    (<code>sts2mm://import/...</code>). Manage profiles, audit versions,
-    auto-backup before launch. Cross-platform for
+    (<code>sts2mm://import/...</code>) — or browse <b>public modpacks</b>
+    other players have shared, right from inside the app. Manage profiles,
+    audit versions, auto-backup before launch. Cross-platform for
     <b>Windows, macOS, and Linux</b>. No account, no tracking, MIT-licensed.
   </p>
 
@@ -208,6 +208,18 @@
         automatically; Nexus-only mods that weren't bundled surface as
         pending. Re-shares reuse the same code so followers see "update
         available" instead of having to follow a new code.
+      </p>
+    </div>
+    <div class="diff">
+      <h3>Browse public modpacks in-app</h3>
+      <p>
+        A dedicated <strong>Browse Modpacks</strong> tab lists every pack
+        people have opted into sharing publicly. One click installs any
+        pack with the same smart-import flow as paste-a-code, with
+        <strong>live download progress</strong> showing which mod is pulling
+        and how far through the pack you are. Your own packs default to
+        Friends-only — flip Visibility on the Publish dialog when you want
+        to list one.
       </p>
     </div>
     <div class="diff">
@@ -284,10 +296,11 @@
     </div>
   </div>
 
-  <h2>Share &amp; follow modpacks</h2>
+  <h2>Share, follow &amp; discover modpacks</h2>
   <p style="color: var(--mute); margin-top: 4px; font-size: 14px;">
     Share what you play. Subscribe to friends' packs and get an
-    "update available" card when they re-share.
+    "update available" card when they re-share. Or browse public packs
+    other players have listed — no friend code needed.
   </p>
   <div class="shot-row">
     <div class="shot">
@@ -295,8 +308,8 @@
       <div class="shot-caption">Profiles: share codes, drift detection, one-click switch.</div>
     </div>
     <div class="shot">
-      <img src="screenshots/browse.png" alt="Browse view — search GitHub and Nexus from inside the app" />
-      <div class="shot-caption">Browse: smart search across GitHub topics and Nexus.</div>
+      <img src="screenshots/browse.png" alt="Browse Mods view — search GitHub and Nexus from inside the app" />
+      <div class="shot-caption">Browse Mods: search GitHub topics and Nexus trending / latest. A separate Browse Modpacks tab lists public packs.</div>
     </div>
   </div>
 
@@ -316,9 +329,10 @@
   <h2>Quick start</h2>
   <ul>
     <li><b>Download</b> the installer for your platform (Windows .msi, macOS .dmg, Linux .deb / .rpm / .AppImage).</li>
-    <li><b>Run it.</b> The first-launch wizard auto-detects your Slay the Spire 2 install via Steam.</li>
+    <li><b>Run it.</b> The first-launch wizard auto-detects your Slay the Spire 2 install via Steam — and remembers a manually picked folder across restarts if you launch the game directly.</li>
     <li><b>Got a code?</b> Paste it on Home and hit Add Pack. Bundled and GitHub-sourced mods install automatically; Nexus-only mods that weren't bundled show as pending so you know what to grab from Nexus.</li>
     <li><b>Got a link?</b> Click <code>sts2mm://import/...</code> and the app does the rest — install, switch, or apply pending update depending on what you already have.</li>
+    <li><b>No code?</b> Open <b>Browse Modpacks</b> in the sidebar and one-click install any public pack — live progress shows which mod is downloading.</li>
     <li><b>Hit Launch.</b> Auto-backup runs first.</li>
   </ul>
 

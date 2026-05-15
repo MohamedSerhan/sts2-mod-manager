@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { ProfileSwitcher } from './ProfileSwitcher';
@@ -85,6 +85,40 @@ describe('<ProfileSwitcher>', () => {
     });
   });
 
+  it('shows singular pending-update copy and falls back to P initials when a name has no initials', async () => {
+    registerInvokeHandler('list_profiles_cmd', () => [
+      { name: '_', mods: [], created_at: '2026-01-01' },
+    ]);
+    registerInvokeHandler('check_subscription_updates', () => [
+      {
+        share_id: 's1',
+        profile_name: '_',
+        has_update: true,
+        added_mods: [],
+        updated_mods: [],
+        removed_mods: [{ name: 'Gone' }],
+      },
+    ]);
+    render(<Wrap />);
+    await waitFor(() => {
+      expect(screen.getByText(/0 mods .* 1 update/)).toBeInTheDocument();
+    });
+    expect(screen.getByText('P')).toBeInTheDocument();
+  });
+
+  it('treats profile-list and update-check failures as an empty usable list', async () => {
+    registerInvokeHandler('list_profiles_cmd', () => {
+      throw new Error('profiles unavailable');
+    });
+    registerInvokeHandler('check_subscription_updates', () => {
+      throw new Error('offline');
+    });
+    render(<Wrap />);
+    await waitFor(() => {
+      expect(screen.getByText(/No profiles yet/i)).toBeInTheDocument();
+    });
+  });
+
   it('switching to the already-active profile just closes', async () => {
     registerInvokeHandler('list_profiles_cmd', () => PROFILES);
     registerInvokeHandler('get_active_profile', () => 'My Pack');
@@ -123,6 +157,73 @@ describe('<ProfileSwitcher>', () => {
     expect(switched[0].args).toEqual({ name: 'Other' });
   });
 
+  it('keeps the current profile active when drift confirmation is cancelled', async () => {
+    registerInvokeHandler('list_profiles_cmd', () => PROFILES);
+    registerInvokeHandler('get_active_profile', () => 'My Pack');
+    registerInvokeHandler('get_profile_drift', () => ({
+      has_drift: true,
+      added: ['Loose Mod'],
+      removed: [],
+      toggled: [],
+      version_changed: [],
+    }));
+    registerInvokeHandler('switch_profile', () => ({
+      downloaded: 0,
+      missing_mods: [],
+      activated: true,
+    }));
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+
+    await screen.findByText('Other');
+    await waitFor(() => {
+      expect(screen.getByText('ACTIVE')).toBeInTheDocument();
+    });
+    await user.click(screen.getByText('Other'));
+
+    expect(await screen.findByText(/Switch away from "My Pack"/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Stay here' }));
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Switch away from "My Pack"/)).toBeNull();
+    });
+    expect(getInvokeCalls().some((c) => c.cmd === 'switch_profile')).toBe(false);
+  });
+
+  it('switches after confirming drift and reports missing restored-pack mods', async () => {
+    registerInvokeHandler('list_profiles_cmd', () => PROFILES);
+    registerInvokeHandler('get_active_profile', () => 'My Pack');
+    registerInvokeHandler('get_profile_drift', () => ({
+      has_drift: true,
+      added: ['Loose Mod'],
+      removed: [],
+      toggled: [],
+      version_changed: [],
+    }));
+    registerInvokeHandler('switch_profile', () => ({
+      downloaded: 1,
+      missing_mods: ['ManualOnly'],
+      activated: true,
+    }));
+
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    render(<Wrap onClose={onClose} />);
+
+    await screen.findByText('Other');
+    await waitFor(() => {
+      expect(screen.getByText('ACTIVE')).toBeInTheDocument();
+    });
+    await user.click(screen.getByText('Other'));
+    await user.click(await screen.findByRole('button', { name: 'Switch anyway' }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/1 downloaded, 1 still missing/)).toBeInTheDocument();
+    });
+    expect(onClose).toHaveBeenCalled();
+  });
+
   it('foot buttons call onAddPack / onManageAll AND onClose', async () => {
     registerInvokeHandler('list_profiles_cmd', () => PROFILES);
     const onClose = vi.fn();
@@ -153,5 +254,16 @@ describe('<ProfileSwitcher>', () => {
     });
     await user.keyboard('{Escape}');
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('outside click closes the popover after the deferred listener is attached', async () => {
+    registerInvokeHandler('list_profiles_cmd', () => PROFILES);
+    const onClose = vi.fn();
+    render(<Wrap onClose={onClose} />);
+    await screen.findByText('My Pack');
+    await waitFor(() => {
+      fireEvent.mouseDown(document.body);
+      expect(onClose).toHaveBeenCalled();
+    });
   });
 });

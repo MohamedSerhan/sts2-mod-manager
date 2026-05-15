@@ -142,10 +142,9 @@ export async function switchProfile(name: string): Promise<SwitchProfileResult> 
   return invoke('switch_profile', { name });
 }
 
-/** Repair a profile: re-apply the manifest *and* delete every mod on disk
- *  that isn't in the manifest (including disabled-folder orphans). The plain
- *  `switch_profile` only toggles state — it never deletes — which means
- *  orphan disabled mods can keep showing up in drift forever. */
+/** Repair a profile: re-apply the manifest, restore missing/profile-drifted
+ *  mods, and move active extras into `mods_disabled`. Disabled library mods
+ *  are preserved and are not treated as garbage. */
 export async function repairProfile(name: string): Promise<RepairProfileResult> {
   return invoke('repair_profile', { name });
 }
@@ -384,6 +383,10 @@ export async function getModDependents(name: string): Promise<string[]> {
 
 export async function createBackup(): Promise<string> {
   return invoke('create_backup_cmd');
+}
+
+export async function createBackupPreserving(preserveName: string): Promise<string> {
+  return invoke('create_backup_preserving_cmd', { preserveName });
 }
 
 export async function listBackups(): Promise<BackupInfo[]> {

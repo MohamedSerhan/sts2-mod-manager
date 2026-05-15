@@ -442,7 +442,15 @@ pub fn detect_game_path(state: tauri::State<'_, AppState>) -> std::result::Resul
     let path = detect_game();
     if let Some(ref p) = path {
         let mut s = state.lock().map_err(|e| e.to_string())?;
+        let config_path = s.config_path.clone();
         s.set_game_path(p.clone());
+        if let Err(e) = crate::state::persist_game_path(&config_path, p) {
+            log::warn!(
+                "Auto-detected game path but could not persist it to {}: {}",
+                config_path.display(),
+                e
+            );
+        }
     }
     // Return current game info
     get_game_info(state)
@@ -459,6 +467,12 @@ pub fn set_game_path(path: String, state: tauri::State<'_, AppState>) -> std::re
         ))
         .to_string());
     }
+    let config_path = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        s.config_path.clone()
+    };
+    crate::state::persist_game_path(&config_path, &game_path)
+        .map_err(|e| format!("Could not save game path to {}: {}", config_path.display(), e))?;
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.set_game_path(game_path);
     drop(s);

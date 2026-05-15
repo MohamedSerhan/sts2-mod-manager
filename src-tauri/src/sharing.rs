@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::io::Write;
+use std::path::Component;
+use walkdir::WalkDir;
 
 use crate::error::{AppError, Result};
 use crate::profiles::Profile;
@@ -60,6 +62,18 @@ impl Drop for ShareGuard {
 // ── Types ───────────────────────────────────────────────────────────────────
 
 const PROFILES_REPO: &str = "sts2mm-profiles";
+const APP_CREATED_BY: &str = "sts2-mod-manager";
+
+fn profiles_repo() -> String {
+    #[cfg(test)]
+    {
+        std::env::var("STS2_PROFILES_REPO").unwrap_or_else(|_| PROFILES_REPO.to_string())
+    }
+    #[cfg(not(test))]
+    {
+        PROFILES_REPO.to_string()
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShareResult {
@@ -83,6 +97,16 @@ pub struct ShareResult {
     /// can retry instead of finding out from a confused friend later.
     #[serde(default)]
     pub failed_uploads: Vec<String>,
+}
+
+pub(crate) fn attribute_profile_to_owner(mut profile: Profile, owner: &str) -> Profile {
+    let owner = owner.trim();
+    if !owner.is_empty() {
+        profile.created_by = Some(owner.to_string());
+    } else if profile.created_by.as_deref() == Some(APP_CREATED_BY) {
+        profile.created_by = None;
+    }
+    profile
 }
 
 /// Local share info stored per profile for re-sharing
@@ -149,8 +173,48 @@ struct ShareProgress {
     mod_name: Option<String>,
 }
 
+/// Per-step status emitted while installing a browsed/shared modpack.
+/// The browse UI uses this to show that a large pack is actively fetching,
+/// downloading, applying, and subscribing instead of looking stuck on a
+/// disabled "Installing..." button.
+#[derive(Debug, Serialize, Clone)]
+struct ModpackInstallProgress {
+    profile_name: String,
+    /// "fetching-manifest", "checking", "downloading", "applying",
+    /// "subscribing", or "done".
+    stage: &'static str,
+    /// 1-indexed position within the profile's mod list. 0 when the
+    /// current stage is not per-mod.
+    current: usize,
+    /// Total mods in the profile. 0 when unknown or irrelevant.
+    total: usize,
+    /// Mod name when stage == "checking" or "downloading".
+    mod_name: Option<String>,
+}
+
+fn emit_modpack_install_progress(
+    app_handle: &tauri::AppHandle,
+    profile_name: &str,
+    stage: &'static str,
+    current: usize,
+    total: usize,
+    mod_name: Option<&str>,
+) {
+    use tauri::Emitter;
+    let _ = app_handle.emit(
+        "modpack-install-progress",
+        ModpackInstallProgress {
+            profile_name: profile_name.to_string(),
+            stage,
+            current,
+            total,
+            mod_name: mod_name.map(|s| s.to_string()),
+        },
+    );
+}
+
 fn build_repo_url(owner: &str) -> String {
-    format!("https://github.com/{}/{}", owner, PROFILES_REPO)
+    format!("https://github.com/{}/{}", owner, profiles_repo())
 }
 
 // ── Profile Code Encoding ──────────────────────────────────────────────────
@@ -269,12 +333,13 @@ async fn get_github_username(token: &str) -> Result<String> {
 /// Ensure the sts2mm-profiles repo exists. Creates it if not.
 async fn ensure_profiles_repo(token: &str, username: &str) -> Result<()> {
     let client = build_client(token);
+    let repo = profiles_repo();
 
     // Check if repo exists
     let resp = client
         .get(&format!(
             "{}/repos/{}/{}",
-            github_api_base(), username, PROFILES_REPO
+            github_api_base(), username, repo
         ))
         .send()
         .await?;
@@ -285,7 +350,7 @@ async fn ensure_profiles_repo(token: &str, username: &str) -> Result<()> {
 
     // Create the repo
     let body = serde_json::json!({
-        "name": PROFILES_REPO,
+        "name": repo,
         "description": "Shared mod profiles for STS2 Mod Manager",
         "public": true,
         "auto_init": true  // Creates with a README so we have a branch to push to
@@ -307,7 +372,7 @@ async fn ensure_profiles_repo(token: &str, username: &str) -> Result<()> {
 
         return Err(AppError::Other(format!(
             "Could not create '{}' repository ({}). You can create it manually on GitHub: go to github.com/new, name it '{}', make it public. Error: {}",
-            PROFILES_REPO, status, PROFILES_REPO, text
+            repo, status, repo, text
         )));
     }
 
@@ -324,9 +389,10 @@ async fn upsert_file(
     message: &str,
 ) -> Result<(String, String)> {
     let client = build_client(token);
+    let repo = profiles_repo();
     let url = format!(
         "{}/repos/{}/{}/contents/{}",
-        github_api_base(), username, PROFILES_REPO, filename
+        github_api_base(), username, repo, filename
     );
 
     // If we don't have the SHA, try to get it (needed for updates)
@@ -384,12 +450,22 @@ async fn upsert_file(
 fn zip_mod_files(mod_name: &str, files: &[String], mods_path: &std::path::Path) -> Result<Vec<u8>> {
     let buf = std::io::Cursor::new(Vec::new());
     let mut zip_writer = zip::ZipWriter::new(buf);
+    let mut written_files = 0usize;
 
     let options = zip::write::SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated);
 
     for file_rel in files {
         let normalized = file_rel.replace('\\', "/");
+        if std::path::Path::new(&normalized)
+            .components()
+            .any(|component| matches!(component, Component::ParentDir | Component::Prefix(_) | Component::RootDir))
+        {
+            return Err(AppError::Other(format!(
+                "Mod '{}' has unsafe declared file '{}'",
+                mod_name, normalized
+            )));
+        }
         let file_path = mods_path.join(&normalized);
 
         if file_path.is_file() {
@@ -399,27 +475,102 @@ fn zip_mod_files(mod_name: &str, files: &[String], mods_path: &std::path::Path) 
                 .map_err(|e| AppError::Other(format!("Read error for '{}': {}", file_path.display(), e)))?;
             zip_writer.write_all(&data)
                 .map_err(|e| AppError::Other(format!("Zip write error: {}", e)))?;
+            written_files += 1;
         } else if file_path.is_dir() {
-            // For directory entries, add all files within
-            if let Ok(entries) = std::fs::read_dir(&file_path) {
-                for entry in entries.flatten() {
-                    if entry.path().is_file() {
-                        let entry_rel = format!("{}/{}", normalized, entry.file_name().to_string_lossy());
-                        zip_writer.start_file(&entry_rel, options)
-                            .map_err(|e| AppError::Other(format!("Zip error: {}", e)))?;
-                        let data = std::fs::read(entry.path())
-                            .map_err(|e| AppError::Other(format!("Read error: {}", e)))?;
-                        zip_writer.write_all(&data)
-                            .map_err(|e| AppError::Other(format!("Zip write error: {}", e)))?;
-                    }
+            for entry in WalkDir::new(&file_path).into_iter().flatten() {
+                if !entry.file_type().is_file() {
+                    continue;
                 }
+                let rel = entry.path().strip_prefix(mods_path).map_err(|e| {
+                    AppError::Other(format!(
+                        "Could not make '{}' relative to '{}': {}",
+                        entry.path().display(),
+                        mods_path.display(),
+                        e
+                    ))
+                })?;
+                let entry_rel = rel.to_string_lossy().replace('\\', "/");
+                zip_writer
+                    .start_file(&entry_rel, options)
+                    .map_err(|e| AppError::Other(format!("Zip error: {}", e)))?;
+                let data = std::fs::read(entry.path())
+                    .map_err(|e| AppError::Other(format!("Read error: {}", e)))?;
+                zip_writer
+                    .write_all(&data)
+                    .map_err(|e| AppError::Other(format!("Zip write error: {}", e)))?;
+                written_files += 1;
             }
+        } else {
+            return Err(AppError::Other(format!(
+                "Mod '{}' is missing declared file '{}'",
+                mod_name, normalized
+            )));
         }
+    }
+
+    if written_files == 0 {
+        return Err(AppError::Other(format!(
+            "Mod '{}' produced an empty bundle; no declared files were readable",
+            mod_name
+        )));
     }
 
     let cursor = zip_writer.finish()
         .map_err(|e| AppError::Other(format!("Zip finalize error: {}", e)))?;
     Ok(cursor.into_inner())
+}
+
+fn zip_profile_mod_files(
+    pm: &crate::profiles::ProfileMod,
+    mods_path: &std::path::Path,
+    disabled_path: &std::path::Path,
+) -> Result<Vec<u8>> {
+    let base = if pm.enabled { mods_path } else { disabled_path };
+    zip_mod_files(&pm.name, &pm.files, base)
+}
+
+fn ensure_profile_publish_complete(profile: &Profile, failed_uploads: &[String]) -> Result<()> {
+    let mut missing: Vec<String> = Vec::new();
+
+    for name in failed_uploads {
+        if !missing.contains(name) {
+            missing.push(name.clone());
+        }
+    }
+
+    for pm in &profile.mods {
+        if pm.bundle_url.is_none() && !missing.contains(&pm.name) {
+            missing.push(pm.name.clone());
+        }
+    }
+
+    if !missing.is_empty() {
+        return Err(AppError::Other(format!(
+            "Could not publish profile '{}': missing bundles for {} mod(s): {}. Restore or reinstall these mods, then share again so the manifest can repair them later.",
+            profile.name,
+            missing.len(),
+            missing.join(", ")
+        )));
+    }
+
+    Ok(())
+}
+
+fn restore_profile_after_failed_publish(old_profile: Option<&Profile>, profiles_path: &std::path::Path) {
+    if let Some(profile) = old_profile {
+        if let Err(e) = crate::profiles::save_profile(profile, profiles_path) {
+            log::error!(
+                "Failed to restore previous local profile '{}' after publish failure: {}",
+                profile.name,
+                e
+            );
+        } else {
+            log::info!(
+                "Restored previous local profile '{}' after publish failure",
+                profile.name
+            );
+        }
+    }
 }
 
 /// Ensure the rolling `bundles` release exists on the profiles repo,
@@ -642,13 +793,15 @@ pub(crate) async fn upload_mod_bundle_via_release(
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' { c } else { '_' })
         .collect::<String>();
-    let asset_name = format!("{}_v{}.zip", safe_name, safe_ver);
+    let _asset_name = format!("{}_v{}.zip", safe_name, safe_ver);
+    let asset_name = release_asset_name(mod_name, version);
 
     let mut hasher = Sha256::new();
     hasher.update(zip_data);
     let local_hash = format!("{:x}", hasher.finalize());
 
-    let release = ensure_bundles_release(&client, username, PROFILES_REPO).await?;
+    let repo = profiles_repo();
+    let release = ensure_bundles_release(&client, username, &repo).await?;
 
     if let Some(existing) = release.assets.iter().find(|a| a.name == asset_name) {
         let hash_matches = prior_sha256.map(|p| p == local_hash.as_str()).unwrap_or(false);
@@ -668,7 +821,7 @@ pub(crate) async fn upload_mod_bundle_via_release(
             mod_name, version
         );
         let url = replace_release_asset_via_delete_post(
-            &client, username, PROFILES_REPO, &release.upload_url,
+            &client, username, &repo, &release.upload_url,
             &asset_name, existing.id, zip_data,
         ).await?;
         return Ok((url, local_hash));
@@ -677,6 +830,19 @@ pub(crate) async fn upload_mod_bundle_via_release(
     // Net-new upload.
     let asset = upload_release_asset(&client, &release.upload_url, &asset_name, zip_data).await?;
     Ok((asset.browser_download_url, local_hash))
+}
+
+fn release_asset_name(mod_name: &str, version: &str) -> String {
+    let safe_name = mod_name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect::<String>();
+    let safe_ver = version
+        .trim_start_matches('v')
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' { c } else { '_' })
+        .collect::<String>();
+    format!("{}_v{}.zip", safe_name, safe_ver)
 }
 
 /// Download a bundled mod zip from a URL and extract into mods_path.
@@ -858,9 +1024,10 @@ pub async fn fetch_shared_profile(
         .unwrap_or_default();
 
     // Primary: use GitHub Contents API with raw accept header to bypass CDN cache.
+    let repo = profiles_repo();
     let api_url = format!(
         "{}/repos/{}/{}/contents/{}",
-        github_api_base(), owner, PROFILES_REPO, filename
+        github_api_base(), owner, repo, filename
     );
     log::info!(
         "Fetching shared profile via GitHub API ({}): {}",
@@ -887,7 +1054,7 @@ pub async fn fetch_shared_profile(
             // Fallback: raw.githubusercontent.com (may be cached but better than nothing)
             let raw_url = format!(
                 "https://raw.githubusercontent.com/{}/{}/main/{}",
-                owner, PROFILES_REPO, filename
+                owner, repo, filename
             );
             let fallback_resp = client.get(&raw_url).send().await?;
             if !fallback_resp.status().is_success() {
@@ -905,7 +1072,7 @@ pub async fn fetch_shared_profile(
             );
             let raw_url = format!(
                 "https://raw.githubusercontent.com/{}/{}/main/{}",
-                owner, PROFILES_REPO, filename
+                owner, repo, filename
             );
             let fallback_resp = client.get(&raw_url).send().await?;
             if !fallback_resp.status().is_success() {
@@ -921,7 +1088,7 @@ pub async fn fetch_shared_profile(
     let profile: Profile = serde_json::from_str(&text)
         .map_err(|e| AppError::Other(format!("Invalid profile data: {}", e)))?;
 
-    Ok(profile)
+    Ok(attribute_profile_to_owner(profile, owner))
 }
 
 // ── Tauri Commands ──────────────────────────────────────────────────────────
@@ -942,16 +1109,21 @@ pub async fn share_profile(
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ShareResult, String> {
     use tauri::Emitter;
-    let (profiles_path, mods_path, token) = {
+    let (profiles_path, mods_path, disabled_path, config_path, token, game_version) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let token = s.github_token.clone().ok_or(
             "GitHub token required to share profiles. Set it in Settings."
         )?;
         let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
-        // disabled_path and config_path validation kept here so we fail fast
-        // before doing any GitHub work, even though we don't need the values.
-        let _ = s.disabled_mods_path.clone().ok_or("Game path not set")?;
-        (s.profiles_path.clone(), mods_path, token)
+        let disabled_path = s.disabled_mods_path.clone().ok_or("Game path not set")?;
+        (
+            s.profiles_path.clone(),
+            mods_path,
+            disabled_path,
+            s.config_path.clone(),
+            token,
+            s.game_version.clone(),
+        )
     };
 
     // If already shared, reuse the existing code (same as reshare). Drop our
@@ -965,8 +1137,20 @@ pub async fn share_profile(
 
     let _guard = ShareGuard::try_acquire(state.inner(), &name)?;
 
-    let mut profile =
-        crate::profiles::load_profile(&name, &profiles_path).map_err(|e| e.to_string())?;
+    // Validate the profile exists, then snapshot the current install as an
+    // explicit publish action. This matches Re-share and keeps Share from
+    // uploading a stale pre-drift manifest.
+    let old_profile = crate::profiles::load_profile(&name, &profiles_path)
+        .map_err(|e| e.to_string())?;
+    let mut profile = crate::profiles::snapshot_current_with_paths(
+        &name,
+        &mods_path,
+        &disabled_path,
+        &profiles_path,
+        Some(&config_path),
+        game_version.as_deref(),
+    )
+    .map_err(|e| e.to_string())?;
 
     if let Some(p) = list_public {
         profile.public = Some(p);
@@ -977,9 +1161,22 @@ pub async fn share_profile(
     let emit_fn = move |event: &str, payload: ShareProgress| {
         let _ = app_handle_for_emit.emit(event, payload);
     };
-    share_profile_impl(profile, &mods_path, &profiles_path, &token, Some(&emit_fn))
-        .await
-        .map_err(|e| e.to_string())
+    match share_profile_impl(
+        profile,
+        &mods_path,
+        &disabled_path,
+        &profiles_path,
+        &token,
+        Some(&emit_fn),
+    )
+    .await
+    {
+        Ok(result) => Ok(result),
+        Err(e) => {
+            restore_profile_after_failed_publish(Some(&old_profile), &profiles_path);
+            Err(e.to_string())
+        }
+    }
 }
 
 /// Non-IPC core of `share_profile` — takes already-loaded paths/token/profile
@@ -991,12 +1188,14 @@ pub async fn share_profile(
 async fn share_profile_impl(
     mut profile: Profile,
     mods_path: &std::path::Path,
+    disabled_path: &std::path::Path,
     profiles_path: &std::path::Path,
     token: &str,
     emit: Option<&(dyn Fn(&str, ShareProgress) + Send + Sync)>,
 ) -> Result<ShareResult> {
     // Get username
     let username = get_github_username(token).await?;
+    profile = attribute_profile_to_owner(profile, &username);
 
     // Ensure repo exists
     ensure_profiles_repo(token, &username).await?;
@@ -1030,7 +1229,7 @@ async fn share_profile_impl(
 
         let pm = &mut profile.mods[idx];
         log::info!("Bundling mod '{}' ({} files)", pm.name, pm.files.len());
-        match zip_mod_files(&pm.name, &pm.files, mods_path) {
+        match zip_profile_mod_files(pm, mods_path, disabled_path) {
             Ok(zip_data) => {
                 match upload_mod_bundle_via_release(
                     token,
@@ -1066,6 +1265,8 @@ async fn share_profile_impl(
             }
         }
     }
+
+    ensure_profile_publish_complete(&profile, &failed_uploads)?;
 
     // Generate code and filename
     let code = generate_code(&profile);
@@ -1158,7 +1359,7 @@ pub fn get_share_info(
     let filename = code_to_filename(&info.code);
     let url = format!(
         "https://github.com/{}/{}/blob/main/{}",
-        info.owner, PROFILES_REPO, filename
+        info.owner, profiles_repo(), filename
     );
     let repo_url = build_repo_url(&info.owner);
     Ok(Some(ShareResult {
@@ -1266,7 +1467,7 @@ pub async fn reshare_profile(
 
         let pm = &mut profile.mods[idx];
         log::info!("Re-bundling mod '{}' ({} files)", pm.name, pm.files.len());
-        match zip_mod_files(&pm.name, &pm.files, &mods_path) {
+        match zip_profile_mod_files(pm, &mods_path, &disabled_path) {
             Ok(zip_data) => {
                 match upload_mod_bundle_via_release(
                     &token,
@@ -1296,8 +1497,19 @@ pub async fn reshare_profile(
         }
     }
 
+    if let Err(e) = ensure_profile_publish_complete(&profile, &failed_uploads) {
+        restore_profile_after_failed_publish(old_profile.as_ref(), &profiles_path);
+        return Err(e.to_string());
+    }
+
     let filename = code_to_filename(&share_info.code);
-    let profile_json = serde_json::to_string_pretty(&profile).map_err(|e| e.to_string())?;
+    let profile_json = match serde_json::to_string_pretty(&profile) {
+        Ok(json) => json,
+        Err(e) => {
+            restore_profile_after_failed_publish(old_profile.as_ref(), &profiles_path);
+            return Err(e.to_string());
+        }
+    };
 
     let _ = app_handle.emit(
         "share-progress",
@@ -1310,7 +1522,7 @@ pub async fn reshare_profile(
         },
     );
 
-    let (file_sha, html_url) = upsert_file(
+    let (file_sha, html_url) = match upsert_file(
         &token,
         &share_info.owner,
         &filename,
@@ -1319,7 +1531,13 @@ pub async fn reshare_profile(
         &format!("Update profile: {} ({} mods)", profile.name, profile.mods.len()),
     )
     .await
-    .map_err(|e| e.to_string())?;
+    {
+        Ok(result) => result,
+        Err(e) => {
+            restore_profile_after_failed_publish(old_profile.as_ref(), &profiles_path);
+            return Err(e.to_string());
+        }
+    };
 
     // Save enriched profile back to local JSON (with bundle_urls)
     crate::profiles::save_profile(&profile, &profiles_path).map_err(|e| e.to_string())?;
@@ -1399,6 +1617,7 @@ pub async fn install_shared_profile(
 ) -> std::result::Result<Profile, String> {
     use tauri::Emitter;
     crate::game::ensure_game_not_running()?;
+    emit_modpack_install_progress(&app_handle, &code, "fetching-manifest", 0, 0, None);
     let (owner, profile_code) = parse_share_code(&code)
         .map_err(|e| e.to_string())?;
 
@@ -1420,6 +1639,7 @@ pub async fn install_shared_profile(
     let profile = fetch_shared_profile(&owner, &filename, token.as_deref())
         .await
         .map_err(|e| e.to_string())?;
+    let total_mods = profile.mods.len();
 
     // Mods skipped because they declare a min_game_version higher than the
     // user's STS2. We download + extract them (since we can't read the
@@ -1453,23 +1673,32 @@ pub async fn install_shared_profile(
     let pinned_set = crate::mod_sources::load_pinned_set(&config_path);
     let mut download_failures: Vec<String> = Vec::new();
 
-    for pm in &profile.mods {
+    for (idx, pm) in profile.mods.iter().enumerate() {
+        let current = idx + 1;
+        emit_modpack_install_progress(
+            &app_handle,
+            &profile.name,
+            "checking",
+            current,
+            total_mods,
+            Some(&pm.name),
+        );
+
         // Find matching on-disk mod
         let on_disk_mod = on_disk_by_id.get(&pm.name)
             .or_else(|| pm.folder_name.as_ref().and_then(|f| on_disk_by_id.get(f)))
             .or_else(|| pm.mod_id.as_ref().and_then(|id| on_disk_by_id.get(id)))
             .copied();
 
-        // Pinned mods keep their installed version — don't replace files.
-        let is_pinned = pinned_set.contains(&pm.name)
-            || pm.folder_name.as_ref().map_or(false, |f| pinned_set.contains(f))
-            || pm.mod_id.as_ref().map_or(false, |i| pinned_set.contains(i))
-            || on_disk_mod.map_or(false, |d| {
-                pinned_set.contains(&d.name)
-                    || d.folder_name.as_ref().map_or(false, |f| pinned_set.contains(f))
-                    || d.mod_id.as_ref().map_or(false, |i| pinned_set.contains(i))
-            });
-        if is_pinned {
+        if on_disk_mod.is_none() && crate::profiles::profile_mod_matches_pin(pm, &pinned_set) {
+            log::info!(
+                "install_shared_profile: pinned mod '{}' is missing on disk; restoring from shared profile",
+                pm.name
+            );
+        }
+
+        // Pinned mods keep their installed version when there is one to preserve.
+        if crate::profiles::should_skip_pinned_profile_mod_download(pm, on_disk_mod, &pinned_set) {
             log::info!("install_shared_profile: skipping pinned mod '{}' (preserving installed version)", pm.name);
             continue;
         }
@@ -1511,6 +1740,14 @@ pub async fn install_shared_profile(
         // Prefer bundle_url over GitHub -- the curator bundled it because
         // the GitHub source may be wrong/unreliable (e.g., wrong game's repo)
         if let Some(ref bundle_url) = pm.bundle_url {
+            emit_modpack_install_progress(
+                &app_handle,
+                &profile.name,
+                "downloading",
+                current,
+                total_mods,
+                Some(&pm.name),
+            );
             log::info!("Downloading bundled mod '{}' from profiles repo", pm.name);
             match download_bundle(bundle_url, &pm.name, &mods_path).await {
                 Ok(_) => {
@@ -1566,15 +1803,26 @@ pub async fn install_shared_profile(
                 None
             })
             .or_else(|| {
-                mod_sources_db
-                    .mods
-                    .get(&pm.name)
-                    .and_then(|e| e.github_repo.clone())
+                crate::mod_sources::lookup_entry(
+                    &mod_sources_db.mods,
+                    pm.folder_name.as_deref(),
+                    &pm.name,
+                    pm.mod_id.as_deref(),
+                )
+                .and_then(|e| e.github_repo.clone())
             });
 
         if let Some(repo) = github_repo {
             let parts: Vec<&str> = repo.splitn(2, '/').collect();
             if parts.len() == 2 {
+                emit_modpack_install_progress(
+                    &app_handle,
+                    &profile.name,
+                    "downloading",
+                    current,
+                    total_mods,
+                    Some(&pm.name),
+                );
                 match crate::download::download_and_install_github_mod(
                     parts[0],
                     parts[1],
@@ -1640,6 +1888,7 @@ pub async fn install_shared_profile(
 
     // ── STEP 2: Apply profile AFTER downloads ──
     // Now all downloadable mods are in mods_path, apply_profile can correctly enable/disable
+    emit_modpack_install_progress(&app_handle, &profile.name, "applying", 0, total_mods, None);
     crate::profiles::apply_profile_with_pins(&profile, &mods_path, &disabled_path, &pinned_set)
         .map_err(|e| e.to_string())?;
 
@@ -1652,6 +1901,7 @@ pub async fn install_shared_profile(
     // version bump wouldn't surface as "+1 mod available to apply"
     // because the diff would treat them as already-present. Filter
     // them out via the shared snapshot helper.
+    emit_modpack_install_progress(&app_handle, &profile.name, "subscribing", 0, total_mods, None);
     let share_key = format!("{}:{}", owner, profile_code);
     let now = chrono::Utc::now();
     let snapshot = crate::subscriptions::build_synced_profile_snapshot(&profile, &skipped_incompatible);
@@ -1668,6 +1918,7 @@ pub async fn install_shared_profile(
     db.subscriptions.insert(share_key, sub);
     let _ = crate::subscriptions::save_subscriptions(&db, &config_path);
 
+    emit_modpack_install_progress(&app_handle, &profile.name, "done", total_mods, total_mods, None);
     Ok(profile)
 }
 
@@ -1869,6 +2120,109 @@ mod listing_tests {
         assert_eq!(fresh.public, Some(false));
     }
 
+}
+
+#[cfg(test)]
+mod publish_bundle_contract_tests {
+    use super::*;
+
+    fn profile_with_mod(pm: crate::profiles::ProfileMod) -> Profile {
+        Profile {
+            name: "contract".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![pm],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+        }
+    }
+
+    fn profile_mod(enabled: bool) -> crate::profiles::ProfileMod {
+        crate::profiles::ProfileMod {
+            name: "ContractMod".into(),
+            version: "1.0.0".into(),
+            source: None,
+            hash: None,
+            files: vec!["ContractMod/ContractMod.json".into()],
+            folder_name: Some("ContractMod".into()),
+            mod_id: Some("ContractMod".into()),
+            enabled,
+            bundle_url: None,
+            bundle_sha256: None,
+        }
+    }
+
+    #[test]
+    fn zip_mod_files_errors_when_declared_file_is_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let err = zip_mod_files(
+            "ContractMod",
+            &["ContractMod/ContractMod.json".into()],
+            tmp.path(),
+        )
+        .expect_err("missing profile files must fail publish instead of creating an empty bundle");
+
+        assert!(
+            err.to_string().contains("missing declared file"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn zip_mod_files_rejects_declared_paths_outside_mods_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let err = zip_mod_files("ContractMod", &["../secrets.txt".into()], tmp.path())
+            .expect_err("publish must not read files outside the mods folder");
+
+        assert!(
+            err.to_string().contains("unsafe declared file"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn zip_profile_mod_files_reads_disabled_mods_from_disabled_base() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mods_path = tmp.path().join("mods");
+        let disabled_path = tmp.path().join("mods_disabled");
+        let disabled_mod = disabled_path.join("ContractMod");
+        std::fs::create_dir_all(&disabled_mod).unwrap();
+        std::fs::write(disabled_mod.join("ContractMod.json"), b"{}").unwrap();
+
+        let zip_data =
+            zip_profile_mod_files(&profile_mod(false), &mods_path, &disabled_path).unwrap();
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip_data)).unwrap();
+        assert!(
+            archive.by_name("ContractMod/ContractMod.json").is_ok(),
+            "disabled profile mods must be bundled from mods_disabled"
+        );
+    }
+
+    #[test]
+    fn publish_completion_rejects_any_mod_without_bundle_url() {
+        let profile = profile_with_mod(profile_mod(true));
+        let err = ensure_profile_publish_complete(&profile, &[])
+            .expect_err("publishing a partially restorable manifest must be blocked");
+
+        assert!(
+            err.to_string().contains("missing bundles"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn share_owner_replaces_app_default_attribution() {
+        let mut profile = profile_with_mod(profile_mod(true));
+        profile.created_by = Some("sts2-mod-manager".into());
+
+        let attributed = attribute_profile_to_owner(profile, "alice");
+
+        assert_eq!(attributed.created_by.as_deref(), Some("alice"));
+    }
 }
 
 #[cfg(test)]
@@ -2671,7 +3025,17 @@ mod share_via_releases_e2e_tests {
             public: None,
         };
 
-        let result = share_profile_impl(profile, &mods_path, &profiles_path, "test-token", None)
+        let disabled_path = tmpdir.path().join("mods_disabled");
+        std::fs::create_dir_all(&disabled_path).unwrap();
+
+        let result = share_profile_impl(
+            profile,
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            "test-token",
+            None,
+        )
             .await
             .expect("share should succeed");
 
@@ -2682,10 +3046,504 @@ mod share_via_releases_e2e_tests {
         let saved_path = profiles_path.join("test.json");
         let saved_text = std::fs::read_to_string(&saved_path).unwrap();
         let saved: Profile = serde_json::from_str(&saved_text).unwrap();
+        assert_eq!(saved.created_by.as_deref(), Some("octo"));
         let m = &saved.mods[0];
         assert!(m.bundle_url.as_deref().map(|u| u.contains("releases/download/bundles/TestMod_v1.0.0.zip")).unwrap_or(false),
             "expected release URL, got {:?}", m.bundle_url);
         assert!(m.bundle_sha256.is_some(), "expected hash to be persisted");
+    }
+
+    #[tokio::test]
+    async fn share_fetch_and_download_round_trips_through_github_api() {
+        let _env_guard = super::release_upload_tests::ENV_LOCK.lock().await;
+        let server = MockServer::start().await;
+        std::env::set_var("STS2_GITHUB_API_BASE", server.uri());
+        std::env::set_var("STS2_GITHUB_RELEASES_BASE", server.uri());
+
+        Mock::given(method("GET")).and(path("/user"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"login": "octo"})))
+            .mount(&server).await;
+
+        Mock::given(method("GET")).and(path("/repos/octo/sts2mm-profiles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"name": "sts2mm-profiles"})))
+            .mount(&server).await;
+
+        Mock::given(method("GET")).and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 42,
+                "upload_url": format!("{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}", server.uri()),
+                "assets": []
+            })))
+            .mount(&server).await;
+
+        Mock::given(method("GET")).and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&server).await;
+
+        Mock::given(method("POST")).and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": 100, "name": "TestMod_v1.0.0.zip",
+                "browser_download_url": "https://github.com/octo/sts2mm-profiles/releases/download/bundles/TestMod_v1.0.0.zip"
+            })))
+            .expect(1)
+            .mount(&server).await;
+
+        Mock::given(method("GET")).and(path_regex(r"/repos/octo/sts2mm-profiles/contents/.+\.json"))
+            .respond_with(ResponseTemplate::new(404))
+            .up_to_n_times(1)
+            .mount(&server).await;
+
+        Mock::given(method("PUT")).and(path_regex(r"/repos/octo/sts2mm-profiles/contents/.+\.json"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "content": {"sha": "abc", "html_url": "https://github.com/octo/sts2mm-profiles/blob/main/x.json"}
+            })))
+            .expect(1)
+            .mount(&server).await;
+
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mods_path = tmpdir.path().join("mods");
+        let mod_dir = mods_path.join("TestMod");
+        std::fs::create_dir_all(&mod_dir).unwrap();
+        std::fs::write(
+            mod_dir.join("TestMod.json"),
+            br#"{"id":"TestMod","name":"TestMod","version":"1.0.0","author":"QA"}"#,
+        ).unwrap();
+        std::fs::write(mod_dir.join("TestMod.dll"), b"github-api-uploaded-dll").unwrap();
+
+        let disabled_path = tmpdir.path().join("mods_disabled");
+        let profiles_path = tmpdir.path().join("profiles");
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        std::fs::create_dir_all(&profiles_path).unwrap();
+
+        let profile = Profile {
+            name: "api-round-trip".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![crate::profiles::ProfileMod {
+                name: "TestMod".into(),
+                version: "1.0.0".into(),
+                source: None,
+                hash: None,
+                files: vec!["TestMod".into()],
+                folder_name: Some("TestMod".into()),
+                mod_id: Some("TestMod".into()),
+                enabled: true,
+                bundle_url: None,
+                bundle_sha256: None,
+            }],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: Some(false),
+        };
+
+        let result = share_profile_impl(
+            profile,
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            "test-token",
+            None,
+        )
+            .await
+            .expect("share should upload bundle and manifest through the GitHub API");
+
+        let uploaded_bundle = server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .find(|request| {
+                request.method.as_str() == "POST"
+                    && request.url.path() == "/repos/octo/sts2mm-profiles/releases/42/assets"
+            })
+            .map(|request| request.body)
+            .expect("release asset upload request should be recorded");
+
+        Mock::given(method("GET")).and(path(format!("/repos/octo/sts2mm-profiles/contents/{}", result.file_path)))
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                std::fs::read_to_string(profiles_path.join("api-round-trip.json")).unwrap()
+            ))
+            .expect(1)
+            .mount(&server).await;
+
+        Mock::given(method("GET")).and(path("/octo/sts2mm-profiles/releases/download/bundles/TestMod_v1.0.0.zip"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(uploaded_bundle))
+            .expect(1)
+            .mount(&server).await;
+
+        let fetched = fetch_shared_profile("octo", &result.file_path, Some("test-token"))
+            .await
+            .expect("shared manifest should be fetched through the GitHub Contents API");
+        assert_eq!(fetched.created_by.as_deref(), Some("octo"));
+        let bundle_url = fetched.mods[0]
+            .bundle_url
+            .as_deref()
+            .expect("published profile should carry a release bundle URL");
+        assert!(bundle_url.contains("/releases/download/bundles/TestMod_v1.0.0.zip"));
+
+        let friend_mods = tmpdir.path().join("friend-mods");
+        std::fs::create_dir_all(&friend_mods).unwrap();
+        download_bundle(bundle_url, "TestMod", &friend_mods)
+            .await
+            .expect("release asset bundle should download through the GitHub release URL path");
+
+        assert_eq!(
+            std::fs::read(friend_mods.join("TestMod").join("TestMod.dll")).unwrap(),
+            b"github-api-uploaded-dll"
+        );
+
+        std::env::remove_var("STS2_GITHUB_RELEASES_BASE");
+    }
+}
+
+#[cfg(test)]
+mod github_api_stress_tests {
+    use super::*;
+    use crate::profiles::ProfileMod;
+    use std::io::Write;
+
+    const STRESS_SIZE_PLAN_MIB: [u64; 40] = [
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        2, 2, 2, 2, 2,
+        4, 4, 4, 4, 4,
+        8, 8, 8, 8,
+        16, 16, 16,
+        32, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256, 288, 300,
+    ];
+
+    #[test]
+    fn github_stress_size_plan_has_40_mods_and_reaches_300_mib() {
+        assert_eq!(STRESS_SIZE_PLAN_MIB.len(), 40);
+        assert_eq!(STRESS_SIZE_PLAN_MIB.iter().max().copied(), Some(300));
+        assert!(STRESS_SIZE_PLAN_MIB.windows(2).all(|w| w[0] <= w[1]));
+    }
+
+    #[tokio::test]
+    #[ignore = "live GitHub API stress test; run npm run qa:github-stress"]
+    async fn github_api_stress_40_mods_various_sizes() {
+        if std::env::var("STS2_GITHUB_STRESS").ok().as_deref() != Some("1") {
+            eprintln!("Skipping: set STS2_GITHUB_STRESS=1 or run npm run qa:github-stress");
+            return;
+        }
+
+        let token = match std::env::var("STS2_GITHUB_TOKEN").or_else(|_| std::env::var("GITHUB_TOKEN")) {
+            Ok(token) if !token.trim().is_empty() => token,
+            _ => {
+                eprintln!("Skipping: set STS2_GITHUB_TOKEN or GITHUB_TOKEN");
+                return;
+            }
+        };
+
+        let repo = std::env::var("STS2_GITHUB_STRESS_REPO")
+            .unwrap_or_else(|_| "sts2mm-profiles-test".to_string());
+        let _repo_guard = EnvVarGuard::set("STS2_PROFILES_REPO", &repo);
+        let _api_guard = EnvVarGuard::unset("STS2_GITHUB_API_BASE");
+
+        let client = build_client(&token);
+        let username = get_github_username(&token)
+            .await
+            .expect("GitHub token must authenticate");
+        ensure_profiles_repo(&token, &username)
+            .await
+            .expect("stress repo must exist or be creatable");
+
+        let run_id = chrono::Utc::now().format("%Y%m%d%H%M%S").to_string();
+        let asset_prefix = format!("Stress{}_", run_id);
+        let profile_name = format!("GitHub API Stress {}", run_id);
+        let work = tempfile::tempdir().expect("create stress tempdir");
+        let mods_path = work.path().join("mods");
+        let disabled_path = work.path().join("mods_disabled");
+        let profiles_path = work.path().join("profiles");
+        std::fs::create_dir_all(&mods_path).unwrap();
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        std::fs::create_dir_all(&profiles_path).unwrap();
+
+        let profile = build_stress_profile(&profile_name, &asset_prefix, &mods_path)
+            .expect("build stress fixture profile");
+        let expected_mods = profile.mods.clone();
+        let expected_asset_names: Vec<String> = expected_mods
+            .iter()
+            .map(|m| release_asset_name(&m.name, &m.version))
+            .collect();
+
+        let result = run_stress_share_and_verify(
+            profile,
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            &token,
+            &username,
+            &repo,
+            &client,
+            &expected_asset_names,
+        )
+        .await;
+
+        let cleanup = cleanup_stress_artifacts(&client, &username, &repo, &asset_prefix, None).await;
+        if let Err(e) = cleanup {
+            eprintln!("Stress cleanup warning: {}", e);
+        }
+
+        result.expect("GitHub API stress test must upload, fetch, download, and verify all bundles");
+    }
+
+    async fn run_stress_share_and_verify(
+        profile: Profile,
+        mods_path: &std::path::Path,
+        disabled_path: &std::path::Path,
+        profiles_path: &std::path::Path,
+        token: &str,
+        username: &str,
+        repo: &str,
+        client: &reqwest::Client,
+        expected_asset_names: &[String],
+    ) -> Result<()> {
+        let result = share_profile_impl(
+            profile,
+            mods_path,
+            disabled_path,
+            profiles_path,
+            token,
+            None,
+        )
+        .await?;
+
+        let verify_result: Result<()> = async {
+            let fetched = fetch_shared_profile(username, &result.file_path, Some(token)).await?;
+            if fetched.mods.len() != STRESS_SIZE_PLAN_MIB.len() {
+                return Err(AppError::Other(format!(
+                    "Fetched profile had {} mods, expected {}",
+                    fetched.mods.len(),
+                    STRESS_SIZE_PLAN_MIB.len()
+                )));
+            }
+
+            let release = ensure_bundles_release(client, username, repo).await?;
+            for (pm, expected_asset_name) in fetched.mods.iter().zip(expected_asset_names.iter()) {
+                let Some(expected_hash) = pm.bundle_sha256.as_deref() else {
+                    return Err(AppError::Other(format!("{} missing bundle_sha256", pm.name)));
+                };
+                let asset = release
+                    .assets
+                    .iter()
+                    .find(|asset| asset.name == *expected_asset_name)
+                    .ok_or_else(|| AppError::Other(format!("Missing release asset {}", expected_asset_name)))?;
+                let bytes = download_release_asset_via_api(client, username, repo, asset.id).await?;
+                let actual_hash = sha256_hex(&bytes);
+                if actual_hash != expected_hash {
+                    return Err(AppError::Other(format!(
+                        "Hash mismatch for {}: downloaded {}, manifest {}",
+                        pm.name, actual_hash, expected_hash
+                    )));
+                }
+            }
+
+            Ok(())
+        }
+        .await;
+
+        if let Err(e) = delete_contents_file_if_exists(client, username, repo, &result.file_path).await {
+            eprintln!("Stress manifest cleanup warning: {}", e);
+        }
+
+        verify_result
+    }
+
+    fn build_stress_profile(
+        profile_name: &str,
+        asset_prefix: &str,
+        mods_path: &std::path::Path,
+    ) -> std::io::Result<Profile> {
+        let now = chrono::Utc::now();
+        let mut mods = Vec::with_capacity(STRESS_SIZE_PLAN_MIB.len());
+        for (idx, size_mib) in STRESS_SIZE_PLAN_MIB.iter().enumerate() {
+            let folder = format!("{}Mod{:02}", asset_prefix, idx + 1);
+            let version = format!("1.0.{}", idx + 1);
+            let dir = mods_path.join(&folder);
+            std::fs::create_dir_all(&dir)?;
+            let manifest_name = format!("{}.json", folder);
+            let dll_name = format!("{}.dll", folder);
+            std::fs::write(
+                dir.join(&manifest_name),
+                format!(
+                    r#"{{"id":"{folder}","name":"{folder}","version":"{version}","author":"stress"}}"#
+                ),
+            )?;
+            write_pseudorandom_file(
+                &dir.join(&dll_name),
+                size_mib * 1024 * 1024,
+                0x5354_5332 ^ idx as u64,
+            )?;
+            mods.push(ProfileMod {
+                name: folder.clone(),
+                version,
+                source: None,
+                hash: None,
+                files: vec![format!("{}/{}", folder, manifest_name), format!("{}/{}", folder, dll_name)],
+                folder_name: Some(folder.clone()),
+                mod_id: Some(folder),
+                enabled: true,
+                bundle_url: None,
+                bundle_sha256: None,
+            });
+        }
+
+        Ok(Profile {
+            name: profile_name.to_string(),
+            game_version: Some("0.105.0".to_string()),
+            created_by: Some("stress".to_string()),
+            mods,
+            created_at: now,
+            updated_at: now,
+            public: Some(false),
+        })
+    }
+
+    fn write_pseudorandom_file(path: &std::path::Path, bytes: u64, seed: u64) -> std::io::Result<()> {
+        let mut file = std::fs::File::create(path)?;
+        let mut remaining = bytes;
+        let mut state = seed.max(1);
+        let mut buf = vec![0u8; 1024 * 1024];
+        while remaining > 0 {
+            let n = remaining.min(buf.len() as u64) as usize;
+            fill_pseudorandom(&mut buf[..n], &mut state);
+            file.write_all(&buf[..n])?;
+            remaining -= n as u64;
+        }
+        Ok(())
+    }
+
+    fn fill_pseudorandom(buf: &mut [u8], state: &mut u64) {
+        for byte in buf {
+            let mut x = *state;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            *state = x;
+            *byte = (x & 0xff) as u8;
+        }
+    }
+
+    async fn download_release_asset_via_api(
+        client: &reqwest::Client,
+        owner: &str,
+        repo: &str,
+        asset_id: u64,
+    ) -> Result<Vec<u8>> {
+        let url = format!(
+            "{}/repos/{}/{}/releases/assets/{}",
+            github_api_base(), owner, repo, asset_id
+        );
+        let resp = client
+            .get(&url)
+            .header(reqwest::header::ACCEPT, "application/octet-stream")
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(AppError::Other(format!(
+                "Failed to download release asset {} ({}): {}",
+                asset_id, status, text
+            )));
+        }
+        Ok(resp.bytes().await?.to_vec())
+    }
+
+    async fn cleanup_stress_artifacts(
+        client: &reqwest::Client,
+        owner: &str,
+        repo: &str,
+        asset_prefix: &str,
+        manifest_filename: Option<&str>,
+    ) -> Result<()> {
+        if let Ok(release) = ensure_bundles_release(client, owner, repo).await {
+            for asset in release.assets.iter().filter(|asset| asset.name.starts_with(asset_prefix)) {
+                delete_release_asset(client, owner, repo, asset.id).await?;
+            }
+        }
+        if let Some(filename) = manifest_filename {
+            delete_contents_file_if_exists(client, owner, repo, filename).await?;
+        }
+        Ok(())
+    }
+
+    async fn delete_contents_file_if_exists(
+        client: &reqwest::Client,
+        owner: &str,
+        repo: &str,
+        filename: &str,
+    ) -> Result<()> {
+        let url = format!(
+            "{}/repos/{}/{}/contents/{}",
+            github_api_base(), owner, repo, filename
+        );
+        let resp = client.get(&url).send().await?;
+        if resp.status().as_u16() == 404 {
+            return Ok(());
+        }
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(AppError::Other(format!(
+                "Failed to fetch manifest for cleanup {} ({}): {}",
+                filename, status, text
+            )));
+        }
+        let value: serde_json::Value = resp.json().await?;
+        let sha = value
+            .get("sha")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| AppError::Other(format!("Cleanup response for {} had no sha", filename)))?;
+        let body = serde_json::json!({
+            "message": format!("Delete stress manifest {}", filename),
+            "sha": sha,
+        });
+        let resp = client.delete(&url).json(&body).send().await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(AppError::Other(format!(
+                "Failed to delete stress manifest {} ({}): {}",
+                filename, status, text
+            )));
+        }
+        Ok(())
+    }
+
+    fn sha256_hex(bytes: &[u8]) -> String {
+        let mut h = Sha256::new();
+        h.update(bytes);
+        format!("{:x}", h.finalize())
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        old: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let old = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, old }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let old = std::env::var(key).ok();
+            std::env::remove_var(key);
+            Self { key, old }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(value) = &self.old {
+                std::env::set_var(self.key, value);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
     }
 }
 

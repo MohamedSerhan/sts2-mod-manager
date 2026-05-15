@@ -979,7 +979,7 @@ describe('<SettingsView>', () => {
       mod_count: 3, size_bytes: 4096,
     }]);
     registerInvokeHandler('restore_backup_cmd', () => null);
-    registerInvokeHandler('create_backup_cmd', () => 'pre-restore-backup');
+    registerInvokeHandler('create_backup_preserving_cmd', () => 'pre-restore-backup');
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
@@ -997,8 +997,12 @@ describe('<SettingsView>', () => {
       expect(getInvokeCalls().some((c) => c.cmd === 'restore_backup_cmd')).toBe(true);
     });
     // The pre-restore save backup is also invoked because the default
-    // checkbox is checked.
-    expect(getInvokeCalls().some((c) => c.cmd === 'create_backup_cmd')).toBe(true);
+    // checkbox is checked, but it must preserve the restore target so
+    // retention pruning cannot delete it before restore runs.
+    expect(getInvokeCalls().some((c) =>
+      c.cmd === 'create_backup_preserving_cmd' &&
+      c.args?.preserveName === 'backup_2026-05-12_15-00-00'
+    )).toBe(true);
   });
 
   it('Restore backup cancel does not invoke restore_backup_cmd', async () => {
@@ -1030,7 +1034,7 @@ describe('<SettingsView>', () => {
       name: 'backup_2026-05-12_15-00-00',
       mod_count: 2, size_bytes: 2048,
     }]);
-    registerInvokeHandler('create_backup_cmd', () => { throw new Error('pre-fail'); });
+    registerInvokeHandler('create_backup_preserving_cmd', () => { throw new Error('pre-fail'); });
     registerInvokeHandler('restore_backup_cmd', () => { throw new Error('rb fail'); });
     const user = userEvent.setup();
     render(<Wrap />);
@@ -1044,7 +1048,7 @@ describe('<SettingsView>', () => {
     await user.click(restoreBtn);
     const confirmBtn = await screen.findByRole('button', { name: /Restore now/i });
     await user.click(confirmBtn);
-    // The pre-restore create_backup failure is swallowed (non-fatal),
+    // The pre-restore safety backup failure is swallowed (non-fatal),
     // but the restore_backup_cmd failure surfaces.
     await waitFor(() => {
       expect(screen.queryByText(/rb fail/)).toBeInTheDocument();
@@ -1624,7 +1628,7 @@ describe('<SettingsView>', () => {
     registerInvokeHandler('list_backups_cmd', () => [{
       name: 'backup_2026-05-12_15-00-00', mod_count: 1, size_bytes: 1024,
     }]);
-    registerInvokeHandler('create_backup_cmd', () => 'pre');
+    registerInvokeHandler('create_backup_preserving_cmd', () => 'pre');
     // eslint-disable-next-line @typescript-eslint/no-throw-literal
     registerInvokeHandler('restore_backup_cmd', () => { throw 'rb string'; });
     const user = userEvent.setup();

@@ -392,7 +392,7 @@ pub async fn download_release_zip_to_cache(
         ))
     })?;
 
-    if !asset.name.ends_with(".zip") {
+    if !asset.name.to_ascii_lowercase().ends_with(".zip") {
         return Err(AppError::Other(format!(
             "Release {} for {}/{} is not a zip ({}) — walk-back can only inspect zip releases",
             tag, owner, repo, asset.name
@@ -554,10 +554,20 @@ fn find_best_asset_for_game_version<'a>(
     release: &'a GitHubRelease,
     game_version: Option<&str>,
 ) -> Option<&'a GitHubAsset> {
-    let zip_assets: Vec<&GitHubAsset> = release
+    let archive_assets: Vec<&GitHubAsset> = release
         .assets
         .iter()
+        .filter(|a| is_supported_archive_asset(&a.name))
+        .collect();
+    let zip_assets: Vec<&GitHubAsset> = archive_assets
+        .iter()
+        .copied()
         .filter(|a| a.name.to_ascii_lowercase().ends_with(".zip"))
+        .collect();
+    let single_file_assets: Vec<&GitHubAsset> = release
+        .assets
+        .iter()
+        .filter(|a| is_single_file_mod_asset(&a.name))
         .collect();
 
     if let Some(current) = game_version.and_then(parse_asset_version) {
@@ -598,15 +608,29 @@ fn find_best_asset_for_game_version<'a>(
         return normal_github_zip;
     }
 
-    let non_variant_zip = zip_assets
+    let non_variant_archive = archive_assets
         .iter()
         .copied()
         .find(|a| !a.name.to_ascii_lowercase().contains("variant-pack"));
-    if non_variant_zip.is_some() {
-        return non_variant_zip;
+    if non_variant_archive.is_some() {
+        return non_variant_archive;
     }
 
-    zip_assets.first().copied().or_else(|| release.assets.first())
+    archive_assets
+        .first()
+        .copied()
+        .or_else(|| single_file_assets.first().copied())
+        .or_else(|| release.assets.first())
+}
+
+fn is_supported_archive_asset(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.ends_with(".zip") || lower.ends_with(".7z") || lower.ends_with(".rar")
+}
+
+fn is_single_file_mod_asset(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.ends_with(".dll") || lower.ends_with(".pck")
 }
 
 fn parse_asset_version(version: &str) -> Option<semver::Version> {
@@ -693,17 +717,26 @@ pub async fn download_and_install_github_mod(
     log::info!("Downloaded '{}' to {}", asset.name, dest.display());
 
     // Install the downloaded file
-    if dest.extension().and_then(|e| e.to_str()) == Some("zip") {
-        install_mod_from_zip(&dest, mods_path)
-    } else if dest.extension().and_then(|e| e.to_str()) == Some("dll") {
+    let ext = dest
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if matches!(ext.as_str(), "zip" | "7z" | "rar") {
+        crate::mods::install_mod_from_archive(&dest, mods_path)
+    } else if matches!(ext.as_str(), "dll" | "pck") {
         // Single DLL file - copy directly
         let dest_path = mods_path.join(&asset.name);
         std::fs::copy(&dest, &dest_path)?;
+        let mod_name = asset
+            .name
+            .trim_end_matches(".dll")
+            .trim_end_matches(".DLL")
+            .trim_end_matches(".pck")
+            .trim_end_matches(".PCK")
+            .to_string();
         Ok(ModInfo {
-            name: asset
-                .name
-                .trim_end_matches(".dll")
-                .to_string(),
+            name: mod_name,
             version: release.tag_name.clone(),
             description: release.body.clone().unwrap_or_default(),
             enabled: true,
@@ -1059,10 +1092,17 @@ mod asset_selection_tests {
     }
 
     #[test]
-    fn asset_selection_falls_back_to_first_when_no_zip() {
+    fn asset_selection_prefers_single_file_asset_when_no_archive() {
         let release = release(&["readme.txt", "AutoPath.dll"]);
         let chosen = find_best_asset_for_game_version(&release, None).expect("expected an asset");
-        assert_eq!(chosen.name, "readme.txt");
+        assert_eq!(chosen.name, "AutoPath.dll");
+    }
+
+    #[test]
+    fn asset_selection_prefers_supported_archives_over_readme_when_no_zip() {
+        let release = release(&["readme.txt", "HighlightPotionCards.7z", "older.rar"]);
+        let chosen = find_best_asset_for_game_version(&release, None).expect("expected an asset");
+        assert_eq!(chosen.name, "HighlightPotionCards.7z");
     }
 
     #[test]

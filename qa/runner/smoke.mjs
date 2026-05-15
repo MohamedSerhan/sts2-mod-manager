@@ -897,40 +897,32 @@ async function specToggleStickyAcrossProfileSwitch(driver) {
 }
 
 /**
- * Regression spec for issue #20: profile Repair must delete orphan
- * folders from BOTH `mods/` and `mods_disabled/`. The bug had Repair
- * only sweeping `mods/`, leaving `mods_disabled/` orphans to keep
- * surfacing as drift forever (since they're "installed but not in
- * profile" → flagged as added each scan).
+ * Regression spec for the safe profile repair/switch contract: disabled
+ * library mods that are not part of the active profile must stay on disk and
+ * must not surface as profile drift. Repair/switch makes active `mods/`
+ * match the selected profile by disabling extras, not by deleting the
+ * user's library from `mods_disabled/`.
  *
  * Flow:
- *   1. Profiles → create + activate a fresh profile. The snapshot
- *      captures only the seeded fixture mods (QaTestMod + UpToDateMod).
- *   2. Nav to Mods (so we leave the Profiles view and the drift
- *      cache doesn't pre-empt step 4's refresh).
- *   3. Seed `mods_disabled/OrphanMod/` on disk — directly, post-snapshot,
- *      so the profile manifest does NOT list it.
- *   4. Nav back to Profiles. The Profiles component remounts and runs
- *      `loadProfiles` → drift effect picks up the orphan as `added` →
- *      drift banner with "Repair" button renders.
- *   5. Click Repair, confirm via the modal's "Repair" button.
- *   6. Assert `mods_disabled/OrphanMod/` no longer exists on disk AND
- *      the success toast surfaces.
+ *   1. Profiles -> create + activate a fresh profile.
+ *   2. Nav away from Profiles, then seed `mods_disabled/OrphanMod/` on disk
+ *      post-snapshot so the manifest does not list it.
+ *   3. Nav back to Profiles and wait for the drift effect to settle.
+ *   4. Assert no Repair drift banner appears and the disabled orphan folder
+ *      still exists.
  */
-async function specRepairRemovesOrphanDisabled(driver) {
+async function specDisabledLibraryExtrasArePreserved(driver) {
   const suffix = Date.now().toString(36);
   const profileName = `QA Repair ${suffix}`;
 
-  // Step 1: create + activate a fresh profile. The snapshot captures
-  // the two fixture mods but NOT (yet) any orphan in mods_disabled/.
+  // Step 1: create + activate a fresh profile.
   await navToProfiles(driver);
   await createProfileNamed(driver, profileName);
   await waitForToastsToClear(driver);
   await activateProfile(driver, profileName);
   await waitForToastsToClear(driver);
 
-  // Step 2: leave Profiles so the next visit remounts the view and
-  // triggers a fresh drift fetch.
+  // Step 2: leave Profiles so the next visit remounts the view.
   await navToMods(driver);
 
   // Step 3: seed an orphan folder under mods_disabled/. A proper-ish
@@ -960,60 +952,31 @@ async function specRepairRemovesOrphanDisabled(driver) {
     throw new Error(`orphan seed failed: ${orphanDir} does not exist after mkdir/writeFile`);
   }
 
-  // Step 4: nav back to Profiles. The component remounts → loadProfiles
-  // → useEffect on profiles fires → drift refresh sees OrphanMod as
-  // "added" (installed but not in the manifest) → drift banner with
-  // Repair button renders.
+  // Step 4: nav back to Profiles. Disabled library extras should not
+  // render a drift banner with a Repair action.
   await navToProfiles(driver);
-  const repairBtn = await waitForElement(
-    driver,
-    By.xpath(
-      "//*[contains(@class,'gf-banner') and contains(@class,'gf-banner-warn')]" +
-        "//button[normalize-space(.)='Repair']",
-    ),
-    'Repair button on drift banner',
-    15_000,
+  const repairButtonLocator = By.xpath(
+    "//*[contains(@class,'gf-banner') and contains(@class,'gf-banner-warn')]" +
+      "//button[normalize-space(.)='Repair']",
   );
 
-  // Step 5: click Repair, then confirm in the modal. The confirm
-  // dialog's primary action text is "Repair" (handleRepairDrift's
-  // confirmLabel) — disambiguate from the banner Repair button by
-  // scoping to the modal foot.
-  await repairBtn.click();
-  await waitForElement(
-    driver,
-    By.xpath(
-      `//*[contains(@class, 'gf-modal-title') and contains(., 'Repair') and contains(., '${profileName}')]`,
-    ),
-    'Repair-profile confirm modal',
-  );
-  const confirmBtn = await waitForElement(
-    driver,
-    By.xpath("//*[contains(@class, 'gf-modal-foot')]//button[normalize-space(.)='Repair']"),
-    'Confirm "Repair" button in modal',
-  );
-  await confirmBtn.click();
-
-  // Step 6a: disk assertion — orphan folder must be gone.
-  const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline) {
-    if (!existsSync(orphanDir)) break;
-    await delay(200);
-  }
-  if (existsSync(orphanDir)) {
+  // Give the drift effect a moment to run, then assert there is no
+  // disabled-library drift and the folder is still preserved on disk.
+  await delay(2_000);
+  const repairButtons = await driver.findElements(repairButtonLocator);
+  if (repairButtons.length > 0) {
     throw new Error(
-      `bug #20 regression: ${orphanDir} still exists after Repair — orphan in mods_disabled/ was not deleted`,
+      `disabled library regression: ${orphanDir} surfaced as profile drift; ` +
+        'disabled mods outside the selected profile should be preserved and ignored',
     );
   }
 
-  // Step 6b: UI assertion — Repair success toast surfaces. ToastContext
-  // pills are `gf-toast`; the success copy starts with "Repaired".
-  await waitForElement(
-    driver,
-    By.xpath("//*[contains(@class, 'gf-toast') and contains(., 'Repaired')]"),
-    'Repair-success toast',
-    10_000,
-  );
+  if (!existsSync(orphanDir)) {
+    throw new Error(
+      `disabled library regression: ${orphanDir} was deleted; Repair/switch ` +
+        'must not remove mods from the user library in mods_disabled/',
+    );
+  }
 }
 
 /* ── Helpers ────────────────────────────────────────────────────── */
@@ -1140,6 +1103,17 @@ function assertEqual(actual, expected, label) {
 async function waitForElement(driver, locator, label, timeoutMs = 10_000) {
   await driver.wait(until.elementLocated(locator), timeoutMs, `Timed out waiting for ${label}`);
   return driver.findElement(locator);
+}
+
+async function waitForToastContaining(driver, parts, label, timeoutMs = 10_000) {
+  return driver.wait(async () => {
+    const toasts = await driver.findElements(By.css('.gf-toast'));
+    for (const toast of toasts) {
+      const text = await toast.getText();
+      if (parts.every((part) => text.includes(part))) return toast;
+    }
+    return false;
+  }, timeoutMs, `Timed out waiting for ${label}`);
 }
 
 async function captureFailureArtifacts(driver, error) {
@@ -1489,7 +1463,10 @@ async function specSkippedModAbsentFromSnapshot(driver) {
   // away after this point until after the click + toast.)
   await waitForToastsToClear(driver);
   await navToProfiles(driver);
-  await driver.executeScript(`window.prompt = function(){ return ${JSON.stringify(snapshotName)}; };`);
+  await driver.executeScript(
+    'const snapshotName = arguments[0]; window.prompt = function(){ return snapshotName; };',
+    snapshotName,
+  );
 
   // Step 4: click the page-level "Snapshot current" button. (The same
   // handleSnapshot is bound to a per-card kebab "Snapshot from current
@@ -1505,11 +1482,9 @@ async function specSkippedModAbsentFromSnapshot(driver) {
 
   // Step 5: wait for the success toast. handleSnapshot surfaces
   // toastCtx.success(`Snapshot "<name>" created with <n> mods`).
-  await waitForElement(
+  await waitForToastContaining(
     driver,
-    By.xpath(
-      `//*[contains(@class, 'gf-toast') and contains(., 'Snapshot') and contains(., ${JSON.stringify(snapshotName)})]`,
-    ),
+    ['Snapshot', snapshotName],
     `Snapshot success toast for "${snapshotName}"`,
     15_000,
   );
@@ -1602,7 +1577,7 @@ const STATE_SPECS = [
   ['create profile via Profiles → New profile', specCreateProfile],
   ['profile switch preserves pins (v1.3.1 contract)', specProfileSwitchPreservesPins],
   ['#22: toggle state sticky across profile switch', specToggleStickyAcrossProfileSwitch],
-  ['#20: profile repair removes orphan mods_disabled folders', specRepairRemovesOrphanDisabled],
+  ['#20: disabled library extras are preserved', specDisabledLibraryExtrasArePreserved],
   ['#21: skipped mods not in fresh snapshot', specSkippedModAbsentFromSnapshot],
 ];
 

@@ -560,15 +560,16 @@ describe('<ProfilesView>', () => {
       downloaded: 1,
       missing_mods: ['StillMissing'],
       failed_downloads: ['FailedX'],
-      deleted_orphans: ['Orphan1', 'Orphan2'],
+      disabled_orphans: ['Orphan1', 'Orphan2'],
+      deleted_orphans: [],
     }));
-    // Backup checkbox is checked by default; let the create_backup_cmd succeed.
+    // Backup checkbox is available but unchecked by default.
     registerInvokeHandler('create_backup_cmd', () => '/tmp/backup.zip');
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('DriftedPack')).toBeInTheDocument(); });
     // The banner's Repair button has a unique title.
-    const repairBanner = await screen.findByTitle('Re-apply manifest and delete orphan mod files');
+    const repairBanner = await screen.findByTitle('Re-apply manifest and disable extra active mods');
     await user.click(repairBanner);
     // Confirm modal opens; click the Repair button in its foot.
     const modal = await confirmModal();
@@ -576,17 +577,52 @@ describe('<ProfilesView>', () => {
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'repair_profile')).toBe(true);
     });
-    // Backup ran (checkbox defaulted on).
-    expect(getInvokeCalls().some((c) => c.cmd === 'create_backup_cmd')).toBe(true);
+    expect(getInvokeCalls().some((c) => c.cmd === 'create_backup_cmd')).toBe(false);
     // Success toast with summary — parts joined by ", " and listed as
-    // "removed N orphan mods, downloaded N, N download(s) failed, N still missing".
+    // "disabled N extra mods, downloaded N, N download(s) failed, N still missing".
     await waitFor(() => {
       const found = document.body.textContent ?? '';
-      expect(found).toMatch(/Repaired "DriftedPack" — removed 2 orphan mods, downloaded 1, 1 download\(s\) failed, 1 still missing/);
+      expect(found).toContain('disabled 2 extra mods, downloaded 1, 1 download(s) failed, 1 still missing');
     });
   });
 
-  it('drift banner Repair with no orphans renders the "nothing to delete" body', async () => {
+  it('drift banner Save changes snapshots the active profile without repairing disk', async () => {
+    seedProfiles([baseProfile({ name: 'DriftedPack' })]);
+    registerInvokeHandler('get_active_profile', () => 'DriftedPack');
+    registerInvokeHandler('get_profile_drift', () => ({
+      added: ['NewMod'],
+      removed: [],
+      toggled: [],
+      version_changed: [],
+      has_drift: true,
+    }));
+    registerInvokeHandler('snapshot_profile', (args) =>
+      baseProfile({
+        name: String(args?.name),
+        mods: [{ name: 'NewMod', enabled: true } as any],
+      }),
+    );
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('DriftedPack')).toBeInTheDocument(); });
+
+    await user.click(await screen.findByRole('button', { name: /Save changes/i }));
+
+    await waitFor(() => {
+      expect(
+        getInvokeCalls().some(
+          (c) => c.cmd === 'snapshot_profile' && c.args?.name === 'DriftedPack',
+        ),
+      ).toBe(true);
+    });
+    expect(getInvokeCalls().some((c) => c.cmd === 'repair_profile')).toBe(false);
+    await waitFor(() => {
+      expect(screen.getByText(/Saved changes to "DriftedPack"/)).toBeInTheDocument();
+    });
+  });
+
+  it('drift banner Repair with no active extras renders the safe body', async () => {
     seedProfiles([baseProfile({ name: 'DriftedPack' })]);
     registerInvokeHandler('get_active_profile', () => 'DriftedPack');
     registerInvokeHandler('get_profile_drift', () => ({
@@ -601,16 +637,16 @@ describe('<ProfilesView>', () => {
       downloaded: 0,
       missing_mods: [],
       failed_downloads: [],
+      disabled_orphans: [],
       deleted_orphans: [],
     }));
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('DriftedPack')).toBeInTheDocument(); });
-    const repairBanner = await screen.findByTitle('Re-apply manifest and delete orphan mod files');
+    const repairBanner = await screen.findByTitle('Re-apply manifest and disable extra active mods');
     await user.click(repairBanner);
-    // Body mentions "No orphan files".
     await waitFor(() => {
-      expect(screen.getByText(/No orphan files to delete/)).toBeInTheDocument();
+      expect(screen.getByText(/No active extra mods to disable/)).toBeInTheDocument();
     });
     const modal = await confirmModal();
     await user.click(modal.getByRole('button', { name: 'Repair' }));
@@ -638,7 +674,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('DriftedPack')).toBeInTheDocument(); });
-    const repairBanner = await screen.findByTitle('Re-apply manifest and delete orphan mod files');
+    const repairBanner = await screen.findByTitle('Re-apply manifest and disable extra active mods');
     await user.click(repairBanner);
     const modal = await confirmModal();
     await user.click(modal.getByRole('button', { name: 'Cancel' }));
@@ -660,16 +696,16 @@ describe('<ProfilesView>', () => {
       downloaded: 0,
       missing_mods: [],
       failed_downloads: [],
-      deleted_orphans: ['Orphan'],
+      disabled_orphans: ['Orphan'],
+      deleted_orphans: [],
     }));
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('DriftedPack')).toBeInTheDocument(); });
-    const repairBanner = await screen.findByTitle('Re-apply manifest and delete orphan mod files');
+    const repairBanner = await screen.findByTitle('Re-apply manifest and disable extra active mods');
     await user.click(repairBanner);
-    // Uncheck the backup checkbox.
     const checkbox = await screen.findByRole('checkbox');
-    await user.click(checkbox);
+    expect(checkbox).not.toBeChecked();
     const modal = await confirmModal();
     await user.click(modal.getByRole('button', { name: 'Repair' }));
     await waitFor(() => {
@@ -694,13 +730,15 @@ describe('<ProfilesView>', () => {
       downloaded: 0,
       missing_mods: [],
       failed_downloads: [],
-      deleted_orphans: ['Orphan'],
+      disabled_orphans: ['Orphan'],
+      deleted_orphans: [],
     }));
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('DriftedPack')).toBeInTheDocument(); });
-    const repairBanner = await screen.findByTitle('Re-apply manifest and delete orphan mod files');
+    const repairBanner = await screen.findByTitle('Re-apply manifest and disable extra active mods');
     await user.click(repairBanner);
+    await user.click(await screen.findByRole('checkbox'));
     const modal = await confirmModal();
     await user.click(modal.getByRole('button', { name: 'Repair' }));
     await waitFor(() => {
@@ -723,7 +761,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('DriftedPack')).toBeInTheDocument(); });
-    const repairBanner = await screen.findByTitle('Re-apply manifest and delete orphan mod files');
+    const repairBanner = await screen.findByTitle('Re-apply manifest and disable extra active mods');
     await user.click(repairBanner);
     const modal = await confirmModal();
     await user.click(modal.getByRole('button', { name: 'Repair' }));
@@ -746,7 +784,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('BigDrift')).toBeInTheDocument(); });
-    const repairBanner = await screen.findByTitle('Re-apply manifest and delete orphan mod files');
+    const repairBanner = await screen.findByTitle('Re-apply manifest and disable extra active mods');
     await user.click(repairBanner);
     await waitFor(() => {
       // "Orph1, Orph2, ... Orph8, …4 more"

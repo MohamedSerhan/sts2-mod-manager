@@ -79,4 +79,18 @@ describe('<WhatsNewCard>', () => {
       'https://github.com/MohamedSerhan/sts2-mod-manager/blob/main/CHANGELOG.md',
     );
   });
+
+  it('renders bold changelog text as styled emphasis instead of raw markdown', async () => {
+    setMockAppVersion('1.3.8');
+    const { container } = render(<WhatsNewCard />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/What's new in v1\.3\.8/)).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText(/\*\*Browse Modpacks\.\*\*/)).toBeNull();
+    const strong = container.querySelector('.gf-whatsnew-strong');
+    expect(strong).not.toBeNull();
+    expect(strong).toHaveTextContent('Browse Modpacks.');
+  });
 });

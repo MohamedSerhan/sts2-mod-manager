@@ -125,13 +125,30 @@ pub fn run() {
         if let Ok(mut s) = app_state.lock() {
             s.set_game_path(p);
         }
-    } else if let Some(game_path) = game::detect_game() {
-        log::info!("Auto-detected game at: {}", game_path.display());
-        if let Ok(mut s) = app_state.lock() {
-            s.set_game_path(game_path);
-        }
     } else {
-        log::info!("Game not auto-detected; user must set path manually.");
+        let restored_saved_game_path = if let Ok(mut s) = app_state.lock() {
+            state::restore_persisted_game_path(&mut s, game::validate_game_path)
+        } else {
+            false
+        };
+        if !restored_saved_game_path {
+            if let Some(game_path) = game::detect_game() {
+                log::info!("Auto-detected game at: {}", game_path.display());
+                if let Ok(mut s) = app_state.lock() {
+                    let config_path = s.config_path.clone();
+                    s.set_game_path(game_path.clone());
+                    if let Err(e) = state::persist_game_path(&config_path, &game_path) {
+                        log::warn!(
+                            "Auto-detected game path but could not persist it to {}: {}",
+                            config_path.display(),
+                            e
+                        );
+                    }
+                }
+            } else {
+                log::info!("Game not auto-detected; user must set path manually.");
+            }
+        }
     }
 
     // Attempt to load Nexus API key from system keyring
@@ -305,6 +322,7 @@ pub fn run() {
             mods::get_mod_dependents,
             // Backup & safety
             backup::create_backup_cmd,
+            backup::create_backup_preserving_cmd,
             backup::list_backups_cmd,
             backup::restore_backup_cmd,
             backup::delete_backup_cmd,

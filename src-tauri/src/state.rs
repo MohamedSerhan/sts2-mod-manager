@@ -5,6 +5,8 @@ use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
+const GAME_PATH_FILE: &str = "game_path.txt";
+
 /// How the user wants to start Slay the Spire 2 from the Launch button and
 /// the `Ctrl/⌘ L` shortcut.
 ///
@@ -236,4 +238,99 @@ fn read_release_info_version(game_path: &Path) -> Option<String> {
 
 pub fn create_app_state() -> AppState {
     Arc::new(Mutex::new(AppStateInner::new()))
+}
+
+pub(crate) fn persist_game_path(config_path: &Path, game_path: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(config_path)?;
+    std::fs::write(config_path.join(GAME_PATH_FILE), game_path.to_string_lossy().as_ref())
+}
+
+pub(crate) fn load_persisted_game_path(config_path: &Path) -> Option<PathBuf> {
+    let raw = std::fs::read_to_string(config_path.join(GAME_PATH_FILE)).ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(trimmed))
+    }
+}
+
+pub(crate) fn restore_persisted_game_path<F>(state: &mut AppStateInner, validate: F) -> bool
+where
+    F: Fn(&Path) -> bool,
+{
+    let Some(game_path) = load_persisted_game_path(&state.config_path) else {
+        return false;
+    };
+
+    if !validate(&game_path) {
+        log::warn!(
+            "Saved game path no longer validates, ignoring for this startup: {}",
+            game_path.display()
+        );
+        return false;
+    }
+
+    log::info!("Restored saved game path: {}", game_path.display());
+    state.set_game_path(game_path);
+    true
+}
+
+#[cfg(test)]
+mod game_path_persistence_tests {
+    use super::*;
+
+    #[test]
+    fn persisted_game_path_round_trips_from_config_dir() {
+        let config = tempfile::tempdir().unwrap();
+        let game = PathBuf::from(r"C:\Program Files (x86)\Steam\steamapps\common\Slay the Spire 2");
+
+        persist_game_path(config.path(), &game).unwrap();
+
+        assert_eq!(load_persisted_game_path(config.path()), Some(game));
+    }
+
+    #[test]
+    fn blank_persisted_game_path_is_ignored() {
+        let config = tempfile::tempdir().unwrap();
+        std::fs::write(config.path().join("game_path.txt"), " \r\n ").unwrap();
+
+        assert_eq!(load_persisted_game_path(config.path()), None);
+    }
+
+    #[test]
+    fn restore_persisted_game_path_rehydrates_runtime_paths() {
+        let config = tempfile::tempdir().unwrap();
+        let game = tempfile::tempdir().unwrap();
+        persist_game_path(config.path(), game.path()).unwrap();
+
+        let mut state = AppStateInner {
+            game_path: None,
+            mods_path: None,
+            disabled_mods_path: None,
+            cache_path: config.path().join("cache"),
+            config_path: config.path().to_path_buf(),
+            profiles_path: config.path().join("profiles"),
+            nexus_api_key: None,
+            github_token: None,
+            vanilla_mode: false,
+            active_profile: None,
+            pending_nexus_installs: Vec::new(),
+            sharing_in_flight: HashSet::new(),
+            game_version: None,
+            pending_deep_link: None,
+            launch_mode: LaunchMode::default(),
+            modpack_browser_cache: std::collections::HashMap::new(),
+        };
+
+        let expected_mods = game.path().join("mods");
+        let expected_disabled = game.path().join("mods_disabled");
+        assert!(restore_persisted_game_path(&mut state, |_| true));
+        assert_eq!(state.game_path.as_deref(), Some(game.path()));
+        assert_eq!(state.mods_path.as_deref(), Some(expected_mods.as_path()));
+        assert_eq!(
+            state.disabled_mods_path.as_deref(),
+            Some(expected_disabled.as_path())
+        );
+    }
 }

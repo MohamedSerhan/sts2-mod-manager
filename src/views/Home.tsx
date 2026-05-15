@@ -411,6 +411,24 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
   }
 
   async function handleActivateModpack(profileName: string) {
+    if (activeProfile && activeProfile !== profileName) {
+      try {
+        const drift = await getProfileDrift(activeProfile);
+        if (drift.has_drift) {
+          const ok = await confirm({
+            title: `Switch away from "${activeProfile}"?`,
+            body: 'This profile has unsaved changes on disk. Switching applies another manifest and those working changes will not be saved to the current profile.',
+            warning: 'Open Profiles and use Save changes first if you want to keep them.',
+            confirmLabel: 'Switch anyway',
+            cancelLabel: 'Stay here',
+          });
+          if (!ok) return;
+        }
+      } catch {
+        // Drift is advisory. If it cannot be checked, keep activation usable.
+      }
+    }
+
     try {
       setActivatingProfile(profileName);
       const result = await switchProfile(profileName);

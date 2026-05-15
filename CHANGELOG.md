@@ -27,11 +27,27 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ### Added
 
+- Installing a pack from Browse Modpacks now shows live download progress, including which mod is downloading and how far through the pack you are.
+- The app now remembers a manually selected game folder across restarts, including when you launch the game directly instead of through Steam.
+
 ### Changed
+
+- Switching or repairing a pack now keeps your disabled mod library intact. Extra active mods are moved out of the way instead of being deleted, while missing bundled mods are restored from the pack manifest.
+- Pack repair now ignores disabled library mods that are not part of the selected pack, so they no longer create false drift warnings.
+- The "What's new" card now hides empty sections and renders emphasis as styled text instead of showing raw markdown markers.
 
 ### Fixed
 
+- Deleting mods no longer rewrites the active pack manifest to an empty or partial list. Only Share or Re-share updates the saved publish manifest.
+- Re-importing or switching back to a shared pack now restores missing bundled mods more reliably, including pinned mods that were deleted from disk.
+- Shared packs installed from Browse Modpacks now keep the curator's name instead of showing `sts2-mod-manager` as the creator.
+- Large shared packs are more reliable to upload, download, and repair, including packs with many bundled mods.
+- Mods with missing or sparse metadata are less likely to lose their saved source, version, or bundle link during snapshots and re-shares.
+- Release notes no longer show empty headings such as Security when that section has no entries.
+
 ### Security
+
+- Archive installs and repair cleanup are stricter about staying inside the intended mod folders, protecting the game folder and the user's mod library from unsafe paths.
 
 ---
 

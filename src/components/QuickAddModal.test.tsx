@@ -109,8 +109,7 @@ describe('<QuickAddModal>', () => {
     render(<Wrap onClose={onClose} />);
     await user.type(
       screen.getByPlaceholderText(/github\.com\/owner\/repo/),
-      // Full URL — nexusFilesUrl() requires protocol, otherwise new URL()
-      // throws and the prompt-to-open-in-browser path is skipped.
+      // Full URL — the helper canonicalizes this to the files tab.
       'https://www.nexusmods.com/sts2/mods/103',
     );
     await user.click(screen.getByRole('button', { name: /Add & install/i }));
@@ -121,6 +120,23 @@ describe('<QuickAddModal>', () => {
     });
     await waitFor(() => {
       expect(onClose).toHaveBeenCalled();
+    });
+  });
+
+  it('Install of a Nexus URL uses a generic sticky prompt when the mod name is missing', async () => {
+    registerInvokeHandler('quick_add_mod', () => ({
+      type: 'nexus_pending',
+      nexus_info: {},
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.type(
+      screen.getByPlaceholderText(/github\.com\/owner\/repo/),
+      'https://www.nexusmods.com/sts2/mods/103',
+    );
+    await user.click(screen.getByRole('button', { name: /Add & install/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/Opened Nexus mod on Nexus/)).toBeInTheDocument();
     });
   });
 

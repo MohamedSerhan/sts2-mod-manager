@@ -61,8 +61,10 @@ export interface SwitchProfileResult {
 }
 
 export interface RepairProfileResult extends SwitchProfileResult {
-  /** Mods that were on disk but not in the profile manifest, deleted as
-   *  part of the repair. Includes both active and disabled folder orphans. */
+  /** Active mods that were not in the profile manifest and were moved to
+   *  mods_disabled as part of repair. */
+  disabled_orphans?: string[];
+  /** Deprecated compatibility field. Repair no longer deletes orphans. */
   deleted_orphans: string[];
 }
 
@@ -266,4 +268,3 @@ export interface BrowserPage {
   stale: boolean;
   fetched_at: number;     // unix seconds
 }
-

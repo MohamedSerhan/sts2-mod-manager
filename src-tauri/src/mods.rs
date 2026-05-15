@@ -1,7 +1,7 @@
 use std::fs;
 use std::io;
 use std::io::Write as IoWrite;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -783,10 +783,16 @@ pub fn move_mod_by_info(mod_info: &ModInfo, src: &Path, dest: &Path) -> Result<(
     let mut moved_any = false;
 
     for file_rel in &mod_info.files {
-        // Normalize path separators for cross-platform compatibility
-        let normalized = file_rel.replace('\\', "/");
-        let src_file = src.join(&normalized);
-        let dest_file = dest.join(&normalized);
+        let Some(rel_path) = safe_mod_relative_path(file_rel) else {
+            log::warn!(
+                "Skipping unsafe path '{}' while moving mod '{}'",
+                file_rel,
+                mod_info.name
+            );
+            continue;
+        };
+        let src_file = src.join(&rel_path);
+        let dest_file = dest.join(&rel_path);
 
         if !src_file.exists() {
             // If the file is already at the destination, count it as moved
@@ -816,18 +822,7 @@ pub fn move_mod_by_info(mod_info: &ModInfo, src: &Path, dest: &Path) -> Result<(
         moved_any = true;
     }
 
-    // Clean up empty subdirectories left behind in src
-    for file_rel in &mod_info.files {
-        let rel_path = Path::new(file_rel);
-        if let Some(parent_rel) = rel_path.parent() {
-            if !parent_rel.as_os_str().is_empty() {
-                let parent_dir = src.join(parent_rel);
-                if parent_dir.is_dir() {
-                    let _ = fs::remove_dir(&parent_dir);
-                }
-            }
-        }
-    }
+    cleanup_empty_parent_dirs(src, &mod_info.files);
 
     if !moved_any {
         return Err(AppError::ModNotFound(format!(
@@ -838,6 +833,53 @@ pub fn move_mod_by_info(mod_info: &ModInfo, src: &Path, dest: &Path) -> Result<(
     }
 
     Ok(())
+}
+
+fn cleanup_empty_parent_dirs(base: &Path, file_rels: &[String]) {
+    let mut parent_dirs = std::collections::HashSet::new();
+
+    for file_rel in file_rels {
+        let Some(rel_path) = safe_mod_relative_path(file_rel) else {
+            log::warn!("Skipping unsafe path '{}' during parent-dir cleanup", file_rel);
+            continue;
+        };
+        let mut parent = rel_path.parent();
+        while let Some(parent_rel) = parent {
+            if parent_rel.as_os_str().is_empty() {
+                break;
+            }
+            parent_dirs.insert(base.join(parent_rel));
+            parent = parent_rel.parent();
+        }
+    }
+
+    let mut parent_dirs: Vec<PathBuf> = parent_dirs.into_iter().collect();
+    parent_dirs.sort_by_key(|path| std::cmp::Reverse(path.components().count()));
+    for dir in parent_dirs {
+        if dir.is_dir() && fs::read_dir(&dir).map(|mut d| d.next().is_none()).unwrap_or(false) {
+            let _ = fs::remove_dir(&dir);
+        }
+    }
+}
+
+fn safe_mod_relative_path(file_rel: &str) -> Option<PathBuf> {
+    let normalized = file_rel.replace('\\', "/");
+    let rel = Path::new(&normalized);
+    let mut cleaned = PathBuf::new();
+
+    for component in rel.components() {
+        match component {
+            Component::Normal(part) => cleaned.push(part),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+
+    if cleaned.as_os_str().is_empty() {
+        None
+    } else {
+        Some(cleaned)
+    }
 }
 
 /// Move all files associated with a mod between two directories.
@@ -933,30 +975,24 @@ pub fn move_directory(src: &Path, dest: &Path) -> io::Result<()> {
 /// Delete a mod's files from disk using its scanned file list.
 /// Used during profile switching to remove version-mismatched mods before reinstalling.
 pub fn delete_mod_files_by_info(mod_info: &ModInfo, base_path: &Path) {
-    let mut parent_dirs = std::collections::HashSet::new();
-
     for file_rel in &mod_info.files {
-        let normalized = file_rel.replace('\\', "/");
-        let file_path = base_path.join(&normalized);
+        let Some(rel_path) = safe_mod_relative_path(file_rel) else {
+            log::warn!(
+                "Skipping unsafe path '{}' while deleting mod '{}'",
+                file_rel,
+                mod_info.name
+            );
+            continue;
+        };
+        let file_path = base_path.join(&rel_path);
         if file_path.is_dir() {
             let _ = fs::remove_dir_all(&file_path);
         } else if file_path.exists() {
             let _ = fs::remove_file(&file_path);
         }
-        if let Some(parent_rel) = Path::new(&normalized).parent() {
-            if !parent_rel.as_os_str().is_empty() {
-                parent_dirs.insert(base_path.join(parent_rel));
-            }
-        }
     }
 
-    for dir in &parent_dirs {
-        if dir.is_dir() {
-            if fs::read_dir(dir).map(|mut d| d.next().is_none()).unwrap_or(false) {
-                let _ = fs::remove_dir(dir);
-            }
-        }
-    }
+    cleanup_empty_parent_dirs(base_path, &mod_info.files);
 
     log::info!("Deleted {} files for mod '{}' from {}", mod_info.files.len(), mod_info.name, base_path.display());
 }
@@ -1915,13 +1951,10 @@ pub fn get_installed_mods(state: tauri::State<'_, AppState>) -> std::result::Res
 /// folder_name. The optional shape keeps any out-of-band callers using
 /// the old name-only contract working.
 ///
-/// After the file move succeeds, re-snapshots the active profile so its
-/// manifest reflects the new state immediately. This makes "the profile is
-/// the complete state" actually true — without it, a toggle would only
-/// affect disk, leaving the manifest stale until the next profile switch.
-/// A subsequent Repair (which re-applies the manifest) would then undo
-/// the user's toggle, which is the source of the "switching profiles
-/// doesn't remember state" complaint.
+/// Toggling changes the working install only. The saved profile manifest is
+/// the contract and changes only through explicit profile actions such as
+/// Snapshot current, Save changes, Share, or Re-share. Drift detection reports
+/// the difference.
 #[tauri::command]
 pub fn toggle_mod(
     name: String,
@@ -1976,48 +2009,7 @@ pub fn toggle_mod(
     };
     move_result.map_err(|e| e.to_string())?;
 
-    refresh_active_profile_manifest(&state);
     Ok(true)
-}
-
-/// Re-snapshot the currently active profile from disk so its manifest is
-/// always live. Called after every disk mutation (toggle, enable-all,
-/// disable-all, delete). Failures are logged but never bubbled — a stale
-/// manifest is recoverable, but blocking the user's mutation isn't worth it.
-fn refresh_active_profile_manifest(state: &tauri::State<'_, AppState>) {
-    let Ok(s) = state.lock() else { return };
-    let Some(active_name) = s.active_profile.clone() else { return };
-    let mods_path = match s.mods_path.clone() { Some(p) => p, None => return };
-    let disabled_path = match s.disabled_mods_path.clone() { Some(p) => p, None => return };
-    let profiles_path = s.profiles_path.clone();
-    let config_path = s.config_path.clone();
-    drop(s);
-
-    // Pass `None` for the incompatibility filter: this auto-refresh
-    // fires after every toggle / install / delete, so an
-    // already-incompatible mod that the user installed deliberately
-    // (or that was sitting in the profile from an older game build)
-    // must survive the refresh. If we filtered, the mod would vanish
-    // from the JSON on the next mutation, drift would flag it as
-    // `added`, and Repair would delete it from disk — silent data
-    // loss. The filter is only applied at explicit publish points
-    // (kebab → Snapshot, share/re-share).
-    if let Err(e) = crate::profiles::snapshot_current_with_paths(
-        &active_name,
-        &mods_path,
-        &disabled_path,
-        &profiles_path,
-        Some(&config_path),
-        None,
-    ) {
-        log::error!(
-            "Failed to refresh active profile manifest for '{}' after mutation: {} \
-             — manifest is now stale; next profile switch will re-snapshot.",
-            active_name, e
-        );
-    } else {
-        log::debug!("Refreshed active profile manifest for '{}'", active_name);
-    }
 }
 
 /// Permanently delete a mod.
@@ -2037,37 +2029,55 @@ pub fn delete_mod_cmd(
     let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?.clone();
     drop(s);
 
+    delete_mod_from_paths(&name, folder_name.as_deref(), &mods_path, &disabled_path)
+}
+
+fn delete_mod_from_paths(
+    name: &str,
+    folder_name: Option<&str>,
+    mods_path: &Path,
+    disabled_path: &Path,
+) -> std::result::Result<bool, String> {
+    validate_mod_root_pair(mods_path, disabled_path, "delete mod files")?;
+
     // Scan to find the mod and get its actual file paths. Match by
     // folder_name first (unique on disk), then by display name as a
     // fallback for legacy callers.
-    let all_mods: Vec<ModInfo> = scan_mods(&mods_path)
+    let all_mods: Vec<ModInfo> = scan_mods(mods_path)
         .into_iter()
-        .chain(scan_disabled_mods(&disabled_path).into_iter())
+        .chain(scan_disabled_mods(disabled_path).into_iter())
         .collect();
 
-    let found = if let Some(ref folder) = folder_name {
-        all_mods.iter().find(|m| m.folder_name.as_deref() == Some(folder.as_str()))
+    let found = if let Some(folder) = folder_name {
+        all_mods.iter().find(|m| m.folder_name.as_deref() == Some(folder))
     } else {
         all_mods.iter().find(|m| m.name == name)
     };
 
     if let Some(info) = found {
-        let base_path = if info.enabled { &mods_path } else { &disabled_path };
+        let base_path = if info.enabled { mods_path } else { disabled_path };
 
         // Collect parent dirs to clean up later
         let mut parent_dirs = std::collections::HashSet::new();
 
         // Delete each file the mod owns
         for file_rel in &info.files {
-            let normalized = file_rel.replace('\\', "/");
-            let file_path = base_path.join(&normalized);
+            let Some(rel_path) = safe_mod_relative_path(file_rel) else {
+                log::warn!(
+                    "Skipping unsafe path '{}' while deleting mod '{}'",
+                    file_rel,
+                    info.name
+                );
+                continue;
+            };
+            let file_path = base_path.join(&rel_path);
             if file_path.is_dir() {
                 let _ = fs::remove_dir_all(&file_path);
             } else if file_path.exists() {
                 let _ = fs::remove_file(&file_path);
             }
             // Track parent directory for cleanup
-            if let Some(parent_rel) = Path::new(&normalized).parent() {
+            if let Some(parent_rel) = rel_path.parent() {
                 if !parent_rel.as_os_str().is_empty() {
                     parent_dirs.insert(base_path.join(parent_rel));
                 }
@@ -2085,14 +2095,13 @@ pub fn delete_mod_cmd(
         }
 
         log::info!("Deleted mod '{}' ({} files)", name, info.files.len());
-        refresh_active_profile_manifest(&state);
         return Ok(true);
     }
 
     // Fallback: fuzzy name match directly on filesystem
     let norm = normalize_name(&name);
     let mut found = false;
-    for search_path in [&mods_path, &disabled_path] {
+    for search_path in [mods_path, disabled_path] {
         // Check for exact-name subdirectory
         let sub_dir = search_path.join(&name);
         if sub_dir.is_dir() {
@@ -2127,7 +2136,6 @@ pub fn delete_mod_cmd(
         return Err(format!("Could not find files for mod '{}' to delete", name));
     }
     log::info!("Deleted mod '{}' via fallback matching", name);
-    refresh_active_profile_manifest(&state);
     Ok(true)
 }
 
@@ -2179,7 +2187,6 @@ pub fn enable_all_mods(state: tauri::State<'_, AppState>) -> std::result::Result
     if !errors.is_empty() {
         log::error!("Some mods failed to enable: {:?}", errors);
     }
-    refresh_active_profile_manifest(&state);
     Ok(true)
 }
 
@@ -2231,7 +2238,6 @@ pub fn disable_all_mods(state: tauri::State<'_, AppState>) -> std::result::Resul
     if !errors.is_empty() {
         log::error!("Some mods failed to disable: {:?}", errors);
     }
-    refresh_active_profile_manifest(&state);
     Ok(true)
 }
 
@@ -2244,8 +2250,23 @@ pub fn delete_all_mods(state: tauri::State<'_, AppState>) -> std::result::Result
     let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?.clone();
     drop(s);
 
+    let count = delete_all_mods_from_paths(&mods_path, &disabled_path)?;
+    log::info!("Deleted all mods ({} items)", count);
+    // Do not refresh the active profile here. Bulk delete is often used as
+    // a reset/repair staging step before re-activating the profile; rewriting
+    // the active manifest to an empty mod list would make that recovery
+    // impossible. Ordinary disk mutations create drift instead.
+    Ok(count)
+}
+
+fn delete_all_mods_from_paths(
+    mods_path: &Path,
+    disabled_path: &Path,
+) -> std::result::Result<u32, String> {
+    validate_mod_root_pair(mods_path, disabled_path, "delete all mods")?;
+
     let mut count = 0u32;
-    for search_path in [&mods_path, &disabled_path] {
+    for search_path in [mods_path, disabled_path] {
         if let Ok(entries) = fs::read_dir(search_path) {
             for entry in entries.flatten() {
                 let path = entry.path();
@@ -2258,9 +2279,36 @@ pub fn delete_all_mods(state: tauri::State<'_, AppState>) -> std::result::Result
             }
         }
     }
-    log::info!("Deleted all mods ({} items)", count);
-    refresh_active_profile_manifest(&state);
     Ok(count)
+}
+
+fn validate_mod_root_pair(
+    mods_path: &Path,
+    disabled_path: &Path,
+    operation: &str,
+) -> std::result::Result<(), String> {
+    let mods_name_ok = path_file_name_eq(mods_path, "mods");
+    let disabled_name_ok = path_file_name_eq(disabled_path, "mods_disabled");
+    let same_parent = mods_path.parent().is_some()
+        && mods_path.parent() == disabled_path.parent();
+
+    if mods_name_ok && disabled_name_ok && same_parent {
+        Ok(())
+    } else {
+        Err(format!(
+            "Refusing to {}: expected sibling 'mods' and 'mods_disabled' folders, got '{}' and '{}'",
+            operation,
+            mods_path.display(),
+            disabled_path.display()
+        ))
+    }
+}
+
+fn path_file_name_eq(path: &Path, expected: &str) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.eq_ignore_ascii_case(expected))
+        .unwrap_or(false)
 }
 
 /// Install a mod from a local file (zip / 7z / rar archive).
@@ -2279,7 +2327,6 @@ pub fn install_mod_from_file(path: String, state: tauri::State<'_, AppState>) ->
     // any edits the user makes in the meantime. No preservation pass
     // happens here — there's nothing to preserve from.
     snapshot_after_fresh_install(&result, &mods_path, &config_path);
-    refresh_active_profile_manifest(&state);
     Ok(result)
 }
 
@@ -3236,5 +3283,201 @@ mod config_snapshot_tests {
             "post-update snapshot must reflect the actual on-disk file (user's edit), \
              not the upstream's shipped default"
         );
+    }
+}
+
+#[cfg(test)]
+mod profile_manifest_refresh_tests {
+    use super::*;
+    use crate::profiles::{load_profile, save_profile, Profile, ProfileMod};
+
+    fn write_test_mod(mods_path: &Path, folder: &str, version: &str) {
+        let dir = mods_path.join(folder);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join(format!("{}.json", folder)),
+            format!(
+                r#"{{
+  "id": "{folder}",
+  "name": "{folder}",
+  "version": "{version}",
+  "author": "qa"
+}}"#,
+                folder = folder,
+                version = version,
+            ),
+        )
+        .unwrap();
+        fs::write(dir.join(format!("{}.dll", folder)), b"dll").unwrap();
+    }
+
+    fn profile_with_mod(name: &str, mod_name: &str, version: &str) -> Profile {
+        let now = chrono::Utc::now();
+        Profile {
+            name: name.into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![ProfileMod {
+                name: mod_name.into(),
+                version: version.into(),
+                source: None,
+                hash: None,
+                files: vec![
+                    format!("{}/{}.json", mod_name, mod_name),
+                    format!("{}/{}.dll", mod_name, mod_name),
+                ],
+                folder_name: Some(mod_name.into()),
+                mod_id: Some(mod_name.into()),
+                enabled: true,
+                bundle_url: None,
+                bundle_sha256: None,
+            }],
+            created_at: now,
+            updated_at: now,
+            public: None,
+        }
+    }
+
+    #[test]
+    fn delete_all_mods_does_not_rewrite_active_profile_manifest_to_empty() {
+        let game_tmp = tempfile::tempdir().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let mods_path = game_tmp.path().join("mods");
+        let disabled_path = game_tmp.path().join("mods_disabled");
+        let profiles_path = config_tmp.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        write_test_mod(&mods_path, "BaseLib", "v3.1.2");
+        save_profile(
+            &profile_with_mod("Active Pack", "BaseLib", "v3.1.2"),
+            &profiles_path,
+        )
+        .unwrap();
+
+        let deleted =
+            delete_all_mods_from_paths(&mods_path, &disabled_path).expect("bulk delete succeeds");
+
+        assert_eq!(deleted, 1);
+        assert!(
+            fs::read_dir(&mods_path).unwrap().next().is_none(),
+            "bulk delete should clear the active mods folder"
+        );
+        assert!(
+            fs::read_dir(&disabled_path).unwrap().next().is_none(),
+            "bulk delete should leave the disabled mods folder empty too"
+        );
+
+        let profile = load_profile("Active Pack", &profiles_path).unwrap();
+        assert!(
+            profile.mods.iter().any(|m| m.name == "BaseLib"),
+            "delete_all_mods must not overwrite the active profile manifest with an empty snapshot"
+        );
+    }
+
+    #[test]
+    fn delete_single_mod_does_not_rewrite_active_profile_manifest() {
+        let game_tmp = tempfile::tempdir().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let mods_path = game_tmp.path().join("mods");
+        let disabled_path = game_tmp.path().join("mods_disabled");
+        let profiles_path = config_tmp.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        write_test_mod(&mods_path, "BaseLib", "v3.1.2");
+        save_profile(
+            &profile_with_mod("Active Pack", "BaseLib", "v3.1.2"),
+            &profiles_path,
+        )
+        .unwrap();
+
+        delete_mod_from_paths(
+            "BaseLib",
+            Some("BaseLib"),
+            &mods_path,
+            &disabled_path,
+        )
+        .expect("single delete succeeds");
+
+        assert!(
+            fs::read_dir(&mods_path).unwrap().next().is_none(),
+            "single delete should remove the mod from disk"
+        );
+
+        let profile = load_profile("Active Pack", &profiles_path).unwrap();
+        assert_eq!(
+            profile.mods.len(),
+            1,
+            "delete_mod must leave the saved manifest intact so re-activating the profile can restore it"
+        );
+        assert_eq!(profile.mods[0].name, "BaseLib");
+        assert_eq!(profile.mods[0].version, "v3.1.2");
+    }
+
+    #[test]
+    fn delete_mod_files_by_info_ignores_paths_that_escape_mods_dir() {
+        let game_tmp = tempfile::tempdir().unwrap();
+        let mods_path = game_tmp.path().join("mods");
+        fs::create_dir_all(&mods_path).unwrap();
+        let protected = game_tmp.path().join("SlayTheSpire2.exe");
+        fs::write(&protected, b"game binary").unwrap();
+
+        let info = ModInfo {
+            name: "BadManifest".into(),
+            version: "1.0.0".into(),
+            description: String::new(),
+            enabled: true,
+            files: vec!["../SlayTheSpire2.exe".into(), "BadManifest/BadManifest.dll".into()],
+            source: None,
+            hash: None,
+            dependencies: vec![],
+            size_bytes: 0,
+            folder_name: Some("BadManifest".into()),
+            mod_id: Some("BadManifest".into()),
+            github_url: None,
+            nexus_url: None,
+            pinned: false,
+            min_game_version: None,
+            author: None,
+            note: None,
+            custom_url: None,
+        };
+
+        let mod_dir = mods_path.join("BadManifest");
+        fs::create_dir_all(&mod_dir).unwrap();
+        fs::write(mod_dir.join("BadManifest.dll"), b"dll").unwrap();
+
+        delete_mod_files_by_info(&info, &mods_path);
+
+        assert!(
+            protected.exists(),
+            "mod cleanup must never follow profile file paths outside the mods directory"
+        );
+        assert!(
+            !mod_dir.exists(),
+            "valid mod-owned empty folders may still be cleaned up"
+        );
+    }
+
+    #[test]
+    fn delete_all_mods_refuses_non_mod_roots() {
+        let game_tmp = tempfile::tempdir().unwrap();
+        let game_root = game_tmp.path();
+        let disabled_path = game_root.join("mods_disabled");
+        fs::create_dir_all(&disabled_path).unwrap();
+        let protected = game_root.join("SlayTheSpire2.exe");
+        fs::write(&protected, b"game binary").unwrap();
+
+        let err = delete_all_mods_from_paths(game_root, &disabled_path)
+            .expect_err("bulk delete must reject paths that are not the mods folder");
+
+        assert!(
+            err.contains("Refusing to delete all mods"),
+            "error should explain the safety refusal, got: {err}"
+        );
+        assert!(protected.exists(), "game-root files must be left untouched");
     }
 }

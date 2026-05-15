@@ -32,6 +32,17 @@ const MAX_BACKUPS: usize = 5;
 /// `backup_dir` named `backup_YYYY-MM-DD_HH-MM-SS`.
 /// Returns the backup directory name.
 pub fn create_backup(mods_path: &Path, backup_dir: &Path) -> Result<String> {
+    create_backup_preserving(mods_path, backup_dir, None)
+}
+
+/// Create a backup while keeping a named restore target safe from retention
+/// pruning. Used by the pre-restore safety backup flow: creating the safety
+/// backup must not delete the backup the user is actively trying to restore.
+pub fn create_backup_preserving(
+    mods_path: &Path,
+    backup_dir: &Path,
+    preserve_name: Option<&str>,
+) -> Result<String> {
     let timestamp = Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
     let backup_name = format!("backup_{}", timestamp);
     let dest = backup_dir.join(&backup_name);
@@ -47,15 +58,18 @@ pub fn create_backup(mods_path: &Path, backup_dir: &Path) -> Result<String> {
 
     log::info!("Backup created: {}", dest.display());
 
-    if let Err(e) = prune_old_backups(backup_dir, MAX_BACKUPS) {
+    if let Err(e) = prune_old_backups_preserving(backup_dir, MAX_BACKUPS, preserve_name) {
         log::warn!("Retention pruning failed: {}", e);
     }
 
     Ok(backup_name)
 }
 
-/// Keep the newest `keep` backups in `backup_dir`, deleting the rest.
-fn prune_old_backups(backup_dir: &Path, keep: usize) -> io::Result<()> {
+fn prune_old_backups_preserving(
+    backup_dir: &Path,
+    keep: usize,
+    preserve_name: Option<&str>,
+) -> io::Result<()> {
     if !backup_dir.exists() {
         return Ok(());
     }
@@ -69,7 +83,20 @@ fn prune_old_backups(backup_dir: &Path, keep: usize) -> io::Result<()> {
 
     names.sort_by(|a, b| b.cmp(a));
 
-    for name in names.into_iter().skip(keep) {
+    let preserve_name = preserve_name.filter(|name| name.starts_with("backup_"));
+    let mut keep_names: Vec<String> = names.iter().take(keep).cloned().collect();
+    if keep > 0 {
+        if let Some(preserve) = preserve_name {
+            if names.iter().any(|name| name == preserve)
+                && !keep_names.iter().any(|name| name == preserve)
+            {
+                keep_names.pop();
+                keep_names.push(preserve.to_string());
+            }
+        }
+    }
+
+    for name in names.into_iter().filter(|name| !keep_names.contains(name)) {
         log::info!("Retention: pruning old backup '{}'", name);
         if let Err(e) = fs::remove_dir_all(backup_dir.join(&name)) {
             log::warn!("Failed to prune backup '{}': {}", name, e);
@@ -354,9 +381,40 @@ mod backup_pure_tests {
             let dir = backups.path().join(format!("backup_2026-0{}-01_10-00-00", i + 1));
             fs::create_dir_all(&dir).unwrap();
         }
-        prune_old_backups(backups.path(), 3).unwrap();
+        prune_old_backups_preserving(backups.path(), 3, None).unwrap();
         let remaining: Vec<_> = fs::read_dir(backups.path()).unwrap().collect();
         assert_eq!(remaining.len(), 3);
+    }
+
+    #[test]
+    fn pre_restore_backup_pruning_preserves_restore_target() {
+        let mods = tempfile::tempdir().unwrap();
+        let backups = tempfile::tempdir().unwrap();
+        fs::create_dir_all(mods.path().join("CurrentMod")).unwrap();
+        fs::write(mods.path().join("CurrentMod/CurrentMod.json"), b"{}").unwrap();
+
+        let restore_target = "backup_2026-01-01_10-00-00";
+        for ts in [
+            "2026-01-01_10-00-00",
+            "2026-02-01_10-00-00",
+            "2026-03-01_10-00-00",
+            "2026-04-01_10-00-00",
+            "2026-05-01_10-00-00",
+        ] {
+            let dir = backups.path().join(format!("backup_{}", ts));
+            fs::create_dir_all(&dir).unwrap();
+        }
+
+        create_backup_preserving(mods.path(), backups.path(), Some(restore_target)).unwrap();
+
+        assert!(
+            backups.path().join(restore_target).exists(),
+            "creating the pre-restore backup must not prune the backup being restored"
+        );
+        assert!(
+            list_backups(backups.path()).len() <= MAX_BACKUPS,
+            "retention should still keep the list bounded by pruning another old backup"
+        );
     }
 }
 
@@ -370,6 +428,20 @@ pub fn create_backup_cmd(state: tauri::State<'_, AppState>) -> std::result::Resu
     let backup_dir = s.config_path.join("backups");
     let _ = fs::create_dir_all(&backup_dir);
     create_backup(mods_path, &backup_dir).map_err(|e| e.to_string())
+}
+
+/// Create a backup while preserving another named backup from retention.
+#[tauri::command]
+pub fn create_backup_preserving_cmd(
+    preserve_name: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<String, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
+    let backup_dir = s.config_path.join("backups");
+    let _ = fs::create_dir_all(&backup_dir);
+    create_backup_preserving(mods_path, &backup_dir, Some(&preserve_name))
+        .map_err(|e| e.to_string())
 }
 
 /// List all available backups.

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { importShareCodeSmart } from './shareImport';
+import {
+  importShareCodeSmart,
+  installSharedProfileWithConfirm,
+} from './shareImport';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
 
 /**
@@ -169,5 +172,114 @@ describe('importShareCodeSmart', () => {
       thrown = e;
     }
     expect(String(thrown)).toMatch(/Invalid share code/);
+  });
+
+  it('Case 3: subscribed but not active + rejected confirm cancels without switching', async () => {
+    const outcome = await importShareCodeSmart('alice/AA5A-315D-61AE', {
+      confirm: confirmReject,
+      subscriptions: [{
+        share_id: 'alice/AA5A-315D-61AE',
+        profile_name: 'Imported',
+        last_synced: '2026-05-01',
+        last_known_remote_sha: 'sha',
+        subscribed_at: '2026-01-01',
+      } as any],
+      activeProfile: 'OtherPack',
+      subUpdates: [],
+    });
+    expect(outcome.kind).toBe('cancelled');
+    expect(getInvokeCalls().some((c) => c.cmd === 'switch_profile')).toBe(false);
+  });
+
+  it('Case 4: pending update summary handles updated and removed mods', async () => {
+    registerInvokeHandler('apply_subscription_update', () => ({
+      name: 'Imported',
+      mods: [],
+      created_at: '2026-01-01',
+    }));
+    const outcome = await importShareCodeSmart('alice/AA5A-315D-61AE', {
+      confirm: confirmAccept,
+      subscriptions: [{
+        share_id: 'alice/AA5A-315D-61AE',
+        profile_name: 'Imported',
+        last_synced: '2026-05-01',
+        last_known_remote_sha: 'sha',
+        subscribed_at: '2026-01-01',
+      } as any],
+      activeProfile: 'Imported',
+      subUpdates: [{
+        share_id: 'alice/AA5A-315D-61AE',
+        profile_name: 'Imported',
+        has_update: true,
+        added_mods: [],
+        updated_mods: [{
+          name: 'Changed',
+          old_version: '1.0.0',
+          new_version: '1.1.0',
+        }],
+        removed_mods: ['Removed'],
+        remote_profile: null,
+      }],
+    });
+    expect(outcome.kind).toBe('synced');
+  });
+
+  it('Case 4: pending update summary handles empty per-mod details', async () => {
+    registerInvokeHandler('apply_subscription_update', () => ({
+      name: 'Imported',
+      mods: [],
+      created_at: '2026-01-01',
+    }));
+    const outcome = await importShareCodeSmart('alice/AA5A-315D-61AE', {
+      confirm: confirmAccept,
+      subscriptions: [{
+        share_id: 'alice/AA5A-315D-61AE',
+        profile_name: 'Imported',
+        last_synced: '2026-05-01',
+        last_known_remote_sha: 'sha',
+        subscribed_at: '2026-01-01',
+      } as any],
+      activeProfile: 'Imported',
+      subUpdates: [{
+        share_id: 'alice/AA5A-315D-61AE',
+        profile_name: 'Imported',
+        has_update: true,
+        added_mods: [],
+        updated_mods: [],
+        removed_mods: [],
+        remote_profile: null,
+      }],
+    });
+    expect(outcome.kind).toBe('synced');
+  });
+
+  it('install confirmation handles manifests without creator or source URLs', async () => {
+    registerInvokeHandler('fetch_shared_profile_cmd', () => ({
+      name: 'Source-less Pack',
+      mods: [
+        {
+          name: 'Manual Mod',
+          version: 'unknown',
+          source: null,
+          bundle_url: null,
+          files: [],
+          enabled: true,
+        },
+      ],
+      created_at: '2026-01-01',
+    }));
+    registerInvokeHandler('install_shared_profile', () => ({
+      name: 'Source-less Pack',
+      mods: [],
+      created_at: '2026-01-01',
+    }));
+
+    const profile = await installSharedProfileWithConfirm(
+      'alice/AA5A-315D-61AE',
+      confirmAccept,
+    );
+
+    expect(profile?.name).toBe('Source-less Pack');
+    expect(getInvokeCalls().filter((c) => c.cmd === 'install_shared_profile')).toHaveLength(1);
   });
 });

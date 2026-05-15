@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { countGithubUpdates, isUpToDate } from '../lib/auditState';
+import { nexusFilesUrl } from '../lib/nexusUrl';
 import {
   Search,
   Upload,
@@ -276,23 +277,6 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
     } finally {
       setQuickAdding(false);
     }
-  }
-
-  function nexusFilesUrl(input: string): string | null {
-    try {
-      const u = new URL(input);
-      if (u.host.includes('nexusmods.com')) {
-        const parts = u.pathname.split('/').filter(Boolean);
-        if (parts.length >= 3 && parts[1] === 'mods') {
-          return `https://www.nexusmods.com/${parts[0]}/mods/${parts[2]}?tab=files`;
-        }
-      }
-    } catch {
-      // not a full URL — fall through to shorthand
-    }
-    const m = input.match(/^nexus:([^/]+)\/mods\/(\d+)/);
-    if (m) return `https://www.nexusmods.com/${m[1]}/mods/${m[2]}?tab=files`;
-    return null;
   }
 
   async function handleEnableAll() {

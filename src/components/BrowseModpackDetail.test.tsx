@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { listen as listenMock } from '@tauri-apps/api/event';
 import { openUrl as openUrlMock } from '@tauri-apps/plugin-opener';
 
 import { BrowseModpackDetail } from './BrowseModpackDetail';
@@ -228,6 +229,54 @@ describe('<BrowseModpackDetail>', () => {
     // While pending: button text flips to "Installing…" and is disabled.
     const busyBtn = await screen.findByRole('button', { name: /Installing/i });
     expect(busyBtn).toBeDisabled();
+    resolveInstall(profile);
+  });
+
+  it('install-progress listener renders the current download and progress bar while pending', async () => {
+    fetchMock.mockResolvedValueOnce(profile);
+    let resolveInstall!: (p: Profile) => void;
+    installMock.mockReturnValueOnce(
+      new Promise<Profile>((res) => {
+        resolveInstall = res;
+      }),
+    );
+    const user = userEvent.setup();
+    renderDetail();
+    await screen.findByText('ModAlpha');
+    await user.click(screen.getByRole('button', { name: /Install/i }));
+    await screen.findByRole('button', { name: /Installing/i });
+
+    const listenSpy = vi.mocked(listenMock);
+    const reg = [...listenSpy.mock.calls].reverse().find((c) => c[0] === 'modpack-install-progress');
+    expect(reg).toBeDefined();
+    const handler = reg![1] as (e: { payload: unknown }) => void;
+    handler({
+      payload: {
+        profile_name: 'Cool Pack',
+        stage: 'downloading',
+        current: 2,
+        total: 5,
+        mod_name: 'BigMod',
+      },
+    });
+
+    await screen.findByText(/Downloading mod 2 of 5: BigMod/);
+    const bar = screen.getByRole('progressbar', { name: /Installing Cool Pack/i });
+    expect(bar).toHaveAttribute('aria-valuenow', '40');
+
+    handler({
+      payload: {
+        profile_name: 'Cool Pack',
+        stage: 'done',
+        current: 5,
+        total: 5,
+        mod_name: null,
+      },
+    });
+    await waitFor(() => {
+      expect(screen.queryByText(/Downloading mod 2 of 5/)).toBeNull();
+    });
+
     resolveInstall(profile);
   });
 

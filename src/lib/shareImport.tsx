@@ -350,8 +350,8 @@ export async function importShareCodeSmart(
         You already have <b>{match.profile_name}</b> ({pretty}) installed.
       </div>
       <div style={{ marginTop: 6, opacity: 0.85 }}>
-        Activate it now to switch your active modpack? Your current pack
-        stays on disk and you can switch back any time.
+        Activate it now to switch your active modpack? You can switch back to
+        your current saved manifest any time.
       </div>
     </div>
   );

@@ -8,6 +8,7 @@ import {
   checkModDependencies,
   checkSubscriptionUpdates,
   createBackup,
+  createBackupPreserving,
   createProfile,
   deleteAllMods,
   deleteBackup,
@@ -379,6 +380,11 @@ describe('useTauri wrappers — command names + arg shapes', () => {
     registerInvokeFallback(() => null);
     await createBackup();
     expect(lastCall().cmd).toBe('create_backup_cmd');
+    await createBackupPreserving('backup_2026-05-12_15-00-00');
+    expect(lastCall()).toEqual({
+      cmd: 'create_backup_preserving_cmd',
+      args: { preserveName: 'backup_2026-05-12_15-00-00' },
+    });
     await listBackups();
     expect(lastCall().cmd).toBe('list_backups_cmd');
     await restoreBackup('b1');

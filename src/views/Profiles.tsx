@@ -16,6 +16,7 @@ import {
   AlertTriangle,
   MessageSquare,
   Link as LinkIcon,
+  Save,
 } from 'lucide-react';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
@@ -68,6 +69,7 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
   const [publishTarget, setPublishTarget] = useState<{ profile: Profile; isReshare: boolean } | null>(null);
   const [driftMap, setDriftMap] = useState<Record<string, ProfileDrift>>({});
   const [switchingProfile, setSwitchingProfile] = useState<string | null>(null);
+  const [savingProfile, setSavingProfile] = useState<string | null>(null);
   // v5 batch 3 — Following / Published tabs.
   // "Following" = every profile you have. "Published" = ones you've shared (have a share code).
   const [tab, setTab] = useState<'following' | 'published'>('following');
@@ -171,6 +173,17 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
   }
 
   async function handleSwitch(name: string) {
+    if (activeProfile && activeProfile !== name && driftMap[activeProfile]?.has_drift) {
+      const ok = await confirm({
+        title: `Switch away from "${activeProfile}"?`,
+        body: 'This profile has unsaved changes on disk. Switching applies another manifest and those working changes will not be saved to the current profile.',
+        warning: 'Use Save changes first if you want the current install to become the profile manifest.',
+        confirmLabel: 'Switch anyway',
+        cancelLabel: 'Stay here',
+      });
+      if (!ok) return;
+    }
+
     try {
       setSwitchingProfile(name);
       const result = await switchProfile(name);
@@ -200,10 +213,9 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
   }
 
   /**
-   * Drift Repair — same as Switch, but ALSO deletes orphan mod files (on
-   * disk but not in the manifest). Surfaces the orphan list to the user
-   * via a confirm dialog before deleting; warns when there's nothing to
-   * delete (drift is purely from missing mods or version mismatch).
+   * Drift Repair — same as Switch, but with "restore from manifest" intent:
+   * missing/version-drifted profile mods are restored, and active extras are
+   * moved to mods_disabled. It never deletes a user's mod library.
    */
   async function handleRepairDrift(name: string) {
     const drift = driftMap[name];
@@ -216,15 +228,12 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
     const ok = await confirm({
       title: `Repair "${name}"?`,
       body: orphanCount > 0
-        ? `Re-applies the manifest and deletes ${orphanCount} mod file(s) that aren't in the profile: ${orphanList}.`
-        : 'Re-applies the manifest. No orphan files to delete — drift will be fixed by toggling state.',
-      warning: orphanCount > 0
-        ? 'Orphan files will be permanently removed. Restore from a backup if you change your mind.'
-        : undefined,
+        ? `Re-applies the manifest and moves ${orphanCount} active mod(s) that aren't in the profile to mods_disabled: ${orphanList}.`
+        : 'Re-applies the manifest. No active extra mods to disable — drift will be fixed by toggling state.',
       confirmLabel: 'Repair',
-      destructive: orphanCount > 0,
+      destructive: false,
       checkbox: orphanCount > 0
-        ? { label: 'Make a backup before repairing', defaultChecked: true }
+        ? { label: 'Make a backup before repairing', defaultChecked: false }
         : undefined,
     });
     if (!ok) return;
@@ -241,8 +250,9 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
       await loadProfiles();
 
       const summary: string[] = [];
-      if (result.deleted_orphans.length > 0) {
-        summary.push(`removed ${result.deleted_orphans.length} orphan mod${result.deleted_orphans.length === 1 ? '' : 's'}`);
+      const disabledOrphans = result.disabled_orphans ?? [];
+      if (disabledOrphans.length > 0) {
+        summary.push(`disabled ${disabledOrphans.length} extra mod${disabledOrphans.length === 1 ? '' : 's'}`);
       }
       if (result.downloaded > 0) summary.push(`downloaded ${result.downloaded}`);
       if (result.failed_downloads.length > 0) {
@@ -260,6 +270,36 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
       toastCtx.error(`Repair failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setSwitchingProfile(null);
+    }
+  }
+
+  async function handleSaveDrift(name: string) {
+    if (savingProfile) return;
+    try {
+      setSavingProfile(name);
+      const profile = await snapshotProfile(name);
+      setProfiles((prev) => {
+        const exists = prev.some((p) => p.name === profile.name);
+        return exists
+          ? prev.map((p) => (p.name === profile.name ? profile : p))
+          : [...prev, profile];
+      });
+      setDriftMap((prev) => {
+        const next = { ...prev };
+        delete next[name];
+        return next;
+      });
+      await refreshAll();
+      await loadProfiles();
+      toastCtx.success(
+        shareInfoMap[name]
+          ? `Saved changes to "${name}". Re-share when you're ready to publish them.`
+          : `Saved changes to "${name}"`
+      );
+    } catch (e) {
+      toastCtx.error(`Failed to save changes: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSavingProfile(null);
     }
   }
 
@@ -507,14 +547,29 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
                 driftMap[activeProfile].toggled.length && `${driftMap[activeProfile].toggled.length} toggled`,
                 (driftMap[activeProfile].version_changed?.length ?? 0) && `${driftMap[activeProfile].version_changed.length} version-changed`,
               ].filter(Boolean).join(' · ') || 'profile and disk are out of sync'}
-              {' '}since the manifest. Repair to match exactly.
+              {' '}since the manifest. Save changes to update the profile, or Repair to restore it.
             </div>
           </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => handleSaveDrift(activeProfile)}
+            title="Save current disk state into this profile manifest"
+            disabled={savingProfile !== null}
+          >
+            {savingProfile === activeProfile ? (
+              <RefreshCw size={12} className="animate-spin" />
+            ) : (
+              <Save size={12} />
+            )}
+            Save changes
+          </Button>
           <Button
             variant="ghost"
             size="sm"
             onClick={() => handleRepairDrift(activeProfile)}
-            title="Re-apply manifest and delete orphan mod files"
+            title="Re-apply manifest and disable extra active mods"
+            disabled={savingProfile !== null}
           >
             Repair
           </Button>
@@ -881,8 +936,8 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
           // Optimistically patch share info so the row flips Share→Re-share
           // immediately even before the reload below settles.
           setShareInfoMap((prev) => ({ ...prev, [publishTarget!.profile.name]: result }));
-          // Re-share takes a fresh snapshot of disk into the profile, so
-          // after it finishes the profile and disk should match again.
+          // Share/Re-share takes a fresh snapshot of disk into the profile,
+          // so after it finishes the profile and disk should match again.
           // Reload the profile list — that bumps the `profiles` state
           // reference, which trips the effect that re-derives drift, so
           // the "out of sync" banner clears immediately instead of

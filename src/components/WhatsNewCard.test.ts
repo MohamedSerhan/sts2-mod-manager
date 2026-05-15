@@ -18,9 +18,10 @@ function blocks(md: string): Block[] {
 }
 
 describe('parseSimpleMarkdown', () => {
-  it('promotes ### lines to subhead blocks', () => {
-    expect(blocks('### Added\n')).toEqual<Block[]>([
+  it('promotes ### lines with content to subhead blocks', () => {
+    expect(blocks('### Added\n\n- One visible update.\n')).toEqual<Block[]>([
       { kind: 'subhead', text: 'Added' },
+      { kind: 'bullets', items: ['One visible update.'] },
     ]);
   });
 
@@ -73,6 +74,16 @@ describe('parseSimpleMarkdown', () => {
     // happens in renderInline. We assert the markdown survives intact.
     expect(blocks('- run `npm run qa:smoke` to reproduce\n')).toEqual<Block[]>([
       { kind: 'bullets', items: ['run `npm run qa:smoke` to reproduce'] },
+    ]);
+  });
+
+  it('drops empty changelog sections before rendering', () => {
+    const md = `### Added\n\n- Visible addition.\n\n### Changed\n\n### Fixed\n\n- Visible fix.\n\n### Security\n\n---\n`;
+    expect(blocks(md)).toEqual<Block[]>([
+      { kind: 'subhead', text: 'Added' },
+      { kind: 'bullets', items: ['Visible addition.'] },
+      { kind: 'subhead', text: 'Fixed' },
+      { kind: 'bullets', items: ['Visible fix.'] },
     ]);
   });
 });

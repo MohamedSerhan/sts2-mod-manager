@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Plus, RefreshCw } from 'lucide-react';
-import { listProfiles, switchProfile, checkSubscriptionUpdates } from '../hooks/useTauri';
+import { listProfiles, switchProfile, checkSubscriptionUpdates, getProfileDrift } from '../hooks/useTauri';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
+import { useConfirm } from './ConfirmDialog';
 import type { Profile, SubscriptionUpdate } from '../types';
 
 // v5 — Profile switcher popover. Opens from the top-bar profile chip.
@@ -32,6 +33,7 @@ function modCount(profile: Profile): number {
 export function ProfileSwitcher({ onClose, onAddPack, onManageAll }: Props) {
   const { activeProfile, setActiveProfile, refreshAll } = useApp();
   const toast = useToast();
+  const confirm = useConfirm();
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [updates, setUpdates] = useState<SubscriptionUpdate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -88,6 +90,23 @@ export function ProfileSwitcher({ onClose, onAddPack, onManageAll }: Props) {
     if (name === activeProfile) {
       onClose();
       return;
+    }
+    if (activeProfile) {
+      try {
+        const drift = await getProfileDrift(activeProfile);
+        if (drift.has_drift) {
+          const ok = await confirm({
+            title: `Switch away from "${activeProfile}"?`,
+            body: 'This profile has unsaved changes on disk. Switching applies another manifest and those working changes will not be saved to the current profile.',
+            warning: 'Open Profiles and use Save changes first if you want to keep them.',
+            confirmLabel: 'Switch anyway',
+            cancelLabel: 'Stay here',
+          });
+          if (!ok) return;
+        }
+      } catch {
+        // Drift is advisory. If it cannot be checked, keep switching usable.
+      }
     }
     setSwitching(name);
     try {

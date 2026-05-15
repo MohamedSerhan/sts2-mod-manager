@@ -4,6 +4,7 @@ import { quickAddMod } from '../hooks/useTauri';
 import { useToast } from '../contexts/ToastContext';
 import { useApp } from '../contexts/AppContext';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import { nexusFilesUrl, parseNexusModInput } from '../lib/nexusUrl';
 
 // v5 batch 3 — Quick-Add by URL modal. Paste a GitHub repo URL or a Nexus
 // mod page; we detect the source from the input and preview before fetching.
@@ -33,31 +34,15 @@ function detect(input: string): Detected {
   const ghBare = v.match(/^([^/\s]+\/[^/\s]+)$/);
   if (ghBare && !v.includes('.')) return { kind: 'github', display: ghBare[1], helper: 'GitHub repo (assumed) · latest release will be installed' };
 
-  // Nexus patterns
-  const nxUrl = v.match(/nexusmods\.com\/([^/]+)\/mods\/(\d+)/);
-  if (nxUrl) return { kind: 'nexus', display: `nexusmods.com/${nxUrl[1]}/mods/${nxUrl[2]}`, helper: 'Nexus mod · we\'ll open the Files tab — click Slow Download / Manual' };
-
-  const nxShort = v.match(/^nexus:([^/]+)\/mods\/(\d+)/);
-  if (nxShort) return { kind: 'nexus', display: `${nxShort[1]}/${nxShort[2]}`, helper: 'Nexus mod · we\'ll open the Files tab — click Slow Download / Manual' };
+  const nx = parseNexusModInput(v);
+  if (nx) {
+    const display = /^nexus:/i.test(v)
+      ? `${nx.gameDomain}/${nx.modId}`
+      : `nexusmods.com/${nx.gameDomain}/mods/${nx.modId}`;
+    return { kind: 'nexus', display, helper: 'Nexus mod · we\'ll open the Files tab — click Slow Download / Manual' };
+  }
 
   return { kind: null, display: v, helper: 'Unrecognised URL — paste a GitHub repo or Nexus mod link' };
-}
-
-function nexusFilesUrl(input: string): string | null {
-  try {
-    const u = new URL(input);
-    if (u.host.includes('nexusmods.com')) {
-      const parts = u.pathname.split('/').filter(Boolean);
-      if (parts.length >= 3 && parts[1] === 'mods') {
-        return `https://www.nexusmods.com/${parts[0]}/mods/${parts[2]}?tab=files`;
-      }
-    }
-  } catch {
-    /* ignore */
-  }
-  const m = input.match(/^nexus:([^/]+)\/mods\/(\d+)/);
-  if (m) return `https://www.nexusmods.com/${m[1]}/mods/${m[2]}?tab=files`;
-  return null;
 }
 
 export function QuickAddModal({ open, onClose }: Props) {

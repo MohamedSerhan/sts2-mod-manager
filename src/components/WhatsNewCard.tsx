@@ -119,9 +119,10 @@ export type Block =
   | { kind: 'para'; text: string };
 
 /** A tiny markdown subset: `###` subheadings, `-` / `*` bullet lists, and
- *  paragraphs. Inline `code` spans get rendered as <code>. Anything else
- *  passes through as plain text. Exported for unit tests; the runtime
- *  caller is `WhatsNewCard` below. */
+ *  paragraphs. Empty sections are dropped so release notes do not show
+ *  headings with no user-facing content. Inline formatting is handled by
+ *  the renderer. Exported for unit tests; the runtime caller is
+ *  `WhatsNewCard` below. */
 export function parseSimpleMarkdown(body: string): Block[] {
   const lines = body.split(/\r?\n/);
   const out: Block[] = [];
@@ -174,7 +175,32 @@ export function parseSimpleMarkdown(body: string): Block[] {
   }
   flushPara();
   flushBullets();
-  return out;
+  return dropEmptySections(out);
+}
+
+function blockHasVisibleContent(block: Block): boolean {
+  switch (block.kind) {
+    case 'bullets':
+      return block.items.some((item) => item.trim().length > 0);
+    case 'para':
+      return block.text.trim().length > 0;
+    case 'subhead':
+      return false;
+  }
+}
+
+function dropEmptySections(blocks: Block[]): Block[] {
+  return blocks.filter((block, index) => {
+    if (block.kind !== 'subhead') return true;
+
+    for (let i = index + 1; i < blocks.length; i += 1) {
+      const next = blocks[i];
+      if (next.kind === 'subhead') return false;
+      if (blockHasVisibleContent(next)) return true;
+    }
+
+    return false;
+  });
 }
 
 function BlockRender({ block }: { block: Block }) {
@@ -194,12 +220,26 @@ function BlockRender({ block }: { block: Block }) {
   }
 }
 
-/** Render inline `code` spans. Everything else stays plain text. */
+/** Render inline `code` and **strong** spans. Everything else stays plain text. */
 function renderInline(text: string): React.ReactNode {
   const parts = text.split(/(`[^`]+`)/g);
-  return parts.map((p, i) => {
+  return parts.flatMap((p, i) => {
     if (p.startsWith('`') && p.endsWith('`')) {
-      return <code key={i}>{p.slice(1, -1)}</code>;
+      return <code key={`code-${i}`}>{p.slice(1, -1)}</code>;
+    }
+    return renderStrong(p, `text-${i}`);
+  });
+}
+
+function renderStrong(text: string, keyPrefix: string): React.ReactNode[] {
+  const parts = text.split(/(\*\*[^*]+?\*\*)/g);
+  return parts.map((p, i) => {
+    if (p.startsWith('**') && p.endsWith('**')) {
+      return (
+        <strong key={`${keyPrefix}-strong-${i}`} className="gf-whatsnew-strong">
+          {p.slice(2, -2)}
+        </strong>
+      );
     }
     return p;
   });

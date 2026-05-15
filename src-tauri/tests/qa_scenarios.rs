@@ -777,7 +777,8 @@ fn snapshot_filter_strips_incompatible_when_enabled_preserves_when_none() {
     );
     assert!(
         preserved.mods.iter().any(|m| m.name == "FutureMod"),
-        "FutureMod must survive when the filter is disabled for a non-publishing snapshot."
+        "FutureMod MUST survive when filter is off (None) — \
+         this is the non-publishing snapshot path where stripping = silent data loss."
     );
 }
 
@@ -817,6 +818,7 @@ fn non_publishing_snapshot_preserves_incompatible_mod_already_in_profile() {
     };
     save_profile(&existing, profiles_tmp.path()).expect("seed profile");
 
+    // Simulate a non-publishing snapshot: filter = None.
     let refreshed = snapshot_current_with_paths(
         "active",
         mods_tmp.path(),
@@ -829,7 +831,10 @@ fn non_publishing_snapshot_preserves_incompatible_mod_already_in_profile() {
 
     assert!(
         refreshed.mods.iter().any(|m| m.name == "FutureMod"),
-        "FutureMod was already in the profile and is still on disk, so a non-publishing snapshot must preserve it."
+        "FutureMod was already in the profile and is still on disk — \
+         a non-publishing snapshot MUST NOT strip it (filter=None). \
+         Stripping here causes the mutation → drift → Repair-deletes \
+         silent data loss loop described in the bug report."
     );
 
     let on_disk = load_profile("active", profiles_tmp.path()).expect("reload");

@@ -39,6 +39,7 @@ import {
   unpinMod,
   updateMod,
   createBackup,
+  createBackupPreserving,
   listBackups,
   restoreBackup,
   deleteBackup,
@@ -139,7 +140,7 @@ export function SettingsView() {
     setBackupBusy(name);
     try {
       if (ok.checked) {
-        try { await createBackup(); } catch { /* non-fatal */ }
+        try { await createBackupPreserving(name); } catch { /* non-fatal */ }
       }
       await restoreBackup(name);
       await refreshAll();

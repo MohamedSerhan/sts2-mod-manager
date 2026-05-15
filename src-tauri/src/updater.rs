@@ -1198,6 +1198,8 @@ mod version_helper_tests {
     #[test]
     fn is_mod_asset_recognizes_supported_extensions() {
         assert!(is_mod_asset("BaseLib.zip"));
+        assert!(is_mod_asset("HighlightPotionCards.7z"));
+        assert!(is_mod_asset("legacy-pack.rar"));
         assert!(is_mod_asset("mod.dll"));
         assert!(is_mod_asset("art.pck"));
         assert!(!is_mod_asset("README.md"));
@@ -1290,7 +1292,12 @@ pub struct ModAuditEntry {
 
 /// Valid mod asset extensions for STS2 mods.
 fn is_mod_asset(name: &str) -> bool {
-    name.ends_with(".zip") || name.ends_with(".dll") || name.ends_with(".pck")
+    let lower = name.to_ascii_lowercase();
+    lower.ends_with(".zip")
+        || lower.ends_with(".7z")
+        || lower.ends_with(".rar")
+        || lower.ends_with(".dll")
+        || lower.ends_with(".pck")
 }
 
 /// Audit installed mods against their latest GitHub releases.

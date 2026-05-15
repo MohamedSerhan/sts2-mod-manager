@@ -1826,6 +1826,7 @@ body {
 .gf-whatsnew-body p { margin: 0 0 8px 0; }
 .gf-whatsnew-body p:last-child { margin-bottom: 0; }
 .gf-whatsnew-body code { font-family: ui-monospace, monospace; font-size: 11.5px; background: var(--indigo-deep); padding: 1px 5px; border-radius: 3px; color: var(--ink); }
+.gf-whatsnew-strong { color: var(--ink); font-weight: 700; background: var(--gf-tint); border-radius: 4px; padding: 0 3px; }
 .gf-whatsnew-subhead { font-weight: 700; font-size: 12px; color: var(--ink); text-transform: uppercase; letter-spacing: 0.04em; margin: 10px 0 4px; }
 .gf-whatsnew-subhead:first-child { margin-top: 0; }
 .gf-whatsnew-bullets { margin: 0 0 8px 0; padding-left: 18px; list-style: disc; }

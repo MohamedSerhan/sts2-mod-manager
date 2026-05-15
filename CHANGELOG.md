@@ -27,6 +27,18 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Security
+
+---
+
+## [1.4.0] - 2026-05-15
+
+### Added
+
 - Installing a pack from Browse Modpacks now shows live download progress, including which mod is downloading and how far through the pack you are.
 - The app now remembers a manually selected game folder across restarts, including when you launch the game directly instead of through Steam.
 

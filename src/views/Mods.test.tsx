@@ -493,6 +493,81 @@ describe('<ModsView>', () => {
     expect(anchor!.getAttribute('href')).toContain('?tab=files');
   });
 
+  it('Nexus pill is suppressed when audit row is snoozed', async () => {
+    seedMods([
+      baseMod({
+        name: 'BaseLib',
+        folder_name: 'BaseLib',
+        nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/42',
+        github_url: null,
+      }),
+    ]);
+    registerInvokeHandler('audit_mod_versions', () => [{
+      mod_name: 'BaseLib',
+      folder_name: 'BaseLib',
+      installed_version: '3.1.2',
+      needs_update: true,
+      asset_names: [],
+      releases_scanned: 0,
+      latest_has_assets: false,
+      github_auto_detected: false,
+      pinned: false,
+      snoozed: true,
+      nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/42',
+      nexus_version: '3.2.0',
+      nexus_update_available: true,
+      update_source: 'nexus',
+    }]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Audit mods' }));
+    // Snoozed-update pill renders elsewhere (the dim "Snoozed" tag), but the
+    // actionable Download-from-Nexus button must stay off until the user
+    // unsnoozes via the kebab — same gate the GitHub pill uses.
+    await screen.findByText(/Snoozed/);
+    expect(screen.queryByText(/Download from Nexus/)).toBeNull();
+  });
+
+  it('Nexus pill falls back to manual ?tab=files when the URL is non-standard', async () => {
+    // nexusFilesUrl() returns null for any host that isn't nexusmods.com.
+    // The pill href falls back to a literal `${url}?tab=files` concat so
+    // unusual entries (mirrored hosts, old mod_sources rows) still get a
+    // working click-through instead of silently disappearing.
+    const odd = 'https://nexusmods.example/sts2/mods/42';
+    seedMods([
+      baseMod({
+        name: 'BaseLib',
+        folder_name: 'BaseLib',
+        nexus_url: odd,
+        github_url: null,
+      }),
+    ]);
+    registerInvokeHandler('audit_mod_versions', () => [{
+      mod_name: 'BaseLib',
+      folder_name: 'BaseLib',
+      installed_version: '3.1.2',
+      needs_update: true,
+      asset_names: [],
+      releases_scanned: 0,
+      latest_has_assets: false,
+      github_auto_detected: false,
+      pinned: false,
+      nexus_url: odd,
+      nexus_version: '3.2.0',
+      nexus_update_available: true,
+      update_source: 'nexus',
+    }]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Audit mods' }));
+    const pill = await screen.findByText(/Download from Nexus/);
+    const anchor = pill.closest('a');
+    expect(anchor).not.toBeNull();
+    expect(anchor!.getAttribute('href')).toBe(`${odd}?tab=files`);
+  });
+
   it('Nexus pill is suppressed when audit row is pinned or snoozed', async () => {
     seedMods([
       baseMod({

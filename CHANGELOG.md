@@ -25,6 +25,18 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ## [Unreleased]
 
+### Added
+
+### Changed
+
+### Fixed
+
+### Security
+
+---
+
+## [1.4.1] - 2026-05-15
+
 > **Hotfix patch over 1.4.0.** This release rolls up everything from 1.4.0 and adds the four fixes called out below, addressing modpack profile-tracking and audit-pill issues reported right after 1.4.0 shipped. Players on 1.3.x updating now will see the full 1.4.0 + hotfix changes in one step.
 
 ### Fixed (hotfix)

@@ -994,6 +994,80 @@ describe('<ModsView>', () => {
     });
   });
 
+  it('Source editor reopen shows the saved GitHub value, not the stale manifest URL', async () => {
+    // Pins the "save reverts to old broken link" user complaint: after a
+    // Save, refreshMods re-fetches the mod list, and the backend's enrich
+    // overlays the user-set github_repo onto mod.github_url. When the user
+    // re-opens the editor, ghRepoFromUrl(mod.github_url) MUST show the
+    // value they just saved — not the manifest's original (possibly
+    // broken) URL.
+    let scanCount = 0;
+    registerInvokeHandler('get_installed_mods', () => {
+      scanCount += 1;
+      // First load (and the load triggered by save's refreshMods after it
+      // succeeds) — caller can decide what to return per call.
+      if (scanCount === 1) {
+        return [baseMod({
+          name: 'Multiplayer Potion View',
+          folder_name: 'STS2-MultiPlayerPotionView',
+          github_url: 'https://github.com/wrong/wrong-manifest-url',
+        })];
+      }
+      // After Save, backend enrich applies the user override to github_url.
+      return [baseMod({
+        name: 'Multiplayer Potion View',
+        folder_name: 'STS2-MultiPlayerPotionView',
+        github_url: 'https://github.com/BAKAOLC/STS2-MultiPlayerPotionView',
+      })];
+    });
+    registerInvokeHandler('set_mod_sources_full', () => ({
+      github_repo: 'BAKAOLC/STS2-MultiPlayerPotionView',
+      github_auto_detected: false,
+      nexus_url: null,
+      pinned: false,
+    }));
+
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await waitFor(() => { expect(screen.getByText('Multiplayer Potion View')).toBeInTheDocument(); });
+
+    // Open editor — input should show the converted manifest value (the
+    // current stored "wrong" repo).
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    let editItems = screen.getAllByRole('menuitem', { name: /Edit sources/ });
+    await user.click(editItems[0]);
+    await waitFor(() => {
+      expect(screen.getByText('Sources for Multiplayer Potion View')).toBeInTheDocument();
+    });
+    const inputBeforeSave = screen.getByPlaceholderText('owner/repo') as HTMLInputElement;
+    expect(inputBeforeSave.value).toBe('wrong/wrong-manifest-url');
+
+    // Clear and type the correct value, then save.
+    await user.clear(inputBeforeSave);
+    await user.type(inputBeforeSave, 'BAKAOLC/STS2-MultiPlayerPotionView');
+    await user.click(screen.getByRole('button', { name: /Save sources/ }));
+
+    // Save closes the editor (setExpandedMod(null)) and triggers
+    // refreshMods, which invokes get_installed_mods a second time.
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'set_mod_sources_full')).toBe(true);
+    });
+    await waitFor(() => {
+      expect(screen.queryByText('Sources for Multiplayer Potion View')).toBeNull();
+    });
+
+    // Reopen the editor — input now reads the saved value, not the stale
+    // manifest. This is the bug fix the user was asking about.
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    editItems = screen.getAllByRole('menuitem', { name: /Edit sources/ });
+    await user.click(editItems[0]);
+    await waitFor(() => {
+      expect(screen.getByText('Sources for Multiplayer Potion View')).toBeInTheDocument();
+    });
+    const inputAfterSave = screen.getByPlaceholderText('owner/repo') as HTMLInputElement;
+    expect(inputAfterSave.value).toBe('BAKAOLC/STS2-MultiPlayerPotionView');
+  });
+
   it('View on GitHub kebab item opens the github_url', async () => {
     const opener = await import('@tauri-apps/plugin-opener');
     seedMods([baseMod({ github_url: 'https://github.com/x/y' })]);

@@ -221,6 +221,12 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
   }
 
   async function handleRollback(name: string, folderName: string | null, hasGithub: boolean) {
+    // The kebab item is `disabled={!github_url}` so React refuses to
+    // dispatch onClick when there's no source. This guard is a defensive
+    // safety net for direct callers and is unreachable via the UI, hence
+    // the v8 ignore directive (same pattern as DiagnosticBundle's
+    // re-entrancy guard).
+    /* v8 ignore start */
     if (!hasGithub) {
       toast.error(
         `'${name}' has no GitHub source linked — rollback fetches from GitHub. ` +
@@ -228,6 +234,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
       );
       return;
     }
+    /* v8 ignore stop */
     const ok = await confirm({
       title: `Roll back '${name}'?`,
       body:

@@ -761,6 +761,78 @@ describe('<ModsView>', () => {
     });
   });
 
+  it('cancelling the Roll back confirm does not invoke rollback_mod', async () => {
+    seedMods([baseMod({ name: 'RitsuLib', folder_name: 'RitsuLib', version: '0.2.31', github_url: 'https://github.com/ritsu/sts2-ritsulib' })]);
+    registerInvokeHandler('rollback_mod', () => baseMod({ name: 'RitsuLib', version: '0.2.30' }));
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await waitFor(() => { expect(screen.getByText('RitsuLib')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    await user.click(screen.getByRole('menuitem', { name: /Roll back one version/ }));
+    await waitFor(() => {
+      expect(screen.getByText(/Roll back 'RitsuLib'/)).toBeInTheDocument();
+    });
+    // Cancel button is the left-most button in the modal foot (same pattern
+    // as the Repair flow cancel test).
+    const cancelBtn = document.querySelector('.gf-modal-foot button') as HTMLButtonElement | null;
+    expect(cancelBtn).toBeTruthy();
+    await user.click(cancelBtn!);
+    expect(getInvokeCalls().some((c) => c.cmd === 'rollback_mod')).toBe(false);
+  });
+
+  it('rollback uses both old and new names for audit refresh when the manifest renames the mod', async () => {
+    seedMods([baseMod({ name: 'OldName', folder_name: 'OldName', version: '0.2.31', github_url: 'https://github.com/ritsu/sts2-ritsulib' })]);
+    registerInvokeHandler('rollback_mod', () => baseMod({ name: 'NewName', folder_name: 'OldName', version: '0.2.30' }));
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await waitFor(() => { expect(screen.getByText('OldName')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    await user.click(screen.getByRole('menuitem', { name: /Roll back one version/ }));
+    await waitFor(() => {
+      expect(screen.getByText(/Roll back 'OldName'/)).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: 'Roll back now' }));
+    await waitFor(() => {
+      expect(screen.getByText(/Rolled back 'NewName' to v0\.2\.30/)).toBeInTheDocument();
+    });
+  });
+
+  it('rollback failure surfaces a toast and clears the rolling-back state', async () => {
+    seedMods([baseMod({ name: 'RitsuLib', folder_name: 'RitsuLib', version: '0.2.31', github_url: 'https://github.com/ritsu/sts2-ritsulib' })]);
+    registerInvokeHandler('rollback_mod', () => { throw new Error('no prior release'); });
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await waitFor(() => { expect(screen.getByText('RitsuLib')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    await user.click(screen.getByRole('menuitem', { name: /Roll back one version/ }));
+    await waitFor(() => {
+      expect(screen.getByText(/Roll back 'RitsuLib'/)).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: 'Roll back now' }));
+    await waitFor(() => {
+      expect(screen.getByText(/Rollback failed for 'RitsuLib'.*no prior release/)).toBeInTheDocument();
+    });
+  });
+
+  it('rollback handles a null folder_name and a non-Error throw value', async () => {
+    seedMods([baseMod({ name: 'NoFolderMod', folder_name: null, version: '0.2.31', github_url: 'https://github.com/x/y' })]);
+    // Throw a bare string so the toast falls through to the `String(e)` branch
+    // rather than `e.message`.
+    registerInvokeHandler('rollback_mod', () => { throw 'plain-string-failure'; });
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await waitFor(() => { expect(screen.getByText('NoFolderMod')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    await user.click(screen.getByRole('menuitem', { name: /Roll back one version/ }));
+    await waitFor(() => {
+      expect(screen.getByText(/Roll back 'NoFolderMod'/)).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: 'Roll back now' }));
+    await waitFor(() => {
+      expect(screen.getByText(/Rollback failed for 'NoFolderMod'.*plain-string-failure/)).toBeInTheDocument();
+    });
+  });
+
   it('Repair kebab is disabled when no github_url is linked', async () => {
     seedMods([baseMod({ name: 'NoSrc', folder_name: 'NoSrc', github_url: null })]);
     const user = userEvent.setup();

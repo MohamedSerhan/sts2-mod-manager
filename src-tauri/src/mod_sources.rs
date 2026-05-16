@@ -448,12 +448,28 @@ pub fn enrich_mods_with_sources(mods: &mut [ModInfo], config_path: &Path) {
             .or_else(|| db.mods.get(&m.name))
             .or_else(|| m.mod_id.as_ref().and_then(|i| db.mods.get(i)));
         if let Some(entry) = entry {
-            // Only set from sources DB if not already extracted from manifest
-            if m.github_url.is_none() {
-                m.github_url = entry
-                    .github_repo
-                    .as_ref()
-                    .map(|r| format!("https://github.com/{}", r));
+            // GitHub override precedence:
+            //   * Manual entry (user typed into SourceEditor) WINS over the
+            //     manifest URL — the user edited sources precisely because
+            //     the manifest was wrong or missing. This matches
+            //     `resolve_github_repo` in updater.rs, so the badge link,
+            //     the editor's display value, and the audit's fetch all
+            //     reference the same repo.
+            //   * Auto-detected entry (the manager's own guess) only
+            //     fills in when the manifest didn't provide a URL.
+            //   * Normalize the stored value before formatting so legacy
+            //     URL-form entries (pre-1.4.3 saves) don't produce
+            //     "https://github.com/https://github.com/..." double
+            //     prefixes.
+            if let Some(ref repo) = entry.github_repo {
+                let canonical = normalize_github_repo_input(repo);
+                if let Some(c) = canonical {
+                    if !entry.github_auto_detected {
+                        m.github_url = Some(format!("https://github.com/{}", c));
+                    } else if m.github_url.is_none() {
+                        m.github_url = Some(format!("https://github.com/{}", c));
+                    }
+                }
             }
             if m.nexus_url.is_none() {
                 m.nexus_url = entry.nexus_url.clone();
@@ -1509,6 +1525,168 @@ pub async fn auto_detect_sources(
         unmatched,
         skipped_already_linked,
     })
+}
+
+#[cfg(test)]
+mod enrich_priority_tests {
+    //! Regression coverage for the "save reverts to old broken link" UX bug.
+    //!
+    //! Pre-1.4.3, `enrich_mods_with_sources` only filled `m.github_url`
+    //! from mod_sources.json when the manifest didn't already provide
+    //! one — manifest-wins priority. The audit/update path
+    //! (`resolve_github_repo` in updater.rs) used the opposite priority
+    //! (user-override-wins), so a user could edit the SourceEditor to
+    //! fix a broken manifest URL, have the backend accept the change,
+    //! but see the editor and the GitHub badge keep showing the old
+    //! manifest value. Aligning enrich to the same priority makes the
+    //! editor display, the row badge link, and the audit all consistent.
+    use super::*;
+    use crate::mods::ModInfo;
+    use tempfile::tempdir;
+
+    fn mod_with(name: &str, folder: Option<&str>, github_url: Option<&str>) -> ModInfo {
+        ModInfo {
+            name: name.into(),
+            version: "1.0.0".into(),
+            description: String::new(),
+            enabled: true,
+            files: vec![],
+            source: None,
+            hash: None,
+            dependencies: vec![],
+            size_bytes: 0,
+            folder_name: folder.map(str::to_string),
+            mod_id: None,
+            github_url: github_url.map(str::to_string),
+            nexus_url: None,
+            pinned: false,
+            min_game_version: None,
+            author: None,
+            note: None,
+            custom_url: None,
+        }
+    }
+
+    fn write_entry(config: &Path, key: &str, entry: ModSourceEntry) {
+        let mut db = ModSourcesDb::default();
+        db.mods.insert(key.to_string(), entry);
+        save_sources(&db, config).unwrap();
+    }
+
+    #[test]
+    fn manual_override_replaces_a_broken_manifest_github_url() {
+        let tmp = tempdir().unwrap();
+        let config = tmp.path();
+        write_entry(
+            config,
+            "STS2-MultiPlayerPotionView",
+            ModSourceEntry {
+                github_repo: Some("BAKAOLC/STS2-MultiPlayerPotionView".into()),
+                github_auto_detected: false, // user edited via SourceEditor
+                ..Default::default()
+            },
+        );
+        let mut mods = vec![mod_with(
+            "Multiplayer Potion View",
+            Some("STS2-MultiPlayerPotionView"),
+            // Manifest shipped a wrong/typo URL — user's override should win.
+            Some("https://github.com/wrong/wrong"),
+        )];
+
+        enrich_mods_with_sources(&mut mods, config);
+
+        assert_eq!(
+            mods[0].github_url.as_deref(),
+            Some("https://github.com/BAKAOLC/STS2-MultiPlayerPotionView"),
+        );
+    }
+
+    #[test]
+    fn auto_detected_entry_does_not_override_existing_manifest_url() {
+        let tmp = tempdir().unwrap();
+        let config = tmp.path();
+        write_entry(
+            config,
+            "SomeMod",
+            ModSourceEntry {
+                github_repo: Some("auto/guess".into()),
+                github_auto_detected: true, // manager guessed it
+                ..Default::default()
+            },
+        );
+        let mut mods = vec![mod_with(
+            "SomeMod",
+            Some("SomeMod"),
+            Some("https://github.com/real/repo"),
+        )];
+
+        enrich_mods_with_sources(&mut mods, config);
+
+        // Auto-detected entries are guesses; the manifest is authoritative
+        // when it provides a URL.
+        assert_eq!(
+            mods[0].github_url.as_deref(),
+            Some("https://github.com/real/repo"),
+        );
+    }
+
+    #[test]
+    fn url_form_db_entry_does_not_double_prefix_the_display_url() {
+        // Legacy mod_sources.json entries (from pre-1.4.3 saves) may have
+        // stored the github_repo as a full URL rather than owner/repo. The
+        // naive `format!("https://github.com/{}", repo)` would produce
+        // "https://github.com/https://github.com/...". Normalize first.
+        let tmp = tempdir().unwrap();
+        let config = tmp.path();
+        write_entry(
+            config,
+            "STS2-MultiPlayerPotionView",
+            ModSourceEntry {
+                github_repo: Some(
+                    "https://github.com/BAKAOLC/STS2-MultiPlayerPotionView".into(),
+                ),
+                github_auto_detected: false,
+                ..Default::default()
+            },
+        );
+        let mut mods = vec![mod_with(
+            "Multiplayer Potion View",
+            Some("STS2-MultiPlayerPotionView"),
+            None,
+        )];
+
+        enrich_mods_with_sources(&mut mods, config);
+
+        assert_eq!(
+            mods[0].github_url.as_deref(),
+            Some("https://github.com/BAKAOLC/STS2-MultiPlayerPotionView"),
+        );
+    }
+
+    #[test]
+    fn auto_detected_entry_still_fills_missing_manifest_url() {
+        // Pre-1.4.3 behavior preserved for the common case: when the
+        // manifest doesn't ship a URL, the auto-detected guess fills in.
+        let tmp = tempdir().unwrap();
+        let config = tmp.path();
+        write_entry(
+            config,
+            "SomeMod",
+            ModSourceEntry {
+                github_repo: Some("guess/from-nexus".into()),
+                github_auto_detected: true,
+                ..Default::default()
+            },
+        );
+        let mut mods = vec![mod_with("SomeMod", Some("SomeMod"), None)];
+
+        enrich_mods_with_sources(&mut mods, config);
+
+        assert_eq!(
+            mods[0].github_url.as_deref(),
+            Some("https://github.com/guess/from-nexus"),
+        );
+    }
 }
 
 #[cfg(test)]

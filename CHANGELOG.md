@@ -27,6 +27,18 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Security
+
+---
+
+## [1.4.2] - 2026-05-16
+
+### Added
+
 - Mods with a GitHub source linked now have a "Roll back one version" action in their kebab menu, marked Beta. Use it to recover when a newly released mod breaks your saves — it reinstalls the closest lower compatible release while keeping your configs.
 - Settings and the first-run onboarding now offer a shortcut to create a scoped GitHub token, so you can paste it in once and stop hitting rate limits.
 

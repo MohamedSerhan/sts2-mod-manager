@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Check, AlertTriangle, ExternalLink, Folder, X, GitBranch } from 'lucide-react';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import type { GameInfo } from '../types';
+import { GITHUB_TOKEN_TEMPLATE_URL } from '../lib/githubLinks';
 import {
   detectGamePath,
   setGamePath,
@@ -49,6 +51,7 @@ export function OnboardingOverlay({
   const [nexusOk, setNexusOk] = useState(false);
   const [ghToken, setGhToken] = useState('');
   const [ghSaved, setGhSaved] = useState(false);
+  const [ghOpenError, setGhOpenError] = useState('');
 
   async function handleDetect() {
     try {
@@ -122,6 +125,15 @@ export function OnboardingOverlay({
       setGhSaved(true);
     } catch {
       // ignore — token is optional
+    }
+  }
+
+  async function handleOpenGithubTokenTemplate() {
+    setGhOpenError('');
+    try {
+      await openUrl(GITHUB_TOKEN_TEMPLATE_URL);
+    } catch (e) {
+      setGhOpenError(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -304,6 +316,9 @@ export function OnboardingOverlay({
                   <button className="gf-btn-3" onClick={handleSaveGh} disabled={!ghToken.trim()}>
                     <GitBranch size={12} /> Save
                   </button>
+                  <button className="gf-btn-3" onClick={handleOpenGithubTokenTemplate}>
+                    <ExternalLink size={12} /> Create scoped token
+                  </button>
                 </div>
                 {ghSaved && (
                   <div className="gf-help ok">
@@ -312,6 +327,11 @@ export function OnboardingOverlay({
                 )}
                 {!ghSaved && (
                   <div className="gf-help muted">Skipping is fine — you'll just hit rate limits faster on Browse.</div>
+                )}
+                {ghOpenError && (
+                  <div className="gf-help err">
+                    <X size={11} /> Couldn't open GitHub token page: {ghOpenError}
+                  </div>
                 )}
                 <div className="gf-help muted" style={{ marginTop: 4, fontSize: 11 }}>
                   <b>Required to publish modpacks</b> — needs <code>repo</code> scope (classic PAT) or{' '}

@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { check as checkUpdate } from '@tauri-apps/plugin-updater';
+import { openUrl } from '@tauri-apps/plugin-opener';
 
 import { SettingsView } from './Settings';
 import { AllProviders } from '../__test__/providers';
@@ -285,6 +286,26 @@ describe('<SettingsView>', () => {
       // Two "Saved ✓" badges (Nexus + GitHub).
       expect(screen.getAllByText(/Saved/).length).toBeGreaterThan(0);
     });
+  });
+
+  it('Accounts tab has a prefilled fine-grained GitHub token link', async () => {
+    vi.mocked(openUrl).mockClear();
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: /Accounts/ }));
+
+    const tokenButton = await screen.findByRole('button', { name: /Create scoped token/i });
+    await user.click(tokenButton);
+
+    await waitFor(() => {
+      expect(openUrl).toHaveBeenCalledTimes(1);
+    });
+    const url = new URL(String(vi.mocked(openUrl).mock.calls[0][0]));
+    expect(`${url.origin}${url.pathname}`).toBe('https://github.com/settings/personal-access-tokens/new');
+    expect(url.searchParams.get('name')).toBe('STS2 Mod Manager');
+    expect(url.searchParams.get('contents')).toBe('write');
+    expect(url.searchParams.get('administration')).toBe('write');
   });
 
   it('Accounts tab Save Nexus key invokes set_nexus_api_key', async () => {

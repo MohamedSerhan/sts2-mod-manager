@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { LogsViewer } from './LogsViewer';
 import { AllProviders } from '../__test__/providers';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
+import { openUrl } from '@tauri-apps/plugin-opener';
 
 /**
  * jsdom 27 gotcha: when jsdom exposes a real Clipboard prototype, a
@@ -34,6 +35,8 @@ function setClipboard(impl: (text: string) => Promise<void> = async () => {}) {
 
 beforeEach(() => {
   setClipboard();
+  vi.mocked(openUrl).mockReset();
+  vi.mocked(openUrl).mockResolvedValue(undefined);
 });
 
 function Wrap() {
@@ -211,9 +214,8 @@ describe('<LogsViewer>', () => {
     });
   });
 
-  it('Send to support opens a GitHub issue URL with encoded log body', async () => {
+  it('Send to support opens a GitHub issue URL through the Tauri opener', async () => {
     registerInvokeHandler('read_log_tail', () => SAMPLE_LOG);
-    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => {
@@ -223,13 +225,46 @@ describe('<LogsViewer>', () => {
     const send = getButton(/Send to support/i);
     await user.click(send);
 
-    expect(openSpy).toHaveBeenCalledTimes(1);
-    const [url, target] = openSpy.mock.calls[0];
-    expect(target).toBe('_blank');
+    expect(openUrl).toHaveBeenCalledTimes(1);
+    const [url] = vi.mocked(openUrl).mock.calls[0];
     expect(String(url)).toContain('github.com/MohamedSerhan/sts2-mod-manager/issues/new');
     // Body should contain an encoded fragment of one of the sample log lines.
     expect(String(url)).toContain(encodeURIComponent('Boom'));
-    openSpy.mockRestore();
+  });
+
+  it('Send to support caps the GitHub issue URL for noisy logs', async () => {
+    const noisyLog = Array.from(
+      { length: 150 },
+      (_, i) => `[2026-05-16 00:${String(i).padStart(2, '0')}:00 INFO sts2] noisy line ${i} ${'x'.repeat(120)}`,
+    ).join('\n');
+    registerInvokeHandler('read_log_tail', () => noisyLog);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => {
+      expect(screen.getByText(/noisy line 149/)).toBeInTheDocument();
+    });
+
+    await user.click(getButton(/Send to support/i));
+
+    const [url] = vi.mocked(openUrl).mock.calls[0];
+    const parsed = new URL(String(url));
+    expect(String(url).length).toBeLessThanOrEqual(3900);
+    expect(parsed.searchParams.get('body')).toContain('Truncated to fit GitHub issue URL limits');
+  });
+
+  it('Send to support surfaces a toast when the opener rejects', async () => {
+    registerInvokeHandler('read_log_tail', () => SAMPLE_LOG);
+    vi.mocked(openUrl).mockRejectedValueOnce(new Error('no browser'));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => {
+      expect(screen.getByText(/Startup banner/)).toBeInTheDocument();
+    });
+
+    const send = getButton(/Send to support/i);
+    await user.click(send);
+
+    expect(await screen.findByText(/Couldn't open support issue: no browser/)).toBeInTheDocument();
   });
 
   it('renders empty-log placeholder when read_log_tail returns nothing', async () => {

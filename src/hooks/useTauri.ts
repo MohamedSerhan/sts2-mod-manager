@@ -210,6 +210,10 @@ export async function repairMod(name: string, folderName: string | null = null):
   return invoke('repair_mod', { name, folderName });
 }
 
+export async function rollbackMod(name: string, folderName: string | null = null): Promise<ModInfo> {
+  return invoke('rollback_mod', { name, folderName });
+}
+
 export async function updateAllMods(): Promise<ModInfo[]> {
   return invoke('update_all_mods');
 }

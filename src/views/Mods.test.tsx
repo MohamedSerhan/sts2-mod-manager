@@ -728,6 +728,25 @@ describe('<ModsView>', () => {
     });
   });
 
+  it('advanced kebab → Roll back one version fires rollback_mod when github_url exists', async () => {
+    seedMods([baseMod({ name: 'RitsuLib', folder_name: 'RitsuLib', version: '0.2.31', github_url: 'https://github.com/ritsu/sts2-ritsulib' })]);
+    registerInvokeHandler('rollback_mod', () => baseMod({ name: 'RitsuLib', folder_name: 'RitsuLib', version: '0.2.30' }));
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await waitFor(() => { expect(screen.getByText('RitsuLib')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    await user.click(screen.getByRole('menuitem', { name: /Roll back one version/ }));
+    await waitFor(() => {
+      expect(screen.getByText(/Roll back 'RitsuLib'/)).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: 'Roll back now' }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some(
+        (c) => c.cmd === 'rollback_mod' && c.args?.name === 'RitsuLib' && c.args?.folderName === 'RitsuLib',
+      )).toBe(true);
+    });
+  });
+
   it('Repair kebab is disabled when no github_url is linked', async () => {
     seedMods([baseMod({ name: 'NoSrc', folder_name: 'NoSrc', github_url: null })]);
     const user = userEvent.setup();

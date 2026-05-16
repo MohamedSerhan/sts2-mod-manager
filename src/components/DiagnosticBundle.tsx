@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { Check, Download, Folder, X } from 'lucide-react';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { useToast } from '../contexts/ToastContext';
 import { useApp } from '../contexts/AppContext';
 import { readLogTail, getLogPath } from '../hooks/useTauri';
+import { buildGitHubIssueUrl } from '../lib/githubLinks';
 
 // v5 batch 4 — diagnostic bundle. Builds a self-contained text report from
 // recent logs + game info + active profile + mod list, copies it to the
@@ -94,9 +96,12 @@ export function DiagnosticBundle({ open, onClose }: Props) {
     /* v8 ignore start */
     if (!generated) return;
     /* v8 ignore stop */
-    const body = encodeURIComponent(generated.slice(0, 6000));
-    const title = encodeURIComponent('Bug report from STS2 Mod Manager');
-    window.open(`https://github.com/MohamedSerhan/sts2-mod-manager/issues/new?title=${title}&body=${body}`, '_blank');
+    const url = buildGitHubIssueUrl('Bug report from STS2 Mod Manager', generated);
+    try {
+      await openUrl(url);
+    } catch (e) {
+      toast.error(`Couldn't open GitHub issue: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   return (

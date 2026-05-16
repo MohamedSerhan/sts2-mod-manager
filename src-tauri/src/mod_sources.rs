@@ -503,10 +503,15 @@ pub fn parse_source_url(url: &str) -> Option<ModSourceEntry> {
         if let Ok(parsed) = url::Url::parse(trimmed) {
             let segs: Vec<&str> = parsed.path_segments().map(|s| s.collect()).unwrap_or_default();
             if segs.len() >= 2 && !segs[0].is_empty() && !segs[1].is_empty() {
-                return Some(ModSourceEntry {
-                    github_repo: Some(format!("{}/{}", segs[0], segs[1])),
-                    ..Default::default()
-                });
+                // Strip ".git" clone-URL suffix so the canonical form
+                // matches what parse_github_url (in updater.rs) produces.
+                let repo = segs[1].trim_end_matches(".git");
+                if !repo.is_empty() {
+                    return Some(ModSourceEntry {
+                        github_repo: Some(format!("{}/{}", segs[0], repo)),
+                        ..Default::default()
+                    });
+                }
             }
         }
     }
@@ -562,6 +567,28 @@ pub fn parse_source_url(url: &str) -> Option<ModSourceEntry> {
     }
 
     None
+}
+
+/// Normalize a user-provided GitHub repo input ("owner/repo", a full
+/// GitHub URL, or the `github:owner/repo` shorthand) into the canonical
+/// `owner/repo` form that everything else in the codebase expects.
+///
+/// Returns `None` for empty input, Nexus URLs, or anything we don't
+/// recognize as a GitHub repo. The caller decides whether to clear the
+/// stored value (empty input → None) or surface an error to the user
+/// (non-empty unparseable → None).
+///
+/// Pre-1.4.3, `set_mod_sources_full` stored the raw user input as-is,
+/// which let URL-form values flow through to the audit's
+/// `parse_owner_repo` and produce malformed API calls like
+/// `repos/https://github.com/owner/repo/releases/latest`. Routing every
+/// save through this helper kills that class of bug at the source.
+pub(crate) fn normalize_github_repo_input(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    parse_source_url(trimmed).and_then(|e| e.github_repo)
 }
 
 // ── Tauri Commands ──────────────────────────────────────────────────────────
@@ -649,9 +676,32 @@ pub fn set_mod_sources_full(
     // Folder-first write key matches the rest of the codebase. Fall back
     // to display name for legacy callers / mods scanned without a folder.
     let key = folder_name.unwrap_or(mod_name);
+
+    // Normalize the GitHub field BEFORE looking at existing state so a bad
+    // input bails out without mutating the entry. Pre-1.4.3 this stored the
+    // raw string, which let full URLs ("https://github.com/owner/repo")
+    // flow through to the audit's parse_owner_repo and produce malformed
+    // API calls (the user-reported 404 on STS2-MultiPlayerPotionView).
+    let normalized_github_repo: Option<String> = match github_repo
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        None => None, // empty/None = explicit clear
+        Some(raw) => match normalize_github_repo_input(raw) {
+            Some(canonical) => Some(canonical),
+            None => {
+                return Err(format!(
+                    "Could not parse GitHub repo '{}'. Use owner/repo or a full GitHub URL.",
+                    raw
+                ));
+            }
+        },
+    };
+
     let entry = db.mods.entry(key).or_default();
 
-    entry.github_repo = github_repo;
+    entry.github_repo = normalized_github_repo;
     entry.github_auto_detected = false; // manually set by user
 
     if let Some(ref nurl) = nexus_url {
@@ -1459,6 +1509,80 @@ pub async fn auto_detect_sources(
         unmatched,
         skipped_already_linked,
     })
+}
+
+#[cfg(test)]
+mod normalize_input_tests {
+    //! Regression coverage for the "save reverts to broken link" / 404 audit
+    //! bug. Pre-1.4.3, `set_mod_sources_full` stored whatever string the
+    //! user typed into the GitHub field as-is, so a paste of
+    //! `https://github.com/owner/repo` landed in mod_sources.json verbatim.
+    //! The audit then called `parse_owner_repo` on that value, silently
+    //! splitting it into garbage owner/repo and producing a 404 like
+    //! `repos/https://github.com/owner/repo/releases/latest`.
+    //!
+    //! These tests pin the canonicalization rules `set_mod_sources_full`
+    //! now applies before storing.
+    use super::normalize_github_repo_input;
+
+    #[test]
+    fn normalize_owner_repo_passes_through() {
+        assert_eq!(
+            normalize_github_repo_input("BAKAOLC/STS2-MultiPlayerPotionView"),
+            Some("BAKAOLC/STS2-MultiPlayerPotionView".into()),
+        );
+    }
+
+    #[test]
+    fn normalize_full_github_url_strips_to_owner_repo() {
+        assert_eq!(
+            normalize_github_repo_input(
+                "https://github.com/BAKAOLC/STS2-MultiPlayerPotionView"
+            ),
+            Some("BAKAOLC/STS2-MultiPlayerPotionView".into()),
+        );
+    }
+
+    #[test]
+    fn normalize_github_url_with_trailing_path_or_git_suffix() {
+        assert_eq!(
+            normalize_github_repo_input(
+                "https://github.com/BAKAOLC/STS2-MultiPlayerPotionView/releases"
+            ),
+            Some("BAKAOLC/STS2-MultiPlayerPotionView".into()),
+        );
+        assert_eq!(
+            normalize_github_repo_input(
+                "https://github.com/BAKAOLC/STS2-MultiPlayerPotionView.git"
+            ),
+            Some("BAKAOLC/STS2-MultiPlayerPotionView".into()),
+        );
+    }
+
+    #[test]
+    fn normalize_github_shorthand() {
+        assert_eq!(
+            normalize_github_repo_input("github:owner/repo"),
+            Some("owner/repo".into()),
+        );
+    }
+
+    #[test]
+    fn normalize_rejects_empty_or_unrecognized() {
+        assert_eq!(normalize_github_repo_input(""), None);
+        assert_eq!(normalize_github_repo_input("   "), None);
+        assert_eq!(normalize_github_repo_input("just-words-no-slash"), None);
+    }
+
+    #[test]
+    fn normalize_rejects_nexus_url() {
+        // A Nexus URL pasted into the GitHub field must not be silently
+        // accepted — the user clearly meant the wrong field.
+        assert_eq!(
+            normalize_github_repo_input("https://www.nexusmods.com/slaythespire2/mods/168"),
+            None,
+        );
+    }
 }
 
 #[cfg(test)]

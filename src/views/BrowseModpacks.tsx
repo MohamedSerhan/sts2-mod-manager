@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { RefreshCw, Search, Plus } from 'lucide-react';
 
 import { fetchModpackBrowserPage } from '../hooks/useTauri';
+import { Badge } from '../components/Badge';
 import { BrowseModpackDetail } from '../components/BrowseModpackDetail';
 import type { BrowserCard, BrowserPage } from '../types';
 
@@ -61,7 +62,10 @@ export function BrowseModpacksView({ onGoToProfiles }: Props = {}) {
     <>
       <div className="gf-view">
       <div className="gf-view-head">
-        <h2 className="gf-view-title">Browse Modpacks</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          <h2 className="gf-view-title">Browse Modpacks</h2>
+          <Badge variant="beta" title="The public modpack browser is still being tuned.">Beta</Badge>
+        </div>
         <button
           className="gf-btn-3"
           onClick={() => load(true)}

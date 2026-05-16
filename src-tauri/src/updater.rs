@@ -462,6 +462,88 @@ fn best_known_installed_version(
     versions.into_iter().max()
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RollbackReleaseTarget {
+    PreviousBelow(semver::Version),
+    ReinstallKnownGood(semver::Version),
+}
+
+impl RollbackReleaseTarget {
+    fn matches_candidate(&self, version: &semver::Version) -> bool {
+        match self {
+            Self::PreviousBelow(current) => version < current,
+            Self::ReinstallKnownGood(known_good) => version == known_good,
+        }
+    }
+
+    fn label(&self) -> String {
+        match self {
+            Self::PreviousBelow(current) => format!("below current v{}", current),
+            Self::ReinstallKnownGood(known_good) => format!("at last known-good v{}", known_good),
+        }
+    }
+
+    fn no_candidate_message(&self, owner: &str, repo: &str) -> String {
+        match self {
+            Self::PreviousBelow(current) => format!(
+                "No lower version release found for {}/{} below v{}",
+                owner, repo, current,
+            ),
+            Self::ReinstallKnownGood(known_good) => format!(
+                "No GitHub release found for {}/{} at the last known-good version v{}",
+                owner, repo, known_good,
+            ),
+        }
+    }
+
+    fn no_compatible_message(
+        &self,
+        owner: &str,
+        repo: &str,
+        game_version: Option<&str>,
+        last_required: Option<&str>,
+    ) -> String {
+        match self {
+            Self::PreviousBelow(current) => format!(
+                "No lower compatible release of {}/{} was found below v{} for your game (v{}). \
+                 Lowest required minimum we saw: v{}.",
+                owner, repo, current,
+                game_version.unwrap_or("?"),
+                last_required.unwrap_or("?"),
+            ),
+            Self::ReinstallKnownGood(known_good) => format!(
+                "The last known-good release of {}/{} (v{}) is not compatible with your game (v{}). \
+                 Lowest required minimum we saw: v{}.",
+                owner, repo, known_good,
+                game_version.unwrap_or("?"),
+                last_required.unwrap_or("?"),
+            ),
+        }
+    }
+}
+
+fn rollback_release_target(
+    mod_info: &ModInfo,
+    sources: &std::collections::HashMap<String, ModSourceEntry>,
+) -> Option<RollbackReleaseTarget> {
+    let source_version = lookup_entry(
+        sources,
+        mod_info.folder_name.as_deref(),
+        &mod_info.name,
+        mod_info.mod_id.as_deref(),
+    )
+    .and_then(|entry| entry.installed_version.as_deref())
+    .and_then(usable_version);
+    let manifest_version = usable_version(&mod_info.version);
+
+    match (manifest_version, source_version) {
+        (Some(_), _) => best_known_installed_version(mod_info, sources)
+            .map(RollbackReleaseTarget::PreviousBelow),
+        (None, Some(source)) => Some(RollbackReleaseTarget::ReinstallKnownGood(source)),
+        (None, None) => None,
+    }
+}
+
 /// Download and install the newest version of a specific mod from its
 /// GitHub source that's compatible with the user's Slay the Spire 2 build.
 ///
@@ -864,9 +946,12 @@ pub async fn repair_mod(
 }
 
 /// Install the closest lower GitHub release below the currently installed
-/// version. This is intentionally different from Repair: Repair finds the
-/// newest compatible release, while Rollback only considers tags lower than
-/// the current installed version.
+/// version. If the current on-disk manifest is broken (`unknown`) but we
+/// still have a last known-good installed_version, reinstall that exact
+/// known-good release instead of skipping below it.
+///
+/// This is intentionally different from Repair: Repair finds the newest
+/// compatible release, while Rollback targets the user's previous-good lane.
 #[tauri::command]
 pub async fn rollback_mod(
     name: String,
@@ -894,19 +979,19 @@ pub async fn rollback_mod(
     let sources_db = load_sources(&config_path);
     let mod_info = find_installed_mod(&installed, &name, folder_name.as_deref())
         .ok_or_else(|| format!("Mod '{}' not found", name))?;
-    let current_version = best_known_installed_version(mod_info, &sources_db.mods).ok_or_else(|| {
+    let rollback_target = rollback_release_target(mod_info, &sources_db.mods).ok_or_else(|| {
         format!(
-            "Mod '{}' does not have a usable current version, so the manager cannot choose a lower release.",
+            "Mod '{}' does not have a usable manifest version or last known-good version, so the manager cannot choose a rollback release.",
             name
         )
     })?;
     let (owner, repo) = resolve_github_repo(mod_info, &sources_db.mods)
         .ok_or_else(|| format!("Mod '{}' has no GitHub source linked. Link one in the Mods view.", name))?;
 
-    let chosen = pick_previous_compatible_release(
+    let chosen = pick_rollback_compatible_release(
         &owner,
         &repo,
-        &current_version,
+        &rollback_target,
         game_version.as_deref(),
         &cache_path,
         token.as_deref(),
@@ -915,8 +1000,8 @@ pub async fn rollback_mod(
     .map_err(|e| e.to_string())?;
 
     log::info!(
-        "rollback_mod: chose tag {} for {}/{} below current {} (game v{}; min_game_version on chosen release: {})",
-        chosen.tag, owner, repo, current_version,
+        "rollback_mod: chose tag {} for {}/{} {} (game v{}; min_game_version on chosen release: {})",
+        chosen.tag, owner, repo, rollback_target.label(),
         game_version.as_deref().unwrap_or("?"),
         chosen.min_game_version.as_deref().unwrap_or("none"),
     );
@@ -1058,10 +1143,10 @@ pub async fn pick_compatible_release(
     )))
 }
 
-pub async fn pick_previous_compatible_release(
+async fn pick_rollback_compatible_release(
     owner: &str,
     repo: &str,
-    current_version: &semver::Version,
+    target: &RollbackReleaseTarget,
     game_version: Option<&str>,
     cache_path: &std::path::Path,
     token: Option<&str>,
@@ -1081,7 +1166,7 @@ pub async fn pick_previous_compatible_release(
         .iter()
         .filter_map(|release| {
             let version = parse_version(&release.tag_name)?;
-            if version < *current_version && release.assets.iter().any(|a| is_mod_asset(&a.name)) {
+            if target.matches_candidate(&version) && release.assets.iter().any(|a| is_mod_asset(&a.name)) {
                 Some((release, version))
             } else {
                 None
@@ -1091,10 +1176,7 @@ pub async fn pick_previous_compatible_release(
     candidates.sort_by(|a, b| b.1.cmp(&a.1));
 
     if candidates.is_empty() {
-        return Err(crate::error::AppError::Other(format!(
-            "No lower version release found for {}/{} below v{}",
-            owner, repo, current_version,
-        )));
+        return Err(crate::error::AppError::Other(target.no_candidate_message(owner, repo)));
     }
 
     let mut last_required: Option<String> = None;
@@ -1139,20 +1221,38 @@ pub async fn pick_previous_compatible_release(
         }
         last_required = mgv.or(last_required);
         log::info!(
-            "Rollback: {}/{}@{} requires game v{} (you have v{}), trying older release",
+            "Rollback: {}/{}@{} requires game v{} (you have v{}), trying another release",
             owner, repo, tag,
             last_required.as_deref().unwrap_or("?"),
             game_version.unwrap_or("?"),
         );
     }
 
-    Err(crate::error::AppError::Other(format!(
-        "No lower compatible release of {}/{} was found below v{} for your game (v{}). \
-         Lowest required minimum we saw: v{}.",
-        owner, repo, current_version,
-        game_version.unwrap_or("?"),
-        last_required.as_deref().unwrap_or("?"),
+    Err(crate::error::AppError::Other(target.no_compatible_message(
+        owner,
+        repo,
+        game_version,
+        last_required.as_deref(),
     )))
+}
+
+pub async fn pick_previous_compatible_release(
+    owner: &str,
+    repo: &str,
+    current_version: &semver::Version,
+    game_version: Option<&str>,
+    cache_path: &std::path::Path,
+    token: Option<&str>,
+) -> crate::error::Result<WalkBackChoice> {
+    pick_rollback_compatible_release(
+        owner,
+        repo,
+        &RollbackReleaseTarget::PreviousBelow(current_version.clone()),
+        game_version,
+        cache_path,
+        token,
+    )
+    .await
 }
 
 /// Update all mods that have available GitHub updates.
@@ -1607,6 +1707,46 @@ mod version_helper_tests {
         assert_eq!(
             best_known_installed_version(&info, &sources).unwrap().to_string(),
             "0.2.30",
+        );
+    }
+
+    #[test]
+    fn rollback_release_target_reinstalls_known_good_when_manifest_is_unknown() {
+        let info = mod_info(|m| {
+            m.version = "unknown".into();
+        });
+        let mut sources = std::collections::HashMap::new();
+        sources.insert(
+            "RitsuLib".into(),
+            ModSourceEntry {
+                installed_version: Some("v0.2.31".into()),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            rollback_release_target(&info, &sources).unwrap(),
+            RollbackReleaseTarget::ReinstallKnownGood(parse_version("0.2.31").unwrap()),
+        );
+    }
+
+    #[test]
+    fn rollback_release_target_rolls_below_highest_known_when_manifest_is_usable() {
+        let info = mod_info(|m| {
+            m.version = "0.2.30".into();
+        });
+        let mut sources = std::collections::HashMap::new();
+        sources.insert(
+            "RitsuLib".into(),
+            ModSourceEntry {
+                installed_version: Some("v0.2.31".into()),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            rollback_release_target(&info, &sources).unwrap(),
+            RollbackReleaseTarget::PreviousBelow(parse_version("0.2.31").unwrap()),
         );
     }
 

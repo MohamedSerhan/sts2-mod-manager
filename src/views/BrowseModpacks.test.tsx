@@ -26,6 +26,15 @@ function makePage(overrides: Partial<BrowserPage> = {}): BrowserPage {
 }
 
 describe('<BrowseModpacksView>', () => {
+  it('marks the modpack browser as beta', async () => {
+    registerInvokeHandler('fetch_modpack_browser_page', () => makePage({ cards: [] }));
+
+    render(<Wrap />);
+
+    expect(await screen.findByRole('heading', { name: 'Browse Modpacks' })).toBeInTheDocument();
+    expect(screen.getByText('Beta')).toBeInTheDocument();
+  });
+
   it('renders cards on success', async () => {
     registerInvokeHandler('fetch_modpack_browser_page', () =>
       makePage({

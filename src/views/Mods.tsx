@@ -231,9 +231,15 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
     const ok = await confirm({
       title: `Roll back '${name}'?`,
       body:
-        `This will delete the current on-disk install and install the closest ` +
-        `lower compatible GitHub release. Use it when the newest release is broken. ` +
+        `This will delete the current on-disk install and recover a compatible ` +
+        `GitHub release. If this install still has a usable version, rollback picks ` +
+        `the closest lower release; if the version reads "unknown", it reinstalls ` +
+        `the last known-good release. Use it when the newest release is broken. ` +
         `Make sure STS2 is closed.`,
+      warning:
+        `Rollback is a beta recovery feature. It preserves mod configs and resolves ` +
+        `a compatible GitHub release before deleting files, but some mods package ` +
+        `releases inconsistently, so check the result before launching a long run.`,
       confirmLabel: 'Roll back now',
     });
     if (!ok) return;
@@ -467,6 +473,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                 >
                   <ClipboardCheck size={14} />
                   Audit mods
+                  <Badge variant="beta" ariaHidden>Beta</Badge>
                 </Button>
               );
             }
@@ -1018,11 +1025,18 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                               }
                               description={
                                 mod.github_url
-                                  ? 'Install the previous compatible GitHub release below the current version. Use when the newest release is broken.'
+                                  ? 'Recover a compatible GitHub release. Uses the previous release when the current version is known, or the last known-good release when this install reads "unknown".'
                                   : 'Link a GitHub source first via "Edit sources…" — rollback fetches from GitHub.'
                               }
                             >
-                              {rollingBackMod === rowKey ? 'Rolling back…' : 'Roll back one version'}
+                              {rollingBackMod === rowKey ? (
+                                'Rolling back…'
+                              ) : (
+                                <span className="inline-flex items-center gap-1">
+                                  Roll back one version
+                                  <Badge variant="beta" ariaHidden>Beta</Badge>
+                                </span>
+                              )}
                             </KebabItem>
                           </KebabSection>
                         </>

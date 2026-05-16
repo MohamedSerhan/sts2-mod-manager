@@ -135,6 +135,17 @@ describe('<ModsView>', () => {
     });
   });
 
+  it('marks the Mods-page audit action as beta without changing its button name', async () => {
+    seedMods([]);
+    render(<Wrap />);
+    await waitFor(() => {
+      expect(screen.getByText(/0 installed/)).toBeInTheDocument();
+    });
+
+    const auditButton = screen.getByRole('button', { name: 'Audit mods' });
+    expect(within(auditButton).getByText('Beta')).toBeInTheDocument();
+  });
+
   it('Audit mods button shows "Up to date" pill + Re-audit button when audit returns zero GitHub updates', async () => {
     seedMods([baseMod({ name: 'BaseLib', folder_name: 'BaseLib' })]);
     registerInvokeHandler('audit_mod_versions', () => [
@@ -735,10 +746,13 @@ describe('<ModsView>', () => {
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText('RitsuLib')).toBeInTheDocument(); });
     await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    await user.click(screen.getByRole('menuitem', { name: /Roll back one version/ }));
+    const rollbackItem = screen.getByRole('menuitem', { name: /Roll back one version/ });
+    expect(within(rollbackItem).getByText('Beta')).toBeInTheDocument();
+    await user.click(rollbackItem);
     await waitFor(() => {
       expect(screen.getByText(/Roll back 'RitsuLib'/)).toBeInTheDocument();
     });
+    expect(screen.getByText(/Rollback is a beta recovery feature/i)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Roll back now' }));
     await waitFor(() => {
       expect(getInvokeCalls().some(

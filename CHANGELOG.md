@@ -27,9 +27,17 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ### Added
 
+- Mods with a GitHub source linked now have a "Roll back one version" action in their kebab menu, marked Beta. Use it to recover when a newly released mod breaks your saves — it reinstalls the closest lower compatible release while keeping your configs.
+- Settings and the first-run onboarding now offer a shortcut to create a scoped GitHub token, so you can paste it in once and stop hitting rate limits.
+
 ### Changed
 
+- A small "Beta" badge now marks the new rollback action, the Audit mods button, and the Browse Modpacks tab so you can see which features are still being tuned.
+
 ### Fixed
+
+- Launching the game on Linux now falls back to native Steam, Flatpak Steam, and Snap Steam launch commands when the steam:// shortcut can't open, instead of silently failing.
+- The "Send to support" and "Get help" links now open even when the auto-generated GitHub URL would be too long for the system opener to handle.
 
 ### Security
 

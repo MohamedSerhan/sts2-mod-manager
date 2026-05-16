@@ -168,6 +168,12 @@ function registerSafeDefaults(): void {
 beforeEach(() => {
   resetTauriMocks();
   registerSafeDefaults();
+  // Components like ModsView persist UI prefs ("sts2mm-mods-advanced",
+  // "sts2mm-onboarded", etc.) to localStorage. jsdom shares one
+  // Storage instance across the whole test file, so an early test that
+  // toggles a preference leaks into later tests that expect the
+  // default state. Clear before every test to keep them independent.
+  try { localStorage.clear(); } catch { /* jsdom quirk */ }
 });
 
 afterEach(() => {

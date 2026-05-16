@@ -314,6 +314,32 @@ describe('<ModsView>', () => {
     });
   });
 
+  it('advanced mode promotes Remove mod to a standalone top-level button (no kebab click needed)', async () => {
+    seedMods([baseMod({ name: 'AutoPath', folder_name: 'AutoPath' })]);
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await waitFor(() => { expect(screen.getByText('AutoPath')).toBeInTheDocument(); });
+    // Standalone button is directly visible — NOT a menuitem — so the user
+    // can click Remove without first opening the kebab.
+    const removeBtn = screen.getByRole('button', { name: /Remove mod/ });
+    expect(removeBtn).toBeInTheDocument();
+    await user.click(removeBtn);
+    await waitFor(() => {
+      expect(screen.getByText(/Delete "AutoPath"/)).toBeInTheDocument();
+    });
+  });
+
+  it('advanced mode does NOT duplicate Remove mod inside the kebab', async () => {
+    seedMods([baseMod({ name: 'AutoPath', folder_name: 'AutoPath' })]);
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await waitFor(() => { expect(screen.getByText('AutoPath')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    // In advanced mode the kebab no longer carries a duplicate Remove
+    // entry — the top-level button is the single source of truth.
+    expect(screen.queryByRole('menuitem', { name: /Remove mod/ })).toBeNull();
+  });
+
   it('kebab → Pin / Unpin toggles via pin_mod / unpin_mod', async () => {
     seedMods([baseMod({ name: 'AutoPath', folder_name: 'AutoPath', pinned: false })]);
     const user = userEvent.setup();
@@ -396,7 +422,11 @@ describe('<ModsView>', () => {
 
   it('mods linked via GitHub show a GH badge', async () => {
     seedMods([baseMod({ github_url: 'https://github.com/x/y', source: 'github:x/y' })]);
-    render(<Wrap />);
+    // GH badges only render in advanced mode (Mods.tsx:804). Pre-fix, this
+    // test passed by accident on localStorage state leaked from an earlier
+    // test that clicked the Advanced toggle. After the setup-level
+    // localStorage.clear(), advanced has to be requested explicitly.
+    render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
     // The Badge component renders 'GitHub' or 'GH' for github sources.
     // Look for the pill class. Easier: search for any element containing

@@ -233,13 +233,13 @@ body {
 }
 .gf-nav .gf-nav-beta {
   position: absolute;
-  left: 20px;
-  top: 21px;
+  left: 161px;
+  top: 15px;
   transform: translateX(-50%);
-  font-size: 5.5px;
+  font-size: 7px;
   line-height: 1.1;
-  letter-spacing: 0;
-  padding: 0 1.5px;
+  letter-spacing: 0.08em;
+  padding: 0.5px 1.5px;
   border-radius: 2px;
   pointer-events: none;
   gap: 0;

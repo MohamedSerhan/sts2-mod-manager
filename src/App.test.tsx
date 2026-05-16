@@ -26,7 +26,7 @@
  *    against `useEffect` cleanup, which is fragile and low-value.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import App from './App';
@@ -105,7 +105,9 @@ describe('<App>', () => {
     expect(getNavButton('Profiles')).toBeInTheDocument();
     expect(getNavButton('Mods')).toBeInTheDocument();
     expect(getNavButton('Browse Mods')).toBeInTheDocument();
-    expect(getNavButton('Browse Modpacks')).toBeInTheDocument();
+    const modpacksNav = getNavButton('Browse Modpacks');
+    expect(modpacksNav).toBeInTheDocument();
+    expect(within(modpacksNav).getByText('Beta')).toBeInTheDocument();
     expect(getNavButton('Tutorial')).toBeInTheDocument();
     expect(getNavButton('Settings')).toBeInTheDocument();
   });

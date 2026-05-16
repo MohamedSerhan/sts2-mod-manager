@@ -27,6 +27,7 @@ import { cn } from './lib/utils';
 import { ToastProvider, useToast } from './contexts/ToastContext';
 import { AppProvider, useApp } from './contexts/AppContext';
 import { ConfirmProvider, useConfirm } from './components/ConfirmDialog';
+import { Badge } from './components/Badge';
 import { importShareCodeSmart } from './lib/shareImport';
 import { getSubscriptions } from './hooks/useTauri';
 import { OnboardingOverlay } from './components/OnboardingOverlay';
@@ -556,7 +557,17 @@ function AppInner() {
                 className={cn('gf-nav', activeView === id && 'active')}
               >
                 <Icon size={14} className="gf-nav-icon" />
-                <span>{label}</span>
+                <span className="gf-nav-label">{label}</span>
+                {id === 'browse-modpacks' && (
+                  <Badge
+                    variant="beta"
+                    className="gf-nav-beta"
+                    title="The public modpack browser is still being tuned."
+                    ariaHidden
+                  >
+                    Beta
+                  </Badge>
+                )}
                 {badge !== null && (
                   <span className="gf-nav-badge" title={`${badge} pack${badge === 1 ? '' : 's'} ${badge === 1 ? 'has' : 'have'} an update available`}>
                     {badge}

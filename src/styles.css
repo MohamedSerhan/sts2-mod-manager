@@ -209,6 +209,12 @@ body {
   display: grid; place-items: center;
   font-size: 12px; opacity: 0.85;
 }
+.gf-nav-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* Update-count chip on a sidebar nav item — pinned to the right edge
    so it doesn't reflow the label. Yellow to match the gold accent
    that signals "actionable" everywhere else (update / install). */
@@ -224,6 +230,19 @@ body {
   background: var(--gf);
   color: var(--gf-ink);
   line-height: 1;
+}
+.gf-nav .gf-nav-beta {
+  position: absolute;
+  left: 20px;
+  top: 21px;
+  transform: translateX(-50%);
+  font-size: 5.5px;
+  line-height: 1.1;
+  letter-spacing: 0;
+  padding: 0 1.5px;
+  border-radius: 2px;
+  pointer-events: none;
+  gap: 0;
 }
 
 /* Activity feed on the Profiles view — followed packs with pending

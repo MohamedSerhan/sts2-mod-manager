@@ -135,6 +135,17 @@ describe('<ModsView>', () => {
     });
   });
 
+  it('marks the Mods-page audit action as beta without changing its button name', async () => {
+    seedMods([]);
+    render(<Wrap />);
+    await waitFor(() => {
+      expect(screen.getByText(/0 installed/)).toBeInTheDocument();
+    });
+
+    const auditButton = screen.getByRole('button', { name: 'Audit mods' });
+    expect(within(auditButton).getByText('Beta')).toBeInTheDocument();
+  });
+
   it('Audit mods button shows "Up to date" pill + Re-audit button when audit returns zero GitHub updates', async () => {
     seedMods([baseMod({ name: 'BaseLib', folder_name: 'BaseLib' })]);
     registerInvokeHandler('audit_mod_versions', () => [
@@ -724,6 +735,28 @@ describe('<ModsView>', () => {
     await waitFor(() => {
       expect(getInvokeCalls().some(
         (c) => c.cmd === 'repair_mod' && c.args?.name === 'BrokenMod',
+      )).toBe(true);
+    });
+  });
+
+  it('advanced kebab → Roll back one version fires rollback_mod when github_url exists', async () => {
+    seedMods([baseMod({ name: 'RitsuLib', folder_name: 'RitsuLib', version: '0.2.31', github_url: 'https://github.com/ritsu/sts2-ritsulib' })]);
+    registerInvokeHandler('rollback_mod', () => baseMod({ name: 'RitsuLib', folder_name: 'RitsuLib', version: '0.2.30' }));
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await waitFor(() => { expect(screen.getByText('RitsuLib')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    const rollbackItem = screen.getByRole('menuitem', { name: /Roll back one version/ });
+    expect(within(rollbackItem).getByText('Beta')).toBeInTheDocument();
+    await user.click(rollbackItem);
+    await waitFor(() => {
+      expect(screen.getByText(/Roll back 'RitsuLib'/)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Rollback is a beta recovery feature/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Roll back now' }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some(
+        (c) => c.cmd === 'rollback_mod' && c.args?.name === 'RitsuLib' && c.args?.folderName === 'RitsuLib',
       )).toBe(true);
     });
   });

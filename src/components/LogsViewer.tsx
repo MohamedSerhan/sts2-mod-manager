@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Copy, Folder, Upload, RefreshCw } from 'lucide-react';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { readLogTail, openLogFile } from '../hooks/useTauri';
 import { useToast } from '../contexts/ToastContext';
+import { buildGitHubIssueUrl } from '../lib/githubLinks';
 
 // v5 batch 4 — in-app logs viewer (Settings → Advanced).
 // Tails the last 500 lines of sts2mm.log, parses common levels, and
@@ -102,19 +104,21 @@ export function LogsViewer({ onClose }: Props) {
     }
   }
 
-  function sendToSupport() {
-    // Open a mailto with the recent log lines pre-filled. Real diag-bundle
-    // export lives in About; this is the quick-and-dirty path.
-    const body = encodeURIComponent(
-      [
-        'Describe what happened:',
-        '',
-        '— Recent log tail —',
-        ...lines.slice(-80).map((l) => l.raw),
-      ].join('\n'),
-    );
-    const url = `https://github.com/MohamedSerhan/sts2-mod-manager/issues/new?title=Bug%20report&body=${body}`;
-    window.open(url, '_blank');
+  async function sendToSupport() {
+    // Open a support issue with the recent log lines pre-filled. Real
+    // diag-bundle export lives in About; this is the quick-and-dirty path.
+    const body = [
+      'Describe what happened:',
+      '',
+      '— Recent log tail —',
+      ...lines.slice(-30).map((l) => l.raw),
+    ].join('\n');
+    const url = buildGitHubIssueUrl('Bug report', body);
+    try {
+      await openUrl(url);
+    } catch (e) {
+      toast.error(`Couldn't open support issue: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   const Chip = ({ id, label }: { id: 'all' | Level; label: string }) => (

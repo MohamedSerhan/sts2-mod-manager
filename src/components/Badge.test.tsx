@@ -17,6 +17,7 @@ describe('<Badge>', () => {
     ['local',  'gf-pill-github'], // local re-uses the github pill style
     ['update', 'gf-pill-update'],
     ['ok',     'gf-pill-ok'],
+    ['beta',   'gf-pill-beta'],
   ] as const)('renders the %s variant with class %s', (variant, expected) => {
     render(<Badge variant={variant}>x</Badge>);
     expect(screen.getByText('x').className).toContain(expected);

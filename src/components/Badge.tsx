@@ -1,11 +1,13 @@
 import { cn } from '../lib/utils';
 
-type BadgeVariant = 'github' | 'nexus' | 'local' | 'default' | 'update' | 'ok';
+type BadgeVariant = 'github' | 'nexus' | 'local' | 'default' | 'update' | 'ok' | 'beta';
 
 interface BadgeProps {
   variant?: BadgeVariant;
   children: React.ReactNode;
   className?: string;
+  title?: string;
+  ariaHidden?: boolean;
 }
 
 // v5 — pills are uppercase + tracked. Source pills are neutral; warm reserved for state.
@@ -16,11 +18,12 @@ const variantClass: Record<BadgeVariant, string> = {
   default: 'gf-pill gf-pill-github',
   update: 'gf-pill gf-pill-update',
   ok: 'gf-pill gf-pill-ok',
+  beta: 'gf-pill gf-pill-beta',
 };
 
-export function Badge({ variant = 'default', children, className }: BadgeProps) {
+export function Badge({ variant = 'default', children, className, title, ariaHidden }: BadgeProps) {
   return (
-    <span className={cn(variantClass[variant], className)}>
+    <span className={cn(variantClass[variant], className)} title={title} aria-hidden={ariaHidden}>
       {children}
     </span>
   );

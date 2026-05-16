@@ -8,6 +8,7 @@ use crate::state::{AppState, LaunchMode};
 /// STS2's Steam AppID. Used to build the `steam://rungameid/<id>` URL
 /// the Steam launcher consumes.
 const STS2_STEAM_APPID: &str = "2868840";
+const STEAM_URL: &str = "steam://rungameid/2868840";
 
 /// Information about the detected game installation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -566,11 +567,71 @@ pub fn open_game_folder(state: tauri::State<'_, AppState>) -> std::result::Resul
 fn spawn_game(mode: LaunchMode, game_path: Option<&Path>) -> std::result::Result<(), String> {
     log::info!("Launching game via {}", mode.as_str());
     match mode {
-        LaunchMode::Steam => {
-            open::that_in_background(format!("steam://rungameid/{}", STS2_STEAM_APPID));
-            Ok(())
-        }
+        LaunchMode::Steam => launch_game_via_steam(),
         LaunchMode::Direct => spawn_game_direct(game_path),
+    }
+}
+
+fn launch_game_via_steam() -> std::result::Result<(), String> {
+    match open::that(STEAM_URL) {
+        Ok(()) => return Ok(()),
+        Err(e) => {
+            log::warn!(
+                "System opener failed for {}: {}. Trying Steam command fallbacks.",
+                STEAM_URL,
+                e
+            );
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        use std::process::Command;
+
+        let mut attempts: Vec<String> = Vec::new();
+
+        let mut try_spawn = |program: &str, args: &[&str]| -> bool {
+            match Command::new(program).args(args).spawn() {
+                Ok(_) => {
+                    log::info!("Steam fallback launched: {} {:?}", program, args);
+                    true
+                }
+                Err(e) => {
+                    attempts.push(format!("{} {:?}: {}", program, args, e));
+                    false
+                }
+            }
+        };
+
+        if try_spawn("steam", &["-applaunch", STS2_STEAM_APPID]) {
+            return Ok(());
+        }
+
+        if try_spawn("flatpak", &["run", "com.valvesoftware.Steam", "-applaunch", STS2_STEAM_APPID]) {
+            return Ok(());
+        }
+
+        if try_spawn("snap", &["run", "steam", "-applaunch", STS2_STEAM_APPID]) {
+            return Ok(());
+        }
+
+        let detail = if attempts.is_empty() {
+            String::new()
+        } else {
+            format!(" Tried: {}.", attempts.join("; "))
+        };
+        return Err(format!(
+            "Could not ask Steam to launch Slay the Spire 2. Make sure Steam is installed and that steam:// links are registered.{}",
+            detail
+        ));
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        Err(
+            "Could not ask Steam to launch Slay the Spire 2. Make sure Steam is installed and steam:// links are registered."
+                .to_string(),
+        )
     }
 }
 

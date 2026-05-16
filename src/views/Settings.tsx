@@ -16,8 +16,10 @@ import {
   Check,
 } from 'lucide-react';
 import { isUpToDate } from '../lib/auditState';
+import { GITHUB_TOKEN_TEMPLATE_URL } from '../lib/githubLinks';
 import { nexusFilesUrl } from '../lib/nexusUrl';
 import { open } from '@tauri-apps/plugin-dialog';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { Card } from '../components/Card';
@@ -271,6 +273,14 @@ export function SettingsView() {
       setGithubTokenSaved(true);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function handleOpenGithubTokenTemplate() {
+    try {
+      await openUrl(GITHUB_TOKEN_TEMPLATE_URL);
+    } catch (e) {
+      toast.error(`Couldn't open GitHub token page: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -577,6 +587,10 @@ export function SettingsView() {
                   />
                   <Button variant="secondary" size="sm" onClick={handleSaveGithubToken}>
                     Save
+                  </Button>
+                  <Button variant="secondary" size="sm" onClick={handleOpenGithubTokenTemplate}>
+                    <ExternalLink size={14} />
+                    Create scoped token
                   </Button>
                 </div>
                 {githubTokenSaved && !githubToken && (

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::download::{fetch_latest_release, fetch_releases};
 use crate::error::Result;
-use crate::mod_sources::{load_sources, save_sources, update_installed_version, ModSourceEntry};
+use crate::mod_sources::{load_sources, lookup_entry, save_sources, update_installed_version, ModSourceEntry};
 use crate::mods::{scan_mods, ModInfo};
 use crate::state::AppState;
 
@@ -122,15 +122,42 @@ fn parse_owner_repo(full_name: &str) -> Option<(String, String)> {
     }
 }
 
+/// Parse a full GitHub repository URL into (owner, repo).
+fn parse_github_url(source: &str) -> Option<(String, String)> {
+    if !source.contains("github.com/") {
+        return None;
+    }
+    let parsed = url::Url::parse(source).ok()?;
+    let host = parsed.host_str()?.to_ascii_lowercase();
+    if host != "github.com" && host != "www.github.com" {
+        return None;
+    }
+    let segs: Vec<&str> = parsed.path_segments().map(|s| s.collect()).unwrap_or_default();
+    if segs.len() < 2 || segs[0].is_empty() || segs[1].is_empty() {
+        return None;
+    }
+    let repo = segs[1].trim_end_matches(".git");
+    if repo.is_empty() {
+        return None;
+    }
+    Some((segs[0].to_string(), repo.to_string()))
+}
+
 /// Resolve the GitHub owner/repo for a mod, checking:
-/// 1. mod_sources.json (explicit link — only if manually set, not auto-detected)
-/// 2. ModInfo.source field (legacy github:owner/repo)
+/// 1. mod_sources.json (folder-first explicit link — only if manually set, not auto-detected)
+/// 2. ModInfo.github_url extracted from the manifest
+/// 3. ModInfo.source field (legacy github:owner/repo)
 fn resolve_github_repo(
     mod_info: &ModInfo,
     sources: &std::collections::HashMap<String, ModSourceEntry>,
 ) -> Option<(String, String)> {
     // Check mod_sources.json first — skip auto-detected links
-    if let Some(entry) = sources.get(&mod_info.name) {
+    if let Some(entry) = lookup_entry(
+        sources,
+        mod_info.folder_name.as_deref(),
+        &mod_info.name,
+        mod_info.mod_id.as_deref(),
+    ) {
         if !entry.github_auto_detected {
             if let Some(ref repo) = entry.github_repo {
                 if let Some(pair) = parse_owner_repo(repo) {
@@ -140,19 +167,19 @@ fn resolve_github_repo(
         }
     }
 
+    if let Some(ref github_url) = mod_info.github_url {
+        if let Some(pair) = parse_github_url(github_url) {
+            return Some(pair);
+        }
+    }
+
     // Fall back to legacy source field (these are from the mod author, trustworthy)
     if let Some(ref source) = mod_info.source {
         if let Some(pair) = parse_github_source(source) {
             return Some(pair);
         }
-        // Also handle full GitHub URLs in source field
-        if source.contains("github.com/") {
-            if let Ok(parsed) = url::Url::parse(source) {
-                let segs: Vec<&str> = parsed.path_segments().map(|s| s.collect()).unwrap_or_default();
-                if segs.len() >= 2 {
-                    return Some((segs[0].to_string(), segs[1].to_string()));
-                }
-            }
+        if let Some(pair) = parse_github_url(source) {
+            return Some(pair);
         }
     }
 
@@ -359,6 +386,162 @@ pub async fn check_for_updates(
     check_all_updates(&installed, &sources_db.mods, token.as_deref(), nexus_key.as_deref())
         .await
         .map_err(|e| e.to_string())
+}
+
+fn find_installed_mod<'a>(
+    installed: &'a [ModInfo],
+    name: &str,
+    folder_name: Option<&str>,
+) -> Option<&'a ModInfo> {
+    if let Some(folder) = folder_name {
+        installed.iter().find(|m| m.folder_name.as_deref() == Some(folder))
+    } else {
+        installed.iter().find(|m| m.name == name)
+    }
+}
+
+fn delete_old_mod_install(old_info: &ModInfo, mods_path: &std::path::Path, label: &str) {
+    let mut parent_dirs = std::collections::HashSet::new();
+    for file_rel in &old_info.files {
+        let normalized = file_rel.replace('\\', "/");
+        let file_path = mods_path.join(&normalized);
+        if file_path.is_dir() {
+            let _ = std::fs::remove_dir_all(&file_path);
+        } else if file_path.exists() {
+            let _ = std::fs::remove_file(&file_path);
+        }
+        if let Some(parent_rel) = std::path::Path::new(&normalized).parent() {
+            if !parent_rel.as_os_str().is_empty() {
+                parent_dirs.insert(mods_path.join(parent_rel));
+            }
+        }
+    }
+    for dir in &parent_dirs {
+        if dir.is_dir()
+            && std::fs::read_dir(dir).map(|mut d| d.next().is_none()).unwrap_or(false)
+        {
+            let _ = std::fs::remove_dir(dir);
+        }
+    }
+    if let Some(folder) = old_info.folder_name.as_deref() {
+        let folder_path = mods_path.join(folder);
+        if folder_path.is_dir() {
+            let _ = std::fs::remove_dir_all(&folder_path);
+        }
+    }
+    log::info!("{}: deleted old files for '{}'", label, old_info.name);
+}
+
+fn usable_version(raw: &str) -> Option<semver::Version> {
+    let trimmed = raw.trim().trim_start_matches('v');
+    if trimmed.is_empty() || trimmed == "unknown" || trimmed == "0.0.0" {
+        return None;
+    }
+    parse_version(raw)
+}
+
+fn best_known_installed_version(
+    mod_info: &ModInfo,
+    sources: &std::collections::HashMap<String, ModSourceEntry>,
+) -> Option<semver::Version> {
+    let mut versions = Vec::new();
+    if let Some(version) = lookup_entry(
+        sources,
+        mod_info.folder_name.as_deref(),
+        &mod_info.name,
+        mod_info.mod_id.as_deref(),
+    )
+    .and_then(|entry| entry.installed_version.as_deref())
+    .and_then(usable_version)
+    {
+        versions.push(version);
+    }
+    if let Some(version) = usable_version(&mod_info.version) {
+        versions.push(version);
+    }
+    versions.into_iter().max()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RollbackReleaseTarget {
+    PreviousBelow(semver::Version),
+    ReinstallKnownGood(semver::Version),
+}
+
+impl RollbackReleaseTarget {
+    fn matches_candidate(&self, version: &semver::Version) -> bool {
+        match self {
+            Self::PreviousBelow(current) => version < current,
+            Self::ReinstallKnownGood(known_good) => version == known_good,
+        }
+    }
+
+    fn label(&self) -> String {
+        match self {
+            Self::PreviousBelow(current) => format!("below current v{}", current),
+            Self::ReinstallKnownGood(known_good) => format!("at last known-good v{}", known_good),
+        }
+    }
+
+    fn no_candidate_message(&self, owner: &str, repo: &str) -> String {
+        match self {
+            Self::PreviousBelow(current) => format!(
+                "No lower version release found for {}/{} below v{}",
+                owner, repo, current,
+            ),
+            Self::ReinstallKnownGood(known_good) => format!(
+                "No GitHub release found for {}/{} at the last known-good version v{}",
+                owner, repo, known_good,
+            ),
+        }
+    }
+
+    fn no_compatible_message(
+        &self,
+        owner: &str,
+        repo: &str,
+        game_version: Option<&str>,
+        last_required: Option<&str>,
+    ) -> String {
+        match self {
+            Self::PreviousBelow(current) => format!(
+                "No lower compatible release of {}/{} was found below v{} for your game (v{}). \
+                 Lowest required minimum we saw: v{}.",
+                owner, repo, current,
+                game_version.unwrap_or("?"),
+                last_required.unwrap_or("?"),
+            ),
+            Self::ReinstallKnownGood(known_good) => format!(
+                "The last known-good release of {}/{} (v{}) is not compatible with your game (v{}). \
+                 Lowest required minimum we saw: v{}.",
+                owner, repo, known_good,
+                game_version.unwrap_or("?"),
+                last_required.unwrap_or("?"),
+            ),
+        }
+    }
+}
+
+fn rollback_release_target(
+    mod_info: &ModInfo,
+    sources: &std::collections::HashMap<String, ModSourceEntry>,
+) -> Option<RollbackReleaseTarget> {
+    let source_version = lookup_entry(
+        sources,
+        mod_info.folder_name.as_deref(),
+        &mod_info.name,
+        mod_info.mod_id.as_deref(),
+    )
+    .and_then(|entry| entry.installed_version.as_deref())
+    .and_then(usable_version);
+    let manifest_version = usable_version(&mod_info.version);
+
+    match (manifest_version, source_version) {
+        (Some(_), _) => best_known_installed_version(mod_info, sources)
+            .map(RollbackReleaseTarget::PreviousBelow),
+        (None, Some(source)) => Some(RollbackReleaseTarget::ReinstallKnownGood(source)),
+        (None, None) => None,
+    }
 }
 
 /// Download and install the newest version of a specific mod from its
@@ -762,6 +945,108 @@ pub async fn repair_mod(
     Ok(info)
 }
 
+/// Install the closest lower GitHub release below the currently installed
+/// version. If the current on-disk manifest is broken (`unknown`) but we
+/// still have a last known-good installed_version, reinstall that exact
+/// known-good release instead of skipping below it.
+///
+/// This is intentionally different from Repair: Repair finds the newest
+/// compatible release, while Rollback targets the user's previous-good lane.
+#[tauri::command]
+pub async fn rollback_mod(
+    name: String,
+    folder_name: Option<String>,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<ModInfo, String> {
+    log::info!(
+        "rollback_mod: requested for '{}' (folder: {:?})",
+        name, folder_name,
+    );
+    crate::game::ensure_game_not_running()?;
+
+    let (mods_path, cache_path, config_path, token, game_version) = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
+        let cache_path = s.cache_path.clone();
+        let config_path = s.config_path.clone();
+        let token = s.github_token.clone();
+        let game_version = s.game_version.clone();
+        (mods_path, cache_path, config_path, token, game_version)
+    };
+
+    let installed = scan_mods(&mods_path);
+    let sources_db = load_sources(&config_path);
+    let mod_info = find_installed_mod(&installed, &name, folder_name.as_deref())
+        .ok_or_else(|| format!("Mod '{}' not found", name))?;
+    let rollback_target = rollback_release_target(mod_info, &sources_db.mods).ok_or_else(|| {
+        format!(
+            "Mod '{}' does not have a usable manifest version or last known-good version, so the manager cannot choose a rollback release.",
+            name
+        )
+    })?;
+    let (owner, repo) = resolve_github_repo(mod_info, &sources_db.mods)
+        .ok_or_else(|| format!("Mod '{}' has no GitHub source linked. Link one in the Mods view.", name))?;
+
+    let chosen = pick_rollback_compatible_release(
+        &owner,
+        &repo,
+        &rollback_target,
+        game_version.as_deref(),
+        &cache_path,
+        token.as_deref(),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    log::info!(
+        "rollback_mod: chose tag {} for {}/{} {} (game v{}; min_game_version on chosen release: {})",
+        chosen.tag, owner, repo, rollback_target.label(),
+        game_version.as_deref().unwrap_or("?"),
+        chosen.min_game_version.as_deref().unwrap_or("none"),
+    );
+
+    let pre_update_preserved = mod_info
+        .folder_name
+        .clone()
+        .or_else(|| Some(mod_info.name.clone()))
+        .map(|folder| {
+            crate::mods::prepare_update_with_preserved_configs(
+                &folder, &name, &mods_path, &config_path,
+            )
+        })
+        .unwrap_or_default();
+
+    delete_old_mod_install(mod_info, &mods_path, "rollback_mod");
+
+    let info = crate::mods::install_mod_from_zip(&chosen.zip_path, &mods_path)
+        .map_err(|e| e.to_string())?;
+
+    let install_healthy = info.version != "unknown" && !info.version.is_empty();
+    if install_healthy {
+        let install_key = info.folder_name.as_deref().unwrap_or(name.as_str());
+        crate::mod_sources::update_installed_version(install_key, &chosen.tag, &config_path);
+        if info.name != name {
+            crate::mod_sources::migrate_source_entry(&name, &info.name, &config_path);
+            crate::mod_sources::update_installed_version(&info.name, &chosen.tag, &config_path);
+        }
+
+        let preserved_names = crate::mods::finalize_update_with_preserved_configs(
+            &info, &mods_path, pre_update_preserved, &config_path,
+        )
+        .map_err(|e| e.to_string())?;
+        crate::mod_sources::emit_configs_preserved(&app, &info.name, &preserved_names);
+    } else {
+        log::error!(
+            "rollback_mod: install of '{}' from {}/{}@{} produced an unhealthy ModInfo (version='{}'); \
+             leaving installed_version untouched.",
+            name, owner, repo, chosen.tag, info.version,
+        );
+    }
+
+    Ok(info)
+}
+
 /// Result of the walk-back: which release we picked + the path to its
 /// cached zip (already on disk, ready to extract).
 pub struct WalkBackChoice {
@@ -856,6 +1141,118 @@ pub async fn pick_compatible_release(
         game_version.unwrap_or("?"),
         last_required.as_deref().unwrap_or("?"),
     )))
+}
+
+async fn pick_rollback_compatible_release(
+    owner: &str,
+    repo: &str,
+    target: &RollbackReleaseTarget,
+    game_version: Option<&str>,
+    cache_path: &std::path::Path,
+    token: Option<&str>,
+) -> crate::error::Result<WalkBackChoice> {
+    const MAX_RELEASES_TO_WALK: usize = 30;
+    const PER_PAGE: u32 = 30;
+
+    let releases = crate::download::fetch_releases(owner, repo, 1, PER_PAGE, token).await?;
+    if releases.is_empty() {
+        return Err(crate::error::AppError::Other(format!(
+            "{}/{} has no releases",
+            owner, repo
+        )));
+    }
+
+    let mut candidates: Vec<_> = releases
+        .iter()
+        .filter_map(|release| {
+            let version = parse_version(&release.tag_name)?;
+            if target.matches_candidate(&version) && release.assets.iter().any(|a| is_mod_asset(&a.name)) {
+                Some((release, version))
+            } else {
+                None
+            }
+        })
+        .collect();
+    candidates.sort_by(|a, b| b.1.cmp(&a.1));
+
+    if candidates.is_empty() {
+        return Err(crate::error::AppError::Other(target.no_candidate_message(owner, repo)));
+    }
+
+    let mut last_required: Option<String> = None;
+    for (release, _) in candidates.into_iter().take(MAX_RELEASES_TO_WALK) {
+        let tag = release.tag_name.as_str();
+        let zip_path = match crate::download::download_release_zip_to_cache(
+            owner, repo, tag, cache_path, game_version, token,
+        )
+        .await
+        {
+            Ok(p) => p,
+            Err(e) => {
+                log::warn!(
+                    "Rollback: skipping {}/{}@{} (download failed: {})",
+                    owner, repo, tag, e
+                );
+                continue;
+            }
+        };
+        let mgv = match crate::download::peek_zip_min_game_version(&zip_path) {
+            Ok(v) => v,
+            Err(e) => {
+                log::warn!(
+                    "Rollback: skipping {}/{}@{} (manifest peek failed: {})",
+                    owner, repo, tag, e
+                );
+                continue;
+            }
+        };
+
+        let compatible = match (game_version, mgv.as_deref()) {
+            (_, None) => true,
+            (None, Some(_)) => true,
+            (Some(gv), Some(req)) => game_version_satisfies(gv, req),
+        };
+        if compatible {
+            return Ok(WalkBackChoice {
+                tag: tag.to_string(),
+                min_game_version: mgv,
+                zip_path,
+            });
+        }
+        last_required = mgv.or(last_required);
+        log::info!(
+            "Rollback: {}/{}@{} requires game v{} (you have v{}), trying another release",
+            owner, repo, tag,
+            last_required.as_deref().unwrap_or("?"),
+            game_version.unwrap_or("?"),
+        );
+    }
+
+    Err(crate::error::AppError::Other(target.no_compatible_message(
+        owner,
+        repo,
+        game_version,
+        last_required.as_deref(),
+    )))
+}
+
+pub async fn pick_previous_compatible_release(
+    owner: &str,
+    repo: &str,
+    current_version: &semver::Version,
+    game_version: Option<&str>,
+    cache_path: &std::path::Path,
+    token: Option<&str>,
+) -> crate::error::Result<WalkBackChoice> {
+    pick_rollback_compatible_release(
+        owner,
+        repo,
+        &RollbackReleaseTarget::PreviousBelow(current_version.clone()),
+        game_version,
+        cache_path,
+        token,
+    )
+    .await
 }
 
 /// Update all mods that have available GitHub updates.
@@ -1090,6 +1487,31 @@ pub async fn update_all_mods(
 mod version_helper_tests {
     use super::*;
 
+    fn mod_info(overrides: impl FnOnce(&mut crate::mods::ModInfo)) -> crate::mods::ModInfo {
+        let mut info = crate::mods::ModInfo {
+            name: "RitsuLib".into(),
+            version: "0.2.31".into(),
+            description: String::new(),
+            enabled: true,
+            files: vec![],
+            source: None,
+            hash: None,
+            dependencies: vec![],
+            size_bytes: 0,
+            folder_name: Some("RitsuLib".into()),
+            mod_id: Some("ritsulib".into()),
+            github_url: None,
+            nexus_url: None,
+            pinned: false,
+            min_game_version: None,
+            author: None,
+            note: None,
+            custom_url: None,
+        };
+        overrides(&mut info);
+        info
+    }
+
     #[test]
     fn parse_version_handles_v_prefix_and_partial() {
         assert_eq!(parse_version("1.2.3").unwrap().to_string(), "1.2.3");
@@ -1193,6 +1615,139 @@ mod version_helper_tests {
         assert_eq!(parse_owner_repo("foo/"), None);
         assert_eq!(parse_owner_repo("/bar"), None);
         assert_eq!(parse_owner_repo("just-one"), None);
+    }
+
+    #[test]
+    fn parse_github_url_extracts_owner_repo_and_trims_git_suffix() {
+        assert_eq!(
+            parse_github_url("https://github.com/ritsu/sts2-ritsulib/releases"),
+            Some(("ritsu".into(), "sts2-ritsulib".into())),
+        );
+        assert_eq!(
+            parse_github_url("https://github.com/ritsu/sts2-ritsulib.git"),
+            Some(("ritsu".into(), "sts2-ritsulib".into())),
+        );
+        assert_eq!(parse_github_url("https://example.com/ritsu/sts2-ritsulib"), None);
+    }
+
+    #[test]
+    fn resolve_github_repo_uses_folder_first_manual_source() {
+        let info = mod_info(|m| {
+            m.name = "SharedName".into();
+            m.folder_name = Some("RitsuLib".into());
+        });
+        let mut sources = std::collections::HashMap::new();
+        sources.insert(
+            "SharedName".into(),
+            ModSourceEntry {
+                github_repo: Some("wrong/name-key".into()),
+                ..Default::default()
+            },
+        );
+        sources.insert(
+            "RitsuLib".into(),
+            ModSourceEntry {
+                github_repo: Some("ritsu/sts2-ritsulib".into()),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            resolve_github_repo(&info, &sources),
+            Some(("ritsu".into(), "sts2-ritsulib".into())),
+        );
+    }
+
+    #[test]
+    fn resolve_github_repo_skips_auto_detected_and_uses_manifest_url() {
+        let info = mod_info(|m| {
+            m.github_url = Some("https://github.com/ritsu/sts2-ritsulib".into());
+        });
+        let mut sources = std::collections::HashMap::new();
+        sources.insert(
+            "RitsuLib".into(),
+            ModSourceEntry {
+                github_repo: Some("wrong/auto-detected".into()),
+                github_auto_detected: true,
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            resolve_github_repo(&info, &sources),
+            Some(("ritsu".into(), "sts2-ritsulib".into())),
+        );
+    }
+
+    #[test]
+    fn best_known_installed_version_prefers_highest_usable_source_or_manifest_version() {
+        let info = mod_info(|m| {
+            m.version = "0.2.30".into();
+        });
+        let mut sources = std::collections::HashMap::new();
+        sources.insert(
+            "RitsuLib".into(),
+            ModSourceEntry {
+                installed_version: Some("v0.2.31".into()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            best_known_installed_version(&info, &sources).unwrap().to_string(),
+            "0.2.31",
+        );
+
+        sources.insert(
+            "RitsuLib".into(),
+            ModSourceEntry {
+                installed_version: Some("unknown".into()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            best_known_installed_version(&info, &sources).unwrap().to_string(),
+            "0.2.30",
+        );
+    }
+
+    #[test]
+    fn rollback_release_target_reinstalls_known_good_when_manifest_is_unknown() {
+        let info = mod_info(|m| {
+            m.version = "unknown".into();
+        });
+        let mut sources = std::collections::HashMap::new();
+        sources.insert(
+            "RitsuLib".into(),
+            ModSourceEntry {
+                installed_version: Some("v0.2.31".into()),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            rollback_release_target(&info, &sources).unwrap(),
+            RollbackReleaseTarget::ReinstallKnownGood(parse_version("0.2.31").unwrap()),
+        );
+    }
+
+    #[test]
+    fn rollback_release_target_rolls_below_highest_known_when_manifest_is_usable() {
+        let info = mod_info(|m| {
+            m.version = "0.2.30".into();
+        });
+        let mut sources = std::collections::HashMap::new();
+        sources.insert(
+            "RitsuLib".into(),
+            ModSourceEntry {
+                installed_version: Some("v0.2.31".into()),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            rollback_release_target(&info, &sources).unwrap(),
+            RollbackReleaseTarget::PreviousBelow(parse_version("0.2.31").unwrap()),
+        );
     }
 
     #[test]

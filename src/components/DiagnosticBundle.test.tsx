@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { openUrl } from '@tauri-apps/plugin-opener';
 
 import { DiagnosticBundle } from './DiagnosticBundle';
 import { AllProviders } from '../__test__/providers';
@@ -34,6 +35,8 @@ function setClipboard(impl: (text: string) => Promise<void> = async () => {}) {
 
 beforeEach(() => {
   setClipboard();
+  vi.mocked(openUrl).mockReset();
+  vi.mocked(openUrl).mockResolvedValue(undefined);
 });
 
 function Wrap(props: Partial<React.ComponentProps<typeof DiagnosticBundle>> = {}) {
@@ -223,11 +226,9 @@ describe('<DiagnosticBundle>', () => {
     expect((ta as HTMLTextAreaElement).value).not.toContain('<redacted>');
   });
 
-  it('"Open GitHub issue" button appears after generation and opens a new issue URL', async () => {
+  it('"Open GitHub issue" button appears after generation and opens through the Tauri opener', async () => {
     registerInvokeHandler('read_log_tail', () => 'GH body');
     registerInvokeHandler('get_log_path', () => '/x.log');
-
-    const winOpen = vi.spyOn(window, 'open').mockImplementation(() => null);
 
     const user = userEvent.setup();
     render(<Wrap />);
@@ -239,15 +240,44 @@ describe('<DiagnosticBundle>', () => {
     const ghBtn = await screen.findByRole('button', { name: /Open GitHub issue/i });
     await user.click(ghBtn);
 
-    expect(winOpen).toHaveBeenCalledTimes(1);
-    const url = winOpen.mock.calls[0][0] as string;
+    expect(openUrl).toHaveBeenCalledTimes(1);
+    const url = vi.mocked(openUrl).mock.calls[0][0] as string;
     expect(url).toMatch(/^https:\/\/github\.com\/MohamedSerhan\/sts2-mod-manager\/issues\/new\?/);
     expect(url).toContain('title=');
     expect(url).toContain('body=');
-    // The body is URL-encoded; check for an encoded fragment from the bundle.
-    expect(url).toContain(encodeURIComponent('STS2 Mod Manager'));
+    expect(new URL(url).searchParams.get('body')).toContain('STS2 Mod Manager');
+  });
 
-    winOpen.mockRestore();
+  it('"Open GitHub issue" caps the issue URL when the bundle is long', async () => {
+    registerInvokeHandler('read_log_tail', () => 'x'.repeat(12000));
+    registerInvokeHandler('get_log_path', () => '/x.log');
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+
+    await user.click(getGenerateButton());
+    const ghBtn = await screen.findByRole('button', { name: /Open GitHub issue/i });
+    await user.click(ghBtn);
+
+    const url = vi.mocked(openUrl).mock.calls[0][0] as string;
+    const parsed = new URL(url);
+    expect(url.length).toBeLessThanOrEqual(3900);
+    expect(parsed.searchParams.get('body')).toContain('Truncated to fit GitHub issue URL limits');
+  });
+
+  it('"Open GitHub issue" surfaces a toast when the opener rejects', async () => {
+    registerInvokeHandler('read_log_tail', () => 'GH body');
+    registerInvokeHandler('get_log_path', () => '/x.log');
+    vi.mocked(openUrl).mockRejectedValueOnce(new Error('no browser'));
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+
+    await user.click(getGenerateButton());
+    const ghBtn = await screen.findByRole('button', { name: /Open GitHub issue/i });
+    await user.click(ghBtn);
+
+    expect(await screen.findByText(/Couldn't open GitHub issue: no browser/)).toBeInTheDocument();
   });
 
   it('shows valid/not-detected game status from AppContext', async () => {

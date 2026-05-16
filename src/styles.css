@@ -209,6 +209,12 @@ body {
   display: grid; place-items: center;
   font-size: 12px; opacity: 0.85;
 }
+.gf-nav-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* Update-count chip on a sidebar nav item — pinned to the right edge
    so it doesn't reflow the label. Yellow to match the gold accent
    that signals "actionable" everywhere else (update / install). */
@@ -224,6 +230,19 @@ body {
   background: var(--gf);
   color: var(--gf-ink);
   line-height: 1;
+}
+.gf-nav .gf-nav-beta {
+  position: absolute;
+  left: 161px;
+  top: 15px;
+  transform: translateX(-50%);
+  font-size: 7px;
+  line-height: 1.1;
+  letter-spacing: 0.08em;
+  padding: 0.5px 1.5px;
+  border-radius: 2px;
+  pointer-events: none;
+  gap: 0;
 }
 
 /* Activity feed on the Profiles view — followed packs with pending
@@ -600,6 +619,7 @@ body {
 .gf-pill-update { background: var(--gf-tint); color: var(--gf); border: 1px solid var(--gf-line); }
 .gf-pill-active { background: var(--gf-tint); color: var(--gf); border: 1px solid var(--gf-line); }
 .gf-pill-ok { background: oklch(0.74 0.11 165 / 0.18); color: var(--ok); }
+.gf-pill-beta { background: oklch(0.70 0.14 85 / 0.16); color: oklch(0.86 0.13 82); border: 1px solid oklch(0.70 0.14 85 / 0.28); }
 .gf-pill-toolbar { padding: 6px 10px; font-size: 13px; }
 
 /* ── Browse grid ──────────────────────────────────────────────────── */

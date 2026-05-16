@@ -25,6 +25,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
+import { openUrl } from '@tauri-apps/plugin-opener';
 
 import { OnboardingOverlay } from './OnboardingOverlay';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
@@ -328,6 +329,35 @@ describe('<OnboardingOverlay> step 2: connect accounts', () => {
     await user.click(screen.getByRole('button', { name: /^Save$/ }));
     expect(await screen.findByText(/Browse will use authenticated calls/)).toBeInTheDocument();
     expect(getInvokeCalls().some((c) => c.cmd === 'set_github_token')).toBe(true);
+  });
+
+  it('Create scoped token opens the prefilled fine-grained GitHub token URL', async () => {
+    vi.mocked(openUrl).mockClear();
+    const user = userEvent.setup();
+    setup({ valid: true, game_path: 'C:/STS2' } as any);
+    await advanceToStep2(user);
+
+    await user.click(screen.getByRole('button', { name: /Create scoped token/i }));
+
+    await waitFor(() => {
+      expect(openUrl).toHaveBeenCalledTimes(1);
+    });
+    const url = new URL(String(vi.mocked(openUrl).mock.calls[0][0]));
+    expect(`${url.origin}${url.pathname}`).toBe('https://github.com/settings/personal-access-tokens/new');
+    expect(url.searchParams.get('name')).toBe('STS2 Mod Manager');
+    expect(url.searchParams.get('contents')).toBe('write');
+    expect(url.searchParams.get('administration')).toBe('write');
+  });
+
+  it('Create scoped token shows an inline error when the opener rejects', async () => {
+    vi.mocked(openUrl).mockRejectedValueOnce(new Error('no browser'));
+    const user = userEvent.setup();
+    setup({ valid: true, game_path: 'C:/STS2' } as any);
+    await advanceToStep2(user);
+
+    await user.click(screen.getByRole('button', { name: /Create scoped token/i }));
+
+    expect(await screen.findByText(/Couldn't open GitHub token page: no browser/)).toBeInTheDocument();
   });
 
   it('GitHub Save swallows the error silently (no UI change) when set_github_token throws', async () => {

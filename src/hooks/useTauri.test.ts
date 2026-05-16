@@ -54,6 +54,7 @@ import {
   repairModpackSubscription,
   repairProfile,
   resetToVanilla,
+  rollbackMod,
   reshareProfile,
   restoreBackup,
   searchGithubMods,
@@ -245,6 +246,12 @@ describe('useTauri wrappers — command names + arg shapes', () => {
     await repairMod('BaseLib', 'BaseLib-v2');
     expect(lastCall()).toEqual({
       cmd: 'repair_mod',
+      args: { name: 'BaseLib', folderName: 'BaseLib-v2' },
+    });
+
+    await rollbackMod('BaseLib', 'BaseLib-v2');
+    expect(lastCall()).toEqual({
+      cmd: 'rollback_mod',
       args: { name: 'BaseLib', folderName: 'BaseLib-v2' },
     });
 

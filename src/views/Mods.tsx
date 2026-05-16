@@ -22,6 +22,7 @@ import {
   AlertTriangle,
   Check,
   Clock,
+  RotateCcw,
 } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
@@ -52,6 +53,7 @@ import {
   pinMod,
   unpinMod,
   repairMod,
+  rollbackMod,
   updateMod,
 } from '../hooks/useTauri';
 
@@ -182,6 +184,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
   // 'unknown', game won't load it). Confirms first because it nukes the
   // current on-disk install before re-extracting.
   const [repairingMod, setRepairingMod] = useState<string | null>(null);
+  const [rollingBackMod, setRollingBackMod] = useState<string | null>(null);
   async function handleRepair(name: string, folderName: string | null, hasGithub: boolean) {
     // uncovered: this guard is defensive — the kebab item is independently
     // disabled when github_url is null (see ModRow render), so no UI path
@@ -214,6 +217,44 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
       toast.error(`Repair failed for '${name}': ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setRepairingMod(null);
+    }
+  }
+
+  async function handleRollback(name: string, folderName: string | null, hasGithub: boolean) {
+    if (!hasGithub) {
+      toast.error(
+        `'${name}' has no GitHub source linked — rollback fetches from GitHub. ` +
+        `Add a source via Edit sources… first.`,
+      );
+      return;
+    }
+    const ok = await confirm({
+      title: `Roll back '${name}'?`,
+      body:
+        `This will delete the current on-disk install and recover a compatible ` +
+        `GitHub release. If this install still has a usable version, rollback picks ` +
+        `the closest lower release; if the version reads "unknown", it reinstalls ` +
+        `the last known-good release. Use it when the newest release is broken. ` +
+        `Make sure STS2 is closed.`,
+      warning:
+        `Rollback is a beta recovery feature. It preserves mod configs and resolves ` +
+        `a compatible GitHub release before deleting files, but some mods package ` +
+        `releases inconsistently, so check the result before launching a long run.`,
+      confirmLabel: 'Roll back now',
+    });
+    if (!ok) return;
+    const rollbackKey = folderName ?? name;
+    setRollingBackMod(rollbackKey);
+    try {
+      const info = await rollbackMod(name, folderName);
+      toast.success(`Rolled back '${info.name}' to v${info.version}`);
+      await refreshAll();
+      const names = info.name !== name ? [name, info.name] : [name];
+      await refreshAuditEntries(names);
+    } catch (e) {
+      toast.error(`Rollback failed for '${name}': ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setRollingBackMod(null);
     }
   }
 
@@ -432,6 +473,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                 >
                   <ClipboardCheck size={14} />
                   Audit mods
+                  <Badge variant="beta" ariaHidden>Beta</Badge>
                 </Button>
               );
             }
@@ -965,6 +1007,36 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                               }
                             >
                               {repairingMod === rowKey ? 'Repairing…' : 'Repair this mod'}
+                            </KebabItem>
+                            <KebabItem
+                              icon={
+                                rollingBackMod === rowKey ? (
+                                  <RefreshCw size={12} className="animate-spin" />
+                                ) : (
+                                  <RotateCcw size={12} />
+                                )
+                              }
+                              onClick={() => handleRollback(mod.name, mod.folder_name, !!mod.github_url)}
+                              disabled={
+                                gameRunning ||
+                                repairingMod !== null ||
+                                rollingBackMod !== null ||
+                                !mod.github_url
+                              }
+                              description={
+                                mod.github_url
+                                  ? 'Recover a compatible GitHub release. Uses the previous release when the current version is known, or the last known-good release when this install reads "unknown".'
+                                  : 'Link a GitHub source first via "Edit sources…" — rollback fetches from GitHub.'
+                              }
+                            >
+                              {rollingBackMod === rowKey ? (
+                                'Rolling back…'
+                              ) : (
+                                <span className="inline-flex items-center gap-1">
+                                  Roll back one version
+                                  <Badge variant="beta" ariaHidden>Beta</Badge>
+                                </span>
+                              )}
                             </KebabItem>
                           </KebabSection>
                         </>

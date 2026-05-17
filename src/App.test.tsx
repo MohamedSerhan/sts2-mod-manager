@@ -26,7 +26,7 @@
  *    against `useEffect` cleanup, which is fragile and low-value.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import App from './App';
@@ -146,6 +146,16 @@ describe('<App>', () => {
     await user.click(getNavButton('Browse Mods'));
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /GitHub/i })).toBeInTheDocument();
+    });
+  });
+
+  it('clicking Browse Modpacks swaps to the modpack browser', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    await user.click(getNavButton('Browse Modpacks'));
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Browse Modpacks' })).toBeInTheDocument();
     });
   });
 
@@ -793,6 +803,42 @@ describe('<App>', () => {
     });
   });
 
+  it('guards external anchor routing and reports opener failures', async () => {
+    const opener = await import('@tauri-apps/plugin-opener');
+    const openUrl = opener.openUrl as ReturnType<typeof vi.fn>;
+    openUrl.mockClear();
+
+    const { container } = render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+
+    const root = container.firstElementChild as HTMLElement;
+    const appendAnchor = (href: string, text: string, configure?: (anchor: HTMLAnchorElement) => void) => {
+      const anchor = document.createElement('a');
+      anchor.setAttribute('href', href);
+      anchor.textContent = text;
+      anchor.addEventListener('click', (event) => event.preventDefault());
+      configure?.(anchor);
+      root.appendChild(anchor);
+      return anchor;
+    };
+
+    fireEvent.click(appendAnchor('https://example.test/modified', 'modified'), { ctrlKey: true });
+    fireEvent.click(appendAnchor('https://example.test/download', 'download', (a) => {
+      a.setAttribute('download', '');
+    }));
+    fireEvent.click(appendAnchor('http://[invalid', 'invalid'));
+    fireEvent.click(appendAnchor('sts2mm://profile/demo', 'internal'));
+
+    expect(openUrl).not.toHaveBeenCalled();
+
+    openUrl.mockRejectedValueOnce(new Error('no browser'));
+    fireEvent.click(appendAnchor('https://example.test/fail', 'fail'));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Failed to open link: no browser/)).toBeInTheDocument();
+    });
+  });
+
   it('updater.check rejection is logged and does not crash the app', async () => {
     const updater = await import('@tauri-apps/plugin-updater');
     (updater.check as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('network'));
@@ -815,6 +861,23 @@ describe('<App>', () => {
     // Visible-behavior assertion: nothing should crash and the button
     // is still in the document afterward.
     expect(max).toBeInTheDocument();
+  });
+
+  it('Maximize button logs capability errors without crashing', async () => {
+    const user = userEvent.setup();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockWindow.toggleMaximize.mockRejectedValueOnce(new Error('missing capability'));
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+
+    const max = screen.getByTitle('Maximize');
+    await user.click(max);
+
+    await waitFor(() => {
+      expect(warnSpy).toHaveBeenCalledWith('toggleMaximize failed:', expect.any(Error));
+    });
+    expect(max).toBeInTheDocument();
+    warnSpy.mockRestore();
   });
 
   it('Close button click is handled without crashing', async () => {

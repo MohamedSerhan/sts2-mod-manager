@@ -1804,6 +1804,15 @@ pub async fn reshare_profile(
         serde_json::to_string_pretty(&updated_info).unwrap(),
     );
 
+    // Reclaim disk on the `bundles` release: any asset no profile
+    // manifest still references after this re-share is dead weight.
+    // Always best-effort — never fails the re-share.
+    match cleanup_orphan_bundle_assets(&token, &owner).await {
+        Ok(0) => {}
+        Ok(n) => log::info!("GC: removed {} orphan bundle asset(s) from {}/{}", n, owner, profiles_repo()),
+        Err(e) => log::warn!("GC: orphan-asset cleanup failed: {}", e),
+    }
+
     let _ = app_handle.emit(
         "share-progress",
         ShareProgress {

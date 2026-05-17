@@ -267,39 +267,89 @@ jobs:
             fi
           }
 
-          # Build the body
-          BODY="## STS2 Mod Manager ${TAG}
+          # Extract the [VERSION] section from CHANGELOG.md so the release
+          # body carries the player-facing notes inline — matching what
+          # the in-app "What's new" card renders (src/lib/changelog.ts).
+          # Pre-1.4.3 the body just linked to the compare URL, leaving
+          # users to click out to find what changed.
+          #
+          # Heading shape: `## [VERSION] - YYYY-MM-DD` (date optional).
+          # Section body extends until the next `## [` heading.
+          NOTES_FILE=$(mktemp)
+          awk -v ver="$VERSION" '
+            /^## \[/ {
+              if (match($0, /^## \[([^\]]+)\]/, m)) {
+                if (m[1] == ver) { in_block = 1; next }
+              }
+              if (in_block) { in_block = 0 }
+            }
+            in_block { print }
+          ' CHANGELOG.md > "$NOTES_FILE"
 
-          ### Download for your platform
+          # Pre-compute the asset link blocks. These need shell expansion
+          # (file names embed VERSION), so they're built outside the
+          # heredoc / file-construction block below.
+          WIN_LINKS=$(
+            link "STS2.Mod.Manager_${VERSION}_x64-setup.exe" "STS2.Mod.Manager_${VERSION}_x64-setup.exe" "Recommended. Double-click to install." true
+            link "STS2.Mod.Manager_${VERSION}_x64_en-US.msi" "STS2.Mod.Manager_${VERSION}_x64_en-US.msi" "Alternative MSI installer."
+            link "STS2.Mod.Manager_${VERSION}_x64_portable.zip" "STS2.Mod.Manager_${VERSION}_x64_portable.zip" "Portable build (no installer, no auto-update). Used by the Nexus Mods page. Requires WebView2 Runtime."
+          )
+          MAC_LINKS=$(
+            link "STS2.Mod.Manager_${VERSION}_universal.dmg" "STS2.Mod.Manager_${VERSION}_universal.dmg" "Works on both Intel and Apple Silicon Macs. Open the DMG and drag to Applications." true
+          )
+          LINUX_LINKS=$(
+            link "STS2.Mod.Manager_${VERSION}_amd64.deb" "STS2.Mod.Manager_${VERSION}_amd64.deb" "For Ubuntu, Debian, Pop!_OS, Linux Mint. Install with \`sudo dpkg -i\`." true
+            link "STS2.Mod.Manager-${VERSION}-1.x86_64.rpm" "STS2.Mod.Manager-${VERSION}-1.x86_64.rpm" "For Fedora, openSUSE. Install with \`sudo rpm -i\`." true
+            link "STS2.Mod.Manager_${VERSION}_amd64.AppImage" "STS2.Mod.Manager_${VERSION}_amd64.AppImage" "Portable, no install needed. Works on all distros including Arch-based (CachyOS, Manjaro, EndeavourOS)." true
+          )
+          PREV_TAG=$(gh release list --limit 2 --json tagName --jq '.[1].tagName // empty')
 
-          #### Windows
-          $(link "STS2.Mod.Manager_${VERSION}_x64-setup.exe" "STS2.Mod.Manager_${VERSION}_x64-setup.exe" "Recommended. Double-click to install." true)
-          $(link "STS2.Mod.Manager_${VERSION}_x64_en-US.msi" "STS2.Mod.Manager_${VERSION}_x64_en-US.msi" "Alternative MSI installer.")
-          $(link "STS2.Mod.Manager_${VERSION}_x64_portable.zip" "STS2.Mod.Manager_${VERSION}_x64_portable.zip" "Portable build (no installer, no auto-update). Used by the Nexus Mods page. Requires WebView2 Runtime.")
-
-          > **Windows SmartScreen warning:** The installer isn't code-signed yet, so when you run it you'll see *\"Windows protected your PC\"* from Microsoft Defender SmartScreen. To install: click **More info**, then click **Run anyway**. Your browser may also flag the download as untrusted -- choose **Keep** (Edge/Chrome) to save the file.
-
-          #### macOS
-          $(link "STS2.Mod.Manager_${VERSION}_universal.dmg" "STS2.Mod.Manager_${VERSION}_universal.dmg" "Works on both Intel and Apple Silicon Macs. Open the DMG and drag to Applications." true)
-
-          > **macOS security warning:** The app isn't notarized by Apple, so on first launch you'll see *\"STS2 Mod Manager cannot be opened because Apple cannot check it for malicious software\"* (or *\"unidentified developer\"*). To open it: **right-click (or Control-click) the app in Applications and choose Open**, then click **Open** in the dialog. You only need to do this once. Alternatively, go to **System Settings → Privacy & Security** and click **Open Anyway**.
-
-          #### Linux
-          $(link "STS2.Mod.Manager_${VERSION}_amd64.deb" "STS2.Mod.Manager_${VERSION}_amd64.deb" "For Ubuntu, Debian, Pop!_OS, Linux Mint. Install with \`sudo dpkg -i\`." true)
-          $(link "STS2.Mod.Manager-${VERSION}-1.x86_64.rpm" "STS2.Mod.Manager-${VERSION}-1.x86_64.rpm" "For Fedora, openSUSE. Install with \`sudo rpm -i\`." true)
-          $(link "STS2.Mod.Manager_${VERSION}_amd64.AppImage" "STS2.Mod.Manager_${VERSION}_amd64.AppImage" "Portable, no install needed. Works on all distros including Arch-based (CachyOS, Manjaro, EndeavourOS)." true)
-
-          > **Arch/CachyOS/Manjaro users:** The AppImage now includes a built-in fix for the blank white screen issue. The AppRun script preloads the system \`libwayland-client.so\` before launching, which prevents WebKit's GPU subprocess from failing EGL initialisation. Simply download, mark executable, and run — no workarounds needed.
-
-          ---
-
-          **Full Changelog**: https://github.com/${REPO}/compare/$(gh release list --limit 2 --json tagName --jq '.[1].tagName')...${TAG}"
-
-          # Strip leading whitespace from heredoc-style indentation
-          BODY=$(echo "$BODY" | sed 's/^          //')
+          # Build the body to a file. Static per-platform install warnings
+          # live in .github/release-warnings/*.md so the YAML doesn't need
+          # to embed multi-line block scalars with markdown that would
+          # break its indentation rules (the inline `cat <<'EOF'` approach
+          # tripped the YAML scanner on the `> ...` quote-block lines).
+          # Dynamic parts (title, links, diff URL, changelog notes) are
+          # written via echo / printf / cat of the prepared shell vars
+          # and files.
+          BODY_FILE=$(mktemp)
+          {
+            echo "## STS2 Mod Manager ${TAG}"
+            echo
+            echo "### What's new"
+            echo
+            if [ -s "$NOTES_FILE" ]; then
+              cat "$NOTES_FILE"
+            else
+              echo "_No changelog entry found for ${VERSION}. See the [full changelog](https://github.com/${REPO}/blob/main/CHANGELOG.md) for the history._"
+            fi
+            echo
+            echo "### Download for your platform"
+            echo
+            echo "#### Windows"
+            printf '%s\n' "$WIN_LINKS"
+            echo
+            cat .github/release-warnings/windows.md
+            echo
+            echo "#### macOS"
+            printf '%s\n' "$MAC_LINKS"
+            echo
+            cat .github/release-warnings/macos.md
+            echo
+            echo "#### Linux"
+            printf '%s\n' "$LINUX_LINKS"
+            echo
+            cat .github/release-warnings/linux.md
+            if [ -n "$PREV_TAG" ]; then
+              echo
+              echo "---"
+              echo
+              echo "**Source diff:** https://github.com/${REPO}/compare/${PREV_TAG}...${TAG}"
+            fi
+          } > "$BODY_FILE"
 
           # Update the release body
-          gh release edit "$TAG" --notes "$BODY"
+          gh release edit "$TAG" --notes-file "$BODY_FILE"
 
   # Upload the portable Windows zip to Nexus Mods (mod 856).
   # Runs in parallel with publish-updater + format-release so a Nexus

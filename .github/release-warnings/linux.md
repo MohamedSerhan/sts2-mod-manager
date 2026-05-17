@@ -1,0 +1,1 @@
+> **Arch/CachyOS/Manjaro users:** The AppImage now includes a built-in fix for the blank white screen issue. The AppRun script preloads the system `libwayland-client.so` before launching, which prevents WebKit's GPU subprocess from failing EGL initialisation. Simply download, mark executable, and run — no workarounds needed.

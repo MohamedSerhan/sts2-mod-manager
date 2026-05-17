@@ -29,6 +29,18 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ### Changed
 
+### Fixed
+
+### Security
+
+---
+
+## [1.4.3] - 2026-05-16
+
+### Added
+
+### Changed
+
 - Advanced mode now puts Remove mod directly on each mod row so cleanup takes one click.
 - The launch overlay now says Steam may take a moment when Steam was not already running.
 

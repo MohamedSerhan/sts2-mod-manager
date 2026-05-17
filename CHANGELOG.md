@@ -31,6 +31,18 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ### Fixed
 
+### Security
+
+---
+
+## [1.4.5] - 2026-05-16
+
+### Added
+
+### Changed
+
+### Fixed
+
 - Linux AppImage buttons now keep working after updating from inside the app, including browser links, folders, support, update checks, and game launch.
 
 ### Security

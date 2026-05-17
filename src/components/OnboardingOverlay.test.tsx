@@ -78,6 +78,12 @@ describe('<OnboardingOverlay> step 1: game detect', () => {
     expect(screen.getByText(/Step 1 of 3/)).toBeInTheDocument();
   });
 
+  it('offers a language override during onboarding', () => {
+    setup({ valid: false } as any);
+
+    expect(screen.getByLabelText('Language')).toBeInTheDocument();
+  });
+
   it('renders the gameNotFound view when gameInfo prop is null (no `?? false` fallback)', () => {
     setup(null);
     expect(screen.getByText(/Couldn't auto-detect/)).toBeInTheDocument();

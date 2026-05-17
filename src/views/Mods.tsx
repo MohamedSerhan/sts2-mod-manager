@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { countGithubUpdates, isUpToDate } from '../lib/auditState';
 import { nexusFilesUrl } from '../lib/nexusUrl';
 import {
@@ -81,6 +82,7 @@ function gameVersionSatisfies(current: string | null | undefined, required: stri
 }
 
 export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: boolean } = {}) {
+  const { t } = useTranslation();
   const { mods, refreshMods, refreshAll, gameRunning, gameInfo, notifyNexusOpen, auditResults, auditing, runAudit, refreshAuditEntries, updatingAll, updateAllGithub } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
@@ -136,14 +138,15 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
     setUpdatingKey(key);
     try {
       const info = await updateMod(name, folderName);
-      toast.success(`Updated '${name}' to v${info.version}`);
+      toast.success(t('mods.toast.updated', { name, version: info.version }));
       await refreshAll();
       // Targeted re-audit: cover both the requested name and any rename
       // the install produced (same approach Settings uses).
       const names = info.name !== name ? [name, info.name] : [name];
       await refreshAuditEntries(names);
     } catch (e) {
-      toast.error(`Update failed for '${name}': ${e instanceof Error ? e.message : String(e)}`);
+      const updateErrMsg = e instanceof Error ? e.message : String(e);
+      toast.error(t('mods.toast.updateFailed', { name, error: updateErrMsg }));
     } finally {
       setUpdatingKey(null);
     }
@@ -158,9 +161,9 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
     try {
       await toggleMod(name, folderName, enable);
       await refreshMods();
-      toast.success(`${name} ${enable ? 'enabled' : 'disabled'}`);
+      toast.success(enable ? t('mods.toast.enabled', { name }) : t('mods.toast.disabled', { name }));
     } catch (e) {
-      toast.error(`Failed to toggle ${name}: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('mods.toast.toggleFailed', { name, error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
@@ -168,14 +171,15 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
     try {
       if (pinned) {
         await unpinMod(name, folderName);
-        toast.success(`Unpinned ${name}`);
+        toast.success(t('mods.toast.unpinned', { name }));
       } else {
         await pinMod(name, folderName);
-        toast.success(`Pinned ${name} — its enabled state will survive modpack updates`);
+        toast.success(t('mods.toast.pinned', { name }));
       }
       await refreshMods();
     } catch (e) {
-      toast.error(`Failed to ${pinned ? 'unpin' : 'pin'} ${name}: ${e instanceof Error ? e.message : String(e)}`);
+      const action = pinned ? t('mods.toast.unpinAction') : t('mods.toast.pinAction');
+      toast.error(t('mods.toast.pinFailed', { action, name, error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
@@ -190,19 +194,13 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
     // disabled when github_url is null (see ModRow render), so no UI path
     // reaches it. Covered indirectly by the "kebab disabled" test instead.
     if (!hasGithub) {
-      toast.error(
-        `'${name}' has no GitHub source linked — repair fetches from GitHub. ` +
-        `Add a source via Edit sources… first.`,
-      );
+      toast.error(t('mods.toast.repairNoGithub', { name }));
       return;
     }
     const ok = await confirm({
-      title: `Repair '${name}'?`,
-      body:
-        `This will delete the current on-disk install and re-download the latest ` +
-        `release from the linked GitHub source. Use it when a mod is broken ` +
-        `(version reads "unknown", game won't load it, etc.). Make sure STS2 is closed.`,
-      confirmLabel: 'Repair now',
+      title: t('mods.repairConfirmTitle', { name }),
+      body: t('mods.repairConfirmBody'),
+      confirmLabel: t('mods.repairNow'),
     });
     if (!ok) return;
     // Track the in-progress repair by folder key so the spinner shows on
@@ -211,10 +209,11 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
     setRepairingMod(repairKey);
     try {
       const info = await repairMod(name, folderName);
-      toast.success(`Repaired '${info.name}' (v${info.version})`);
+      toast.success(t('mods.toast.repaired', { name: info.name, version: info.version }));
       await refreshAll();
     } catch (e) {
-      toast.error(`Repair failed for '${name}': ${e instanceof Error ? e.message : String(e)}`);
+      const repairErrMsg = e instanceof Error ? e.message : String(e);
+      toast.error(t('mods.toast.repairFailed', { name, error: repairErrMsg }));
     } finally {
       setRepairingMod(null);
     }
@@ -228,38 +227,27 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
     // re-entrancy guard).
     /* v8 ignore start */
     if (!hasGithub) {
-      toast.error(
-        `'${name}' has no GitHub source linked — rollback fetches from GitHub. ` +
-        `Add a source via Edit sources… first.`,
-      );
+      toast.error(t('mods.rollbackNoSource', { name }));
       return;
     }
     /* v8 ignore stop */
     const ok = await confirm({
-      title: `Roll back '${name}'?`,
-      body:
-        `This will delete the current on-disk install and recover a compatible ` +
-        `GitHub release. If this install still has a usable version, rollback picks ` +
-        `the closest lower release; if the version reads "unknown", it reinstalls ` +
-        `the last known-good release. Use it when the newest release is broken. ` +
-        `Make sure STS2 is closed.`,
-      warning:
-        `Rollback is a beta recovery feature. It preserves mod configs and resolves ` +
-        `a compatible GitHub release before deleting files, but some mods package ` +
-        `releases inconsistently, so check the result before launching a long run.`,
-      confirmLabel: 'Roll back now',
+      title: t('mods.rollbackConfirmTitle', { name }),
+      body: t('mods.rollbackConfirmBody'),
+      warning: t('mods.rollbackConfirmWarning'),
+      confirmLabel: t('mods.rollbackNow'),
     });
     if (!ok) return;
     const rollbackKey = folderName ?? name;
     setRollingBackMod(rollbackKey);
     try {
       const info = await rollbackMod(name, folderName);
-      toast.success(`Rolled back '${info.name}' to v${info.version}`);
+      toast.success(t('mods.toast.rolledBack', { name: info.name, version: info.version }));
       await refreshAll();
       const names = info.name !== name ? [name, info.name] : [name];
       await refreshAuditEntries(names);
     } catch (e) {
-      toast.error(`Rollback failed for '${name}': ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('mods.toast.rollbackFailed', { name, error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setRollingBackMod(null);
     }
@@ -267,18 +255,19 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
 
   async function handleDelete(name: string, folderName: string | null) {
     const ok = await confirm({
-      title: `Delete "${name}"?`,
-      body: 'This permanently removes the mod files from disk. This cannot be undone.',
-      confirmLabel: 'Delete',
+      title: t('mods.deleteConfirmTitle', { name }),
+      body: t('mods.deleteConfirmBody'),
+      confirmLabel: t('mods.delete'),
       destructive: true,
     });
     if (!ok) return;
     try {
       await deleteMod(name, folderName);
       await refreshMods();
-      toast.success(`Deleted: ${name}`);
+      toast.success(t('mods.toast.deleted', { name }));
     } catch (e) {
-      toast.error(`Failed to delete ${name}: ${e instanceof Error ? e.message : String(e)}`);
+      const delErrMsg = e instanceof Error ? e.message : String(e);
+      toast.error(t('mods.toast.deleteFailed', { name, error: delErrMsg }));
     }
   }
 
@@ -286,15 +275,16 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
     try {
       const selected = await open({
         multiple: false,
-        filters: [{ name: 'Mod Archives', extensions: ['zip', '7z', 'rar'] }],
+        filters: [{ name: t('mods.importArchiveFilter'), extensions: ['zip', '7z', 'rar'] }],
       });
       if (!selected) return;
       const path = typeof selected === 'string' ? selected : selected;
       const mod = await installModFromFile(path);
       await refreshAll();
-      toast.success(`Installed: ${mod.name}`);
+      toast.success(t('mods.toast.installed', { name: mod.name }));
     } catch (e) {
-      toast.error(`Import failed: ${e instanceof Error ? e.message : String(e)}`);
+      const impErrMsg = e instanceof Error ? e.message : String(e);
+      toast.error(t('mods.toast.importFailed', { error: impErrMsg }));
     }
   }
 
@@ -306,22 +296,23 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
       const result = await quickAddMod(input);
       if (result.type === 'github_installed') {
         await refreshAll();
-        toast.success(`Installed: ${result.mod_info.name}`);
+        toast.success(t('mods.toast.installed', { name: result.mod_info.name }));
       } else {
         const filesUrl = nexusFilesUrl(input);
         if (filesUrl) {
           await openExternalUrl(filesUrl);
           // Sticky toast — dismissed when the downloads watcher reports
           // an install or after a 10-min fail-safe.
-          notifyNexusOpen(result.nexus_info.name || 'Nexus mod');
+          notifyNexusOpen(result.nexus_info.name || t('quickAdd.nexusMod'));
         } else {
-          toast.info(`Found Nexus mod: ${result.nexus_info.name || 'Unknown'}. Open it on Nexus and click "Slow Download" / "Manual" — the app will catch the zip from your Downloads folder.`);
+          toast.info(t('mods.toast.foundNexusMod', { name: result.nexus_info.name || t('quickAdd.unknown') }));
         }
       }
       setQuickAddUrl('');
       setShowQuickAdd(false);
     } catch (e) {
-      toast.error(`Quick add failed: ${e instanceof Error ? e.message : String(e)}`);
+      const qaErrMsg = e instanceof Error ? e.message : String(e);
+      toast.error(t('mods.toast.quickAddFailed', { error: qaErrMsg }));
     } finally {
       setQuickAdding(false);
     }
@@ -331,9 +322,9 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
     try {
       await enableAllMods();
       await refreshMods();
-      toast.success('All mods enabled');
+      toast.success(t('mods.toast.allEnabled'));
     } catch (e) {
-      toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('mods.toast.allFailed', { error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
@@ -341,18 +332,18 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
     try {
       await disableAllMods();
       await refreshMods();
-      toast.success('All mods disabled');
+      toast.success(t('mods.toast.allDisabled'));
     } catch (e) {
-      toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('mods.toast.allFailed', { error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
   async function handleDeleteAll() {
     const ok = await confirm({
-      title: `Delete all ${mods.length} mods?`,
-      body: 'Every mod folder will be permanently removed from disk. This cannot be undone.',
-      warning: 'Profiles that include these mods will be unable to launch until mods are reinstalled.',
-      confirmLabel: 'Delete everything',
+      title: t('mods.deleteAllConfirmTitle', { count: mods.length }),
+      body: t('mods.deleteAllConfirmBody'),
+      warning: t('mods.deleteAllConfirmWarning'),
+      confirmLabel: t('mods.deleteEverything'),
       destructive: true,
       typedPhrase: 'delete all',
     });
@@ -360,9 +351,9 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
     try {
       const deleted = await deleteAllMods();
       await refreshAll();
-      toast.success(`Deleted ${deleted} mods`);
+      toast.success(t('mods.toast.deletedMultiple', { count: deleted }));
     } catch (e) {
-      toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('mods.toast.allFailed', { error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
@@ -378,9 +369,9 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
     try {
       await setModSource(modName, '', folderName);
       await refreshMods();
-      toast.info(`Source link cleared for ${modName}`);
+      toast.info(t('mods.toast.sourceCleared', { name: modName }));
     } catch (e) {
-      toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('mods.toast.allFailed', { error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
@@ -417,12 +408,12 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
       {/* Header */}
       <div className="gf-page-head">
         <div>
-          <h1 className="gf-page-title">Your mods</h1>
+          <h1 className="gf-page-title">{t('mods.title')}</h1>
           <p className="gf-page-sub">
-            {totalCount} installed · {enabledCount} active{disabledCount > 0 ? `, ${disabledCount} disabled` : ''}
+            {t('mods.subtitle', { total: totalCount, enabled: enabledCount, disabled: disabledCount > 0 ? t('mods.subtitleDisabledSuffix', { count: disabledCount }) : '' })}
             {advancedMode && linkedCount > 0 && (
               <span style={{ color: 'var(--ok)', marginLeft: 8 }}>
-                · {linkedCount} linked for auto-updates
+                · {t('mods.linkedCount', { count: linkedCount })}
               </span>
             )}
           </p>
@@ -430,17 +421,17 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
         <div className="gf-page-actions">
           <Button variant="secondary" size="sm" onClick={handleOpenFolder}>
             <FolderOpen size={14} />
-            Open folder
+            {t('mods.openFolder')}
           </Button>
           {advancedMode && (
             <>
               <Button variant="secondary" size="sm" onClick={handleImportFile} disabled={gameRunning}>
                 <Upload size={14} />
-                Import mod
+                {t('mods.importMod')}
               </Button>
               <Button variant="secondary" size="sm" onClick={() => setShowQuickAdd(!showQuickAdd)} disabled={gameRunning}>
                 <Link size={14} />
-                Quick add URL
+                {t('mods.quickAddUrl')}
               </Button>
             </>
           )}
@@ -454,9 +445,9 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
 
             if (auditing) {
               return (
-                <Button variant="secondary" size="sm" disabled title="Checking each mod against its source…">
+                <Button variant="secondary" size="sm" disabled title={t('mods.checking')}>
                   <ClipboardCheck size={14} className="animate-pulse" />
-                  Auditing…
+                  {t('mods.audit.running')}
                 </Button>
               );
             }
@@ -465,7 +456,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
               return (
                 <Button variant="primary" size="sm" disabled>
                   <RefreshCw size={14} className="animate-spin" />
-                  Updating {ghUpdateCount}…
+                  {t('mods.updatingCount', { count: ghUpdateCount })}
                 </Button>
               );
             }
@@ -476,11 +467,11 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                   variant="secondary"
                   size="sm"
                   onClick={handleCheckUpdates}
-                  title="Check each mod against its source for updates."
+                  title={t('mods.checkForUpdates')}
                 >
                   <ClipboardCheck size={14} />
-                  Audit mods
-                  <Badge variant="beta" ariaHidden>Beta</Badge>
+                  {t('mods.audit.run')}
+                  <Badge variant="beta" ariaHidden>{t('common.beta')}</Badge>
                 </Button>
               );
             }
@@ -490,16 +481,16 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                 <>
                   <span
                     className="gf-pill gf-pill-ok gf-pill-toolbar"
-                    title="Every linked mod is on its source's latest installable release."
+                    title={t('mods.allUpToDate')}
                   >
-                    Up to date
+                    {t('mods.audit.upToDate')}
                   </span>
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={handleCheckUpdates}
-                    title="Re-audit"
-                    aria-label="Re-audit"
+                    title={t('mods.reaudit')}
+                    aria-label={t('mods.reaudit')}
                   >
                     <RefreshCw size={14} />
                   </Button>
@@ -513,17 +504,17 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                   variant="primary"
                   size="sm"
                   onClick={() => updateAllGithub(ghUpdateNames)}
-                  title="Update every GitHub-linked mod with a pending update. Pinned mods are skipped."
+                  title={t('mods.updateAllTitle')}
                 >
                   <Download size={14} />
-                  Update {ghUpdateCount} mod{ghUpdateCount === 1 ? '' : 's'}
+                  {t('mods.updateAllLabel', { count: ghUpdateCount })}
                 </Button>
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={handleCheckUpdates}
-                  title="Re-audit"
-                  aria-label="Re-audit"
+                  title={t('mods.reaudit')}
+                  aria-label={t('mods.reaudit')}
                 >
                   <RefreshCw size={14} />
                 </Button>
@@ -536,7 +527,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
             finally { setRefreshing(false); }
           }} disabled={refreshing}>
             <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
-            {refreshing ? 'Refreshing…' : 'Refresh'}
+            {refreshing ? t('common.refreshing') : t('common.refresh')}
           </Button>
         </div>
       </div>
@@ -546,20 +537,20 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
         <Card className="flex gap-3 items-end">
           <div className="flex-1">
             <label className="text-sm text-text-muted block mb-1.5">
-              GitHub URL, Nexus URL, or github:owner/repo
+              {t('mods.quickAddLabel')}
             </label>
             <input
               type="text"
               value={quickAddUrl}
               onChange={(e) => setQuickAddUrl(e.target.value)}
-              placeholder="https://github.com/user/mod or nexus:slaythespire2/mods/123"
+              placeholder={t('mods.quickAddPlaceholder')}
               className="w-full bg-background border border-border rounded-lg px-4 py-2.5 text-sm text-text placeholder:text-text-dim focus:outline-none focus:ring-2 focus:ring-primary/50"
               onKeyDown={(e) => e.key === 'Enter' && handleQuickAdd()}
               disabled={quickAdding}
             />
           </div>
           <Button size="sm" onClick={handleQuickAdd} disabled={quickAdding}>
-            {quickAdding ? 'Adding...' : 'Add'}
+            {quickAdding ? t('mods.adding') : t('mods.add')}
           </Button>
           <Button variant="ghost" size="sm" onClick={() => setShowQuickAdd(false)}>
             <X size={14} />
@@ -573,7 +564,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
           <Search size={14} style={{ color: 'var(--ink-dim)' }} />
           <input
             type="text"
-            placeholder={`Search ${totalCount} mod${totalCount === 1 ? '' : 's'}…`}
+            placeholder={t('mods.searchPlaceholder', { count: totalCount })}
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
           />
@@ -583,26 +574,26 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
           type="button"
           className={`gf-adv-toggle ${advancedMode ? 'on' : ''}`}
           onClick={toggleAdvanced}
-          title="Show source pills, Pin/Delete, source editor"
+          title={t('mods.advancedTitle')}
         >
           <span className="gf-adv-toggle-track">
             <span className="gf-adv-toggle-dot" />
           </span>
-          <span className="gf-adv-toggle-label">Advanced</span>
+          <span className="gf-adv-toggle-label">{t('mods.advanced')}</span>
         </button>
         {mods.length > 0 && (
           <div className="flex gap-1.5">
-            <Button variant="ghost" size="sm" onClick={handleEnableAll} disabled={gameRunning} title={gameRunning ? 'Close STS2 first' : 'Enable all mods'}>
+            <Button variant="ghost" size="sm" onClick={handleEnableAll} disabled={gameRunning} title={gameRunning ? t('mods.closeSts2First') : t('mods.enableAll')}>
               <ToggleRight size={14} />
-              Enable all
+              {t('mods.enableAll')}
             </Button>
-            <Button variant="ghost" size="sm" onClick={handleDisableAll} disabled={gameRunning} title={gameRunning ? 'Close STS2 first' : 'Disable all mods'}>
+            <Button variant="ghost" size="sm" onClick={handleDisableAll} disabled={gameRunning} title={gameRunning ? t('mods.closeSts2First') : t('mods.disableAll')}>
               <ToggleLeft size={14} />
-              Disable all
+              {t('mods.disableAll')}
             </Button>
-            <Button variant="danger" size="sm" onClick={handleDeleteAll} disabled={gameRunning} title={gameRunning ? 'Close STS2 first' : 'Delete every mod'}>
+            <Button variant="danger" size="sm" onClick={handleDeleteAll} disabled={gameRunning} title={gameRunning ? t('mods.closeSts2First') : t('mods.deleteAll')}>
               <Trash2 size={14} />
-              Delete all
+              {t('mods.deleteAll')}
             </Button>
           </div>
         )}
@@ -613,12 +604,12 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
         <div className="gf-empty">
           <div className="gf-empty-art"><Package size={28} /></div>
           <div className="gf-empty-title">
-            {mods.length === 0 ? 'No mods installed' : 'No mods match your filter'}
+            {mods.length === 0 ? t('mods.empty') : t('mods.noMatch')}
           </div>
           <div className="gf-empty-sub">
             {mods.length === 0
-              ? "Browse to install a mod, paste a friend's profile code, or drop a .zip anywhere on this window."
-              : 'Try a different search term.'}
+              ? t('mods.emptyDescription')
+              : t('mods.noMatchSub')}
           </div>
         </div>
       ) : (
@@ -696,7 +687,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                         {disambiguator && (
                           <span
                             className="text-xs text-text-dim"
-                            title={`Two installed mods are named "${mod.name}". This one is identified by ${mod.author ? `author: ${mod.author}` : `folder: ${mod.folder_name}`}.`}
+                            title={t('mods.disambiguatorTitle', { name: mod.name, identifier: mod.author ? t('mods.disambiguatorAuthor', { author: mod.author }) : t('mods.disambiguatorFolder', { folder: mod.folder_name }) })}
                           >
                             · {disambiguator}
                           </span>
@@ -705,17 +696,17 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                         {mod.pinned && (
                           <span
                             className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300"
-                            title="Pinned — modpack updates will preserve this mod's enabled/disabled state and version"
+                            title={t('mods.pinnedTitle')}
                           >
-                            <Pin size={9} /> Pinned
+                            <Pin size={9} /> {t('mods.pinned')}
                           </span>
                         )}
                         {auditRow && isUpToDate(auditRow) && (
                           <span
                             className="gf-pill gf-pill-ok"
-                            title="On the source's latest installable release."
+                            title={t('mods.latestTitle')}
                           >
-                            <Check size={9} /> Latest
+                            <Check size={9} /> {t('mods.latest')}
                           </span>
                         )}
                         {showUpdatePill && (
@@ -725,14 +716,14 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                             className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
                             title={
                               gameRunning
-                                ? 'Close STS2 first.'
-                                : `Click to update from v${mod.version} → v${compatibleTag?.replace(/^v/, '')}. Same pipeline as Settings → Audit.`
+                                ? t('mods.closeSts2FirstDot')
+                                : t('mods.updateClickTitle', { current: mod.version, target: compatibleTag?.replace(/^v/, '') })
                             }
                           >
                             {isUpdatingThisRow ? (
-                              <><RefreshCw size={9} className="animate-spin" /> Updating…</>
+                              <><RefreshCw size={9} className="animate-spin" /> {t('mods.updating')}</>
                             ) : (
-                              <><Download size={9} /> Update available → v{compatibleTag?.replace(/^v/, '')}</>
+                              <><Download size={9} /> {t('mods.updateAvailable', { version: compatibleTag?.replace(/^v/, '') })}</>
                             )}
                           </button>
                         )}
@@ -743,31 +734,25 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                             rel="noopener noreferrer"
                             onClick={() => notifyNexusOpen(mod.name)}
                             className="gf-pill gf-pill-update inline-flex items-center gap-1 hover:underline"
-                            title={
-                              `Nexus has v${auditRow!.nexus_version ?? '?'} (you have v${mod.version}). ` +
-                              `Click to open the Nexus Files tab — pick "Slow Download" / "Manual" and the manager will auto-install the zip when it lands in Downloads.`
-                            }
+                            title={t('mods.nexusUpdateTitle', { nexusVer: auditRow!.nexus_version ?? '?', localVer: mod.version })}
                           >
-                            <Download size={9} /> Download from Nexus
+                            <Download size={9} /> {t('mods.downloadFromNexus')}
                           </a>
                         )}
                         {auditRow?.snoozed && (
                           <span
                             className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-500/20 text-slate-300"
-                            title={`Update suggestion snoozed at v${auditRow.latest_release_with_assets_tag?.replace(/^v/, '') ?? '?'}. Auto-expires when a newer release appears.`}
+                            title={t('mods.snoozedTitle', { version: auditRow.latest_release_with_assets_tag?.replace(/^v/, '') ?? '?' })}
                           >
-                            💤 Snoozed
+                            💤 {t('mods.snoozed')}
                           </span>
                         )}
                         {auditRow?.latest_release_blocked_by_game_version && !auditRow.pinned && (
                           <span
                             className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300"
-                            title={
-                              `Newer release exists (v${auditRow.latest_release_with_assets_tag?.replace(/^v/, '') ?? '?'}) but it requires a newer Slay the Spire 2 build. ` +
-                              `Update STS2 (or switch beta branches) to pick it up; the manager can install an older compatible release in the meantime.`
-                            }
+                            title={t('mods.gameVersionBlockedTitle', { target: auditRow.latest_release_with_assets_tag?.replace(/^v/, '') ?? '?' })}
                           >
-                            <AlertTriangle size={9} /> Update blocked by game version
+                            <AlertTriangle size={9} /> {t('mods.updateBlockedByGameVersion')}
                           </span>
                         )}
                         {auditError && (
@@ -775,7 +760,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                             className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-red-500/20 text-red-300"
                             title={auditError}
                           >
-                            <AlertTriangle size={9} /> Audit error
+                            <AlertTriangle size={9} /> {t('mods.auditError')}
                           </span>
                         )}
                         {mod.min_game_version &&
@@ -786,18 +771,9 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                               background: 'oklch(0.78 0.16 60 / 0.18)',
                               color: 'oklch(0.85 0.16 60)',
                             }}
-                            title={
-                              `This mod's manifest declares min_game_version=${mod.min_game_version}. ` +
-                              // uncovered: `?? 'unknown'` fallback is dead in current logic.
-                              // gameVersionSatisfies(null|undef, X) fails open (returns true), so
-                              // the warning span only renders when game_version is a real string.
-                              // Kept as defensive code in case satisfies-semantics change later.
-                              `Your STS2 is v${gameInfo?.game_version ?? 'unknown'}. ` +
-                              `The game's loader will silently skip this mod until you update STS2 or switch beta branches. ` +
-                              `Use Repair (advanced kebab) to roll back to a compatible release.`
-                            }
+                            title={t('mods.minGameVersionTitle', { minVer: mod.min_game_version, yourVer: gameInfo?.game_version ?? 'unknown' })}
                           >
-                            ⚠ needs game ≥ v{mod.min_game_version}
+                            ⚠ {t('mods.needsGameVersion', { version: mod.min_game_version })}
                           </span>
                         )}
                         {/* Source badges (advanced only) */}
@@ -807,11 +783,11 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex"
-                            title={`View on GitHub: ${mod.github_url}`}
+                            title={t('mods.viewOnGitHub', { url: mod.github_url })}
                           >
                             <Badge variant="github">
                               <GitBranch size={10} className="mr-1" />
-                              GitHub
+                              {t('mods.gitHub')}
                             </Badge>
                           </a>
                         ) : null}
@@ -821,9 +797,9 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex"
-                            title={`View on Nexus: ${mod.nexus_url}`}
+                            title={t('mods.viewOnNexus', { url: mod.nexus_url })}
                           >
-                            <Badge variant="nexus">Nexus</Badge>
+                            <Badge variant="nexus">{t('mods.nexus')}</Badge>
                           </a>
                         ) : null}
                         {advancedMode && mod.custom_url ? (
@@ -832,17 +808,17 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex"
-                            title={`Open link: ${mod.custom_url}`}
+                            title={t('mods.openLink', { url: mod.custom_url })}
                           >
                             <Badge variant="default">
                               <ExternalLink size={10} className="mr-1" />
-                              Link
+                              {t('mods.link')}
                             </Badge>
                           </a>
                         ) : null}
                         {advancedMode && !hasLinks && !mod.custom_url && (
                           <Badge variant={getSourceVariant(mod.source)}>
-                            {mod.source ? 'Local' : 'Unlinked'}
+                            {mod.source ? t('mods.local') : t('mods.unlinked')}
                           </Badge>
                         )}
                         {mod.size_bytes > 0 && (
@@ -876,38 +852,38 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                         size="sm"
                         onClick={() => handleDelete(mod.name, mod.folder_name)}
                         disabled={gameRunning}
-                        aria-label="Remove mod"
-                        title={gameRunning ? 'Close STS2 first' : 'Remove mod'}
+                        aria-label={t('mods.removeMod')}
+                        title={gameRunning ? t('mods.closeSts2First') : t('mods.removeMod')}
                       >
                         <Trash2 size={12} />
                       </Button>
                     )}
-                    <KebabMenu title="Mod actions">
+                    <KebabMenu title={t('mods.modActions')}>
                       <KebabSection>
                         <KebabItem
                           icon={mod.pinned ? <PinOff size={12} /> : <Pin size={12} />}
                           onClick={() => handleTogglePin(mod.name, mod.folder_name, mod.pinned)}
                           description={
                             mod.pinned
-                              ? "Modpacks can update or replace this mod again."
-                              : "Lock this mod's version and enabled/disabled state. Switching profiles or applying a modpack won't touch it."
+                              ? t('mods.unpinDesc')
+                              : t('mods.pinDesc')
                           }
                         >
-                          {mod.pinned ? 'Unpin this mod' : 'Pin this mod'}
+                          {mod.pinned ? t('mods.unpinThisMod') : t('mods.pinThisMod')}
                         </KebabItem>
                         <KebabItem
                           icon={<Copy size={12} />}
                           onClick={() => {
                             navigator.clipboard.writeText(mod.version).then(
-                              () => toast.success(`Copied v${mod.version}`),
-                              () => toast.error('Could not copy'),
+                              () => toast.success(t('mods.toast.versionCopied', { version: mod.version })),
+                              () => toast.error(t('mods.toast.couldNotCopy')),
                             );
                           }}
                         >
-                          Copy version (v{mod.version})
+                          {t('mods.copyVersion', { version: mod.version })}
                         </KebabItem>
                         <KebabItem icon={<FolderOpen size={12} />} onClick={handleOpenFolder}>
-                          Open mods folder
+                          {t('mods.openModsFolder')}
                         </KebabItem>
                         {auditRow?.snoozed ? (
                           <KebabItem
@@ -916,14 +892,14 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                               try {
                                 await setModSnooze(mod.name, null, mod.folder_name);
                                 await refreshAuditEntries([mod.name]);
-                                toast.success(`Unsnoozed ${mod.name}`);
+                                toast.success(t('mods.toast.unsnoozed', { name: mod.name }));
                               } catch (e) {
-                                toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+                                toast.error(t('mods.toast.allFailed', { error: e instanceof Error ? e.message : String(e) }));
                               }
                             }}
-                            description="Show the update suggestion again for the current upstream release."
+                            description={t('mods.unsnoozeDesc')}
                           >
-                            Unsnooze update
+                            {t('mods.unsnoozeUpdate')}
                           </KebabItem>
                         ) : (
                           auditRow?.needs_update && !!auditRow.latest_release_with_assets_tag && (
@@ -937,20 +913,14 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                                     mod.folder_name,
                                   );
                                   await refreshAuditEntries([mod.name]);
-                                  toast.success(
-                                    `Snoozed ${mod.name} until next release`,
-                                  );
+                                  toast.success(t('mods.toast.snoozed', { name: mod.name }));
                                 } catch (e) {
-                                  toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+                                  toast.error(t('mods.toast.allFailed', { error: e instanceof Error ? e.message : String(e) }));
                                 }
                               }}
-                              description={
-                                `Hide the update suggestion until a newer release appears upstream ` +
-                                `(currently v${auditRow.latest_release_with_assets_tag?.replace(/^v/, '') ?? '?'}). ` +
-                                `Use this when the website's announced version doesn't match the file's actual version.`
-                              }
+                              description={t('mods.snoozeDesc', { version: auditRow.latest_release_with_assets_tag?.replace(/^v/, '') ?? '?' })}
                             >
-                              Snooze update suggestion
+                              {t('mods.snoozeUpdate')}
                             </KebabItem>
                           )
                         )}
@@ -958,21 +928,21 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                       {advancedMode && (
                         <>
                           <KebabDivider />
-                          <KebabSection head="Sources">
+                          <KebabSection head={t('mods.sources')}>
                             <KebabItem
                               icon={<Link size={12} />}
                               onClick={() =>
                                 isExpanded ? setExpandedMod(null) : startEditSource(rowKey)
                               }
                             >
-                              {isExpanded ? 'Close source editor' : 'Edit sources…'}
+                              {isExpanded ? t('mods.closeSourceEditor') : t('mods.editSources')}
                             </KebabItem>
                             {mod.github_url && (
                               <KebabItem
                                 icon={<GitBranch size={12} />}
                                 onClick={() => openExternalUrl(mod.github_url!).catch(() => {})}
                               >
-                                View on GitHub
+                                {t('mods.viewOnGitHubKebab')}
                               </KebabItem>
                             )}
                             {mod.nexus_url && (
@@ -980,7 +950,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                                 icon={<ExternalLink size={12} />}
                                 onClick={() => openExternalUrl(mod.nexus_url!).catch(() => {})}
                               >
-                                View on Nexus
+                                {t('mods.viewOnNexusKebab')}
                               </KebabItem>
                             )}
                             {mod.nexus_url && !mod.github_url && (
@@ -992,23 +962,23 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                                     const repo = await findGithubFromNexus(mod.name, mod.folder_name);
                                     if (repo) {
                                       await refreshMods();
-                                      toast.success(`Found GitHub repo: ${repo}`);
+                                      toast.success(t('mods.toast.foundGitHub', { repo }));
                                     } else {
-                                      toast.info(`No GitHub link found in Nexus description for ${mod.name}`);
+                                      toast.info(t('mods.toast.noGitHubInNexus', { name: mod.name }));
                                     }
                                   } catch (e) {
-                                    toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+                                    toast.error(t('mods.toast.allFailed', { error: e instanceof Error ? e.message : String(e) }));
                                   } finally {
                                     setFindingGithub(null);
                                   }
                                 }}
                               >
-                                Find GitHub from Nexus
+                                {t('mods.findGitHubFromNexus')}
                               </KebabItem>
                             )}
                           </KebabSection>
                           <KebabDivider />
-                          <KebabSection head="Recovery">
+                          <KebabSection head={t('mods.recovery')}>
                             <KebabItem
                               icon={
                                 repairingMod === rowKey ? (
@@ -1025,11 +995,11 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                               }
                               description={
                                 mod.github_url
-                                  ? 'Force-reinstall from GitHub. Use when version reads "unknown", the game refuses to load this mod, or the install otherwise looks broken.'
-                                  : 'Link a GitHub source first via "Edit sources…" — repair fetches from GitHub.'
+                                  ? t('mods.repairDesc')
+                                  : t('mods.repairNeedSource')
                               }
                             >
-                              {repairingMod === rowKey ? 'Repairing…' : 'Repair this mod'}
+                              {repairingMod === rowKey ? t('mods.repairing') : t('mods.repairThisMod')}
                             </KebabItem>
                             <KebabItem
                               icon={
@@ -1048,16 +1018,16 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                               }
                               description={
                                 mod.github_url
-                                  ? 'Recover a compatible GitHub release. Uses the previous release when the current version is known, or the last known-good release when this install reads "unknown".'
-                                  : 'Link a GitHub source first via "Edit sources…" — rollback fetches from GitHub.'
+                                  ? t('mods.rollbackDesc')
+                                  : t('mods.rollbackNeedSource')
                               }
                             >
                               {rollingBackMod === rowKey ? (
-                                'Rolling back…'
+                                t('mods.rollingBack')
                               ) : (
                                 <span className="inline-flex items-center gap-1">
-                                  Roll back one version
-                                  <Badge variant="beta" ariaHidden>Beta</Badge>
+                                  {t('mods.rollBackOneVersion')}
+                                  <Badge variant="beta" ariaHidden>{t('common.beta')}</Badge>
                                 </span>
                               )}
                             </KebabItem>
@@ -1073,7 +1043,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                             onClick={() => handleDelete(mod.name, mod.folder_name)}
                             disabled={gameRunning}
                           >
-                            Remove mod…
+                            {t('mods.removeMod')}
                           </KebabItem>
                         </>
                       )}
@@ -1094,12 +1064,12 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                         const repo = await findGithubFromNexus(mod.name, mod.folder_name);
                         if (repo) {
                           await refreshMods();
-                          toast.success(`Found GitHub repo: ${repo}`);
+                          toast.success(t('mods.toast.foundGitHub', { repo }));
                         } else {
-                          toast.info(`No GitHub link found in Nexus description for ${mod.name}`);
+                          toast.info(t('mods.toast.noGitHubInNexus', { name: mod.name }));
                         }
                       } catch (e) {
-                        toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+                        toast.error(t('mods.toast.allFailed', { error: e instanceof Error ? e.message : String(e) }));
                       } finally {
                         setFindingGithub(null);
                       }
@@ -1115,10 +1085,10 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                         await setModSourcesFull(mod.name, gh.trim() || null, nx.trim() || null, mod.folder_name);
                         await setModExtras(mod.name, note.trim() || null, customUrl.trim() || null, mod.folder_name);
                         await refreshMods();
-                        toast.success(`Sources saved for ${mod.name}`);
+                        toast.success(t('mods.toast.sourcesSaved', { name: mod.name }));
                         setExpandedMod(null);
                       } catch (e) {
-                        toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+                        toast.error(t('mods.toast.allFailed', { error: e instanceof Error ? e.message : String(e) }));
                       } finally {
                         setSavingSource(false);
                       }

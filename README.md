@@ -138,6 +138,27 @@ at `https://github.com/<owner>/sts2mm-profiles`, or use GitHub's standard
 process at <https://github.com/contact/dmca>. Requests sent to the
 manager project repo can't be acted on from here.
 
+### Languages
+
+- **English** and **Simplified Chinese (简体中文)** are bundled.
+- The picker lives in **Settings → General → Language** and in the
+  onboarding header (top-right). `Auto` follows your system locale; any
+  `zh-*` locale routes to Simplified Chinese until a Traditional
+  translation exists.
+- **The maintainer doesn't read Chinese.** Translation accuracy depends
+  on community contributors — the first Chinese translation came from
+  [@xiatinfeng](https://github.com/xiatinfeng) (PR
+  [#45](https://github.com/MohamedSerhan/sts2-mod-manager/pull/45)),
+  reworked by the maintainer for current `main`. Non-English users see a
+  small notice on the What's New card pointing them at the translation
+  issue tracker when they install a new version.
+- **Spotted a translation mistake?** Open an issue with the
+  [`translation` label](https://github.com/MohamedSerhan/sts2-mod-manager/issues/new?labels=translation)
+  or send a PR against `src/i18n/locales/zh-Hans.json`. Pull requests
+  adding new languages (`fr.json`, `ja.json`, `zh-Hant.json`, …) are
+  welcome — the routing in `src/i18n/language.ts` is already set up to
+  pick up additional locale codes.
+
 ### Mods
 - **Toggle on/off** per-mod with instant effect.
 - **Auto-updates.** "Update all" pulls fresh GitHub releases; pinned mods
@@ -347,9 +368,13 @@ src/
                           # ProfileSwitcher, KebabMenu, PublishModal,
                           # AutoDetectModal, QuickAddModal, BrowseDetail,
                           # SourceEditor, LogsViewer, DiagnosticBundle,
-                          # LaunchSpinner, AboutCard, SubUpdateDetail
+                          # LaunchSpinner, AboutCard, SubUpdateDetail,
+                          # LanguageSelect
   contexts/               # ToastContext, AppContext
   hooks/useTauri.ts       # all Tauri command bindings (one place)
+  i18n/                   # i18next init, language detection/routing,
+                          # locales/en.json + locales/zh-Hans.json,
+                          # parity test (en ↔ zh-Hans keys must match)
   styles.css              # all theme tokens + utility classes (gf-*)
 src-tauri/
   src/                    # Rust backend (game.rs, mods.rs, backup.rs,
@@ -377,6 +402,53 @@ the React components + matching Rust events):
 
 The CSS for all of those (`.gf-prog-*`, `.gf-conflict-*`, `.gf-dep-*`) is
 already wired so it's pure React work once the backend signals exist.
+
+### Adding or changing user-visible strings
+
+Every user-facing string lives in `src/i18n/locales/en.json` and
+`src/i18n/locales/zh-Hans.json`. The two files must stay key-for-key in
+sync — `src/i18n/locales/parity.test.ts` fails the build otherwise.
+
+When you add a string:
+
+1. Pick a key path that fits the surface it's on
+   (`settings.general.foo`, `mods.toast.bar`, etc.).
+2. Add the English value to `en.json` and a translation to
+   `zh-Hans.json`. If you don't speak Chinese, copy the English value
+   verbatim into `zh-Hans.json` and flag it in your PR — the maintainers
+   will route it to a translation contributor before merge. Don't ship
+   machine-translated guesses.
+3. Reference the key from the component with `t('your.key')` or
+   `<Trans i18nKey="your.key" components={…} />` — never hardcode prose
+   in JSX, `toast.*`, `confirm({…})`, `title=`, `aria-label=`, or
+   `placeholder=`.
+4. Run `npx vitest run src/i18n/locales/parity.test.ts` before pushing.
+
+The same rule applies to AI-assisted contributions — see `AGENTS.md`.
+
+### Translations
+
+Pull requests against `src/i18n/locales/*.json` are the fastest path. The
+maintainer can't review translation accuracy, so PRs from native speakers
+get merged on trust + parity-test pass.
+
+Adding a new language:
+
+1. Copy `src/i18n/locales/en.json` to `src/i18n/locales/<code>.json`
+   (use IETF tags like `fr`, `ja`, `zh-Hant`).
+2. Register the code in `src/i18n/language.ts`'s `SUPPORTED_LANGUAGES`
+   array and import it in `src/i18n/index.ts`.
+3. If your language family needs custom routing (e.g. `zh-Hant` should
+   capture `zh-TW`, `zh-HK`, `zh-MO`), extend `resolveOneLocale` in
+   `language.ts` — the Simplified Chinese path there is the model.
+
+### Credits
+
+- **Simplified Chinese translation:** initial work by
+  [@xiatinfeng](https://github.com/xiatinfeng) in PR
+  [#45](https://github.com/MohamedSerhan/sts2-mod-manager/pull/45),
+  reworked onto current `main` and extended for new strings by the
+  maintainer.
 
 ---
 

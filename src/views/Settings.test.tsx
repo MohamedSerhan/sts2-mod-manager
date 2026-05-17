@@ -42,6 +42,12 @@ describe('<SettingsView>', () => {
     });
   });
 
+  it('shows the language override on the General tab', async () => {
+    render(<Wrap />);
+
+    expect(await screen.findByLabelText('Language')).toHaveValue('auto');
+  });
+
   it('clicking Accounts shows the Nexus + GitHub key fields', async () => {
     const user = userEvent.setup();
     render(<Wrap />);

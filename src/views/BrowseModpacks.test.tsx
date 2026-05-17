@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-import { BrowseModpacksView } from './BrowseModpacks';
+import { BrowseModpacksView, dedupeBrowserCards } from './BrowseModpacks';
 import { AllProviders } from '../__test__/providers';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
 import type { BrowserPage, Profile } from '../types';
@@ -24,6 +24,36 @@ function makePage(overrides: Partial<BrowserPage> = {}): BrowserPage {
     ...overrides,
   };
 }
+
+describe('dedupeBrowserCards', () => {
+  it('keeps the newer card per (owner, name) and discards the older twin', () => {
+    const older = {
+      owner: 'NessajHu', code: 'AAAA', name: 'My',
+      mod_count: 3, created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-10T00:00:00Z',
+    };
+    const newer = { ...older, code: 'BBBB', updated_at: '2026-05-16T12:00:00Z' };
+    const out = dedupeBrowserCards([older, newer]);
+    expect(out).toEqual([newer]);
+  });
+
+  it('treats names case- and whitespace-insensitively for the dedup key', () => {
+    const a = {
+      owner: 'jess', code: 'AAAA', name: 'My Pack',
+      mod_count: 1, created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-10T00:00:00Z',
+    };
+    const b = { ...a, code: 'BBBB', name: '  my pack  ', updated_at: '2026-05-11T00:00:00Z' };
+    expect(dedupeBrowserCards([a, b])).toEqual([b]);
+  });
+
+  it('preserves cards from different curators with the same pack name', () => {
+    const a = {
+      owner: 'jess', code: 'AAAA', name: 'My',
+      mod_count: 3, created_at: '', updated_at: '2026-05-10T00:00:00Z',
+    };
+    const b = { ...a, owner: 'bob', code: 'BBBB' };
+    expect(dedupeBrowserCards([a, b])).toHaveLength(2);
+  });
+});
 
 describe('<BrowseModpacksView>', () => {
   it('marks the modpack browser as beta', async () => {
@@ -57,6 +87,35 @@ describe('<BrowseModpacksView>', () => {
     // owner appears in the subline (e.g. "@somebody · 7 mods · …")
     expect(screen.getByText(/somebody/)).toBeInTheDocument();
     expect(screen.getByText(/7 mods/)).toBeInTheDocument();
+  });
+
+  it('collapses duplicate publishes from the same curator down to the newest', async () => {
+    registerInvokeHandler('fetch_modpack_browser_page', () =>
+      makePage({
+        cards: [
+          {
+            owner: 'NessajHu',
+            code: 'AAAA-AAAA-AAAA',
+            name: 'My',
+            mod_count: 3,
+            created_at: '2026-05-01T00:00:00Z',
+            updated_at: '2026-05-15T00:00:00Z',
+          },
+          {
+            owner: 'NessajHu',
+            code: 'BBBB-BBBB-BBBB',
+            name: 'My',
+            mod_count: 3,
+            created_at: '2026-05-02T00:00:00Z',
+            updated_at: '2026-05-16T12:00:00Z',
+          },
+        ],
+      }),
+    );
+
+    render(<Wrap />);
+
+    expect(await screen.findAllByText('My')).toHaveLength(1);
   });
 
   it('renders the empty state when no cards come back', async () => {

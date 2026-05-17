@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   FolderSearch,
   Key,
@@ -29,6 +30,7 @@ import { useConfirm } from '../components/ConfirmDialog';
 import { LogsViewer } from '../components/LogsViewer';
 import { DiagnosticBundle } from '../components/DiagnosticBundle';
 import { AutoDetectModal } from '../components/AutoDetectModal';
+import { LanguageSelect } from '../components/LanguageSelect';
 import {
   detectGamePath,
   setGamePath,
@@ -60,6 +62,7 @@ export function SettingsView() {
   const { gameInfo, refreshAll, auditResults, auditing, runAudit, refreshAuditEntries, updatingAll, updateAllGithub } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
+  const { t } = useTranslation();
   const [tab, setTab] = useState<Tab>('general');
 
   // ── General ─────────────────────────────────────────
@@ -94,7 +97,7 @@ export function SettingsView() {
     try {
       setBackups(await listBackups());
     } catch (e) {
-      toast.error(`Failed to load backups: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('settings.backups.loadFailed', { error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
@@ -122,10 +125,10 @@ export function SettingsView() {
     setBackupBusy('create');
     try {
       const name = await createBackup();
-      toast.success(`Backup created: ${name}`);
+      toast.success(t('settings.backups.created', { name }));
       await refreshBackups();
     } catch (e) {
-      toast.error(`Failed to create backup: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('settings.backups.createFailed', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setBackupBusy(null);
     }
@@ -133,11 +136,11 @@ export function SettingsView() {
 
   async function handleRestoreBackup(name: string) {
     const ok = await confirm({
-      title: 'Restore overwrites your current setup',
-      body: 'This will replace your current mods with the snapshot. Your current state is not saved unless you back it up first.',
-      confirmLabel: 'Restore now',
+      title: t('settings.backups.restoreConfirmTitle'),
+      body: t('settings.backups.restoreConfirmBody'),
+      confirmLabel: t('settings.backups.restoreConfirmLabel'),
       destructive: true,
-      checkbox: { label: 'Save current as a new backup before restoring', defaultChecked: true },
+      checkbox: { label: t('settings.backups.restoreCheckbox'), defaultChecked: true },
     });
     if (!ok) return;
     setBackupBusy(name);
@@ -147,9 +150,9 @@ export function SettingsView() {
       }
       await restoreBackup(name);
       await refreshAll();
-      toast.success('Backup restored.');
+      toast.success(t('settings.backups.restored'));
     } catch (e) {
-      toast.error(`Failed to restore backup: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('settings.backups.restoreFailed', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setBackupBusy(null);
     }
@@ -157,19 +160,19 @@ export function SettingsView() {
 
   async function handleDeleteBackup(name: string) {
     const ok = await confirm({
-      title: 'Delete this backup?',
-      body: 'You won\'t be able to restore it after this.',
-      confirmLabel: 'Delete',
+      title: t('settings.backups.deleteConfirmTitle'),
+      body: t('settings.backups.deleteConfirmBody'),
+      confirmLabel: t('settings.backups.delete'),
       destructive: true,
     });
     if (!ok) return;
     setBackupBusy(name);
     try {
       await deleteBackup(name);
-      toast.success('Backup deleted.');
+      toast.success(t('settings.backups.deleted'));
       await refreshBackups();
     } catch (e) {
-      toast.error(`Failed to delete backup: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('settings.backups.deleteFailed', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setBackupBusy(null);
     }
@@ -193,9 +196,9 @@ export function SettingsView() {
       if (info.valid && info.game_path) {
         setGamePathValue(info.game_path);
         await refreshAll();
-        toast.success('Game detected successfully!');
+        toast.success(t('settings.general.gameDetected'));
       } else {
-        toast.error('Could not auto-detect game path. Please set it manually.');
+        toast.error(t('settings.general.couldNotAutoDetect'));
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -208,7 +211,7 @@ export function SettingsView() {
       const info = await setGamePath(gamePath.trim());
       if (info.valid) {
         await refreshAll();
-        toast.success('Game path updated.');
+        toast.success(t('settings.general.gamePathUpdated'));
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -220,7 +223,7 @@ export function SettingsView() {
       const selected = await open({
         directory: true,
         multiple: false,
-        title: 'Select Slay the Spire 2 folder',
+        title: t('settings.general.selectSts2Folder'),
       });
       if (!selected) return;
       const picked = typeof selected === 'string' ? selected : String(selected);
@@ -229,7 +232,7 @@ export function SettingsView() {
       if (info.valid && info.game_path) {
         setGamePathValue(info.game_path);
         await refreshAll();
-        toast.success('Game path updated.');
+        toast.success(t('settings.general.gamePathUpdated'));
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -243,10 +246,10 @@ export function SettingsView() {
     setLaunchModeValue(mode);
     try {
       await setLaunchMode(mode);
-      toast.success(`Launch mode set to ${mode === 'steam' ? 'Steam' : 'Direct'}`);
+      toast.success(mode === 'steam' ? t('settings.general.launchModeSetSteam') : t('settings.general.launchModeSetDirect'));
     } catch (e) {
       setLaunchModeValue(previous);
-      toast.error(`Failed to update launch mode: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('settings.general.failedUpdateLaunchMode', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setSavingLaunchMode(false);
     }
@@ -256,7 +259,7 @@ export function SettingsView() {
     if (!nexusKey.trim()) return;
     try {
       await setNexusApiKey(nexusKey.trim());
-      toast.success('Nexus API key saved.');
+      toast.success(t('settings.accounts.nexusKeySaved'));
       setNexusKey('');
       setNexusKeySaved(true);
     } catch (e) {
@@ -268,7 +271,7 @@ export function SettingsView() {
     if (!githubToken.trim()) return;
     try {
       await setGithubToken(githubToken.trim());
-      toast.success('GitHub token saved.');
+      toast.success(t('settings.accounts.githubTokenSaved'));
       setGithubTokenValue('');
       setGithubTokenSaved(true);
     } catch (e) {
@@ -280,7 +283,7 @@ export function SettingsView() {
     try {
       await openExternalUrl(GITHUB_TOKEN_TEMPLATE_URL);
     } catch (e) {
-      toast.error(`Couldn't open GitHub token page: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('settings.accounts.openGithubTokenPageFailed', { error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
@@ -311,14 +314,14 @@ export function SettingsView() {
     setUpdatingMod(modName);
     try {
       const info = await updateMod(modName, folderName);
-      toast.success(`Updated '${modName}' to v${info.version}`);
+      toast.success(t('settings.audit.updatedToToast', { name: modName, version: info.version }));
       await refreshAll();
       // Re-audit only this mod (and the manifest name if install_mod_from_zip
       // ended up rewriting it) so the row flips fast — no full audit needed.
       const names = info.name !== modName ? [modName, info.name] : [modName];
       await refreshAuditEntries(names);
     } catch (e) {
-      toast.error(`Update failed for '${modName}': ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('settings.audit.updateFailedToast', { name: modName, error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setUpdatingMod(null);
     }
@@ -330,25 +333,25 @@ export function SettingsView() {
     try {
       const update = await check();
       if (!update) {
-        toast.success('You are on the latest version.');
+        toast.success(t('settings.advanced.latestVersion'));
         return;
       }
-      toast.success(`v${update.version} available — installing...`);
+      toast.success(t('settings.advanced.versionAvailable', { version: update.version }));
       await update.downloadAndInstall();
       await relaunch();
     } catch (e) {
-      toast.error(`Update check failed: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('settings.advanced.updateCheckFailed', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setCheckingUpdate(false);
     }
   }
 
   const TABS: { id: Tab; label: string; count?: number }[] = [
-    { id: 'general',  label: 'General' },
-    { id: 'accounts', label: 'Accounts' },
-    { id: 'backups',  label: 'Backups',  count: backups.length || undefined },
-    { id: 'audit',    label: 'Audit',    count: auditResults?.filter(r => r.needs_update).length || undefined },
-    { id: 'advanced', label: 'Advanced' },
+    { id: 'general',  label: t('settings.tabs.general') },
+    { id: 'accounts', label: t('settings.tabs.accounts') },
+    { id: 'backups',  label: t('settings.tabs.backups'),  count: backups.length || undefined },
+    { id: 'audit',    label: t('settings.tabs.audit'),    count: auditResults?.filter(r => r.needs_update).length || undefined },
+    { id: 'advanced', label: t('settings.tabs.advanced') },
     // About moved to the Home screen footer (v1.0.4) — kept the section in
     // history because the diag-bundle action and update-check now live there.
   ];
@@ -357,8 +360,8 @@ export function SettingsView() {
     <div className="gf-body" style={{ display: 'flex', flexDirection: 'column' }}>
       <div className="gf-page-head">
         <div>
-          <h1 className="gf-page-title">Settings</h1>
-          <p className="gf-page-sub">Game paths, accounts, backups, mod audit, advanced</p>
+          <h1 className="gf-page-title">{t('settings.title')}</h1>
+          <p className="gf-page-sub">{t('settings.subtitle')}</p>
         </div>
       </div>
 
@@ -382,7 +385,7 @@ export function SettingsView() {
             <Card className="space-y-4">
               <h3 className="text-base font-semibold text-text flex items-center gap-2">
                 <FolderSearch size={18} />
-                Game Path
+                {t('settings.general.gamePath')}
               </h3>
               <div className="gf-field" style={{ margin: 0 }}>
                 <div className="gf-input-row">
@@ -390,10 +393,10 @@ export function SettingsView() {
                     className={`gf-set-input ${gameInfo?.valid ? 'is-ok' : gamePath && !gameInfo?.valid ? 'is-err' : ''}`}
                     placeholder={
                       typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
-                        ? '~/Library/Application Support/Steam/steamapps/common/SlayTheSpire2'
+                        ? t('settings.defaultPathMac')
                         : typeof navigator !== 'undefined' && /Linux/.test(navigator.platform)
-                        ? '~/.steam/steam/steamapps/common/SlayTheSpire2'
-                        : 'C:\\Program Files (x86)\\Steam\\steamapps\\common\\SlayTheSpire2'
+                        ? t('settings.defaultPathLinux')
+                        : t('settings.defaultPathWin')
                     }
                     value={gamePath}
                     onChange={(e) => setGamePathValue(e.target.value)}
@@ -401,26 +404,26 @@ export function SettingsView() {
                     style={{ flex: 1 }}
                   />
                   <Button variant="secondary" size="sm" onClick={handleBrowseGamePath}>
-                    Browse...
+                    {t('settings.general.browse')}
                   </Button>
                   <Button variant="secondary" size="sm" onClick={handleDetectGame}>
-                    Auto-detect
+                    {t('settings.general.autoDetect')}
                   </Button>
                   <Button size="sm" onClick={handleSetGamePath}>
-                    Save
+                    {t('settings.general.save')}
                   </Button>
                 </div>
                 {gameInfo?.valid ? (
                   <div className="gf-help ok">
                     <span>✓</span>
                     <span>
-                      Verified · {gameInfo.mods_count} mods detected ·{' '}
+                      {t('settings.general.verified', { count: gameInfo.mods_count })} ·{' '}
                       <button onClick={handleOpenGameFolder} className="hover:underline" style={{ background: 'none', border: 0, color: 'inherit', cursor: 'pointer', padding: 0 }}>
-                        Open game folder
+                        {t('settings.general.openGameFolder')}
                       </button>
                       {' · '}
                       <button onClick={handleOpenModsFolder} className="hover:underline" style={{ background: 'none', border: 0, color: 'inherit', cursor: 'pointer', padding: 0 }}>
-                        Open mods folder
+                        {t('settings.general.openModsFolder')}
                       </button>
                     </span>
                   </div>
@@ -428,18 +431,19 @@ export function SettingsView() {
                   <div className="gf-help err">
                     <span>!</span>
                     <span>
-                      Couldn't verify{' '}
-                      {typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
-                        ? 'SlayTheSpire2.app'
-                        : typeof navigator !== 'undefined' && /Linux/.test(navigator.platform)
-                        ? 'SlayTheSpire2.pck'
-                        : 'SlayTheSpire2.exe'}{' '}
-                      in this folder. Pick the install root, not a subfolder.
+                      {t('settings.general.couldNotVerify', {
+                        file:
+                          typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
+                            ? t('settings.sts2App')
+                            : typeof navigator !== 'undefined' && /Linux/.test(navigator.platform)
+                            ? t('settings.sts2Pck')
+                            : t('settings.sts2Exe'),
+                      })}
                     </span>
                   </div>
                 ) : (
                   <div className="gf-help muted">
-                    <span>Click <b>Auto-detect</b> to find your Steam install, or <b>Browse</b> to pick the folder manually.</span>
+                    <span>{t('settings.general.autoDetectHint')}</span>
                   </div>
                 )}
               </div>
@@ -448,22 +452,22 @@ export function SettingsView() {
             <Card className="space-y-4" style={{ marginTop: 8 }}>
               <h3 className="text-base font-semibold text-text flex items-center gap-2">
                 <Play size={16} />
-                Launch
+                {t('settings.general.launch')}
               </h3>
               <div className="gf-set-desc" style={{ marginTop: -6 }}>
-                How the Launch button and <code>Ctrl/⌘ L</code> start Slay the Spire 2.
+                {t('settings.general.launchDesc')}
               </div>
-              <div role="radiogroup" aria-label="Launch mode" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div role="radiogroup" aria-label={t('settings.general.launchModeAria')} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {([
                   {
                     value: 'steam' as LaunchMode,
-                    title: 'Steam (recommended)',
-                    desc: 'Launches via Steam. Required for cloud saves, achievements, and Proton on Linux.',
+                    title: t('settings.general.steamRecommended'),
+                    desc: t('settings.general.steamDesc'),
                   },
                   {
                     value: 'direct' as LaunchMode,
-                    title: 'Direct',
-                    desc: 'Skips the Steam launcher and runs the game executable. Steam itself still needs to be running — STS2 uses Steamworks for saves and achievements. Useful for Family Sharing borrowers (the lender\'s library lock blocks normal Steam launches) and Steam offline mode. Not supported for Proton/Linux installs.',
+                    title: t('settings.general.direct'),
+                    desc: t('settings.general.directDesc'),
                   },
                 ]).map((opt) => {
                   const selected = launchMode === opt.value;
@@ -505,6 +509,14 @@ export function SettingsView() {
                 })}
               </div>
             </Card>
+
+            <Card className="space-y-4" style={{ marginTop: 8 }}>
+              <h3 className="text-base font-semibold text-text flex items-center gap-2">
+                <Key size={16} />
+                {t('settings.language.label')}
+              </h3>
+              <LanguageSelect />
+            </Card>
           </>
         )}
 
@@ -513,9 +525,9 @@ export function SettingsView() {
             <Card className="space-y-4">
               <h3 className="text-base font-semibold text-text flex items-center gap-2">
                 <Key size={18} />
-                Nexus Mods API Key
+                {t('settings.accounts.nexusKey')}
                 {nexusKeySaved && (
-                  <span className="gf-pill gf-pill-update" style={{ marginLeft: 6 }}>Saved ✓</span>
+                  <span className="gf-pill gf-pill-update" style={{ marginLeft: 6 }}>{t('settings.accounts.saved')}</span>
                 )}
               </h3>
               <div className="gf-field" style={{ margin: 0 }}>
@@ -523,19 +535,19 @@ export function SettingsView() {
                   <input
                     className={`gf-set-input ${nexusKeySaved && !nexusKey ? 'is-ok' : ''}`}
                     type="password"
-                    placeholder={nexusKeySaved ? '••••••••••••••••  (saved · enter new value to replace)' : 'Enter your Nexus API key'}
+                    placeholder={nexusKeySaved ? t('settings.accounts.nexusSavedPlaceholder') : t('settings.accounts.nexusPlaceholder')}
                     value={nexusKey}
                     onChange={(e) => setNexusKey(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleSaveNexusKey()}
                     style={{ flex: 1 }}
                   />
                   <Button size="sm" onClick={handleSaveNexusKey}>
-                    Save
+                    {t('common.save')}
                   </Button>
                 </div>
                 {nexusKeySaved && !nexusKey ? (
                   <div className="gf-help ok">
-                    <span>✓</span><span>Saved · Nexus mods will appear in Browse.</span>
+                    <span>✓</span><span>{t('settings.accounts.nexusSavedHelp')}</span>
                   </div>
                 ) : (
                   <div className="gf-help muted">
@@ -547,19 +559,14 @@ export function SettingsView() {
                         style={{ color: 'var(--gf)', display: 'inline-flex', alignItems: 'center', gap: 4 }}
                         className="hover:underline"
                       >
-                        Get your API key from Nexus Mods <ExternalLink size={11} />
+                        {t('settings.accounts.nexusApiLink')} <ExternalLink size={11} />
                       </a>
                     </span>
                   </div>
                 )}
                 <div className="gf-help muted" style={{ marginTop: 6, fontSize: 11.5 }}>
                   <span>
-                    Free-tier only. To install a Nexus mod, click the
-                    "Slow Download" / "Manual" button on Nexus — the app
-                    catches the zip from your <code>Downloads</code> folder.
-                    The "Mod Manager Download" button isn't wired through.
-                    Nexus Premium's instant-download API isn't either, so
-                    paid subscribers don't get faster downloads here.
+                    {t('settings.accounts.nexusTierNote')}
                   </span>
                 </div>
               </div>
@@ -568,10 +575,10 @@ export function SettingsView() {
             <Card className="space-y-4" style={{ marginTop: 8 }}>
               <h3 className="text-base font-semibold text-text flex items-center gap-2">
                 <Key size={18} />
-                GitHub Token
-                <span className="text-xs text-text-dim font-normal">(optional)</span>
+                {t('settings.accounts.githubToken')}
+                <span className="text-xs text-text-dim font-normal">{t('settings.accounts.optional')}</span>
                 {githubTokenSaved && (
-                  <span className="gf-pill gf-pill-update" style={{ marginLeft: 6 }}>Saved ✓</span>
+                  <span className="gf-pill gf-pill-update" style={{ marginLeft: 6 }}>{t('settings.accounts.saved')}</span>
                 )}
               </h3>
               <div className="gf-field" style={{ margin: 0 }}>
@@ -579,38 +586,34 @@ export function SettingsView() {
                   <input
                     className={`gf-set-input ${githubTokenSaved && !githubToken ? 'is-ok' : ''}`}
                     type="password"
-                    placeholder={githubTokenSaved ? '••••••••••••••••  (saved · enter new value to replace)' : 'ghp_xxxxxxxxxxxxxxxxxxxx'}
+                    placeholder={githubTokenSaved ? t('settings.accounts.githubSavedPlaceholder') : t('settings.accounts.githubPlaceholder')}
                     value={githubToken}
                     onChange={(e) => setGithubTokenValue(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleSaveGithubToken()}
                     style={{ flex: 1 }}
                   />
                   <Button variant="secondary" size="sm" onClick={handleSaveGithubToken}>
-                    Save
+                    {t('common.save')}
                   </Button>
                   <Button variant="secondary" size="sm" onClick={handleOpenGithubTokenTemplate}>
                     <ExternalLink size={14} />
-                    Create scoped token
+                    {t('settings.accounts.createScopedToken')}
                   </Button>
                 </div>
                 {githubTokenSaved && !githubToken && (
                   <div className="gf-help ok">
-                    <span>✓</span><span>Saved · raises API rate limit to 5,000 req/hr.</span>
+                    <span>✓</span><span>{t('settings.accounts.githubSavedHelp')}</span>
                   </div>
                 )}
                 <div className="gf-help muted">
                   <span>
-                    Optional for browsing GitHub mods (raises rate limit to 5,000 req/hr from
-                    60/hr without auth). <b>Required</b> if you want to publish modpacks.
+                    {t('settings.accounts.githubHelp')}
                     <br />
-                    Scopes for sharing:
+                    {t('settings.accounts.githubScopesTitle')}
                     <ul style={{ margin: '4px 0 0 14px', padding: 0, listStyle: 'disc' }}>
-                      <li><b>Classic PAT</b> — check the <code>repo</code> scope.</li>
+                      <li><b>{t('settings.accounts.githubClassicPat')}</b></li>
                       <li>
-                        <b>Fine-grained PAT</b> — repository access scoped to <code>sts2mm-profiles</code>{' '}
-                        (or "All repositories"), with{' '}
-                        <b>Contents: Read and write</b> + <b>Administration: Read and write</b>{' '}
-                        (Administration is only needed for the one-time repo create; you can drop it after).
+                        <b>{t('settings.accounts.githubFinePat')}</b>
                       </li>
                     </ul>
                   </span>
@@ -624,24 +627,24 @@ export function SettingsView() {
           <>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
               <div>
-                <div className="gf-set-label" style={{ fontSize: 14 }}>Backups</div>
-                <div className="gf-set-desc">Auto-saved before every launch and Vanilla Mode · keeps the last 5</div>
+                <div className="gf-set-label" style={{ fontSize: 14 }}>{t('settings.backups.title')}</div>
+                <div className="gf-set-desc">{t('settings.backups.desc')}</div>
               </div>
               <div style={{ display: 'flex', gap: 6 }}>
                 <Button variant="secondary" size="sm" onClick={handleOpenModsFolder}>
-                  <FolderOpen size={14} /> Open folder
+                  <FolderOpen size={14} /> {t('settings.backups.openFolder')}
                 </Button>
                 <Button size="sm" onClick={handleCreateBackup} disabled={backupBusy !== null}>
                   <Archive size={14} />
-                  {backupBusy === 'create' ? 'Creating...' : 'Create backup'}
+                  {backupBusy === 'create' ? t('settings.backups.creating') : t('settings.backups.create')}
                 </Button>
               </div>
             </div>
             {backups.length === 0 ? (
               <div className="gf-empty">
                 <div className="gf-empty-art"><Archive size={28} /></div>
-                <div className="gf-empty-title">No backups yet</div>
-                <div className="gf-empty-sub">A backup is auto-created before every launch. You can also create one manually.</div>
+                <div className="gf-empty-title">{t('settings.backups.noBackups')}</div>
+                <div className="gf-empty-sub">{t('settings.backups.noBackupsHint')}</div>
               </div>
             ) : (
               backups.map((b, i) => {
@@ -654,11 +657,11 @@ export function SettingsView() {
                       <div className="gf-backup-time">
                         {formatBackupTimestamp(b.name)}
                         {i === 0 && (
-                          <span className="gf-pill gf-pill-update" style={{ marginLeft: 8 }}>NEWEST</span>
+                          <span className="gf-pill gf-pill-update" style={{ marginLeft: 8 }}>{t('settings.backups.newest')}</span>
                         )}
                       </div>
                       <div className="gf-backup-meta">
-                        {b.mod_count} {b.mod_count === 1 ? 'file' : 'files'} · {formatSizeMb(b.size_bytes)}
+                        {b.mod_count} {b.mod_count === 1 ? t('settings.backups.files_one', { count: 1 }) : t('settings.backups.files_other', { count: b.mod_count })} · {formatSizeMb(b.size_bytes)}
                       </div>
                     </div>
                     <Button
@@ -672,14 +675,14 @@ export function SettingsView() {
                       ) : (
                         <RotateCcw size={12} />
                       )}
-                      {busy ? 'Restoring…' : 'Restore'}
+                      {busy ? t('settings.backups.restoring') : t('settings.backups.restore')}
                     </Button>
                     <Button
                       variant="danger"
                       size="sm"
                       onClick={() => handleDeleteBackup(b.name)}
                       disabled={anyBusy}
-                      title="Delete backup"
+                      title={t('settings.backups.deleteTitle')}
                     >
                       <Trash2 size={12} />
                     </Button>
@@ -708,8 +711,8 @@ export function SettingsView() {
               return (
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
                   <div>
-                    <div className="gf-set-label" style={{ fontSize: 14 }}>Mod audit</div>
-                    <div className="gf-set-desc">Compare each installed mod against its source · pin to lock the current version</div>
+                    <div className="gf-set-label" style={{ fontSize: 14 }}>{t('settings.audit.title')}</div>
+                    <div className="gf-set-desc">{t('settings.audit.desc')}</div>
                   </div>
                   <div style={{ display: 'flex', gap: 6 }}>
                     {/* Show Update all only when there are 2+ GitHub-sourced
@@ -721,7 +724,7 @@ export function SettingsView() {
                         size="sm"
                         onClick={() => updateAllGithub(ghUpdates)}
                         disabled={updatingAll || updatingMod !== null}
-                        title={`Update ${ghUpdates.length} GitHub-sourced mods (skips pinned)`}
+                        title={ghUpdates.length === 1 ? t('settings.audit.updateAll_one', { count: ghUpdates.length }) : t('settings.audit.updateAll_other', { count: ghUpdates.length })}
                       >
                         {updatingAll ? (
                           <RefreshCw size={14} className="animate-spin" />
@@ -729,12 +732,12 @@ export function SettingsView() {
                           <Download size={14} />
                         )}
                         {updatingAll
-                          ? `Updating ${ghUpdates.length}…`
-                          : `Update ${ghUpdates.length} mod${ghUpdates.length === 1 ? '' : 's'}`}
+                          ? t('settings.audit.updatingAll', { count: ghUpdates.length })
+                          : (ghUpdates.length === 1 ? t('settings.audit.updateAll_one', { count: ghUpdates.length }) : t('settings.audit.updateAll_other', { count: ghUpdates.length }))}
                       </Button>
                     )}
                     <Button variant="ghost" size="sm" onClick={() => setShowAutoDetect(true)} disabled={updatingAll}>
-                      Auto-detect sources
+                      {t('settings.audit.autoDetectSources')}
                     </Button>
                     <Button
                       variant={ghUpdates.length >= 2 ? 'ghost' : 'secondary'}
@@ -743,7 +746,7 @@ export function SettingsView() {
                       disabled={auditing || updatingAll}
                     >
                       <ClipboardCheck size={14} className={auditing ? 'animate-pulse' : ''} />
-                      {auditing ? 'Auditing...' : auditResults ? 'Re-audit' : 'Run audit'}
+                      {auditing ? t('settings.audit.auditing') : auditResults ? t('settings.audit.reaudit') : t('settings.audit.run')}
                     </Button>
                   </div>
                 </div>
@@ -753,19 +756,19 @@ export function SettingsView() {
             {auditResults === null ? (
               <div className="gf-empty">
                 <div className="gf-empty-art"><ClipboardCheck size={28} /></div>
-                <div className="gf-empty-title">No audit yet</div>
-                <div className="gf-empty-sub">Run an audit to see which mods have updates available, which are pinned, and which can't be matched against a source.</div>
+                <div className="gf-empty-title">{t('settings.audit.noAudit')}</div>
+                <div className="gf-empty-sub">{t('settings.audit.noAuditHint')}</div>
                 <div style={{ marginTop: 14 }}>
                   <Button onClick={runAudit} disabled={auditing}>
-                    <ClipboardCheck size={14} /> {auditing ? 'Auditing...' : 'Run audit'}
+                    <ClipboardCheck size={14} /> {auditing ? t('settings.audit.auditing') : t('settings.audit.run')}
                   </Button>
                 </div>
               </div>
             ) : auditResults.length === 0 ? (
               <div className="gf-empty">
                 <div className="gf-empty-art"><ClipboardCheck size={28} /></div>
-                <div className="gf-empty-title">No mods to audit</div>
-                <div className="gf-empty-sub">Install some mods first.</div>
+                <div className="gf-empty-title">{t('settings.audit.noMods')}</div>
+                <div className="gf-empty-sub">{t('settings.audit.noModsHint')}</div>
               </div>
             ) : (
               <>
@@ -814,13 +817,13 @@ export function SettingsView() {
                             <span className={`gf-audit-led ${ledClass}`} />
                             {entry.mod_name}
                             {isUpToDate(entry) && (
-                              <span className="gf-pill gf-pill-ok" title="On the source's latest installable release.">
-                                <Check size={9} /> Latest
+                              <span className="gf-pill gf-pill-ok" title={t('settings.onLatestRelease')}>
+                                <Check size={9} /> {t('settings.audit.latest')}
                               </span>
                             )}
                             {entry.pinned && (
                               <span className="gf-pill" style={{ background: 'var(--indigo-elev)', color: 'var(--ink-mute)' }}>
-                                <Pin size={9} /> PINNED
+                                <Pin size={9} /> {t('settings.audit.pinned')}
                               </span>
                             )}
                           </span>
@@ -849,15 +852,14 @@ export function SettingsView() {
                                 className="gf-btn gf-btn-sm"
                                 title={
                                   entry.latest_release_blocked_by_game_version && entry.latest_compatible_tag
-                                    ? `Latest v${entry.latest_release_with_assets_tag} requires game v${entry.latest_release_min_game_version ?? '?'}. ` +
-                                      `Will install the newest compatible release: v${entry.latest_compatible_tag}.`
-                                    : `Download and install v${entry.latest_compatible_tag ?? entry.latest_release_with_assets_tag}`
+                                    ? t('settings.updateGameBlocked', { version: entry.latest_release_with_assets_tag, compatibleVersion: entry.latest_compatible_tag })
+                                    : t('settings.downloadInstall', { tag: entry.latest_compatible_tag ?? entry.latest_release_with_assets_tag })
                                 }
                               >
                                 {updatingMod === entry.mod_name || updatingAll ? (
-                                  <><RefreshCw size={10} className="animate-spin" /> Updating…</>
+                                  <><RefreshCw size={10} className="animate-spin" /> {t('settings.audit.updating')}</>
                                 ) : (
-                                  <><Download size={10} /> Update</>
+                                  <><Download size={10} /> {t('settings.audit.update')}</>
                                 )}
                               </button>
                             )}
@@ -872,10 +874,10 @@ export function SettingsView() {
                                   const folder = entry.folder_name ?? null;
                                   if (entry.pinned) {
                                     await unpinMod(entry.mod_name, folder);
-                                    toast.success(`Unpinned '${entry.mod_name}' — updates will be checked again.`);
+                                    toast.success(t('settings.unpinnedToast', { name: entry.mod_name }));
                                   } else {
                                     await pinMod(entry.mod_name, folder);
-                                    toast.success(`Pinned '${entry.mod_name}' — version and on/off state locked.`);
+                                    toast.success(t('settings.pinnedToast', { name: entry.mod_name }));
                                   }
                                   // Pin/unpin only flips the `pinned` flag
                                   // and recomputes needs_update for THIS
@@ -887,31 +889,33 @@ export function SettingsView() {
                                 }
                               }}
                               className="gf-btn-3 gf-btn-2-sm"
-                              title={entry.pinned ? 'Unpin — allow updates and profile changes' : 'Pin — lock version and on/off state'}
+                              title={entry.pinned ? t('settings.audit.unpinTooltip') : t('settings.audit.pinTooltip')}
                             >
-                              {entry.pinned ? <><PinOff size={9} /> Unpin</> : <><Pin size={9} /> Pin</>}
+                              {entry.pinned ? <><PinOff size={9} /> {t('settings.audit.unpin')}</> : <><Pin size={9} /> {t('settings.audit.pin')}</>}
                             </button>
                             <span
                               className="gf-audit-mono"
                               title={
                                 isGone
-                                  ? `GitHub release ${entry.latest_release_tag ?? ''} ships no installable asset. Auto-update can't fetch from this source.`
+                                  ? t('settings.noAssetTooltip', { version: entry.latest_release_tag ?? '' })
                                   : undefined
                               }
                             >
                               {hasRealError
-                                ? 'ERROR'
+                                ? t('settings.audit.error')
                                 : entry.needs_update
-                                ? `${entry.installed_version} → ${
-                                    entry.update_source === 'nexus' || (!entry.latest_release_with_assets_tag && entry.nexus_version)
-                                      ? entry.nexus_version
-                                      : entry.latest_compatible_tag ?? entry.latest_release_with_assets_tag
-                                  }`
+                                ? t('settings.audit.versionArrow', {
+                                    installed: entry.installed_version,
+                                    available:
+                                      entry.update_source === 'nexus' || (!entry.latest_release_with_assets_tag && entry.nexus_version)
+                                        ? entry.nexus_version
+                                        : entry.latest_compatible_tag ?? entry.latest_release_with_assets_tag,
+                                  })
                                 : !hasAnySource
-                                ? 'No source'
+                                ? t('settings.audit.noSource')
                                 : isGone
-                                ? `${entry.installed_version} · release missing assets`
-                                : `${entry.installed_version} (latest)`}
+                                ? t('settings.audit.nexusReleaseMissing', { version: entry.installed_version })
+                                : `${entry.installed_version} ${t('settings.audit.latest2')}`}
                             </span>
                           </span>
                         </div>
@@ -927,7 +931,7 @@ export function SettingsView() {
                               <ExternalLink size={10} />
                               {entry.github_repo}
                               {entry.github_auto_detected && (
-                                <span className="text-text-dim opacity-60">(auto-detected)</span>
+                                <span className="text-text-dim opacity-60">{t('settings.audit.autoDetected')}</span>
                               )}
                             </a>
                           )}
@@ -940,21 +944,17 @@ export function SettingsView() {
                               style={{ color: 'var(--gf)' }}
                             >
                               <ExternalLink size={10} />
-                              Nexus{entry.nexus_version ? ` (v${entry.nexus_version})` : ''}
+                              {entry.nexus_version ? t('settings.audit.nexusVersion', { version: entry.nexus_version }) : t('settings.nexusFallback')}
                             </a>
                           )}
                           {entry.nexus_update_available && entry.nexus_url && (
                             <a
-                              // Use the shared `nexusFilesUrl` helper so the
-                              // Files-tab URL is built identically here and on
-                              // the Mods row — string concat could double-up
-                              // a `?` if the source URL already carried one.
                               href={nexusFilesUrl(entry.nexus_url) ?? `${entry.nexus_url}?tab=files`}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="gf-pill gf-pill-update inline-flex items-center gap-1 hover:underline"
                             >
-                              <Download size={10} /> Download from Nexus
+                              <Download size={10} /> {t('settings.audit.downloadFromNexus')}
                             </a>
                           )}
                         </div>
@@ -973,16 +973,9 @@ export function SettingsView() {
                               alignItems: 'center',
                               gap: 6,
                             }}
-                            title={
-                              `This mod's manifest declares min_game_version=${entry.min_game_version}. ` +
-                              `Your STS2 install reports ${gameInfo?.game_version ?? 'unknown'}. ` +
-                              `Until you update STS2 (or switch beta branches), the game's loader will silently skip this mod.`
-                            }
+                            title={t('settings.auditGameVersionBlock', { declared: entry.min_game_version, installed: gameInfo?.game_version ?? 'unknown' })}
                           >
-                            ⚠ Won't load on your game (needs Slay the Spire 2 ≥ v
-                            {entry.min_game_version}; you have v
-                            {gameInfo?.game_version ?? '?'}). Use Repair on the
-                            Mods row to roll back to a compatible release.
+                            ⚠ {t('settings.auditWontLoad', { version: entry.min_game_version, installed: gameInfo?.game_version ?? '?' })}
                           </div>
                         )}
                         {entry.latest_release_blocked_by_game_version && (
@@ -996,15 +989,9 @@ export function SettingsView() {
                                 alignItems: 'center',
                                 gap: 6,
                               }}
-                              title={
-                                `Latest release v${entry.latest_release_with_assets_tag} requires game v${entry.latest_release_min_game_version ?? '?'}. ` +
-                                `Update will walk back to v${entry.latest_compatible_tag}, the newest release compatible with your STS2 build.`
-                              }
+                              title={t('settings.auditCompatTag', { latest: entry.latest_release_with_assets_tag, required: entry.latest_release_min_game_version ?? '?', compatible: entry.latest_compatible_tag })}
                             >
-                              ↺ Latest v{entry.latest_release_with_assets_tag} needs
-                              game v{entry.latest_release_min_game_version ?? '?'};
-                              Update will install v{entry.latest_compatible_tag}{' '}
-                              (newest compatible).
+                              ↺ {t('settings.auditCompatTagVisible', { latest: entry.latest_release_with_assets_tag, required: entry.latest_release_min_game_version ?? '?', compatible: entry.latest_compatible_tag })}
                             </div>
                           ) : (
                             <div
@@ -1016,16 +1003,9 @@ export function SettingsView() {
                                 alignItems: 'center',
                                 gap: 6,
                               }}
-                              title={
-                                `Latest release v${entry.latest_release_with_assets_tag} requires game v${entry.latest_release_min_game_version ?? '?'}. ` +
-                                `You're already on v${entry.installed_version}, the newest release that runs on your current STS2 build. ` +
-                                `Update STS2 (or switch beta branches) to pick up the newer mod release.`
-                              }
+                              title={t('settings.auditAlreadyCompat', { version: entry.latest_release_with_assets_tag, required: entry.latest_release_min_game_version ?? '?', installed: entry.installed_version })}
                             >
-                              ↺ Latest v{entry.latest_release_with_assets_tag} needs
-                              game v{entry.latest_release_min_game_version ?? '?'};
-                              you're on v{entry.installed_version} — the newest
-                              version that runs on your game.
+                              ↺ {t('settings.auditAlreadyCompatVisible', { version: entry.latest_release_with_assets_tag, required: entry.latest_release_min_game_version ?? '?', installed: entry.installed_version })}
                             </div>
                           )
                         )}
@@ -1050,39 +1030,36 @@ export function SettingsView() {
                     <div className="gf-audit-foot" style={{ marginTop: 12 }}>
                       <div className="gf-audit-foot-stat">
                         <span className="gf-audit-led gf-audit-led-ok" />
-                        {okCount} up to date
+                        {okCount} {t('settings.audit.upToDate')}
                       </div>
                       <div className="gf-audit-foot-stat">
                         <span className="gf-audit-led gf-audit-led-update" />
-                        {updateCount} updates available
+                        {updateCount} {t('settings.audit.updatesAvailable')}
                       </div>
                       {incompatibleCount > 0 && (
                         <div
                           className="gf-audit-foot-stat"
-                          title={
-                            `These mods declare a min_game_version above your detected STS2 build (v${gameInfo?.game_version ?? '?'}). ` +
-                            `Use Repair on each Mods row to roll back to a compatible release.`
-                          }
+                          title={t('settings.audit.wontLoadTitle', { version: gameInfo?.game_version ?? '?' })}
                         >
                           <span className="gf-audit-led gf-audit-led-warn" />
-                          {incompatibleCount} won't load
+                          {incompatibleCount} {t('settings.audit.wontLoad')}
                         </div>
                       )}
                       {goneCount > 0 && (
                         <div
                           className="gf-audit-foot-stat"
-                          title="GitHub release exists but ships no installable asset — auto-update can't fetch from this source."
+                          title={t('settings.audit.goneTitle')}
                         >
                           <span className="gf-audit-led gf-audit-led-warn" />
-                          {goneCount} release{goneCount === 1 ? '' : 's'} missing assets
+                          {goneCount === 1 ? t('settings.audit.releasesMissingAssets_one', { count: goneCount }) : t('settings.audit.releasesMissingAssets_other', { count: goneCount })}
                         </div>
                       )}
                       <div className="gf-audit-foot-stat">
                         <span className="gf-audit-led gf-audit-led-gone" />
-                        {errCount} error{errCount === 1 ? '' : 's'}
+                        {errCount === 1 ? t('settings.audit.errorCount_one', { count: errCount }) : t('settings.audit.errorCount_other', { count: errCount })}
                       </div>
                       <div className="gf-audit-foot-stat" style={{ marginLeft: 'auto', color: 'var(--ink-dim)' }}>
-                        {pinnedCount} pinned · {unlinkedCount} unlinked
+                        {t('settings.audit.pinnedCount', { count: pinnedCount })} · {t('settings.audit.unlinkedCount', { count: unlinkedCount })}
                       </div>
                     </div>
                   );
@@ -1094,14 +1071,14 @@ export function SettingsView() {
 
         {tab === 'advanced' && (
           <>
-            <div className="gf-section-title" style={{ marginTop: 0 }}>Quick actions</div>
+            <div className="gf-section-title" style={{ marginTop: 0 }}>{t('settings.advanced.quickActions')}</div>
             <Card className="space-y-3">
               <div className="flex gap-2 flex-wrap">
                 <Button variant="secondary" size="sm" onClick={handleOpenGameFolder}>
-                  <FolderOpen size={14} /> Open game folder
+                  <FolderOpen size={14} /> {t('settings.advanced.openGameFolder')}
                 </Button>
                 <Button variant="secondary" size="sm" onClick={handleOpenModsFolder}>
-                  <FolderOpen size={14} /> Open mods folder
+                  <FolderOpen size={14} /> {t('settings.advanced.openModsFolder')}
                 </Button>
                 <Button
                   variant="secondary"
@@ -1110,12 +1087,12 @@ export function SettingsView() {
                   disabled={checkingUpdate}
                 >
                   <RefreshCw size={14} className={checkingUpdate ? 'animate-spin' : ''} />
-                  {checkingUpdate ? 'Checking...' : 'Check for updates'}
+                  {checkingUpdate ? t('settings.advanced.checking') : t('settings.advanced.checkForUpdates')}
                 </Button>
               </div>
             </Card>
 
-            <div className="gf-section-title">In-app logs</div>
+            <div className="gf-section-title">{t('settings.advanced.inAppLogs')}</div>
             <LogsViewer />
           </>
         )}

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Check, X, GitBranch, ExternalLink, Search, Save, StickyNote, Link as LinkIcon } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import type { ModInfo } from '../types';
 
 // v5 batch 2 — inline source editor drawer.
@@ -45,6 +46,7 @@ export function SourceEditor({
   onFindGithub,
   onSave,
 }: Props) {
+  const { t } = useTranslation();
   const [github, setGithub] = useState<string>(ghRepoFromUrl(mod.github_url));
   const [nexus, setNexus] = useState<string>(mod.nexus_url ?? '');
   const [note, setNote] = useState<string>(mod.note ?? '');
@@ -57,10 +59,10 @@ export function SourceEditor({
   function statusBadge(ok: boolean) {
     return ok ? (
       <span className="gf-src-edit-status gf-src-edit-status-ok">
-        <Check size={9} style={{ display: 'inline', marginRight: 2 }} /> OK
+        <Check size={9} style={{ display: 'inline', marginRight: 2 }} /> {t('sourceEditor.ok')}
       </span>
     ) : (
-      <span className="gf-src-edit-status gf-src-edit-status-empty">empty</span>
+      <span className="gf-src-edit-status gf-src-edit-status-empty">{t('sourceEditor.empty')}</span>
     );
   }
 
@@ -68,12 +70,12 @@ export function SourceEditor({
     <div className="gf-src-edit">
       <div className="gf-src-edit-head">
         <div>
-          <div className="gf-src-edit-title">Sources for {mod.name}</div>
+          <div className="gf-src-edit-title">{t('sourceEditor.title', { name: mod.name })}</div>
           <div className="gf-src-edit-sub">
-            Linking enables auto-updates from GitHub releases or Nexus.
+            {t('sourceEditor.subtitle')}
           </div>
         </div>
-        <button className="gf-btn-3 gf-btn-icon" onClick={onClose} title="Close editor">
+        <button className="gf-btn-3 gf-btn-icon" onClick={onClose} title={t('sourceEditor.closeEditor')}>
           <X size={12} />
         </button>
       </div>
@@ -83,14 +85,14 @@ export function SourceEditor({
         <div className="gf-src-edit-field">
           <label className="gf-src-edit-label">
             <GitBranch size={11} style={{ marginRight: 4 }} />
-            GitHub repo
+            {t('sourceEditor.githubRepo')}
             {github && (
               <button
                 type="button"
                 className="gf-src-edit-clear"
                 onClick={() => setGithub('')}
               >
-                clear
+                {t('sourceEditor.clear')}
               </button>
             )}
           </label>
@@ -98,7 +100,7 @@ export function SourceEditor({
             <input
               value={github}
               onChange={(e) => setGithub(e.target.value)}
-              placeholder="owner/repo"
+              placeholder={t('sourceEditor.githubPlaceholder')}
             />
             {statusBadge(ghOk)}
           </div>
@@ -112,14 +114,14 @@ export function SourceEditor({
         <div className="gf-src-edit-field">
           <label className="gf-src-edit-label">
             <ExternalLink size={11} style={{ marginRight: 4 }} />
-            Nexus mod URL
+            {t('sourceEditor.nexusUrl')}
             {nexus && (
               <button
                 type="button"
                 className="gf-src-edit-clear"
                 onClick={() => setNexus('')}
               >
-                clear
+                {t('sourceEditor.clear')}
               </button>
             )}
           </label>
@@ -127,7 +129,7 @@ export function SourceEditor({
             <input
               value={nexus}
               onChange={(e) => setNexus(e.target.value)}
-              placeholder="https://www.nexusmods.com/sts2/mods/123"
+              placeholder={t('sourceEditor.nexusPlaceholder')}
             />
             {statusBadge(nxOk)}
           </div>
@@ -142,14 +144,14 @@ export function SourceEditor({
         <div className="gf-src-edit-field">
           <label className="gf-src-edit-label">
             <StickyNote size={11} style={{ marginRight: 4 }} />
-            Note
+            {t('sourceEditor.note')}
             {note && (
               <button
                 type="button"
                 className="gf-src-edit-clear"
                 onClick={() => setNote('')}
               >
-                clear
+                {t('sourceEditor.clear')}
               </button>
             )}
           </label>
@@ -157,12 +159,12 @@ export function SourceEditor({
             <textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="e.g. downloaded from Patreon, compat patch for v1.8 build"
+              placeholder={t('sourceEditor.notePlaceholder')}
               rows={2}
             />
           </div>
           <div className="gf-src-edit-hint">
-            <span>Free-form. Shown on the mod row so you remember where this came from.</span>
+            <span>{t('sourceEditor.noteHint')}</span>
           </div>
         </div>
 
@@ -170,14 +172,14 @@ export function SourceEditor({
         <div className="gf-src-edit-field">
           <label className="gf-src-edit-label">
             <LinkIcon size={11} style={{ marginRight: 4 }} />
-            Other link
+            {t('sourceEditor.otherLink')}
             {customUrl && (
               <button
                 type="button"
                 className="gf-src-edit-clear"
                 onClick={() => setCustomUrl('')}
               >
-                clear
+                {t('sourceEditor.clear')}
               </button>
             )}
           </label>
@@ -185,12 +187,12 @@ export function SourceEditor({
             <input
               value={customUrl}
               onChange={(e) => setCustomUrl(e.target.value)}
-              placeholder="https://… (Patreon, X, Discord, etc.)"
+              placeholder={t('sourceEditor.otherLinkPlaceholder')}
             />
             {statusBadge(customUrl.trim().length > 0)}
           </div>
           <div className="gf-src-edit-hint">
-            <span>For mods that don't live on GitHub or Nexus.</span>
+            <span>{t('sourceEditor.otherLinkHint')}</span>
           </div>
         </div>
       </div>
@@ -212,11 +214,10 @@ export function SourceEditor({
         >
           <Search size={12} />
           <span style={{ flex: 1 }}>
-            Nexus-only mod — try fetching the GitHub repo from the Nexus
-            description so updates are checked from both sources.
+            {t('sourceEditor.nexusOnlyMessage')}
           </span>
           <button className="gf-btn-3 gf-btn-2-sm" onClick={onFindGithub} disabled={findingGithub}>
-            {findingGithub ? 'Searching…' : 'Find GitHub'}
+            {findingGithub ? t('sourceEditor.searching') : t('sourceEditor.findGitHub')}
           </button>
         </div>
       )}
@@ -224,17 +225,17 @@ export function SourceEditor({
       <div className="gf-src-edit-foot">
         {(mod.github_url || mod.nexus_url) && (
           <button className="gf-btn-3 gf-btn-2-sm gf-btn-danger" onClick={onClear}>
-            Clear all links
+            {t('sourceEditor.clearAllLinks')}
           </button>
         )}
         <div style={{ flex: 1 }} />
-        <button className="gf-btn-3" onClick={onClose}>Cancel</button>
+        <button className="gf-btn-3" onClick={onClose}>{t('common.cancel')}</button>
         <button
           className="gf-btn gf-btn-sm"
           onClick={() => onSave(github, nexus, note, customUrl)}
           disabled={saving}
         >
-          <Save size={11} /> {saving ? 'Saving…' : 'Save sources'}
+          <Save size={11} /> {saving ? t('sourceEditor.saving') : t('sourceEditor.saveSources')}
         </button>
       </div>
     </div>

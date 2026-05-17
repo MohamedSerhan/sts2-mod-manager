@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation, Trans } from 'react-i18next';
 import { AlertTriangle, Check, Copy, ExternalLink, Info, Link as LinkIcon, MessageSquare, Upload, X } from 'lucide-react';
 import { listen } from '@tauri-apps/api/event';
 import type { Profile, ShareResult } from '../types';
@@ -38,6 +39,7 @@ interface ShareProgress {
 
 export function PublishModal({ open, profile, isReshare, onClose, onShared, onGoToSettings }: Props) {
   const toast = useToast();
+  const { t } = useTranslation();
   // Live disk state — the Rust share/reshare path re-snapshots disk before
   // uploading, so the modal's preview has to mirror disk, not the saved
   // profile.mods (which is the last snapshot and may be days stale).
@@ -129,18 +131,21 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
       // Partial-fail toast — curators used to find out about silent mod-
       // upload failures only when a confused friend complained later.
       if (result.failed_uploads && result.failed_uploads.length > 0) {
+        const count = result.failed_uploads.length;
         const list = result.failed_uploads.slice(0, 5).join(', ');
         const more = result.failed_uploads.length > 5
           ? `, +${result.failed_uploads.length - 5} more`
           : '';
         toast.error(
-          `${result.failed_uploads.length} mod${result.failed_uploads.length === 1 ? '' : 's'} failed to upload: ${list}${more}. Friends installing this code will see "missing mod" for these — try re-publishing.`,
+          count === 1
+            ? t('publish.failedUploadsToast_one', { count, list })
+            : t('publish.failedUploadsToast_other', { count, list, more }),
         );
       } else {
-        toast.success(isReshare ? 'Update pushed to followers' : 'Profile published');
+        toast.success(isReshare ? t('publish.updatePushedToast') : t('publish.profilePublishedToast'));
       }
     } catch (e) {
-      toast.error(`Failed to publish: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('publish.publishFailed', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setBusy(false);
       setProgress(null);
@@ -155,13 +160,13 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
     const text =
       kind === 'code' ? codeStr
       : kind === 'link' ? buildShareLink(codeStr)
-      : buildShareMessage(profile.name, codeStr);
+      : buildShareMessage(profile.name, codeStr, t);
     try {
       await navigator.clipboard.writeText(text);
       setCopied(kind);
       setTimeout(() => setCopied(null), 1800);
     } catch {
-      toast.error('Could not copy to clipboard');
+      toast.error(t('publish.couldntCopy'));
     }
   }
 
@@ -177,7 +182,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
     // so this guard is dead at runtime.
     if (!shared?.repo_url) return;
     try { await openExternalUrl(shared.repo_url); }
-    catch (e) { toast.error(`Couldn't open browser: ${e instanceof Error ? e.message : String(e)}`); }
+    catch (e) { toast.error(t('publish.couldntOpenBrowser', { error: e instanceof Error ? e.message : String(e) })); }
   }
 
   // Pre-flight error: GitHub token not set. We block publishing rather
@@ -192,21 +197,21 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
             <div className="gf-modal-title">
               {shared
                 ? isReshare
-                  ? 'Update pushed'
-                  : 'Profile published'
+                  ? t('publish.updatePushed')
+                  : t('publish.profilePublished')
                 : isReshare
-                ? `Re-share ${profile.name}?`
-                : `Publish ${profile.name}`}
+                ? t('publish.reshareTitle', { name: profile.name })
+                : t('publish.publishTitle', { name: profile.name })}
             </div>
             <div className="gf-modal-sub">
               {shared
-                ? 'Anyone with the code can install this exact set of mods.'
+                ? t('publish.sharedSubtitle')
                 : isReshare
-                ? "Same code — followers will see an update prompt next time they open the app."
-                : 'Uploads your mod files to a GitHub repo on your account so friends can install them.'}
+                ? t('publish.reshareSubtitle')
+                : t('publish.publishSubtitle')}
             </div>
           </div>
-          <button className="gf-btn-3 gf-btn-icon" onClick={handleDone} disabled={busy} title="Close">
+          <button className="gf-btn-3 gf-btn-icon" onClick={handleDone} disabled={busy} title={t('common.close')}>
             <X size={14} />
           </button>
         </div>
@@ -231,12 +236,14 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
               <AlertTriangle size={16} style={{ color: 'oklch(0.78 0.16 25)', marginTop: 1, flexShrink: 0 }} />
               <div style={{ flex: 1, fontSize: 12.5, lineHeight: 1.55 }}>
                 <div style={{ fontWeight: 600, color: 'var(--ink)', marginBottom: 4 }}>
-                  GitHub token required
+                  {t('publish.tokenRequired')}
                 </div>
                 <div style={{ color: 'var(--ink-mute)' }}>
-                  Publishing uploads your mod files to a GitHub repo on your account, so the manager needs
-                  a personal access token with <code>repo</code> scope (or, for fine-grained tokens,
-                  <code> Contents: R/W</code> + <code>Administration: R/W</code>).
+                  <Trans i18nKey="publish.tokenExplanation">
+                    <code />
+                    <code />
+                    <code />
+                  </Trans>
                 </div>
                 {onGoToSettings && (
                   <button
@@ -244,7 +251,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
                     style={{ marginTop: 10 }}
                     onClick={() => { onGoToSettings(); handleDone(); }}
                   >
-                    Open Settings → Accounts
+                    {t('publish.openSettings')}
                   </button>
                 )}
               </div>
@@ -254,7 +261,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
           {!shared && !blockedByMissingToken && !busy && (
             <>
               <div className="gf-field">
-                <label className="gf-field-label">Pack name</label>
+                <label className="gf-field-label">{t('publish.packName')}</label>
                 <input
                   className="gf-set-input"
                   defaultValue={profile.name}
@@ -263,23 +270,27 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
                 />
               </div>
               <div className="gf-field">
-                <label className="gf-field-label">What's included</label>
+                <label className="gf-field-label">{t('publish.whatsIncluded')}</label>
                 <div className="gf-includes">
                   <div className="gf-includes-row">
-                    <span className="gf-includes-stat">{totalCount}</span> mods total
+                    <span className="gf-includes-stat">{totalCount}</span> {t('publish.modsTotal')}
                   </div>
                   <div className="gf-includes-row">
-                    <span className="gf-includes-stat">{enabledCount}</span> active
+                    <span className="gf-includes-stat">{enabledCount}</span> {t('publish.activeLabel')}
                     {disabledCount > 0 && (
                       <>
                         {' · '}
-                        <span className="gf-includes-stat">{disabledCount}</span> disabled (installed off)
+                        <span className="gf-includes-stat">{disabledCount}</span> {t('publish.disabledLabel')}
                       </>
                     )}
                   </div>
                   {profile.created_by && (
                     <div className="gf-includes-row">
-                      curated by <b style={{ color: 'var(--ink)' }}>{profile.created_by}</b>
+                      <Trans
+                        i18nKey="publish.curatedBy"
+                        values={{ name: profile.created_by }}
+                        components={{ bold: <b style={{ color: 'var(--ink)' }} /> }}
+                      />
                     </div>
                   )}
                 </div>
@@ -291,7 +302,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
                   pack. The success view keeps a toggle for last-minute
                   changes of mind. */}
               <div className="gf-field">
-                <label className="gf-field-label">Visibility</label>
+                <label className="gf-field-label">{t('publish.visibility')}</label>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <label
                     style={{
@@ -314,10 +325,10 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
                     />
                     <div>
                       <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>
-                        Friends only <span style={{ color: 'var(--ink-mute)', fontWeight: 400 }}>· default</span>
+                        {t('publish.friendsOnly')} <span style={{ color: 'var(--ink-mute)', fontWeight: 400 }}>· {t('publish.friendsOnlyDefault')}</span>
                       </div>
                       <div style={{ fontSize: 12, color: 'var(--ink-mute)', lineHeight: 1.5, marginTop: 2 }}>
-                        Anyone with the code or link can install it. Not listed on Browse Modpacks.
+                        {t('publish.friendsOnlyDesc')}
                       </div>
                     </div>
                   </label>
@@ -342,10 +353,10 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
                     />
                     <div>
                       <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>
-                        Public
+                        {t('publish.public')}
                       </div>
                       <div style={{ fontSize: 12, color: 'var(--ink-mute)', lineHeight: 1.5, marginTop: 2 }}>
-                        Listed on Browse Modpacks. Anyone using the app can find and install it.
+                        {t('publish.publicDesc')}
                       </div>
                     </div>
                   </label>
@@ -371,10 +382,10 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
                 >
                   <Info size={14} style={{ flexShrink: 0, marginTop: 1 }} />
                   <div>
-                    The manager will create a <b>public</b> repo called <code>sts2mm-profiles</code> on
-                    your GitHub account (if you don't already have one) to hold your published packs +
-                    mod bundles. You can re-publish updates later to the same code; you can also delete
-                    or make it private on GitHub at any time.
+                    <Trans i18nKey="publish.publicRepoNote">
+                      <b />
+                      <code />
+                    </Trans>
                   </div>
                 </div>
               )}
@@ -386,10 +397,10 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
             <div style={{ padding: '4px 2px' }}>
               <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--ink)' }}>
                 {progress?.stage === 'uploading-manifest'
-                  ? 'Uploading profile manifest…'
+                  ? t('publish.uploadingManifest')
                   : progress?.mod_name
-                  ? `Bundling mod ${progress.current} of ${progress.total}: ${progress.mod_name}`
-                  : 'Preparing…'}
+                  ? t('publish.bundlingMod', { current: progress.current, total: progress.total, name: progress.mod_name })
+                  : t('publish.preparing')}
               </div>
               {progress?.total && progress.total > 0 && progress.stage === 'bundling' && (
                 <div
@@ -413,8 +424,9 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
                 </div>
               )}
               <div style={{ fontSize: 11.5, color: 'var(--ink-dim)' }}>
-                This can take a minute or two for big packs — your mod files are being zipped + uploaded
-                to your <code>sts2mm-profiles</code> repo one at a time. Don't close the window.
+                <Trans i18nKey="publish.progressNote">
+                  <code />
+                </Trans>
               </div>
             </div>
           )}
@@ -423,7 +435,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
             <>
               <div className="gf-share-code">
                 <div className="gf-share-code-text">
-                  <div className="gf-share-code-eyebrow">Share code</div>
+                  <div className="gf-share-code-eyebrow">{t('publish.shareCode')}</div>
                   <div className="gf-share-code-value">
                     {shared.owner}/{shared.code}
                   </div>
@@ -431,26 +443,26 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
                 <button
                   className="gf-btn-2 gf-btn-2-sm"
                   onClick={() => handleCopy('code')}
-                  title="Copy the raw share code (paste into the manager's code box)"
+                  title={t('publish.copyCodeTitle')}
                 >
                   {copied === 'code' ? <Check size={12} /> : <Copy size={12} />}
-                  {copied === 'code' ? 'Copied' : 'Copy code'}
+                  {copied === 'code' ? t('publish.codeCopied') : t('publish.copyCode')}
                 </button>
                 <button
                   className="gf-btn-2 gf-btn-2-sm"
                   onClick={() => handleCopy('link')}
-                  title="Copy the install link — clickable in Discord / chat, routes friends through the install bridge page"
+                  title={t('publish.copyLinkTitle')}
                 >
                   {copied === 'link' ? <Check size={12} /> : <LinkIcon size={12} />}
-                  {copied === 'link' ? 'Copied' : 'Copy link'}
+                  {copied === 'link' ? t('publish.linkCopied') : t('publish.copyLink')}
                 </button>
                 <button
                   className="gf-btn-2 gf-btn-2-sm"
                   onClick={() => handleCopy('msg')}
-                  title="Copy a paste-ready share message — intro line + install link + raw code in one block"
+                  title={t('publish.copyMessageTitle')}
                 >
                   {copied === 'msg' ? <Check size={12} /> : <MessageSquare size={12} />}
-                  {copied === 'msg' ? 'Copied' : 'Copy message'}
+                  {copied === 'msg' ? t('publish.messageCopied') : t('publish.copyMessage')}
                 </button>
               </div>
 
@@ -469,8 +481,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
               >
                 <Info size={14} style={{ flexShrink: 0, marginTop: 1 }} />
                 <div>
-                  This same code is reused if you re-share later — friends will see updates instead of
-                  having to follow a new code.
+                  {t('publish.reuseNote')}
                 </div>
               </div>
 
@@ -488,7 +499,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
                   }}
                   title={shared.repo_url}
                 >
-                  <ExternalLink size={12} /> Open my profiles repo on GitHub
+                  <ExternalLink size={12} /> {t('publish.openRepo')}
                 </button>
               )}
 
@@ -508,16 +519,20 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
                 >
                   <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
                   <div>
-                    <b>{shared.failed_uploads.length} mod{shared.failed_uploads.length === 1 ? '' : 's'} failed to upload:</b>{' '}
+                    <b>
+                      {shared.failed_uploads.length === 1
+                        ? t('publish.failedUploadsSummary_one', { count: shared.failed_uploads.length })
+                        : t('publish.failedUploadsSummary_other', { count: shared.failed_uploads.length })}
+                    </b>{' '}
                     {shared.failed_uploads.slice(0, 5).join(', ')}
                     {shared.failed_uploads.length > 5 && `, +${shared.failed_uploads.length - 5} more`}.{' '}
-                    Friends installing this code will see "missing mod" for these — re-publish to retry.
+                    {t('publish.failedUploadsHelp')}
                   </div>
                 </div>
               )}
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, fontSize: 12 }}>
-                <span style={{ color: 'var(--ink-mute)' }}>Listed publicly:</span>
+                <span style={{ color: 'var(--ink-mute)' }}>{t('publish.listedPublicly')}</span>
                 <ListingToggle profileName={profile.name} initial={visibility === 'public'} />
               </div>
             </>
@@ -527,25 +542,25 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
         <div className="gf-modal-foot">
           {!shared && !busy ? (
             <>
-              <button className="gf-btn-3" onClick={handleDone}>Cancel</button>
+              <button className="gf-btn-3" onClick={handleDone}>{t('common.cancel')}</button>
               <div style={{ flex: 1 }} />
               <button
                 className="gf-btn"
                 onClick={handlePublish}
                 disabled={busy || blockedByMissingToken || tokenSet === null}
               >
-                <Upload size={12} /> {isReshare ? 'Push update' : 'Publish'}
+                <Upload size={12} /> {isReshare ? t('publish.pushUpdate') : t('common.publish')}
               </button>
             </>
           ) : busy ? (
             <>
               <div style={{ flex: 1 }} />
-              <button className="gf-btn-3" disabled>Publishing…</button>
+              <button className="gf-btn-3" disabled>{t('common.publishing')}</button>
             </>
           ) : (
             <>
               <div style={{ flex: 1 }} />
-              <button className="gf-btn" onClick={handleDone}>Done</button>
+              <button className="gf-btn" onClick={handleDone}>{t('common.done')}</button>
             </>
           )}
         </div>
@@ -556,6 +571,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
 
 function ListingToggle({ profileName, initial }: { profileName: string; initial: boolean }) {
   const toast = useToast();
+  const { t } = useTranslation();
   const [on, setOn] = useState(initial);
   const [busy, setBusy] = useState(false);
   async function flip() {
@@ -565,16 +581,16 @@ function ListingToggle({ profileName, initial }: { profileName: string; initial:
     try {
       await setModpackListing(profileName, next);
       setOn(next);
-      toast.success(next ? 'Listed on Browse Modpacks' : 'Hidden from Browse Modpacks');
+      toast.success(next ? t('publish.listedToast') : t('publish.hiddenToast'));
     } catch (e) {
-      toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('publish.listingFailed', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setBusy(false);
     }
   }
   return (
     <button className="gf-btn-3" onClick={flip} disabled={busy}>
-      {on ? 'Yes' : 'No'}
+      {on ? t('common.yes') : t('common.no')}
     </button>
   );
 }

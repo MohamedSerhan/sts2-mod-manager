@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { ModsView } from './Mods';
 import { AllProviders } from '../__test__/providers';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
+import i18n from '../i18n';
 import type { ModInfo } from '../types';
 
 /**
@@ -1262,6 +1263,36 @@ describe('<ModsView>', () => {
     await waitFor(() => {
       expect(screen.getByText(/Failed to pin PinFail.*locked/)).toBeInTheDocument();
     });
+  });
+
+  it.each([
+    {
+      cmd: 'pin_mod',
+      mod: baseMod({ name: 'PinFailZh', folder_name: 'PinFailZh', pinned: false }),
+      menuName: /固定此模组/,
+      expected: /固定 PinFailZh 失败：locked/,
+      leakedEnglish: /pin PinFailZh/,
+    },
+    {
+      cmd: 'unpin_mod',
+      mod: baseMod({ name: 'UnpinFailZh', folder_name: 'UnpinFailZh', pinned: true }),
+      menuName: /取消固定此模组/,
+      expected: /取消固定 UnpinFailZh 失败：locked/,
+      leakedEnglish: /unpin UnpinFailZh/,
+    },
+  ])('$cmd failure localizes the action in Simplified Chinese', async ({ cmd, mod, menuName, expected, leakedEnglish }) => {
+    await i18n.changeLanguage('zh-Hans');
+    seedMods([mod]);
+    registerInvokeHandler(cmd, () => { throw new Error('locked'); });
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText(mod.name)).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: '模组操作' }));
+    await user.click(screen.getByRole('menuitem', { name: menuName }));
+    await waitFor(() => {
+      expect(screen.getByText(expected)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(leakedEnglish)).toBeNull();
   });
 
   it('unpin_mod path triggers unpin command + success toast', async () => {

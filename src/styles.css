@@ -232,16 +232,16 @@ body {
   line-height: 1;
 }
 .gf-nav .gf-nav-beta {
-  position: absolute;
-  left: 161px;
-  top: 15px;
-  transform: translateX(-50%);
-  font-size: 7px;
+  /* Inline next to the label — was absolutely positioned which broke
+     once labels wider than "Browse Modpacks" (e.g. Chinese) shifted
+     past the hardcoded offset. */
+  font-size: 9px;
   line-height: 1.1;
-  letter-spacing: 0.08em;
-  padding: 0.5px 1.5px;
-  border-radius: 2px;
+  letter-spacing: 0.06em;
+  padding: 1px 4px;
+  border-radius: 3px;
   pointer-events: none;
+  flex: 0 0 auto;
   gap: 0;
 }
 
@@ -1732,6 +1732,13 @@ body {
 .gf-wiz-step.active { background: var(--gold); }
 .gf-wiz-step.done { background: var(--ok); }
 .gf-wiz-head { padding: 16px 24px 4px; }
+.gf-wiz-head-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 6px;
+}
 .gf-wiz-eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-mute); margin-bottom: 6px; }
 .gf-wiz-title { font-size: 22px; font-weight: 700; color: var(--ink); }
 .gf-wiz-sub { font-size: 13.5px; color: var(--ink-mute); margin-top: 6px; }
@@ -1759,6 +1766,42 @@ body {
 .gf-help.err { color: oklch(0.82 0.16 25); }
 .gf-help.warn { color: oklch(0.85 0.14 70); }
 .gf-help.muted { color: var(--ink-mute); }
+
+.gf-language-select {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  max-width: 220px;
+}
+.gf-language-select .gf-field-label { margin-bottom: 0; }
+.gf-language-select select { min-width: 180px; }
+/* Native <option> elements inherit unpredictable system colors on
+   Windows/Linux against the dark panel background — the dropdown
+   list rendered nearly invisible. Force readable contrast. */
+.gf-language-select select option {
+  background-color: var(--indigo-panel);
+  color: var(--ink);
+}
+.gf-language-select.compact {
+  align-items: flex-end;
+  max-width: 180px;
+}
+.gf-language-select.compact select {
+  min-width: 150px;
+  height: 28px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+@media (max-width: 560px) {
+  .gf-wiz-head-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .gf-language-select.compact {
+    align-items: flex-start;
+  }
+}
 
 /* Logs viewer */
 .gf-logs {
@@ -1872,6 +1915,23 @@ body {
 .gf-whatsnew-bullets { margin: 0 0 8px 0; padding-left: 18px; list-style: disc; }
 .gf-whatsnew-bullets li { margin-bottom: 4px; }
 .gf-whatsnew-note { margin-top: 8px; font-size: 11px; color: var(--ink-dim); font-style: italic; }
+/* Notice shown when the active locale isn't English: maintainer can't
+   verify translation accuracy. Sits on top of the release notes body. */
+.gf-whatsnew-locale-note {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 8px 10px; margin-bottom: 12px;
+  border: 1px solid var(--indigo-line);
+  background: oklch(0.22 0.05 280 / 0.5);
+  border-radius: 6px;
+  font-size: 11.5px; color: var(--ink-mute); line-height: 1.45;
+}
+.gf-whatsnew-locale-note svg { color: var(--gf); flex: 0 0 auto; margin-top: 2px; }
+.gf-whatsnew-locale-link {
+  background: transparent; border: 0; padding: 0;
+  color: var(--gf); cursor: pointer; text-decoration: underline;
+  font: inherit;
+}
+.gf-whatsnew-locale-link:hover { color: var(--ink); }
 
 /* ── Browse Modpacks view ─────────────────────────────────────────── */
 .gf-view { padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }

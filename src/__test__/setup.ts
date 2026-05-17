@@ -17,6 +17,7 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, vi } from 'vitest';
 import { cleanup } from '@testing-library/react';
+import i18n from '../i18n';
 
 // ── Tauri mock plumbing ────────────────────────────────────────────
 
@@ -170,7 +171,7 @@ function registerSafeDefaults(): void {
 
 // ── Per-test cleanup ───────────────────────────────────────────────
 
-beforeEach(() => {
+beforeEach(async () => {
   resetTauriMocks();
   registerSafeDefaults();
   // Components like ModsView persist UI prefs ("sts2mm-mods-advanced",
@@ -179,6 +180,7 @@ beforeEach(() => {
   // toggles a preference leaks into later tests that expect the
   // default state. Clear before every test to keep them independent.
   try { localStorage.clear(); } catch { /* jsdom quirk */ }
+  await i18n.changeLanguage('en');
 });
 
 afterEach(() => {

@@ -3,6 +3,7 @@ import { X, Download, ExternalLink } from 'lucide-react';
 import { listen } from '@tauri-apps/api/event';
 import type { BrowserCard, Profile } from '../types';
 import { fetchSharedProfile, installSharedProfile, openExternalUrl } from '../hooks/useTauri';
+import { useTranslation } from 'react-i18next';
 import { useToast } from '../contexts/ToastContext';
 
 interface Props {
@@ -29,6 +30,7 @@ interface InstallProgress {
  * splits on `/` to resolve the GitHub repo + manifest path.
  */
 export function BrowseModpackDetail({ card, onClose, onInstalled }: Props) {
+  const { t } = useTranslation();
   const toast = useToast();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -44,7 +46,7 @@ export function BrowseModpackDetail({ card, onClose, onInstalled }: Props) {
       })
       .catch((e) => {
         if (!cancelled) {
-          toast.error(`Couldn't load modpack: ${e instanceof Error ? e.message : String(e)}`);
+          toast.error(t('browseModpacks.couldntLoad', { error: e instanceof Error ? e.message : String(e) }));
         }
       })
       .finally(() => {
@@ -83,11 +85,11 @@ export function BrowseModpackDetail({ card, onClose, onInstalled }: Props) {
     });
     try {
       await installSharedProfile(`${card.owner}/${card.code}`);
-      toast.success(`Installed: ${card.name}`);
+      toast.success(t('browseModpacks.installed', { name: card.name }));
       onInstalled?.();
       onClose();
     } catch (e) {
-      toast.error(`Install failed: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('browseModpacks.installFailed', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setInstalling(false);
       setProgress(null);
@@ -103,15 +105,15 @@ export function BrowseModpackDetail({ card, onClose, onInstalled }: Props) {
   }
 
   function progressLabel() {
-    if (!progress) return 'Preparing install...';
-    if (progress.stage === 'fetching-manifest') return 'Fetching profile manifest...';
-    if (progress.stage === 'applying') return 'Applying profile...';
-    if (progress.stage === 'subscribing') return 'Subscribing for updates...';
+    if (!progress) return t('browseModpacks.preparingInstall');
+    if (progress.stage === 'fetching-manifest') return t('browseModpacks.fetchingManifest');
+    if (progress.stage === 'applying') return t('browseModpacks.applyingProfile');
+    if (progress.stage === 'subscribing') return t('browseModpacks.subscribing');
     if (progress.mod_name && progress.total > 0) {
-      const verb = progress.stage === 'downloading' ? 'Downloading' : 'Checking';
-      return `${verb} mod ${progress.current} of ${progress.total}: ${progress.mod_name}`;
+      const key = progress.stage === 'downloading' ? 'browseModpacks.downloadingMod' : 'browseModpacks.checkingMod';
+      return t(key, { current: progress.current, total: progress.total, name: progress.mod_name });
     }
-    return 'Installing modpack...';
+    return t('browseModpacks.installingModpack');
   }
 
   const progressPercent = progress?.total
@@ -132,27 +134,27 @@ export function BrowseModpackDetail({ card, onClose, onInstalled }: Props) {
               <button
                 className="gf-btn-3"
                 onClick={openCuratorProfile}
-                title="Open curator on GitHub"
+                title={t('browseModpacks.openCurator')}
                 style={{ padding: '2px 6px', fontSize: 12.5 }}
               >
                 @{card.owner} <ExternalLink size={11} />
               </button>
               {' · '}
-              {card.mod_count} mod{card.mod_count === 1 ? '' : 's'}
+              {t('browseModpacks.modCount', { count: card.mod_count })}
             </div>
           </div>
           <button
             className="gf-btn-3 gf-btn-icon"
             onClick={onClose}
             disabled={installing}
-            title="Close"
+            title={t('common.close')}
           >
             <X size={14} />
           </button>
         </div>
 
         <div className="gf-modal-body">
-          {loading && <div style={{ color: 'var(--ink-mute)' }}>Loading…</div>}
+          {loading && <div style={{ color: 'var(--ink-mute)' }}>{t('common.loading')}</div>}
           {profile && (
             <div className="gf-mod-list">
               {profile.mods.map((m) => (
@@ -171,7 +173,7 @@ export function BrowseModpackDetail({ card, onClose, onInstalled }: Props) {
               </div>
               <div
                 role="progressbar"
-                aria-label={`Installing ${card.name}`}
+                aria-label={t('browseModpacks.installingNamed', { name: card.name })}
                 aria-valuemin={0}
                 aria-valuemax={100}
                 aria-valuenow={progressPercent}
@@ -194,8 +196,7 @@ export function BrowseModpackDetail({ card, onClose, onInstalled }: Props) {
                 />
               </div>
               <div style={{ fontSize: 11.5, color: 'var(--ink-dim)' }}>
-                Large packs can take a while while bundles download from the curator's GitHub repo.
-                Don't close the window.
+                {t('browseModpacks.largePackNote')}
               </div>
             </div>
           )}
@@ -203,7 +204,7 @@ export function BrowseModpackDetail({ card, onClose, onInstalled }: Props) {
 
         <div className="gf-modal-foot">
           <button className="gf-btn-3" onClick={onClose} disabled={installing}>
-            Cancel
+            {t('common.cancel')}
           </button>
           <div style={{ flex: 1 }} />
           <button
@@ -211,7 +212,7 @@ export function BrowseModpackDetail({ card, onClose, onInstalled }: Props) {
             onClick={handleInstall}
             disabled={installing || !profile}
           >
-            <Download size={12} /> {installing ? 'Installing…' : 'Install'}
+            <Download size={12} /> {installing ? t('common.installing') : t('common.install')}
           </button>
         </div>
       </div>

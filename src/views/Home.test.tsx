@@ -1013,7 +1013,7 @@ describe('<HomeView> drift overlay & active-profile Repair', () => {
     });
     // Summary toast contains every branch — orphans + downloads + failed + missing.
     await waitFor(() => {
-      expect(screen.getByText(/Repaired "MyPack" — removed 2 orphan mods, downloaded 3, 1 download\(s\) failed, 1 still missing/)).toBeInTheDocument();
+      expect(screen.getByText(/Repaired "MyPack" — removed 2 orphan mods, downloaded 3, 1 download failed, 1 still missing/)).toBeInTheDocument();
     });
   });
 

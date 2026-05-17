@@ -27,9 +27,18 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ### Added
 
+- Simplified Chinese (简体中文) translation, plus an Auto / English / 简体中文 picker in onboarding and Settings → General. Auto follows your system language.
+- The Browse Modpacks list now collapses duplicate publishes from the same curator down to the newest one, so you no longer see the same pack twice.
+
 ### Changed
 
+- Bumped to 1.5.0 for the language work.
+
 ### Fixed
+
+- Mod names with Chinese characters (or any non-ASCII text) now keep those characters when their bundles upload to GitHub release assets — they previously collapsed to underscores. (#44)
+- Sidebar Beta pill on Browse Modpacks no longer overlaps neighbouring nav rows when the label is wider than the English original.
+- Language picker dropdown now uses readable text on Windows dark themes.
 
 ### Security
 

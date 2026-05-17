@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { Download, X } from 'lucide-react';
 import type { SubscriptionUpdate } from '../types';
 
@@ -14,6 +15,8 @@ interface Props {
 }
 
 export function SubUpdateDetail({ open, update, onClose, onApply, applying }: Props) {
+  const { t } = useTranslation();
+
   if (!open || !update) return null;
 
   const total = update.added_mods.length + update.updated_mods.length + update.removed_mods.length;
@@ -24,13 +27,13 @@ export function SubUpdateDetail({ open, update, onClose, onApply, applying }: Pr
         <div className="gf-modal-head">
           <div>
             <div className="gf-modal-title">
-              {total} update{total === 1 ? '' : 's'} available — {update.profile_name}
+              {t('subUpdate.title', { count: total, name: update.profile_name })}
             </div>
             <div className="gf-modal-sub">
-              Curated pack updates. Review what changes before syncing.
+              {t('subUpdate.subtitle')}
             </div>
           </div>
-          <button className="gf-btn-3 gf-btn-icon" onClick={onClose} title="Close">
+          <button className="gf-btn-3 gf-btn-icon" onClick={onClose} title={t('common.close')}>
             <X size={14} />
           </button>
         </div>
@@ -38,20 +41,20 @@ export function SubUpdateDetail({ open, update, onClose, onApply, applying }: Pr
         <div className="gf-modal-body">
           {total === 0 ? (
             <div style={{ color: 'var(--ink-mute)', fontSize: 13 }}>
-              No changes — you're already up to date.
+              {t('subUpdate.noChanges')}
             </div>
           ) : (
             <div className="gf-changelist">
               {update.added_mods.map((name) => (
                 <div className="gf-changelist-row gf-cl-add" key={`add-${name}`}>
-                  <span className="gf-cl-tag">+ ADDED</span>
+                  <span className="gf-cl-tag">{t('subUpdate.added')}</span>
                   <span className="gf-cl-name">{name}</span>
-                  <span className="gf-cl-meta">new</span>
+                  <span className="gf-cl-meta">{t('subUpdate.new')}</span>
                 </div>
               ))}
               {update.updated_mods.map((m) => (
                 <div className="gf-changelist-row gf-cl-upd" key={`upd-${m.name}`}>
-                  <span className="gf-cl-tag">↑ UPDATED</span>
+                  <span className="gf-cl-tag">{t('subUpdate.updated')}</span>
                   <span className="gf-cl-name">{m.name}</span>
                   <span className="gf-cl-meta">
                     {m.old_version} → {m.new_version}
@@ -60,9 +63,9 @@ export function SubUpdateDetail({ open, update, onClose, onApply, applying }: Pr
               ))}
               {update.removed_mods.map((name) => (
                 <div className="gf-changelist-row gf-cl-rem" key={`rem-${name}`}>
-                  <span className="gf-cl-tag">− REMOVED</span>
+                  <span className="gf-cl-tag">{t('subUpdate.removed')}</span>
                   <span className="gf-cl-name">{name}</span>
-                  <span className="gf-cl-meta">no longer in pack</span>
+                  <span className="gf-cl-meta">{t('subUpdate.noLongerInPack')}</span>
                 </div>
               ))}
             </div>
@@ -70,14 +73,14 @@ export function SubUpdateDetail({ open, update, onClose, onApply, applying }: Pr
         </div>
 
         <div className="gf-modal-foot">
-          <button className="gf-btn-3" onClick={onClose}>Skip this update</button>
+          <button className="gf-btn-3" onClick={onClose}>{t('subUpdate.skipThisUpdate')}</button>
           <div style={{ flex: 1 }} />
           <button
             className="gf-btn"
             onClick={() => onApply(update.share_id)}
             disabled={applying || total === 0}
           >
-            <Download size={12} /> {applying ? 'Applying…' : 'Apply all'}
+            <Download size={12} /> {applying ? t('subUpdate.applying') : t('subUpdate.applyAll')}
           </button>
         </div>
       </div>

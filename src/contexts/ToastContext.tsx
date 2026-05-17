@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, Check, Info, AlertCircle } from 'lucide-react';
 
 interface Toast {
@@ -32,6 +33,7 @@ let nextId = 0;
 
 // v5 — bottom-right toast stack with gf-toast pills.
 export function ToastProvider({ children }: { children: ReactNode }) {
+  const { t } = useTranslation();
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const addToast = useCallback((
@@ -68,7 +70,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={ctx}>
       {children}
-      <div className="gf-toasts" aria-label="Notifications">
+      <div className="gf-toasts" aria-label={t('common.notifications')}>
         <div role="alert" aria-live="assertive" aria-atomic="false">
           {errors.map((t) => (
             <ToastItem key={t.id} toast={t} onDismiss={() => removeToast(t.id)} />
@@ -85,6 +87,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 }
 
 function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }) {
+  const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
   const [leaving, setLeaving] = useState(false);
 
@@ -142,8 +145,8 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
         onClick={() => setLeaving(true)}
         className="gf-btn-3 gf-btn-icon"
         style={{ border: 0, padding: 4, minWidth: 22, height: 22 }}
-        title="Dismiss"
-        aria-label="Dismiss notification"
+        title={t('common.dismiss')}
+        aria-label={t('common.dismiss')}
       >
         <X size={12} aria-hidden="true" />
       </button>

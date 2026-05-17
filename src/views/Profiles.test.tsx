@@ -56,33 +56,43 @@ function seedProfiles(profiles: Profile[]): void {
   registerInvokeHandler('list_profiles_cmd', () => profiles);
 }
 
-// jsdom doesn't ship a real Clipboard. Some browsers expose a real
-// Clipboard prototype with writeText on the proto; a plain
-// defineProperty on the navigator.clipboard instance is shadowed by the
-// proto getter. Install on the proto when present; otherwise fall back
-// to defining the whole property on navigator. Returns the mock for
-// assertions.
+// jsdom's clipboard support varies by version. Install a concrete
+// navigator.clipboard object each time so assertions observe the exact
+// writeText mock the UI calls.
 let clipboardWrite: ReturnType<typeof vi.fn>;
 function installClipboard(fn: (text: string) => Promise<void> = async () => {}) {
   clipboardWrite = vi.fn(fn);
-  const proto = navigator.clipboard ? Object.getPrototypeOf(navigator.clipboard) : null;
-  if (proto && 'writeText' in proto) {
+  const clipboard = window.navigator.clipboard ?? navigator.clipboard ?? {};
+  Object.defineProperty(clipboard, 'writeText', {
+    value: clipboardWrite,
+    configurable: true,
+    writable: true,
+  });
+  const proto = Object.getPrototypeOf(clipboard);
+  if (proto) {
     Object.defineProperty(proto, 'writeText', {
       value: clipboardWrite,
       configurable: true,
       writable: true,
     });
-    return;
   }
-  Object.defineProperty(navigator, 'clipboard', {
-    value: { writeText: clipboardWrite },
-    configurable: true,
-  });
+  for (const target of [navigator, window.navigator]) {
+    Object.defineProperty(target, 'clipboard', {
+      value: clipboard,
+      configurable: true,
+    });
+  }
 }
 
 beforeEach(() => {
   installClipboard();
 });
+
+function setupUserWithClipboard(fn: (text: string) => Promise<void> = async () => {}) {
+  const user = userEvent.setup();
+  installClipboard(fn);
+  return user;
+}
 
 /** Scope to the confirm-modal foot (the bottom row with the action
  *  buttons). Dodges the X icon in the head and stray buttons elsewhere
@@ -122,7 +132,7 @@ describe('<ProfilesView>', () => {
   it('opens the create form and creates a profile on Create click', async () => {
     seedProfiles([baseProfile({ name: 'Existing' })]);
     registerInvokeHandler('create_profile', (args) => baseProfile({ name: String(args?.name) }));
-    const user = userEvent.setup();
+    const user = setupUserWithClipboard();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('Existing')).toBeInTheDocument(); });
 
@@ -144,7 +154,7 @@ describe('<ProfilesView>', () => {
   it('Create form Enter key submits via onKeyDown handler', async () => {
     seedProfiles([baseProfile({ name: 'X' })]);
     registerInvokeHandler('create_profile', (args) => baseProfile({ name: String(args?.name) }));
-    const user = userEvent.setup();
+    const user = setupUserWithClipboard();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
     await user.click(screen.getByRole('button', { name: /New profile/ }));
@@ -160,7 +170,7 @@ describe('<ProfilesView>', () => {
   it('create_profile error surfaces an error toast', async () => {
     seedProfiles([baseProfile({ name: 'X' })]);
     registerInvokeHandler('create_profile', () => { throw new Error('disk full'); });
-    const user = userEvent.setup();
+    const user = setupUserWithClipboard();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
     await user.click(screen.getByRole('button', { name: /New profile/ }));
@@ -174,7 +184,7 @@ describe('<ProfilesView>', () => {
 
   it('Cancel button in the create form hides the input', async () => {
     seedProfiles([]);
-    const user = userEvent.setup();
+    const user = setupUserWithClipboard();
     render(<Wrap />);
     await waitFor(() => {
       expect(screen.getByText(/No profiles yet/i)).toBeInTheDocument();
@@ -188,7 +198,7 @@ describe('<ProfilesView>', () => {
 
   it('refuses to submit when the name is empty (whitespace only)', async () => {
     seedProfiles([baseProfile({ name: 'X' })]);
-    const user = userEvent.setup();
+    const user = setupUserWithClipboard();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
     await user.click(screen.getByRole('button', { name: /New profile/ }));
@@ -229,7 +239,7 @@ describe('<ProfilesView>', () => {
       },
     ]);
     registerInvokeHandler('apply_subscription_update', () => baseProfile({ name: 'Alpha' }));
-    const user = userEvent.setup();
+    const user = setupUserWithClipboard();
     render(<Wrap />);
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Apply update/ })).toBeInTheDocument();
@@ -578,11 +588,12 @@ describe('<ProfilesView>', () => {
       expect(getInvokeCalls().some((c) => c.cmd === 'repair_profile')).toBe(true);
     });
     expect(getInvokeCalls().some((c) => c.cmd === 'create_backup_cmd')).toBe(false);
-    // Success toast with summary — parts joined by ", " and listed as
-    // "disabled N extra mods, downloaded N, N download(s) failed, N still missing".
+    // Success toast with summary — parts joined by ", " with i18next
+    // plurals so the singular reads "1 download failed" instead of the
+    // old "1 download(s) failed" lazy-form.
     await waitFor(() => {
       const found = document.body.textContent ?? '';
-      expect(found).toContain('disabled 2 extra mods, downloaded 1, 1 download(s) failed, 1 still missing');
+      expect(found).toContain('disabled 2 extra mods, downloaded 1, 1 download failed, 1 still missing');
     });
   });
 
@@ -981,7 +992,7 @@ describe('<ProfilesView>', () => {
       url: '',
       remote_path: 'Published.json',
     }));
-    const user = userEvent.setup();
+    const user = setupUserWithClipboard();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('alice/AA5A-315D-61AE')).toBeInTheDocument(); });
     const copyBtn = await screen.findByTitle('Copy share code');
@@ -999,7 +1010,7 @@ describe('<ProfilesView>', () => {
       url: '',
       remote_path: 'Published.json',
     }));
-    const user = userEvent.setup();
+    const user = setupUserWithClipboard();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('alice/AA5A-315D-61AE')).toBeInTheDocument(); });
     const linkBtn = await screen.findByTitle(/Copy install link/i);
@@ -1017,12 +1028,11 @@ describe('<ProfilesView>', () => {
   });
 
   it('Inline Copy install link clipboard reject surfaces error toast', async () => {
-    installClipboard(async () => { throw new Error('blocked'); });
     seedProfiles([baseProfile({ name: 'Published' })]);
     registerInvokeHandler('get_share_info', () => ({
       owner: 'alice', code: 'AA5A-315D-61AE', url: '', remote_path: 'P.json',
     }));
-    const user = userEvent.setup();
+    const user = setupUserWithClipboard(async () => { throw new Error('blocked'); });
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('alice/AA5A-315D-61AE')).toBeInTheDocument(); });
     const linkBtn = await screen.findByTitle(/Copy install link/i);
@@ -1038,7 +1048,7 @@ describe('<ProfilesView>', () => {
       owner: 'alice', code: 'AA5A-315D-61AE',
       url: '', remote_path: 'Published.json',
     }));
-    const user = userEvent.setup();
+    const user = setupUserWithClipboard();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('alice/AA5A-315D-61AE')).toBeInTheDocument(); });
     const msgBtn = await screen.findByTitle(/Copy share message/i);
@@ -1056,12 +1066,11 @@ describe('<ProfilesView>', () => {
   });
 
   it('Inline Copy share message clipboard reject surfaces error toast', async () => {
-    installClipboard(async () => { throw new Error('blocked'); });
     seedProfiles([baseProfile({ name: 'Published' })]);
     registerInvokeHandler('get_share_info', () => ({
       owner: 'alice', code: 'AA5A-315D-61AE', url: '', remote_path: 'P.json',
     }));
-    const user = userEvent.setup();
+    const user = setupUserWithClipboard(async () => { throw new Error('blocked'); });
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('alice/AA5A-315D-61AE')).toBeInTheDocument(); });
     const msgBtn = await screen.findByTitle(/Copy share message/i);
@@ -1141,7 +1150,7 @@ describe('<ProfilesView>', () => {
   it('Kebab → Export JSON fires export_profile_cmd + success toast', async () => {
     seedProfiles([baseProfile({ name: 'Exportable' })]);
     registerInvokeHandler('export_profile_cmd', () => '{"name":"Exportable","mods":[]}');
-    const user = userEvent.setup();
+    const user = setupUserWithClipboard();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('Exportable')).toBeInTheDocument(); });
     const kebabs = screen.getAllByRole('button', { name: /More actions/ });
@@ -1161,7 +1170,7 @@ describe('<ProfilesView>', () => {
   it('Kebab → Export JSON error path surfaces a toast', async () => {
     seedProfiles([baseProfile({ name: 'X' })]);
     registerInvokeHandler('export_profile_cmd', () => { throw new Error('locked'); });
-    const user = userEvent.setup();
+    const user = setupUserWithClipboard();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
     const kebabs = screen.getAllByRole('button', { name: /More actions/ });
@@ -1198,7 +1207,7 @@ describe('<ProfilesView>', () => {
   it('Kebab → Delete profile opens confirm modal → confirms → invokes delete_profile_cmd + toast', async () => {
     seedProfiles([baseProfile({ name: 'Doomed' })]);
     registerInvokeHandler('delete_profile_cmd', () => null);
-    const user = userEvent.setup();
+    const user = setupUserWithClipboard();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('Doomed')).toBeInTheDocument(); });
     const kebabs = screen.getAllByRole('button', { name: /More actions/ });
@@ -1255,7 +1264,7 @@ describe('<ProfilesView>', () => {
     registerInvokeHandler('get_share_info', () => ({
       owner: 'alice', code: 'AA5A-315D-61AE', url: '', remote_path: 'P.json',
     }));
-    const user = userEvent.setup();
+    const user = setupUserWithClipboard();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('Published')).toBeInTheDocument(); });
     const kebabs = screen.getAllByRole('button', { name: /More actions/ });
@@ -1276,7 +1285,7 @@ describe('<ProfilesView>', () => {
     registerInvokeHandler('get_share_info', () => ({
       owner: 'alice', code: 'AA5A-315D-61AE', url: '', remote_path: 'P.json',
     }));
-    const user = userEvent.setup();
+    const user = setupUserWithClipboard();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('Published')).toBeInTheDocument(); });
     const kebabs = screen.getAllByRole('button', { name: /More actions/ });
@@ -1296,12 +1305,11 @@ describe('<ProfilesView>', () => {
   });
 
   it('Published kebab Copy share link clipboard reject surfaces error toast', async () => {
-    installClipboard(async () => { throw new Error('blocked'); });
     seedProfiles([baseProfile({ name: 'Published' })]);
     registerInvokeHandler('get_share_info', () => ({
       owner: 'alice', code: 'AA5A-315D-61AE', url: '', remote_path: 'P.json',
     }));
-    const user = userEvent.setup();
+    const user = setupUserWithClipboard(async () => { throw new Error('blocked'); });
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('Published')).toBeInTheDocument(); });
     const kebabs = screen.getAllByRole('button', { name: /More actions/ });
@@ -1318,7 +1326,7 @@ describe('<ProfilesView>', () => {
     registerInvokeHandler('get_share_info', () => ({
       owner: 'alice', code: 'AA5A-315D-61AE', url: '', remote_path: 'P.json',
     }));
-    const user = userEvent.setup();
+    const user = setupUserWithClipboard();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('Published')).toBeInTheDocument(); });
     const kebabs = screen.getAllByRole('button', { name: /More actions/ });
@@ -1338,12 +1346,11 @@ describe('<ProfilesView>', () => {
   });
 
   it('Published kebab Copy share message clipboard reject surfaces error toast', async () => {
-    installClipboard(async () => { throw new Error('blocked'); });
     seedProfiles([baseProfile({ name: 'Published' })]);
     registerInvokeHandler('get_share_info', () => ({
       owner: 'alice', code: 'AA5A-315D-61AE', url: '', remote_path: 'P.json',
     }));
-    const user = userEvent.setup();
+    const user = setupUserWithClipboard(async () => { throw new Error('blocked'); });
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('Published')).toBeInTheDocument(); });
     const kebabs = screen.getAllByRole('button', { name: /More actions/ });

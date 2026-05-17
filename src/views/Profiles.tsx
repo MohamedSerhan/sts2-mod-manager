@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Plus,
   Camera,
@@ -73,6 +74,7 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
   // v5 batch 3 — Following / Published tabs.
   // "Following" = every profile you have. "Published" = ones you've shared (have a share code).
   const [tab, setTab] = useState<'following' | 'published'>('following');
+  const { t, i18n } = useTranslation();
   const { refreshAll, setActiveProfile, activeProfile, subUpdates, refreshSubUpdates } = useApp();
   const toastCtx = useToast();
   const confirm = useConfirm();
@@ -85,9 +87,9 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
       const profile = await applySubscriptionUpdate(shareId);
       await refreshAll();
       refreshSubUpdates();
-      toastCtx.success(`Synced "${profile.name}" — you're up to date.`);
+      toastCtx.success(t('profiles.toast.synced', { name: profile.name }));
     } catch (e) {
-      toastCtx.error(`Sync failed: ${e instanceof Error ? e.message : String(e)}`);
+      toastCtx.error(t('profiles.toast.syncFailed', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setApplyingSubId(null);
     }
@@ -154,32 +156,32 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
       setProfiles((prev) => [...prev, profile]);
       setNewName('');
       setShowCreate(false);
-      toastCtx.success(`Profile "${profile.name}" created`);
+      toastCtx.success(t('profiles.toast.created', { name: profile.name }));
     } catch (e) {
-      toastCtx.error(`Failed to create profile: ${e instanceof Error ? e.message : String(e)}`);
+      toastCtx.error(t('profiles.toast.createFailed', { error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
   async function handleSnapshot() {
-    const name = prompt('Enter snapshot name:');
+    const name = prompt(t('profiles.prompt.snapshotName'));
     if (!name?.trim()) return;
     try {
       const profile = await snapshotProfile(name.trim());
       setProfiles((prev) => [...prev, profile]);
-      toastCtx.success(`Snapshot "${profile.name}" created with ${profile.mods.length} mods`);
+      toastCtx.success(t('profiles.toast.snapshotCreated', { name: profile.name, count: profile.mods.length }));
     } catch (e) {
-      toastCtx.error(`Failed to snapshot: ${e instanceof Error ? e.message : String(e)}`);
+      toastCtx.error(t('profiles.toast.snapshotFailed', { error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
   async function handleSwitch(name: string) {
     if (activeProfile && activeProfile !== name && driftMap[activeProfile]?.has_drift) {
       const ok = await confirm({
-        title: `Switch away from "${activeProfile}"?`,
-        body: 'This profile has unsaved changes on disk. Switching applies another manifest and those working changes will not be saved to the current profile.',
-        warning: 'Use Save changes first if you want the current install to become the profile manifest.',
-        confirmLabel: 'Switch anyway',
-        cancelLabel: 'Stay here',
+        title: t('profiles.confirm.switch.title', { name: activeProfile }),
+        body: t('profiles.confirm.switch.body'),
+        warning: t('profiles.confirm.switch.warning'),
+        confirmLabel: t('profiles.confirm.switch.confirmLabel'),
+        cancelLabel: t('profiles.confirm.switch.cancelLabel'),
       });
       if (!ok) return;
     }
@@ -192,21 +194,21 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
       await loadProfiles();
 
       const parts: string[] = [];
-      if (result.downloaded > 0) parts.push(`${result.downloaded} mod(s) downloaded`);
+      if (result.downloaded > 0) parts.push(t('common.parts.modsDownloaded', { count: result.downloaded }));
       if (result.failed_downloads && result.failed_downloads.length > 0) {
-        parts.push(`${result.failed_downloads.length} failed: ${result.failed_downloads.join(', ')}`);
+        parts.push(t('common.parts.failedWithList', { count: result.failed_downloads.length, list: result.failed_downloads.join(', ') }));
       }
       if (result.missing_mods.length > 0) {
-        parts.push(`${result.missing_mods.length} still missing: ${result.missing_mods.join(', ')}`);
+        parts.push(t('common.parts.stillMissingWithList', { count: result.missing_mods.length, list: result.missing_mods.join(', ') }));
       }
 
       if (parts.length > 0) {
-        toastCtx.info(`Switched to "${name}". ${parts.join('. ')}`);
+        toastCtx.info(t('profiles.toast.switchedWithDetails', { name, details: parts.join('. ') }));
       } else {
-        toastCtx.success(`Switched to profile "${name}"`);
+        toastCtx.success(t('profiles.toast.switched', { name }));
       }
     } catch (e) {
-      toastCtx.error(`Failed to switch: ${e instanceof Error ? e.message : String(e)}`);
+      toastCtx.error(t('profiles.toast.switchFailed', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setSwitchingProfile(null);
     }
@@ -226,14 +228,14 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
       : orphans.join(', ');
 
     const ok = await confirm({
-      title: `Repair "${name}"?`,
+      title: t('profiles.confirm.repair.title', { name }),
       body: orphanCount > 0
-        ? `Re-applies the manifest and moves ${orphanCount} active mod(s) that aren't in the profile to mods_disabled: ${orphanList}.`
-        : 'Re-applies the manifest. No active extra mods to disable — drift will be fixed by toggling state.',
-      confirmLabel: 'Repair',
+        ? t('profiles.confirm.repair.bodyWithOrphans', { count: orphanCount, list: orphanList })
+        : t('profiles.confirm.repair.bodyNoOrphans'),
+      confirmLabel: t('profiles.confirm.repair.confirmLabel'),
       destructive: false,
       checkbox: orphanCount > 0
-        ? { label: 'Make a backup before repairing', defaultChecked: false }
+        ? { label: t('profiles.confirm.repair.backupCheckbox'), defaultChecked: false }
         : undefined,
     });
     if (!ok) return;
@@ -242,7 +244,7 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
       setSwitchingProfile(name);
       if (ok.checked) {
         try { await createBackup(); }
-        catch (e) { toastCtx.error(`Backup failed: ${e instanceof Error ? e.message : String(e)}`); }
+        catch (e) { toastCtx.error(t('profiles.toast.backupFailed', { error: e instanceof Error ? e.message : String(e) })); }
       }
       const result = await repairProfile(name);
       setActiveProfile(name);
@@ -252,22 +254,22 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
       const summary: string[] = [];
       const disabledOrphans = result.disabled_orphans ?? [];
       if (disabledOrphans.length > 0) {
-        summary.push(`disabled ${disabledOrphans.length} extra mod${disabledOrphans.length === 1 ? '' : 's'}`);
+        summary.push(t('common.parts.disabledOrphans', { count: disabledOrphans.length }));
       }
-      if (result.downloaded > 0) summary.push(`downloaded ${result.downloaded}`);
+      if (result.downloaded > 0) summary.push(t('common.parts.downloadedNum', { count: result.downloaded }));
       if (result.failed_downloads.length > 0) {
-        summary.push(`${result.failed_downloads.length} download(s) failed`);
+        summary.push(t('common.parts.downloadsFailed', { count: result.failed_downloads.length }));
       }
       if (result.missing_mods.length > 0) {
-        summary.push(`${result.missing_mods.length} still missing`);
+        summary.push(t('common.parts.stillMissing', { count: result.missing_mods.length }));
       }
       toastCtx.success(
         summary.length > 0
-          ? `Repaired "${name}" — ${summary.join(', ')}`
-          : `Repaired "${name}"`
+          ? t('profiles.toast.repairedWithDetails', { name, details: summary.join(', ') })
+          : t('profiles.toast.repaired', { name })
       );
     } catch (e) {
-      toastCtx.error(`Repair failed: ${e instanceof Error ? e.message : String(e)}`);
+      toastCtx.error(t('profiles.toast.repairFailed', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setSwitchingProfile(null);
     }
@@ -293,11 +295,11 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
       await loadProfiles();
       toastCtx.success(
         shareInfoMap[name]
-          ? `Saved changes to "${name}". Re-share when you're ready to publish them.`
-          : `Saved changes to "${name}"`
+          ? t('profiles.toast.savedChangesWithReShare', { name })
+          : t('profiles.toast.savedChanges', { name })
       );
     } catch (e) {
-      toastCtx.error(`Failed to save changes: ${e instanceof Error ? e.message : String(e)}`);
+      toastCtx.error(t('profiles.toast.saveFailed', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setSavingProfile(null);
     }
@@ -307,38 +309,38 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
     try {
       const json = await exportProfile(name);
       await navigator.clipboard.writeText(json);
-      toastCtx.success('Profile JSON copied to clipboard!');
+      toastCtx.success(t('profiles.toast.exported'));
     } catch (e) {
-      toastCtx.error(`Failed to export: ${e instanceof Error ? e.message : String(e)}`);
+      toastCtx.error(t('profiles.toast.exportFailed', { error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
   async function handleDelete(name: string) {
     const ok = await confirm({
-      title: `Delete profile "${name}"?`,
-      body: 'The profile manifest will be removed. Mod files on disk stay where they are.',
-      confirmLabel: 'Delete profile',
+      title: t('profiles.confirm.delete.title', { name }),
+      body: t('profiles.confirm.delete.body'),
+      confirmLabel: t('profiles.confirm.delete.confirmLabel'),
       destructive: true,
     });
     if (!ok) return;
     try {
       await deleteProfile(name);
       setProfiles((prev) => prev.filter((p) => p.name !== name));
-      toastCtx.success(`Profile "${name}" deleted`);
+      toastCtx.success(t('profiles.toast.deleted', { name }));
     } catch (e) {
-      toastCtx.error(`Failed to delete: ${e instanceof Error ? e.message : String(e)}`);
+      toastCtx.error(t('profiles.toast.deleteFailed', { error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
   async function handleDuplicate(name: string) {
-    const newName = prompt(`Duplicate "${name}" as:`, `${name} (copy)`);
+    const newName = prompt(t('profiles.prompt.duplicateAs', { name }), t('profiles.prompt.duplicateDefault', { name }));
     if (!newName?.trim()) return;
     try {
       const profile = await duplicateProfile(name, newName.trim());
       setProfiles((prev) => [...prev, profile]);
-      toastCtx.success(`Duplicated as "${profile.name}"`);
+      toastCtx.success(t('profiles.toast.duplicated', { name: profile.name }));
     } catch (e) {
-      toastCtx.error(`Failed to duplicate: ${e instanceof Error ? e.message : String(e)}`);
+      toastCtx.error(t('profiles.toast.duplicateFailed', { error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
@@ -349,9 +351,9 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
       setProfiles((prev) => [...prev, profile]);
       setImportJson('');
       setShowImport(false);
-      toastCtx.success(`Imported profile "${profile.name}"`);
+      toastCtx.success(t('profiles.toast.imported', { name: profile.name }));
     } catch (e) {
-      toastCtx.error(`Failed to import: ${e instanceof Error ? e.message : String(e)}`);
+      toastCtx.error(t('profiles.toast.importFailed', { error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
@@ -374,6 +376,7 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
         subscriptions: subs,
         activeProfile,
         subUpdates,
+        t,
       });
       if (outcome.kind === 'cancelled') return;
 
@@ -385,23 +388,23 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
       if (outcome.kind === 'installed') {
         setProfiles((prev) => [...prev, outcome.profile]);
         toastCtx.success(
-          `Imported modpack "${outcome.profile.name}" — ${outcome.profile.mods.length} mods. You're now subscribed for updates!`,
+          t('profiles.toast.importedModpack', { name: outcome.profile.name, count: outcome.profile.mods.length }),
         );
       } else if (outcome.kind === 'activated') {
-        toastCtx.success(`Switched to "${outcome.profileName}"`);
+        toastCtx.success(t('profiles.toast.activated', { name: outcome.profileName }));
       } else if (outcome.kind === 'reapplied') {
         const parts: string[] = [];
-        if (outcome.result.downloaded > 0) parts.push(`${outcome.result.downloaded} downloaded`);
-        if (outcome.result.failed_downloads.length > 0) parts.push(`${outcome.result.failed_downloads.length} failed`);
-        if (outcome.result.missing_mods.length > 0) parts.push(`${outcome.result.missing_mods.length} still missing`);
-        toastCtx.info(parts.length ? `Re-applied "${outcome.profileName}" - ${parts.join(', ')}.` : `Re-applied "${outcome.profileName}".`);
+        if (outcome.result.downloaded > 0) parts.push(t('common.parts.downloaded', { count: outcome.result.downloaded }));
+        if (outcome.result.failed_downloads.length > 0) parts.push(t('common.parts.failed', { count: outcome.result.failed_downloads.length }));
+        if (outcome.result.missing_mods.length > 0) parts.push(t('common.parts.stillMissing', { count: outcome.result.missing_mods.length }));
+        toastCtx.info(parts.length ? t('profiles.toast.reappliedWithDetails', { name: outcome.profileName, details: parts.join(', ') }) : t('profiles.toast.reapplied', { name: outcome.profileName }));
       } else if (outcome.kind === 'synced') {
-        toastCtx.success(`Synced "${outcome.profileName}" — you're up to date!`);
+        toastCtx.success(t('profiles.toast.syncedUpToDate', { name: outcome.profileName }));
       } else if (outcome.kind === 'already-active') {
-        toastCtx.info(`You're already on "${outcome.profileName}".`);
+        toastCtx.info(t('profiles.toast.alreadyActive', { name: outcome.profileName }));
       }
     } catch (e) {
-      toastCtx.error(`Failed to import: ${e instanceof Error ? e.message : String(e)}`);
+      toastCtx.error(t('profiles.toast.importFailed', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setImportingCode(false);
     }
@@ -414,12 +417,12 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
         <div className="gf-modal-back">
           <div className="gf-loading-card">
             <div className="gf-spinner" />
-            <div className="gf-loading-msg">Activating "{switchingProfile}"</div>
+            <div className="gf-loading-msg">{t('profiles.switching.activating', { name: switchingProfile })}</div>
             <div className="gf-loading-sub">
-              Fetching profile data and downloading missing mods…
+              {t('profiles.switching.fetching')}
             </div>
             <div className="gf-loading-step">
-              This may take a minute depending on the number of mods.
+              {t('profiles.switching.eta')}
             </div>
           </div>
         </div>
@@ -428,9 +431,9 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
       {/* Header */}
       <div className="gf-page-head">
         <div>
-          <h1 className="gf-page-title">Your packs</h1>
+          <h1 className="gf-page-title">{t('profiles.page.title')}</h1>
           <p className="gf-page-sub">
-            All the packs you follow, plus your own
+            {t('profiles.page.subtitle')}
           </p>
         </div>
         <div className="gf-page-actions">
@@ -444,7 +447,7 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
             }}
           >
             <Key size={14} />
-            Add by code
+            {t('profiles.actions.addByCode')}
           </Button>
           <Button
             variant="secondary"
@@ -456,11 +459,11 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
             }}
           >
             <Upload size={14} />
-            Import JSON
+            {t('profiles.actions.importJson')}
           </Button>
           <Button variant="secondary" size="sm" onClick={handleSnapshot}>
             <Camera size={14} />
-            Snapshot current
+            {t('profiles.actions.snapshotCurrent')}
           </Button>
           <Button size="sm" onClick={() => {
             setShowCreate(!showCreate);
@@ -468,7 +471,7 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
             setShowImportCode(false);
           }}>
             <Plus size={14} />
-            New profile
+            {t('profiles.actions.newProfile')}
           </Button>
         </div>
       </div>
@@ -479,14 +482,14 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
           className={`gf-tab ${tab === 'following' ? 'active' : ''}`}
           onClick={() => setTab('following')}
         >
-          Following
+          {t('profiles.tabs.following')}
           <span className="gf-tab-count">{profiles.length}</span>
         </button>
         <button
           className={`gf-tab ${tab === 'published' ? 'active' : ''}`}
           onClick={() => setTab('published')}
         >
-          Published by you
+          {t('profiles.tabs.publishedByYou')}
           <span className="gf-tab-count">{Object.keys(shareInfoMap).length}</span>
         </button>
       </div>
@@ -500,15 +503,17 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
           <div className="gf-activity-head">
             <RefreshCw size={14} />
             <span>
-              {subUpdates.length} pack{subUpdates.length === 1 ? '' : 's'} {subUpdates.length === 1 ? 'has' : 'have'} updates
+              {subUpdates.length === 1
+                ? t('profiles.activity.hasUpdates', { count: subUpdates.length })
+                : t('profiles.activity.haveUpdates', { count: subUpdates.length })}
             </span>
           </div>
           {subUpdates.map((u) => {
             const summary = [
-              u.added_mods.length > 0 && `+${u.added_mods.length} added`,
-              u.updated_mods.length > 0 && `${u.updated_mods.length} updated`,
-              u.removed_mods.length > 0 && `-${u.removed_mods.length} removed`,
-            ].filter(Boolean).join(' · ') || 'curator pushed an update';
+              u.added_mods.length > 0 && t('profiles.activity.summary.added', { count: u.added_mods.length }),
+              u.updated_mods.length > 0 && t('profiles.activity.summary.updated', { count: u.updated_mods.length }),
+              u.removed_mods.length > 0 && t('profiles.activity.summary.removed', { count: u.removed_mods.length }),
+            ].filter(Boolean).join(' · ') || t('profiles.activity.summary.noChange');
             return (
               <div key={u.share_id} className="gf-activity-row">
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -526,7 +531,7 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
                   ) : (
                     <Download size={12} />
                   )}
-                  {applyingSubId === u.share_id ? 'Applying…' : 'Apply update'}
+                  {applyingSubId === u.share_id ? t('profiles.activity.applying') : t('profiles.activity.applyUpdate')}
                 </Button>
               </div>
             );
@@ -539,22 +544,22 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
         <div className="gf-banner gf-banner-warn" style={{ marginBottom: 14 }}>
           <AlertTriangle size={16} className="gf-banner-icon" />
           <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 600 }}>{activeProfile} has drifted</div>
+            <div style={{ fontWeight: 600 }}>{t('profiles.drift.title', { name: activeProfile })}</div>
             <div style={{ fontSize: 12, opacity: 0.85 }}>
               {[
-                driftMap[activeProfile].added.length && `${driftMap[activeProfile].added.length} new`,
-                driftMap[activeProfile].removed.length && `${driftMap[activeProfile].removed.length} removed`,
-                driftMap[activeProfile].toggled.length && `${driftMap[activeProfile].toggled.length} toggled`,
-                (driftMap[activeProfile].version_changed?.length ?? 0) && `${driftMap[activeProfile].version_changed.length} version-changed`,
-              ].filter(Boolean).join(' · ') || 'profile and disk are out of sync'}
-              {' '}since the manifest. Save changes to update the profile, or Repair to restore it.
+                driftMap[activeProfile].added.length && t('profiles.drift.newItems', { count: driftMap[activeProfile].added.length }),
+                driftMap[activeProfile].removed.length && t('profiles.drift.removedItems', { count: driftMap[activeProfile].removed.length }),
+                driftMap[activeProfile].toggled.length && t('profiles.drift.toggledItems', { count: driftMap[activeProfile].toggled.length }),
+                (driftMap[activeProfile].version_changed?.length ?? 0) && t('profiles.drift.versionChanged', { count: driftMap[activeProfile].version_changed.length }),
+              ].filter(Boolean).join(' · ') || t('profiles.drift.outOfSyncFallback')}
+              {' '}{t('profiles.drift.hint')}
             </div>
           </div>
           <Button
             variant="secondary"
             size="sm"
             onClick={() => handleSaveDrift(activeProfile)}
-            title="Save current disk state into this profile manifest"
+            title={t('profiles.drift.saveChanges')}
             disabled={savingProfile !== null}
           >
             {savingProfile === activeProfile ? (
@@ -562,16 +567,16 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
             ) : (
               <Save size={12} />
             )}
-            Save changes
+            {t('profiles.drift.saveChanges')}
           </Button>
           <Button
             variant="ghost"
             size="sm"
             onClick={() => handleRepairDrift(activeProfile)}
-            title="Re-apply manifest and disable extra active mods"
+            title={t('profiles.drift.repairTitle')}
             disabled={savingProfile !== null}
           >
-            Repair
+            {t('profiles.drift.repair')}
           </Button>
         </div>
       )}
@@ -581,13 +586,13 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
         <Card className="flex gap-2 items-end">
           <div className="flex-1">
             <label className="text-xs text-text-muted block mb-1">
-              Profile Code (from a friend)
+              {t('profiles.form.codeLabel')}
             </label>
             <input
               type="text"
               value={importCode}
               onChange={(e) => setImportCode(e.target.value)}
-              placeholder="username/XXXX-XXXX-XXXX"
+              placeholder={t('profiles.form.codePlaceholder')}
               className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-text font-mono tracking-wider placeholder:text-text-dim focus:outline-none focus:ring-2 focus:ring-primary/50"
               onKeyDown={(e) => e.key === 'Enter' && handleImportFromCode()}
               disabled={importingCode}
@@ -603,14 +608,14 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
             ) : (
               <Download size={14} />
             )}
-            {importingCode ? 'Importing...' : 'Import'}
+            {importingCode ? t('common.importing') : t('common.import')}
           </Button>
           <Button
             variant="ghost"
             size="sm"
             onClick={() => setShowImportCode(false)}
           >
-            Cancel
+            {t('common.cancel')}
           </Button>
         </Card>
       )}
@@ -620,26 +625,26 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
         <Card className="flex gap-2 items-end">
           <div className="flex-1">
             <label className="text-xs text-text-muted block mb-1">
-              Profile Name
+              {t('profiles.form.nameLabel')}
             </label>
             <input
               type="text"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              placeholder="My Profile"
+              placeholder={t('profiles.form.namePlaceholder')}
               className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-text placeholder:text-text-dim focus:outline-none focus:ring-2 focus:ring-primary/50"
               onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
             />
           </div>
           <Button size="sm" onClick={handleCreate}>
-            Create
+            {t('common.create')}
           </Button>
           <Button
             variant="ghost"
             size="sm"
             onClick={() => setShowCreate(false)}
           >
-            Cancel
+            {t('common.cancel')}
           </Button>
         </Card>
       )}
@@ -648,25 +653,25 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
       {showImport && (
         <Card className="space-y-2">
           <label className="text-xs text-text-muted block">
-            Paste profile JSON
+            {t('profiles.form.jsonLabel')}
           </label>
           <textarea
             value={importJson}
             onChange={(e) => setImportJson(e.target.value)}
-            placeholder='{"name": "...", "mods": [...]}'
+            placeholder={t('profiles.form.jsonPlaceholder')}
             rows={4}
             className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-text placeholder:text-text-dim focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none font-mono"
           />
           <div className="flex gap-2">
             <Button size="sm" onClick={handleImport}>
-              Import
+              {t('common.import')}
             </Button>
             <Button
               variant="ghost"
               size="sm"
               onClick={() => setShowImport(false)}
             >
-              Cancel
+              {t('common.cancel')}
             </Button>
           </div>
         </Card>
@@ -675,7 +680,7 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
       {/* Profiles List */}
       {loading ? (
         <div className="flex items-center justify-center py-16 text-text-dim">
-          <p className="text-sm">Loading profiles...</p>
+          <p className="text-sm">{t('profiles.loading')}</p>
         </div>
       ) : error ? (
         <Card className="text-center py-8">
@@ -686,15 +691,15 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
             className="mt-3"
             onClick={loadProfiles}
           >
-            Retry
+            {t('common.retry')}
           </Button>
         </Card>
       ) : profiles.length === 0 ? (
         <div className="gf-empty">
           <div className="gf-empty-art"><Layers size={28} /></div>
-          <div className="gf-empty-title">No profiles yet</div>
+          <div className="gf-empty-title">{t('profiles.empty.following.title')}</div>
           <div className="gf-empty-sub">
-            Create a profile to save your mod configuration, or import a code from a friend.
+            {t('profiles.empty.following.hint')}
           </div>
         </div>
       ) : (() => {
@@ -705,8 +710,8 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
           return (
             <div className="gf-empty">
               <div className="gf-empty-art"><Layers size={28} /></div>
-              <div className="gf-empty-title">You haven't published anything yet</div>
-              <div className="gf-empty-sub">Share a profile to make it appear here. Friends paste your code to install the same set of mods.</div>
+              <div className="gf-empty-title">{t('profiles.empty.published.title')}</div>
+              <div className="gf-empty-sub">{t('profiles.empty.published.hint')}</div>
             </div>
           );
         }
@@ -721,22 +726,22 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
                 <h3 className="text-sm font-semibold text-text flex items-center gap-2">
                   {profile.name}
                   {activeProfile === profile.name && (
-                    <span className="text-[10px] font-normal bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded">ACTIVE</span>
+                    <span className="text-[10px] font-normal bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded">{t('profiles.card.active')}</span>
                   )}
                 </h3>
                 <div className="flex items-center gap-3 mt-1 text-xs text-text-dim">
                   <span>
-                    {profile.mods.filter(m => m.enabled).length} enabled
+                    {t('profiles.card.enabled', { count: profile.mods.filter(m => m.enabled).length })}
                     {profile.mods.filter(m => !m.enabled).length > 0 && (
-                      <>, {profile.mods.filter(m => !m.enabled).length} disabled</>
+                      <>, {t('profiles.card.disabled', { count: profile.mods.filter(m => !m.enabled).length })}</>
                     )}
                   </span>
                   {profile.game_version && <span>{profile.game_version}</span>}
                   <span>
-                    {new Date(profile.created_at).toLocaleDateString()}
+                    {new Date(profile.created_at).toLocaleDateString(i18n.language)}
                   </span>
                   {profile.created_by && (
-                    <span className="text-primary">by {profile.created_by}</span>
+                    <span className="text-primary">{t('profiles.card.by', { name: profile.created_by })}</span>
                   )}
                 </div>
                 {shareInfoMap[profile.name] && (
@@ -754,7 +759,7 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
                         }).catch(() => {});
                       }}
                       className="text-text-dim hover:text-text transition-colors"
-                      title="Copy share code"
+                      title={t('profiles.kebab.copyShareCode')}
                     >
                       {copiedProfileCode === profile.name ? <Check size={12} /> : <Copy size={12} />}
                     </button>
@@ -764,11 +769,11 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
                         e.stopPropagation();
                         const code = `${shareInfoMap[profile.name].owner}/${shareInfoMap[profile.name].code}`;
                         navigator.clipboard.writeText(buildShareLink(code))
-                          .then(() => toastCtx.success('Install link copied — paste into Discord / chat'))
-                          .catch(() => toastCtx.error("Couldn't copy to clipboard"));
+                          .then(() => toastCtx.success(t('profiles.toast.installLinkCopied')))
+                          .catch(() => toastCtx.error(t('profiles.toast.cantCopyToClipboard')));
                       }}
                       className="text-text-dim hover:text-text transition-colors"
-                      title="Copy install link (clickable in Discord / chat)"
+                      title={t('profiles.kebab.copyInstallLinkTitle')}
                     >
                       <LinkIcon size={12} />
                     </button>
@@ -777,13 +782,13 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
                       onClick={(e) => {
                         e.stopPropagation();
                         const code = `${shareInfoMap[profile.name].owner}/${shareInfoMap[profile.name].code}`;
-                        const message = buildShareMessage(profile.name, code);
+                        const message = buildShareMessage(profile.name, code, t);
                         navigator.clipboard.writeText(message)
-                          .then(() => toastCtx.success('Share message copied — paste into Discord / chat'))
-                          .catch(() => toastCtx.error("Couldn't copy to clipboard"));
+                          .then(() => toastCtx.success(t('profiles.toast.shareMessageCopied')))
+                          .catch(() => toastCtx.error(t('profiles.toast.cantCopyToClipboard')));
                       }}
                       className="text-text-dim hover:text-text transition-colors"
-                      title="Copy share message (paste-ready: intro + link + code)"
+                      title={t('profiles.kebab.copyShareMessage')}
                     >
                       <MessageSquare size={12} />
                     </button>
@@ -800,21 +805,21 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
                   >
                     <AlertTriangle size={12} className="flex-shrink-0 mt-0.5" />
                     <span>
-                      Out of sync
+                      {t('profiles.card.outOfSync')}
                       {driftMap[profile.name].added.length > 0 && (
-                        <> &middot; {driftMap[profile.name].added.length} new mod{driftMap[profile.name].added.length > 1 ? 's' : ''}</>
+                        <> &middot; {driftMap[profile.name].added.length > 1 ? t('profiles.card.newMods', { count: driftMap[profile.name].added.length }) : t('profiles.card.newMod', { count: driftMap[profile.name].added.length })}</>
                       )}
                       {driftMap[profile.name].removed.length > 0 && (
-                        <> &middot; {driftMap[profile.name].removed.length} removed</>
+                        <> &middot; {t('profiles.card.removed', { count: driftMap[profile.name].removed.length })}</>
                       )}
                       {driftMap[profile.name].toggled.length > 0 && (
-                        <> &middot; {driftMap[profile.name].toggled.length} toggled</>
+                        <> &middot; {t('profiles.card.toggled', { count: driftMap[profile.name].toggled.length })}</>
                       )}
                       {(driftMap[profile.name].version_changed?.length ?? 0) > 0 && (
-                        <> &middot; {driftMap[profile.name].version_changed.length} version{driftMap[profile.name].version_changed.length > 1 ? 's' : ''} changed</>
+                        <> &middot; {driftMap[profile.name].version_changed.length > 1 ? t('profiles.card.versionChanged_other', { count: driftMap[profile.name].version_changed.length }) : t('profiles.card.versionChanged_one', { count: driftMap[profile.name].version_changed.length })}</>
                       )}
                       {shareInfoMap[profile.name] && (
-                        <> &mdash; re-share to update subscribers</>
+                        <> &mdash; {t('profiles.card.reShareHint')}</>
                       )}
                     </span>
                   </div>
@@ -826,7 +831,7 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
                     variant="ghost"
                     size="sm"
                     onClick={() => handleSwitch(profile.name)}
-                    title="Re-apply this profile to match the manifest"
+                    title={t('profiles.card.restore')}
                     disabled={switchingProfile !== null}
                   >
                     {switchingProfile === profile.name ? (
@@ -840,13 +845,13 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
                     variant="primary"
                     size="sm"
                     onClick={() => handleSwitch(profile.name)}
-                    title="Activate profile (enable these mods)"
+                    title={t('profiles.card.activateProfile')}
                     disabled={switchingProfile !== null}
                   >
                     {switchingProfile === profile.name ? (
                       <RefreshCw size={14} className="animate-spin" />
                     ) : (
-                      <><Play size={14} fill="currentColor" /> Switch to</>
+                      <><Play size={14} fill="currentColor" /> {t('profiles.card.switchTo')}</>
                     )}
                   </Button>
                 )}
@@ -854,24 +859,24 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
                   variant="secondary"
                   size="sm"
                   onClick={() => setPublishTarget({ profile, isReshare: !!shareInfoMap[profile.name] })}
-                  title={shareInfoMap[profile.name] ? 'Re-share — same code, friends see an update' : 'Share — friends paste the code to install'}
+                  title={shareInfoMap[profile.name] ? t('profiles.card.reShareTitle') : t('profiles.card.shareTitle')}
                 >
                   <Share2 size={14} />
-                  {shareInfoMap[profile.name] ? 'Re-share' : 'Share'}
+                  {shareInfoMap[profile.name] ? t('profiles.card.reShare') : t('profiles.card.share')}
                 </Button>
-                <KebabMenu title="More actions">
+                <KebabMenu title={t('profiles.card.moreActions')}>
                   <KebabSection>
                     <KebabItem icon={<Camera size={12} />} onClick={() => handleSnapshot()}>
-                      Snapshot from current install
+                      {t('profiles.kebab.snapshotFromCurrent')}
                     </KebabItem>
                     <KebabItem icon={<Files size={12} />} onClick={() => handleDuplicate(profile.name)}>
-                      Duplicate
+                      {t('profiles.kebab.duplicate')}
                     </KebabItem>
                   </KebabSection>
                   <KebabDivider />
                   <KebabSection>
                     <KebabItem icon={<Download size={12} />} onClick={() => handleExport(profile.name)}>
-                      Export JSON…
+                      {t('profiles.kebab.exportJson')}
                     </KebabItem>
                     {shareInfoMap[profile.name] && (
                       <>
@@ -879,33 +884,33 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
                           icon={<Copy size={12} />}
                           onClick={() => {
                             const code = `${shareInfoMap[profile.name].owner}/${shareInfoMap[profile.name].code}`;
-                            navigator.clipboard.writeText(code).then(() => toastCtx.success('Share code copied'));
+                            navigator.clipboard.writeText(code).then(() => toastCtx.success(t('profiles.toast.shareCodeCopied')));
                           }}
                         >
-                          Copy share code
+                          {t('profiles.kebab.copyShareCode')}
                         </KebabItem>
                         <KebabItem
                           icon={<LinkIcon size={12} />}
                           onClick={() => {
                             const code = `${shareInfoMap[profile.name].owner}/${shareInfoMap[profile.name].code}`;
                             navigator.clipboard.writeText(buildShareLink(code))
-                              .then(() => toastCtx.success('Install link copied — paste into Discord / chat'))
-                              .catch(() => toastCtx.error("Couldn't copy to clipboard"));
+                              .then(() => toastCtx.success(t('profiles.toast.installLinkCopied')))
+                              .catch(() => toastCtx.error(t('profiles.toast.cantCopyToClipboard')));
                           }}
                         >
-                          Copy share link
+                          {t('profiles.kebab.copyShareLink')}
                         </KebabItem>
                         <KebabItem
                           icon={<MessageSquare size={12} />}
                           onClick={() => {
                             const code = `${shareInfoMap[profile.name].owner}/${shareInfoMap[profile.name].code}`;
-                            const message = buildShareMessage(profile.name, code);
+                            const message = buildShareMessage(profile.name, code, t);
                             navigator.clipboard.writeText(message)
-                              .then(() => toastCtx.success('Share message copied — paste into Discord / chat'))
-                              .catch(() => toastCtx.error("Couldn't copy to clipboard"));
+                              .then(() => toastCtx.success(t('profiles.toast.shareMessageCopied')))
+                              .catch(() => toastCtx.error(t('profiles.toast.cantCopyToClipboard')));
                           }}
                         >
-                          Copy share message
+                          {t('profiles.kebab.copyShareMessageLabel')}
                         </KebabItem>
                       </>
                     )}
@@ -916,7 +921,7 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
                     icon={<Trash2 size={12} />}
                     onClick={() => handleDelete(profile.name)}
                   >
-                    Delete profile…
+                    {t('profiles.kebab.deleteProfile')}
                   </KebabItem>
                 </KebabMenu>
               </div>

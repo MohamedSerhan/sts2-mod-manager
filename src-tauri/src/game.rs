@@ -525,7 +525,7 @@ pub fn open_mods_folder(state: tauri::State<'_, AppState>) -> std::result::Resul
     // Try mods folder first
     if let Some(ref mods_path) = s.mods_path {
         if mods_path.exists() {
-            open::that_detached(mods_path)
+            crate::external_open::open_external_detached(mods_path)
                 .map_err(|e| format!("Failed to open mods folder: {}", e))?;
             return Ok(true);
         }
@@ -534,7 +534,7 @@ pub fn open_mods_folder(state: tauri::State<'_, AppState>) -> std::result::Resul
     // Fall back to game folder
     if let Some(ref game_path) = s.game_path {
         if game_path.exists() {
-            open::that_detached(game_path)
+            crate::external_open::open_external_detached(game_path)
                 .map_err(|e| format!("Failed to open game folder: {}", e))?;
             return Ok(true);
         }
@@ -550,7 +550,7 @@ pub fn open_game_folder(state: tauri::State<'_, AppState>) -> std::result::Resul
 
     if let Some(ref game_path) = s.game_path {
         if game_path.exists() {
-            open::that_detached(game_path)
+            crate::external_open::open_external_detached(game_path)
                 .map_err(|e| format!("Failed to open game folder: {}", e))?;
             return Ok(true);
         }
@@ -584,6 +584,7 @@ fn spawn_game(mode: LaunchMode, game_path: Option<&Path>) -> std::result::Result
 /// fall back to the protocol URL when we can't (or on platforms where
 /// applaunch via the Windows binary doesn't apply).
 #[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 enum SteamLaunchPrimary {
     ApplaunchExe { steam_exe: PathBuf, appid: String },
     ProtocolUrl(String),
@@ -593,6 +594,7 @@ enum SteamLaunchPrimary {
 /// and the target appid, pick the launch strategy. Extracted from
 /// `launch_game_via_steam` so the choice can be unit-tested without
 /// actually spawning processes.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn plan_steam_launch_primary(steam_exe: Option<&Path>, appid: &str) -> SteamLaunchPrimary {
     if let Some(exe) = steam_exe {
         return SteamLaunchPrimary::ApplaunchExe {
@@ -633,7 +635,7 @@ fn launch_game_via_steam() -> std::result::Result<(), String> {
                      Cold-start launches may be unreliable when Steam isn't already running.",
                     url
                 );
-                // Fall through to the open::that path below.
+                // Fall through to the system-opener path below.
             }
         }
     }
@@ -654,10 +656,9 @@ fn launch_game_via_steam() -> std::result::Result<(), String> {
                 "Launching STS2 via 'open -a Steam --args -applaunch {}' (robust cold-start path)",
                 STS2_STEAM_APPID
             );
-            match Command::new("open")
-                .args(["-a", "Steam", "--args", "-applaunch", STS2_STEAM_APPID])
-                .spawn()
-            {
+            let mut cmd = Command::new("open");
+            cmd.args(["-a", "Steam", "--args", "-applaunch", STS2_STEAM_APPID]);
+            match crate::external_open::spawn_external_command(&mut cmd) {
                 Ok(_) => return Ok(()),
                 Err(e) => log::warn!(
                     "macOS 'open -a Steam' failed: {}. Falling back to {}.",
@@ -673,7 +674,7 @@ fn launch_game_via_steam() -> std::result::Result<(), String> {
         }
     }
 
-    match open::that(STEAM_URL) {
+    match crate::external_open::open_external_blocking(STEAM_URL) {
         Ok(()) => return Ok(()),
         Err(e) => {
             log::warn!(
@@ -691,7 +692,9 @@ fn launch_game_via_steam() -> std::result::Result<(), String> {
         let mut attempts: Vec<String> = Vec::new();
 
         let mut try_spawn = |program: &str, args: &[&str]| -> bool {
-            match Command::new(program).args(args).spawn() {
+            let mut cmd = Command::new(program);
+            cmd.args(args);
+            match crate::external_open::spawn_external_command(&mut cmd) {
                 Ok(_) => {
                     log::info!("Steam fallback launched: {} {:?}", program, args);
                     true
@@ -747,9 +750,9 @@ fn spawn_steam_applaunch(steam_exe: &Path, appid: &str) -> std::result::Result<(
         steam_exe.display(),
         appid
     );
-    Command::new(steam_exe)
-        .args(["-applaunch", appid])
-        .spawn()
+    let mut cmd = Command::new(steam_exe);
+    cmd.args(["-applaunch", appid]);
+    crate::external_open::spawn_external_command(&mut cmd)
         .map(|_| ())
         .map_err(|e| {
             format!(
@@ -836,9 +839,9 @@ fn spawn_game_direct(game_path: Option<&Path>) -> std::result::Result<(), String
         // so steam_appid.txt goes right next to it.
         write_steam_appid_file(game_path);
         log::info!("Direct launch: spawning {}", exe.display());
-        Command::new(exe)
-            .current_dir(game_path)
-            .spawn()
+        let mut cmd = Command::new(exe);
+        cmd.current_dir(game_path);
+        crate::external_open::spawn_external_command(&mut cmd)
             .map(|_| ())
             .map_err(|e| {
                 let msg = format!("Direct launch failed: {}", e);
@@ -894,9 +897,9 @@ fn spawn_game_direct(game_path: Option<&Path>) -> std::result::Result<(), String
         write_steam_appid_file(game_path);
 
         log::info!("Direct launch: open {}", bundle.display());
-        Command::new("open")
-            .arg(bundle)
-            .spawn()
+        let mut cmd = Command::new("open");
+        cmd.arg(bundle);
+        crate::external_open::spawn_external_command(&mut cmd)
             .map(|_| ())
             .map_err(|e| {
                 let msg = format!("Direct launch failed: {}", e);
@@ -920,9 +923,9 @@ fn spawn_game_direct(game_path: Option<&Path>) -> std::result::Result<(), String
         if let Some(bin) = binary {
             write_steam_appid_file(game_path);
             log::info!("Direct launch: spawning {}", bin.display());
-            return Command::new(bin)
-                .current_dir(game_path)
-                .spawn()
+            let mut cmd = Command::new(bin);
+            cmd.current_dir(game_path);
+            return crate::external_open::spawn_external_command(&mut cmd)
                 .map(|_| ())
                 .map_err(|e| {
                     let msg = format!("Direct launch failed: {}", e);
@@ -1165,11 +1168,11 @@ pub fn open_log_file(
     };
 
     if log_path.exists() {
-        match open::that_detached(&log_path) {
+        match crate::external_open::open_external_detached(&log_path) {
             Ok(()) => return Ok(true),
             Err(e) => {
                 log::warn!(
-                    "open::that_detached failed for log file {:?}: {}. Falling back to parent dir.",
+                    "system opener failed for log file {:?}: {}. Falling back to parent dir.",
                     log_path, e
                 );
             }
@@ -1180,7 +1183,7 @@ pub fn open_log_file(
 
     // Fall back to opening the parent (config) directory so the user can find the log.
     if parent.exists() {
-        open::that_detached(&parent).map_err(|e| {
+        crate::external_open::open_external_detached(&parent).map_err(|e| {
             format!("Failed to open log directory {}: {}", parent.display(), e)
         })?;
         Ok(true)

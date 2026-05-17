@@ -1,9 +1,8 @@
 import { useState } from 'react';
 import { Check, Download, Folder, X } from 'lucide-react';
-import { openUrl } from '@tauri-apps/plugin-opener';
 import { useToast } from '../contexts/ToastContext';
 import { useApp } from '../contexts/AppContext';
-import { readLogTail, getLogPath } from '../hooks/useTauri';
+import { readLogTail, getLogPath, openExternalUrl } from '../hooks/useTauri';
 import { buildGitHubIssueUrl } from '../lib/githubLinks';
 
 // v5 batch 4 — diagnostic bundle. Builds a self-contained text report from
@@ -98,7 +97,7 @@ export function DiagnosticBundle({ open, onClose }: Props) {
     /* v8 ignore stop */
     const url = buildGitHubIssueUrl('Bug report from STS2 Mod Manager', generated);
     try {
-      await openUrl(url);
+      await openExternalUrl(url);
     } catch (e) {
       toast.error(`Couldn't open GitHub issue: ${e instanceof Error ? e.message : String(e)}`);
     }

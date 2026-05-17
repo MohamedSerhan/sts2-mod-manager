@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { Search, Star, Download, ExternalLink, Flame, Sparkles, Loader2, Plus } from 'lucide-react';
-import { openUrl } from '@tauri-apps/plugin-opener';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { Badge } from '../components/Badge';
@@ -13,6 +12,7 @@ import {
   downloadGithubMod,
   nexusGetTrending,
   nexusGetLatestAdded,
+  openExternalUrl,
 } from '../hooks/useTauri';
 import { fuzzyRerank } from '../lib/fuzzy';
 import type { GitHubRepo, NexusModInfo } from '../types';
@@ -129,7 +129,7 @@ export function BrowseView({ onGoToSettings }: BrowseViewProps = {}) {
   async function openNexusMod(modId: number) {
     const url = `https://www.nexusmods.com/${NEXUS_GAME_DOMAIN}/mods/${modId}`;
     try {
-      await openUrl(url);
+      await openExternalUrl(url);
     } catch (e) {
       toast.error(`Failed to open: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -343,7 +343,7 @@ export function BrowseView({ onGoToSettings }: BrowseViewProps = {}) {
             await handleInstall(detailRepo);
             setDetailRepo(null);
           }}
-          onOpenExternal={() => openUrl(detailRepo.html_url).catch(() => {})}
+          onOpenExternal={() => openExternalUrl(detailRepo.html_url).catch(() => {})}
         />
       )}
 
@@ -352,7 +352,7 @@ export function BrowseView({ onGoToSettings }: BrowseViewProps = {}) {
           kind="nexus"
           mod={detailNexus}
           onClose={() => setDetailNexus(null)}
-          onOpenExternal={() => openUrl(`https://www.nexusmods.com/${NEXUS_GAME_DOMAIN}/mods/${detailNexus.mod_id}`).catch(() => {})}
+          onOpenExternal={() => openExternalUrl(`https://www.nexusmods.com/${NEXUS_GAME_DOMAIN}/mods/${detailNexus.mod_id}`).catch(() => {})}
         />
       )}
     </div>

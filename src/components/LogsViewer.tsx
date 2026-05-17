@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Copy, Folder, Upload, RefreshCw } from 'lucide-react';
-import { openUrl } from '@tauri-apps/plugin-opener';
-import { readLogTail, openLogFile } from '../hooks/useTauri';
+import { readLogTail, openLogFile, openExternalUrl } from '../hooks/useTauri';
 import { useToast } from '../contexts/ToastContext';
 import { buildGitHubIssueUrl } from '../lib/githubLinks';
 
@@ -115,7 +114,7 @@ export function LogsViewer({ onClose }: Props) {
     ].join('\n');
     const url = buildGitHubIssueUrl('Bug report', body);
     try {
-      await openUrl(url);
+      await openExternalUrl(url);
     } catch (e) {
       toast.error(`Couldn't open support issue: ${e instanceof Error ? e.message : String(e)}`);
     }

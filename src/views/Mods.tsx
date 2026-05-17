@@ -25,7 +25,6 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
-import { openUrl } from '@tauri-apps/plugin-opener';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { Toggle } from '../components/Toggle';
@@ -45,6 +44,7 @@ import {
   enableAllMods,
   disableAllMods,
   openModsFolder,
+  openExternalUrl,
   setModSource,
   setModSourcesFull,
   setModExtras,
@@ -310,7 +310,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
       } else {
         const filesUrl = nexusFilesUrl(input);
         if (filesUrl) {
-          await openUrl(filesUrl);
+          await openExternalUrl(filesUrl);
           // Sticky toast — dismissed when the downloads watcher reports
           // an install or after a 10-min fail-safe.
           notifyNexusOpen(result.nexus_info.name || 'Nexus mod');
@@ -970,7 +970,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                             {mod.github_url && (
                               <KebabItem
                                 icon={<GitBranch size={12} />}
-                                onClick={() => openUrl(mod.github_url!).catch(() => {})}
+                                onClick={() => openExternalUrl(mod.github_url!).catch(() => {})}
                               >
                                 View on GitHub
                               </KebabItem>
@@ -978,7 +978,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                             {mod.nexus_url && (
                               <KebabItem
                                 icon={<ExternalLink size={12} />}
-                                onClick={() => openUrl(mod.nexus_url!).catch(() => {})}
+                                onClick={() => openExternalUrl(mod.nexus_url!).catch(() => {})}
                               >
                                 View on Nexus
                               </KebabItem>

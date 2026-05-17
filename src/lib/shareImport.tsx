@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react';
+import type { TFunction } from 'i18next';
+import { Trans } from 'react-i18next';
 import type { Profile, Subscription, SubscriptionUpdate, SwitchProfileResult } from '../types';
 import {
   fetchSharedProfile,
@@ -92,13 +94,13 @@ export function buildShareLink(code: string): string {
  *  dashes — we don't reformat it because both are valid input to the
  *  smart router, and over-formatting risks losing a recipient who's
  *  used to a different shape). */
-export function buildShareMessage(packName: string, code: string): string {
+export function buildShareMessage(packName: string, code: string, t: TFunction): string {
   const link = buildShareLink(code);
   return (
-    `Join my Slay the Spire 2 modpack "${packName}":\n` +
-    `\n` +
-    `Install: ${link}\n` +
-    `Or paste this code in the manager: ${code}`
+    t('shareImport.shareMessageJoinPack', { packName }) + '\n' +
+    '\n' +
+    t('shareImport.shareMessageInstall', { link }) + '\n' +
+    t('shareImport.shareMessagePasteCode', { code })
   );
 }
 
@@ -132,6 +134,7 @@ export type ImportOutcome =
 export async function installSharedProfileWithConfirm(
   code: string,
   confirm: ConfirmFn,
+  t: TFunction,
 ): Promise<Profile | null> {
   // Fetch metadata only — no mod files downloaded yet.
   const preview = await fetchSharedProfile(code);
@@ -154,6 +157,7 @@ export async function installSharedProfileWithConfirm(
   ).sort();
 
   const modCount = preview.mods.length;
+  const sourceLabel = uniqueHosts.length === 1 ? t('shareImport.thisSource') : t('shareImport.theseSources');
 
   const body: ReactNode = (
     <div style={{ fontSize: 12.5, lineHeight: 1.55 }}>
@@ -162,13 +166,17 @@ export async function installSharedProfileWithConfirm(
         {preview.created_by && (
           <span style={{ opacity: 0.7 }}>
             {' '}
-            · by {preview.created_by}
+            {t('shareImport.byCreator', { creator: preview.created_by })}
           </span>
         )}
       </div>
       <div style={{ marginBottom: 10 }}>
-        Installs <b>{modCount}</b> mod{modCount === 1 ? '' : 's'} from{' '}
-        {uniqueHosts.length === 1 ? 'this source' : 'these sources'}:
+        <Trans
+          i18nKey="shareImport.installsModsFrom"
+          values={{ count: modCount, source: sourceLabel }}
+          components={{ 1: <b /> }}
+        />
+        :
       </div>
       <ul
         style={{
@@ -185,19 +193,18 @@ export async function installSharedProfileWithConfirm(
         {uniqueHosts.length > 0 ? (
           uniqueHosts.map((h) => <li key={h}>{h}</li>)
         ) : (
-          <li style={{ opacity: 0.6 }}>(no source URLs declared)</li>
+          <li style={{ opacity: 0.6 }}>{t('shareImport.noSourceUrls')}</li>
         )}
       </ul>
     </div>
   );
 
   const result = await confirm({
-    title: 'Install this modpack?',
+    title: t('shareImport.installConfirmTitle'),
     body,
-    warning:
-      'Modpacks run code (DLLs) inside Slay the Spire 2. Only install from creators you trust.',
-    confirmLabel: `Install ${modCount} mod${modCount === 1 ? '' : 's'}`,
-    cancelLabel: 'Cancel',
+    warning: t('shareImport.installConfirmWarning'),
+    confirmLabel: t('shareImport.installConfirmLabel', { count: modCount }),
+    cancelLabel: t('common.cancel'),
     width: 540,
   });
 
@@ -210,6 +217,7 @@ interface SmartImportOpts {
   subscriptions: Subscription[];
   activeProfile: string | null;
   subUpdates: SubscriptionUpdate[];
+  t: TFunction;
 }
 
 /**
@@ -242,7 +250,7 @@ export async function importShareCodeSmart(
     // Let the existing install path produce the parse error the user is
     // used to seeing — it has more context (it'll mention "owner/CODE"
     // expected shape).
-    const profile = await installSharedProfileWithConfirm(input, opts.confirm);
+    const profile = await installSharedProfileWithConfirm(input, opts.confirm, opts.t);
     return profile
       ? { kind: 'installed', profile }
       : { kind: 'cancelled' };
@@ -264,7 +272,7 @@ export async function importShareCodeSmart(
   );
 
   if (!match) {
-    const profile = await installSharedProfileWithConfirm(pretty, opts.confirm);
+    const profile = await installSharedProfileWithConfirm(pretty, opts.confirm, opts.t);
     return profile
       ? { kind: 'installed', profile }
       : { kind: 'cancelled' };
@@ -282,6 +290,7 @@ export async function importShareCodeSmart(
   // Apply on confirm. Re-uses applySubscriptionUpdate which already
   // handles activation as a side effect.
   if (pending) {
+    const { t } = opts;
     const changeCount =
       (pending.added_mods.length || 0) +
       (pending.updated_mods.length || 0) +
@@ -290,43 +299,50 @@ export async function importShareCodeSmart(
     if (pending.added_mods.length > 0) {
       summaryBits.push(
         <span key="added" style={{ color: 'var(--ok)' }}>
-          +{pending.added_mods.length} added
+          {t('shareImport.updateSummaryAdded', { count: pending.added_mods.length })}
         </span>,
       );
     }
     if (pending.updated_mods.length > 0) {
       summaryBits.push(
         <span key="updated" style={{ color: 'var(--gf)' }}>
-          {pending.updated_mods.length} updated
+          {t('shareImport.updateSummaryUpdated', { count: pending.updated_mods.length })}
         </span>,
       );
     }
     if (pending.removed_mods.length > 0) {
       summaryBits.push(
         <span key="removed" style={{ color: 'var(--danger)' }}>
-          −{pending.removed_mods.length} removed
+          {t('shareImport.updateSummaryRemoved', { count: pending.removed_mods.length })}
         </span>,
       );
     }
     const body: ReactNode = (
       <div style={{ fontSize: 12.5, lineHeight: 1.55 }}>
         <div style={{ marginBottom: 8 }}>
-          You already have <b>{match.profile_name}</b> ({pretty}).
+          <Trans
+            i18nKey="shareImport.updateDialogAlreadyHave"
+            values={{ profileName: match.profile_name, code: pretty }}
+            components={{ 1: <b /> }}
+          />
         </div>
         <div style={{ marginBottom: 4 }}>
-          The curator has pushed <b>{changeCount}</b> change
-          {changeCount === 1 ? '' : 's'} since you last synced:
+          <Trans
+            i18nKey="shareImport.updateDialogCuratorPushed"
+            values={{ count: changeCount }}
+            components={{ 1: <b /> }}
+          />
         </div>
         <div style={{ display: 'flex', gap: 12, fontSize: 12 }}>
-          {summaryBits.length > 0 ? summaryBits : <span style={{ opacity: 0.7 }}>(no per-mod summary)</span>}
+          {summaryBits.length > 0 ? summaryBits : <span style={{ opacity: 0.7 }}>{t('shareImport.updateDialogNoSummary')}</span>}
         </div>
       </div>
     );
     const ok = await opts.confirm({
-      title: 'Apply pending update?',
+      title: t('shareImport.updateDialogTitle'),
       body,
-      confirmLabel: 'Apply update',
-      cancelLabel: 'Not now',
+      confirmLabel: t('shareImport.updateDialogConfirmLabel'),
+      cancelLabel: t('shareImport.updateDialogCancelLabel'),
       width: 480,
     });
     if (!ok) return { kind: 'cancelled' };
@@ -344,22 +360,26 @@ export async function importShareCodeSmart(
   }
 
   // Case 3: subscribed but not active — offer to switch.
+  const { t } = opts;
   const body: ReactNode = (
     <div style={{ fontSize: 12.5, lineHeight: 1.55 }}>
       <div>
-        You already have <b>{match.profile_name}</b> ({pretty}) installed.
+        <Trans
+          i18nKey="shareImport.switchDialogAlreadyHave"
+          values={{ profileName: match.profile_name, code: pretty }}
+          components={{ 1: <b /> }}
+        />
       </div>
       <div style={{ marginTop: 6, opacity: 0.85 }}>
-        Activate it now to switch your active modpack? You can switch back to
-        your current saved manifest any time.
+        {t('shareImport.switchDialogActivatePrompt')}
       </div>
     </div>
   );
   const ok = await opts.confirm({
-    title: `Switch to "${match.profile_name}"?`,
+    title: t('shareImport.switchDialogTitle', { profileName: match.profile_name }),
     body,
-    confirmLabel: 'Activate',
-    cancelLabel: 'Cancel',
+    confirmLabel: t('common.activate'),
+    cancelLabel: t('common.cancel'),
     width: 480,
   });
   if (!ok) return { kind: 'cancelled' };

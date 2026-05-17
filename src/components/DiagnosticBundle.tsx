@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Check, Download, Folder, X } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { useToast } from '../contexts/ToastContext';
 import { useApp } from '../contexts/AppContext';
 import { readLogTail, getLogPath } from '../hooks/useTauri';
@@ -15,6 +16,7 @@ interface Props {
 }
 
 export function DiagnosticBundle({ open, onClose }: Props) {
+  const { t } = useTranslation();
   const toast = useToast();
   const { gameInfo, mods, activeProfile } = useApp();
   const [redactPaths, setRedactPaths] = useState(true);
@@ -51,36 +53,36 @@ export function DiagnosticBundle({ open, onClose }: Props) {
       const platform = /* v8 ignore next */ typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown';
 
       const report = [
-        '=== STS2 Mod Manager — Support Bundle ===',
-        `Generated: ${new Date().toISOString()}`,
-        `Platform: ${platform}`,
+        t('diagnosticBundle.reportHeader'),
+        t('diagnosticBundle.reportGenerated', { date: new Date().toISOString() }),
+        t('diagnosticBundle.reportPlatform', { platform }),
         '',
-        '--- Game ---',
-        `Path: ${redact(gameInfo?.game_path || '<not set>')}`,
-        `Valid: ${gameInfo?.valid ?? false}`,
-        `Mods on disk: ${gameInfo?.mods_count ?? 0} (${gameInfo?.disabled_count ?? 0} disabled)`,
+        t('diagnosticBundle.reportGameSection'),
+        t('diagnosticBundle.reportPath', { path: redact(gameInfo?.game_path || '<not set>') }),
+        t('diagnosticBundle.reportValid', { valid: String(gameInfo?.valid ?? false) }),
+        t('diagnosticBundle.reportModsOnDisk', { total: gameInfo?.mods_count ?? 0, disabled: gameInfo?.disabled_count ?? 0 }),
         '',
-        '--- Active profile ---',
-        `Name: ${activeProfile || 'Vanilla'}`,
+        t('diagnosticBundle.reportActiveProfileSection'),
+        t('diagnosticBundle.reportProfileName', { name: activeProfile || 'Vanilla' }),
         '',
-        '--- Installed mods ---',
+        t('diagnosticBundle.reportInstalledModsSection'),
         ...mods.map((m) => `  ${m.enabled ? '✓' : '✗'} ${m.name} ${m.version}${m.pinned ? ' [pinned]' : ''}${m.github_url ? ` <${m.github_url}>` : ''}${m.nexus_url ? ` <${m.nexus_url}>` : ''}`),
         '',
-        '--- Log tail (last 500 lines) ---',
-        `Source: ${redact(logPath)}`,
+        t('diagnosticBundle.reportLogTailSection'),
+        t('diagnosticBundle.reportLogSource', { path: redact(logPath) }),
         '',
-        redact(logs || '<log empty>'),
+        redact(logs || t('diagnosticBundle.reportLogEmpty')),
       ].join('\n');
 
       setGenerated(report);
       try {
         await navigator.clipboard.writeText(report);
-        toast.success('Diagnostic bundle copied to clipboard');
+        toast.success(t('diagnosticBundle.copiedToast'));
       } catch {
-        toast.info('Bundle ready — scroll the preview to copy manually.');
+        toast.info(t('diagnosticBundle.readyToast'));
       }
     } catch (e) {
-      toast.error(`Couldn't build bundle: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('diagnosticBundle.buildFailed', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setBusy(false);
     }
@@ -95,7 +97,7 @@ export function DiagnosticBundle({ open, onClose }: Props) {
     if (!generated) return;
     /* v8 ignore stop */
     const body = encodeURIComponent(generated.slice(0, 6000));
-    const title = encodeURIComponent('Bug report from STS2 Mod Manager');
+    const title = encodeURIComponent(t('diagnosticBundle.reportGitHubIssueTitle'));
     window.open(`https://github.com/MohamedSerhan/sts2-mod-manager/issues/new?title=${title}&body=${body}`, '_blank');
   }
 
@@ -104,13 +106,12 @@ export function DiagnosticBundle({ open, onClose }: Props) {
       <div className="gf-modal" style={{ width: 600 }} onClick={(e) => e.stopPropagation()}>
         <div className="gf-modal-head">
           <div>
-            <div className="gf-modal-title">Generate support bundle</div>
+            <div className="gf-modal-title">{t('diagnosticBundle.title')}</div>
             <div className="gf-modal-sub">
-              Builds a single text report — game info, active profile, mod list, and recent logs.
-              Nothing is uploaded; the bundle is copied to your clipboard so you can paste it wherever.
+              {t('diagnosticBundle.subtitle')}
             </div>
           </div>
-          <button className="gf-btn-3 gf-btn-icon" onClick={onClose} title="Close">
+          <button className="gf-btn-3 gf-btn-icon" onClick={onClose} title={t('common.close')}>
             <X size={14} />
           </button>
         </div>
@@ -118,30 +119,30 @@ export function DiagnosticBundle({ open, onClose }: Props) {
           <div className="gf-diag-list">
             <div className="gf-diag-item">
               <span className="check"><Check size={12} /></span>
-              <b style={{ color: 'var(--ink)' }}>Recent logs</b>
-              <span style={{ marginLeft: 'auto', fontSize: 11 }}>last 500 lines</span>
+              <b style={{ color: 'var(--ink)' }}>{t('diagnosticBundle.recentLogs')}</b>
+              <span style={{ marginLeft: 'auto', fontSize: 11 }}>{t('diagnosticBundle.last500Lines')}</span>
             </div>
             <div className="gf-diag-item">
               <span className="check"><Check size={12} /></span>
-              <b style={{ color: 'var(--ink)' }}>Active profile</b>
-              <span style={{ marginLeft: 'auto', fontSize: 11 }}>{activeProfile || 'Vanilla'}</span>
+              <b style={{ color: 'var(--ink)' }}>{t('diagnosticBundle.activeProfile')}</b>
+              <span style={{ marginLeft: 'auto', fontSize: 11 }}>{activeProfile || t('common.vanilla')}</span>
             </div>
             <div className="gf-diag-item">
               <span className="check"><Check size={12} /></span>
-              <b style={{ color: 'var(--ink)' }}>Mod list</b>
-              <span style={{ marginLeft: 'auto', fontSize: 11 }}>{mods.length} entries</span>
+              <b style={{ color: 'var(--ink)' }}>{t('diagnosticBundle.modList')}</b>
+              <span style={{ marginLeft: 'auto', fontSize: 11 }}>{t('diagnosticBundle.entriesCount', { count: mods.length })}</span>
             </div>
             <div className="gf-diag-item">
               <span className="check"><Check size={12} /></span>
-              <b style={{ color: 'var(--ink)' }}>Game info</b>
+              <b style={{ color: 'var(--ink)' }}>{t('diagnosticBundle.gameInfo')}</b>
               <span style={{ marginLeft: 'auto', fontSize: 11 }}>
-                {gameInfo?.valid ? 'valid' : 'not detected'}
+                {gameInfo?.valid ? t('diagnosticBundle.valid') : t('diagnosticBundle.notDetected')}
               </span>
             </div>
             <div className="gf-diag-item">
               <span style={{ color: 'var(--ink-mute)' }}>—</span>
-              <span>API keys</span>
-              <span style={{ marginLeft: 'auto', fontSize: 11 }}>excluded</span>
+              <span>{t('diagnosticBundle.apiKeys')}</span>
+              <span style={{ marginLeft: 'auto', fontSize: 11 }}>{t('diagnosticBundle.excluded')}</span>
             </div>
           </div>
           <label
@@ -159,7 +160,7 @@ export function DiagnosticBundle({ open, onClose }: Props) {
               checked={redactPaths}
               onChange={(e) => setRedactPaths(e.target.checked)}
             />
-            Redact home-folder paths and usernames
+            {t('diagnosticBundle.redactCheckbox')}
           </label>
 
           {generated && (
@@ -183,15 +184,15 @@ export function DiagnosticBundle({ open, onClose }: Props) {
           )}
         </div>
         <div className="gf-modal-foot">
-          <button className="gf-btn-3" onClick={onClose}>Close</button>
+          <button className="gf-btn-3" onClick={onClose}>{t('common.close')}</button>
           <div style={{ flex: 1 }} />
           {generated && (
             <button className="gf-btn-2" onClick={openInBrowser}>
-              <Folder size={12} /> Open GitHub issue
+              <Folder size={12} /> {t('diagnosticBundle.openGitHubIssue')}
             </button>
           )}
           <button className="gf-btn" onClick={generate} disabled={busy}>
-            <Download size={12} /> {busy ? 'Generating…' : generated ? 'Re-generate' : 'Generate bundle'}
+            <Download size={12} /> {busy ? t('diagnosticBundle.generating') : generated ? t('diagnosticBundle.regenerate') : t('diagnosticBundle.generateBundle')}
           </button>
         </div>
       </div>

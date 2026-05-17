@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation, Trans } from 'react-i18next';
 import { Check, AlertTriangle, ExternalLink, Folder, X, GitBranch } from 'lucide-react';
 import type { GameInfo } from '../types';
 import {
@@ -32,6 +33,7 @@ export function OnboardingOverlay({
   onAddCode,
   refreshGame,
 }: OnboardingProps) {
+  const { t } = useTranslation();
   const [step, setStep] = useState<Step>(1);
 
   // Step 1 — game detection
@@ -91,7 +93,7 @@ export function OnboardingOverlay({
             : typeof navigator !== 'undefined' && /Linux/.test(navigator.platform)
             ? 'SlayTheSpire2.pck'
             : 'SlayTheSpire2.exe';
-        setPathError(`This folder doesn't look like a Slay the Spire 2 install (no ${signature} found) — pick the install root.`);
+        setPathError(t('onboarding.step1.pathError', { signature }));
       }
     } catch (e) {
       setPathError(e instanceof Error ? e.message : String(e));
@@ -153,29 +155,28 @@ export function OnboardingOverlay({
         </div>
 
         <div className="gf-wiz-head">
-          <div className="gf-wiz-eyebrow">Step {step} of 3</div>
+          <div className="gf-wiz-eyebrow">{t('onboarding.stepIndicator', { step })}</div>
           {step === 1 && (
             <>
-              <div className="gf-wiz-title">Find your Slay the Spire 2 install</div>
+              <div className="gf-wiz-title">{t('onboarding.step1.title')}</div>
               <div className="gf-wiz-sub">
-                We'll auto-detect via Steam. You can override anytime in Settings.
+                {t('onboarding.step1.subtitle')}
               </div>
             </>
           )}
           {step === 2 && (
             <>
-              <div className="gf-wiz-title">Connect your accounts (optional)</div>
+              <div className="gf-wiz-title">{t('onboarding.step2.title')}</div>
               <div className="gf-wiz-sub">
-                Nexus needs an API key for downloads. GitHub auth raises the rate limit.
-                Skip both to start with public Browse only.
+                {t('onboarding.step2.subtitle')}
               </div>
             </>
           )}
           {step === 3 && (
             <>
-              <div className="gf-wiz-title">Pick your first profile</div>
+              <div className="gf-wiz-title">{t('onboarding.step3.title')}</div>
               <div className="gf-wiz-sub">
-                Start vanilla, follow a friend's pack, or import a JSON. You can always switch.
+                {t('onboarding.step3.subtitle')}
               </div>
             </>
           )}
@@ -188,13 +189,13 @@ export function OnboardingOverlay({
                 <Check size={22} />
               </span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="gf-wiz-detect-t">Found Slay the Spire 2</div>
+                <div className="gf-wiz-detect-t">{t('onboarding.step1.found')}</div>
                 <div className="gf-wiz-detect-s" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {detectedPath}
                 </div>
               </div>
               <button className="gf-btn-3 gf-btn-2-sm" onClick={() => { setDetected(false); setGameSub('gameNotFound'); }}>
-                Change
+                {t('onboarding.step1.change')}
               </button>
             </div>
           )}
@@ -206,9 +207,9 @@ export function OnboardingOverlay({
                   <AlertTriangle size={22} />
                 </span>
                 <div style={{ flex: 1 }}>
-                  <div className="gf-wiz-detect-t">Couldn't auto-detect Slay the Spire 2</div>
+                  <div className="gf-wiz-detect-t">{t('onboarding.step1.notFound')}</div>
                   <div className="gf-wiz-detect-s">
-                    Pick the folder containing{' '}
+                    {t('onboarding.step1.pickFolder')}
                     <code>
                       {typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
                         ? 'SlayTheSpire2.app'
@@ -220,11 +221,11 @@ export function OnboardingOverlay({
                   </div>
                 </div>
                 <button className="gf-btn-2 gf-btn-2-sm" onClick={handleDetect} disabled={busy}>
-                  {busy ? 'Detecting…' : 'Try again'}
+                  {busy ? t('onboarding.step1.detecting') : t('onboarding.step1.tryAgain')}
                 </button>
               </div>
               <div className="gf-field" style={{ marginTop: 14 }}>
-                <label className="gf-field-label">Pick the install folder manually</label>
+                <label className="gf-field-label">{t('onboarding.step1.browseLabel')}</label>
                 <div className="gf-input-row">
                   <input
                     className={`gf-set-input ${pathError ? 'is-err' : ''}`}
@@ -232,14 +233,14 @@ export function OnboardingOverlay({
                     onChange={(e) => setManualPath(e.target.value)}
                     placeholder={
                       typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
-                        ? '~/Library/Application Support/Steam/steamapps/common/Slay the Spire 2'
+                        ? t('onboarding.step1.browsePlaceholderMac')
                         : typeof navigator !== 'undefined' && /Linux/.test(navigator.platform)
-                        ? '~/.steam/steam/steamapps/common/Slay the Spire 2'
-                        : 'C:\\Program Files (x86)\\Steam\\steamapps\\common\\Slay the Spire 2'
+                        ? t('onboarding.step1.browsePlaceholderLinux')
+                        : t('onboarding.step1.browsePlaceholderWindows')
                     }
                   />
                   <button className="gf-btn-3" onClick={handleBrowse} disabled={busy}>
-                    <Folder size={12} /> Browse…
+                    <Folder size={12} /> {t('onboarding.step1.browse')}
                   </button>
                 </div>
                 {pathError && (
@@ -254,68 +255,69 @@ export function OnboardingOverlay({
           {step === 2 && (
             <div style={{ display: 'grid', gap: 12 }}>
               <div className="gf-field">
-                <label className="gf-field-label">Nexus Mods API key (recommended)</label>
+                <label className="gf-field-label">{t('onboarding.step2.nexusLabel')}</label>
                 <div className="gf-input-row">
                   <input
                     className={`gf-set-input ${nexusOk ? 'is-ok' : keySub === 'keyRejected' ? 'is-err' : ''}`}
                     type="password"
                     value={nexusKey}
                     onChange={(e) => setNexusKey(e.target.value)}
-                    placeholder="Paste your Nexus API key"
+                    placeholder={t('onboarding.step2.nexusPlaceholder')}
                   />
                   <button className="gf-btn-3" onClick={handleTestNexus} disabled={keyTesting || !nexusKey.trim()}>
-                    {keyTesting ? 'Testing…' : 'Test & save'}
+                    {keyTesting ? t('onboarding.step2.testing') : t('onboarding.step2.testSave')}
                   </button>
                 </div>
                 {nexusOk && (
                   <div className="gf-help ok">
-                    <Check size={11} /> Saved — Nexus mods will appear in Browse.
+                    <Check size={11} /> {t('onboarding.step2.nexusSaved')}
                   </div>
                 )}
                 {keySub === 'keyRejected' && (
                   <div className="gf-help err">
-                    <X size={11} /> Nexus rejected this key.{' '}
+                    <X size={11} /> {t('onboarding.step2.nexusRejected')}
                     <a href="https://www.nexusmods.com/users/myaccount?tab=api" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'underline' }}>
-                      Generate a new one →
+                      {t('onboarding.step2.generateNew')}
                     </a>
                   </div>
                 )}
                 {!nexusOk && keySub !== 'keyRejected' && (
-                  <div className="gf-help muted">Skip if you only use GitHub mods.</div>
+                  <div className="gf-help muted">{t('onboarding.step2.nexusSkipHint')}</div>
                 )}
                 <div className="gf-help muted" style={{ marginTop: 4, fontSize: 11 }}>
-                  Free Nexus account is fine. To install a Nexus mod, you'll
-                  click "Slow Download" / "Manual" on Nexus — the app catches
-                  the zip from your Downloads folder. (Nexus Premium's
-                  instant-download API isn't wired in.)
+                  {t('onboarding.step2.nexusFreeNote')}
                 </div>
               </div>
 
               <div className="gf-field">
-                <label className="gf-field-label">GitHub token (optional — raises rate limit 60→5000/hr)</label>
+                <label className="gf-field-label">{t('onboarding.step2.ghLabel')}</label>
                 <div className="gf-input-row">
                   <input
                     className={`gf-set-input ${ghSaved ? 'is-ok' : ''}`}
                     type="password"
                     value={ghToken}
                     onChange={(e) => setGhToken(e.target.value)}
-                    placeholder="ghp_… (or leave blank)"
+                    placeholder={t('onboarding.step2.ghPlaceholder')}
                   />
                   <button className="gf-btn-3" onClick={handleSaveGh} disabled={!ghToken.trim()}>
-                    <GitBranch size={12} /> Save
+                    <GitBranch size={12} /> {t('common.save')}
                   </button>
                 </div>
                 {ghSaved && (
                   <div className="gf-help ok">
-                    <Check size={11} /> Saved — Browse will use authenticated calls.
+                    <Check size={11} /> {t('onboarding.step2.ghSaved')}
                   </div>
                 )}
                 {!ghSaved && (
-                  <div className="gf-help muted">Skipping is fine — you'll just hit rate limits faster on Browse.</div>
+                  <div className="gf-help muted">{t('onboarding.step2.ghSkipHint')}</div>
                 )}
                 <div className="gf-help muted" style={{ marginTop: 4, fontSize: 11 }}>
-                  <b>Required to publish modpacks</b> — needs <code>repo</code> scope (classic PAT) or{' '}
-                  <code>Contents: R/W</code> + <code>Administration: R/W</code> (fine-grained).
+                  <Trans i18nKey="onboarding.step2.ghRequiredNote">
+                    <b />
+                    <code />
+                    <code />
+                    <code />
+                  </Trans>
                 </div>
               </div>
             </div>
@@ -325,12 +327,12 @@ export function OnboardingOverlay({
             <div style={{ display: 'grid', gap: 8 }}>
               {(
                 [
-                  ['Vanilla — no mods', 'Game launches stock — toggle mods on later', 'vanilla'],
-                  ["Follow a friend (paste code)", 'Type or paste a code like jess/XYZ4', 'follow'],
-                  ['Import profile JSON', 'Drop or pick a .json exported from another install', 'json'],
-                  ['Skip — set up later', 'You can re-run setup from Settings → General', 'skip'],
+                  [t('onboarding.step3.optionVanilla.title'), t('onboarding.step3.optionVanilla.desc'), 'vanilla'],
+                  [t('onboarding.step3.optionFollow.title'), t('onboarding.step3.optionFollow.desc'), 'follow'],
+                  [t('onboarding.step3.optionImport.title'), t('onboarding.step3.optionImport.desc'), 'json'],
+                  [t('onboarding.step3.optionSkip.title'), t('onboarding.step3.optionSkip.desc'), 'skip'],
                 ] as const
-              ).map(([t, b, action], i) => (
+              ).map(([label, desc, action], i) => (
                 <button
                   key={action}
                   onClick={() => pick(action)}
@@ -346,8 +348,8 @@ export function OnboardingOverlay({
                     fontFamily: 'inherit',
                   }}
                 >
-                  <div style={{ fontWeight: 600 }}>{t}</div>
-                  <div style={{ fontSize: 11.5, color: 'var(--ink-mute)', marginTop: 3 }}>{b}</div>
+                  <div style={{ fontWeight: 600 }}>{label}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--ink-mute)', marginTop: 3 }}>{desc}</div>
                 </button>
               ))}
             </div>
@@ -356,22 +358,18 @@ export function OnboardingOverlay({
 
         <div className="gf-wiz-foot">
           <button className="gf-btn-3" onClick={back} disabled={step === 1}>
-            Back
+            {t('common.back')}
           </button>
           <button className="gf-btn-3" onClick={onSkip}>
-            Skip setup
+            {t('onboarding.skipSetup')}
           </button>
           <div style={{ flex: 1 }} />
           {step < 3 ? (
-            // On step 2, the accounts are optional. If the user hasn't saved
-            // either credential, surface the primary action as "Skip" so it's
-            // clear they're moving on without entering anything — instead of
-            // implying "Next" means saving was already done.
             <button className="gf-btn" onClick={next}>
               {step === 2 && !nexusOk && !ghSaved ? (
-                'Skip for now'
+                t('onboarding.skipForNow')
               ) : (
-                <>Next <ExternalLink size={11} style={{ transform: 'rotate(-45deg)' }} /></>
+                <>{t('common.next')} <ExternalLink size={11} style={{ transform: 'rotate(-45deg)' }} /></>
               )}
             </button>
           ) : null}

@@ -65,9 +65,14 @@ describe('buildShareLink', () => {
   });
 });
 
+const mockT = ((key: string, vars?: Record<string, unknown>) => {
+  if (vars) return `[${key}] ${JSON.stringify(vars)}`;
+  return `[${key}]`;
+}) as any;
+
 describe('buildShareMessage', () => {
   it('includes pack name + link + code', () => {
-    const msg = buildShareMessage('Daily Pack', 'jess/AA5A-315D-61AE');
+    const msg = buildShareMessage('Daily Pack', 'jess/AA5A-315D-61AE', mockT);
     expect(msg).toContain('Daily Pack');
     expect(msg).toContain('jess/AA5A-315D-61AE');
     expect(msg).toContain(buildShareLink('jess/AA5A-315D-61AE'));

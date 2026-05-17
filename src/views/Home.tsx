@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Download,
   RefreshCw,
@@ -74,11 +75,12 @@ function packInitials(name: string): string {
  *  toast so the click registers without the user having to track the
  *  toast stack. */
 function ShareCodeChip({ code, packName }: { code: string; packName: string }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState<'code' | 'link' | 'msg' | null>(null);
   const toast = useToast();
 
   const link = buildShareLink(code);
-  const message = buildShareMessage(packName, code);
+  const message = buildShareMessage(packName, code, t);
 
   async function copyTo(kind: 'code' | 'link' | 'msg', value: string, label: string) {
     try {
@@ -87,7 +89,7 @@ function ShareCodeChip({ code, packName }: { code: string; packName: string }) {
       toast.success(label);
       window.setTimeout(() => setCopied(null), 1600);
     } catch (e) {
-      toast.error("Couldn't copy to clipboard");
+      toast.error(t('profiles.toast.cantCopyToClipboard'));
     }
   }
 
@@ -96,41 +98,41 @@ function ShareCodeChip({ code, packName }: { code: string; packName: string }) {
       <button
         type="button"
         className={`gf-sharecode-chip${copied === 'code' ? ' is-copied' : ''}`}
-        onClick={() => copyTo('code', code, 'Share code copied')}
-        title="Click to copy the share code"
+        onClick={() => copyTo('code', code, t('profiles.toast.shareCodeCopied'))}
+        title={t('home.copyShareCodeTitle', { code })}
       >
-        <span className="gf-sharecode-eyebrow">Share code</span>
+        <span className="gf-sharecode-eyebrow">{t('home.hero.title')}</span>
         <span className="gf-sharecode-value">{code}</span>
         <span className="gf-sharecode-action">
           {copied === 'code' ? (
-            <><Check size={13} /> Copied</>
+            <><Check size={13} /> {t('common.copied')}</>
           ) : (
-            <><Copy size={13} /> Copy</>
+            <><Copy size={13} /> {t('common.copy')}</>
           )}
         </span>
       </button>
       <button
         type="button"
         className={`gf-sharecode-msg-btn${copied === 'link' ? ' is-copied' : ''}`}
-        onClick={() => copyTo('link', link, 'Install link copied — paste into Discord / chat')}
-        title={`Copies the clickable install link: ${link}`}
+        onClick={() => copyTo('link', link, t('profiles.toast.installLinkCopied'))}
+        title={t('home.copyLinkTitle', { link })}
       >
         {copied === 'link' ? (
-          <><Check size={13} /> Copied link</>
+          <><Check size={13} /> {t('home.copiedLink')}</>
         ) : (
-          <><LinkIcon size={13} /> Copy link</>
+          <><LinkIcon size={13} /> {t('home.copyLink')}</>
         )}
       </button>
       <button
         type="button"
         className={`gf-sharecode-msg-btn${copied === 'msg' ? ' is-copied' : ''}`}
-        onClick={() => copyTo('msg', message, 'Share message copied — paste into Discord / chat')}
-        title={`Copies the full share message:\n\n${message}`}
+        onClick={() => copyTo('msg', message, t('profiles.toast.shareMessageCopied'))}
+        title={t('home.copyMessageTitle', { message })}
       >
         {copied === 'msg' ? (
-          <><Check size={13} /> Copied message</>
+          <><Check size={13} /> {t('home.copiedMessage')}</>
         ) : (
-          <><MessageSquare size={13} /> Copy message</>
+          <><MessageSquare size={13} /> {t('home.copyMessage')}</>
         )}
       </button>
     </div>
@@ -154,6 +156,7 @@ interface HomeProps {
   focusCodeBarSignal?: number;
 }
 export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchPack, onLaunch, focusCodeBarSignal }: HomeProps) {
+  const { t } = useTranslation();
   const { gameInfo, mods, refreshAll, activeProfile, refreshSubUpdates, subUpdates: ctxSubUpdates } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
@@ -235,10 +238,13 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
       const updates = u.filter((s) => s.has_update);
       setSubUpdates(updates);
       if (showToast && updates.length === 0) {
-        toast.success('All modpacks are up to date!');
+        toast.success(t('home.toast.allUpToDate'));
       }
     } catch (e) {
-      if (showToast) toast.error(`Check failed: ${e instanceof Error ? e.message : String(e)}`);
+      if (showToast) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        toast.error(t('home.toast.checkFailed', { error: errMsg }));
+      }
     } finally {
       setChecking(false);
     }
@@ -261,6 +267,7 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
         subscriptions,
         activeProfile,
         subUpdates: ctxSubUpdates,
+        t,
       });
       if (outcome.kind === 'cancelled') return;
 
@@ -273,29 +280,33 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
         const installedNames = new Set(installedMods.map(m => m.name));
         const missing = outcome.profile.mods.filter(m => !installedNames.has(m.name));
         if (missing.length > 0) {
-          toast.info(
-            `Installed ${outcome.profile.mods.length - missing.length}/${outcome.profile.mods.length} mods. ` +
-            `Missing: ${missing.map(m => m.name).join(', ')}. These need to be installed manually.`
-          );
+          toast.info(t('home.toast.installedPartial', {
+            installed: outcome.profile.mods.length - missing.length,
+            total: outcome.profile.mods.length,
+            missing: missing.map(m => m.name).join(', '),
+          }));
         } else {
-          toast.success(`Installed modpack "${outcome.profile.name}" with ${outcome.profile.mods.length} mods!`);
+          toast.success(t('home.toast.installedModpack', { name: outcome.profile.name, count: outcome.profile.mods.length }));
         }
       } else if (outcome.kind === 'activated') {
-        toast.success(`Switched to "${outcome.profileName}"`);
+        toast.success(t('profiles.toast.switched', { name: outcome.profileName }));
       } else if (outcome.kind === 'reapplied') {
         const parts: string[] = [];
         if (outcome.result.downloaded > 0) parts.push(`${outcome.result.downloaded} downloaded`);
         if (outcome.result.failed_downloads.length > 0) parts.push(`${outcome.result.failed_downloads.length} failed`);
         if (outcome.result.missing_mods.length > 0) parts.push(`${outcome.result.missing_mods.length} still missing`);
-        toast.info(parts.length ? `Re-applied "${outcome.profileName}" - ${parts.join(', ')}.` : `Re-applied "${outcome.profileName}".`);
+        toast.info(parts.length
+          ? t('profiles.toast.reappliedWithDetails', { name: outcome.profileName, details: parts.join(', ') })
+          : t('profiles.toast.reapplied', { name: outcome.profileName }));
       } else if (outcome.kind === 'synced') {
-        toast.success(`Synced "${outcome.profileName}" — you're up to date!`);
+        toast.success(t('profiles.toast.syncedUpToDate', { name: outcome.profileName }));
       } else if (outcome.kind === 'already-active') {
-        toast.info(`You're already on "${outcome.profileName}".`);
+        toast.info(t('profiles.toast.alreadyActive', { name: outcome.profileName }));
       }
       setProfileCode('');
     } catch (e) {
-      toast.error(`Failed to import: ${e instanceof Error ? e.message : String(e)}`);
+      const errMsg = e instanceof Error ? e.message : String(e);
+      toast.error(t('profiles.toast.importFailed', { error: errMsg }));
     } finally {
       setImporting(false);
     }
@@ -311,9 +322,10 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
       // background poll would catch this in 90s but the user expects
       // the badge to clear immediately.
       refreshSubUpdates();
-      toast.success(`Synced modpack "${profile.name}" - you're up to date!`);
+      toast.success(t('profiles.toast.syncedUpToDate', { name: profile.name }));
     } catch (e) {
-      toast.error(`Sync failed: ${e instanceof Error ? e.message : String(e)}`);
+      const errMsg = e instanceof Error ? e.message : String(e);
+      toast.error(t('profiles.toast.syncFailed', { error: errMsg }));
     } finally {
       setApplyingSub(null);
     }
@@ -321,9 +333,9 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
 
   async function handleUnsubscribe(shareId: string, profileName: string) {
     const ok = await confirm({
-      title: `Unlink from "${profileName}"?`,
-      body: "You'll stop receiving updates from the curator. The mods stay installed.",
-      confirmLabel: 'Unlink',
+      title: t('home.unlinkTitle', { name: profileName }),
+      body: t('home.unlinkBody'),
+      confirmLabel: t('home.unlink'),
       destructive: true,
     });
     if (!ok) return;
@@ -332,18 +344,19 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
       setSubscriptions((prev) => prev.filter((s) => s.share_id !== shareId));
       setSubUpdates((prev) => prev.filter((s) => s.share_id !== shareId));
       refreshSubUpdates();
-      toast.success(`Unlinked from "${profileName}"`);
+      toast.success(t('home.toast.unlinked', { name: profileName }));
     } catch (e) {
-      toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+      const errMsg = e instanceof Error ? e.message : String(e);
+      toast.error(t('home.toast.failed', { error: errMsg }));
     }
   }
 
   async function handleRepairModpack(shareId: string) {
     const ok = await confirm({
-      title: 'Repair this pack?',
-      body: 'Repair wipes the mods folder and reinstalls every entry from the manifest. Use when the install has drifted or you suspect corruption.',
-      checkbox: { label: 'Make a backup before repairing', defaultChecked: true },
-      confirmLabel: 'Repair',
+      title: t('home.repairPackTitle'),
+      body: t('home.repairPackBody'),
+      checkbox: { label: t('home.repairPackBackupLabel'), defaultChecked: true },
+      confirmLabel: t('home.repair'),
       destructive: true,
     });
     if (!ok) return;
@@ -351,9 +364,10 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
       setRepairingShareId(shareId);
       await repairModpackSubscription(shareId);
       await refreshAll();
-      toast.success('Modpack reinstalled');
+      toast.success(t('home.toast.reinstalled'));
     } catch (e) {
-      toast.error(`Repair failed: ${e instanceof Error ? e.message : String(e)}`);
+      const errMsg = e instanceof Error ? e.message : String(e);
+      toast.error(t('profiles.toast.repairFailed', { error: errMsg }));
     } finally {
       setRepairingShareId(null);
     }
@@ -372,17 +386,17 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
       : orphans.join(', ');
 
     const ok = await confirm({
-      title: `Repair "${name}"?`,
+      title: t('home.repairOrphanTitle', { name }),
       body: orphanCount > 0
-        ? `Re-applies the manifest and deletes ${orphanCount} mod file(s) that aren't in the profile: ${orphanList}.`
-        : 'Re-applies the manifest exactly. Toggles, versions, and load order are restored from the saved snapshot.',
+        ? t('home.repairOrphanBody', { count: orphanCount, list: orphanList })
+        : t('home.repairOrphanBodyNoOrphans'),
       warning: orphanCount > 0
-        ? 'Orphan files will be permanently removed. Restore from a backup if you change your mind.'
+        ? t('home.repairOrphanWarning')
         : undefined,
-      confirmLabel: 'Repair',
+      confirmLabel: t('home.repair'),
       destructive: orphanCount > 0,
       checkbox: orphanCount > 0
-        ? { label: 'Make a backup before repairing', defaultChecked: true }
+        ? { label: t('home.repairPackBackupLabel'), defaultChecked: true }
         : undefined,
     });
     if (!ok) return;
@@ -391,7 +405,7 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
     try {
       if (ok.checked) {
         try { await createBackup(); }
-        catch (e) { toast.error(`Backup failed: ${e instanceof Error ? e.message : String(e)}`); }
+        catch (e) { const errMsg = e instanceof Error ? e.message : String(e); toast.error(t('profiles.toast.backupFailed', { error: errMsg })); }
       }
       const result = await repairProfile(name);
       await refreshAll();
@@ -402,9 +416,12 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
       if (result.downloaded > 0) summary.push(`downloaded ${result.downloaded}`);
       if (result.failed_downloads.length > 0) summary.push(`${result.failed_downloads.length} download(s) failed`);
       if (result.missing_mods.length > 0) summary.push(`${result.missing_mods.length} still missing`);
-      toast.success(summary.length ? `Repaired "${name}" — ${summary.join(', ')}` : `Repaired "${name}"`);
+      toast.success(summary.length
+        ? t('profiles.toast.repairedWithDetails', { name, details: summary.join(', ') })
+        : t('profiles.toast.repaired', { name }));
     } catch (e) {
-      toast.error(`Repair failed: ${e instanceof Error ? e.message : String(e)}`);
+      const errMsg = e instanceof Error ? e.message : String(e);
+      toast.error(t('profiles.toast.repairFailed', { error: errMsg }));
     } finally {
       setRepairing(false);
     }
@@ -416,11 +433,11 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
         const drift = await getProfileDrift(activeProfile);
         if (drift.has_drift) {
           const ok = await confirm({
-            title: `Switch away from "${activeProfile}"?`,
-            body: 'This profile has unsaved changes on disk. Switching applies another manifest and those working changes will not be saved to the current profile.',
-            warning: 'Open Profiles and use Save changes first if you want to keep them.',
-            confirmLabel: 'Switch anyway',
-            cancelLabel: 'Stay here',
+            title: t('home.switchAwayTitle', { name: activeProfile }),
+            body: t('home.switchAwayBody'),
+            warning: t('home.switchAwayWarning'),
+            confirmLabel: t('home.switchAnyway'),
+            cancelLabel: t('home.stayHere'),
           });
           if (!ok) return;
         }
@@ -434,12 +451,17 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
       const result = await switchProfile(profileName);
       await refreshAll();
       if (result.missing_mods.length > 0) {
-        toast.info(`Activated "${profileName}". ${result.downloaded} downloaded, ${result.missing_mods.length} still missing.`);
+        toast.info(t('home.toast.activatedWithDetails', {
+          name: profileName,
+          downloaded: result.downloaded,
+          missing: result.missing_mods.length,
+        }));
       } else {
-        toast.success(`Activated "${profileName}"`);
+        toast.success(t('home.toast.activated', { name: profileName }));
       }
     } catch (e) {
-      toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+      const errMsg = e instanceof Error ? e.message : String(e);
+      toast.error(t('home.toast.failed', { error: errMsg }));
     } finally {
       setActivatingProfile(null);
     }
@@ -450,7 +472,7 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
   const otherSubs = subscriptions.filter((s) => s.profile_name !== activeProfile);
   const activeUpdate = subUpdates.find((s) => s.profile_name === activeProfile);
 
-  const heroName = activeProfile || 'Vanilla';
+  const heroName = activeProfile || t('home.heroNameVanilla');
   // Share code source: prefer activeSub (a pack imported FROM someone),
   // fall back to activeProfileShare (the curator's own published pack
   // — sidecar on disk, no subscription record). Used to display "yep,
@@ -467,10 +489,10 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
   // Code lives in its own ShareCodeChip below, so it's not duplicated
   // in the meta line. The meta keeps just mod count + sync recency.
   const heroMeta = activeSub
-    ? `${enabledMods.length} mods · synced ${new Date(activeSub.last_synced).toLocaleDateString()}`
+    ? t('home.heroMetaSubscribed', { count: enabledMods.length, date: new Date(activeSub.last_synced).toLocaleDateString() })
     : activeProfileShare
-    ? `${enabledMods.length} mods · published by you`
-    : `${enabledMods.length} mods · ${activeProfile ? 'Local profile' : 'Built-in vanilla profile'}`;
+    ? t('home.heroMetaOwn', { count: enabledMods.length })
+    : t('home.heroMetaLocal', { count: enabledMods.length, type: activeProfile ? t('home.heroMetaLocalProfile') : t('home.heroMetaBuiltinVanilla') });
 
   return (
     <div className="gf-body">
@@ -479,9 +501,9 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
         <div className="gf-onb">
           <div className="gf-onb-card" style={{ width: 380, textAlign: 'center' }}>
             <RefreshCw size={32} className="mx-auto mb-3" style={{ color: 'var(--gf)', animation: 'spin 1s linear infinite' }} />
-            <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Installing modpack</h3>
-            <p style={{ fontSize: 13, color: 'var(--ink-mute)' }}>Downloading mods and setting up your profile…</p>
-            <p style={{ fontSize: 12, color: 'var(--ink-dim)', marginTop: 6 }}>This may take a few minutes for large modpacks.</p>
+            <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>{t('common.installing')}</h3>
+            <p style={{ fontSize: 13, color: 'var(--ink-mute)' }}>{t('home.importingOverlayTitle')}</p>
+            <p style={{ fontSize: 12, color: 'var(--ink-dim)', marginTop: 6 }}>{t('home.importingOverlaySubtext')}</p>
           </div>
         </div>
       )}
@@ -496,23 +518,23 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
         <div className="gf-banner gf-banner-warn" style={{ marginBottom: 14 }}>
           <Gamepad2 size={16} className="gf-banner-icon" />
           <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 600 }}>Game not detected</div>
+            <div style={{ fontWeight: 600 }}>{t('home.gameNotDetected')}</div>
             <div style={{ fontSize: 12, opacity: 0.85 }}>
-              Slay the Spire 2 wasn't found automatically. Open Settings to set the path.
+              {t('home.gameNotDetectedDesc')}
             </div>
           </div>
           <button className="gf-btn-3" onClick={onGoToSettings}>
-            <Settings size={12} /> Settings
+            <Settings size={12} /> {t('nav.settings')}
           </button>
         </div>
       )}
 
       {/* Hero — single "Continue with" pattern */}
       <div className="gf-hero">
-        <div className="gf-hero-eyebrow">Continue with</div>
+        <div className="gf-hero-eyebrow">{t('home.continueWith')}</div>
         <div className="gf-hero-title">
           {heroName}
-          <span className="gf-pill gf-pill-active">ACTIVE</span>
+          <span className="gf-pill gf-pill-active">{t('common.active')}</span>
         </div>
         <div className="gf-hero-meta">{heroMeta}</div>
 
@@ -535,15 +557,14 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
           >
             <span className="gf-dot gf-dot-warn" />
             <span style={{ flex: 1, fontWeight: 600 }}>
-              {(activeUpdate.added_mods.length || 0) + (activeUpdate.updated_mods.length || 0) + (activeUpdate.removed_mods.length || 0)} update
-              {((activeUpdate.added_mods.length || 0) + (activeUpdate.updated_mods.length || 0) + (activeUpdate.removed_mods.length || 0)) === 1 ? '' : 's'} from author
+              {t('home.updateAvailableCount', { count: (activeUpdate.added_mods.length || 0) + (activeUpdate.updated_mods.length || 0) + (activeUpdate.removed_mods.length || 0) })}
             </span>
             <button
               className="gf-btn-2 gf-btn-2-sm"
               onClick={() => setUpdateDetail(activeUpdate)}
               disabled={applyingSub === activeUpdate.share_id}
             >
-              View changes
+              {t('home.viewChanges')}
             </button>
             <button
               className="gf-btn gf-btn-sm"
@@ -555,7 +576,7 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
               ) : (
                 <Download size={11} />
               )}
-              Sync updates
+              {t('home.syncUpdates')}
             </button>
           </div>
         )}
@@ -565,37 +586,37 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
             className="gf-btn gf-btn-lg"
             onClick={onLaunch}
             disabled={!onLaunch}
-            title={onLaunch ? 'Launch STS2 with this pack' : 'Use the Launch button in the top bar'}
+            title={onLaunch ? t('home.launchTitle') : t('home.noLaunchTitle')}
           >
-            <Play size={11} fill="currentColor" /> Launch with this pack
+            <Play size={11} fill="currentColor" /> {t('home.launchWithPack')}
           </button>
           <button
             className="gf-btn-2"
             onClick={onGoToMods}
-            title="See and toggle the mods in this profile"
+            title={t('home.manageModsTitle')}
           >
-            Manage mods
+            {t('home.manageMods')}
           </button>
           <button
             className="gf-btn-2"
             onClick={onSwitchPack}
-            title="Switch to a different pack"
+            title={t('home.switchPackTitle')}
           >
-            Switch pack
+            {t('home.switchPack')}
           </button>
           {activeProfile && (
             <button
               className="gf-btn-2"
               onClick={() => handleRepair(activeProfile)}
               disabled={repairing}
-              title="Re-apply the manifest and delete any orphan mod files"
+              title={t('home.reapplyTitle')}
             >
               {repairing ? (
                 <RefreshCw size={11} className="animate-spin" />
               ) : (
                 <Wrench size={11} />
               )}
-              {repairing ? 'Repairing…' : 'Repair'}
+              {repairing ? t('home.repairing') : t('home.repair')}
             </button>
           )}
           {/* Share-this-pack CTA — only renders when the active profile
@@ -612,20 +633,21 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
                   const list = await listProfiles();
                   const p = list.find((p) => p.name === activeProfile);
                   if (p) setPublishTarget({ profile: p, isReshare: false });
-                  else toast.error("Couldn't find this profile on disk.");
+                  else toast.error(t('home.toast.profileNotFoundOnDisk'));
                 } catch (e) {
-                  toast.error(`Couldn't load profile: ${e instanceof Error ? e.message : String(e)}`);
+                  const errMsg = e instanceof Error ? e.message : String(e);
+                  toast.error(t('home.toast.couldntLoadProfile', { error: errMsg }));
                 }
               }}
-              title="Publish this pack to a GitHub repo on your account so friends can install it with a code or link"
+              title={t('home.shareThisPackTitle')}
             >
-              <Share2 size={11} /> Share this pack
+              <Share2 size={11} /> {t('home.shareThisPack')}
             </button>
           )}
         </div>
         {activeProfile && (
           <div className="gf-hero-shortcut-tip">
-            Tip: press <kbd className="gf-kbd">Ctrl</kbd>+<kbd className="gf-kbd">L</kbd> from anywhere to launch this pack.
+            {t('home.shortcutTip', { shortcut: 'Ctrl+L' })}
           </div>
         )}
       </div>
@@ -635,12 +657,12 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
         ref={codeBarRef}
         className={`gf-quickadd${codeBarPulse ? ' gf-quickadd-pulse' : ''}`}
       >
-        <div className="gf-quickadd-eyebrow">Drop a code, hit Add</div>
+        <div className="gf-quickadd-eyebrow">{t('home.quickAddHeading')}</div>
         <div style={{ display: 'flex', gap: 8, marginTop: 11 }}>
           <input
             ref={codeInputRef}
             className="gf-input-hero"
-            placeholder="username/AA5A-315D-61AE"
+            placeholder={t('home.hero.placeholder')}
             value={profileCode}
             onChange={(e) => setProfileCode(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleImportCode()}
@@ -651,7 +673,7 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
             onClick={handleImportCode}
             disabled={importing || !profileCode.trim()}
           >
-            <Plus size={12} /> Add Pack
+            <Plus size={12} /> {t('home.quickAdd.add')}
           </button>
         </div>
       </div>
@@ -661,15 +683,15 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
         <>
           <div className="gf-section-head">
             <div className="gf-section-eyebrow">
-              Your other packs · {otherSubs.length}
+              {t('home.yourOtherPacks')} · {otherSubs.length}
             </div>
             <button
               type="button"
               onClick={() => onGoToProfiles?.()}
               className="gf-link-button"
-              title="Open the Profiles page to manage every pack"
+              title={t('home.viewAllInProfilesTitle')}
             >
-              View all in Profiles <ChevronRight size={12} style={{ display: 'inline', verticalAlign: 'middle' }} />
+              {t('home.viewAllInProfiles')} <ChevronRight size={12} style={{ display: 'inline', verticalAlign: 'middle' }} />
             </button>
           </div>
 
@@ -687,25 +709,25 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
             const handleCopyCode = async () => {
               try {
                 await navigator.clipboard.writeText(prettyCode);
-                toast.success(`Copied ${prettyCode}`);
+                toast.success(t('home.toast.codeCopied', { code: prettyCode }));
               } catch {
-                toast.error("Couldn't copy to clipboard");
+                toast.error(t('profiles.toast.cantCopyToClipboard'));
               }
             };
             const handleCopyLink = async () => {
               try {
                 await navigator.clipboard.writeText(buildShareLink(prettyCode));
-                toast.success('Install link copied — paste into Discord / chat');
+                toast.success(t('profiles.toast.installLinkCopied'));
               } catch {
-                toast.error("Couldn't copy to clipboard");
+                toast.error(t('profiles.toast.cantCopyToClipboard'));
               }
             };
             const handleCopyMsg = async () => {
               try {
-                await navigator.clipboard.writeText(buildShareMessage(sub.profile_name, prettyCode));
-                toast.success('Share message copied — paste into Discord / chat');
+                await navigator.clipboard.writeText(buildShareMessage(sub.profile_name, prettyCode, t));
+                toast.success(t('profiles.toast.shareMessageCopied'));
               } catch {
-                toast.error("Couldn't copy to clipboard");
+                toast.error(t('profiles.toast.cantCopyToClipboard'));
               }
             };
             return (
@@ -714,30 +736,30 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 600 }}>{sub.profile_name}</div>
                   <div style={{ fontSize: 11.5, color: 'var(--ink-mute)', marginTop: 2 }}>
-                    {prettyCode} · {sub.curator ? `by ${sub.curator}` : 'community'} · last synced{' '}
+                    {prettyCode} · {sub.curator !== null ? t('home.byCurator', { curator: sub.curator }) : t('home.community')} · {t('home.lastSynced')}{' '}
                     {new Date(sub.last_synced).toLocaleDateString()}
                   </div>
                 </div>
                 {updateCount > 0 && (
-                  <span className="gf-pill gf-pill-update">{updateCount} updates</span>
+                  <span className="gf-pill gf-pill-update">{t('home.updatesPill', { count: updateCount })}</span>
                 )}
                 <button
                   className="gf-btn-3 gf-btn-icon"
-                  title={`Copy share code (${prettyCode})`}
+                  title={t('home.copyShareCodeTitle', { code: prettyCode })}
                   onClick={handleCopyCode}
                 >
                   <Copy size={12} />
                 </button>
                 <button
                   className="gf-btn-3 gf-btn-icon"
-                  title="Copy install link — clickable in Discord / chat, routes friends through the install bridge"
+                  title={t('home.copyInstallLinkTitle')}
                   onClick={handleCopyLink}
                 >
                   <LinkIcon size={12} />
                 </button>
                 <button
                   className="gf-btn-3 gf-btn-icon"
-                  title="Copy full share message — intro line + install link + raw code"
+                  title={t('home.copyFullMessageTitle')}
                   onClick={handleCopyMsg}
                 >
                   <MessageSquare size={12} />
@@ -746,18 +768,18 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
                   className="gf-btn-2 gf-btn-2-sm"
                   onClick={() => handleActivateModpack(sub.profile_name)}
                   disabled={activatingProfile === sub.profile_name}
-                  title="Switch to this pack"
+                  title={t('home.switchToPack')}
                 >
                   {activatingProfile === sub.profile_name ? (
                     <RefreshCw size={11} className="animate-spin" />
                   ) : (
                     <Play size={11} />
                   )}
-                  Activate
+                  {t('common.activate')}
                 </button>
                 <button
                   className="gf-btn-3 gf-btn-icon"
-                  title="Wipe and reinstall"
+                  title={t('home.wipeAndReinstall')}
                   onClick={() => handleRepairModpack(sub.share_id)}
                   disabled={repairingShareId === sub.share_id}
                 >
@@ -769,7 +791,7 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
                 </button>
                 <button
                   className="gf-btn-3 gf-btn-icon gf-btn-danger"
-                  title="Unlink from this pack"
+                  title={t('home.unlinkFromPack')}
                   onClick={() => handleUnsubscribe(sub.share_id, sub.profile_name)}
                 >
                   <Trash2 size={12} />
@@ -784,7 +806,7 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
       {subUpdates.filter((s) => s.profile_name !== activeProfile).length > 0 && (
         <>
           <div className="gf-section-head">
-            <div className="gf-section-eyebrow">Updates available</div>
+            <div className="gf-section-eyebrow">{t('home.pendingUpdates')}</div>
           </div>
           {subUpdates
             .filter((s) => s.profile_name !== activeProfile)
@@ -806,9 +828,9 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 600 }}>{sub.profile_name}</div>
                   <div style={{ fontSize: 11.5, color: 'var(--ink-mute)', marginTop: 2 }}>
-                    {sub.added_mods.length > 0 && <span style={{ color: 'var(--ok)' }}>+{sub.added_mods.length} new </span>}
-                    {sub.updated_mods.length > 0 && <span style={{ color: 'var(--gf)' }}>{sub.updated_mods.length} updated </span>}
-                    {sub.removed_mods.length > 0 && <span style={{ color: 'var(--danger)' }}>-{sub.removed_mods.length} removed</span>}
+                    {sub.added_mods.length > 0 && <span style={{ color: 'var(--ok)' }}>+{sub.added_mods.length}{t('home.newLabel')} </span>}
+                    {sub.updated_mods.length > 0 && <span style={{ color: 'var(--gf)' }}>{sub.updated_mods.length}{t('home.updatedLabel')} </span>}
+                    {sub.removed_mods.length > 0 && <span style={{ color: 'var(--danger)' }}>-{sub.removed_mods.length}{t('home.removedLabel')}</span>}
                   </div>
                 </div>
                 <button
@@ -816,7 +838,7 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
                   onClick={() => setUpdateDetail(sub)}
                   disabled={applyingSub === sub.share_id}
                 >
-                  Review
+                  {t('home.review')}
                 </button>
                 <button
                   className="gf-btn gf-btn-sm"
@@ -824,7 +846,7 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
                   disabled={applyingSub === sub.share_id}
                 >
                   {applyingSub === sub.share_id ? <RefreshCw size={11} className="animate-spin" /> : <Download size={11} />}
-                  Sync
+                  {t('home.sync')}
                 </button>
               </div>
             ))}
@@ -835,14 +857,14 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
       {subscriptions.length === 0 && (
         <>
           <div className="gf-section-head">
-            <div className="gf-section-eyebrow">Your packs</div>
+            <div className="gf-section-eyebrow">{t('home.yourPacks')}</div>
           </div>
           <div className="gf-empty-card">
             <div style={{ width: 36, height: 36, borderRadius: 8, background: 'var(--indigo-elev)', display: 'grid', placeItems: 'center', fontSize: 18 }}>
               <Plus size={16} />
             </div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>Follow a friend's pack</div>
-            <div style={{ fontSize: 11.5, color: 'var(--ink-dim)' }}>Paste their share code in the box above.</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{t('home.followFriendsPack')}</div>
+            <div style={{ fontSize: 11.5, color: 'var(--ink-dim)' }}>{t('home.pasteCodeAbove')}</div>
           </div>
         </>
       )}

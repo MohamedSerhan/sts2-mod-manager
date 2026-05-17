@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, type MouseEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { getVersion } from '@tauri-apps/api/app';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
@@ -81,21 +82,9 @@ export default function App() {
   );
 }
 
-/** Build the "preserved N config files" toast message. Includes up to
- *  three filenames inline so the user can see what was kept at a
- *  glance; beyond that the count + "(and N more)" keeps it readable.
- *  Used both for the downloads-watcher single-event flow AND for the
- *  per-mod `mod-configs-preserved` event from update_mod / repair_mod /
- *  update_all_mods.
- */
-function formatPreservedConfigsMessage(modName: string, files: string[]): string {
-  const n = files.length;
-  const shown = files.slice(0, 3).join(', ');
-  const tail = n > 3 ? ` (and ${n - 3} more)` : '';
-  return `Preserved ${n} config file${n === 1 ? '' : 's'} you edited in "${modName}": ${shown}${tail}`;
-}
 
 function AppInner() {
+  const { t } = useTranslation();
   const [activeView, setActiveView] = useState<View>('home');
   const { gameInfo, mods, refreshAll, activeProfile, gameRunning, subUpdates, refreshSubUpdates } = useApp();
   const toast = useToast();
@@ -139,20 +128,20 @@ function AppInner() {
     }>('mod-auto-installed', (event) => {
       const { mod_name, file_name, replaced, preserved_configs } = event.payload;
       if (replaced) {
-        toast.success(`Updated "${replaced}" → "${mod_name}" from ${file_name}`);
+        toast.success(t('app.toast.replacedMod', { replaced, mod: mod_name, file: file_name }));
       } else {
-        toast.success(`Mod "${mod_name}" auto-installed from ${file_name}`);
+        toast.success(t('app.toast.autoInstalled', { name: mod_name, file: file_name }));
       }
       // Preserved-configs toast fires as its own event for non-watcher
       // updates (update_mod / update_all_mods). The watcher inlines the
       // list on the auto-installed event, so emit the toast here.
       if (preserved_configs && preserved_configs.length > 0) {
-        toast.info(formatPreservedConfigsMessage(mod_name, preserved_configs));
+        toast.info(t('app.toast.preservedConfigs', { files: preserved_configs.join(', ') }));
       }
       refreshAll();
     });
     const unlisten2 = listen<{ file_name: string; error: string }>('mod-auto-install-failed', (event) => {
-      toast.error(`Failed to install ${event.payload.file_name}: ${event.payload.error}`);
+      toast.error(t('app.toast.installFailed', { file: event.payload.file_name, error: event.payload.error }));
     });
     // Emitted by update_mod / repair_mod / update_all_mods whenever an
     // update carried forward user-edited config files. The downloads
@@ -161,9 +150,9 @@ function AppInner() {
     const unlistenPreserve = listen<{ mod_name: string; files: string[] }>(
       'mod-configs-preserved',
       (event) => {
-        const { mod_name, files } = event.payload;
+        const { files } = event.payload;
         if (files.length === 0) return;
-        toast.info(formatPreservedConfigsMessage(mod_name, files));
+        toast.info(t('app.toast.preservedConfigs', { files: files.join(', ') }));
       },
     );
     // Modpack apply / subscription update emits this when one or more
@@ -178,9 +167,9 @@ function AppInner() {
       const { profile_name, skipped } = event.payload;
       if (skipped.length === 0) return;
       const summary = skipped.length === 1
-        ? `Skipped 1 mod: ${skipped[0].mod_name} needs game v${skipped[0].min_game_version} (you have v${skipped[0].user_game_version || '?'}).`
-        : `Skipped ${skipped.length} mods (need a newer game build than yours): ${skipped.map((s) => s.mod_name).join(', ')}.`;
-      toast.info(`Modpack "${profile_name}" applied. ${summary}`);
+        ? t('app.skippedMod', { name: skipped[0].mod_name, version: skipped[0].min_game_version, gameVersion: skipped[0].user_game_version || '?' })
+        : t('app.skippedMods', { n: skipped.length, names: skipped.map((s) => s.mod_name).join(', ') });
+      toast.info(t('app.toast.modpackApplied', { name: profile_name, summary }));
     });
     return () => {
       unlisten1.then(f => f());
@@ -261,6 +250,7 @@ function AppInner() {
           subscriptions: subs,
           activeProfile: activeProfileRef.current,
           subUpdates: subUpdatesRef.current,
+          t,
         });
         if (outcome.kind === 'cancelled') return;
 
@@ -269,23 +259,26 @@ function AppInner() {
 
         if (outcome.kind === 'installed') {
           toast.success(
-            `Installed modpack "${outcome.profile.name}" — ${outcome.profile.mods.length} mods. You're subscribed for updates!`,
+            t('profiles.toast.importedModpack', { name: outcome.profile.name, count: outcome.profile.mods.length }),
           );
         } else if (outcome.kind === 'activated') {
-          toast.success(`Switched to "${outcome.profileName}"`);
+          toast.success(t('profiles.toast.switched', { name: outcome.profileName }));
         } else if (outcome.kind === 'reapplied') {
           const parts: string[] = [];
           if (outcome.result.downloaded > 0) parts.push(`${outcome.result.downloaded} downloaded`);
           if (outcome.result.failed_downloads.length > 0) parts.push(`${outcome.result.failed_downloads.length} failed`);
           if (outcome.result.missing_mods.length > 0) parts.push(`${outcome.result.missing_mods.length} still missing`);
-          toast.info(parts.length ? `Re-applied "${outcome.profileName}" - ${parts.join(', ')}.` : `Re-applied "${outcome.profileName}".`);
+          toast.info(parts.length > 0
+            ? t('profiles.toast.reappliedWithDetails', { name: outcome.profileName, details: parts.join(', ') })
+            : t('profiles.toast.reapplied', { name: outcome.profileName }));
         } else if (outcome.kind === 'synced') {
-          toast.success(`Synced "${outcome.profileName}" — you're up to date!`);
+          toast.success(t('profiles.toast.syncedUpToDate', { name: outcome.profileName }));
         } else if (outcome.kind === 'already-active') {
-          toast.info(`You're already on "${outcome.profileName}".`);
+          toast.info(t('profiles.toast.alreadyActive', { name: outcome.profileName }));
         }
       } catch (e) {
-        toast.error(`Couldn't open share link: ${e instanceof Error ? e.message : String(e)}`);
+        const errMsg = e instanceof Error ? e.message : String(e);
+        toast.error(t('app.toast.couldntOpenShare', { error: errMsg }));
         // No explicit delete needed — the time-window dedupe ages the
         // entry out in 2s, well within any human-paced retry.
       }
@@ -336,13 +329,11 @@ function AppInner() {
     setUpdateInstalling(true);
     try {
       await appUpdate.downloadAndInstall();
-      toast.success('Update installed. Restarting...');
+      toast.success(t('app.toast.updateInstalled'));
       await relaunch();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      toast.error(
-        `Update failed: ${msg}. If you installed via .deb or .rpm, use the AppImage build for seamless updates, or click Download to get the new package manually.`
-      );
+      toast.error(t('app.updateFailed', { error: msg }));
       setUpdateInstalling(false);
     }
   }
@@ -351,7 +342,8 @@ function AppInner() {
     try {
       await openUrl(RELEASES_URL);
     } catch (e) {
-      toast.error(`Failed to open browser: ${e instanceof Error ? e.message : String(e)}`);
+      const errMsg = e instanceof Error ? e.message : String(e);
+      toast.error(t('app.toast.browserFailed', { error: errMsg }));
     }
   }
 
@@ -363,13 +355,14 @@ function AppInner() {
     setLaunching('modded');
     try {
       await launchGame();
-      toast.success('Launching STS2 via Steam (auto-backup created)...');
+      toast.success(t('app.toast.launching'));
       // Keep the spinner up briefly so the user sees the transition;
       // hide once the Steam launcher takes over the foreground.
       setTimeout(() => { setLaunching(null); refreshAll(); }, 2500);
     } catch (e) {
       setLaunching(null);
-      toast.error(`Failed to launch game: ${e instanceof Error ? e.message : String(e)}`);
+      const errMsg = e instanceof Error ? e.message : String(e);
+      toast.error(t('app.toast.launchFailed', { error: errMsg }));
     }
   }
 
@@ -378,12 +371,13 @@ function AppInner() {
     setLaunching('vanilla');
     try {
       await launchVanilla();
-      toast.success('Launching STS2 in vanilla mode (all mods disabled, backup created)...');
+      toast.success(t('app.toast.launchingVanilla'));
       await refreshAll();
       setTimeout(() => setLaunching(null), 2500);
     } catch (e) {
       setLaunching(null);
-      toast.error(`Failed to launch: ${e instanceof Error ? e.message : String(e)}`);
+      const errMsg = e instanceof Error ? e.message : String(e);
+      toast.error(t('app.toast.launchVanillaFailed', { error: errMsg }));
     }
   }
 
@@ -459,14 +453,15 @@ function AppInner() {
             const filePath = file.path as string;
             if (filePath) {
               const mod = await installModFromFile(filePath);
-              toast.success(`Installed mod: ${mod.name}`);
+              toast.success(t('app.toast.installedMod', { name: mod.name }));
               await refreshAll();
             }
           } catch (err) {
-            toast.error(`Failed to install ${file.name}: ${err instanceof Error ? err.message : String(err)}`);
+            const errMsg = err instanceof Error ? err.message : String(err);
+            toast.error(t('app.toast.installZipFailed', { file: file.name, error: errMsg }));
           }
         } else {
-          toast.error(`Unsupported file: ${file.name}. Use .zip, .7z, or .rar.`);
+          toast.error(t('app.toast.unsupportedFile', { name: file.name }));
         }
       }
     }
@@ -495,16 +490,16 @@ function AppInner() {
       <div className="gf-titlebar" data-tauri-drag-region>
         <div className="gf-titlebar-app" data-tauri-drag-region>
           <div className="gf-titlebar-mark" data-tauri-drag-region>✦</div>
-          <span className="gf-titlebar-title" data-tauri-drag-region>STS2 Mod Manager</span>
+          <span className="gf-titlebar-title" data-tauri-drag-region>{t('app.windowTitle')}</span>
         </div>
         <div className="gf-titlebar-controls">
-          <button className="gf-titlebar-btn" title="Minimize" onClick={handleTitlebarMin}>
+          <button className="gf-titlebar-btn" title={t('app.minimize')} onClick={handleTitlebarMin}>
             <Minus size={12} />
           </button>
-          <button className="gf-titlebar-btn" title="Maximize" onClick={handleTitlebarMax}>
+          <button className="gf-titlebar-btn" title={t('app.maximize')} onClick={handleTitlebarMax}>
             <Square size={10} />
           </button>
-          <button className="gf-titlebar-btn gf-titlebar-close" title="Close" onClick={handleTitlebarClose}>
+          <button className="gf-titlebar-btn gf-titlebar-close" title={t('app.close')} onClick={handleTitlebarClose}>
             <X size={12} />
           </button>
         </div>
@@ -527,8 +522,8 @@ function AppInner() {
               <div className="gf-dropzone-icon">
                 <Package size={28} />
               </div>
-              <div className="gf-dropzone-title">Drop to install</div>
-              <div className="gf-dropzone-sub">.zip — we'll detect the source for you</div>
+              <div className="gf-dropzone-title">{t('app.dragDrop.textActive')}</div>
+              <div className="gf-dropzone-sub">{t('app.dragDrop.text')}</div>
             </div>
           </div>
         )}
@@ -538,17 +533,26 @@ function AppInner() {
           <div className="gf-brand">
             <div className="gf-brand-mark">✦</div>
             <span className="gf-brand-title">
-              <span className="gf-brand-game">Slay the Spire 2</span>
-              <span className="gf-brand-tag">Mod Manager</span>
+              <span className="gf-brand-game">{t('app.brandName')}</span>
+              <span className="gf-brand-tag">{t('app.brandTagline')}</span>
             </span>
           </div>
 
-          {NAV.map(({ id, label, icon: Icon }) => {
+          {NAV.map(({ id, icon: Icon }) => {
             // Profiles gets a count badge when followed packs have
             // pending updates — same data the Home view's "update
             // available" cards consume, lifted to AppContext so the
             // sidebar can read it from anywhere.
             const badge = id === 'profiles' && subUpdates.length > 0 ? subUpdates.length : null;
+            const navLabels: Record<View, string> = {
+              home: t('nav.home'),
+              profiles: t('nav.profiles'),
+              mods: t('nav.mods'),
+              'browse-mods': t('nav.browseMods'),
+              'browse-modpacks': t('nav.browseModpacks'),
+              tutorial: t('nav.tutorial'),
+              settings: t('nav.settings'),
+            };
             return (
               <button
                 key={id}
@@ -556,9 +560,9 @@ function AppInner() {
                 className={cn('gf-nav', activeView === id && 'active')}
               >
                 <Icon size={14} className="gf-nav-icon" />
-                <span>{label}</span>
+                <span>{navLabels[id]}</span>
                 {badge !== null && (
-                  <span className="gf-nav-badge" title={`${badge} pack${badge === 1 ? '' : 's'} ${badge === 1 ? 'has' : 'have'} an update available`}>
+                  <span className="gf-nav-badge" title={badge === 1 ? t('app.packUpdateTooltip_one', { badge }) : t('app.packUpdateTooltip_other', { badge })}>
                     {badge}
                   </span>
                 )}
@@ -567,28 +571,39 @@ function AppInner() {
           })}
 
           <div className="gf-side-foot">
-            {FOOT_NAV.map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                onClick={() => setActiveView(id)}
-                className={cn('gf-nav', activeView === id && 'active')}
-              >
-                <Icon size={14} className="gf-nav-icon" />
-                <span>{label}</span>
-              </button>
-            ))}
+            {FOOT_NAV.map(({ id, icon: Icon }) => {
+              const footLabels: Record<View, string> = {
+                home: t('nav.home'),
+                profiles: t('nav.profiles'),
+                mods: t('nav.mods'),
+                'browse-mods': t('nav.browseMods'),
+                'browse-modpacks': t('nav.browseModpacks'),
+                tutorial: t('nav.tutorial'),
+                settings: t('nav.settings'),
+              };
+              return (
+                <button
+                  key={id}
+                  onClick={() => setActiveView(id)}
+                  className={cn('gf-nav', activeView === id && 'active')}
+                >
+                  <Icon size={14} className="gf-nav-icon" />
+                  <span>{footLabels[id]}</span>
+                </button>
+              );
+            })}
 
             {/* Status block */}
             <div className="gf-side-status">
               <div className="gf-side-stat-row">
                 <span className={cn('gf-side-stat-dot', !gameInfo?.valid && 'err')} />
                 <span className="gf-side-stat-label">
-                  {gameInfo?.valid ? 'STS2 detected' : 'Game not found'}
+                  {gameInfo?.valid ? t('app.sts2Detected') : t('app.gameNotFound')}
                 </span>
               </div>
               {gameInfo?.valid && (
                 <div className="gf-side-stat-meta">
-                  {enabledCount} active / {totalCount} mods
+                  {t('app.modCount', { enabled: enabledCount, total: totalCount })}
                 </div>
               )}
               {appVersion && <div className="gf-side-version">v{appVersion}</div>}
@@ -604,15 +619,15 @@ function AppInner() {
               <button
                 className="gf-prof"
                 onClick={() => setShowProfileSwitcher((v) => !v)}
-                title="Switch active pack"
+                title={t('app.switchActivePack')}
               >
-                <div className="gf-prof-avatar">{profileInitials || 'VA'}</div>
+                <div className="gf-prof-avatar">{profileInitials || t('app.vanillaInitials')}</div>
                 <div className="gf-prof-text">
-                  <span className="gf-prof-eyebrow">Active Profile</span>
-                  <span className="gf-prof-name">{activeProfile || 'Vanilla'}</span>
+                  <span className="gf-prof-eyebrow">{t('app.activeProfile')}</span>
+                  <span className="gf-prof-name">{activeProfile || t('app.launch.vanilla')}</span>
                 </div>
                 <span className="gf-prof-meta">
-                  {enabledCount} active / {totalCount} mods
+                  {t('app.modCount', { enabled: enabledCount, total: totalCount })}
                 </span>
                 <ChevronDown
                   size={14}
@@ -642,26 +657,26 @@ function AppInner() {
                 disabled={gameRunning}
                 title={
                   gameRunning
-                    ? 'Close STS2 first'
-                    : 'Launches Slay the Spire 2 with all mods temporarily disabled (auto-backup first).'
+                    ? t('app.closeSts2First')
+                    : t('app.vanillaDesc')
                 }
                 className="gf-btn-2 gf-btn-2-sm"
               >
-                <Play size={11} /> Vanilla — no mods
+                <Play size={11} /> {t('app.launch.vanilla')}
               </button>
               <button
                 onClick={handleLaunchGame}
                 disabled={gameRunning}
                 title={
                   gameRunning
-                    ? 'Close STS2 first'
-                    : `Launch Slay the Spire 2 with ${activeProfile || 'no active profile'}`
+                    ? t('app.closeSts2First')
+                    : t('app.launch.moddedTitle', { profile: activeProfile || t('app.launch.noActiveProfile') })
                 }
                 className="gf-btn"
               >
                 <Play size={12} fill="currentColor" />
                 <span className="gf-launch-label">
-                  Launch{activeProfile ? <> · <span className="gf-launch-prof">{activeProfile}</span></> : ''}
+                  {t('app.launch.modded')}{activeProfile ? <> · <span className="gf-launch-prof">{activeProfile}</span></> : ''}
                 </span>
               </button>
             </div>
@@ -673,9 +688,9 @@ function AppInner() {
               <div className="gf-banner gf-banner-warn">
                 <AlertTriangle size={16} className="gf-banner-icon" />
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600 }}>Slay the Spire 2 is running</div>
+                  <div style={{ fontWeight: 600 }}>{t('app.gameRunning')}</div>
                   <div style={{ fontSize: 12, opacity: 0.85 }}>
-                    Mod and profile changes are paused until the game closes — touching files now can crash the game.
+                    {t('app.gameRunningDesc')}
                   </div>
                 </div>
               </div>
@@ -690,13 +705,13 @@ function AppInner() {
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 600 }}>
                     {updateInstalling
-                      ? `Installing v${appUpdate.version}...`
-                      : `Mod Manager v${appUpdate.version} is available`}
+                      ? t('app.installing', { version: appUpdate.version })
+                      : t('app.updateAvailableBanner', { version: appUpdate.version })}
                   </div>
                   <div style={{ fontSize: 12, opacity: 0.8 }}>
                     {updateInstalling
-                      ? 'The app will restart when this finishes.'
-                      : `You're on v${appUpdate.currentVersion}.`}
+                      ? t('app.willRestart')
+                      : t('app.currentVersion', { version: appUpdate.currentVersion })}
                   </div>
                 </div>
                 <button
@@ -704,22 +719,22 @@ function AppInner() {
                   disabled={updateInstalling}
                   className="gf-btn-3"
                 >
-                  Dismiss
+                  {t('common.dismiss')}
                 </button>
                 <button
                   onClick={handleDownloadUpdate}
                   disabled={updateInstalling}
-                  title="Open GitHub releases page to download manually"
+                  title={t('app.downloadManual')}
                   className="gf-btn-3"
                 >
-                  <ExternalLink size={11} /> Download
+                  <ExternalLink size={11} /> {t('app.download')}
                 </button>
                 <button
                   onClick={handleInstallUpdate}
                   disabled={updateInstalling}
                   className="gf-btn gf-btn-sm"
                 >
-                  {updateInstalling ? 'Installing...' : 'Install & Restart'}
+                  {updateInstalling ? t('app.installingLabel') : t('app.installAndRestartLabel')}
                 </button>
               </div>
             </div>

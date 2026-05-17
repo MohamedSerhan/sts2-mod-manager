@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { getGameInfo, getInstalledMods, isGameRunning, checkSubscriptionUpdates, auditModVersions, updateAllMods } from '../hooks/useTauri';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -66,6 +67,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const gameRunningRef = useRef<boolean>(false);
   const toast = useToast();
   const confirm = useConfirm();
+  const { t } = useTranslation();
   // Tracks the active "Nexus pending install" sticky toast so we can
   // dismiss it when the watcher reports an install (or when the user
   // opens a different Nexus mod, which supersedes the previous prompt).
@@ -85,7 +87,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // messages if they bounce between mods.
     dismissNexusPending();
     const id = toast.sticky(
-      `Opened ${modName} on Nexus. Click "Slow Download" / "Manual" — the app will auto-install when the zip lands in your Downloads folder.`,
+      t('app.nexusPendingToast', { modName }),
       'info',
     );
     const timeoutHandle = window.setTimeout(() => {
@@ -199,7 +201,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const results = await auditModVersions();
       setAuditResults(results);
     } catch (e) {
-      toast.error(`Audit failed: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('app.auditFailed', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setAuditing(false);
     }
@@ -232,11 +234,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateAllGithub = useCallback(async (githubUpdateNames: string[]) => {
     if (updatingAll || githubUpdateNames.length === 0) return;
     const ok = await confirm({
-      title: `Update ${githubUpdateNames.length} mod${githubUpdateNames.length === 1 ? '' : 's'}?`,
-      body:
-        `This will download and re-install the latest GitHub release for each. ` +
-        `Pinned mods are skipped. Make sure STS2 is closed first.`,
-      confirmLabel: `Update ${githubUpdateNames.length} mod${githubUpdateNames.length === 1 ? '' : 's'}`,
+      title: t('app.updateConfirmTitle', { count: githubUpdateNames.length }),
+      body: t('app.updateConfirmBody'),
+      confirmLabel: t('app.updateConfirmLabel', { count: githubUpdateNames.length }),
     });
     if (!ok) return;
     setUpdatingAll(true);
@@ -244,8 +244,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const updated = await updateAllMods();
       toast.success(
         updated.length === 0
-          ? 'Nothing to update.'
-          : `Updated ${updated.length} mod${updated.length === 1 ? '' : 's'}.`,
+          ? t('app.nothingToUpdate')
+          : t('app.updated', { count: updated.length }),
       );
       await refreshAll();
       const names = Array.from(
@@ -253,7 +253,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       );
       await refreshAuditEntries(names);
     } catch (e) {
-      toast.error(`Update failed: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('app.updateFailed', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setUpdatingAll(false);
     }

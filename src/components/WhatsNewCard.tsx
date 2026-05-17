@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { getVersion } from '@tauri-apps/api/app';
 import { Sparkles, X, ExternalLink } from 'lucide-react';
 import { openUrl } from '@tauri-apps/plugin-opener';
@@ -21,6 +22,7 @@ const DISMISS_PREFIX = 'sts2mm-whatsnew-seen:';
  * a dev build at least *something* to read.
  */
 export function WhatsNewCard() {
+  const { t } = useTranslation();
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [entry, setEntry] = useState<ChangelogEntry | null>(null);
   const [dismissed, setDismissed] = useState(true); // start hidden until we know
@@ -77,23 +79,23 @@ export function WhatsNewCard() {
       <div className="gf-whatsnew-head">
         <div className="gf-whatsnew-title">
           <Sparkles size={14} />
-          <span>What's new in v{entry.version}</span>
+          <span>{t('whatsNew.title', { version: entry.version })}</span>
           {entry.date && <span className="gf-whatsnew-date">· {entry.date}</span>}
         </div>
         <div className="gf-whatsnew-actions">
           <button
             className="gf-whatsnew-link"
             onClick={handleViewFull}
-            title="Open the full changelog on GitHub"
+            title={t('whatsNew.fullChangelogTitle')}
           >
             <ExternalLink size={11} />
-            Full changelog
+            {t('whatsNew.fullChangelog')}
           </button>
           <button
             className="gf-whatsnew-close"
             onClick={handleDismiss}
-            title="Dismiss — won't show again for this version"
-            aria-label="Dismiss what's new"
+            title={t('whatsNew.dismissTitle')}
+            aria-label={t('whatsNew.dismissAria')}
           >
             <X size={12} />
           </button>
@@ -105,7 +107,7 @@ export function WhatsNewCard() {
         ))}
         {appVersion && entry.version !== appVersion && (
           <p className="gf-whatsnew-note">
-            (Showing the latest released notes — your build is v{appVersion}.)
+            {t('whatsNew.devNote', { version: appVersion })}
           </p>
         )}
       </div>

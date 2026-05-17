@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from 'react';
+import { useTranslation, Trans } from 'react-i18next';
 import { AlertTriangle, X } from 'lucide-react';
 
 // v5 batch 4 — promise-based confirm dialog. Replaces window.confirm() with
@@ -51,6 +52,7 @@ interface PendingConfirm extends ConfirmOptions {
 }
 
 export function ConfirmProvider({ children }: { children: ReactNode }) {
+  const { t } = useTranslation();
   const [pending, setPending] = useState<PendingConfirm | null>(null);
   const [typed, setTyped] = useState('');
   const [checked, setChecked] = useState(false);
@@ -95,7 +97,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
               <button
                 onClick={() => close(false)}
                 className="gf-btn-3 gf-btn-icon"
-                title="Cancel"
+                title={t('common.cancel')}
               >
                 <X size={14} />
               </button>
@@ -144,7 +146,9 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
                 )}
                 {pending.typedPhrase && (
                   <div style={{ fontSize: 12.5, color: 'oklch(0.86 0.10 25)' }}>
-                    Type <b>{pending.typedPhrase}</b> to confirm:
+                    <Trans i18nKey="confirm.typePhrase" values={{ phrase: pending.typedPhrase }}>
+                      Type <b>{pending.typedPhrase}</b> to confirm:
+                    </Trans>
                     <input
                       className={`gf-set-input ${typed && !phraseOk ? 'is-err' : phraseOk && typed ? 'is-ok' : ''}`}
                       placeholder={pending.typedPhrase}
@@ -160,7 +164,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
 
             <div className="gf-modal-foot">
               <button className="gf-btn-3" onClick={() => close(false)}>
-                {pending.cancelLabel || 'Cancel'}
+                {pending.cancelLabel || t('common.cancel')}
               </button>
               <div style={{ flex: 1 }} />
               <button
@@ -170,7 +174,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
                 autoFocus={!pending.typedPhrase}
                 style={pending.destructive && pending.typedPhrase ? { background: 'oklch(0.65 0.18 25)', color: '#fff', border: 0 } : undefined}
               >
-                {pending.confirmLabel || (pending.destructive ? 'Delete' : 'Confirm')}
+                {pending.confirmLabel || (pending.destructive ? t('common.delete') : t('common.confirm'))}
               </button>
             </div>
           </div>

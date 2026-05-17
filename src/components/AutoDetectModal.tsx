@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { RefreshCw, X } from 'lucide-react';
 import { autoDetectSources, setModSource } from '../hooks/useTauri';
 import { useToast } from '../contexts/ToastContext';
@@ -15,6 +16,7 @@ interface Props {
 }
 
 export function AutoDetectModal({ open, onClose, onApplied }: Props) {
+  const { t } = useTranslation();
   const toast = useToast();
   const [scanning, setScanning] = useState(false);
   const [result, setResult] = useState<AutoDetectResult | null>(null);
@@ -28,7 +30,7 @@ export function AutoDetectModal({ open, onClose, onApplied }: Props) {
     setSkipped(new Set());
     autoDetectSources()
       .then(setResult)
-      .catch((e) => toast.error(`Auto-detect failed: ${e instanceof Error ? e.message : String(e)}`))
+      .catch((e) => toast.error(t('autoDetect.scanFailed', { error: e instanceof Error ? e.message : String(e) })))
       .finally(() => setScanning(false));
   }, [open]);
 
@@ -71,8 +73,8 @@ export function AutoDetectModal({ open, onClose, onApplied }: Props) {
       }
     }
     setApplying(false);
-    if (fail === 0) toast.success(`Linked ${ok} mod${ok === 1 ? '' : 's'} to GitHub sources`);
-    else toast.info(`${ok} linked · ${fail} failed`);
+    if (fail === 0) toast.success(t('autoDetect.linkedSuccess', { count: ok }));
+    else toast.info(t('autoDetect.linkedPartial', { ok, fail }));
     onApplied();
     onClose();
   }
@@ -82,13 +84,12 @@ export function AutoDetectModal({ open, onClose, onApplied }: Props) {
       <div className="gf-modal" style={{ width: 640 }} onClick={(e) => e.stopPropagation()}>
         <div className="gf-modal-head">
           <div>
-            <div className="gf-modal-title">Auto-detect sources</div>
+            <div className="gf-modal-title">{t('autoDetect.title')}</div>
             <div className="gf-modal-sub">
-              Scan installed mods against GitHub by name. Review matches before
-              applying — high-confidence matches are pre-selected.
+              {t('autoDetect.subtitle')}
             </div>
           </div>
-          <button className="gf-btn-3 gf-btn-icon" onClick={onClose} title="Close">
+          <button className="gf-btn-3 gf-btn-icon" onClick={onClose} title={t('common.close')}>
             <X size={14} />
           </button>
         </div>
@@ -97,10 +98,10 @@ export function AutoDetectModal({ open, onClose, onApplied }: Props) {
           {scanning ? (
             <div style={{ padding: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, color: 'var(--ink-mute)' }}>
               <RefreshCw size={14} className="animate-spin" />
-              Scanning…
+              {t('autoDetect.scanning')}
             </div>
           ) : !result ? (
-            <div style={{ padding: 18, color: 'var(--ink-mute)' }}>No result.</div>
+            <div style={{ padding: 18, color: 'var(--ink-mute)' }}>{t('autoDetect.noResult')}</div>
           ) : matched.length === 0 && unmatched.length === 0 ? (
             // Nothing scanned. Either there are no mods installed, or every
             // installed mod already has a GitHub or Nexus source attached
@@ -111,22 +112,19 @@ export function AutoDetectModal({ open, onClose, onApplied }: Props) {
               {result.skipped_already_linked && result.skipped_already_linked > 0 ? (
                 <>
                   <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', marginBottom: 6 }}>
-                    Nothing to detect — every mod already has a source.
+                    {t('autoDetect.allLinkedTitle')}
                   </div>
                   <div style={{ fontSize: 12.5, color: 'var(--ink-mute)', lineHeight: 1.55 }}>
-                    All {result.skipped_already_linked} installed mod
-                    {result.skipped_already_linked === 1 ? ' has' : 's have'} a GitHub or Nexus link
-                    attached, so auto-detect left them alone. To re-link a specific mod manually,
-                    open the Mods view, expand the row, and edit its source.
+                    {t('autoDetect.allLinkedBody', { count: result.skipped_already_linked })}
                   </div>
                 </>
               ) : (
                 <>
                   <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', marginBottom: 6 }}>
-                    No mods to scan.
+                    {t('autoDetect.noModsTitle')}
                   </div>
                   <div style={{ fontSize: 12.5, color: 'var(--ink-mute)' }}>
-                    Install some mods first.
+                    {t('autoDetect.noModsBody')}
                   </div>
                 </>
               )}
@@ -136,21 +134,20 @@ export function AutoDetectModal({ open, onClose, onApplied }: Props) {
               <div className="gf-detect-stats">
                 <div className="gf-detect-stat ok">
                   {high.length}
-                  <span>matched</span>
+                  <span>{t('autoDetect.matched')}</span>
                 </div>
                 <div className="gf-detect-stat warn">
                   {ambiguous.length}
-                  <span>ambiguous</span>
+                  <span>{t('autoDetect.ambiguous')}</span>
                 </div>
                 <div className="gf-detect-stat err">
                   {unmatched.length}
-                  <span>no match</span>
+                  <span>{t('autoDetect.noMatch')}</span>
                 </div>
               </div>
               {result.skipped_already_linked && result.skipped_already_linked > 0 && (
                 <div style={{ marginTop: 10, fontSize: 12, color: 'var(--ink-dim)' }}>
-                  {result.skipped_already_linked} mod{result.skipped_already_linked === 1 ? '' : 's'}{' '}
-                  skipped — already linked.
+                  {t('autoDetect.skippedAlreadyLinked', { count: result.skipped_already_linked })}
                 </div>
               )}
 
@@ -168,7 +165,7 @@ export function AutoDetectModal({ open, onClose, onApplied }: Props) {
                       <span className="gf-detect-name">{m.mod_name}</span>
                       <span className="gf-detect-match">{m.github_repo}</span>
                       <span style={{ fontSize: 10.5, color: 'var(--ink-dim)' }}>
-                        {isSkipped ? 'skip' : 'link'}
+                        {isSkipped ? t('autoDetect.skip') : t('autoDetect.link')}
                       </span>
                     </div>
                   );
@@ -185,7 +182,7 @@ export function AutoDetectModal({ open, onClose, onApplied }: Props) {
                   <div key={name} className="gf-detect-row gf-detect-err">
                     <span className="gf-detect-led" />
                     <span className="gf-detect-name">{name}</span>
-                    <span className="gf-detect-match">no candidates</span>
+                    <span className="gf-detect-match">{t('autoDetect.noCandidates')}</span>
                     <span style={{ fontSize: 10.5, color: 'oklch(0.82 0.16 25)' }}>—</span>
                   </div>
                 ))}
@@ -195,11 +192,11 @@ export function AutoDetectModal({ open, onClose, onApplied }: Props) {
         </div>
 
         <div className="gf-modal-foot">
-          <button className="gf-btn-3" onClick={onClose}>Cancel</button>
+          <button className="gf-btn-3" onClick={onClose}>{t('common.cancel')}</button>
           <div style={{ flex: 1 }} />
           {willApply.length > 0 && (
             <button className="gf-btn" onClick={handleApply} disabled={applying}>
-              {applying ? 'Applying…' : `Apply ${willApply.length} match${willApply.length === 1 ? '' : 'es'}`}
+              {applying ? t('common.applying') : t('autoDetect.applyingMatches', { count: willApply.length })}
             </button>
           )}
         </div>

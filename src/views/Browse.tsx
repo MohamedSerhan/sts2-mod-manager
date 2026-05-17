@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Search, Star, Download, ExternalLink, Flame, Sparkles, Loader2, Plus } from 'lucide-react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { Card } from '../components/Card';
@@ -26,6 +27,7 @@ interface BrowseViewProps {
 }
 
 export function BrowseView({ onGoToSettings }: BrowseViewProps = {}) {
+  const { t } = useTranslation();
   const { refreshAll } = useApp();
   const toast = useToast();
   const [tab, setTab] = useState<BrowseTab>('github');
@@ -67,10 +69,10 @@ export function BrowseView({ onGoToSettings }: BrowseViewProps = {}) {
       const finalList = ranked.length > 0 ? ranked : repos;
       setResults(finalList);
       if (finalList.length === 0) {
-        toast.info('No mods found. Try different keywords.');
+        toast.info(t('browse.search.noResults'));
       }
     } catch (e) {
-      toast.error(`Search failed: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('browse.search.searchFailed', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setLoading(false);
     }
@@ -81,9 +83,9 @@ export function BrowseView({ onGoToSettings }: BrowseViewProps = {}) {
       setInstalling(repo.full_name);
       const mod = await downloadGithubMod(repo.owner.login, repo.name);
       await refreshAll();
-      toast.success(`Installed: ${mod.name}`);
+      toast.success(t('browse.card.installed', { name: mod.name }));
     } catch (e) {
-      toast.error(`Failed to install ${repo.name}: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('browse.card.installFailed', { name: repo.name, error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setInstalling(null);
     }
@@ -131,7 +133,7 @@ export function BrowseView({ onGoToSettings }: BrowseViewProps = {}) {
     try {
       await openUrl(url);
     } catch (e) {
-      toast.error(`Failed to open: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('common.errorWithMessage', { message: e instanceof Error ? e.message : String(e) }));
     }
   }
 
@@ -150,21 +152,21 @@ export function BrowseView({ onGoToSettings }: BrowseViewProps = {}) {
     <div className="gf-body">
       <div className="gf-page-head">
         <div>
-          <h1 className="gf-page-title">Browse mods</h1>
-          <p className="gf-page-sub">GitHub installs in one click; Nexus opens in your browser (free-tier)</p>
+          <h1 className="gf-page-title">{t('browse.page.title')}</h1>
+          <p className="gf-page-sub">{t('browse.page.subtitle')}</p>
         </div>
         <div className="gf-page-actions">
           <Button size="sm" onClick={() => setShowQuickAdd(true)}>
-            <Plus size={14} /> Add by URL
+            <Plus size={14} /> {t('browse.actions.addByUrl')}
           </Button>
         </div>
       </div>
 
       {/* Tabs */}
       <div className="gf-tabs" style={{ marginBottom: 14 }}>
-        {tabBtn('github', 'GitHub', Search)}
-        {tabBtn('nexus_trending', 'Nexus Trending', Flame)}
-        {tabBtn('nexus_latest', 'Nexus Latest', Sparkles)}
+        {tabBtn('github', t('browse.tabs.github'), Search)}
+        {tabBtn('nexus_trending', t('browse.tabs.nexusTrending'), Flame)}
+        {tabBtn('nexus_latest', t('browse.tabs.nexusLatest'), Sparkles)}
       </div>
 
       {tab === 'github' && (
@@ -183,14 +185,14 @@ export function BrowseView({ onGoToSettings }: BrowseViewProps = {}) {
               />
               <input
                 type="text"
-                placeholder="Search for mods..."
+                placeholder={t('browse.search.placeholder')}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 className="w-full bg-surface border border-border rounded-lg pl-11 pr-4 py-3 text-sm text-text placeholder:text-text-dim focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-colors"
               />
             </div>
             <Button type="submit" disabled={loading}>
-              {loading ? 'Searching...' : 'Search'}
+              {loading ? t('common.searching') : t('common.search')}
             </Button>
           </form>
 
@@ -212,7 +214,7 @@ export function BrowseView({ onGoToSettings }: BrowseViewProps = {}) {
                       </div>
                     </div>
                     <p className="text-xs text-text-muted line-clamp-2 mb-3">
-                      {repo.description || 'No description'}
+                      {repo.description || t('browse.card.noDescription')}
                     </p>
                   </div>
                   <div className="flex items-center justify-between">
@@ -223,7 +225,7 @@ export function BrowseView({ onGoToSettings }: BrowseViewProps = {}) {
                         target="_blank"
                         rel="noopener noreferrer"
                         className="p-1.5 rounded-md text-text-dim hover:text-text hover:bg-surface-hover transition-colors"
-                        title="View on GitHub"
+                        title={t('browse.card.viewOnGitHub')}
                       >
                         <ExternalLink size={14} />
                       </a>
@@ -233,7 +235,7 @@ export function BrowseView({ onGoToSettings }: BrowseViewProps = {}) {
                         disabled={installing === repo.full_name}
                       >
                         <Download size={14} />
-                        {installing === repo.full_name ? 'Installing...' : 'Install'}
+                        {installing === repo.full_name ? t('common.installing') : t('common.install')}
                       </Button>
                     </div>
                   </div>
@@ -245,10 +247,10 @@ export function BrowseView({ onGoToSettings }: BrowseViewProps = {}) {
               <Card className="flex flex-col items-center justify-center py-16">
                 <Search size={44} className="text-text-dim opacity-40 mb-4" />
                 <p className="text-base text-text-dim">
-                  Search for mods to get started
+                  {t('browse.search.emptyPrompt')}
                 </p>
                 <p className="text-sm text-text-dim mt-1.5">
-                  Try searching for game-related keywords
+                  {t('browse.search.emptyHint')}
                 </p>
               </Card>
             )
@@ -263,14 +265,14 @@ export function BrowseView({ onGoToSettings }: BrowseViewProps = {}) {
               <div className="gf-banner gf-banner-info" style={{ marginBottom: 14 }}>
                 <Sparkles size={16} className="gf-banner-icon" />
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600 }}>Nexus is hidden — set an API key to see Nexus mods</div>
+                  <div style={{ fontWeight: 600 }}>{t('browse.nexus.keyMissing')}</div>
                   <div style={{ fontSize: 12, opacity: 0.85 }}>
-                    Nexus's free API does not allow general text search, but it does expose Trending and Latest Added lists.
+                    {t('browse.nexus.keyMissingHint')}
                   </div>
                 </div>
                 {onGoToSettings && (
                   <Button variant="secondary" size="sm" onClick={onGoToSettings}>
-                    Open Settings
+                    {t('browse.nexus.openSettings')}
                   </Button>
                 )}
               </div>
@@ -278,18 +280,18 @@ export function BrowseView({ onGoToSettings }: BrowseViewProps = {}) {
           ) : nexusLoading ? (
             <div className="gf-empty">
               <div className="gf-empty-art"><Loader2 size={28} className="animate-spin" /></div>
-              <div className="gf-empty-title">Loading {tab === 'nexus_trending' ? 'trending' : 'latest'} mods…</div>
+              <div className="gf-empty-title">{t('browse.nexus.loading', { type: tab === 'nexus_trending' ? 'trending ' : 'latest ' })}</div>
             </div>
           ) : nexusError ? (
             <div className="gf-empty">
               <div className="gf-empty-art" style={{ color: 'oklch(0.65 0.18 25)' }}>!</div>
-              <div className="gf-empty-title">Couldn't reach Nexus</div>
+              <div className="gf-empty-title">{t('browse.nexus.couldntReach')}</div>
               <div className="gf-empty-sub">{nexusError}</div>
             </div>
           ) : nexusMods.length === 0 ? (
             <div className="gf-empty">
               <div className="gf-empty-art"><Sparkles size={28} /></div>
-              <div className="gf-empty-title">No mods returned</div>
+              <div className="gf-empty-title">{t('browse.nexus.noModsReturned')}</div>
             </div>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -309,11 +311,11 @@ export function BrowseView({ onGoToSettings }: BrowseViewProps = {}) {
                         {mod.name || `Mod #${mod.mod_id}`}
                       </h3>
                       <p className="text-xs text-text-dim">
-                        {mod.author || 'Unknown author'}
+                        {mod.author || t('browse.card.unknownAuthor')}
                         {mod.version ? ` • v${mod.version}` : ''}
                       </p>
                       <p className="text-xs text-text-muted line-clamp-3 mt-1.5">
-                        {mod.summary || mod.description || 'No description'}
+                        {mod.summary || mod.description || t('browse.card.noDescription')}
                       </p>
                     </div>
                   </div>
@@ -321,7 +323,7 @@ export function BrowseView({ onGoToSettings }: BrowseViewProps = {}) {
                     <Badge variant="nexus">Nexus</Badge>
                     <Button size="sm" onClick={() => openNexusMod(mod.mod_id)}>
                       <ExternalLink size={14} />
-                      Open on Nexus
+                      {t('browse.card.openOnNexus')}
                     </Button>
                   </div>
                 </Card>

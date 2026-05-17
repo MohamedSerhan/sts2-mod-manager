@@ -1,5 +1,6 @@
 // v5 batch 4 — full-screen launching overlay shown while we kick off the
 // game. Uses the gf-launch-* classes from styles.css.
+import { useTranslation } from 'react-i18next';
 
 interface Props {
   vanilla?: boolean;
@@ -7,20 +8,19 @@ interface Props {
 }
 
 export function LaunchSpinner({ vanilla = false, onCancel }: Props) {
+  const { t } = useTranslation();
   return (
     <div className="gf-launch-back">
       <div className="gf-launch-card">
         <div className="gf-launch-spinner" />
         <div className="gf-launch-t">
-          {vanilla ? 'Launching Slay the Spire 2 (vanilla)' : 'Launching Slay the Spire 2'}
+          {vanilla ? t('launch.titleVanilla') : t('launch.title')}
         </div>
         <div className="gf-launch-s">
-          {vanilla
-            ? 'All mods are temporarily disabled · auto-backup created · waiting for game window…'
-            : 'Verifying mods · auto-backup created · waiting for game window…'}
+          {vanilla ? t('launch.subtitleVanilla') : t('launch.subtitle')}
         </div>
         <button className="gf-btn-3" style={{ marginTop: 4 }} onClick={onCancel}>
-          Hide
+          {t('launch.hide')}
         </button>
       </div>
     </div>

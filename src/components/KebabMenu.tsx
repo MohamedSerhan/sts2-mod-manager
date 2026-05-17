@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { MoreHorizontal } from 'lucide-react';
 
 // v5 batch 2/3 — generic ⋯ kebab popover. Wraps a trigger button + a
@@ -25,9 +26,11 @@ export function KebabMenu({
   children,
   size = 'md',
   align = 'right',
-  title = 'More actions',
+  title,
   buttonClassName,
 }: KebabMenuProps) {
+  const { t } = useTranslation();
+  const resolvedTitle = title ?? t('common.moreActions');
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
@@ -60,7 +63,7 @@ export function KebabMenu({
       <button
         className={buttonClass}
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-        title={title}
+        title={resolvedTitle}
         aria-haspopup="menu"
         aria-expanded={open}
       >

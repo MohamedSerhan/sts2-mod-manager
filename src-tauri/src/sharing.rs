@@ -719,6 +719,51 @@ async fn upload_release_asset(
     Ok(resp.json::<ReleaseAsset>().await?)
 }
 
+/// Upload helper that recovers from GitHub's `422 already_exists`. The
+/// in-memory release listing we built ahead of time can lie — GitHub's
+/// per-release `assets` array sometimes round-trips non-ASCII names
+/// differently from what our `?name=<encoded>` POST produces, so our
+/// lookup may legitimately miss an asset that GitHub then refuses to
+/// re-create. When that happens we refetch the live asset listing, find
+/// the conflicting asset by canonical-decoded name, DELETE it, and POST
+/// once more. One retry only — any further conflict bubbles up.
+async fn upload_release_asset_recovering(
+    client: &reqwest::Client,
+    owner: &str,
+    repo: &str,
+    upload_url_template: &str,
+    filename: &str,
+    data: &[u8],
+) -> Result<ReleaseAsset> {
+    match upload_release_asset(client, upload_url_template, filename, data).await {
+        Ok(asset) => Ok(asset),
+        Err(AppError::Other(msg)) if msg.contains("already_exists") => {
+            log::warn!(
+                "Asset '{}' returned 422 already_exists — refetching release listing and replacing via DELETE-then-POST",
+                filename
+            );
+            let fresh = ensure_bundles_release(client, owner, repo).await?;
+            let canonical = decode_asset_name(filename);
+            let existing = fresh
+                .assets
+                .iter()
+                .find(|a| decode_asset_name(&a.name) == canonical);
+            match existing {
+                Some(asset) => {
+                    delete_release_asset(client, owner, repo, asset.id).await?;
+                    upload_release_asset(client, &fresh.upload_url, filename, data).await
+                }
+                None => Err(AppError::Other(format!(
+                    "Upload of '{}' failed with 422 already_exists but the asset is not visible in the release listing — \
+                     retry the share or delete the asset manually from GitHub.",
+                    filename
+                ))),
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+
 /// DELETE a release asset. Used by the replace flow to free the canonical
 /// name before re-POSTing fresh bytes under the same name.
 async fn delete_release_asset(
@@ -838,9 +883,139 @@ pub(crate) async fn upload_mod_bundle_via_release(
         return Ok((url, local_hash));
     }
 
-    // Net-new upload.
-    let asset = upload_release_asset(&client, &release.upload_url, &asset_name, zip_data).await?;
+    // Net-new upload, with 422 already_exists recovery — see
+    // upload_release_asset_recovering for the rationale.
+    let asset = upload_release_asset_recovering(
+        &client, username, &repo, &release.upload_url, &asset_name, zip_data,
+    ).await?;
     Ok((asset.browser_download_url, local_hash))
+}
+
+/// Minimal shape of a directory-listing entry returned by
+/// `GET /repos/{o}/{r}/contents/` — only the fields we read for the
+/// bundle-asset GC sweep. (For files in a directory listing, GitHub
+/// populates `download_url` with a `raw.githubusercontent.com` URL.)
+#[derive(Debug, Deserialize)]
+struct RepoContentEntry {
+    name: String,
+    #[serde(rename = "type")]
+    entry_type: String,
+    download_url: Option<String>,
+}
+
+/// Delete every asset on the curator's `bundles` release that no profile
+/// manifest in the same `sts2mm-profiles` repo references. Called after
+/// each share/re-share completes, so leftover bundles from prior renames,
+/// repaired-with-different-content uploads, or the v1.4.x ASCII-only
+/// asset names (`___SpeedX_v0.11.7.zip` before issue #44 was fixed) get
+/// reclaimed automatically.
+///
+/// Best-effort: every step that can fail logs and continues. We never
+/// fail the surrounding share over a cleanup error — orphan assets are a
+/// disk-space concern, not a correctness one, and the next share will
+/// retry the sweep anyway.
+pub(crate) async fn cleanup_orphan_bundle_assets(
+    token: &str,
+    owner: &str,
+) -> Result<usize> {
+    let client = build_client(token);
+    let repo = profiles_repo();
+    let base = github_api_base();
+
+    // 1. List `.json` profile manifests at the repo root.
+    let listing_url = format!("{}/repos/{}/{}/contents", base, owner, repo);
+    let listing_resp = match client.get(&listing_url).send().await {
+        Ok(r) => r,
+        Err(e) => {
+            log::warn!("GC: skipping cleanup — could not list contents of {}/{}: {}", owner, repo, e);
+            return Ok(0);
+        }
+    };
+    if !listing_resp.status().is_success() {
+        log::warn!(
+            "GC: skipping cleanup — contents listing for {}/{} returned {}",
+            owner, repo, listing_resp.status()
+        );
+        return Ok(0);
+    }
+    let entries: Vec<RepoContentEntry> = match listing_resp.json().await {
+        Ok(v) => v,
+        Err(e) => {
+            log::warn!("GC: skipping cleanup — could not parse contents listing for {}/{}: {}", owner, repo, e);
+            return Ok(0);
+        }
+    };
+
+    // 2. For each `.json` manifest, collect referenced bundle URLs.
+    let mut referenced: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for entry in entries.iter().filter(|e| e.entry_type == "file" && e.name.ends_with(".json")) {
+        let download_url = match entry.download_url.as_deref() {
+            Some(u) => u,
+            None => continue,
+        };
+        let resp = match client.get(download_url).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                log::warn!("GC: could not fetch manifest {}: {}", entry.name, e);
+                continue;
+            }
+        };
+        if !resp.status().is_success() {
+            log::warn!("GC: manifest {} returned {}", entry.name, resp.status());
+            continue;
+        }
+        let profile: crate::profiles::Profile = match resp.json().await {
+            Ok(p) => p,
+            Err(e) => {
+                log::warn!("GC: could not parse manifest {}: {}", entry.name, e);
+                continue;
+            }
+        };
+        for pm in profile.mods {
+            if let Some(url) = pm.bundle_url {
+                referenced.insert(url);
+            }
+        }
+    }
+
+    // 3. List every asset currently on the `bundles` release.
+    let release = match ensure_bundles_release(&client, owner, &repo).await {
+        Ok(r) => r,
+        Err(e) => {
+            log::warn!("GC: could not fetch bundles release for {}/{}: {}", owner, repo, e);
+            return Ok(0);
+        }
+    };
+
+    // 4. Delete orphans. If `referenced` is empty AND there are assets, we
+    // could be looking at a torn repo state (manifest listing failed mid-
+    // sweep) — refuse to delete anything in that case so we don't nuke a
+    // healthy release.
+    if referenced.is_empty() && !release.assets.is_empty() {
+        log::warn!(
+            "GC: aborting — referenced URL set is empty but release has {} assets. \
+             Refusing to delete anything in case the manifest listing was incomplete.",
+            release.assets.len()
+        );
+        return Ok(0);
+    }
+
+    let mut deleted = 0usize;
+    for asset in &release.assets {
+        if referenced.contains(&asset.browser_download_url) {
+            continue;
+        }
+        match delete_release_asset(&client, owner, &repo, asset.id).await {
+            Ok(()) => {
+                log::info!("GC: deleted orphan bundle asset '{}'", asset.name);
+                deleted += 1;
+            }
+            Err(e) => {
+                log::warn!("GC: failed to delete orphan asset '{}': {}", asset.name, e);
+            }
+        }
+    }
+    Ok(deleted)
 }
 
 /// Compose the release-asset filename for a mod bundle.
@@ -1358,6 +1533,16 @@ async fn share_profile_impl(
         &share_info_path,
         serde_json::to_string_pretty(&share_info).unwrap(),
     )?;
+
+    // Reclaim disk on the `bundles` release: any asset no profile manifest
+    // references after this upload is dead weight. Runs after the manifest
+    // upsert so the freshly-written manifest's bundle URLs are part of the
+    // referenced set. Always best-effort — never fails the share.
+    match cleanup_orphan_bundle_assets(token, &username).await {
+        Ok(0) => {}
+        Ok(n) => log::info!("GC: removed {} orphan bundle asset(s) from {}/{}", n, username, profiles_repo()),
+        Err(e) => log::warn!("GC: orphan-asset cleanup failed: {}", e),
+    }
 
     if let Some(e) = emit {
         e(
@@ -2835,16 +3020,17 @@ mod release_upload_tests {
         ).await.expect("ok");
     }
 
-    /// Regression test: mod names with non-ASCII characters (Chinese
-    /// ideographs, accents, etc.) must produce ASCII-only asset names.
-    /// GitHub's asset-list response round-trips non-ASCII names through
-    /// a normalization that doesn't match our POST URL-encoding, so the
-    /// orchestrator's find-by-name lookup would miss the existing asset
-    /// and fall through to POST → 422 already_exists. The fix is to use
-    /// `is_ascii_alphanumeric` instead of `is_alphanumeric` so the asset
-    /// name is round-trip stable.
+    /// Regression for issue #44: mod names with non-ASCII characters
+    /// (Chinese ideographs, emoji, accented chars) must PRESERVE those
+    /// characters in the uploaded asset filename — pre-fix the asset
+    /// name collapsed to `___SpeedX_v0.11.7.zip` because the sanitiser
+    /// stripped everything outside the ASCII alphanumeric set.
+    ///
+    /// The orchestrator's old "ASCII-only for round-trip stability"
+    /// concern is now handled by `decode_asset_name` on both sides of
+    /// the lookup comparison instead of by mangling the filename.
     #[tokio::test]
-    async fn upload_mod_bundle_via_release_sanitizes_non_ascii_to_underscores() {
+    async fn upload_mod_bundle_via_release_preserves_unicode_in_asset_name() {
         let (server, _env_guard) = mock_github().await;
         Mock::given(method("GET"))
             .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
@@ -2859,23 +3045,26 @@ mod release_upload_tests {
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
             .mount(&server).await;
 
-        // "皮皮极速: SpeedX" → 4 ideographs + ":" + " " all map to _ each.
-        // Then "SpeedX" passes through. Final: "______SpeedX_v0.11.7.zip".
-        // Six underscores total (4 ideographs + colon + space).
+        // "皮皮极速: SpeedX" — colon and space become `_`, but the four
+        // ideographs are kept verbatim. Final: `皮皮极速__SpeedX_v0.11.7.zip`.
+        let expected_name = "皮皮极速__SpeedX_v0.11.7.zip";
         Mock::given(method("POST"))
             .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
-            .and(query_param("name", "______SpeedX_v0.11.7.zip"))
+            .and(query_param("name", expected_name))
             .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
                 "id": 100,
-                "name": "______SpeedX_v0.11.7.zip",
-                "browser_download_url": "https://github.com/octo/sts2mm-profiles/releases/download/bundles/______SpeedX_v0.11.7.zip"
+                "name": expected_name,
+                "browser_download_url": format!(
+                    "https://github.com/octo/sts2mm-profiles/releases/download/bundles/{}",
+                    expected_name
+                )
             })))
             .expect(1)
             .mount(&server).await;
 
         let _ = upload_mod_bundle_via_release(
             "test-token", "octo", "皮皮极速: SpeedX", "0.11.7", b"data", None
-        ).await.expect("non-ascii mod name must sanitize to ASCII-only asset name");
+        ).await.expect("non-ascii mod names must round-trip into the asset filename");
     }
 
     /// Regression for Bug A through the orchestrator: an asset on page 2

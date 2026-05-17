@@ -19,12 +19,12 @@ set -euo pipefail
 # divergence). This prevents the "ghost release on stale main" failure mode
 # that produced the v0.7.4/v0.7.5 mess.
 #
-# QA gate: after pre-flight, runs the full QA suite (Rust tests + Vitest +
-# WebDriver smoke in cassette + non-cassette modes). The gate blocks the
-# release on any failure. Set SKIP_QA=1 to bypass for emergency hotfixes,
-# but understand that's how past regressions shipped — the v1.3.1
-# vunknown bug and the duplicate same-name mod collapse both made it to
-# users because nobody ran the existing tests.
+# QA gate: after pre-flight, runs the full cross-platform QA suite (Rust tests
+# + Vitest). On Windows it also runs the WebDriver smoke in cassette +
+# non-cassette modes. The gate blocks the release on any failure. Set
+# SKIP_QA=1 to bypass for emergency hotfixes, but understand that's how past
+# regressions shipped — the v1.3.1 vunknown bug and the duplicate same-name
+# mod collapse both made it to users because nobody ran the existing tests.
 
 # --- Pre-flight ---
 
@@ -138,7 +138,7 @@ fi
 #      intercept didn't regress)
 #   3. Frontend parser unit tests via Vitest
 #   4. WebDriver smoke against a built binary, in both modes
-#      (non-cassette + CASSETTE=1)
+#      (non-cassette + CASSETTE=1) on Windows, where the harness is supported
 #
 # This blocks a release if anything is red. To bypass for an
 # emergency hotfix, set SKIP_QA=1. Use it sparingly — past releases
@@ -162,18 +162,24 @@ else
   npm run --silent qa:coverage
 
   echo "[4/4] WebDriver smoke..."
-  # Ensure the matching msedgedriver is on disk. The auto-fetch
-  # detects the local WebView2 version and downloads the exact
-  # driver — idempotent if already current.
-  if [[ -f qa/runner/scripts/download-msedgedriver.mjs ]]; then
-    node qa/runner/scripts/download-msedgedriver.mjs
+  PLATFORM=$(node -p "process.platform")
+  if [[ "$PLATFORM" == "win32" ]]; then
+    # Ensure the matching msedgedriver is on disk. The auto-fetch
+    # detects the local WebView2 version and downloads the exact
+    # driver — idempotent if already current.
+    if [[ -f qa/runner/scripts/download-msedgedriver.mjs ]]; then
+      node qa/runner/scripts/download-msedgedriver.mjs
+    fi
+    # The smoke binary must be built with `qa-cassette` so the
+    # CASSETTE=1 pass exercises the intercept. Build once and reuse
+    # for both modes.
+    npm run tauri build -- --no-bundle --features qa-cassette
+    node qa/runner/smoke.mjs
+    CASSETTE=1 node qa/runner/smoke.mjs
+  else
+    echo "WebDriver smoke skipped on ${PLATFORM}; the current harness is Windows-only."
+    echo "Rust, cassette, and frontend coverage gates remain mandatory."
   fi
-  # The smoke binary must be built with `qa-cassette` so the
-  # CASSETTE=1 pass exercises the intercept. Build once and reuse
-  # for both modes.
-  npm run tauri build -- --no-bundle --features qa-cassette
-  node qa/runner/smoke.mjs
-  CASSETTE=1 node qa/runner/smoke.mjs
   echo "==== QA suite green — proceeding with release ===="
 fi
 

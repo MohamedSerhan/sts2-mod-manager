@@ -70,7 +70,7 @@ if [ ! -d squashfs-root ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 2. Inject LD_PRELOAD fix into AppRun before the final exec line
+# 2. Inject/wrap LD_PRELOAD fix into AppRun before the app starts
 # ---------------------------------------------------------------------------
 APPRUN="squashfs-root/AppRun"
 
@@ -78,7 +78,6 @@ python3 - "$APPRUN" <<'PYEOF'
 import sys, pathlib
 
 apprun = pathlib.Path(sys.argv[1])
-content = apprun.read_text()
 
 # The patch is a POSIX sh snippet that finds the system libwayland-client.so
 # and prepends it to LD_PRELOAD, then falls through to the normal exec.
@@ -97,21 +96,37 @@ patch = (
     "unset _wl\n"
 )
 
-lines = content.splitlines(keepends=True)
-# Insert before the last exec line (the app launch exec, not an exec test)
-patched = False
-for i in range(len(lines) - 1, -1, -1):
-    if lines[i].lstrip().startswith("exec "):
-        lines.insert(i, patch)
-        patched = True
-        break
+try:
+    content = apprun.read_text()
+except UnicodeDecodeError:
+    launcher = apprun.with_name("AppRun.tauri-bin")
+    apprun.rename(launcher)
+    apprun.write_text(
+        "#!/bin/sh\n"
+        "set -eu\n"
+        'HERE="$(dirname "$(readlink -f "$0")")"\n'
+        f"{patch}"
+        'exec "$HERE/AppRun.tauri-bin" "$@"\n'
+    )
+    apprun.chmod(0o755)
+    launcher.chmod(0o755)
+    print("  AppRun was binary; wrapped launcher with LD_PRELOAD patch.")
+else:
+    lines = content.splitlines(keepends=True)
+    # Insert before the last exec line (the app launch exec, not an exec test)
+    patched = False
+    for i in range(len(lines) - 1, -1, -1):
+        if lines[i].lstrip().startswith("exec "):
+            lines.insert(i, patch)
+            patched = True
+            break
 
-if not patched:
-    print("WARNING: no exec line found in AppRun — appending patch at end.", file=sys.stderr)
-    lines.append(patch)
+    if not patched:
+        print("WARNING: no exec line found in AppRun; appending patch at end.", file=sys.stderr)
+        lines.append(patch)
 
-apprun.write_text("".join(lines))
-print("  AppRun patched.")
+    apprun.write_text("".join(lines))
+    print("  AppRun patched.")
 PYEOF
 
 # ---------------------------------------------------------------------------

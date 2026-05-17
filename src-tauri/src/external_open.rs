@@ -80,20 +80,36 @@ pub(crate) fn spawn_external_command(cmd: &mut Command) -> io::Result<Child> {
 
 pub(crate) fn open_external_blocking(path: impl AsRef<OsStr>) -> io::Result<()> {
     let mut last_err = None;
-    for mut cmd in open::commands(path.as_ref()) {
+    for mut cmd in external_open_commands(path.as_ref()) {
         prepare_external_command(&mut cmd)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
+        log::info!(
+            "Trying external opener: {}",
+            cmd.get_program().to_string_lossy()
+        );
         match cmd.status() {
             Ok(status) if status.success() => return Ok(()),
             Ok(status) => {
+                log::warn!(
+                    "External opener {} exited with {}",
+                    cmd.get_program().to_string_lossy(),
+                    status
+                );
                 last_err = Some(io::Error::new(
                     io::ErrorKind::Other,
                     format!("Launcher {cmd:?} failed with {status}"),
                 ));
             }
-            Err(err) => last_err = Some(err),
+            Err(err) => {
+                log::warn!(
+                    "External opener {} failed to start: {}",
+                    cmd.get_program().to_string_lossy(),
+                    err
+                );
+                last_err = Some(err);
+            }
         }
     }
     Err(last_err
@@ -102,10 +118,21 @@ pub(crate) fn open_external_blocking(path: impl AsRef<OsStr>) -> io::Result<()> 
 
 pub(crate) fn open_external_detached(path: impl AsRef<OsStr>) -> io::Result<()> {
     let mut last_err = None;
-    for mut cmd in open::commands(path.as_ref()) {
+    for mut cmd in external_open_commands(path.as_ref()) {
+        log::info!(
+            "Spawning external opener: {}",
+            cmd.get_program().to_string_lossy()
+        );
         match spawn_external_command(&mut cmd) {
             Ok(_) => return Ok(()),
-            Err(err) => last_err = Some(err),
+            Err(err) => {
+                log::warn!(
+                    "External opener {} failed to start: {}",
+                    cmd.get_program().to_string_lossy(),
+                    err
+                );
+                last_err = Some(err);
+            }
         }
     }
     Err(last_err
@@ -133,6 +160,76 @@ fn appdir_from_env() -> Option<PathBuf> {
     std::env::var_os("APPDIR").map(PathBuf::from)
 }
 
+fn external_open_commands(path: &OsStr) -> Vec<Command> {
+    #[cfg(target_os = "linux")]
+    {
+        if appimage_runtime_active() {
+            let appdir = appdir_from_env();
+            return open_commands_for_appimage(
+                path,
+                appdir.as_deref(),
+                std::env::var_os("PATH"),
+                std::env::var_os("XDG_CURRENT_DESKTOP").as_deref(),
+            );
+        }
+    }
+
+    open::commands(path)
+}
+
+fn open_commands_for_appimage(
+    path: &OsStr,
+    appdir: Option<&Path>,
+    path_value: Option<OsString>,
+    xdg_current_desktop: Option<&OsStr>,
+) -> Vec<Command> {
+    let path_env =
+        clean_path_like_value_with_fallback(path_value, appdir, Some(HOST_PATH_FALLBACK));
+    let Some(path_env) = path_env else {
+        return Vec::new();
+    };
+
+    let mut candidates = Vec::new();
+    if is_kde_desktop(xdg_current_desktop) {
+        candidates.extend_from_slice(&[
+            ("kde-open", &[][..]),
+            ("xdg-open", &[][..]),
+            ("gio", &["open"][..]),
+            ("gnome-open", &[][..]),
+        ]);
+    } else {
+        candidates.extend_from_slice(&[
+            ("xdg-open", &[][..]),
+            ("gio", &["open"][..]),
+            ("gnome-open", &[][..]),
+            ("kde-open", &[][..]),
+        ]);
+    }
+
+    candidates
+        .into_iter()
+        .filter_map(|(program, leading_args)| {
+            let program = resolve_program_in_path(program, &path_env)?;
+            let mut cmd = Command::new(program);
+            cmd.args(leading_args);
+            cmd.arg(path);
+            Some(cmd)
+        })
+        .collect()
+}
+
+fn is_kde_desktop(value: Option<&OsStr>) -> bool {
+    value
+        .map(|value| value.to_string_lossy().to_ascii_lowercase())
+        .is_some_and(|value| value.contains("kde") || value.contains("plasma"))
+}
+
+fn resolve_program_in_path(program: &str, path_value: &OsStr) -> Option<PathBuf> {
+    std::env::split_paths(path_value)
+        .map(|dir| dir.join(program))
+        .find(|candidate| candidate.is_file())
+}
+
 fn apply_clean_path_like_env(
     cmd: &mut Command,
     key: &str,
@@ -140,15 +237,23 @@ fn apply_clean_path_like_env(
     appdir: Option<&Path>,
     fallback: Option<&str>,
 ) {
-    let cleaned = value
-        .and_then(|value| clean_path_like_value(&value, appdir))
-        .or_else(|| fallback.map(OsString::from));
+    let cleaned = clean_path_like_value_with_fallback(value, appdir, fallback);
 
     if let Some(cleaned) = cleaned {
         cmd.env(key, cleaned);
     } else {
         cmd.env_remove(key);
     }
+}
+
+fn clean_path_like_value_with_fallback(
+    value: Option<OsString>,
+    appdir: Option<&Path>,
+    fallback: Option<&str>,
+) -> Option<OsString> {
+    value
+        .and_then(|value| clean_path_like_value(&value, appdir))
+        .or_else(|| fallback.map(OsString::from))
 }
 
 fn clean_path_like_value(value: &OsStr, appdir: Option<&Path>) -> Option<OsString> {
@@ -165,7 +270,7 @@ fn clean_path_like_value(value: &OsStr, appdir: Option<&Path>) -> Option<OsStrin
 
 #[cfg(test)]
 mod tests {
-    use super::prepare_external_command_for_appimage;
+    use super::{open_commands_for_appimage, prepare_external_command_for_appimage};
     use std::env;
     use std::ffi::{OsStr, OsString};
     use std::path::{Path, PathBuf};
@@ -179,6 +284,49 @@ mod tests {
 
     fn split(value: &OsStr) -> Vec<PathBuf> {
         env::split_paths(value).collect()
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn appimage_open_commands_use_host_openers_on_kde() {
+        let tmp = tempfile::tempdir().unwrap();
+        let appdir = tmp.path().join(".mount_STS2mm");
+        let app_bin = appdir.join("usr/bin");
+        let host_bin = tmp.path().join("host-bin");
+        std::fs::create_dir_all(&app_bin).unwrap();
+        std::fs::create_dir_all(&host_bin).unwrap();
+
+        for path in [
+            app_bin.join("xdg-open"),
+            host_bin.join("kde-open"),
+            host_bin.join("xdg-open"),
+            host_bin.join("gio"),
+        ] {
+            std::fs::write(path, "").unwrap();
+        }
+
+        let path_value = env::join_paths([app_bin.clone(), host_bin.clone()]).unwrap();
+        let commands = open_commands_for_appimage(
+            OsStr::new("https://example.test"),
+            Some(&appdir),
+            Some(path_value),
+            Some(OsStr::new("KDE")),
+        );
+
+        let programs: Vec<PathBuf> = commands
+            .iter()
+            .map(|cmd| PathBuf::from(cmd.get_program()))
+            .collect();
+
+        assert_eq!(
+            programs,
+            vec![
+                host_bin.join("kde-open"),
+                host_bin.join("xdg-open"),
+                host_bin.join("gio"),
+            ]
+        );
+        assert!(!programs.iter().any(|program| program.starts_with(&appdir)));
     }
 
     #[test]

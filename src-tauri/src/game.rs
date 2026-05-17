@@ -590,6 +590,13 @@ enum SteamLaunchPrimary {
     ProtocolUrl(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+struct LinuxSteamLaunchAttempt {
+    program: String,
+    args: Vec<String>,
+}
+
 /// Pure decision function — given an optional resolved Steam executable
 /// and the target appid, pick the launch strategy. Extracted from
 /// `launch_game_via_steam` so the choice can be unit-tested without
@@ -603,6 +610,38 @@ fn plan_steam_launch_primary(steam_exe: Option<&Path>, appid: &str) -> SteamLaun
         };
     }
     SteamLaunchPrimary::ProtocolUrl(format!("steam://rungameid/{}", appid))
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn linux_steam_launch_attempts(appid: &str) -> Vec<LinuxSteamLaunchAttempt> {
+    vec![
+        LinuxSteamLaunchAttempt {
+            program: "steam".to_string(),
+            args: vec!["-applaunch".to_string(), appid.to_string()],
+        },
+        LinuxSteamLaunchAttempt {
+            program: "flatpak".to_string(),
+            args: vec![
+                "run".to_string(),
+                "com.valvesoftware.Steam".to_string(),
+                "-applaunch".to_string(),
+                appid.to_string(),
+            ],
+        },
+        LinuxSteamLaunchAttempt {
+            program: "snap".to_string(),
+            args: vec![
+                "run".to_string(),
+                "steam".to_string(),
+                "-applaunch".to_string(),
+                appid.to_string(),
+            ],
+        },
+        LinuxSteamLaunchAttempt {
+            program: "steam-protocol".to_string(),
+            args: vec![format!("steam://rungameid/{}", appid)],
+        },
+    ]
 }
 
 /// Locate `steam.exe` on Windows by appending it to whatever directory
@@ -674,48 +713,44 @@ fn launch_game_via_steam() -> std::result::Result<(), String> {
         }
     }
 
-    match crate::external_open::open_external_blocking(STEAM_URL) {
-        Ok(()) => return Ok(()),
-        Err(e) => {
-            log::warn!(
-                "System opener failed for {}: {}. Trying Steam command fallbacks.",
-                STEAM_URL,
-                e
-            );
-        }
-    }
-
     #[cfg(target_os = "linux")]
     {
         use std::process::Command;
 
         let mut attempts: Vec<String> = Vec::new();
 
-        let mut try_spawn = |program: &str, args: &[&str]| -> bool {
-            let mut cmd = Command::new(program);
-            cmd.args(args);
+        for attempt in linux_steam_launch_attempts(STS2_STEAM_APPID) {
+            if attempt.program == "steam-protocol" {
+                let url = attempt
+                    .args
+                    .first()
+                    .map(String::as_str)
+                    .unwrap_or(STEAM_URL);
+                match crate::external_open::open_external_blocking(url) {
+                    Ok(()) => return Ok(()),
+                    Err(e) => {
+                        log::warn!("System opener failed for {}: {}", url, e);
+                        attempts.push(format!("{}: {}", url, e));
+                    }
+                }
+                continue;
+            }
+
+            let mut cmd = Command::new(&attempt.program);
+            cmd.args(&attempt.args);
             match crate::external_open::spawn_external_command(&mut cmd) {
                 Ok(_) => {
-                    log::info!("Steam fallback launched: {} {:?}", program, args);
-                    true
+                    log::info!(
+                        "Steam launch spawned: {} {:?}",
+                        attempt.program,
+                        attempt.args
+                    );
+                    return Ok(());
                 }
                 Err(e) => {
-                    attempts.push(format!("{} {:?}: {}", program, args, e));
-                    false
+                    attempts.push(format!("{} {:?}: {}", attempt.program, attempt.args, e));
                 }
             }
-        };
-
-        if try_spawn("steam", &["-applaunch", STS2_STEAM_APPID]) {
-            return Ok(());
-        }
-
-        if try_spawn("flatpak", &["run", "com.valvesoftware.Steam", "-applaunch", STS2_STEAM_APPID]) {
-            return Ok(());
-        }
-
-        if try_spawn("snap", &["run", "steam", "-applaunch", STS2_STEAM_APPID]) {
-            return Ok(());
         }
 
         let detail = if attempts.is_empty() {
@@ -731,10 +766,16 @@ fn launch_game_via_steam() -> std::result::Result<(), String> {
 
     #[cfg(not(target_os = "linux"))]
     {
-        Err(
-            "Could not ask Steam to launch Slay the Spire 2. Make sure Steam is installed and steam:// links are registered."
-                .to_string(),
-        )
+        match crate::external_open::open_external_blocking(STEAM_URL) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                log::warn!("System opener failed for {}: {}", STEAM_URL, e);
+                Err(
+                    "Could not ask Steam to launch Slay the Spire 2. Make sure Steam is installed and steam:// links are registered."
+                        .to_string(),
+                )
+            }
+        }
     }
 }
 
@@ -1224,7 +1265,10 @@ mod steam_launch_planner_tests {
     //! two strategies; the actual `Command::spawn` is exercised by the
     //! WebDriver smoke (which is the only test layer that can verify
     //! the game actually launches).
-    use super::{plan_steam_launch_primary, SteamLaunchPrimary, STS2_STEAM_APPID};
+    use super::{
+        linux_steam_launch_attempts, plan_steam_launch_primary, SteamLaunchPrimary,
+        STS2_STEAM_APPID,
+    };
     use std::path::PathBuf;
 
     #[test]
@@ -1249,5 +1293,26 @@ mod steam_launch_planner_tests {
             }
             other => panic!("expected ProtocolUrl, got {:?}", other),
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_prefers_steam_applaunch_before_protocol_url() {
+        let attempts = linux_steam_launch_attempts(STS2_STEAM_APPID);
+        assert_eq!(attempts[0].program, "steam");
+        assert_eq!(attempts[0].args, vec!["-applaunch", STS2_STEAM_APPID]);
+        assert!(attempts.iter().any(|attempt| attempt.program == "flatpak"
+            && attempt.args
+                == vec![
+                    "run",
+                    "com.valvesoftware.Steam",
+                    "-applaunch",
+                    STS2_STEAM_APPID
+                ]));
+        assert_eq!(attempts.last().unwrap().program, "steam-protocol");
+        assert_eq!(
+            attempts.last().unwrap().args,
+            vec![format!("steam://rungameid/{}", STS2_STEAM_APPID)]
+        );
     }
 }

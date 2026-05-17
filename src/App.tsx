@@ -489,8 +489,49 @@ function AppInner() {
     .join('')
     .toUpperCase();
 
+  function handleExternalAnchorClick(event: MouseEvent<HTMLDivElement>) {
+    if (
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.shiftKey
+    ) {
+      return;
+    }
+
+    const target = event.target instanceof Element ? event.target : null;
+    const anchor = target?.closest('a[href]');
+    if (!(anchor instanceof HTMLAnchorElement) || anchor.hasAttribute('download')) {
+      return;
+    }
+
+    const rawHref = anchor.getAttribute('href');
+    if (!rawHref) return;
+
+    let url: URL;
+    try {
+      url = new URL(rawHref, window.location.href);
+    } catch {
+      return;
+    }
+
+    if (!['http:', 'https:', 'mailto:', 'tel:'].includes(url.protocol)) {
+      return;
+    }
+
+    event.preventDefault();
+    openExternalUrl(url.href).catch((e) => {
+      toast.error(`Failed to open link: ${e instanceof Error ? e.message : String(e)}`);
+    });
+  }
+
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden relative">
+    <div
+      className="flex flex-col h-screen w-screen overflow-hidden relative"
+      onClickCapture={handleExternalAnchorClick}
+    >
       {/* Custom titlebar (Tauri drag region + window controls) */}
       <div className="gf-titlebar" data-tauri-drag-region>
         <div className="gf-titlebar-app" data-tauri-drag-region>

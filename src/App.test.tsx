@@ -775,6 +775,24 @@ describe('<App>', () => {
     });
   });
 
+  it('routes external anchor clicks through the backend opener', async () => {
+    const opener = await import('@tauri-apps/plugin-opener');
+    (opener.openUrl as ReturnType<typeof vi.fn>).mockClear();
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+
+    await user.click(getNavButton('Settings'));
+    await user.click(screen.getByRole('button', { name: /Accounts/ }));
+    await user.click(await screen.findByRole('link', { name: /Get your API key from Nexus Mods/i }));
+
+    await waitFor(() => {
+      expect(opener.openUrl).toHaveBeenCalledWith(
+        'https://www.nexusmods.com/users/myaccount?tab=api',
+      );
+    });
+  });
+
   it('updater.check rejection is logged and does not crash the app', async () => {
     const updater = await import('@tauri-apps/plugin-updater');
     (updater.check as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('network'));

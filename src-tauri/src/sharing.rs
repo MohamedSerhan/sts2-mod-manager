@@ -692,6 +692,7 @@ async fn upload_release_asset(
     client: &reqwest::Client,
     upload_url_template: &str,
     filename: &str,
+    label: Option<&str>,
     data: &[u8],
 ) -> Result<ReleaseAsset> {
     let base = upload_url_template
@@ -699,7 +700,21 @@ async fn upload_release_asset(
         .map(|(b, _)| b)
         .unwrap_or(upload_url_template);
     let encoded_name = urlencoding::encode(filename);
-    let url = format!("{}?name={}", base, encoded_name);
+    let url = match label {
+        // GitHub silently strips non-ASCII chars from the asset filename
+        // (Chinese ideographs, emoji, etc.) — documented behavior we can't
+        // disable. The separate `label` param ("alternate short
+        // description of the asset, used in place of the filename") is
+        // shown on the release page UI INSTEAD of the mangled filename,
+        // so we pass the original human-readable name through there.
+        Some(l) => format!(
+            "{}?name={}&label={}",
+            base,
+            encoded_name,
+            urlencoding::encode(l)
+        ),
+        None => format!("{}?name={}", base, encoded_name),
+    };
 
     let resp = client
         .post(&url)
@@ -733,9 +748,10 @@ async fn upload_release_asset_recovering(
     repo: &str,
     upload_url_template: &str,
     filename: &str,
+    label: Option<&str>,
     data: &[u8],
 ) -> Result<ReleaseAsset> {
-    match upload_release_asset(client, upload_url_template, filename, data).await {
+    match upload_release_asset(client, upload_url_template, filename, label, data).await {
         Ok(asset) => Ok(asset),
         Err(AppError::Other(msg)) if msg.contains("already_exists") => {
             log::warn!(
@@ -751,7 +767,7 @@ async fn upload_release_asset_recovering(
             match existing {
                 Some(asset) => {
                     delete_release_asset(client, owner, repo, asset.id).await?;
-                    upload_release_asset(client, &fresh.upload_url, filename, data).await
+                    upload_release_asset(client, &fresh.upload_url, filename, label, data).await
                 }
                 None => Err(AppError::Other(format!(
                     "Upload of '{}' failed with 422 already_exists but the asset is not visible in the release listing — \
@@ -808,11 +824,12 @@ async fn replace_release_asset_via_delete_post(
     repo: &str,
     upload_url_template: &str,
     canonical_name: &str,
+    label: Option<&str>,
     old_asset_id: u64,
     data: &[u8],
 ) -> Result<String> {
     delete_release_asset(client, owner, repo, old_asset_id).await?;
-    let asset = upload_release_asset(client, upload_url_template, canonical_name, data).await?;
+    let asset = upload_release_asset(client, upload_url_template, canonical_name, label, data).await?;
     Ok(asset.browser_download_url)
 }
 
@@ -854,6 +871,14 @@ pub(crate) async fn upload_mod_bundle_via_release(
     let local_hash = format!("{:x}", hasher.finalize());
 
     let asset_name = release_asset_name(mod_name, version, &local_hash);
+    // GitHub strips non-ASCII chars from the asset filename it stores
+    // (Chinese ideographs, emoji, etc.) — undocumented but consistent
+    // behavior, see https://docs.github.com/en/rest/releases/assets.
+    // The `label` query param is described as "an alternate short
+    // description of the asset, used in place of the filename" — it's
+    // shown on the release-page UI instead of the mangled stored name,
+    // so we put the human-readable "<mod> v<version>" form there.
+    let asset_label = format!("{} v{}", mod_name, version);
 
     let repo = profiles_repo();
     let release = ensure_bundles_release(&client, username, &repo).await?;
@@ -888,7 +913,7 @@ pub(crate) async fn upload_mod_bundle_via_release(
         );
         let url = replace_release_asset_via_delete_post(
             &client, username, &repo, &release.upload_url,
-            &asset_name, existing.id, zip_data,
+            &asset_name, Some(&asset_label), existing.id, zip_data,
         ).await?;
         return Ok((url, local_hash));
     }
@@ -896,7 +921,7 @@ pub(crate) async fn upload_mod_bundle_via_release(
     // Net-new upload, with 422 already_exists recovery — see
     // upload_release_asset_recovering for the rationale.
     let asset = upload_release_asset_recovering(
-        &client, username, &repo, &release.upload_url, &asset_name, zip_data,
+        &client, username, &repo, &release.upload_url, &asset_name, Some(&asset_label), zip_data,
     ).await?;
     Ok((asset.browser_download_url, local_hash))
 }
@@ -2809,6 +2834,7 @@ mod release_upload_tests {
             &client,
             &upload_url_template,
             "TheCursedMod_v0.2.7.zip",
+            None,
             b"PK\x03\x04...fake-zip-bytes",
         ).await.expect("upload should succeed");
         assert_eq!(
@@ -2863,7 +2889,7 @@ mod release_upload_tests {
         let client = build_client("test-token");
         let url = replace_release_asset_via_delete_post(
             &client, "octo", "sts2mm-profiles", &upload_url_template,
-            "TheCursed_v0.2.7.zip", 555, b"new-bytes"
+            "TheCursed_v0.2.7.zip", None, 555, b"new-bytes"
         ).await.expect("delete-then-post should succeed");
         assert!(url.contains("releases/download/bundles/TheCursed_v0.2.7.zip"));
     }

@@ -74,7 +74,7 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
   // v5 batch 3 — Following / Published tabs.
   // "Following" = every profile you have. "Published" = ones you've shared (have a share code).
   const [tab, setTab] = useState<'following' | 'published'>('following');
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { refreshAll, setActiveProfile, activeProfile, subUpdates, refreshSubUpdates } = useApp();
   const toastCtx = useToast();
   const confirm = useConfirm();
@@ -738,7 +738,7 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
                   </span>
                   {profile.game_version && <span>{profile.game_version}</span>}
                   <span>
-                    {new Date(profile.created_at).toLocaleDateString()}
+                    {new Date(profile.created_at).toLocaleDateString(i18n.language)}
                   </span>
                   {profile.created_by && (
                     <span className="text-primary">{t('profiles.card.by', { name: profile.created_by })}</span>

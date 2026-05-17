@@ -284,7 +284,12 @@ function UserGuide({ onGoToSettings }: { onGoToSettings?: () => void }) {
           </Step>
 
           <Step n={3} title={t('tutorial.player.step3.title')}>
-            <p>{t('tutorial.player.step3.p1')}</p>
+            <p>
+              <Trans
+                i18nKey="tutorial.player.step3.p1"
+                components={{ 0: <strong />, 1: <strong />, 2: <strong /> }}
+              />
+            </p>
             <ul className="list-disc list-inside space-y-1 ml-1">
               <li>
                 <strong>{t('tutorial.player.step3.codeTitle')}</strong>

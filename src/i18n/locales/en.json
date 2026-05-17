@@ -1048,7 +1048,8 @@
       "githubScopesTitle": "Required scopes:",
       "githubClassicPat": "Classic PAT — check the repo scope.",
       "githubFinePat": "Fine-grained PAT — repository access scoped to sts2mm-profiles (or \"All repositories\"), with Contents: Read and write + Administration: Read and write (Administration is only needed for the one-time repo create; you can drop it after).",
-      "openGithubTokenPageFailed": "Couldn't open GitHub token page: {{error}}"
+      "openGithubTokenPageFailed": "Couldn't open GitHub token page: {{error}}",
+      "createScopedToken": "Create scoped token"
     },
     "backups": {
       "title": "Backups",

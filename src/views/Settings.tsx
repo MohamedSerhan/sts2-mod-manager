@@ -597,7 +597,7 @@ export function SettingsView() {
                   </Button>
                   <Button variant="secondary" size="sm" onClick={handleOpenGithubTokenTemplate}>
                     <ExternalLink size={14} />
-                    Create scoped token
+                    {t('settings.accounts.createScopedToken')}
                   </Button>
                 </div>
                 {githubTokenSaved && !githubToken && (

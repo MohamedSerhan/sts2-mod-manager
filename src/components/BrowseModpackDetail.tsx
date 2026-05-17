@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
 import { X, Download, ExternalLink } from 'lucide-react';
 import { listen } from '@tauri-apps/api/event';
-import { openUrl } from '@tauri-apps/plugin-opener';
 import type { BrowserCard, Profile } from '../types';
-import { fetchSharedProfile, installSharedProfile } from '../hooks/useTauri';
+import { fetchSharedProfile, installSharedProfile, openExternalUrl } from '../hooks/useTauri';
 import { useToast } from '../contexts/ToastContext';
 
 interface Props {
@@ -97,7 +96,7 @@ export function BrowseModpackDetail({ card, onClose, onInstalled }: Props) {
 
   async function openCuratorProfile() {
     try {
-      await openUrl(`https://github.com/${card.owner}`);
+      await openExternalUrl(`https://github.com/${card.owner}`);
     } catch {
       /* noop — opener failures aren't worth a toast here */
     }

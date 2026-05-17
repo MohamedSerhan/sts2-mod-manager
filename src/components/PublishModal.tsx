@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, Check, Copy, ExternalLink, Info, Link as LinkIcon, MessageSquare, Upload, X } from 'lucide-react';
 import { listen } from '@tauri-apps/api/event';
-import { openUrl } from '@tauri-apps/plugin-opener';
 import type { Profile, ShareResult } from '../types';
-import { shareProfile, reshareProfile, getApiKeyStatus, setModpackListing } from '../hooks/useTauri';
+import { shareProfile, reshareProfile, getApiKeyStatus, setModpackListing, openExternalUrl } from '../hooks/useTauri';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { buildShareMessage, buildShareLink } from '../lib/shareImport';
@@ -177,7 +176,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
     // uncovered: Open-repo button only renders inside `{shared.repo_url && (...)}`,
     // so this guard is dead at runtime.
     if (!shared?.repo_url) return;
-    try { await openUrl(shared.repo_url); }
+    try { await openExternalUrl(shared.repo_url); }
     catch (e) { toast.error(`Couldn't open browser: ${e instanceof Error ? e.message : String(e)}`); }
   }
 

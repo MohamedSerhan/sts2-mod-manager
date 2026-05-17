@@ -21,7 +21,6 @@ import {
   X,
 } from 'lucide-react';
 import { check, type Update } from '@tauri-apps/plugin-updater';
-import { openUrl } from '@tauri-apps/plugin-opener';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { cn } from './lib/utils';
 import { ToastProvider, useToast } from './contexts/ToastContext';
@@ -40,7 +39,7 @@ import { BrowseModpacksView } from './views/BrowseModpacks';
 import { ProfilesView } from './views/Profiles';
 import { SettingsView } from './views/Settings';
 import { TutorialView } from './views/Tutorial';
-import { launchGame, launchVanilla, installModFromFile } from './hooks/useTauri';
+import { launchGame, launchVanilla, installModFromFile, openExternalUrl } from './hooks/useTauri';
 
 type View = 'home' | 'profiles' | 'mods' | 'browse-mods' | 'browse-modpacks' | 'tutorial' | 'settings';
 type ResizeDirection = 'East' | 'North' | 'NorthEast' | 'NorthWest' | 'South' | 'SouthEast' | 'SouthWest' | 'West';
@@ -350,7 +349,7 @@ function AppInner() {
 
   async function handleDownloadUpdate() {
     try {
-      await openUrl(RELEASES_URL);
+      await openExternalUrl(RELEASES_URL);
     } catch (e) {
       toast.error(`Failed to open browser: ${e instanceof Error ? e.message : String(e)}`);
     }

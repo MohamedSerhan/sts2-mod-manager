@@ -23,6 +23,10 @@ export async function openGameFolder(): Promise<boolean> {
   return invoke('open_game_folder');
 }
 
+export async function openExternalUrl(url: string): Promise<boolean> {
+  return invoke('open_external_url', { url });
+}
+
 export async function launchGame(): Promise<boolean> {
   return invoke('launch_game');
 }

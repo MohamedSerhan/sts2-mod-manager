@@ -1,9 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Download, X } from 'lucide-react';
-import { quickAddMod } from '../hooks/useTauri';
+import { openExternalUrl, quickAddMod } from '../hooks/useTauri';
 import { useToast } from '../contexts/ToastContext';
 import { useApp } from '../contexts/AppContext';
-import { openUrl } from '@tauri-apps/plugin-opener';
 import { nexusFilesUrl, parseNexusModInput } from '../lib/nexusUrl';
 
 // v5 batch 3 — Quick-Add by URL modal. Paste a GitHub repo URL or a Nexus
@@ -68,7 +67,7 @@ export function QuickAddModal({ open, onClose }: Props) {
       } else {
         const filesUrl = nexusFilesUrl(input);
         if (filesUrl) {
-          await openUrl(filesUrl);
+          await openExternalUrl(filesUrl);
           // Sticky toast — stays up until the downloads watcher reports
           // an install (or a 10-min fail-safe timeout fires). Replaces
           // the previous 4-second info toast that vanished before the

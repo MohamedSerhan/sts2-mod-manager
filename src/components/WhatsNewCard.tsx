@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
 import { Sparkles, X, ExternalLink } from 'lucide-react';
-import { openUrl } from '@tauri-apps/plugin-opener';
 import { Card } from './Card';
 import { getEntryForVersion, getLatestReleasedEntry, type ChangelogEntry } from '../lib/changelog';
+import { openExternalUrl } from '../hooks/useTauri';
 
 /** localStorage key for "user dismissed the what's-new card for version X".
  *  We track per-version, not a single boolean, so a fresh release shows
@@ -61,7 +61,7 @@ export function WhatsNewCard() {
   }
 
   function handleViewFull() {
-    openUrl('https://github.com/MohamedSerhan/sts2-mod-manager/blob/main/CHANGELOG.md').catch(() => {});
+    openExternalUrl('https://github.com/MohamedSerhan/sts2-mod-manager/blob/main/CHANGELOG.md').catch(() => {});
   }
 
   if (dismissed || !entry) return null;

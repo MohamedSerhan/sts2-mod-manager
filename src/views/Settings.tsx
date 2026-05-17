@@ -19,7 +19,6 @@ import { isUpToDate } from '../lib/auditState';
 import { GITHUB_TOKEN_TEMPLATE_URL } from '../lib/githubLinks';
 import { nexusFilesUrl } from '../lib/nexusUrl';
 import { open } from '@tauri-apps/plugin-dialog';
-import { openUrl } from '@tauri-apps/plugin-opener';
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { Card } from '../components/Card';
@@ -35,6 +34,7 @@ import {
   setGamePath,
   setNexusApiKey,
   setGithubToken,
+  openExternalUrl,
   openGameFolder,
   openModsFolder,
   getApiKeyStatus,
@@ -278,7 +278,7 @@ export function SettingsView() {
 
   async function handleOpenGithubTokenTemplate() {
     try {
-      await openUrl(GITHUB_TOKEN_TEMPLATE_URL);
+      await openExternalUrl(GITHUB_TOKEN_TEMPLATE_URL);
     } catch (e) {
       toast.error(`Couldn't open GitHub token page: ${e instanceof Error ? e.message : String(e)}`);
     }

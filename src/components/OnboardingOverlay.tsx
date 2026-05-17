@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { Check, AlertTriangle, ExternalLink, Folder, X, GitBranch } from 'lucide-react';
-import { openUrl } from '@tauri-apps/plugin-opener';
 import type { GameInfo } from '../types';
 import { GITHUB_TOKEN_TEMPLATE_URL } from '../lib/githubLinks';
 import {
   detectGamePath,
+  openExternalUrl,
   setGamePath,
   setNexusApiKey,
   setGithubToken,
@@ -131,7 +131,7 @@ export function OnboardingOverlay({
   async function handleOpenGithubTokenTemplate() {
     setGhOpenError('');
     try {
-      await openUrl(GITHUB_TOKEN_TEMPLATE_URL);
+      await openExternalUrl(GITHUB_TOKEN_TEMPLATE_URL);
     } catch (e) {
       setGhOpenError(e instanceof Error ? e.message : String(e));
     }

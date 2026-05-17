@@ -2,6 +2,7 @@ mod backup;
 mod download;
 mod downloads_watcher;
 mod error;
+mod external_open;
 mod game;
 // `mod_sources` and `mods` are pub so `tests/qa_scenarios.rs` can call
 // scan_mods / install_mod_from_zip / load_sources / lookup_entry the
@@ -270,6 +271,7 @@ pub fn run() {
             game::open_log_file,
             game::read_log_tail,
             game::is_game_running_cmd,
+            external_open::open_external_url,
             // Mod management
             mods::get_installed_mods,
             mods::toggle_mod,

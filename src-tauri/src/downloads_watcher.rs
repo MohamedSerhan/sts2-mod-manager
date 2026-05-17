@@ -569,6 +569,39 @@ fn normalize_mod_name(name: &str) -> String {
         .to_string()
 }
 
+/// Compact a mod/file label for loose identity comparisons.
+/// Removes punctuation, spaces, and version separators so
+/// "STS2BaseCamp V0.4.0" can still match an installed "Base Camp".
+fn compact_mod_identity(name: &str) -> String {
+    name.chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .map(|c| c.to_ascii_lowercase())
+        .collect()
+}
+
+fn identities_overlap(a: &str, b: &str) -> bool {
+    let a = compact_mod_identity(&normalize_mod_name(a));
+    let b = compact_mod_identity(&normalize_mod_name(b));
+    a.len() >= 4 && b.len() >= 4 && (a.contains(&b) || b.contains(&a))
+}
+
+fn download_filename_matches_installed_mod(
+    file_name: &str,
+    installed_name: &str,
+    installed_folder: Option<&str>,
+) -> bool {
+    let stem = Path::new(file_name)
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let clean_stem = strip_nexus_suffix(&stem);
+    identities_overlap(&clean_stem, installed_name)
+        || installed_folder
+            .map(|folder| identities_overlap(&clean_stem, folder))
+            .unwrap_or(false)
+}
+
 /// Strip Nexus Mods filename suffixes.
 /// E.g. "RelicsReminder-284-1-1-0-1775500710" -> "RelicsReminder"
 /// Pattern: ModName followed by -digits repeated (mod ID, version parts, file ID)
@@ -744,6 +777,12 @@ fn attach_pending_nexus_source(
 
         let stem_lower = file_name.to_lowercase();
         let installed_norm = normalize_mod_name(installed_name);
+        let single_pending_filename_match = s.pending_nexus_installs.len() == 1
+            && download_filename_matches_installed_mod(
+                file_name,
+                installed_name,
+                installed_folder,
+            );
 
         let idx = s.pending_nexus_installs.iter().position(|p| {
             // Nexus filenames look like "ModName-{mod_id}-{version}-...zip"
@@ -752,8 +791,14 @@ fn attach_pending_nexus_source(
                 return true;
             }
             let p_norm = normalize_mod_name(&p.mod_name);
-            !p_norm.is_empty()
-                && (installed_norm.contains(&p_norm) || p_norm.contains(&installed_norm))
+            if !p_norm.is_empty()
+                && (installed_norm.contains(&p_norm)
+                    || p_norm.contains(&installed_norm)
+                    || identities_overlap(installed_name, &p.mod_name))
+            {
+                return true;
+            }
+            single_pending_filename_match
         });
 
         idx.map(|i| s.pending_nexus_installs.remove(i))
@@ -825,5 +870,53 @@ fn looks_like_mod_zip(path: &Path) -> bool {
         // isn't a known archive extension.
         "7z" | "rar" => true,
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod pending_nexus_source_tests {
+    use super::*;
+    use crate::state::{create_app_state, PendingNexusInstall};
+    use tempfile::tempdir;
+
+    #[test]
+    fn attach_pending_nexus_source_matches_download_filename_to_installed_mod_name() {
+        let config = tempdir().unwrap();
+        let state = create_app_state();
+        {
+            let mut s = state.lock().unwrap();
+            s.pending_nexus_installs.push(PendingNexusInstall {
+                // Nexus page 526 is titled "SpireValley-Farm", but its file
+                // names are "STS2BaseCamp V0.4.0" / "BASECamp".
+                mod_name: "SpireValley-Farm".into(),
+                nexus_url: "https://www.nexusmods.com/slaythespire2/mods/526".into(),
+                game_domain: "slaythespire2".into(),
+                mod_id: 526,
+                queued_at: std::time::Instant::now(),
+            });
+        }
+
+        attach_pending_nexus_source(
+            "Base Camp",
+            Some("BaseCamp"),
+            "STS2BaseCamp V0.4.0.zip",
+            config.path(),
+            &state,
+        );
+
+        let db = crate::mod_sources::load_sources(config.path());
+        let entry = db
+            .mods
+            .get("BaseCamp")
+            .expect("pending Nexus source should attach to the installed folder key");
+        assert_eq!(entry.nexus_mod_id, Some(526));
+        assert_eq!(
+            entry.nexus_url.as_deref(),
+            Some("https://www.nexusmods.com/slaythespire2/mods/526"),
+        );
+        assert!(
+            state.lock().unwrap().pending_nexus_installs.is_empty(),
+            "matching pending Nexus install should be consumed"
+        );
     }
 }

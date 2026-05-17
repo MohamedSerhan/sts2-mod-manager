@@ -29,7 +29,16 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ### Changed
 
+- Advanced mode now puts Remove mod directly on each mod row so cleanup takes one click.
+- The launch overlay now says Steam may take a moment when Steam was not already running.
+
 ### Fixed
+
+- Pasting `github.com/owner/repo` into the source editor now saves the correct GitHub repo.
+- Saving a corrected GitHub source now keeps that source visible after you close and reopen the editor.
+- Updating after a rollback now checks the saved installed version correctly instead of getting blocked by stale mod details.
+- Launching through Steam is more reliable on Windows and macOS when Steam was closed.
+- The source editor's Note field now matches the rest of the dark editor styling.
 
 ### Security
 

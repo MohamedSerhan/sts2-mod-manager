@@ -112,14 +112,23 @@ fn parse_github_source(source: &str) -> Option<(String, String)> {
     }
 }
 
-/// Parse an "owner/repo" string into (owner, repo).
+/// Parse a strict "owner/repo" string into (owner, repo).
+///
+/// Rejects anything that isn't exactly two non-empty, slash-separated
+/// segments. In particular, full URLs (containing ':') and inputs with
+/// 3+ segments (e.g. "owner/repo/extra") are refused so the caller can
+/// fall back to `parse_github_url`. Accepting URLs here was the root
+/// cause of malformed GitHub API requests like
+/// `repos/https://github.com/owner/repo/releases/latest` returning 404.
 fn parse_owner_repo(full_name: &str) -> Option<(String, String)> {
-    let parts: Vec<&str> = full_name.splitn(2, '/').collect();
-    if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
-        Some((parts[0].to_string(), parts[1].to_string()))
-    } else {
-        None
+    if full_name.contains(':') {
+        return None;
     }
+    let parts: Vec<&str> = full_name.split('/').collect();
+    if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
+        return None;
+    }
+    Some((parts[0].to_string(), parts[1].to_string()))
 }
 
 /// Parse a full GitHub repository URL into (owner, repo).
@@ -160,7 +169,13 @@ fn resolve_github_repo(
     ) {
         if !entry.github_auto_detected {
             if let Some(ref repo) = entry.github_repo {
-                if let Some(pair) = parse_owner_repo(repo) {
+                // Try strict "owner/repo" first, then fall back to URL
+                // parsing. Existing DBs may have URL-form values stored
+                // from before set_mod_sources_full normalized input —
+                // we recover those instead of silently 404ing.
+                if let Some(pair) =
+                    parse_owner_repo(repo).or_else(|| parse_github_url(repo))
+                {
                     return Some(pair);
                 }
             }
@@ -400,6 +415,57 @@ fn find_installed_mod<'a>(
     }
 }
 
+/// Decide whether installing `chosen_tag` would no-op (user already on it).
+/// Returns `Some(message)` for the gate in `update_mod` to bubble up,
+/// `None` when the update should actually proceed.
+///
+/// Lookup is folder-first via `lookup_entry`, matching every other
+/// source-DB read/write in the codebase. Pre-1.4.3 the inline gate used
+/// `sources.get(&name)` — name-only — which missed the folder-keyed
+/// `installed_version` written by rollback/repair/the regular update
+/// path. With that miss, the gate fell back to comparing only the
+/// on-disk manifest version, and curator manifests that lag their
+/// release tags falsely fired the gate.
+///
+/// The chosen tag is also normalized (leading `v` stripped) so the
+/// formatted message reads `(v0.2.32)` rather than the pre-1.4.3
+/// `(vv0.2.32)` cosmetic bug.
+fn already_on_chosen_message(
+    chosen_tag: &str,
+    owner: &str,
+    repo: &str,
+    mod_info: &ModInfo,
+    sources: &std::collections::HashMap<String, ModSourceEntry>,
+    name: &str,
+) -> Option<String> {
+    let canonical_chosen = chosen_tag.trim_start_matches('v');
+    if canonical_chosen.is_empty() {
+        return None;
+    }
+
+    let installed_tag = crate::mod_sources::lookup_entry(
+        sources,
+        mod_info.folder_name.as_deref(),
+        name,
+        mod_info.mod_id.as_deref(),
+    )
+    .and_then(|e| e.installed_version.as_deref())
+    .map(|s| s.trim_start_matches('v'))
+    .unwrap_or("");
+    let manifest_ver = mod_info.version.trim_start_matches('v');
+
+    if canonical_chosen == installed_tag || canonical_chosen == manifest_ver {
+        Some(format!(
+            "Already on the newest version compatible with your Slay the Spire 2 build (v{}). \
+             Newer releases of {}/{} require a higher game version — update Slay the Spire 2 \
+             (or switch Steam beta branches) to pick up the latest mod release.",
+            canonical_chosen, owner, repo
+        ))
+    } else {
+        None
+    }
+}
+
 fn delete_old_mod_install(old_info: &ModInfo, mods_path: &std::path::Path, label: &str) {
     let mut parent_dirs = std::collections::HashSet::new();
     for file_rel in &old_info.files {
@@ -612,26 +678,15 @@ pub async fn update_mod(
         // the update — the audit's "needs_update" flag was based on the
         // absolute latest release, which the user can't run. Tell them so
         // they understand why nothing changed.
-        let installed_tag = sources_db
-            .mods
-            .get(&name)
-            .and_then(|e| e.installed_version.as_deref())
-            .map(|s| s.trim_start_matches('v'))
-            .unwrap_or("");
-        let manifest_ver = mod_info.version.trim_start_matches('v');
-        let chosen_ver = chosen.tag.trim_start_matches('v');
-        let already_on_chosen = chosen_ver == installed_tag || chosen_ver == manifest_ver;
-        if already_on_chosen {
-            return Err(format!(
-                "Already on the newest version compatible with your Slay the Spire 2 build (v{}). \
-                 The latest release of {}/{} requires a newer game version{} — update Slay the Spire 2 \
-                 (or switch Steam beta branches) to pick up the newer mod release.",
-                chosen.tag, owner, repo,
-                chosen.min_game_version
-                    .as_ref()
-                    .map(|v| format!(" (min v{})", v))
-                    .unwrap_or_default(),
-            ));
+        if let Some(msg) = already_on_chosen_message(
+            &chosen.tag,
+            &owner,
+            &repo,
+            mod_info,
+            &sources_db.mods,
+            &name,
+        ) {
+            return Err(msg);
         }
 
         chosen_tag = chosen.tag;
@@ -1617,6 +1672,27 @@ mod version_helper_tests {
         assert_eq!(parse_owner_repo("just-one"), None);
     }
 
+    /// Regression: parse_owner_repo used to accept full GitHub URLs and
+    /// silently splitn(2) on the first '/', producing owner="https:" and
+    /// repo="/github.com/BAKAOLC/STS2-MultiPlayerPotionView". That garbage
+    /// pair got pasted into the GitHub API URL, producing 404s like
+    /// `repos/https://github.com/.../releases/latest`. URLs (anything
+    /// containing ':' or with 3+ slash-separated parts) MUST be rejected
+    /// here so the caller can fall back to parse_github_url instead.
+    #[test]
+    fn parse_owner_repo_rejects_full_github_urls() {
+        assert_eq!(
+            parse_owner_repo("https://github.com/BAKAOLC/STS2-MultiPlayerPotionView"),
+            None,
+        );
+        assert_eq!(
+            parse_owner_repo("http://github.com/owner/repo"),
+            None,
+        );
+        // Three-segment input (owner/repo/extra) is also not a bare pair.
+        assert_eq!(parse_owner_repo("foo/bar/baz"), None);
+    }
+
     #[test]
     fn parse_github_url_extracts_owner_repo_and_trims_git_suffix() {
         assert_eq!(
@@ -1655,6 +1731,131 @@ mod version_helper_tests {
         assert_eq!(
             resolve_github_repo(&info, &sources),
             Some(("ritsu".into(), "sts2-ritsulib".into())),
+        );
+    }
+
+    /// Regression: pre-1.4.3 the "already on chosen" gate in `update_mod`
+    /// formatted the chosen tag with `(v{})` while `chosen.tag` already
+    /// started with a `v`, producing `(vv0.2.32)`. The fix strips the
+    /// leading `v` before interpolating.
+    #[test]
+    fn already_on_chosen_message_strips_double_v_prefix() {
+        let info = mod_info(|m| {
+            m.name = "RitsuLib".into();
+            m.version = "0.2.32".into();
+        });
+        let sources = std::collections::HashMap::new();
+        let msg = already_on_chosen_message(
+            "v0.2.32",
+            "BAKAOLC",
+            "STS2-RitsuLib",
+            &info,
+            &sources,
+            "RitsuLib",
+        )
+        .expect("gate should fire when manifest_ver matches chosen");
+        assert!(msg.contains("(v0.2.32)"), "msg should contain (v0.2.32): {}", msg);
+        assert!(!msg.contains("vv0.2.32"), "msg should not contain vv0.2.32: {}", msg);
+    }
+
+    /// Regression: pre-1.4.3 the gate's installed_tag lookup was
+    /// `sources.get(&name)` — name-key only — even though every other
+    /// path (audit, update_mod write, rollback write) used folder-first
+    /// via `lookup_entry`. After a rollback wrote `installed_version`
+    /// under the folder key, the next Update read empty from the
+    /// name key and incorrectly fell back to comparing only against
+    /// manifest_ver. This test pins the folder-first lookup so a
+    /// folder-key-only entry is found by the gate.
+    #[test]
+    fn already_on_chosen_message_uses_folder_first_lookup() {
+        let info = mod_info(|m| {
+            m.name = "RitsuLib (STS2 0.103.2 compat)".into();
+            m.folder_name = Some("STS2-RitsuLib".into());
+            // manifest version DIFFERS from installed_version — only the
+            // folder-keyed sources entry can prove the user is on chosen.
+            m.version = "unknown".into();
+        });
+        let mut sources = std::collections::HashMap::new();
+        sources.insert(
+            "STS2-RitsuLib".into(),
+            ModSourceEntry {
+                installed_version: Some("v0.2.32".into()),
+                ..Default::default()
+            },
+        );
+
+        // chosen=v0.2.32 matches the folder-keyed installed_version → fire
+        assert!(already_on_chosen_message(
+            "v0.2.32",
+            "BAKAOLC",
+            "STS2-RitsuLib",
+            &info,
+            &sources,
+            &info.name,
+        ).is_some());
+    }
+
+    /// Inverse of the above: when the folder-keyed installed_version
+    /// is BELOW the chosen tag (e.g. the user just rolled back), the
+    /// gate must NOT fire — the update should proceed.
+    #[test]
+    fn already_on_chosen_message_returns_none_after_rollback_to_lower_version() {
+        let info = mod_info(|m| {
+            m.name = "RitsuLib (STS2 0.103.2 compat)".into();
+            m.folder_name = Some("STS2-RitsuLib".into());
+            m.version = "0.2.31".into();
+        });
+        let mut sources = std::collections::HashMap::new();
+        sources.insert(
+            "STS2-RitsuLib".into(),
+            ModSourceEntry {
+                installed_version: Some("v0.2.31".into()),
+                ..Default::default()
+            },
+        );
+
+        // chosen=v0.2.32 vs installed=v0.2.31 → update should proceed
+        assert_eq!(
+            already_on_chosen_message(
+                "v0.2.32",
+                "BAKAOLC",
+                "STS2-RitsuLib",
+                &info,
+                &sources,
+                &info.name,
+            ),
+            None,
+        );
+    }
+
+    /// Regression: pre-1.4.3, the SourceEditor stored whatever string the
+    /// user typed into the GitHub field — including full URLs — and the
+    /// audit then called parse_owner_repo on that value, silently
+    /// splitting "https://github.com/owner/repo" into owner="https:" and
+    /// repo="/github.com/owner/repo". 1.4.3 makes parse_owner_repo strict;
+    /// resolve_github_repo MUST fall back to parse_github_url so users
+    /// with existing URL-form entries still resolve correctly without
+    /// editing their mod_sources.json by hand.
+    #[test]
+    fn resolve_github_repo_recovers_when_db_entry_is_a_full_github_url() {
+        let info = mod_info(|m| {
+            m.name = "Multiplayer Potion View".into();
+            m.folder_name = Some("STS2-MultiPlayerPotionView-168-0-2-0-1774530567".into());
+        });
+        let mut sources = std::collections::HashMap::new();
+        sources.insert(
+            "STS2-MultiPlayerPotionView-168-0-2-0-1774530567".into(),
+            ModSourceEntry {
+                github_repo: Some(
+                    "https://github.com/BAKAOLC/STS2-MultiPlayerPotionView".into(),
+                ),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            resolve_github_repo(&info, &sources),
+            Some(("BAKAOLC".into(), "STS2-MultiPlayerPotionView".into())),
         );
     }
 

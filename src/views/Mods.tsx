@@ -866,6 +866,22 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5 ml-4 shrink-0">
+                    {/* Advanced mode: promote Remove to a one-click button
+                        on the row (left of the kebab). Non-advanced mode
+                        keeps the Remove entry inside the kebab so the row
+                        stays tidy for casual users. */}
+                    {advancedMode && (
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        onClick={() => handleDelete(mod.name, mod.folder_name)}
+                        disabled={gameRunning}
+                        aria-label="Remove mod"
+                        title={gameRunning ? 'Close STS2 first' : 'Remove mod'}
+                      >
+                        <Trash2 size={12} />
+                      </Button>
+                    )}
                     <KebabMenu title="Mod actions">
                       <KebabSection>
                         <KebabItem
@@ -1048,15 +1064,19 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                           </KebabSection>
                         </>
                       )}
-                      <KebabDivider />
-                      <KebabItem
-                        danger
-                        icon={<Trash2 size={12} />}
-                        onClick={() => handleDelete(mod.name, mod.folder_name)}
-                        disabled={gameRunning}
-                      >
-                        Remove mod…
-                      </KebabItem>
+                      {!advancedMode && (
+                        <>
+                          <KebabDivider />
+                          <KebabItem
+                            danger
+                            icon={<Trash2 size={12} />}
+                            onClick={() => handleDelete(mod.name, mod.folder_name)}
+                            disabled={gameRunning}
+                          >
+                            Remove mod…
+                          </KebabItem>
+                        </>
+                      )}
                     </KebabMenu>
                   </div>
                 </div>

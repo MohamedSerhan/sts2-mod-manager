@@ -314,6 +314,32 @@ describe('<ModsView>', () => {
     });
   });
 
+  it('advanced mode promotes Remove mod to a standalone top-level button (no kebab click needed)', async () => {
+    seedMods([baseMod({ name: 'AutoPath', folder_name: 'AutoPath' })]);
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await waitFor(() => { expect(screen.getByText('AutoPath')).toBeInTheDocument(); });
+    // Standalone button is directly visible — NOT a menuitem — so the user
+    // can click Remove without first opening the kebab.
+    const removeBtn = screen.getByRole('button', { name: /Remove mod/ });
+    expect(removeBtn).toBeInTheDocument();
+    await user.click(removeBtn);
+    await waitFor(() => {
+      expect(screen.getByText(/Delete "AutoPath"/)).toBeInTheDocument();
+    });
+  });
+
+  it('advanced mode does NOT duplicate Remove mod inside the kebab', async () => {
+    seedMods([baseMod({ name: 'AutoPath', folder_name: 'AutoPath' })]);
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await waitFor(() => { expect(screen.getByText('AutoPath')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    // In advanced mode the kebab no longer carries a duplicate Remove
+    // entry — the top-level button is the single source of truth.
+    expect(screen.queryByRole('menuitem', { name: /Remove mod/ })).toBeNull();
+  });
+
   it('kebab → Pin / Unpin toggles via pin_mod / unpin_mod', async () => {
     seedMods([baseMod({ name: 'AutoPath', folder_name: 'AutoPath', pinned: false })]);
     const user = userEvent.setup();
@@ -396,7 +422,11 @@ describe('<ModsView>', () => {
 
   it('mods linked via GitHub show a GH badge', async () => {
     seedMods([baseMod({ github_url: 'https://github.com/x/y', source: 'github:x/y' })]);
-    render(<Wrap />);
+    // GH badges only render in advanced mode (Mods.tsx:804). Pre-fix, this
+    // test passed by accident on localStorage state leaked from an earlier
+    // test that clicked the Advanced toggle. After the setup-level
+    // localStorage.clear(), advanced has to be requested explicitly.
+    render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
     // The Badge component renders 'GitHub' or 'GH' for github sources.
     // Look for the pill class. Easier: search for any element containing
@@ -962,6 +992,80 @@ describe('<ModsView>', () => {
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'set_mod_sources_full')).toBe(true);
     });
+  });
+
+  it('Source editor reopen shows the saved GitHub value, not the stale manifest URL', async () => {
+    // Pins the "save reverts to old broken link" user complaint: after a
+    // Save, refreshMods re-fetches the mod list, and the backend's enrich
+    // overlays the user-set github_repo onto mod.github_url. When the user
+    // re-opens the editor, ghRepoFromUrl(mod.github_url) MUST show the
+    // value they just saved — not the manifest's original (possibly
+    // broken) URL.
+    let scanCount = 0;
+    registerInvokeHandler('get_installed_mods', () => {
+      scanCount += 1;
+      // First load (and the load triggered by save's refreshMods after it
+      // succeeds) — caller can decide what to return per call.
+      if (scanCount === 1) {
+        return [baseMod({
+          name: 'Multiplayer Potion View',
+          folder_name: 'STS2-MultiPlayerPotionView',
+          github_url: 'https://github.com/wrong/wrong-manifest-url',
+        })];
+      }
+      // After Save, backend enrich applies the user override to github_url.
+      return [baseMod({
+        name: 'Multiplayer Potion View',
+        folder_name: 'STS2-MultiPlayerPotionView',
+        github_url: 'https://github.com/BAKAOLC/STS2-MultiPlayerPotionView',
+      })];
+    });
+    registerInvokeHandler('set_mod_sources_full', () => ({
+      github_repo: 'BAKAOLC/STS2-MultiPlayerPotionView',
+      github_auto_detected: false,
+      nexus_url: null,
+      pinned: false,
+    }));
+
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await waitFor(() => { expect(screen.getByText('Multiplayer Potion View')).toBeInTheDocument(); });
+
+    // Open editor — input should show the converted manifest value (the
+    // current stored "wrong" repo).
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    let editItems = screen.getAllByRole('menuitem', { name: /Edit sources/ });
+    await user.click(editItems[0]);
+    await waitFor(() => {
+      expect(screen.getByText('Sources for Multiplayer Potion View')).toBeInTheDocument();
+    });
+    const inputBeforeSave = screen.getByPlaceholderText('owner/repo') as HTMLInputElement;
+    expect(inputBeforeSave.value).toBe('wrong/wrong-manifest-url');
+
+    // Clear and type the correct value, then save.
+    await user.clear(inputBeforeSave);
+    await user.type(inputBeforeSave, 'BAKAOLC/STS2-MultiPlayerPotionView');
+    await user.click(screen.getByRole('button', { name: /Save sources/ }));
+
+    // Save closes the editor (setExpandedMod(null)) and triggers
+    // refreshMods, which invokes get_installed_mods a second time.
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'set_mod_sources_full')).toBe(true);
+    });
+    await waitFor(() => {
+      expect(screen.queryByText('Sources for Multiplayer Potion View')).toBeNull();
+    });
+
+    // Reopen the editor — input now reads the saved value, not the stale
+    // manifest. This is the bug fix the user was asking about.
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    editItems = screen.getAllByRole('menuitem', { name: /Edit sources/ });
+    await user.click(editItems[0]);
+    await waitFor(() => {
+      expect(screen.getByText('Sources for Multiplayer Potion View')).toBeInTheDocument();
+    });
+    const inputAfterSave = screen.getByPlaceholderText('owner/repo') as HTMLInputElement;
+    expect(inputAfterSave.value).toBe('BAKAOLC/STS2-MultiPlayerPotionView');
   });
 
   it('View on GitHub kebab item opens the github_url', async () => {

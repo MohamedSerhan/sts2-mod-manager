@@ -159,7 +159,6 @@ export function SourceEditor({
               onChange={(e) => setNote(e.target.value)}
               placeholder="e.g. downloaded from Patreon, compat patch for v1.8 build"
               rows={2}
-              style={{ resize: 'vertical', minHeight: 30, fontFamily: 'inherit' }}
             />
           </div>
           <div className="gf-src-edit-hint">

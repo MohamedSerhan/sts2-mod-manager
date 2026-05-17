@@ -572,7 +572,107 @@ fn spawn_game(mode: LaunchMode, game_path: Option<&Path>) -> std::result::Result
     }
 }
 
+/// Primary strategy the launch flow will attempt first.
+///
+/// The `steam://` protocol URL is convenient (no install-path lookup
+/// required) but unreliable when Steam itself is cold-starting: Steam
+/// catches the protocol message via its registered handler, but during
+/// boot that message can be dropped, and the game never launches. Per
+/// Valve's docs, `steam.exe -applaunch <appid>` is the robust path —
+/// Steam queues the request internally whether it's already running or
+/// not. We prefer it on Windows when we can locate `steam.exe`, and
+/// fall back to the protocol URL when we can't (or on platforms where
+/// applaunch via the Windows binary doesn't apply).
+#[derive(Debug, PartialEq, Eq)]
+enum SteamLaunchPrimary {
+    ApplaunchExe { steam_exe: PathBuf, appid: String },
+    ProtocolUrl(String),
+}
+
+/// Pure decision function — given an optional resolved Steam executable
+/// and the target appid, pick the launch strategy. Extracted from
+/// `launch_game_via_steam` so the choice can be unit-tested without
+/// actually spawning processes.
+fn plan_steam_launch_primary(steam_exe: Option<&Path>, appid: &str) -> SteamLaunchPrimary {
+    if let Some(exe) = steam_exe {
+        return SteamLaunchPrimary::ApplaunchExe {
+            steam_exe: exe.to_path_buf(),
+            appid: appid.to_string(),
+        };
+    }
+    SteamLaunchPrimary::ProtocolUrl(format!("steam://rungameid/{}", appid))
+}
+
+/// Locate `steam.exe` on Windows by appending it to whatever directory
+/// `find_steam_path` resolves to, then confirming the file exists. None
+/// when Steam isn't installed (or its registry entries point at a
+/// stale path), in which case the caller drops back to `steam://`.
+#[cfg(target_os = "windows")]
+fn find_steam_exe() -> Option<PathBuf> {
+    find_steam_path()
+        .map(|p| p.join("steam.exe"))
+        .filter(|p| p.exists())
+}
+
 fn launch_game_via_steam() -> std::result::Result<(), String> {
+    // Windows: prefer `steam.exe -applaunch` which Steam handles
+    // robustly whether it's running or cold-starting. The fallback
+    // path (steam:// protocol URL) only kicks in if we can't find
+    // steam.exe at all — which is rare, but keeps the launch working
+    // even when the Steam registry entries are stale or stripped.
+    #[cfg(target_os = "windows")]
+    {
+        let steam_exe = find_steam_exe();
+        match plan_steam_launch_primary(steam_exe.as_deref(), STS2_STEAM_APPID) {
+            SteamLaunchPrimary::ApplaunchExe { steam_exe, appid } => {
+                return spawn_steam_applaunch(&steam_exe, &appid);
+            }
+            SteamLaunchPrimary::ProtocolUrl(url) => {
+                log::warn!(
+                    "steam.exe not located via registry/common paths — falling back to {}. \
+                     Cold-start launches may be unreliable when Steam isn't already running.",
+                    url
+                );
+                // Fall through to the open::that path below.
+            }
+        }
+    }
+
+    // macOS: same cold-start tradeoff as Windows — the steam:// protocol
+    // can drop the launch message while Steam is booting. `open -a Steam
+    // --args -applaunch <appid>` is the documented robust path: macOS
+    // launches Steam.app if not running, then hands `-applaunch <appid>`
+    // through to the Steam process. Falls back to the steam:// URL when
+    // /Applications/Steam.app isn't present (rare — would mean Steam was
+    // installed somewhere non-standard).
+    #[cfg(target_os = "macos")]
+    {
+        let steam_app = std::path::Path::new("/Applications/Steam.app");
+        if steam_app.exists() {
+            use std::process::Command;
+            log::info!(
+                "Launching STS2 via 'open -a Steam --args -applaunch {}' (robust cold-start path)",
+                STS2_STEAM_APPID
+            );
+            match Command::new("open")
+                .args(["-a", "Steam", "--args", "-applaunch", STS2_STEAM_APPID])
+                .spawn()
+            {
+                Ok(_) => return Ok(()),
+                Err(e) => log::warn!(
+                    "macOS 'open -a Steam' failed: {}. Falling back to {}.",
+                    e, STEAM_URL
+                ),
+            }
+        } else {
+            log::warn!(
+                "/Applications/Steam.app not found — falling back to {}. \
+                 Cold-start launches may be unreliable when Steam isn't already running.",
+                STEAM_URL
+            );
+        }
+    }
+
     match open::that(STEAM_URL) {
         Ok(()) => return Ok(()),
         Err(e) => {
@@ -633,6 +733,32 @@ fn launch_game_via_steam() -> std::result::Result<(), String> {
                 .to_string(),
         )
     }
+}
+
+/// Spawn `steam.exe -applaunch <appid>` on Windows. Fire-and-forget —
+/// we don't wait for Steam (it may need to fully boot before the game
+/// process appears), and we don't poll for the game window: the user
+/// sees Steam's own launch UX from this point on.
+#[cfg(target_os = "windows")]
+fn spawn_steam_applaunch(steam_exe: &Path, appid: &str) -> std::result::Result<(), String> {
+    use std::process::Command;
+    log::info!(
+        "Launching STS2 via {} -applaunch {} (robust cold-start path)",
+        steam_exe.display(),
+        appid
+    );
+    Command::new(steam_exe)
+        .args(["-applaunch", appid])
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| {
+            format!(
+                "Could not run {} -applaunch {}: {}. Try starting Steam manually, then click Launch again.",
+                steam_exe.display(),
+                appid,
+                e
+            )
+        })
 }
 
 /// STS2 calls Steamworks' `SteamAPI_Init()` on startup. When the game
@@ -1083,4 +1209,42 @@ pub fn read_log_tail(
     let collected: Vec<&str> = text.lines().collect();
     let start = collected.len().saturating_sub(want);
     Ok(collected[start..].join("\n"))
+}
+
+#[cfg(test)]
+mod steam_launch_planner_tests {
+    //! `steam://rungameid/<appid>` is unreliable on Windows when Steam is
+    //! cold-starting — the protocol message can be dropped while Steam
+    //! boots. Calling `steam.exe -applaunch <appid>` is the documented
+    //! robust path: Steam queues the launch itself whether running or
+    //! not. These tests pin the decision logic that picks between the
+    //! two strategies; the actual `Command::spawn` is exercised by the
+    //! WebDriver smoke (which is the only test layer that can verify
+    //! the game actually launches).
+    use super::{plan_steam_launch_primary, SteamLaunchPrimary, STS2_STEAM_APPID};
+    use std::path::PathBuf;
+
+    #[test]
+    fn prefers_applaunch_when_steam_exe_is_known() {
+        let exe = PathBuf::from(r"C:\Program Files (x86)\Steam\steam.exe");
+        let plan = plan_steam_launch_primary(Some(&exe), STS2_STEAM_APPID);
+        match plan {
+            SteamLaunchPrimary::ApplaunchExe { steam_exe, appid } => {
+                assert_eq!(steam_exe, exe);
+                assert_eq!(appid, STS2_STEAM_APPID);
+            }
+            other => panic!("expected ApplaunchExe, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn falls_back_to_protocol_url_when_steam_exe_is_unknown() {
+        let plan = plan_steam_launch_primary(None, STS2_STEAM_APPID);
+        match plan {
+            SteamLaunchPrimary::ProtocolUrl(url) => {
+                assert_eq!(url, format!("steam://rungameid/{}", STS2_STEAM_APPID));
+            }
+            other => panic!("expected ProtocolUrl, got {:?}", other),
+        }
+    }
 }

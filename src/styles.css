@@ -1236,10 +1236,30 @@ body {
   background: var(--indigo-deep); border: 1px solid var(--indigo-line);
   border-radius: 6px; padding: 0 10px;
 }
-.gf-src-edit-input input {
+/* The container originally only styled `input`; the Note textarea fell
+   through to default browser styling (light bg, mismatched border,
+   no width fill) inside a flex row, producing the cramped/malformed
+   look reported by users. Apply the same chrome to both. */
+.gf-src-edit-input input,
+.gf-src-edit-input textarea {
   flex: 1; background: transparent; border: 0; outline: 0;
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 11.5px; color: var(--ink); padding: 8px 0;
+}
+.gf-src-edit-input input {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+.gf-src-edit-input textarea {
+  font-family: inherit;
+  resize: vertical;
+  min-height: 30px;
+  width: 100%;
+}
+/* Textareas span multiple rows so vertical centering crops them.
+   Switch this container to top-aligned for textarea-containing fields. */
+.gf-src-edit-input:has(textarea) {
+  align-items: stretch;
+  padding-top: 6px;
+  padding-bottom: 6px;
 }
 .gf-src-edit-status {
   font-size: 10.5px; padding: 2px 7px; border-radius: 999px;

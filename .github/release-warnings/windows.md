@@ -1,0 +1,1 @@
+> **Windows SmartScreen warning:** The installer isn't code-signed yet, so when you run it you'll see *"Windows protected your PC"* from Microsoft Defender SmartScreen. To install: click **More info**, then click **Run anyway**. Your browser may also flag the download as untrusted -- choose **Keep** (Edge/Chrome) to save the file.

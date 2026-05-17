@@ -31,6 +31,18 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ### Fixed
 
+### Security
+
+---
+
+## [1.4.4] - 2026-05-16
+
+### Added
+
+### Changed
+
+### Fixed
+
 - Linux AppImage buttons now open Steam, folders, browser links, and support links using the system environment instead of the bundled app environment.
 
 ### Security

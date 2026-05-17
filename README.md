@@ -108,6 +108,36 @@ clipboard for pasting into a GitHub issue.
 > you hit Share. Solo users who only consume friends' packs never
 > have anything written to their account.
 
+### About modpack sharing
+
+The Share / Re-share flow uploads your pack to a public GitHub repo on
+**your** account (`<your-username>/sts2mm-profiles`). The manager creates
+that repo on first share using your OAuth login. The bundle exists so
+profile-switching, repair, and recovery all work locally without
+redownloading anything — sharing reuses the same bundle.
+
+A few practical notes:
+
+- The repo lives on **your** GitHub, not somewhere central. The manager's
+  author doesn't host anything and keeps no list of who's sharing what.
+- To remove a pack later: delete its `.json` from your `sts2mm-profiles`
+  repo, or delete the whole repo from GitHub → Settings.
+- The publish dialog has a Visibility option — Friends only (default) or
+  Public. Friends only keeps the pack share-code-only — friends with the
+  code can still install, but it won't appear in Browse Modpacks.
+
+If you're sharing mods you didn't write yourself, glancing at the mod's
+permissions page is good practice. Most authors are happy for their work
+to travel; a few mark mods "do not redistribute" and respecting that
+keeps the modding scene friendly. The manager won't check this for you.
+
+**For mod authors:** the manager's author has no access to other users'
+personal `sts2mm-profiles` repos and can't remove content from them. To
+request removal of a specific share, open an issue on the curator's repo
+at `https://github.com/<owner>/sts2mm-profiles`, or use GitHub's standard
+process at <https://github.com/contact/dmca>. Requests sent to the
+manager project repo can't be acted on from here.
+
 ### Mods
 - **Toggle on/off** per-mod with instant effect.
 - **Auto-updates.** "Update all" pulls fresh GitHub releases; pinned mods

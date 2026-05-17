@@ -1253,6 +1253,8 @@
       "toggleFailed": "Failed to toggle {{name}}: {{error}}",
       "unpinned": "Unpinned {{name}}",
       "pinned": "Pinned {{name}} — its enabled state will survive modpack updates",
+      "pinAction": "pin",
+      "unpinAction": "unpin",
       "pinFailed": "Failed to {{action}} {{name}}: {{error}}",
       "repaired": "Repaired '{{name}}' (v{{version}})",
       "repairFailed": "Repair failed for '{{name}}': {{error}}",

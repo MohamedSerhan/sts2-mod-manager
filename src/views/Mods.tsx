@@ -178,7 +178,8 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
       }
       await refreshMods();
     } catch (e) {
-      toast.error(t('mods.toast.pinFailed', { action: pinned ? 'unpin' : 'pin', name, error: e instanceof Error ? e.message : String(e) }));
+      const action = pinned ? t('mods.toast.unpinAction') : t('mods.toast.pinAction');
+      toast.error(t('mods.toast.pinFailed', { action, name, error: e instanceof Error ? e.message : String(e) }));
     }
   }
 

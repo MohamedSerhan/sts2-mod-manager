@@ -839,11 +839,21 @@ pub(crate) async fn upload_mod_bundle_via_release(
     use sha2::{Digest, Sha256};
 
     let client = build_client(token);
-    let asset_name = release_asset_name(mod_name, version);
 
+    // Hash first so the asset filename can carry the content prefix.
+    // Content-addressed names mean: identical bytes → identical filename
+    // (skippable via the prior_sha256 short-circuit below) and different
+    // bytes → different filename (no GitHub-side dedup collision, ever).
+    // Pre-fix, two re-shares with the same logical version but different
+    // bytes would race on the same asset name and trip 422 already_exists
+    // even when our lookup correctly identified the conflict — and worse,
+    // some past-version uploads left orphan names in GitHub's dedup index
+    // that the listing API doesn't surface, so even a fresh POST 422'd.
     let mut hasher = Sha256::new();
     hasher.update(zip_data);
     let local_hash = format!("{:x}", hasher.finalize());
+
+    let asset_name = release_asset_name(mod_name, version, &local_hash);
 
     let repo = profiles_repo();
     let release = ensure_bundles_release(&client, username, &repo).await?;
@@ -1026,10 +1036,17 @@ pub(crate) async fn cleanup_orphan_bundle_assets(
 /// turned every Chinese character into `_`. Only path-/URL-unsafe chars
 /// are replaced so the result is still a valid filename on every platform
 /// and safe to URL-encode for the upload endpoint.
-fn release_asset_name(mod_name: &str, version: &str) -> String {
+///
+/// The trailing `_<sha8>` suffix is the first 8 hex chars of the
+/// bundle's SHA-256 — it makes the filename content-addressed so two
+/// uploads with different bytes can never collide on GitHub's dedup
+/// index. Caller passes the full hex digest; we slice the prefix here so
+/// the asset name stays short enough to be readable.
+fn release_asset_name(mod_name: &str, version: &str, sha256_hex: &str) -> String {
     let safe_name = sanitize_asset_component(mod_name, false);
     let safe_ver = sanitize_asset_component(version.trim_start_matches('v'), true);
-    format!("{}_v{}.zip", safe_name, safe_ver)
+    let sha8 = sha256_hex.get(..8).unwrap_or(sha256_hex);
+    format!("{}_v{}_{}.zip", safe_name, safe_ver, sha8)
 }
 
 fn sanitize_asset_component(input: &str, allow_dot: bool) -> String {
@@ -2334,10 +2351,16 @@ mod parse_share_code_tests {
 mod release_asset_name_tests {
     use super::{decode_asset_name, release_asset_name, sanitize_asset_component};
 
+    /// SHA-256 of an empty byte slice — used as a stable test fixture.
+    const SHA_EMPTY: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
     #[test]
     fn preserves_unicode_in_mod_names() {
         // Issue #44: Chinese ideographs used to collapse to `___`.
-        assert_eq!(release_asset_name("皮皮统计", "1.0.0"), "皮皮统计_v1.0.0.zip");
+        assert_eq!(
+            release_asset_name("皮皮统计", "1.0.0", SHA_EMPTY),
+            "皮皮统计_v1.0.0_e3b0c442.zip",
+        );
     }
 
     #[test]
@@ -2350,7 +2373,29 @@ mod release_asset_name_tests {
 
     #[test]
     fn keeps_ascii_alphanumerics_and_separators() {
-        assert_eq!(release_asset_name("My-Mod_42", "v2.3.4"), "My-Mod_42_v2.3.4.zip");
+        assert_eq!(
+            release_asset_name("My-Mod_42", "v2.3.4", SHA_EMPTY),
+            "My-Mod_42_v2.3.4_e3b0c442.zip",
+        );
+    }
+
+    #[test]
+    fn includes_short_sha_so_content_changes_produce_distinct_names() {
+        // Same name + version with different content hashes must produce
+        // distinct asset filenames — that's the property that eliminates
+        // the GitHub already_exists / orphan-name failure mode.
+        let a = release_asset_name("ModX", "1.0.0", "aaaaaaaa00000000");
+        let b = release_asset_name("ModX", "1.0.0", "bbbbbbbb00000000");
+        assert_ne!(a, b);
+        assert_eq!(a, "ModX_v1.0.0_aaaaaaaa.zip");
+        assert_eq!(b, "ModX_v1.0.0_bbbbbbbb.zip");
+    }
+
+    #[test]
+    fn short_sha_does_not_panic_on_truncated_input() {
+        // Defensive — sha8 prefix slice was the obvious panic site if a
+        // caller ever passes a hex string under 8 chars.
+        assert!(release_asset_name("ModX", "1.0.0", "abc").ends_with("_abc.zip"));
     }
 
     #[test]
@@ -2814,9 +2859,28 @@ mod release_upload_tests {
         assert!(url.contains("releases/download/bundles/TheCursed_v0.2.7.zip"));
     }
 
+    /// Helper: compute the asset filename the orchestrator will produce
+    /// for these exact bytes. Asset names are content-addressed
+    /// (`<mod>_v<ver>_<sha8>.zip`) so tests can't hardcode them — the
+    /// SHA prefix shifts whenever the test fixture bytes change.
+    fn expected_asset_name(mod_name: &str, version: &str, data: &[u8]) -> String {
+        super::release_asset_name(mod_name, version, &sha256_hex(data))
+    }
+
+    fn expected_download_url(mod_name: &str, version: &str, data: &[u8]) -> String {
+        format!(
+            "https://github.com/octo/sts2mm-profiles/releases/download/bundles/{}",
+            expected_asset_name(mod_name, version, data)
+        )
+    }
+
     #[tokio::test]
     async fn upload_mod_bundle_via_release_first_upload_records_hash() {
         let (server, _env_guard) = mock_github().await;
+        let bytes = b"fake-zip-bytes";
+        let name = expected_asset_name("TheCursedMod", "0.2.7", bytes);
+        let download_url = expected_download_url("TheCursedMod", "0.2.7", bytes);
+
         Mock::given(method("GET"))
             .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -2834,20 +2898,19 @@ mod release_upload_tests {
 
         Mock::given(method("POST"))
             .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
-            .and(query_param("name", "TheCursedMod_v0.2.7.zip"))
+            .and(query_param("name", &name))
             .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
                 "id": 100,
-                "name": "TheCursedMod_v0.2.7.zip",
-                "browser_download_url": "https://github.com/octo/sts2mm-profiles/releases/download/bundles/TheCursedMod_v0.2.7.zip"
+                "name": name,
+                "browser_download_url": download_url,
             })))
             .expect(1)
             .mount(&server).await;
 
-        let bytes = b"fake-zip-bytes";
         let (url, hash) = upload_mod_bundle_via_release(
             "test-token", "octo", "TheCursedMod", "0.2.7", bytes, None
         ).await.expect("first upload should succeed");
-        assert!(url.contains("releases/download/bundles/TheCursedMod_v0.2.7.zip"));
+        assert_eq!(url, download_url);
         assert_eq!(hash, sha256_hex(bytes));
     }
 
@@ -2856,6 +2919,8 @@ mod release_upload_tests {
         let (server, _env_guard) = mock_github().await;
         let bytes = b"fake-zip-bytes";
         let prior_hash = sha256_hex(bytes);
+        let name = expected_asset_name("TheCursedMod", "0.2.7", bytes);
+        let download_url = expected_download_url("TheCursedMod", "0.2.7", bytes);
 
         Mock::given(method("GET"))
             .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
@@ -2871,8 +2936,8 @@ mod release_upload_tests {
             .and(query_param("page", "1"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([{
                 "id": 555,
-                "name": "TheCursedMod_v0.2.7.zip",
-                "browser_download_url": "https://github.com/octo/sts2mm-profiles/releases/download/bundles/TheCursedMod_v0.2.7.zip"
+                "name": name,
+                "browser_download_url": download_url,
             }])))
             .mount(&server).await;
 
@@ -2883,18 +2948,24 @@ mod release_upload_tests {
         let (url, hash) = upload_mod_bundle_via_release(
             "test-token", "octo", "TheCursedMod", "0.2.7", bytes, Some(&prior_hash)
         ).await.expect("skip should succeed");
-        assert_eq!(url, "https://github.com/octo/sts2mm-profiles/releases/download/bundles/TheCursedMod_v0.2.7.zip");
+        assert_eq!(url, download_url);
         assert_eq!(hash, prior_hash, "hash returned to caller must match what was on disk");
     }
 
     #[tokio::test]
     async fn upload_mod_bundle_via_release_replaces_when_hash_differs_but_name_matches() {
         // The mod-author case: edited locally without bumping version.
-        // Asset already on the release with a different hash → orchestrator
-        // takes the DELETE-then-POST replace path.
+        // Both old + new bytes hash differently, so under the content-
+        // addressed naming the new bytes produce a brand-new asset name.
+        // The orchestrator no longer needs the DELETE-then-POST replace
+        // path here — it falls into the net-new POST path because the
+        // looked-up canonical (new bytes) name doesn't collide.
         let (server, _env_guard) = mock_github().await;
         let bytes = b"fresh-bytes-after-edit";
         let stale_prior_hash = sha256_hex(b"original-bytes");
+        let new_name = expected_asset_name("TheCursedMod", "0.2.7", bytes);
+        let new_url = expected_download_url("TheCursedMod", "0.2.7", bytes);
+        let stale_name = expected_asset_name("TheCursedMod", "0.2.7", b"original-bytes");
 
         Mock::given(method("GET"))
             .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
@@ -2905,49 +2976,49 @@ mod release_upload_tests {
             })))
             .mount(&server).await;
 
-        // Paginated assets list: page 1 has the existing asset, page 2 empty.
+        // Stale asset under the OLD hash's name is still on the release
+        // (the GC sweep will reap it on a later share). Orchestrator
+        // doesn't touch it — its canonical name is the new-hash one.
         Mock::given(method("GET"))
             .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
             .and(query_param("page", "1"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([{
                 "id": 555,
-                "name": "TheCursedMod_v0.2.7.zip",
+                "name": stale_name,
                 "browser_download_url": "https://example/old"
             }])))
             .mount(&server).await;
 
-        Mock::given(method("DELETE"))
-            .and(path("/repos/octo/sts2mm-profiles/releases/assets/555"))
-            .respond_with(ResponseTemplate::new(204))
-            .expect(1)
-            .mount(&server).await;
-
         Mock::given(method("POST"))
             .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
-            .and(query_param("name", "TheCursedMod_v0.2.7.zip"))
+            .and(query_param("name", &new_name))
             .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
                 "id": 1001,
-                "name": "TheCursedMod_v0.2.7.zip",
-                "browser_download_url": "https://github.com/octo/sts2mm-profiles/releases/download/bundles/TheCursedMod_v0.2.7.zip"
+                "name": new_name,
+                "browser_download_url": new_url,
             })))
             .expect(1)
             .mount(&server).await;
 
         let (url, hash) = upload_mod_bundle_via_release(
             "test-token", "octo", "TheCursedMod", "0.2.7", bytes, Some(&stale_prior_hash)
-        ).await.expect("replace path should succeed");
-        assert!(url.contains("releases/download/bundles/TheCursedMod_v0.2.7.zip"));
+        ).await.expect("net-new upload under fresh content-addressed name should succeed");
+        assert_eq!(url, new_url);
         assert_eq!(hash, sha256_hex(bytes));
     }
 
     #[tokio::test]
-    async fn upload_mod_bundle_via_release_re_uploads_when_no_prior_hash_but_name_collision() {
+    async fn upload_mod_bundle_via_release_replaces_when_same_bytes_same_name_no_prior_hash() {
         // Edge case: fresh install (no prior hash in profile JSON) but
-        // canonical name already exists on the release (curator re-installed
-        // app and lost local manifest). Must take the DELETE+POST replace
-        // path — we can't trust an asset's hash without checking it.
+        // the canonical content-addressed name happens to be on the
+        // release already (curator re-installed app and lost local
+        // manifest). Orchestrator looks the asset up, can't compare
+        // hashes (no prior), and takes the DELETE-then-POST replace path
+        // to be safe.
         let (server, _env_guard) = mock_github().await;
         let bytes = b"data";
+        let name = expected_asset_name("TheCursedMod", "0.2.7", bytes);
+        let download_url = expected_download_url("TheCursedMod", "0.2.7", bytes);
 
         Mock::given(method("GET"))
             .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
@@ -2963,7 +3034,7 @@ mod release_upload_tests {
             .and(query_param("page", "1"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([{
                 "id": 555,
-                "name": "TheCursedMod_v0.2.7.zip",
+                "name": name,
                 "browser_download_url": "https://example/whatever"
             }])))
             .mount(&server).await;
@@ -2976,10 +3047,10 @@ mod release_upload_tests {
 
         Mock::given(method("POST"))
             .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
-            .and(query_param("name", "TheCursedMod_v0.2.7.zip"))
+            .and(query_param("name", &name))
             .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
-                "id": 1001, "name": "TheCursedMod_v0.2.7.zip",
-                "browser_download_url": "https://github.com/octo/sts2mm-profiles/releases/download/bundles/TheCursedMod_v0.2.7.zip"
+                "id": 1001, "name": name,
+                "browser_download_url": download_url,
             })))
             .expect(1)
             .mount(&server).await;
@@ -2992,6 +3063,10 @@ mod release_upload_tests {
     #[tokio::test]
     async fn upload_mod_bundle_via_release_sanitizes_filename() {
         let (server, _env_guard) = mock_github().await;
+        let bytes = b"data";
+        let name = expected_asset_name("My Cool/Mod", "v1.2.3", bytes);
+        let download_url = expected_download_url("My Cool/Mod", "v1.2.3", bytes);
+
         Mock::given(method("GET"))
             .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -3007,17 +3082,19 @@ mod release_upload_tests {
             .mount(&server).await;
         Mock::given(method("POST"))
             .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
-            .and(query_param("name", "My_Cool_Mod_v1.2.3.zip"))
+            .and(query_param("name", &name))
             .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
-                "id": 999, "name": "My_Cool_Mod_v1.2.3.zip",
-                "browser_download_url": "https://github.com/octo/sts2mm-profiles/releases/download/bundles/My_Cool_Mod_v1.2.3.zip"
+                "id": 999, "name": name,
+                "browser_download_url": download_url,
             })))
             .expect(1)
             .mount(&server).await;
 
         let _ = upload_mod_bundle_via_release(
-            "test-token", "octo", "My Cool/Mod", "v1.2.3", b"data", None
+            "test-token", "octo", "My Cool/Mod", "v1.2.3", bytes, None
         ).await.expect("ok");
+        // Sanitised stem still appears in the filename; SHA prefix follows.
+        assert!(name.starts_with("My_Cool_Mod_v1.2.3_"));
     }
 
     /// Regression for issue #44: mod names with non-ASCII characters
@@ -3046,24 +3123,28 @@ mod release_upload_tests {
             .mount(&server).await;
 
         // "皮皮极速: SpeedX" — colon and space become `_`, but the four
-        // ideographs are kept verbatim. Final: `皮皮极速__SpeedX_v0.11.7.zip`.
-        let expected_name = "皮皮极速__SpeedX_v0.11.7.zip";
+        // ideographs are kept verbatim. With content-addressing the
+        // filename has a SHA8 suffix appended: `皮皮极速__SpeedX_v0.11.7_<sha8>.zip`.
+        let bytes = b"data";
+        let expected_name = expected_asset_name("皮皮极速: SpeedX", "0.11.7", bytes);
+        let download_url = expected_download_url("皮皮极速: SpeedX", "0.11.7", bytes);
+        assert!(
+            expected_name.starts_with("皮皮极速__SpeedX_v0.11.7_"),
+            "ideographs must be preserved in the asset name",
+        );
         Mock::given(method("POST"))
             .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
-            .and(query_param("name", expected_name))
+            .and(query_param("name", &expected_name))
             .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
                 "id": 100,
                 "name": expected_name,
-                "browser_download_url": format!(
-                    "https://github.com/octo/sts2mm-profiles/releases/download/bundles/{}",
-                    expected_name
-                )
+                "browser_download_url": download_url,
             })))
             .expect(1)
             .mount(&server).await;
 
         let _ = upload_mod_bundle_via_release(
-            "test-token", "octo", "皮皮极速: SpeedX", "0.11.7", b"data", None
+            "test-token", "octo", "皮皮极速: SpeedX", "0.11.7", bytes, None
         ).await.expect("non-ascii mod names must round-trip into the asset filename");
     }
 
@@ -3099,14 +3180,16 @@ mod release_upload_tests {
             .respond_with(ResponseTemplate::new(200).set_body_json(page1))
             .mount(&server).await;
 
-        // Page 2: the canonical asset.
+        // Page 2: the canonical asset (content-addressed name).
+        let name = expected_asset_name("TheCursedMod", "0.2.7", bytes);
+        let download_url = expected_download_url("TheCursedMod", "0.2.7", bytes);
         Mock::given(method("GET"))
             .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
             .and(query_param("page", "2"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([{
                 "id": 9999,
-                "name": "TheCursedMod_v0.2.7.zip",
-                "browser_download_url": "https://github.com/octo/sts2mm-profiles/releases/download/bundles/TheCursedMod_v0.2.7.zip"
+                "name": name,
+                "browser_download_url": download_url,
             }])))
             .mount(&server).await;
 
@@ -3116,27 +3199,30 @@ mod release_upload_tests {
         let (url, hash) = upload_mod_bundle_via_release(
             "test-token", "octo", "TheCursedMod", "0.2.7", bytes, Some(&prior_hash)
         ).await.expect("skip via page-2 lookup must succeed");
-        assert_eq!(url, "https://github.com/octo/sts2mm-profiles/releases/download/bundles/TheCursedMod_v0.2.7.zip");
+        assert_eq!(url, download_url);
         assert_eq!(hash, prior_hash);
     }
 
-    /// Regression for Bug B: two consecutive replaces against the same
-    /// release. Pre-fix, the second replace failed because the rename
-    /// flow left a `<canonical>.stale` from the first replace, and the
-    /// second PATCH old → `.stale` got 422 already_exists.
-    ///
-    /// With DELETE-then-POST there's no `.stale` state to accumulate, so
-    /// the second replace should succeed exactly like the first.
+    /// Two consecutive re-shares against the same release. Under
+    /// content-addressed naming each cycle produces a DIFFERENT asset
+    /// filename (`<mod>_v<ver>_<sha8>.zip` differs whenever bytes
+    /// differ), so each cycle hits the net-new POST path rather than
+    /// the DELETE-then-POST replace path. The pre-fix `.stale`-orphan
+    /// failure mode (Bug B) is now impossible — the second upload's
+    /// name doesn't collide with the first's.
     #[tokio::test]
-    async fn upload_mod_bundle_via_release_two_consecutive_replaces_both_succeed() {
+    async fn upload_mod_bundle_via_release_two_consecutive_shares_both_succeed() {
         let (server, _env_guard) = mock_github().await;
         let first_bytes = b"v1-bytes";
         let second_bytes = b"v2-bytes";
         let hash_before_first = sha256_hex(b"original-bytes");
         let hash_after_first = sha256_hex(first_bytes);
+        let first_name = expected_asset_name("TheCursedMod", "0.2.7", first_bytes);
+        let first_url = expected_download_url("TheCursedMod", "0.2.7", first_bytes);
+        let second_name = expected_asset_name("TheCursedMod", "0.2.7", second_bytes);
+        let second_url = expected_download_url("TheCursedMod", "0.2.7", second_bytes);
 
-        // ── First replace cycle ────────────────────────────────────────
-        // Asset id 555 exists; orchestrator must DELETE 555 then POST canonical.
+        // ── First cycle ────────────────────────────────────────────────
         Mock::given(method("GET"))
             .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -3148,24 +3234,15 @@ mod release_upload_tests {
         Mock::given(method("GET"))
             .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
             .and(query_param("page", "1"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([{
-                "id": 555,
-                "name": "TheCursedMod_v0.2.7.zip",
-                "browser_download_url": "https://example/v0"
-            }])))
-            .mount(&server).await;
-        Mock::given(method("DELETE"))
-            .and(path("/repos/octo/sts2mm-profiles/releases/assets/555"))
-            .respond_with(ResponseTemplate::new(204))
-            .expect(1)
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
             .mount(&server).await;
         Mock::given(method("POST"))
             .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
-            .and(query_param("name", "TheCursedMod_v0.2.7.zip"))
+            .and(query_param("name", &first_name))
             .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
                 "id": 1001,
-                "name": "TheCursedMod_v0.2.7.zip",
-                "browser_download_url": "https://github.com/octo/sts2mm-profiles/releases/download/bundles/TheCursedMod_v0.2.7.zip"
+                "name": first_name,
+                "browser_download_url": first_url,
             })))
             .expect(1)
             .mount(&server).await;
@@ -3173,22 +3250,17 @@ mod release_upload_tests {
         let (url1, hash1) = upload_mod_bundle_via_release(
             "test-token", "octo", "TheCursedMod", "0.2.7",
             first_bytes, Some(&hash_before_first),
-        ).await.expect("first replace must succeed");
-        assert!(url1.contains("TheCursedMod_v0.2.7.zip"));
+        ).await.expect("first share must succeed");
+        assert_eq!(url1, first_url);
         assert_eq!(hash1, sha256_hex(first_bytes));
 
-        // Reset the server's mocks before the second cycle so the cycle-1
-        // listing (which returned asset 555) doesn't shadow cycle 2's
-        // listing (which must return asset 1001). Wiremock's mount-order
-        // matching makes overlapping mocks hard to reason about; reset is
-        // cleanest.
+        // Reset mocks so cycle 2's listing doesn't shadow cycle 1's.
         server.reset().await;
 
-        // ── Second replace cycle ───────────────────────────────────────
-        // Now the asset id is 1001 (from the first cycle's POST). New
-        // content hashes differently, so orchestrator must DELETE 1001
-        // then POST canonical again. Pre-fix, this would 422 on the rename
-        // because `.stale` from cycle 1 was still present.
+        // ── Second cycle ───────────────────────────────────────────────
+        // Old asset still sits on the release (GC sweep will reap it).
+        // Orchestrator looks up by the NEW canonical name, doesn't find
+        // it, and POSTs net-new under the new SHA-suffixed name.
         Mock::given(method("GET"))
             .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -3202,22 +3274,17 @@ mod release_upload_tests {
             .and(query_param("page", "1"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([{
                 "id": 1001,
-                "name": "TheCursedMod_v0.2.7.zip",
-                "browser_download_url": "https://example/v1"
+                "name": first_name,
+                "browser_download_url": first_url,
             }])))
-            .mount(&server).await;
-        Mock::given(method("DELETE"))
-            .and(path("/repos/octo/sts2mm-profiles/releases/assets/1001"))
-            .respond_with(ResponseTemplate::new(204))
-            .expect(1)
             .mount(&server).await;
         Mock::given(method("POST"))
             .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
-            .and(query_param("name", "TheCursedMod_v0.2.7.zip"))
+            .and(query_param("name", &second_name))
             .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
                 "id": 2002,
-                "name": "TheCursedMod_v0.2.7.zip",
-                "browser_download_url": "https://github.com/octo/sts2mm-profiles/releases/download/bundles/TheCursedMod_v0.2.7.zip"
+                "name": second_name,
+                "browser_download_url": second_url,
             })))
             .expect(1)
             .mount(&server).await;
@@ -3225,9 +3292,10 @@ mod release_upload_tests {
         let (url2, hash2) = upload_mod_bundle_via_release(
             "test-token", "octo", "TheCursedMod", "0.2.7",
             second_bytes, Some(&hash_after_first),
-        ).await.expect("second replace must succeed — Bug B regression guard");
-        assert!(url2.contains("TheCursedMod_v0.2.7.zip"));
+        ).await.expect("second share must succeed");
+        assert_eq!(url2, second_url);
         assert_eq!(hash2, sha256_hex(second_bytes));
+        assert_ne!(first_name, second_name, "different bytes must produce different content-addressed names");
     }
 }
 
@@ -3552,12 +3620,6 @@ mod github_api_stress_tests {
 
         let profile = build_stress_profile(&profile_name, &asset_prefix, &mods_path)
             .expect("build stress fixture profile");
-        let expected_mods = profile.mods.clone();
-        let expected_asset_names: Vec<String> = expected_mods
-            .iter()
-            .map(|m| release_asset_name(&m.name, &m.version))
-            .collect();
-
         let result = run_stress_share_and_verify(
             profile,
             &mods_path,
@@ -3567,7 +3629,6 @@ mod github_api_stress_tests {
             &username,
             &repo,
             &client,
-            &expected_asset_names,
         )
         .await;
 
@@ -3588,7 +3649,6 @@ mod github_api_stress_tests {
         username: &str,
         repo: &str,
         client: &reqwest::Client,
-        expected_asset_names: &[String],
     ) -> Result<()> {
         let result = share_profile_impl(
             profile,
@@ -3610,16 +3670,23 @@ mod github_api_stress_tests {
                 )));
             }
 
+            // Asset names are content-addressed (`<mod>_v<ver>_<sha8>.zip`)
+            // so we can't predict them ahead of time. Verify via each
+            // mod's bundle_url instead — the manifest is the source of
+            // truth for which asset URL the manager will actually fetch.
             let release = ensure_bundles_release(client, username, repo).await?;
-            for (pm, expected_asset_name) in fetched.mods.iter().zip(expected_asset_names.iter()) {
+            for pm in fetched.mods.iter() {
                 let Some(expected_hash) = pm.bundle_sha256.as_deref() else {
                     return Err(AppError::Other(format!("{} missing bundle_sha256", pm.name)));
+                };
+                let Some(bundle_url) = pm.bundle_url.as_deref() else {
+                    return Err(AppError::Other(format!("{} missing bundle_url", pm.name)));
                 };
                 let asset = release
                     .assets
                     .iter()
-                    .find(|asset| asset.name == *expected_asset_name)
-                    .ok_or_else(|| AppError::Other(format!("Missing release asset {}", expected_asset_name)))?;
+                    .find(|asset| asset.browser_download_url == bundle_url)
+                    .ok_or_else(|| AppError::Other(format!("Manifest URL {} not present on release", bundle_url)))?;
                 let bytes = download_release_asset_via_api(client, username, repo, asset.id).await?;
                 let actual_hash = sha256_hex(&bytes);
                 if actual_hash != expected_hash {

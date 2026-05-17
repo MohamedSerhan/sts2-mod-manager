@@ -520,6 +520,22 @@ fn zip_mod_files(mod_name: &str, files: &[String], mods_path: &std::path::Path) 
     Ok(cursor.into_inner())
 }
 
+fn zip_entry_outpath(mods_path: &std::path::Path, entry_name: &str) -> Option<std::path::PathBuf> {
+    let normalized = entry_name.replace('\\', "/");
+    let rel = std::path::Path::new(&normalized);
+    if normalized.trim_matches('/').is_empty()
+        || rel.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::Prefix(_) | Component::RootDir
+            )
+        })
+    {
+        return None;
+    }
+    Some(mods_path.join(rel))
+}
+
 fn zip_profile_mod_files(
     pm: &crate::profiles::ProfileMod,
     mods_path: &std::path::Path,
@@ -878,7 +894,7 @@ pub async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::P
                 let mut file = archive
                     .by_index(i)
                     .map_err(|e| AppError::Other(e.to_string()))?;
-                let Some(outpath) = file.enclosed_name().map(|p| mods_path.join(p)) else {
+                let Some(outpath) = zip_entry_outpath(mods_path, file.name()) else {
                     continue;
                 };
                 if file.name().ends_with('/') {
@@ -986,7 +1002,7 @@ pub async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::P
         let mut file = archive
             .by_index(i)
             .map_err(|e| AppError::Other(e.to_string()))?;
-        let Some(outpath) = file.enclosed_name().map(|p| mods_path.join(p)) else {
+        let Some(outpath) = zip_entry_outpath(mods_path, file.name()) else {
             continue;
         };
         if file.name().ends_with('/') {

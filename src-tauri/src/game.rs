@@ -638,6 +638,41 @@ fn launch_game_via_steam() -> std::result::Result<(), String> {
         }
     }
 
+    // macOS: same cold-start tradeoff as Windows — the steam:// protocol
+    // can drop the launch message while Steam is booting. `open -a Steam
+    // --args -applaunch <appid>` is the documented robust path: macOS
+    // launches Steam.app if not running, then hands `-applaunch <appid>`
+    // through to the Steam process. Falls back to the steam:// URL when
+    // /Applications/Steam.app isn't present (rare — would mean Steam was
+    // installed somewhere non-standard).
+    #[cfg(target_os = "macos")]
+    {
+        let steam_app = std::path::Path::new("/Applications/Steam.app");
+        if steam_app.exists() {
+            use std::process::Command;
+            log::info!(
+                "Launching STS2 via 'open -a Steam --args -applaunch {}' (robust cold-start path)",
+                STS2_STEAM_APPID
+            );
+            match Command::new("open")
+                .args(["-a", "Steam", "--args", "-applaunch", STS2_STEAM_APPID])
+                .spawn()
+            {
+                Ok(_) => return Ok(()),
+                Err(e) => log::warn!(
+                    "macOS 'open -a Steam' failed: {}. Falling back to {}.",
+                    e, STEAM_URL
+                ),
+            }
+        } else {
+            log::warn!(
+                "/Applications/Steam.app not found — falling back to {}. \
+                 Cold-start launches may be unreliable when Steam isn't already running.",
+                STEAM_URL
+            );
+        }
+    }
+
     match open::that(STEAM_URL) {
         Ok(()) => return Ok(()),
         Err(e) => {

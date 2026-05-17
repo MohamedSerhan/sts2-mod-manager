@@ -16,8 +16,8 @@ export function LaunchSpinner({ vanilla = false, onCancel }: Props) {
         </div>
         <div className="gf-launch-s">
           {vanilla
-            ? 'All mods are temporarily disabled · auto-backup created · waiting for game window…'
-            : 'Verifying mods · auto-backup created · waiting for game window…'}
+            ? 'All mods are temporarily disabled · auto-backup created · waiting for Steam and the game window (Steam may take a moment if it wasn’t already running)…'
+            : 'Verifying mods · auto-backup created · waiting for Steam and the game window (Steam may take a moment if it wasn’t already running)…'}
         </div>
         <button className="gf-btn-3" style={{ marginTop: 4 }} onClick={onCancel}>
           Hide

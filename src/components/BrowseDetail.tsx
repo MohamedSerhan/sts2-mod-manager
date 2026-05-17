@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { Download, ExternalLink, Star, X } from 'lucide-react';
 import type { GitHubRepo, NexusModInfo } from '../types';
 
@@ -23,6 +24,8 @@ interface NxProps {
 type Props = GhProps | NxProps;
 
 export function BrowseDetail(props: Props) {
+  const { t } = useTranslation();
+
   return (
     <div className="gf-modal-back" onClick={props.onClose}>
       <div className="gf-modal" style={{ width: 640 }} onClick={(e) => e.stopPropagation()}>
@@ -42,7 +45,7 @@ export function BrowseDetail(props: Props) {
           <button
             className="gf-btn-3 gf-btn-icon"
             onClick={props.onClose}
-            title="Close"
+            title={t('common.close')}
             style={{ position: 'absolute', top: 12, right: 12, background: 'oklch(0.10 0.04 280 / 0.6)' }}
           >
             <X size={14} />
@@ -59,14 +62,14 @@ export function BrowseDetail(props: Props) {
                     {props.repo.full_name}
                   </div>
                   <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-                    <span className="gf-pill gf-pill-github">GitHub</span>
+                    <span className="gf-pill gf-pill-github">{t('browseDetail.github')}</span>
                     <span className="gf-pill" style={{ background: 'var(--indigo-line)', color: 'var(--ink-mute)' }}>
                       <Star size={9} style={{ marginRight: 3 }} />
                       {props.repo.stargazers_count.toLocaleString()}
                     </span>
                     {props.repo.owner?.login && (
                       <span className="gf-pill" style={{ background: 'var(--indigo-line)', color: 'var(--ink-mute)' }}>
-                        by {props.repo.owner.login}
+                        {t('browseDetail.by', { name: props.repo.owner.login })}
                       </span>
                     )}
                   </div>
@@ -74,7 +77,7 @@ export function BrowseDetail(props: Props) {
               </div>
               <div className="gf-detail-content">
                 <p style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--ink-mute)', margin: 0 }}>
-                  {props.repo.description || 'No description provided.'}
+                  {props.repo.description || t('browseDetail.noDescription')}
                 </p>
                 <div
                   style={{
@@ -95,11 +98,9 @@ export function BrowseDetail(props: Props) {
                       marginBottom: 6,
                     }}
                   >
-                    What happens on install
+                    {t('browseDetail.whatHappensTitle')}
                   </div>
-                  We fetch the latest GitHub release for{' '}
-                  <code style={{ fontFamily: 'ui-monospace, monospace' }}>{props.repo.full_name}</code>, download
-                  the first asset, and place it in your mods folder. Updates check this repo whenever you run an audit.
+                  {t('browseDetail.whatHappensBody', { repo: props.repo.full_name })}
                 </div>
               </div>
             </>
@@ -108,20 +109,20 @@ export function BrowseDetail(props: Props) {
               <div className="gf-detail-head" style={{ marginBottom: 14 }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--ink)' }}>
-                    {props.mod.name || `Nexus mod #${props.mod.mod_id}`}
+                    {props.mod.name || t('browseDetail.nexusModNum', { id: props.mod.mod_id })}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--ink-mute)', marginTop: 4 }}>
-                    {props.mod.author && <>by {props.mod.author}</>}
+                    {props.mod.author && <>{t('browseDetail.by', { name: props.mod.author })}</>}
                     {props.mod.version && <> · v{props.mod.version}</>}
                   </div>
                   <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-                    <span className="gf-pill gf-pill-nexus">Nexus</span>
+                    <span className="gf-pill gf-pill-nexus">{t('browseDetail.nexus')}</span>
                   </div>
                 </div>
               </div>
               <div className="gf-detail-content">
                 <p style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--ink-mute)', margin: 0 }}>
-                  {props.mod.summary || props.mod.description || 'No summary provided.'}
+                  {props.mod.summary || props.mod.description || t('browseDetail.noSummary')}
                 </p>
                 <div
                   style={{
@@ -142,13 +143,9 @@ export function BrowseDetail(props: Props) {
                       marginBottom: 6,
                     }}
                   >
-                    Nexus install
+                    {t('browseDetail.nexusInstallTitle')}
                   </div>
-                  Nexus doesn't allow direct downloads — clicking install opens
-                  the mod's Files tab in your browser. Click <b>Slow Download</b>
-                  (or <b>Manual</b>) — not Mod Manager Download — wait the few
-                  seconds, and the manager auto-installs the .zip as soon as it
-                  lands in your Downloads folder.
+                  {t('browseDetail.nexusInstallBody')}
                 </div>
               </div>
             </>
@@ -156,14 +153,14 @@ export function BrowseDetail(props: Props) {
         </div>
 
         <div className="gf-modal-foot">
-          <button className="gf-btn-3" onClick={props.onClose}>Close</button>
+          <button className="gf-btn-3" onClick={props.onClose}>{t('common.close')}</button>
           <div style={{ flex: 1 }} />
           <button className="gf-btn-2" onClick={props.onOpenExternal}>
-            <ExternalLink size={12} /> Open in browser
+            <ExternalLink size={12} /> {t('browseDetail.openInBrowser')}
           </button>
           {props.kind === 'github' && (
             <button className="gf-btn" onClick={props.onInstall} disabled={props.installing}>
-              <Download size={12} /> {props.installing ? 'Installing…' : 'Install'}
+              <Download size={12} /> {props.installing ? t('browseDetail.installing') : t('browseDetail.install')}
             </button>
           )}
         </div>

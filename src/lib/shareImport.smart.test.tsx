@@ -15,6 +15,11 @@ type ConfirmResult = false | { confirmed: true; checked: boolean };
 const confirmAccept = async (): Promise<ConfirmResult> => ({ confirmed: true as const, checked: false });
 const confirmReject = async (): Promise<ConfirmResult> => false;
 
+const mockT = ((key: string, vars?: Record<string, unknown>) => {
+  if (vars) return `[${key}] ${JSON.stringify(vars)}`;
+  return `[${key}]`;
+}) as any;
+
 describe('importShareCodeSmart', () => {
   it('Case 1: brand-new pack → installs after confirm (installed outcome)', async () => {
     registerInvokeHandler('fetch_shared_profile_cmd', () => ({
@@ -32,6 +37,7 @@ describe('importShareCodeSmart', () => {
       subscriptions: [],
       activeProfile: null,
       subUpdates: [],
+      t: mockT,
     });
     expect(outcome.kind).toBe('installed');
     if (outcome.kind === 'installed') {
@@ -50,6 +56,7 @@ describe('importShareCodeSmart', () => {
       subscriptions: [],
       activeProfile: null,
       subUpdates: [],
+      t: mockT,
     });
     expect(outcome.kind).toBe('cancelled');
   });
@@ -73,6 +80,7 @@ describe('importShareCodeSmart', () => {
       } as any],
       activeProfile: 'Imported',
       subUpdates: [],
+      t: mockT,
     });
     expect(outcome.kind).toBe('reapplied');
     if (outcome.kind === 'reapplied') {
@@ -99,6 +107,7 @@ describe('importShareCodeSmart', () => {
       } as any],
       activeProfile: 'OtherPack',
       subUpdates: [],
+      t: mockT,
     });
     expect(outcome.kind).toBe('activated');
   });
@@ -128,6 +137,7 @@ describe('importShareCodeSmart', () => {
         removed_mods: [],
         remote_profile: null,
       }],
+      t: mockT,
     });
     expect(outcome.kind).toBe('synced');
   });
@@ -152,6 +162,7 @@ describe('importShareCodeSmart', () => {
         removed_mods: [],
         remote_profile: null,
       }],
+      t: mockT,
     });
     expect(outcome.kind).toBe('cancelled');
   });
@@ -167,6 +178,7 @@ describe('importShareCodeSmart', () => {
         subscriptions: [],
         activeProfile: null,
         subUpdates: [],
+        t: mockT,
       });
     } catch (e) {
       thrown = e;
@@ -186,6 +198,7 @@ describe('importShareCodeSmart', () => {
       } as any],
       activeProfile: 'OtherPack',
       subUpdates: [],
+      t: mockT,
     });
     expect(outcome.kind).toBe('cancelled');
     expect(getInvokeCalls().some((c) => c.cmd === 'switch_profile')).toBe(false);
@@ -220,6 +233,7 @@ describe('importShareCodeSmart', () => {
         removed_mods: ['Removed'],
         remote_profile: null,
       }],
+      t: mockT,
     });
     expect(outcome.kind).toBe('synced');
   });
@@ -249,6 +263,7 @@ describe('importShareCodeSmart', () => {
         removed_mods: [],
         remote_profile: null,
       }],
+      t: mockT,
     });
     expect(outcome.kind).toBe('synced');
   });
@@ -277,6 +292,7 @@ describe('importShareCodeSmart', () => {
     const profile = await installSharedProfileWithConfirm(
       'alice/AA5A-315D-61AE',
       confirmAccept,
+      mockT,
     );
 
     expect(profile?.name).toBe('Source-less Pack');

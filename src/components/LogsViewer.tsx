@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Copy, Folder, Upload, RefreshCw } from 'lucide-react';
 import { readLogTail, openLogFile, openExternalUrl } from '../hooks/useTauri';
+import { useTranslation } from 'react-i18next';
 import { useToast } from '../contexts/ToastContext';
 import { buildGitHubIssueUrl } from '../lib/githubLinks';
 
@@ -48,6 +49,7 @@ interface Props {
 }
 
 export function LogsViewer({ onClose }: Props) {
+  const { t } = useTranslation();
   const toast = useToast();
   const [raw, setRaw] = useState<string>('');
   const [loading, setLoading] = useState(true);
@@ -60,7 +62,7 @@ export function LogsViewer({ onClose }: Props) {
       const text = await readLogTail(500);
       setRaw(text);
     } catch (e) {
-      toast.error(`Failed to read logs: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('logsViewer.failedToRead', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setLoading(false);
     }
@@ -89,9 +91,9 @@ export function LogsViewer({ onClose }: Props) {
   async function copyAll() {
     try {
       await navigator.clipboard.writeText(raw);
-      toast.success('Log copied to clipboard');
+      toast.success(t('logsViewer.copiedToClipboard'));
     } catch (e) {
-      toast.error(`Couldn't copy: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('logsViewer.couldntCopy', { error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
@@ -99,7 +101,7 @@ export function LogsViewer({ onClose }: Props) {
     try {
       await openLogFile();
     } catch (e) {
-      toast.error(`Couldn't open log: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('logsViewer.couldntOpen', { error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
@@ -107,16 +109,16 @@ export function LogsViewer({ onClose }: Props) {
     // Open a support issue with the recent log lines pre-filled. Real
     // diag-bundle export lives in About; this is the quick-and-dirty path.
     const body = [
-      'Describe what happened:',
+      t('logsViewer.supportDescribe'),
       '',
-      '— Recent log tail —',
+      t('logsViewer.supportRecentLog'),
       ...lines.slice(-30).map((l) => l.raw),
     ].join('\n');
-    const url = buildGitHubIssueUrl('Bug report', body);
+    const url = buildGitHubIssueUrl(t('logsViewer.supportIssueTitle'), body);
     try {
       await openExternalUrl(url);
     } catch (e) {
-      toast.error(`Couldn't open support issue: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('logsViewer.couldntOpenSupport', { error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
@@ -134,41 +136,41 @@ export function LogsViewer({ onClose }: Props) {
   return (
     <div className="gf-logs" style={{ height: 540 }}>
       <div className="gf-logs-bar">
-        <Chip id="all" label="All" />
-        <Chip id="info" label="Info" />
-        <Chip id="warn" label="Warn" />
-        <Chip id="err" label="Error" />
-        <Chip id="dbg" label="Debug" />
+        <Chip id="all" label={t('logsViewer.filterAll')} />
+        <Chip id="info" label={t('logsViewer.filterInfo')} />
+        <Chip id="warn" label={t('logsViewer.filterWarn')} />
+        <Chip id="err" label={t('logsViewer.filterError')} />
+        <Chip id="dbg" label={t('logsViewer.filterDebug')} />
         <div style={{ width: 1, height: 18, background: 'var(--indigo-line)', margin: '0 4px' }} />
         <input
           className="gf-set-input"
-          placeholder="Filter messages…"
+          placeholder={t('logsViewer.filterPlaceholder')}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           style={{ flex: 1, height: 26, padding: '4px 8px', fontSize: 11.5 }}
         />
-        <button className="gf-btn-3 gf-btn-2-sm" onClick={reload} disabled={loading} title="Reload">
+        <button className="gf-btn-3 gf-btn-2-sm" onClick={reload} disabled={loading} title={t('logsViewer.reload')}>
           <RefreshCw size={11} className={loading ? 'animate-spin' : ''} />
         </button>
-        <button className="gf-btn-3 gf-btn-2-sm" onClick={copyAll} title="Copy whole log">
-          <Copy size={11} /> Copy
+        <button className="gf-btn-3 gf-btn-2-sm" onClick={copyAll} title={t('logsViewer.copyLog')}>
+          <Copy size={11} /> {t('common.copy')}
         </button>
-        <button className="gf-btn-3 gf-btn-2-sm" onClick={openFolder} title="Open log file/folder">
-          <Folder size={11} /> Open
+        <button className="gf-btn-3 gf-btn-2-sm" onClick={openFolder} title={t('logsViewer.openFolder')}>
+          <Folder size={11} /> {t('logsViewer.openBtn')}
         </button>
         <button className="gf-btn-2 gf-btn-2-sm" onClick={sendToSupport}>
-          <Upload size={11} /> Send to support
+          <Upload size={11} /> {t('logsViewer.sendToSupport')}
         </button>
         {onClose && (
-          <button className="gf-btn-3 gf-btn-2-sm" onClick={onClose}>Close</button>
+          <button className="gf-btn-3 gf-btn-2-sm" onClick={onClose}>{t('common.close')}</button>
         )}
       </div>
       <div className="gf-logs-body">
         {loading ? (
-          <div style={{ color: 'var(--ink-mute)' }}>Loading…</div>
+          <div style={{ color: 'var(--ink-mute)' }}>{t('common.loading')}</div>
         ) : filtered.length === 0 ? (
           <div style={{ color: 'var(--ink-mute)' }}>
-            {lines.length === 0 ? 'Log is empty — actions in the app will appear here.' : 'No lines match this filter.'}
+            {lines.length === 0 ? t('logsViewer.emptyLog') : t('logsViewer.noMatch')}
           </div>
         ) : (
           filtered.map((l, i) => (
@@ -180,7 +182,7 @@ export function LogsViewer({ onClose }: Props) {
           ))
         )}
         <div style={{ marginTop: 8, padding: '6px 0', color: 'var(--ink-mute)', fontSize: 11, borderTop: '1px dashed var(--indigo-line)' }}>
-          {lines.length} lines (last 500) · {filtered.length} shown
+          {t('logsViewer.summary', { total: lines.length, shown: filtered.length })}
         </div>
       </div>
     </div>

@@ -794,22 +794,6 @@ pub(crate) async fn upload_mod_bundle_via_release(
     use sha2::{Digest, Sha256};
 
     let client = build_client(token);
-    // ASCII-only sanitization. `is_alphanumeric()` returns true for Unicode
-    // alphanumeric chars (e.g. Chinese ideographs in "皮皮统计: Skada"), but
-    // GitHub's asset-list response round-trips non-ASCII names differently
-    // than our POST URL-encoding, so the `find(|a| a.name == asset_name)`
-    // lookup misses → fall through to POST → 422 already_exists. Stick to
-    // ASCII so the round-trip is byte-stable.
-    let safe_name = mod_name
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
-        .collect::<String>();
-    let safe_ver = version
-        .trim_start_matches('v')
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' { c } else { '_' })
-        .collect::<String>();
-    let _asset_name = format!("{}_v{}.zip", safe_name, safe_ver);
     let asset_name = release_asset_name(mod_name, version);
 
     let mut hasher = Sha256::new();
@@ -819,7 +803,18 @@ pub(crate) async fn upload_mod_bundle_via_release(
     let repo = profiles_repo();
     let release = ensure_bundles_release(&client, username, &repo).await?;
 
-    if let Some(existing) = release.assets.iter().find(|a| a.name == asset_name) {
+    // Lookup compares percent-decoded names on both sides so the same
+    // logical filename matches whether GitHub returns the raw UTF-8 form
+    // (`皮皮.zip`) or an already-encoded one (`%E7%9A%AE.zip`). Without
+    // this, mods with non-ASCII names round-tripped to a POST → 422
+    // already_exists loop, which is what motivated the old ASCII-only
+    // sanitiser. We can now keep the Unicode in filenames (issue #44).
+    let canonical = decode_asset_name(&asset_name);
+    if let Some(existing) = release
+        .assets
+        .iter()
+        .find(|a| decode_asset_name(&a.name) == canonical)
+    {
         let hash_matches = prior_sha256.map(|p| p == local_hash.as_str()).unwrap_or(false);
         if hash_matches {
             log::info!(
@@ -848,17 +843,51 @@ pub(crate) async fn upload_mod_bundle_via_release(
     Ok((asset.browser_download_url, local_hash))
 }
 
+/// Compose the release-asset filename for a mod bundle.
+///
+/// We keep Unicode (Chinese ideographs, emoji, accented chars) so non-
+/// English mod names survive the round-trip to GitHub release assets and
+/// back — see issue #44 where the previous ASCII-only sanitiser silently
+/// turned every Chinese character into `_`. Only path-/URL-unsafe chars
+/// are replaced so the result is still a valid filename on every platform
+/// and safe to URL-encode for the upload endpoint.
 fn release_asset_name(mod_name: &str, version: &str) -> String {
-    let safe_name = mod_name
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
-        .collect::<String>();
-    let safe_ver = version
-        .trim_start_matches('v')
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' { c } else { '_' })
-        .collect::<String>();
+    let safe_name = sanitize_asset_component(mod_name, false);
+    let safe_ver = sanitize_asset_component(version.trim_start_matches('v'), true);
     format!("{}_v{}.zip", safe_name, safe_ver)
+}
+
+fn sanitize_asset_component(input: &str, allow_dot: bool) -> String {
+    input
+        .chars()
+        .map(|c| {
+            // Replace control chars, whitespace, and characters that are
+            // unsafe in filenames or URL paths. Anything else — including
+            // Unicode letters and digits — passes through unchanged.
+            let unsafe_char = c.is_control()
+                || c.is_whitespace()
+                || matches!(
+                    c,
+                    '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '#' | '%' | '&' | '+'
+                );
+            if unsafe_char {
+                '_'
+            } else if !allow_dot && c == '.' {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect()
+}
+
+/// Best-effort percent-decode so equality checks survive whatever encoding
+/// GitHub chooses to put in the asset-list response. Falls back to the
+/// raw input on a decode error rather than panicking.
+fn decode_asset_name(name: &str) -> String {
+    urlencoding::decode(name)
+        .map(|cow| cow.into_owned())
+        .unwrap_or_else(|_| name.to_string())
 }
 
 /// Download a bundled mod zip from a URL and extract into mods_path.
@@ -2113,6 +2142,42 @@ mod parse_share_code_tests {
     #[test]
     fn rejects_too_long() {
         assert!(!is_valid_github_username(&"a".repeat(40)));
+    }
+}
+
+#[cfg(test)]
+mod release_asset_name_tests {
+    use super::{decode_asset_name, release_asset_name, sanitize_asset_component};
+
+    #[test]
+    fn preserves_unicode_in_mod_names() {
+        // Issue #44: Chinese ideographs used to collapse to `___`.
+        assert_eq!(release_asset_name("皮皮统计", "1.0.0"), "皮皮统计_v1.0.0.zip");
+    }
+
+    #[test]
+    fn replaces_only_path_unsafe_chars() {
+        assert_eq!(
+            sanitize_asset_component("Skada/Recount: helper*", false),
+            "Skada_Recount__helper_",
+        );
+    }
+
+    #[test]
+    fn keeps_ascii_alphanumerics_and_separators() {
+        assert_eq!(release_asset_name("My-Mod_42", "v2.3.4"), "My-Mod_42_v2.3.4.zip");
+    }
+
+    #[test]
+    fn decode_asset_name_handles_raw_and_encoded() {
+        assert_eq!(decode_asset_name("皮皮.zip"), "皮皮.zip");
+        assert_eq!(decode_asset_name("%E7%9A%AE%E7%9A%AE.zip"), "皮皮.zip");
+    }
+
+    #[test]
+    fn decode_asset_name_falls_back_on_bad_encoding() {
+        // Lone % is not valid percent-encoding; should not panic.
+        assert_eq!(decode_asset_name("abc%zz.zip"), "abc%zz.zip");
     }
 }
 

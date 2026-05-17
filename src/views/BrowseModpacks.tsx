@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation, Trans } from 'react-i18next';
 import { RefreshCw, Search, Plus } from 'lucide-react';
 
 import { fetchModpackBrowserPage } from '../hooks/useTauri';
@@ -10,14 +11,35 @@ interface Props {
   onGoToProfiles?: () => void;
 }
 
-function relativeTime(iso: string): string {
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return '';
-  const secs = Math.max(0, Math.floor((Date.now() - t) / 1000));
-  if (secs < 60) return 'just now';
-  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
-  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
-  return `${Math.floor(secs / 86400)}d ago`;
+type TFunc = ReturnType<typeof useTranslation>['t'];
+
+function relativeTime(iso: string, t: TFunc): string {
+  const time = Date.parse(iso);
+  if (Number.isNaN(time)) return '';
+  const secs = Math.max(0, Math.floor((Date.now() - time) / 1000));
+  if (secs < 60) return t('browseModpacks.justNow');
+  if (secs < 3600) return t('browseModpacks.minutesAgo', { count: Math.floor(secs / 60) });
+  if (secs < 86400) return t('browseModpacks.hoursAgo', { count: Math.floor(secs / 3600) });
+  return t('browseModpacks.daysAgo', { count: Math.floor(secs / 86400) });
+}
+
+/** Collapse duplicate publishes by the same curator under the same pack
+ *  name down to the most recently updated one. Some curators end up with
+ *  two repos / two manifests for the same pack and the browser was
+ *  showing both rows. Case-insensitive on name; owner stays exact. */
+export function dedupeBrowserCards(cards: BrowserCard[]): BrowserCard[] {
+  const newest = new Map<string, BrowserCard>();
+  for (const card of cards) {
+    const key = `${card.owner.toLowerCase()}/${card.name.trim().toLowerCase()}`;
+    const existing = newest.get(key);
+    if (!existing || Date.parse(card.updated_at) > Date.parse(existing.updated_at)) {
+      newest.set(key, card);
+    }
+  }
+  // Preserve original ordering of the surviving cards (the API ranks
+  // them; we just drop the dupes that sat next to their newer twins).
+  const survivorCodes = new Set(Array.from(newest.values()).map((c) => `${c.owner}/${c.code}`));
+  return cards.filter((c) => survivorCodes.has(`${c.owner}/${c.code}`));
 }
 
 function isRateLimit(err: unknown): boolean {
@@ -29,6 +51,7 @@ function isRateLimit(err: unknown): boolean {
 }
 
 export function BrowseModpacksView({ onGoToProfiles }: Props = {}) {
+  const { t } = useTranslation();
   const [page, setPage] = useState<BrowserPage | null>(null);
   const [loading, setLoading] = useState(true);
   const [rateLimited, setRateLimited] = useState(false);
@@ -63,31 +86,31 @@ export function BrowseModpacksView({ onGoToProfiles }: Props = {}) {
       <div className="gf-view">
       <div className="gf-view-head">
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-          <h2 className="gf-view-title">Browse Modpacks</h2>
-          <Badge variant="beta" title="The public modpack browser is still being tuned.">Beta</Badge>
+          <h2 className="gf-view-title">{t('browseModpacks.title')}</h2>
+          <Badge variant="beta" title={t('browseModpacks.betaTitle')}>{t('common.beta')}</Badge>
         </div>
         <button
           className="gf-btn-3"
           onClick={() => load(true)}
           disabled={loading}
-          title="Refresh"
+          title={t('browseModpacks.refresh')}
         >
           <RefreshCw size={14} className={loading ? 'gf-spin' : undefined} />
           {page && !loading
-            ? ` Last refreshed ${relativeTime(new Date(page.fetched_at * 1000).toISOString())}`
+            ? ` ${t('browseModpacks.lastRefreshed', { time: relativeTime(new Date(page.fetched_at * 1000).toISOString(), t) })}`
             : ''}
         </button>
       </div>
 
       {page?.stale && (
         <div className="gf-banner gf-banner-warn">
-          Showing cached results — couldn't reach GitHub.
+          {t('browseModpacks.cached')}
         </div>
       )}
 
       {rateLimited && (
         <div className="gf-banner gf-banner-warn">
-          GitHub is rate-limiting us — try again in a minute, or connect a GitHub token in Settings for a higher limit.
+          {t('browseModpacks.rateLimited')}
         </div>
       )}
 
@@ -105,11 +128,11 @@ export function BrowseModpacksView({ onGoToProfiles }: Props = {}) {
         <div className="gf-empty">
           <Search size={28} />
           <div className="gf-empty-title">
-            No public modpacks found yet — be the first to share one!
+            {t('browseModpacks.noPacks')}
           </div>
           {onGoToProfiles && (
             <button className="gf-btn-2" onClick={onGoToProfiles}>
-              <Plus size={12} /> Go to Profiles
+              <Plus size={12} /> {t('browseModpacks.goProfiles')}
             </button>
           )}
         </div>
@@ -131,17 +154,19 @@ export function BrowseModpacksView({ onGoToProfiles }: Props = {}) {
             }}
           >
             <span>
-              Want yours here too? Publish a new pack — or re-share an existing one — from
-              Profiles and pick <b style={{ color: 'var(--ink)' }}>Public</b> visibility.
+              <Trans
+                i18nKey="browseModpacks.cta"
+                components={{ 1: <b style={{ color: 'var(--ink)' }} /> }}
+              />
             </span>
             {onGoToProfiles && (
               <button className="gf-btn-3" onClick={onGoToProfiles}>
-                <Plus size={12} /> Go to Profiles
+                <Plus size={12} /> {t('browseModpacks.goProfiles')}
               </button>
             )}
           </div>
           <div className="gf-card-list">
-            {page.cards.map((c) => (
+            {dedupeBrowserCards(page.cards).map((c) => (
               <button
                 key={`${c.owner}/${c.code}`}
                 className="gf-card gf-card-clickable"
@@ -149,8 +174,7 @@ export function BrowseModpacksView({ onGoToProfiles }: Props = {}) {
               >
                 <div className="gf-card-title">{c.name}</div>
                 <div className="gf-card-sub">
-                  @{c.owner} · {c.mod_count} mod{c.mod_count === 1 ? '' : 's'} · Updated{' '}
-                  {relativeTime(c.updated_at)}
+                  @{c.owner} · {t('browseModpacks.modCount', { count: c.mod_count })} · {t('browseModpacks.updated', { time: relativeTime(c.updated_at, t) })}
                 </div>
               </button>
             ))}

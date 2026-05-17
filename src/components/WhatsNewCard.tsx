@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { getVersion } from '@tauri-apps/api/app';
-import { Sparkles, X, ExternalLink } from 'lucide-react';
+import { Sparkles, X, ExternalLink, Info } from 'lucide-react';
 import { Card } from './Card';
 import { getEntryForVersion, getLatestReleasedEntry, type ChangelogEntry } from '../lib/changelog';
 import { openExternalUrl } from '../hooks/useTauri';
@@ -21,6 +22,11 @@ const DISMISS_PREFIX = 'sts2mm-whatsnew-seen:';
  * a dev build at least *something* to read.
  */
 export function WhatsNewCard() {
+  const { t, i18n } = useTranslation();
+  // Show a maintainer-can't-translate notice on top of the card whenever
+  // the active locale isn't English. Dismissed alongside the card itself
+  // (per-version) so users see it on every new release until they ack.
+  const showLocaleNotice = i18n.language && !i18n.language.startsWith('en');
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [entry, setEntry] = useState<ChangelogEntry | null>(null);
   const [dismissed, setDismissed] = useState(true); // start hidden until we know
@@ -77,35 +83,54 @@ export function WhatsNewCard() {
       <div className="gf-whatsnew-head">
         <div className="gf-whatsnew-title">
           <Sparkles size={14} />
-          <span>What's new in v{entry.version}</span>
+          <span>{t('whatsNew.title', { version: entry.version })}</span>
           {entry.date && <span className="gf-whatsnew-date">· {entry.date}</span>}
         </div>
         <div className="gf-whatsnew-actions">
           <button
             className="gf-whatsnew-link"
             onClick={handleViewFull}
-            title="Open the full changelog on GitHub"
+            title={t('whatsNew.fullChangelogTitle')}
           >
             <ExternalLink size={11} />
-            Full changelog
+            {t('whatsNew.fullChangelog')}
           </button>
           <button
             className="gf-whatsnew-close"
             onClick={handleDismiss}
-            title="Dismiss — won't show again for this version"
-            aria-label="Dismiss what's new"
+            title={t('whatsNew.dismissTitle')}
+            aria-label={t('whatsNew.dismissAria')}
           >
             <X size={12} />
           </button>
         </div>
       </div>
       <div className="gf-whatsnew-body">
+        {showLocaleNotice && (
+          <div className="gf-whatsnew-locale-note">
+            <Info size={12} />
+            <span>
+              {t('whatsNew.localeNotice')}{' '}
+              <button
+                type="button"
+                className="gf-whatsnew-locale-link"
+                onClick={() =>
+                  openExternalUrl(
+                    'https://github.com/MohamedSerhan/sts2-mod-manager/issues/new?labels=translation',
+                  ).catch(() => {})
+                }
+              >
+                {t('whatsNew.localeNoticeReport')}
+              </button>
+            </span>
+          </div>
+        )}
         {blocks.map((b, i) => (
           <BlockRender key={i} block={b} />
         ))}
         {appVersion && entry.version !== appVersion && (
           <p className="gf-whatsnew-note">
-            (Showing the latest released notes — your build is v{appVersion}.)
+            {t('whatsNew.devNote', { version: appVersion })}
           </p>
         )}
       </div>

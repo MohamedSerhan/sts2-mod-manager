@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Plus, RefreshCw } from 'lucide-react';
 import { listProfiles, switchProfile, checkSubscriptionUpdates, getProfileDrift } from '../hooks/useTauri';
 import { useApp } from '../contexts/AppContext';
@@ -31,6 +32,7 @@ function modCount(profile: Profile): number {
 }
 
 export function ProfileSwitcher({ onClose, onAddPack, onManageAll }: Props) {
+  const { t } = useTranslation();
   const { activeProfile, setActiveProfile, refreshAll } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
@@ -96,11 +98,11 @@ export function ProfileSwitcher({ onClose, onAddPack, onManageAll }: Props) {
         const drift = await getProfileDrift(activeProfile);
         if (drift.has_drift) {
           const ok = await confirm({
-            title: `Switch away from "${activeProfile}"?`,
-            body: 'This profile has unsaved changes on disk. Switching applies another manifest and those working changes will not be saved to the current profile.',
-            warning: 'Open Profiles and use Save changes first if you want to keep them.',
-            confirmLabel: 'Switch anyway',
-            cancelLabel: 'Stay here',
+            title: t('profiles.confirm.switch.title', { name: activeProfile }),
+            body: t('profiles.confirm.switch.body'),
+            warning: t('profiles.confirm.switch.warning'),
+            confirmLabel: t('profiles.confirm.switch.confirmLabel'),
+            cancelLabel: t('profiles.confirm.switch.cancelLabel'),
           });
           if (!ok) return;
         }
@@ -115,14 +117,17 @@ export function ProfileSwitcher({ onClose, onAddPack, onManageAll }: Props) {
       await refreshAll();
       if (result.missing_mods.length > 0) {
         toast.info(
-          `Activated "${name}". ${result.downloaded} downloaded, ${result.missing_mods.length} still missing.`,
+          t('profiles.toast.switchedWithDetails', {
+            name,
+            details: t('profileSwitcher.downloadedStatus', { downloaded: result.downloaded, missing: result.missing_mods.length }),
+          }),
         );
       } else {
-        toast.success(`Activated "${name}"`);
+        toast.success(t('profiles.toast.switched', { name }));
       }
       onClose();
     } catch (e) {
-      toast.error(`Failed to switch: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('profiles.toast.switchFailed', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setSwitching(null);
     }
@@ -146,14 +151,14 @@ export function ProfileSwitcher({ onClose, onAddPack, onManageAll }: Props) {
       className="gf-pop"
       style={{ top: 'calc(100% + 4px)', left: 0, right: 'auto' }}
     >
-      <div className="gf-pop-head">Switch active pack</div>
+      <div className="gf-pop-head">{t('profileSwitcher.title')}</div>
       {loading ? (
         <div style={{ padding: '14px 12px', display: 'flex', alignItems: 'center', gap: 8, color: 'var(--ink-mute)', fontSize: 12 }}>
-          <RefreshCw size={12} className="animate-spin" /> Loading…
+          <RefreshCw size={12} className="animate-spin" /> {t('common.loading')}
         </div>
       ) : visibleProfiles.length === 0 ? (
         <div style={{ padding: '14px 12px', color: 'var(--ink-mute)', fontSize: 12 }}>
-          No profiles yet. Add a pack to get started.
+          {t('profileSwitcher.empty')}
         </div>
       ) : (
         visibleProfiles.map((p) => {
@@ -188,14 +193,14 @@ export function ProfileSwitcher({ onClose, onAddPack, onManageAll }: Props) {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="gf-pop-item-name">{p.name}</div>
                 <div className="gf-pop-item-meta">
-                  {count} mod{count === 1 ? '' : 's'}
-                  {updateCount > 0 && ` · ${updateCount} update${updateCount === 1 ? '' : 's'}`}
+                  {t('profileSwitcher.mods', { count })}
+                  {updateCount > 0 && t('profileSwitcher.updates', { count: updateCount })}
                 </div>
               </div>
               {switching === p.name ? (
                 <RefreshCw size={12} className="animate-spin" style={{ color: 'var(--ink-mute)' }} />
               ) : isActive ? (
-                <span className="gf-pill gf-pill-update">ACTIVE</span>
+                <span className="gf-pill gf-pill-update">{t('profileSwitcher.active')}</span>
               ) : null}
             </button>
           );
@@ -207,14 +212,14 @@ export function ProfileSwitcher({ onClose, onAddPack, onManageAll }: Props) {
           style={{ flex: 1, justifyContent: 'center' }}
           onClick={() => { onClose(); onAddPack(); }}
         >
-          <Plus size={11} /> Add pack
+          <Plus size={11} /> {t('profileSwitcher.addPack')}
         </button>
         <button
           className="gf-btn-2 gf-btn-2-sm"
           style={{ flex: 1, justifyContent: 'center' }}
           onClick={() => { onClose(); onManageAll(); }}
         >
-          Manage all
+          {t('profileSwitcher.manageAll')}
         </button>
       </div>
     </div>

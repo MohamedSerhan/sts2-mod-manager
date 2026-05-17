@@ -278,9 +278,10 @@ jobs:
           NOTES_FILE=$(mktemp)
           awk -v ver="$VERSION" '
             /^## \[/ {
-              if (match($0, /^## \[([^\]]+)\]/, m)) {
-                if (m[1] == ver) { in_block = 1; next }
-              }
+              heading = $0
+              sub(/^## \[/, "", heading)
+              sub(/\].*$/, "", heading)
+              if (heading == ver) { in_block = 1; next }
               if (in_block) { in_block = 0 }
             }
             in_block { print }

@@ -293,9 +293,10 @@ if command -v gh >/dev/null 2>&1; then
   # class matching one of "1.3"). The next `## [` line ends the section.
   BODY=$(awk -v ver="$NEW" '
     /^## \[/ {
-      if (match($0, /^## \[([^\]]+)\]/, m)) {
-        if (m[1] == ver) { in_block = 1; next }
-      }
+      heading = $0
+      sub(/^## \[/, "", heading)
+      sub(/\].*$/, "", heading)
+      if (heading == ver) { in_block = 1; next }
       if (in_block) { in_block = 0 }
     }
     in_block { print }

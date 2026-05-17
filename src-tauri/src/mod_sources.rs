@@ -496,6 +496,7 @@ pub fn enrich_mods_with_sources(mods: &mut [ModInfo], config_path: &Path) {
 /// Parse a user-provided URL/shorthand into a ModSourceEntry.
 /// Accepts:
 ///   - https://github.com/owner/repo
+///   - github.com/owner/repo
 ///   - github:owner/repo
 ///   - owner/repo (assumed GitHub)
 ///   - https://www.nexusmods.com/game/mods/123
@@ -505,18 +506,32 @@ pub fn parse_source_url(url: &str) -> Option<ModSourceEntry> {
 
     // GitHub shorthand: github:owner/repo
     if let Some(rest) = trimmed.strip_prefix("github:") {
-        let parts: Vec<&str> = rest.splitn(2, '/').collect();
+        let parts: Vec<&str> = rest.split('/').collect();
         if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
+            let repo = parts[1].trim_end_matches(".git");
+            if repo.is_empty() {
+                return None;
+            }
             return Some(ModSourceEntry {
-                github_repo: Some(format!("{}/{}", parts[0], parts[1])),
+                github_repo: Some(format!("{}/{}", parts[0], repo)),
                 ..Default::default()
             });
         }
     }
 
-    // GitHub URL
+    // GitHub URL. Accepts normal URLs and the scheme-less form shown in
+    // the SourceEditor hint (`github.com/owner/repo`).
     if trimmed.contains("github.com/") {
-        if let Ok(parsed) = url::Url::parse(trimmed) {
+        let candidate = if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+            trimmed.to_string()
+        } else {
+            format!("https://{}", trimmed.trim_start_matches("//"))
+        };
+        if let Ok(parsed) = url::Url::parse(&candidate) {
+            let host = parsed.host_str()?.to_ascii_lowercase();
+            if host != "github.com" && host != "www.github.com" {
+                return None;
+            }
             let segs: Vec<&str> = parsed.path_segments().map(|s| s.collect()).unwrap_or_default();
             if segs.len() >= 2 && !segs[0].is_empty() && !segs[1].is_empty() {
                 // Strip ".git" clone-URL suffix so the canonical form
@@ -573,10 +588,14 @@ pub fn parse_source_url(url: &str) -> Option<ModSourceEntry> {
 
     // Bare owner/repo (assume GitHub)
     if !trimmed.contains("://") && !trimmed.contains(' ') {
-        let parts: Vec<&str> = trimmed.splitn(2, '/').collect();
+        let parts: Vec<&str> = trimmed.split('/').collect();
         if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
+            let repo = parts[1].trim_end_matches(".git");
+            if repo.is_empty() {
+                return None;
+            }
             return Some(ModSourceEntry {
-                github_repo: Some(trimmed.to_string()),
+                github_repo: Some(format!("{}/{}", parts[0], repo)),
                 ..Default::default()
             });
         }
@@ -1738,11 +1757,32 @@ mod normalize_input_tests {
     }
 
     #[test]
+    fn normalize_scheme_less_github_url() {
+        assert_eq!(
+            normalize_github_repo_input(
+                "github.com/BAKAOLC/STS2-MultiPlayerPotionView"
+            ),
+            Some("BAKAOLC/STS2-MultiPlayerPotionView".into()),
+        );
+        assert_eq!(
+            normalize_github_repo_input(
+                "www.github.com/BAKAOLC/STS2-MultiPlayerPotionView/releases"
+            ),
+            Some("BAKAOLC/STS2-MultiPlayerPotionView".into()),
+        );
+    }
+
+    #[test]
     fn normalize_github_shorthand() {
         assert_eq!(
             normalize_github_repo_input("github:owner/repo"),
             Some("owner/repo".into()),
         );
+    }
+
+    #[test]
+    fn normalize_rejects_bare_owner_repo_with_extra_segments() {
+        assert_eq!(normalize_github_repo_input("owner/repo/releases"), None);
     }
 
     #[test]

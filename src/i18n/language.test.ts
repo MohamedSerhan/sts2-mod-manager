@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { afterEach, describe, expect, it, beforeEach } from 'vitest';
 import {
   DEFAULT_LANGUAGE_PREFERENCE,
   LANGUAGE_STORAGE_KEY,
@@ -70,6 +70,46 @@ describe('resolveDetectedLanguage', () => {
     // so it should return via the early exact-match branch instead of
     // falling through to the `en`/`en-*` routing.
     expect(resolveDetectedLanguage(['en'])).toBe('en');
+  });
+
+  it('skips whitespace-only locales without throwing or matching English', () => {
+    // A blank navigator.language string (seen on some embedded WebViews)
+    // normalises to '' which is not a valid locale; the resolver should
+    // skip it and fall through to the English default, not crash and not
+    // pretend the empty string is English.
+    expect(resolveDetectedLanguage(['   '])).toBe('en');
+    // And when paired with a real locale later in the list, the blank
+    // entry must not short-circuit the search.
+    expect(resolveDetectedLanguage(['   ', 'zh-CN'])).toBe('zh-Hans');
+  });
+});
+
+describe('loadLanguagePreference when the localStorage global is hostile', () => {
+  let originalDescriptor: PropertyDescriptor | undefined;
+
+  beforeEach(() => {
+    originalDescriptor = Object.getOwnPropertyDescriptor(window, 'localStorage');
+  });
+
+  afterEach(() => {
+    if (originalDescriptor) {
+      Object.defineProperty(window, 'localStorage', originalDescriptor);
+    }
+  });
+
+  it('returns the default preference when accessing localStorage throws', () => {
+    // Some privacy modes (Safari private browsing pre-15, locked-down
+    // WebViews) throw SecurityError on the very first `localStorage`
+    // property access. The default-arg helper must catch that and let
+    // the UI boot with the "auto" default instead of crashing the app.
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      get: () => {
+        throw new Error('SecurityError: localStorage access blocked');
+      },
+    });
+
+    expect(loadLanguagePreference()).toBe(DEFAULT_LANGUAGE_PREFERENCE);
   });
 });
 

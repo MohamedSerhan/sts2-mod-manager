@@ -59,4 +59,55 @@ describe('resolveDetectedLanguage', () => {
   it('checks later browser locales before falling back to English', () => {
     expect(resolveDetectedLanguage(['fr-FR', 'zh-CN'])).toBe('zh-Hans');
   });
+
+  it('falls back to English when no browser locales are supplied', () => {
+    expect(resolveDetectedLanguage([])).toBe('en');
+    expect(resolveDetectedLanguage(undefined)).toBe('en');
+  });
+
+  it('matches an exact supported code without going through the english/chinese routing', () => {
+    // Pre-normalised match: `en` is in SUPPORTED_LANGUAGE_CODES verbatim,
+    // so it should return via the early exact-match branch instead of
+    // falling through to the `en`/`en-*` routing.
+    expect(resolveDetectedLanguage(['en'])).toBe('en');
+  });
+});
+
+describe('storage-failure resilience', () => {
+  it('loadLanguagePreference returns the default when storage is unavailable', () => {
+    expect(loadLanguagePreference(undefined)).toBe(DEFAULT_LANGUAGE_PREFERENCE);
+  });
+
+  it('loadLanguagePreference returns the default when storage.getItem throws', () => {
+    const blocked: Storage = {
+      length: 0,
+      clear: () => {},
+      getItem: () => { throw new Error('SecurityError: storage access blocked'); },
+      key: () => null,
+      removeItem: () => {},
+      setItem: () => {},
+    };
+    expect(loadLanguagePreference(blocked)).toBe(DEFAULT_LANGUAGE_PREFERENCE);
+  });
+
+  it('saveLanguagePreference is a no-op when storage is unavailable', () => {
+    expect(() => saveLanguagePreference('zh-Hans', undefined)).not.toThrow();
+  });
+
+  it('saveLanguagePreference swallows storage.setItem failures', () => {
+    const writes: string[] = [];
+    const blocked: Storage = {
+      length: 0,
+      clear: () => {},
+      getItem: () => null,
+      key: () => null,
+      removeItem: () => {},
+      setItem: () => {
+        writes.push('attempted');
+        throw new Error('QuotaExceededError');
+      },
+    };
+    expect(() => saveLanguagePreference('zh-Hans', blocked)).not.toThrow();
+    expect(writes).toEqual(['attempted']);
+  });
 });

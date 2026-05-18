@@ -27,6 +27,18 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Security
+
+---
+
+## [1.5.0] - 2026-05-17
+
+### Added
+
 - Simplified Chinese (简体中文) translation, plus an Auto / English / 简体中文 picker in onboarding and Settings → General. Auto follows your system language.
 - The Browse Modpacks list now collapses duplicate publishes from the same curator down to the newest one, so you no longer see the same pack twice.
 

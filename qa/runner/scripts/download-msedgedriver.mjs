@@ -154,7 +154,18 @@ function extractZip(zipPath, destDir) {
   // tar.exe ships in Windows 10+ and handles zip files. Avoids pulling
   // in adm-zip / unzipper just for one extraction. Falls back to a
   // helpful error if tar isn't available (older Windows or Linux).
-  const r = spawnSync('tar', ['-xf', zipPath, '-C', destDir], { stdio: 'pipe' });
+  //
+  // On Windows we must invoke the System32 bsdtar by absolute path: when
+  // this script runs from Git Bash / MSYS (e.g. release.sh), a bare
+  // "tar" resolves to GNU tar, which parses "C:\..." as host:path and
+  // dies with `tar: Cannot connect to C: resolve failed`. System32
+  // bsdtar has no such ambiguity.
+  let tarBin = 'tar';
+  if (process.platform === 'win32') {
+    const sys32 = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe');
+    if (existsSync(sys32)) tarBin = sys32;
+  }
+  const r = spawnSync(tarBin, ['-xf', zipPath, '-C', destDir], { stdio: 'pipe' });
   if (r.status !== 0) {
     throw new Error(
       `Failed to extract ${zipPath}: tar exited ${r.status}\n` +

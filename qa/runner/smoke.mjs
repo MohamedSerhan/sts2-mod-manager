@@ -764,10 +764,19 @@ async function specProfileSwitchPreservesPins(driver) {
   await pinItem.click();
   // Wait for the durable indicator (Pinned pill) to render — proves the
   // backend write landed and React picked up the source-list change.
+  //
+  // We match the pill via `normalize-space(.)='Pinned'`, not `text()`,
+  // because the JSX renders the icon and label as siblings:
+  //     <span><Pin/> {t('mods.pinned')}</span>
+  // which React emits as two adjacent text nodes (" " + "Pinned"). XPath
+  // 1.0's `string(text())` converts the node-set to a string by taking
+  // only the FIRST text node, so `normalize-space(text())` collapses to
+  // "" and never matches. `.` flattens the whole subtree, which is what
+  // we actually want.
   await waitForElement(
     driver,
     By.xpath(
-      "//*[normalize-space(text())='QaTestMod']/ancestor::*[contains(@class,'gf-mod-pinned')][1]//*[normalize-space(text())='Pinned']",
+      "//*[normalize-space(text())='QaTestMod']/ancestor::*[contains(@class,'gf-mod-pinned')][1]//*[normalize-space(.)='Pinned']",
     ),
     '"Pinned" pill on QaTestMod row after pin',
     8_000,
@@ -788,7 +797,7 @@ async function specProfileSwitchPreservesPins(driver) {
   await waitForElement(
     driver,
     By.xpath(
-      "//*[normalize-space(text())='QaTestMod']/ancestor::*[contains(@class,'gf-mod-pinned')][1]//*[normalize-space(text())='Pinned']",
+      "//*[normalize-space(text())='QaTestMod']/ancestor::*[contains(@class,'gf-mod-pinned')][1]//*[normalize-space(.)='Pinned']",
     ),
     '"Pinned" pill on QaTestMod row after profile-switch round trip',
     10_000,
@@ -1243,9 +1252,15 @@ async function specAuditAgainstCassettesShowsOnePending(driver) {
   // Also assert the green "Update available" pill rendered on the
   // QaTestMod row. Catches the case where the audit count comes back
   // right but the per-row UI didn't update.
+  //
+  // Inner predicate uses `contains(.,'Update available')` rather than
+  // `contains(text(),...)`: the pill button is `<Download/> {t(...)}`,
+  // which React emits as two adjacent text nodes — XPath 1.0's
+  // node-set-to-string conversion would only see the first (whitespace)
+  // text node. See specProfileSwitchPreservesPins for the longer note.
   await waitForElement(
     driver,
-    By.xpath("//*[contains(text(),'QaTestMod')]/ancestor::*[contains(@class,'gf-mod-row') or contains(@class,'gf-card')][1]//*[contains(text(),'Update available')]"),
+    By.xpath("//*[contains(text(),'QaTestMod')]/ancestor::*[contains(@class,'gf-mod-row') or contains(@class,'gf-card')][1]//*[contains(.,'Update available')]"),
     'Update-available pill on QaTestMod row',
     5_000,
   );

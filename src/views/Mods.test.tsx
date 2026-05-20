@@ -1124,6 +1124,47 @@ describe('<ModsView>', () => {
     expect(getInvokeCalls().some((c) => c.cmd === 'set_mod_display_overrides')).toBe(false);
   });
 
+  it('Clear all links preserves existing display overrides after refresh', async () => {
+    let scanCount = 0;
+    registerInvokeHandler('get_installed_mods', () => {
+      scanCount += 1;
+      return [baseMod({
+        name: 'manifest-gibberish',
+        folder_name: 'UnreadableFolder',
+        github_url: scanCount === 1 ? 'https://github.com/old/link' : null,
+        display_name: 'Readable Name',
+        display_description: 'Human-maintained description',
+      })];
+    });
+    registerInvokeHandler('set_mod_source', () => ({
+      github_repo: null,
+      github_auto_detected: false,
+      nexus_url: null,
+      display_name: 'Readable Name',
+      display_description: 'Human-maintained description',
+    }));
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await waitFor(() => { expect(screen.getByText('Readable Name')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    await user.click(screen.getAllByRole('menuitem', { name: /Edit sources/ })[0]);
+
+    await user.click(screen.getByRole('button', { name: /Clear all links/ }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls()).toContainEqual({
+        cmd: 'set_mod_source',
+        args: {
+          modName: 'manifest-gibberish',
+          folderName: 'UnreadableFolder',
+          sourceUrl: '',
+        },
+      });
+    });
+    expect(screen.getByText('Readable Name')).toBeInTheDocument();
+    expect(screen.getAllByText('Human-maintained description').length).toBeGreaterThan(0);
+  });
+
   it('Source editor reopen shows the saved GitHub value, not the stale manifest URL', async () => {
     // Pins the "save reverts to old broken link" user complaint: after a
     // Save, refreshMods re-fetches the mod list, and the backend's enrich

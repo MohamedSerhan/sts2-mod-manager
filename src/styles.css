@@ -141,7 +141,7 @@ body {
 
 /* ── Sidebar ─────────────────────────────────────────────────────── */
 .gf-sidebar {
-  width: 200px;
+  width: 230px;
   flex-shrink: 0;
   background: var(--indigo-side);
   border-right: 1px solid var(--indigo-line);
@@ -214,25 +214,6 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.gf-nav-modpacks {
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
-  column-gap: 10px;
-  row-gap: 2px;
-  align-items: center;
-  padding-top: 7px;
-  padding-bottom: 7px;
-}
-.gf-nav-modpacks .gf-nav-icon { grid-column: 1; grid-row: 1 / span 2; }
-.gf-nav-modpacks .gf-nav-label {
-  grid-column: 2;
-  overflow: visible;
-  text-overflow: clip;
-}
-.gf-nav-modpacks .gf-nav-beta {
-  grid-column: 2;
-  justify-self: start;
 }
 /* Update-count chip on a sidebar nav item — pinned to the right edge
    so it doesn't reflow the label. Yellow to match the gold accent

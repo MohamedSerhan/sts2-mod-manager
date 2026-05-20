@@ -160,8 +160,15 @@
       "duplicateDefault": "{{name}} (copy)"
     },
     "tabs": {
-      "following": "Following",
+      "following": "All packs",
       "publishedByYou": "Published by you"
+    },
+    "assignments": {
+      "open": "Mod Library",
+      "title": "Mod Library",
+      "subtitle": "See every installed mod, which profiles use it, and reassign mods without switching profiles.",
+      "description": "See every installed mod, which profiles use it, and reassign mods without switching profiles.",
+      "back": "Back to profiles"
     },
     "activity": {
       "hasUpdates": "{{count}} pack has updates",
@@ -211,6 +218,41 @@
         "title": "You haven't published anything yet",
         "hint": "Share a profile to make it appear here. Friends paste your code to install the same set of mods."
       }
+    },
+    "library": {
+      "loading": "Loading Mod Library...",
+      "installedActive": "installed active",
+      "installedDisabled": "installed disabled",
+      "disabledInProfile": "disabled",
+      "readOnly": "Read-only",
+      "readOnlyTitle": "Followed profiles are read-only. Duplicate the profile to edit it.",
+      "noProfiles": "No profiles yet",
+      "empty": {
+        "title": "No installed mods",
+        "hint": "Install mods first, then use Mod Library to choose which profiles include each one."
+      },
+      "toastAdded": "Added {{mod}} to {{profile}}",
+      "toastRemoved": "Removed {{mod}} from {{profile}}",
+      "toastFailed": "Failed to update membership: {{error}}"
+    },
+    "loadOrder": {
+      "buttonTitle": "Customize load order for {{name}}",
+      "dialogLabel": "Load order for {{name}}",
+      "title": "Load order for {{name}}",
+      "subtitle": "Top loads first. STS2 can still re-sort dependencies if an order is invalid.",
+      "note": "This order is stored with the profile and written to STS2 settings when the profile is active or activated.",
+      "empty": "This profile has no mods to order.",
+      "disabled": "disabled",
+      "moveUp": "Move {{name}} up",
+      "moveDown": "Move {{name}} down",
+      "save": "Save order",
+      "toastSavedApplied": "Load order saved for {{name}} and applied to settings.save.",
+      "toastSavedInactive": "Load order saved for {{name}}. It will apply when you activate this profile.",
+      "toastSavedSettingsMissing": "Load order saved for {{name}}, but settings.save was not found. Launch STS2 once, then activate this profile.",
+      "toastSavedSettingsMultiple": "Load order saved for {{name}}, but multiple settings.save files were found so none were changed.",
+      "toastSavedGameRunning": "Load order saved for {{name}}, but STS2 is running. Close the game and activate the profile to apply it.",
+      "toastSavedSettingsFailed": "Load order saved for {{name}}, but settings.save could not be updated.",
+      "toastFailed": "Failed to save load order: {{error}}"
     },
     "card": {
       "active": "ACTIVE",
@@ -722,6 +764,8 @@
     "closeEditor": "Close editor",
     "githubRepo": "GitHub repo",
     "nexusUrl": "Nexus mod URL",
+    "displayName": "Display name",
+    "displayDescription": "Display description",
     "note": "Note",
     "otherLink": "Other link",
     "clear": "clear",
@@ -732,6 +776,9 @@
     "empty": "empty",
     "githubPlaceholder": "owner/repo",
     "nexusPlaceholder": "https://www.nexusmods.com/sts2/mods/123",
+    "displayDescriptionPlaceholder": "Shown in the Mods list",
+    "displayNameHint": "Optional label shown in the manager only. The manifest name stays unchanged.",
+    "displayDescriptionHint": "Optional manager-only description for confusing or untranslated mods.",
     "notePlaceholder": "e.g. downloaded from Patreon, compat patch for v1.8 build",
     "otherLinkPlaceholder": "https://… (Patreon, X, Discord, etc.)",
     "noteHint": "Free-form. Shown on the mod row so you remember where this came from.",
@@ -1282,6 +1329,15 @@
     },
     "title": "Your mods",
     "searchPlaceholder": "Search mods…",
+    "sort": {
+      "label": "Sort",
+      "nameAsc": "Name A-Z",
+      "nameDesc": "Name Z-A",
+      "enabledFirst": "Enabled first",
+      "disabledFirst": "Disabled first",
+      "largestFirst": "Largest first",
+      "visualOnly": "Visual only: this sort does not change load order."
+    },
     "audit": {
       "run": "Audit mods",
       "running": "Checking…",

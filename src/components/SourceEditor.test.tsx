@@ -22,6 +22,8 @@ const baseMod = (overrides: Partial<ModInfo> = {}): ModInfo => ({
   pinned: false,
   min_game_version: null,
   author: null,
+  display_name: null,
+  display_description: null,
   ...overrides,
 });
 
@@ -114,6 +116,8 @@ describe('<SourceEditor>', () => {
       'https://www.nexusmods.com/sts2/mods/99',
       '',
       '',
+      '',
+      '',
     );
   });
 
@@ -135,7 +139,39 @@ describe('<SourceEditor>', () => {
       '',
       'got this from a friend',
       'https://example.com/post/1',
+      '',
+      '',
     );
+  });
+
+  it('Display override fields round-trip through onSave', async () => {
+    const onSave = vi.fn();
+    const user = userEvent.setup();
+    renderEditor(baseMod({ description: 'Manifest description' }), { onSave });
+    await user.type(screen.getByPlaceholderText('BaseLib'), 'Friendly Base');
+    await user.type(screen.getByPlaceholderText('Manifest description'), 'Readable description');
+    await user.click(screen.getByRole('button', { name: /Save sources/ }));
+    expect(onSave).toHaveBeenCalledWith(
+      '',
+      '',
+      '',
+      '',
+      'Friendly Base',
+      'Readable description',
+    );
+  });
+
+  it('initial display override values come from mod fields', () => {
+    renderEditor(
+      baseMod({
+        display_name: 'Friendly Base',
+        display_description: 'Readable description',
+      }),
+    );
+    const nameEl = screen.getByPlaceholderText('BaseLib') as HTMLInputElement;
+    expect(nameEl.value).toBe('Friendly Base');
+    const descEl = screen.getByPlaceholderText('Shown in the Mods list') as HTMLTextAreaElement;
+    expect(descEl.value).toBe('Readable description');
   });
 
   it('initial Note + custom_url come from mod fields', () => {

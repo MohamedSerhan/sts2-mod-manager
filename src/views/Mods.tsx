@@ -36,6 +36,7 @@ import { useConfirm } from '../components/ConfirmDialog';
 import { KebabMenu, KebabSection, KebabDivider, KebabItem } from '../components/KebabMenu';
 import { SourceEditor } from '../components/SourceEditor';
 import { Copy } from 'lucide-react';
+import type { ModInfo } from '../types';
 import {
   toggleMod,
   deleteMod,
@@ -49,6 +50,7 @@ import {
   setModSource,
   setModSourcesFull,
   setModExtras,
+  setModDisplayOverrides,
   setModSnooze,
   findGithubFromNexus,
   pinMod,
@@ -60,6 +62,49 @@ import {
 
 // v5 — Advanced mode is per-screen, persisted in localStorage. Off by default.
 const ADVANCED_KEY = 'sts2mm-mods-advanced';
+
+function displayNameFor(mod: ModInfo): string {
+  return mod.display_name?.trim() || mod.name;
+}
+
+function displayDescriptionFor(mod: ModInfo): string {
+  return mod.display_description?.trim() || mod.description;
+}
+
+type ModSortMode = 'nameAsc' | 'nameDesc' | 'enabledFirst' | 'disabledFirst' | 'largestFirst';
+
+function compareModDisplayName(a: ModInfo, b: ModInfo): number {
+  const byName = displayNameFor(a).localeCompare(displayNameFor(b), undefined, {
+    sensitivity: 'base',
+    numeric: true,
+  });
+  if (byName !== 0) return byName;
+  return (a.folder_name ?? a.mod_id ?? a.name).localeCompare(b.folder_name ?? b.mod_id ?? b.name, undefined, {
+    sensitivity: 'base',
+    numeric: true,
+  });
+}
+
+function sortMods(mods: ModInfo[], sortMode: ModSortMode): ModInfo[] {
+  const sorted = [...mods];
+  sorted.sort((a, b) => {
+    if (sortMode === 'nameDesc') return compareModDisplayName(b, a);
+    if (sortMode === 'enabledFirst') {
+      const byEnabled = Number(b.enabled) - Number(a.enabled);
+      return byEnabled || compareModDisplayName(a, b);
+    }
+    if (sortMode === 'disabledFirst') {
+      const byDisabled = Number(a.enabled) - Number(b.enabled);
+      return byDisabled || compareModDisplayName(a, b);
+    }
+    if (sortMode === 'largestFirst') {
+      const bySize = b.size_bytes - a.size_bytes;
+      return bySize || compareModDisplayName(a, b);
+    }
+    return compareModDisplayName(a, b);
+  });
+  return sorted;
+}
 
 /**
  * Numeric semver compare for the small subset we actually see in
@@ -87,6 +132,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
   const toast = useToast();
   const confirm = useConfirm();
   const [filter, setFilter] = useState('');
+  const [sortMode, setSortMode] = useState<ModSortMode>('nameAsc');
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [quickAddUrl, setQuickAddUrl] = useState('');
   const [quickAdding, setQuickAdding] = useState(false);
@@ -387,9 +433,17 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
     return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
   }
 
-  const filtered = mods.filter((m) =>
-    m.name.toLowerCase().includes(filter.toLowerCase()),
-  );
+  const filtered = useMemo(() => {
+    const term = filter.trim().toLowerCase();
+    const visible = term
+      ? mods.filter((m) =>
+          displayNameFor(m).toLowerCase().includes(term)
+          || m.name.toLowerCase().includes(term)
+          || (m.folder_name?.toLowerCase().includes(term) ?? false),
+        )
+      : mods;
+    return sortMods(visible, sortMode);
+  }, [mods, filter, sortMode]);
 
   // Display names that appear on more than one installed mod. These rows
   // get a folder/author subtitle so the user can tell two same-named
@@ -398,8 +452,9 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
   {
     const seen = new Set<string>();
     for (const m of mods) {
-      if (seen.has(m.name)) duplicateNames.add(m.name);
-      seen.add(m.name);
+      const displayName = displayNameFor(m);
+      if (seen.has(displayName)) duplicateNames.add(displayName);
+      seen.add(displayName);
     }
   }
 
@@ -569,6 +624,21 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
             onChange={(e) => setFilter(e.target.value)}
           />
         </div>
+        <label className="gf-sort-control">
+          <span>{t('mods.sort.label')}</span>
+          <select
+            aria-label={t('mods.sort.label')}
+            value={sortMode}
+            onChange={(e) => setSortMode(e.target.value as ModSortMode)}
+          >
+            <option value="nameAsc">{t('mods.sort.nameAsc')}</option>
+            <option value="nameDesc">{t('mods.sort.nameDesc')}</option>
+            <option value="enabledFirst">{t('mods.sort.enabledFirst')}</option>
+            <option value="disabledFirst">{t('mods.sort.disabledFirst')}</option>
+            <option value="largestFirst">{t('mods.sort.largestFirst')}</option>
+          </select>
+        </label>
+        <div className="gf-sort-note">{t('mods.sort.visualOnly')}</div>
         {/* Per-screen Advanced toggle (v5 batch 2) */}
         <button
           type="button"
@@ -620,7 +690,9 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
             const rowKey = mod.folder_name ?? mod.name;
             const isExpanded = expandedMod === rowKey;
             const hasLinks = mod.github_url || mod.nexus_url;
-            const isDuplicate = duplicateNames.has(mod.name);
+            const displayName = displayNameFor(mod);
+            const displayDescription = displayDescriptionFor(mod);
+            const isDuplicate = duplicateNames.has(displayName);
             // When two mods share a display name, show a subtitle so the
             // user can tell them apart. Prefer author, fall back to the
             // on-disk folder name.
@@ -682,12 +754,17 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2.5 flex-wrap">
                         <span className="text-sm font-medium text-text truncate">
-                          {mod.name}
+                          {displayName}
+                          {mod.display_name && (
+                            <span className="ml-1.5 text-[10px] font-normal text-text-dim">
+                              {mod.name}
+                            </span>
+                          )}
                         </span>
                         {disambiguator && (
                           <span
                             className="text-xs text-text-dim"
-                            title={t('mods.disambiguatorTitle', { name: mod.name, identifier: mod.author ? t('mods.disambiguatorAuthor', { author: mod.author }) : t('mods.disambiguatorFolder', { folder: mod.folder_name }) })}
+                            title={t('mods.disambiguatorTitle', { name: displayName, identifier: mod.author ? t('mods.disambiguatorAuthor', { author: mod.author }) : t('mods.disambiguatorFolder', { folder: mod.folder_name }) })}
                           >
                             · {disambiguator}
                           </span>
@@ -825,9 +902,9 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                           <span className="text-xs text-text-dim">{formatBytes(mod.size_bytes)}</span>
                         )}
                       </div>
-                      {mod.description && (
+                      {displayDescription && (
                         <p className="text-sm text-text-muted mt-1 truncate">
-                          {mod.description}
+                          {displayDescription}
                         </p>
                       )}
                       {mod.note && (
@@ -1074,7 +1151,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                         setFindingGithub(null);
                       }
                     }}
-                    onSave={async (gh, nx, note, customUrl) => {
+                    onSave={async (gh, nx, note, customUrl, displayName, displayDescription) => {
                       try {
                         setSavingSource(true);
                         // Two separate commands by design: setModSourcesFull
@@ -1084,8 +1161,21 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                         // same source entry but don't clobber each other.
                         await setModSourcesFull(mod.name, gh.trim() || null, nx.trim() || null, mod.folder_name);
                         await setModExtras(mod.name, note.trim() || null, customUrl.trim() || null, mod.folder_name);
+                        const nextDisplayName = displayName.trim() || null;
+                        const nextDisplayDescription = displayDescription.trim() || null;
+                        if (
+                          nextDisplayName !== (mod.display_name ?? null)
+                          || nextDisplayDescription !== (mod.display_description ?? null)
+                        ) {
+                          await setModDisplayOverrides(
+                            mod.name,
+                            nextDisplayName,
+                            nextDisplayDescription,
+                            mod.folder_name,
+                          );
+                        }
                         await refreshMods();
-                        toast.success(t('mods.toast.sourcesSaved', { name: mod.name }));
+                        toast.success(t('mods.toast.sourcesSaved', { name: displayNameFor(mod) }));
                         setExpandedMod(null);
                       } catch (e) {
                         toast.error(t('mods.toast.allFailed', { error: e instanceof Error ? e.message : String(e) }));

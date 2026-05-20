@@ -18,9 +18,14 @@ import {
   MessageSquare,
   Link as LinkIcon,
   Save,
+  ListOrdered,
+  ListChecks,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
+import { Badge } from '../components/Badge';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../components/ConfirmDialog';
@@ -36,6 +41,9 @@ import {
   duplicateProfile,
   exportProfile,
   importProfile,
+  getProfileMemberships,
+  setProfileModMembership,
+  setProfileLoadOrder,
   getShareInfo,
   getProfileDrift,
   createBackup,
@@ -44,7 +52,7 @@ import {
 } from '../hooks/useTauri';
 import { importShareCodeSmart, buildShareMessage, buildShareLink } from '../lib/shareImport';
 import type { ProfileDrift } from '../hooks/useTauri';
-import type { Profile, ShareResult } from '../types';
+import type { LoadOrderSettingsStatus, Profile, ProfileMembershipGrid, ProfileMembershipMod, ProfileMembershipState, ShareResult } from '../types';
 
 interface ProfilesViewProps {
   /** Navigates to Settings → Accounts. Passed down to PublishModal's
@@ -52,6 +60,18 @@ interface ProfilesViewProps {
    *  one-click route to the token field instead of having to discover
    *  it themselves. */
   onGoToSettings?: () => void;
+}
+
+function membershipKey(row: ProfileMembershipMod, profileName: string): string {
+  return `${row.folder_name ?? row.mod_id ?? row.name}::${profileName}`;
+}
+
+function membershipRowKey(row: ProfileMembershipMod): string {
+  return row.folder_name ?? row.mod_id ?? row.name;
+}
+
+function membershipDisplayName(row: ProfileMembershipMod): string {
+  return row.display_name?.trim() || row.name;
 }
 
 export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
@@ -71,11 +91,18 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
   const [driftMap, setDriftMap] = useState<Record<string, ProfileDrift>>({});
   const [switchingProfile, setSwitchingProfile] = useState<string | null>(null);
   const [savingProfile, setSavingProfile] = useState<string | null>(null);
-  // v5 batch 3 — Following / Published tabs.
-  // "Following" = every profile you have. "Published" = ones you've shared (have a share code).
+  // v5 batch 3 - profile list filters and a separate assignment workspace.
   const [tab, setTab] = useState<'following' | 'published'>('following');
+  const [showModAssignments, setShowModAssignments] = useState(false);
+  const [membershipGrid, setMembershipGrid] = useState<ProfileMembershipGrid | null>(null);
+  const [membershipLoading, setMembershipLoading] = useState(false);
+  const [membershipError, setMembershipError] = useState<string | null>(null);
+  const [membershipSaving, setMembershipSaving] = useState<string | null>(null);
+  const [loadOrderProfile, setLoadOrderProfile] = useState<Profile | null>(null);
+  const [loadOrderDraft, setLoadOrderDraft] = useState<Profile['mods']>([]);
+  const [loadOrderSaving, setLoadOrderSaving] = useState(false);
   const { t, i18n } = useTranslation();
-  const { refreshAll, setActiveProfile, activeProfile, subUpdates, refreshSubUpdates } = useApp();
+  const { mods, refreshAll, setActiveProfile, activeProfile, subUpdates, refreshSubUpdates } = useApp();
   const toastCtx = useToast();
   const confirm = useConfirm();
   const [applyingSubId, setApplyingSubId] = useState<string | null>(null);
@@ -136,6 +163,36 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
     refreshShareAndDrift();
   }, [profiles, activeProfile, refreshShareAndDrift]);
 
+  const loadMemberships = useCallback(async () => {
+    try {
+      setMembershipLoading(true);
+      setMembershipError(null);
+      const grid = await getProfileMemberships();
+      setMembershipGrid(grid);
+    } catch (e) {
+      setMembershipError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setMembershipLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (showModAssignments) {
+      loadMemberships();
+    }
+  }, [showModAssignments, loadMemberships]);
+
+  function openModAssignments() {
+    setShowModAssignments(true);
+    setShowCreate(false);
+    setShowImport(false);
+    setShowImportCode(false);
+  }
+
+  function closeModAssignments() {
+    setShowModAssignments(false);
+  }
+
   async function loadProfiles() {
     try {
       setLoading(true);
@@ -146,6 +203,132 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
+    }
+  }
+
+  function openLoadOrderEditor(profile: Profile) {
+    setLoadOrderProfile(profile);
+    setLoadOrderDraft([...profile.mods]);
+  }
+
+  function closeLoadOrderEditor() {
+    if (loadOrderSaving) return;
+    setLoadOrderProfile(null);
+    setLoadOrderDraft([]);
+  }
+
+  function moveLoadOrderItem(index: number, delta: -1 | 1) {
+    setLoadOrderDraft((prev) => {
+      const nextIndex = index + delta;
+      if (nextIndex < 0 || nextIndex >= prev.length) return prev;
+      const next = [...prev];
+      [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+      return next;
+    });
+  }
+
+  function loadOrderToastKey(status: LoadOrderSettingsStatus): string {
+    switch (status) {
+      case 'applied':
+        return 'profiles.loadOrder.toastSavedApplied';
+      case 'skipped_missing':
+        return 'profiles.loadOrder.toastSavedSettingsMissing';
+      case 'skipped_multiple':
+        return 'profiles.loadOrder.toastSavedSettingsMultiple';
+      case 'skipped_game_running':
+        return 'profiles.loadOrder.toastSavedGameRunning';
+      case 'failed':
+        return 'profiles.loadOrder.toastSavedSettingsFailed';
+      case 'skipped_inactive':
+      default:
+        return 'profiles.loadOrder.toastSavedInactive';
+    }
+  }
+
+  async function handleSaveLoadOrder() {
+    if (!loadOrderProfile || loadOrderSaving) return;
+    try {
+      setLoadOrderSaving(true);
+      const result = await setProfileLoadOrder(
+        loadOrderProfile.name,
+        loadOrderDraft.map((mod) => ({
+          name: mod.name,
+          folder_name: mod.folder_name,
+          mod_id: mod.mod_id,
+        })),
+      );
+      setProfiles((prev) => prev.map((profile) => (
+        profile.name === result.profile.name ? result.profile : profile
+      )));
+      setLoadOrderProfile(null);
+      setLoadOrderDraft([]);
+      const key = loadOrderToastKey(result.settings_status);
+      const message = t(key, { name: result.profile.name });
+      if (result.settings_status === 'failed') {
+        toastCtx.error(message);
+      } else if (
+        result.settings_status === 'skipped_missing'
+        || result.settings_status === 'skipped_multiple'
+        || result.settings_status === 'skipped_game_running'
+      ) {
+        toastCtx.info(message);
+      } else {
+        toastCtx.success(message);
+      }
+    } catch (e) {
+      toastCtx.error(t('profiles.loadOrder.toastFailed', { error: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setLoadOrderSaving(false);
+    }
+  }
+
+  async function handleToggleMembership(row: ProfileMembershipMod, state: ProfileMembershipState) {
+    if (!state.editable || membershipSaving) return;
+    const nextIncluded = !state.included;
+    const key = membershipKey(row, state.profile_name);
+    try {
+      setMembershipSaving(key);
+      const updatedProfile = await setProfileModMembership(
+        state.profile_name,
+        row.name,
+        row.folder_name,
+        row.mod_id,
+        nextIncluded,
+      );
+      setProfiles((prev) => prev.map((profile) => (
+        profile.name === updatedProfile.name ? updatedProfile : profile
+      )));
+      setMembershipGrid((prev) => {
+        if (!prev) return prev;
+        const targetKey = membershipRowKey(row);
+        return {
+          ...prev,
+          mods: prev.mods.map((mod) => {
+            if (membershipRowKey(mod) !== targetKey) return mod;
+            return {
+              ...mod,
+              profiles: mod.profiles.map((profileState) => (
+                profileState.profile_name === state.profile_name
+                  ? {
+                      ...profileState,
+                      included: nextIncluded,
+                      enabled: nextIncluded ? row.installed_enabled : false,
+                    }
+                  : profileState
+              )),
+            };
+          }),
+        };
+      });
+      toastCtx.success(
+        nextIncluded
+          ? t('profiles.library.toastAdded', { mod: membershipDisplayName(row), profile: state.profile_name })
+          : t('profiles.library.toastRemoved', { mod: membershipDisplayName(row), profile: state.profile_name }),
+      );
+    } catch (e) {
+      toastCtx.error(t('profiles.library.toastFailed', { error: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setMembershipSaving(null);
     }
   }
 
@@ -410,8 +593,193 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
     }
   }
 
+  function renderLoadOrderModal() {
+    if (!loadOrderProfile) return null;
+    return (
+      <div className="gf-modal-back">
+        <div
+          className="gf-modal gf-load-order-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('profiles.loadOrder.dialogLabel', { name: loadOrderProfile.name })}
+        >
+          <div className="gf-modal-head">
+            <div>
+              <div className="gf-modal-title">{t('profiles.loadOrder.title', { name: loadOrderProfile.name })}</div>
+              <div className="gf-modal-sub">{t('profiles.loadOrder.subtitle')}</div>
+            </div>
+          </div>
+          <div className="gf-modal-body">
+            <div className="gf-load-order-note">{t('profiles.loadOrder.note')}</div>
+            {loadOrderDraft.length === 0 ? (
+              <div className="gf-empty-sub">{t('profiles.loadOrder.empty')}</div>
+            ) : (
+              <div className="gf-load-order-list">
+                {loadOrderDraft.map((mod, index) => (
+                  <div className="gf-load-order-row" key={`${mod.folder_name ?? mod.mod_id ?? mod.name}-${index}`}>
+                    <div className="gf-load-order-rank">{index + 1}</div>
+                    <div className="gf-load-order-main">
+                      <div className="gf-load-order-name">{mod.name}</div>
+                      <div className="gf-load-order-meta">
+                        <span>{mod.version}</span>
+                        {mod.folder_name && <span>{mod.folder_name}</span>}
+                        {!mod.enabled && <span>{t('profiles.loadOrder.disabled')}</span>}
+                      </div>
+                    </div>
+                    <div className="gf-load-order-actions">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => moveLoadOrderItem(index, -1)}
+                        disabled={index === 0 || loadOrderSaving}
+                        title={t('profiles.loadOrder.moveUp', { name: mod.name })}
+                        aria-label={t('profiles.loadOrder.moveUp', { name: mod.name })}
+                      >
+                        <ArrowUp size={14} />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => moveLoadOrderItem(index, 1)}
+                        disabled={index === loadOrderDraft.length - 1 || loadOrderSaving}
+                        title={t('profiles.loadOrder.moveDown', { name: mod.name })}
+                        aria-label={t('profiles.loadOrder.moveDown', { name: mod.name })}
+                      >
+                        <ArrowDown size={14} />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="gf-modal-foot">
+            <Button variant="ghost" size="sm" onClick={closeLoadOrderEditor} disabled={loadOrderSaving}>
+              {t('common.cancel')}
+            </Button>
+            <Button size="sm" onClick={handleSaveLoadOrder} disabled={loadOrderSaving || loadOrderDraft.length === 0}>
+              {loadOrderSaving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+              {t('profiles.loadOrder.save')}
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderModLibrary() {
+    if (membershipLoading) {
+      return (
+        <div className="flex items-center justify-center py-16 text-text-dim">
+          <p className="text-sm">{t('profiles.library.loading')}</p>
+        </div>
+      );
+    }
+
+    if (membershipError) {
+      return (
+        <Card className="text-center py-8">
+          <p className="text-danger text-sm">{membershipError}</p>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="mt-3"
+            onClick={loadMemberships}
+          >
+            {t('common.retry')}
+          </Button>
+        </Card>
+      );
+    }
+
+    if (!membershipGrid) {
+      return (
+        <div className="flex items-center justify-center py-16 text-text-dim">
+          <p className="text-sm">{t('profiles.library.loading')}</p>
+        </div>
+      );
+    }
+
+    const grid = membershipGrid;
+    if (grid.mods.length === 0) {
+      return (
+        <div className="gf-empty">
+          <div className="gf-empty-art"><Layers size={28} /></div>
+          <div className="gf-empty-title">{t('profiles.library.empty.title')}</div>
+          <div className="gf-empty-sub">{t('profiles.library.empty.hint')}</div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-2">
+        {grid.mods.map((row) => (
+          <Card
+            key={membershipRowKey(row)}
+            className="gf-profile-library-row"
+          >
+            <div className="gf-profile-library-main">
+              <div className="min-w-0">
+                <h3 className="gf-profile-library-title">
+                  {row.display_name?.trim() || row.name}
+                  {row.display_name && (
+                    <span className="ml-1.5 text-[10px] font-normal text-text-dim">
+                      {row.name}
+                    </span>
+                  )}
+                </h3>
+                <div className="gf-profile-library-meta">
+                  <span>{row.version}</span>
+                  {row.folder_name && <span>{row.folder_name}</span>}
+                  <span>
+                    {row.installed_enabled
+                      ? t('profiles.library.installedActive')
+                      : t('profiles.library.installedDisabled')}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div className="gf-profile-memberships">
+              {row.profiles.length === 0 ? (
+                <span className="gf-profile-library-muted">{t('profiles.library.noProfiles')}</span>
+              ) : row.profiles.map((state) => {
+                const key = membershipKey(row, state.profile_name);
+                const saving = membershipSaving === key;
+                return (
+                  <label
+                    key={state.profile_name}
+                    className={`gf-profile-membership ${state.included ? 'active' : ''}`}
+                    title={!state.editable ? t('profiles.library.readOnlyTitle') : undefined}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={state.included}
+                      disabled={!state.editable || membershipSaving !== null}
+                      onChange={() => handleToggleMembership(row, state)}
+                      aria-label={state.profile_name}
+                    />
+                    <span className="gf-profile-membership-name">{state.profile_name}</span>
+                    {state.included && !state.enabled && (
+                      <span className="gf-profile-membership-note">{t('profiles.library.disabledInProfile')}</span>
+                    )}
+                    {!state.editable && (
+                      <span className="gf-profile-membership-note">{t('profiles.library.readOnly')}</span>
+                    )}
+                    {saving && <RefreshCw size={12} className="animate-spin" />}
+                  </label>
+                );
+              })}
+            </div>
+          </Card>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className="gf-body">
+      {renderLoadOrderModal()}
+
       {/* Switching Profile Overlay (v5 loading) */}
       {switchingProfile && (
         <div className="gf-modal-back">
@@ -437,6 +805,8 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
           </p>
         </div>
         <div className="gf-page-actions">
+          {!showModAssignments && (
+            <>
           <Button
             variant="secondary"
             size="sm"
@@ -473,10 +843,27 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
             <Plus size={14} />
             {t('profiles.actions.newProfile')}
           </Button>
+            </>
+          )}
         </div>
       </div>
 
-      {/* Following / Published tabs (v5 batch 3) */}
+      {showModAssignments ? (
+        <>
+          <div className="gf-assignment-head">
+            <div>
+              <h2 className="gf-section-title">{t('profiles.assignments.title')}</h2>
+              <p className="gf-section-sub">{t('profiles.assignments.subtitle')}</p>
+            </div>
+            <Button variant="secondary" size="sm" onClick={closeModAssignments}>
+              {t('profiles.assignments.back')}
+            </Button>
+          </div>
+          {renderModLibrary()}
+        </>
+      ) : (
+        <>
+      {/* Profile list filters (v5 batch 3) */}
       <div className="gf-tabs gf-tabs-settings" style={{ marginBottom: 14 }}>
         <button
           className={`gf-tab ${tab === 'following' ? 'active' : ''}`}
@@ -491,6 +878,22 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
         >
           {t('profiles.tabs.publishedByYou')}
           <span className="gf-tab-count">{Object.keys(shareInfoMap).length}</span>
+        </button>
+      </div>
+
+      <div className="gf-profile-special-actions">
+        <button className="gf-profile-library-launch" onClick={openModAssignments}>
+          <span className="gf-profile-library-launch-icon">
+            <ListChecks size={18} />
+          </span>
+          <span className="gf-profile-library-launch-copy">
+            <span className="gf-profile-library-launch-title">
+              {t('profiles.assignments.open')}
+              <Badge variant="beta" className="gf-tab-beta" ariaHidden>{t('common.beta')}</Badge>
+              <span className="gf-tab-count">{membershipGrid?.mods.length ?? mods.length}</span>
+            </span>
+            <span className="gf-profile-library-launch-desc">{t('profiles.assignments.description')}</span>
+          </span>
         </button>
       </div>
 
@@ -826,6 +1229,16 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
                 )}
               </div>
               <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => openLoadOrderEditor(profile)}
+                  title={t('profiles.loadOrder.buttonTitle', { name: profile.name })}
+                  aria-label={t('profiles.loadOrder.buttonTitle', { name: profile.name })}
+                  disabled={profile.mods.length === 0}
+                >
+                  <ListOrdered size={14} />
+                </Button>
                 {activeProfile === profile.name ? (
                   <Button
                     variant="ghost"
@@ -930,6 +1343,8 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
         </div>
         );
       })()}
+        </>
+      )}
 
       <PublishModal
         open={!!publishTarget}

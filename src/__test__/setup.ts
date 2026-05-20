@@ -137,6 +137,12 @@ function registerSafeDefaults(): void {
   invokeHandlers.set('is_game_running_cmd', () => false);
   invokeHandlers.set('check_subscription_updates', () => []);
   invokeHandlers.set('list_profiles_cmd', () => []);
+  invokeHandlers.set('get_profile_memberships', () => ({ profiles: [], mods: [] }));
+  invokeHandlers.set('set_profile_load_order', () => ({
+    profile: null,
+    settings_status: 'skipped_inactive',
+    settings_path: null,
+  }));
   invokeHandlers.set('get_subscriptions', () => []);
   invokeHandlers.set('get_active_profile', () => null);
   invokeHandlers.set('get_mod_sources', () => ({}));

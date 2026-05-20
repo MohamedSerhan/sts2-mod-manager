@@ -13,9 +13,11 @@ When you add or modify a string, do all of this in the same change:
 
 1. Add the key + value to `src/i18n/locales/en.json`.
 2. Add the same key + a translation to `src/i18n/locales/zh-Hans.json`.
-   If you can't translate confidently, copy the English value verbatim
-   and call it out in your summary so a human translator can fill it
-   in. **Do not invent Chinese.**
+   **Do not copy English prose as a placeholder.** If you can't translate
+   confidently, stop and flag it for a human translator. Brand names,
+   file paths, placeholders, and other values that intentionally stay the
+   same must be listed in `src/i18n/locales/parity.test.ts`.
+   **Do not invent Chinese.**
 3. Reference the key in the component:
    - `t('your.key', { var })` for plain strings, toasts, `title=`,
      `aria-label=`, `placeholder=`, confirm dialogs.
@@ -23,8 +25,15 @@ When you add or modify a string, do all of this in the same change:
      rich markup. The `<n>` placeholders in the JSON must match the
      `components={…}` indices exactly — duplicate indices will render
      blank.
-4. Run `npx vitest run src/i18n/locales/parity.test.ts`. It fails the
-   build if `en.json` and `zh-Hans.json` aren't key-for-key in sync.
+4. Run `npm run qa:i18n`. It fails the build if `en.json` and
+   `zh-Hans.json` aren't key-for-key in sync or if Simplified Chinese
+   contains copied English prose outside the explicit exception list.
+
+## Release translation gate
+
+Supported languages must be translated before a release can go out. The
+release script runs `npm run qa:i18n` outside `SKIP_QA`, so missing keys or
+English fallback prose block release even during emergency hotfixes.
 
 ### Anti-patterns to reject
 

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, X, GitBranch, ExternalLink, Search, Save, StickyNote, Link as LinkIcon } from 'lucide-react';
+import { Check, X, GitBranch, ExternalLink, Search, Save, StickyNote, Link as LinkIcon, Type, FileText } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ModInfo } from '../types';
 
@@ -26,6 +26,8 @@ interface Props {
     nexusUrl: string,
     note: string,
     customUrl: string,
+    displayName: string,
+    displayDescription: string,
   ) => void | Promise<void>;
 }
 
@@ -51,10 +53,13 @@ export function SourceEditor({
   const [nexus, setNexus] = useState<string>(mod.nexus_url ?? '');
   const [note, setNote] = useState<string>(mod.note ?? '');
   const [customUrl, setCustomUrl] = useState<string>(mod.custom_url ?? '');
+  const [displayName, setDisplayName] = useState<string>(mod.display_name ?? '');
+  const [displayDescription, setDisplayDescription] = useState<string>(mod.display_description ?? '');
 
   const ghOk = github.trim().length > 0;
   const nxOk = nexus.trim().length > 0;
   const onlyNexus = nxOk && !ghOk;
+  const titleName = mod.display_name?.trim() || mod.name;
 
   function statusBadge(ok: boolean) {
     return ok ? (
@@ -70,7 +75,7 @@ export function SourceEditor({
     <div className="gf-src-edit">
       <div className="gf-src-edit-head">
         <div>
-          <div className="gf-src-edit-title">{t('sourceEditor.title', { name: mod.name })}</div>
+          <div className="gf-src-edit-title">{t('sourceEditor.title', { name: titleName })}</div>
           <div className="gf-src-edit-sub">
             {t('sourceEditor.subtitle')}
           </div>
@@ -78,6 +83,61 @@ export function SourceEditor({
         <button className="gf-btn-3 gf-btn-icon" onClick={onClose} title={t('sourceEditor.closeEditor')}>
           <X size={12} />
         </button>
+      </div>
+
+      <div className="gf-src-edit-grid">
+        <div className="gf-src-edit-field">
+          <label className="gf-src-edit-label">
+            <Type size={11} style={{ marginRight: 4 }} />
+            {t('sourceEditor.displayName')}
+            {displayName && (
+              <button
+                type="button"
+                className="gf-src-edit-clear"
+                onClick={() => setDisplayName('')}
+              >
+                {t('sourceEditor.clear')}
+              </button>
+            )}
+          </label>
+          <div className="gf-src-edit-input">
+            <input
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder={mod.name}
+            />
+          </div>
+          <div className="gf-src-edit-hint">
+            <span>{t('sourceEditor.displayNameHint')}</span>
+          </div>
+        </div>
+
+        <div className="gf-src-edit-field">
+          <label className="gf-src-edit-label">
+            <FileText size={11} style={{ marginRight: 4 }} />
+            {t('sourceEditor.displayDescription')}
+            {displayDescription && (
+              <button
+                type="button"
+                className="gf-src-edit-clear"
+                onClick={() => setDisplayDescription('')}
+              >
+                {t('sourceEditor.clear')}
+              </button>
+            )}
+          </label>
+          <div className="gf-src-edit-input">
+            <textarea
+              value={displayDescription}
+              onChange={(e) => setDisplayDescription(e.target.value)}
+              placeholder={mod.description || t('sourceEditor.displayDescriptionPlaceholder')}
+              rows={2}
+            />
+          </div>
+          <div className="gf-src-edit-hint">
+            <span>{t('sourceEditor.displayDescriptionHint')}</span>
+          </div>
+        </div>
       </div>
 
       <div className="gf-src-edit-grid">
@@ -232,7 +292,7 @@ export function SourceEditor({
         <button className="gf-btn-3" onClick={onClose}>{t('common.cancel')}</button>
         <button
           className="gf-btn gf-btn-sm"
-          onClick={() => onSave(github, nexus, note, customUrl)}
+          onClick={() => onSave(github, nexus, note, customUrl, displayName, displayDescription)}
           disabled={saving}
         >
           <Save size={11} /> {saving ? t('sourceEditor.saving') : t('sourceEditor.saveSources')}

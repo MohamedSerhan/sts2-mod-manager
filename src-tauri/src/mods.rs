@@ -60,6 +60,14 @@ pub struct ModInfo {
     /// Populated by `mod_sources::enrich_mods_with_sources`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_url: Option<String>,
+    /// User-facing display name override from mod_sources.json. This does
+    /// not replace `name`, because `name` is still part of the stable mod
+    /// identity used by profiles, updates, and file operations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    /// User-facing description override from mod_sources.json.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_description: Option<String>,
 }
 
 /// One dependency entry in a mod manifest.
@@ -452,6 +460,8 @@ fn parse_manifest(manifest_path: &Path, base_dir: &Path, enabled: bool) -> Optio
         author: raw.author,
         note: None,
         custom_url: None,
+        display_name: None,
+        display_description: None,
     })
 }
 
@@ -507,6 +517,8 @@ fn dll_only_mod(dll_path: &Path, base_dir: &Path, enabled: bool) -> ModInfo {
         author: None,
         note: None,
         custom_url: None,
+        display_name: None,
+        display_description: None,
     }
 }
 
@@ -755,6 +767,38 @@ fn scan_mods_inner(dir: &Path, enabled: bool) -> Vec<ModInfo> {
     // Sort by name for consistent ordering
     mods.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     mods
+}
+
+/// Merge active and disabled scan results into the single list shown by the
+/// manager. Active copies win only when the same folder identity exists in
+/// both locations; then sort the whole result so disabled rows do not appear
+/// as a second alphabetized block after active rows.
+pub(crate) fn merge_active_disabled_mods(
+    active_mods: Vec<ModInfo>,
+    disabled_mods: Vec<ModInfo>,
+) -> Vec<ModInfo> {
+    let active_keys: std::collections::HashSet<String> =
+        active_mods.iter().map(dedup_key).collect();
+
+    let mut all_mods = active_mods;
+    for d in disabled_mods {
+        if active_keys.contains(&dedup_key(&d)) {
+            log::warn!(
+                "Mod folder '{}' has files in BOTH active and disabled folders - showing the active copy only. Re-toggle or repair the profile to clean this up.",
+                dedup_key(&d)
+            );
+            continue;
+        }
+        all_mods.push(d);
+    }
+
+    all_mods.sort_by(|a, b| {
+        a.name
+            .to_lowercase()
+            .cmp(&b.name.to_lowercase())
+            .then_with(|| dedup_key(a).cmp(&dedup_key(b)))
+    });
+    all_mods
 }
 
 /// Enable a mod by moving its files from disabled to active.
@@ -1538,6 +1582,23 @@ pub fn snapshot_after_fresh_install(info: &ModInfo, mods_path: &Path, config_pat
 /// + rezip manually before the manager would touch them. This routes both
 /// through the existing install pipeline.
 pub fn install_mod_from_archive(archive_path: &Path, mods_path: &Path) -> Result<ModInfo> {
+    let info = install_mod_from_archive_unchecked(archive_path, mods_path)?;
+    if installed_info_is_visible_after_extract(&info, mods_path) {
+        return Ok(info);
+    }
+
+    delete_mod_files_by_info(&info, mods_path);
+    let archive_name = archive_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("archive");
+    Err(AppError::Other(format!(
+        "No installed mod could be detected after extracting '{}'. The archive may contain another archive or an extra wrapper folder; extract the inner mod archive and install that instead.",
+        archive_name
+    )))
+}
+
+fn install_mod_from_archive_unchecked(archive_path: &Path, mods_path: &Path) -> Result<ModInfo> {
     let ext = archive_path
         .extension()
         .and_then(|e| e.to_str())
@@ -1568,6 +1629,48 @@ pub fn install_mod_from_archive(archive_path: &Path, mods_path: &Path) -> Result
             other
         ))),
     }
+}
+
+fn normalized_installed_rel(path: &str) -> String {
+    path.replace('\\', "/")
+        .trim_start_matches("./")
+        .to_lowercase()
+}
+
+fn mod_identity_intersects(a: &ModInfo, b: &ModInfo) -> bool {
+    let mut a_keys = std::collections::HashSet::new();
+    for candidate in [a.mod_id.as_deref(), a.folder_name.as_deref(), Some(a.name.as_str())] {
+        if let Some(value) = candidate {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                a_keys.insert(trimmed.to_lowercase());
+            }
+        }
+    }
+
+    [b.mod_id.as_deref(), b.folder_name.as_deref(), Some(b.name.as_str())]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .any(|value| a_keys.contains(&value.to_lowercase()))
+}
+
+fn installed_info_is_visible_after_extract(info: &ModInfo, mods_path: &Path) -> bool {
+    let installed_files: std::collections::HashSet<String> = info
+        .files
+        .iter()
+        .map(|f| normalized_installed_rel(f))
+        .collect();
+
+    scan_mods(mods_path).into_iter().any(|scanned| {
+        mod_identity_intersects(&scanned, info)
+            || scanned
+                .files
+                .iter()
+                .map(|f| normalized_installed_rel(f))
+                .any(|f| installed_files.contains(&f))
+    })
 }
 
 /// Decompress a `.7z` file into `dest_dir`. Preserves the archive's
@@ -1885,6 +1988,8 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
                 author: None,
                 note: None,
                 custom_url: None,
+                display_name: None,
+                display_description: None,
             })
         }
     }
@@ -1938,8 +2043,28 @@ pub fn get_installed_mods(state: tauri::State<'_, AppState>) -> std::result::Res
         all_mods.push(d);
     }
 
+    all_mods.sort_by(|a, b| {
+        a.name
+            .to_lowercase()
+            .cmp(&b.name.to_lowercase())
+            .then_with(|| dedup_key(a).cmp(&dedup_key(b)))
+    });
+
     // Enrich with source metadata (GitHub/Nexus links)
     crate::mod_sources::enrich_mods_with_sources(&mut all_mods, &s.config_path);
+    all_mods.sort_by(|a, b| {
+        a.display_name
+            .as_deref()
+            .unwrap_or(&a.name)
+            .to_lowercase()
+            .cmp(
+                &b.display_name
+                    .as_deref()
+                    .unwrap_or(&b.name)
+                    .to_lowercase(),
+            )
+            .then_with(|| dedup_key(a).cmp(&dedup_key(b)))
+    });
 
     Ok(all_mods)
 }
@@ -2853,7 +2978,7 @@ mod user_scenario_tests {
 
 #[cfg(test)]
 mod dedup_identity_tests {
-    use super::{upsert_mod_dedup, ModInfo};
+    use super::{merge_active_disabled_mods, upsert_mod_dedup, ModInfo};
 
     fn mod_with(name: &str, folder: Option<&str>, version: &str) -> ModInfo {
         ModInfo {
@@ -2875,6 +3000,8 @@ mod dedup_identity_tests {
             author: None,
             note: None,
             custom_url: None,
+            display_name: None,
+            display_description: None,
         }
     }
 
@@ -2931,6 +3058,26 @@ mod dedup_identity_tests {
         upsert_mod_dedup(&mut mods, mod_with("my-mod", None, "1.0.0"), "test");
         assert_eq!(mods.len(), 1, "Normalized-name dedup must still apply when folder is missing");
     }
+
+    #[test]
+    fn merged_active_and_disabled_mods_sort_globally_by_name() {
+        let active = vec![
+            mod_with("Zulu Active", Some("ZuluActive"), "1.0.0"),
+            mod_with("BaseLib", Some("BaseLib"), "1.0.0"),
+        ];
+        let mut disabled_mod = mod_with("AutoPath", Some("AutoPath"), "1.0.0");
+        disabled_mod.enabled = false;
+        let disabled = vec![disabled_mod];
+
+        let merged = merge_active_disabled_mods(active, disabled);
+        let names: Vec<&str> = merged.iter().map(|m| m.name.as_str()).collect();
+
+        assert_eq!(
+            names,
+            vec!["AutoPath", "BaseLib", "Zulu Active"],
+            "get_installed_mods should not look alphabetized only until disabled rows are appended"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -2951,6 +3098,25 @@ mod archive_dispatch_tests {
     //! require an external `rar.exe`, which isn't part of CI.
 
     use super::*;
+
+    fn zip_bytes(entries: Vec<(&str, Vec<u8>)>) -> Vec<u8> {
+        use std::io::Write as _;
+        use zip::write::SimpleFileOptions;
+
+        let cursor = std::io::Cursor::new(Vec::new());
+        let mut zw = zip::ZipWriter::new(cursor);
+        let opts = SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        for (name, bytes) in entries {
+            zw.start_file(name, opts).unwrap();
+            zw.write_all(&bytes).unwrap();
+        }
+        zw.finish().unwrap().into_inner()
+    }
+
+    fn write_zip_file(path: &Path, entries: Vec<(&str, Vec<u8>)>) {
+        fs::write(path, zip_bytes(entries)).unwrap();
+    }
 
     #[test]
     fn install_mod_from_archive_dispatch_rejects_unsupported_extension() {
@@ -3036,6 +3202,103 @@ mod archive_dispatch_tests {
             msg.to_lowercase().contains("rar"),
             "error should make clear the rar extractor rejected the file, got: {}",
             msg,
+        );
+    }
+
+    #[test]
+    fn install_mod_from_archive_rejects_nested_archive_that_would_not_scan() {
+        let tmp = tempfile::tempdir().unwrap();
+        let inner_zip = tmp.path().join("InnerMod.zip");
+        write_zip_file(
+            &inner_zip,
+            vec![
+                ("InnerMod/InnerMod.json", br#"{"name":"InnerMod","version":"1.0.0"}"#.to_vec()),
+                ("InnerMod/InnerMod.dll", b"dll".to_vec()),
+            ],
+        );
+
+        let outer_zip = tmp.path().join("OuterPackage.zip");
+        write_zip_file(
+            &outer_zip,
+            vec![("InnerMod.zip", fs::read(&inner_zip).unwrap())],
+        );
+
+        let mods_tmp = tempfile::tempdir().unwrap();
+        let err = install_mod_from_archive(&outer_zip, mods_tmp.path()).unwrap_err();
+        let msg = err.to_string();
+
+        assert!(
+            msg.contains("No installed mod could be detected"),
+            "nested archive installs must fail loudly instead of returning a disappearing row; got: {}",
+            msg
+        );
+        assert!(
+            fs::read_dir(mods_tmp.path()).unwrap().next().is_none(),
+            "failed nested-archive install should clean up the extracted inner archive"
+        );
+    }
+
+    #[test]
+    fn install_mod_from_archive_rejects_deeply_nested_archive_chain_and_cleans_up() {
+        let tmp = tempfile::tempdir().unwrap();
+        let inner_mod_zip = zip_bytes(vec![
+            ("DeepMod/DeepMod.json", br#"{"id":"DeepMod","name":"DeepMod","version":"3.0.0"}"#.to_vec()),
+            ("DeepMod/DeepMod.dll", b"dll".to_vec()),
+        ]);
+        let middle_zip = zip_bytes(vec![
+            ("level-two/level-three/DeepMod.zip", inner_mod_zip),
+        ]);
+        let outer_zip = tmp.path().join("OuterPackage.zip");
+        write_zip_file(
+            &outer_zip,
+            vec![("level-one/level-two/MiddlePackage.zip", middle_zip)],
+        );
+
+        let mods_tmp = tempfile::tempdir().unwrap();
+        let err = install_mod_from_archive(&outer_zip, mods_tmp.path()).unwrap_err();
+        let msg = err.to_string();
+
+        assert!(
+            msg.contains("another archive"),
+            "deep nested archive installs should tell the user an inner archive is likely involved; got: {}",
+            msg,
+        );
+        assert!(
+            fs::read_dir(mods_tmp.path()).unwrap().next().is_none(),
+            "failed deep nested-archive install should leave no extracted wrapper folders behind"
+        );
+    }
+
+    #[test]
+    fn install_mod_from_archive_rejects_mod_hidden_behind_extra_wrapper_folders() {
+        let tmp = tempfile::tempdir().unwrap();
+        let outer_zip = tmp.path().join("TooManyFolders.zip");
+        write_zip_file(
+            &outer_zip,
+            vec![
+                (
+                    "Wrapper/NotTheMod/StillNotTheMod/DeepMod/DeepMod.json",
+                    br#"{"id":"DeepMod","name":"DeepMod","version":"3.0.0"}"#.to_vec(),
+                ),
+                (
+                    "Wrapper/NotTheMod/StillNotTheMod/DeepMod/DeepMod.dll",
+                    b"dll".to_vec(),
+                ),
+            ],
+        );
+
+        let mods_tmp = tempfile::tempdir().unwrap();
+        let err = install_mod_from_archive(&outer_zip, mods_tmp.path()).unwrap_err();
+        let msg = err.to_string();
+
+        assert!(
+            msg.contains("extra wrapper folder"),
+            "too-deep wrapper installs should point at wrapper-folder packaging; got: {}",
+            msg,
+        );
+        assert!(
+            fs::read_dir(mods_tmp.path()).unwrap().next().is_none(),
+            "failed deep-wrapper install should clean up every extracted folder"
         );
     }
 }
@@ -3444,6 +3707,8 @@ mod profile_manifest_refresh_tests {
             author: None,
             note: None,
             custom_url: None,
+            display_name: None,
+            display_description: None,
         };
 
         let mod_dir = mods_path.join("BadManifest");

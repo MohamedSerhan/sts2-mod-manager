@@ -32,7 +32,7 @@ import userEvent from '@testing-library/user-event';
 import { ProfilesView } from './Profiles';
 import { AllProviders } from '../__test__/providers';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
-import type { Profile } from '../types';
+import type { ModInfo, Profile } from '../types';
 
 function Wrap() {
   return (
@@ -51,6 +51,30 @@ const baseProfile = (overrides: Partial<Profile> = {}): Profile =>
     game_version: '0.105.0',
     ...overrides,
   } as Profile);
+
+const baseMod = (overrides: Partial<ModInfo> = {}): ModInfo => ({
+  name: 'BaseLib',
+  version: '1.0.0',
+  description: 'Base library',
+  enabled: true,
+  files: ['BaseLib/BaseLib.dll'],
+  source: null,
+  hash: null,
+  dependencies: [],
+  size_bytes: 1024,
+  folder_name: 'BaseLib',
+  mod_id: 'BaseLib',
+  github_url: null,
+  nexus_url: null,
+  pinned: false,
+  min_game_version: null,
+  author: 'QA',
+  note: null,
+  custom_url: null,
+  display_name: null,
+  display_description: null,
+  ...overrides,
+});
 
 function seedProfiles(profiles: Profile[]): void {
   registerInvokeHandler('list_profiles_cmd', () => profiles);
@@ -118,13 +142,13 @@ describe('<ProfilesView>', () => {
   it('renders profile cards with active badge for the active profile', async () => {
     seedProfiles([
       baseProfile({ name: 'Alpha' }),
-      baseProfile({ name: 'Beta' }),
+      baseProfile({ name: 'Gamma' }),
     ]);
     registerInvokeHandler('get_active_profile', () => 'Alpha');
     render(<Wrap />);
     await waitFor(() => {
       expect(screen.getByText('Alpha')).toBeInTheDocument();
-      expect(screen.getByText('Beta')).toBeInTheDocument();
+      expect(screen.getByText('Gamma')).toBeInTheDocument();
     });
     expect(screen.getByText('ACTIVE')).toBeInTheDocument();
   });
@@ -833,7 +857,7 @@ describe('<ProfilesView>', () => {
     }
   });
 
-  it('Following / Published tabs toggle visibility', async () => {
+  it('All packs / Published tabs toggle profile filters', async () => {
     seedProfiles([baseProfile({ name: 'Alpha' })]);
     const user = userEvent.setup();
     render(<Wrap />);
@@ -841,10 +865,215 @@ describe('<ProfilesView>', () => {
     const publishedBtn = screen.getByRole('button', { name: /Published by you/i });
     await user.click(publishedBtn);
     expect(publishedBtn.className).toContain('active');
-    // Following tab toggles back.
-    const followingBtn = screen.getByRole('button', { name: /^Following/i });
-    await user.click(followingBtn);
-    expect(followingBtn.className).toContain('active');
+    const allPacksBtn = screen.getByRole('button', { name: /^All packs/i });
+    await user.click(allPacksBtn);
+    expect(allPacksBtn.className).toContain('active');
+    expect(screen.getByRole('button', { name: /Mod Library/i })).toBeInTheDocument();
+  });
+
+  it('Mod Library opens a dedicated library workspace from a special action row', async () => {
+    seedProfiles([baseProfile({ name: 'Alpha' }), baseProfile({ name: 'Beta' })]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [
+        { name: 'Alpha', editable: true },
+        { name: 'Beta', editable: true },
+      ],
+      mods: [
+        {
+          name: 'BaseLib',
+          version: '1.0.0',
+          folder_name: 'BaseLib',
+          mod_id: 'BaseLib',
+          installed_enabled: true,
+          profiles: [
+            { profile_name: 'Alpha', included: true, enabled: true, editable: true },
+            { profile_name: 'Beta', included: false, enabled: false, editable: true },
+          ],
+        },
+      ],
+    }));
+
+    const user = userEvent.setup();
+    const { container } = render(<Wrap />);
+    const specialRow = container.querySelector('.gf-profile-special-actions');
+    expect(specialRow).not.toBeNull();
+    expect(specialRow).toContainElement(await screen.findByRole('button', { name: /Mod Library/i }));
+    expect(container.querySelector('.gf-page-actions')).not.toContainElement(screen.getByRole('button', { name: /Mod Library/i }));
+    expect(screen.getByText(/See every installed mod, which profiles use it, and reassign mods without switching profiles/i)).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: /Mod Library/i }));
+
+    expect(await screen.findByRole('heading', { name: /Mod Library/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Back to profiles/i })).toBeInTheDocument();
+    expect((await screen.findAllByText('BaseLib')).length).toBeGreaterThan(0);
+    expect(screen.getByText('1.0.0')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Alpha' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Beta' })).not.toBeChecked();
+  });
+
+  it('Mod Library action shows the installed count before opening and is marked beta', async () => {
+    seedProfiles([baseProfile({ name: 'Alpha' })]);
+    registerInvokeHandler('get_installed_mods', () => [
+      baseMod({ name: 'BaseLib', folder_name: 'BaseLib' }),
+      baseMod({ name: 'AutoPath', folder_name: 'AutoPath', mod_id: 'AutoPath' }),
+    ]);
+
+    render(<Wrap />);
+
+    const action = await screen.findByRole('button', { name: /Mod Library.*2/i });
+    expect(within(action).getByText('Beta')).toBeInTheDocument();
+  });
+
+  it('Mod Library toggles membership by folder identity without applying the profile', async () => {
+    seedProfiles([baseProfile({ name: 'Stable' })]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [
+        {
+          name: 'Library Only',
+          version: '1.2.3',
+          folder_name: 'LibraryOnly',
+          mod_id: 'LibraryOnly',
+          installed_enabled: false,
+          profiles: [
+            { profile_name: 'Stable', included: false, enabled: false, editable: true },
+          ],
+        },
+      ],
+    }));
+    registerInvokeHandler('set_profile_mod_membership', () => baseProfile({ name: 'Stable' }));
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.click(await screen.findByRole('button', { name: /Mod Library/i }));
+    await user.click(await screen.findByRole('checkbox', { name: 'Stable' }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls()).toContainEqual({
+        cmd: 'set_profile_mod_membership',
+        args: {
+          profileName: 'Stable',
+          modName: 'Library Only',
+          folderName: 'LibraryOnly',
+          modId: 'LibraryOnly',
+          included: true,
+        },
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/Added Library Only to Stable/i)).toBeInTheDocument();
+    });
+    expect(screen.getByRole('checkbox', { name: 'Stable' })).toBeChecked();
+    expect(getInvokeCalls().filter((call) => call.cmd === 'get_profile_memberships')).toHaveLength(1);
+    expect(getInvokeCalls().some((call) => call.cmd === 'switch_profile')).toBe(false);
+  });
+
+  it('Mod Library disables followed profile membership edits', async () => {
+    seedProfiles([baseProfile({ name: 'Friend Pack', created_by: 'alice' })]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Friend Pack', editable: false }],
+      mods: [
+        {
+          name: 'BaseLib',
+          version: '1.0.0',
+          folder_name: 'BaseLib',
+          mod_id: 'BaseLib',
+          installed_enabled: true,
+          profiles: [
+            { profile_name: 'Friend Pack', included: true, enabled: true, editable: false },
+          ],
+        },
+      ],
+    }));
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.click(await screen.findByRole('button', { name: /Mod Library/i }));
+
+    expect(await screen.findByRole('checkbox', { name: 'Friend Pack' })).toBeDisabled();
+    expect(screen.getByText(/Read-only/i)).toBeInTheDocument();
+  });
+
+  it('Mod Library surfaces membership load failures with retry', async () => {
+    seedProfiles([baseProfile({ name: 'Stable' })]);
+    let attempts = 0;
+    registerInvokeHandler('get_profile_memberships', () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new Error('membership service unavailable');
+      }
+      return { profiles: [{ name: 'Stable', editable: true }], mods: [] };
+    });
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.click(await screen.findByRole('button', { name: /Mod Library/i }));
+
+    expect(await screen.findByText(/membership service unavailable/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Retry/i }));
+
+    expect(await screen.findByText(/No installed mods/i)).toBeInTheDocument();
+    expect(attempts).toBe(2);
+  });
+
+  it('opens a profile load-order editor and saves the reordered manifest', async () => {
+    const user = userEvent.setup();
+    seedProfiles([
+      baseProfile({
+        name: 'Stable',
+        mods: [
+          {
+            name: 'BaseLib',
+            version: '1.0.0',
+            source: null,
+            hash: null,
+            files: ['BaseLib/BaseLib.dll'],
+            enabled: true,
+            bundle_url: null,
+            folder_name: 'BaseLib',
+            mod_id: 'BaseLib',
+          },
+          {
+            name: 'Card Art Editor',
+            version: '2.0.0',
+            source: null,
+            hash: null,
+            files: ['CardArtEditor/CardArtEditor.dll'],
+            enabled: true,
+            bundle_url: null,
+            folder_name: 'CardArtEditor',
+            mod_id: 'CardArtEditor',
+          },
+        ],
+      }),
+    ]);
+    registerInvokeHandler('set_profile_load_order', (args) => {
+      expect(args?.profileName).toBe('Stable');
+      expect(args?.orderedMods).toEqual([
+        { name: 'Card Art Editor', folderName: 'CardArtEditor', modId: 'CardArtEditor' },
+        { name: 'BaseLib', folderName: 'BaseLib', modId: 'BaseLib' },
+      ]);
+      return {
+        profile: baseProfile({ name: 'Stable' }),
+        settings_status: 'skipped_inactive',
+        settings_path: null,
+      };
+    });
+
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Stable')).toBeInTheDocument(); });
+
+    await user.click(screen.getByRole('button', { name: /Customize load order for Stable/i }));
+    const dialog = await screen.findByRole('dialog', { name: /Load order for Stable/i });
+    expect(within(dialog).getByText(/Top loads first/i)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: /Move Card Art Editor up/i }));
+    await user.click(within(dialog).getByRole('button', { name: /Save order/i }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls().some((call) => call.cmd === 'set_profile_load_order')).toBe(true);
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/Load order saved for Stable/i)).toBeInTheDocument();
+    });
   });
 
   it('Share button opens the publish modal when profile is unpublished', async () => {

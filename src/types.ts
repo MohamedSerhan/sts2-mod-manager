@@ -27,6 +27,11 @@ export interface ModInfo {
   /** User-saved non-GitHub/non-Nexus URL (Patreon, X, Discord, etc).
    *  Shown as an external-link chip alongside GitHub/Nexus on the row. */
   custom_url?: string | null;
+  /** User-facing label override. The manifest name remains in `name`. */
+  display_name?: string | null;
+  /** User-facing description override. The manifest description remains
+   *  in `description`. */
+  display_description?: string | null;
 }
 
 export interface Profile {
@@ -51,6 +56,53 @@ export interface ProfileMod {
   bundle_url: string | null;
   folder_name: string | null;
   mod_id: string | null;
+}
+
+export interface ProfileModOrderKey {
+  name: string;
+  folder_name: string | null;
+  mod_id: string | null;
+}
+
+export type LoadOrderSettingsStatus =
+  | 'applied'
+  | 'skipped_inactive'
+  | 'skipped_missing'
+  | 'skipped_multiple'
+  | 'skipped_game_running'
+  | 'failed';
+
+export interface ProfileLoadOrderUpdate {
+  profile: Profile;
+  settings_status: LoadOrderSettingsStatus;
+  settings_path: string | null;
+}
+
+export interface ProfileMembershipGrid {
+  profiles: ProfileMembershipProfile[];
+  mods: ProfileMembershipMod[];
+}
+
+export interface ProfileMembershipProfile {
+  name: string;
+  editable: boolean;
+}
+
+export interface ProfileMembershipMod {
+  name: string;
+  version: string;
+  folder_name: string | null;
+  mod_id: string | null;
+  display_name?: string | null;
+  installed_enabled: boolean;
+  profiles: ProfileMembershipState[];
+}
+
+export interface ProfileMembershipState {
+  profile_name: string;
+  included: boolean;
+  enabled: boolean;
+  editable: boolean;
 }
 
 export interface SwitchProfileResult {
@@ -151,6 +203,8 @@ export interface ModSourceEntry {
   nexus_mod_id: number | null;
   note?: string | null;
   custom_url?: string | null;
+  display_name?: string | null;
+  display_description?: string | null;
   snoozed_until_tag?: string | null;
   /** SHA256 of each tracked config file at install time. Backend-only
    *  bookkeeping driving the post-update "preserved N files" toast —

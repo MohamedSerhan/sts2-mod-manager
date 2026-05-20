@@ -609,7 +609,11 @@ function AppInner() {
               <button
                 key={id}
                 onClick={() => setActiveView(id)}
-                className={cn('gf-nav', activeView === id && 'active')}
+                className={cn(
+                  'gf-nav',
+                  id === 'browse-modpacks' && 'gf-nav-modpacks',
+                  activeView === id && 'active',
+                )}
               >
                 <Icon size={14} className="gf-nav-icon" />
                 <span className="gf-nav-label">{navLabels[id]}</span>

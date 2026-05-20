@@ -107,6 +107,8 @@ describe('<App>', () => {
     expect(getNavButton('Browse Mods')).toBeInTheDocument();
     const modpacksNav = getNavButton('Browse Modpacks');
     expect(modpacksNav).toBeInTheDocument();
+    expect(modpacksNav).toHaveClass('gf-nav-modpacks');
+    expect(within(modpacksNav).getByText('Browse Modpacks')).toHaveClass('gf-nav-label');
     expect(within(modpacksNav).getByText('Beta')).toBeInTheDocument();
     expect(getNavButton('Tutorial')).toBeInTheDocument();
     expect(getNavButton('Settings')).toBeInTheDocument();

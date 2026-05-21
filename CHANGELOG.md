@@ -27,9 +27,22 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ### Added
 
+- Mod Library lets you see installed mods across profiles and add or remove them without switching profiles.
+- Profiles now include a load-order editor so you can arrange how a profile's mods load.
+- Mods can now have custom names and descriptions in the manager without changing their installed files.
+- The Mods list now has sort options for name, enabled state, and size.
+
 ### Changed
 
+- Browse Modpacks now fits fully in the sidebar next to the Beta badge.
+- The Mods list now explains that sorting the list does not change the game's load order.
+
 ### Fixed
+
+- Archive installs now fail clearly when the selected file only contains another archive or hides the mod behind too many folders.
+- Failed nested or over-wrapped archive installs now clean up extracted files instead of leaving invisible mods behind.
+- Saving or clearing source links no longer removes custom mod names or descriptions.
+- Updating active profile load order now backs up the game's settings file and restores it if the write fails.
 
 ### Security
 

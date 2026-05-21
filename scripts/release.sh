@@ -104,6 +104,15 @@ if [[ -n "$devspeak_hits" ]]; then
   exit 1
 fi
 
+# --- Translation gate ---
+#
+# This is intentionally outside SKIP_QA. A release may skip the heavier
+# QA suite only for an emergency hotfix, but it must never ship missing
+# locale keys or copied-English fallback prose in supported languages.
+
+echo "Checking locale completeness..."
+npm run --silent qa:i18n
+
 echo "Fetching origin..."
 # Fetch the branch ref, but NOT --tags. We don't need local tags in sync;
 # the collision check below uses `git ls-remote --tags origin` directly.

@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ModInfo, Profile, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, RepairProfileResult, ModAuditEntry, NexusModInfo, BrowserPage } from '../types';
+import type { ModInfo, Profile, ProfileMembershipGrid, ProfileLoadOrderUpdate, ProfileModOrderKey, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, RepairProfileResult, ModAuditEntry, NexusModInfo, BrowserPage } from '../types';
 
 // ── Game Detection & QOL ───────────────────────────────────────────────────
 
@@ -173,6 +173,40 @@ export async function importProfile(json: string): Promise<Profile> {
   return invoke('import_profile_cmd', { json });
 }
 
+export async function getProfileMemberships(): Promise<ProfileMembershipGrid> {
+  return invoke('get_profile_memberships');
+}
+
+export async function setProfileModMembership(
+  profileName: string,
+  modName: string,
+  folderName: string | null,
+  modId: string | null,
+  included: boolean,
+): Promise<Profile> {
+  return invoke('set_profile_mod_membership', {
+    profileName,
+    modName,
+    folderName,
+    modId,
+    included,
+  });
+}
+
+export async function setProfileLoadOrder(
+  profileName: string,
+  orderedMods: ProfileModOrderKey[],
+): Promise<ProfileLoadOrderUpdate> {
+  return invoke('set_profile_load_order', {
+    profileName,
+    orderedMods: orderedMods.map((mod) => ({
+      name: mod.name,
+      folderName: mod.folder_name,
+      modId: mod.mod_id,
+    })),
+  });
+}
+
 export interface VersionMismatch {
   name: string;
   profile_version: string;
@@ -285,6 +319,20 @@ export async function setModExtras(
   folderName: string | null = null,
 ): Promise<ModSourceEntry> {
   return invoke('set_mod_extras', { modName, folderName, note, customUrl });
+}
+
+export async function setModDisplayOverrides(
+  modName: string,
+  displayName: string | null,
+  displayDescription: string | null,
+  folderName: string | null = null,
+): Promise<ModSourceEntry> {
+  return invoke('set_mod_display_overrides', {
+    modName,
+    folderName,
+    displayName,
+    displayDescription,
+  });
 }
 
 /**

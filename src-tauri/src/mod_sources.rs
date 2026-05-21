@@ -50,6 +50,14 @@ pub struct ModSourceEntry {
     /// later without breaking this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_url: Option<String>,
+    /// Optional user-facing display name. Stored separately from manifest
+    /// identity so users can label confusing upstream mods without changing
+    /// profile/update matching.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    /// Optional user-facing description shown in the Mods list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_description: Option<String>,
     /// When set and equal to the audit's `latest_release_with_assets_tag`,
     /// the audit's update suggestion is suppressed for this mod. The user
     /// uses this when the website's announced version doesn't actually
@@ -296,6 +304,12 @@ pub fn migrate_source_entry(old_name: &str, new_name: &str, config_path: &Path) 
     if dest.custom_url.is_none() {
         dest.custom_url = old.custom_url;
     }
+    if dest.display_name.is_none() {
+        dest.display_name = old.display_name;
+    }
+    if dest.display_description.is_none() {
+        dest.display_description = old.display_description;
+    }
     if dest.snoozed_until_tag.is_none() {
         dest.snoozed_until_tag = old.snoozed_until_tag;
     }
@@ -376,6 +390,12 @@ pub fn carry_source_entry(
     }
     if dest.custom_url.is_none() {
         dest.custom_url = old.custom_url;
+    }
+    if dest.display_name.is_none() {
+        dest.display_name = old.display_name;
+    }
+    if dest.display_description.is_none() {
+        dest.display_description = old.display_description;
     }
     if dest.snoozed_until_tag.is_none() {
         dest.snoozed_until_tag = old.snoozed_until_tag;
@@ -479,6 +499,8 @@ pub fn enrich_mods_with_sources(mods: &mut [ModInfo], config_path: &Path) {
             // to the GitHub/Nexus chips and the kebab menu.
             m.note = entry.note.clone();
             m.custom_url = entry.custom_url.clone();
+            m.display_name = entry.display_name.clone();
+            m.display_description = entry.display_description.clone();
         }
         // Also try to infer from the legacy `source` field if no explicit link
         if m.github_url.is_none() {
@@ -656,14 +678,12 @@ pub fn set_mod_source(
     let key = folder_name.clone().unwrap_or_else(|| mod_name.clone());
 
     if source_url.trim().is_empty() {
-        // Clear both the new folder-keyed entry AND any legacy name-keyed
-        // entry that might shadow it on read.
-        db.mods.remove(&key);
-        if key != mod_name {
-            db.mods.remove(&mod_name);
-        }
-        save_sources(&db, &s.config_path).map_err(|e| e.to_string())?;
-        return Ok(ModSourceEntry::default());
+        return clear_mod_source_links_from_path(
+            &mod_name,
+            folder_name.as_deref(),
+            &s.config_path,
+        )
+        .map_err(|e| e.to_string());
     }
 
     let entry = parse_source_url(&source_url).ok_or_else(|| {
@@ -759,6 +779,71 @@ pub fn set_mod_sources_full(
     Ok(result)
 }
 
+fn clean_optional_string(value: Option<String>) -> Option<String> {
+    value.and_then(|s| {
+        let trimmed = s.trim().to_string();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    })
+}
+
+fn clear_source_link_fields(entry: &mut ModSourceEntry) {
+    entry.github_repo = None;
+    entry.github_auto_detected = false;
+    entry.nexus_url = None;
+    entry.nexus_game_domain = None;
+    entry.nexus_mod_id = None;
+}
+
+fn source_entry_has_any_metadata(entry: &ModSourceEntry) -> bool {
+    entry.github_repo.is_some()
+        || entry.github_auto_detected
+        || entry.nexus_url.is_some()
+        || entry.nexus_game_domain.is_some()
+        || entry.nexus_mod_id.is_some()
+        || entry.installed_version.is_some()
+        || entry.pinned
+        || entry.note.is_some()
+        || entry.custom_url.is_some()
+        || entry.display_name.is_some()
+        || entry.display_description.is_some()
+        || entry.snoozed_until_tag.is_some()
+        || !entry.config_hashes.is_empty()
+}
+
+fn clear_source_links_for_key(db: &mut ModSourcesDb, key: &str) -> Option<ModSourceEntry> {
+    let entry = db.mods.get_mut(key)?;
+    clear_source_link_fields(entry);
+    let result = entry.clone();
+    if !source_entry_has_any_metadata(entry) {
+        db.mods.remove(key);
+    }
+    Some(result)
+}
+
+pub(crate) fn clear_mod_source_links_from_path(
+    mod_name: &str,
+    folder_name: Option<&str>,
+    config_path: &Path,
+) -> Result<ModSourceEntry> {
+    let mut db = load_sources(config_path);
+    let key = folder_name.unwrap_or(mod_name);
+    let primary = clear_source_links_for_key(&mut db, key);
+    let legacy = if key != mod_name {
+        clear_source_links_for_key(&mut db, mod_name)
+    } else {
+        None
+    };
+    let result = primary
+        .or(legacy)
+        .unwrap_or_else(ModSourceEntry::default);
+    save_sources(&db, config_path)?;
+    Ok(result)
+}
+
 /// Set or clear a mod's free-form note and/or custom (non-GitHub/Nexus)
 /// link. Empty strings clear the corresponding field. Folder-first write.
 /// Other fields on the entry (github, nexus, pin, snooze, version) are
@@ -776,18 +861,53 @@ pub fn set_mod_extras(
     let key = folder_name.unwrap_or(mod_name);
     let entry = db.mods.entry(key).or_default();
 
-    entry.note = note.and_then(|s| {
-        let t = s.trim().to_string();
-        if t.is_empty() { None } else { Some(t) }
-    });
-    entry.custom_url = custom_url.and_then(|s| {
-        let t = s.trim().to_string();
-        if t.is_empty() { None } else { Some(t) }
-    });
+    entry.note = clean_optional_string(note);
+    entry.custom_url = clean_optional_string(custom_url);
 
     let result = entry.clone();
     save_sources(&db, &s.config_path).map_err(|e| e.to_string())?;
     Ok(result)
+}
+
+pub(crate) fn set_mod_display_overrides_from_path(
+    mod_name: &str,
+    folder_name: Option<&str>,
+    display_name: Option<String>,
+    display_description: Option<String>,
+    config_path: &Path,
+) -> Result<ModSourceEntry> {
+    let mut db = load_sources(config_path);
+    let key = folder_name
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| mod_name.to_string());
+    let entry = db.mods.entry(key).or_default();
+    entry.display_name = clean_optional_string(display_name);
+    entry.display_description = clean_optional_string(display_description);
+    let result = entry.clone();
+    save_sources(&db, config_path)?;
+    Ok(result)
+}
+
+/// Set or clear the user-facing display name/description for a mod. These
+/// are presentation-only overrides; the manifest name remains the identity
+/// used for profiles, updates, and file operations.
+#[tauri::command]
+pub fn set_mod_display_overrides(
+    mod_name: String,
+    folder_name: Option<String>,
+    display_name: Option<String>,
+    display_description: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<ModSourceEntry, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    set_mod_display_overrides_from_path(
+        &mod_name,
+        folder_name.as_deref(),
+        display_name,
+        display_description,
+        &s.config_path,
+    )
+    .map_err(|e| e.to_string())
 }
 
 /// Snooze update suggestions for this mod until a release tag newer than
@@ -815,9 +935,9 @@ pub fn set_mod_snooze(
     Ok(result)
 }
 
-/// Remove source links for a mod. Removes both the folder-keyed entry
+/// Remove source links for a mod. Clears both the folder-keyed entry
 /// (when folder_name is provided) AND any legacy name-keyed entry so a
-/// "clear" action actually clears.
+/// "clear" action actually clears while preserving non-link metadata.
 #[tauri::command]
 pub fn remove_mod_source(
     mod_name: String,
@@ -825,12 +945,8 @@ pub fn remove_mod_source(
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<bool, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
-    let mut db = load_sources(&s.config_path);
-    if let Some(ref folder) = folder_name {
-        db.mods.remove(folder);
-    }
-    db.mods.remove(&mod_name);
-    save_sources(&db, &s.config_path).map_err(|e| e.to_string())?;
+    clear_mod_source_links_from_path(&mod_name, folder_name.as_deref(), &s.config_path)
+        .map_err(|e| e.to_string())?;
     Ok(true)
 }
 
@@ -1583,6 +1699,8 @@ mod enrich_priority_tests {
             author: None,
             note: None,
             custom_url: None,
+            display_name: None,
+            display_description: None,
         }
     }
 
@@ -1704,6 +1822,214 @@ mod enrich_priority_tests {
         assert_eq!(
             mods[0].github_url.as_deref(),
             Some("https://github.com/guess/from-nexus"),
+        );
+    }
+
+    #[test]
+    fn display_overrides_enrich_without_replacing_identity_name() {
+        let tmp = tempdir().unwrap();
+        let config = tmp.path();
+        write_entry(
+            config,
+            "UnreadableFolder",
+            ModSourceEntry {
+                display_name: Some("Readable Name".into()),
+                display_description: Some("Human-maintained description".into()),
+                ..Default::default()
+            },
+        );
+        let mut mods = vec![mod_with("manifest-gibberish", Some("UnreadableFolder"), None)];
+
+        enrich_mods_with_sources(&mut mods, config);
+
+        assert_eq!(mods[0].name, "manifest-gibberish");
+        assert_eq!(mods[0].display_name.as_deref(), Some("Readable Name"));
+        assert_eq!(
+            mods[0].display_description.as_deref(),
+            Some("Human-maintained description"),
+        );
+    }
+
+    #[test]
+    fn set_display_overrides_trims_and_clears_values() {
+        let tmp = tempdir().unwrap();
+        let config = tmp.path();
+
+        let saved = set_mod_display_overrides_from_path(
+            "ManifestName",
+            Some("FolderName"),
+            Some("  Friendly Name  ".into()),
+            Some("  Better description  ".into()),
+            config,
+        )
+        .unwrap();
+        assert_eq!(saved.display_name.as_deref(), Some("Friendly Name"));
+        assert_eq!(saved.display_description.as_deref(), Some("Better description"));
+
+        let cleared = set_mod_display_overrides_from_path(
+            "ManifestName",
+            Some("FolderName"),
+            Some(" ".into()),
+            None,
+            config,
+        )
+        .unwrap();
+        assert_eq!(cleared.display_name, None);
+        assert_eq!(cleared.display_description, None);
+    }
+
+    #[test]
+    fn clear_source_links_preserves_non_link_metadata() {
+        let tmp = tempdir().unwrap();
+        let config = tmp.path();
+        write_entry(
+            config,
+            "FolderName",
+            ModSourceEntry {
+                github_repo: Some("owner/repo".into()),
+                github_auto_detected: true,
+                nexus_url: Some("https://www.nexusmods.com/sts2/mods/77".into()),
+                nexus_game_domain: Some("sts2".into()),
+                nexus_mod_id: Some(77),
+                installed_version: Some("v1.0.0".into()),
+                pinned: true,
+                note: Some("keep note".into()),
+                custom_url: Some("https://example.test/post".into()),
+                display_name: Some("Readable Name".into()),
+                display_description: Some("Human-maintained description".into()),
+                snoozed_until_tag: Some("v1.1.0".into()),
+                config_hashes: std::collections::HashMap::from([(
+                    "FolderName/config.ini".into(),
+                    "sha256".into(),
+                )]),
+            },
+        );
+
+        let cleared = clear_mod_source_links_from_path(
+            "ManifestName",
+            Some("FolderName"),
+            config,
+        )
+        .unwrap();
+
+        assert_eq!(cleared.github_repo, None);
+        assert_eq!(cleared.nexus_url, None);
+        assert_eq!(cleared.nexus_mod_id, None);
+        assert!(!cleared.github_auto_detected);
+        assert_eq!(cleared.display_name.as_deref(), Some("Readable Name"));
+        assert_eq!(
+            cleared.display_description.as_deref(),
+            Some("Human-maintained description"),
+        );
+        assert_eq!(cleared.note.as_deref(), Some("keep note"));
+        assert!(cleared.pinned);
+        assert_eq!(cleared.installed_version.as_deref(), Some("v1.0.0"));
+        assert_eq!(cleared.snoozed_until_tag.as_deref(), Some("v1.1.0"));
+        assert!(cleared.config_hashes.contains_key("FolderName/config.ini"));
+
+        let db = load_sources(config);
+        let saved = db.mods.get("FolderName").unwrap();
+        assert_eq!(saved.github_repo, None);
+        assert_eq!(saved.nexus_url, None);
+        assert_eq!(saved.display_name.as_deref(), Some("Readable Name"));
+    }
+
+    #[test]
+    fn clear_source_links_keeps_legacy_metadata_without_creating_empty_folder_shadow() {
+        let tmp = tempdir().unwrap();
+        let config = tmp.path();
+        write_entry(
+            config,
+            "ManifestName",
+            ModSourceEntry {
+                github_repo: Some("owner/repo".into()),
+                display_name: Some("Readable Legacy Name".into()),
+                ..Default::default()
+            },
+        );
+
+        let cleared = clear_mod_source_links_from_path(
+            "ManifestName",
+            Some("FolderName"),
+            config,
+        )
+        .unwrap();
+
+        assert_eq!(cleared.github_repo, None);
+        assert_eq!(cleared.display_name.as_deref(), Some("Readable Legacy Name"));
+        let db = load_sources(config);
+        assert!(
+            !db.mods.contains_key("FolderName"),
+            "clearing links should not create an empty folder-keyed entry that hides legacy metadata"
+        );
+        assert_eq!(
+            db.mods
+                .get("ManifestName")
+                .and_then(|entry| entry.display_name.as_deref()),
+            Some("Readable Legacy Name"),
+        );
+    }
+
+    #[test]
+    fn carry_source_entry_preserves_display_overrides_across_update_rename() {
+        let tmp = tempdir().unwrap();
+        let config = tmp.path();
+        write_entry(
+            config,
+            "OldFolder",
+            ModSourceEntry {
+                github_repo: Some("owner/repo".into()),
+                display_name: Some("Readable Old Name".into()),
+                display_description: Some("User-maintained description".into()),
+                ..Default::default()
+            },
+        );
+
+        carry_source_entry(
+            Some("OldFolder"),
+            "old-manifest-name",
+            Some("NewFolder"),
+            "new-manifest-name",
+            config,
+        );
+
+        let db = load_sources(config);
+        let saved = db.mods.get("NewFolder").unwrap();
+        assert_eq!(saved.github_repo.as_deref(), Some("owner/repo"));
+        assert_eq!(saved.display_name.as_deref(), Some("Readable Old Name"));
+        assert_eq!(
+            saved.display_description.as_deref(),
+            Some("User-maintained description"),
+        );
+    }
+
+    #[test]
+    fn migrate_source_entry_preserves_display_overrides_across_manifest_rename() {
+        let tmp = tempdir().unwrap();
+        let config = tmp.path();
+        write_entry(
+            config,
+            "old-manifest-name",
+            ModSourceEntry {
+                nexus_url: Some("https://www.nexusmods.com/sts2/mods/77".into()),
+                display_name: Some("Readable Nexus Name".into()),
+                display_description: Some("Explains the upstream mod".into()),
+                ..Default::default()
+            },
+        );
+
+        migrate_source_entry("old-manifest-name", "new-manifest-name", config);
+
+        let db = load_sources(config);
+        let saved = db.mods.get("new-manifest-name").unwrap();
+        assert_eq!(
+            saved.nexus_url.as_deref(),
+            Some("https://www.nexusmods.com/sts2/mods/77"),
+        );
+        assert_eq!(saved.display_name.as_deref(), Some("Readable Nexus Name"));
+        assert_eq!(
+            saved.display_description.as_deref(),
+            Some("Explains the upstream mod"),
         );
     }
 }

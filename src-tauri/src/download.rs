@@ -754,6 +754,8 @@ pub async fn download_and_install_github_mod(
             author: None,
             note: None,
             custom_url: None,
+            display_name: None,
+            display_description: None,
         })
     } else {
         Err(AppError::Other(format!(
@@ -897,6 +899,8 @@ pub async fn download_url_mod(
             author: None,
             note: None,
             custom_url: None,
+            display_name: None,
+            display_description: None,
         })
     } else {
         Err(format!("Unsupported file type: {}", file_name))

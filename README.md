@@ -407,22 +407,26 @@ already wired so it's pure React work once the backend signals exist.
 
 Every user-facing string lives in `src/i18n/locales/en.json` and
 `src/i18n/locales/zh-Hans.json`. The two files must stay key-for-key in
-sync — `src/i18n/locales/parity.test.ts` fails the build otherwise.
+sync, and supported locales must be translated before release. The i18n
+gate fails on missing keys and copied-English fallback prose.
 
 When you add a string:
 
 1. Pick a key path that fits the surface it's on
    (`settings.general.foo`, `mods.toast.bar`, etc.).
 2. Add the English value to `en.json` and a translation to
-   `zh-Hans.json`. If you don't speak Chinese, copy the English value
-   verbatim into `zh-Hans.json` and flag it in your PR — the maintainers
-   will route it to a translation contributor before merge. Don't ship
+   `zh-Hans.json`. If you don't speak Chinese, flag the PR for a human
+   translator before merge. Don't ship copied English placeholders or
    machine-translated guesses.
 3. Reference the key from the component with `t('your.key')` or
    `<Trans i18nKey="your.key" components={…} />` — never hardcode prose
    in JSX, `toast.*`, `confirm({…})`, `title=`, `aria-label=`, or
    `placeholder=`.
-4. Run `npx vitest run src/i18n/locales/parity.test.ts` before pushing.
+4. Run `npm run qa:i18n` before pushing.
+
+Release is blocked until this check passes. `scripts/release.sh` runs it
+outside `SKIP_QA`, so emergency releases still cannot ship untranslated
+supported locales.
 
 The same rule applies to AI-assisted contributions — see `AGENTS.md`.
 

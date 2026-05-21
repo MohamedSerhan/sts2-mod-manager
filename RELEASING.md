@@ -19,6 +19,12 @@ A failed `publish-nexus` does not block the GitHub Release or the in-app updater
 
 The portable zip ships to Nexus specifically because the NSIS self-extracting installer triggers AV/SmartScreen heuristics that a bare `.exe` does not. NSIS / MSI continue to ship on the GitHub Release because the in-app updater depends on them.
 
+## Hard gates
+
+- `npm run qa:i18n` must pass before release. Supported locales cannot ship
+  missing keys or copied-English fallback prose. This gate runs even when
+  `SKIP_QA=1` is used for an emergency hotfix.
+
 ## Required GitHub Actions secrets
 
 Set these once at <https://github.com/MohamedSerhan/sts2-mod-manager/settings/secrets/actions>:

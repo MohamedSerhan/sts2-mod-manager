@@ -1562,6 +1562,8 @@ mod version_helper_tests {
             author: None,
             note: None,
             custom_url: None,
+            display_name: None,
+            display_description: None,
         };
         overrides(&mut info);
         info
@@ -1648,6 +1650,8 @@ mod version_helper_tests {
             author: None,
             note: None,
             custom_url: None,
+            display_name: None,
+            display_description: None,
         };
         assert!(install_is_incompatible(&mk(Some("0.110.0")), Some("0.105.0")));
         assert!(!install_is_incompatible(&mk(Some("0.100.0")), Some("0.105.0")));

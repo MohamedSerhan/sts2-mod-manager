@@ -41,11 +41,21 @@ const baseMod = (overrides: Partial<ModInfo> = {}): ModInfo => ({
   pinned: false,
   min_game_version: null,
   author: 'Alchyr',
+  display_name: null,
+  display_description: null,
   ...overrides,
 });
 
 function seedMods(mods: ModInfo[]): void {
   registerInvokeHandler('get_installed_mods', () => mods);
+}
+
+function expectTextBefore(first: string, second: string): void {
+  const firstNode = screen.getByText(first);
+  const secondNode = screen.getByText(second);
+  expect(
+    Boolean(firstNode.compareDocumentPosition(secondNode) & Node.DOCUMENT_POSITION_FOLLOWING),
+  ).toBe(true);
 }
 
 describe('<ModsView>', () => {
@@ -90,6 +100,43 @@ describe('<ModsView>', () => {
     });
     expect(screen.getByText('AutoPath')).toBeInTheDocument();
     expect(screen.queryByText('CardArtEditor')).toBeNull();
+  });
+
+  it('sort dropdown supports common mod-library orders', async () => {
+    seedMods([
+      baseMod({ name: 'ZuluPatch', folder_name: 'ZuluPatch', enabled: true, size_bytes: 1024 }),
+      baseMod({ name: 'BaseLib', folder_name: 'BaseLib', enabled: false, size_bytes: 2048 }),
+      baseMod({ name: 'AutoPath', folder_name: 'AutoPath', enabled: true, size_bytes: 4096 }),
+    ]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => {
+      expect(screen.getByText('AutoPath')).toBeInTheDocument();
+    });
+
+    const sort = screen.getByRole('combobox', { name: /Sort/i });
+    expectTextBefore('AutoPath', 'BaseLib');
+    expectTextBefore('BaseLib', 'ZuluPatch');
+
+    await user.selectOptions(sort, 'disabledFirst');
+    expectTextBefore('BaseLib', 'AutoPath');
+
+    await user.selectOptions(sort, 'largestFirst');
+    expectTextBefore('AutoPath', 'BaseLib');
+    expectTextBefore('BaseLib', 'ZuluPatch');
+  });
+
+  it('makes clear that Mods tab sorting is visual and not load order', async () => {
+    seedMods([
+      baseMod({ name: 'BaseLib', folder_name: 'BaseLib' }),
+    ]);
+    render(<Wrap />);
+    await waitFor(() => {
+      expect(screen.getByText('BaseLib')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/visual only/i)).toBeInTheDocument();
+    expect(screen.getByText(/does not change load order/i)).toBeInTheDocument();
   });
 
   it('advanced-mode toggle reveals "Import mod" + "Quick add URL" buttons', async () => {
@@ -993,6 +1040,129 @@ describe('<ModsView>', () => {
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'set_mod_sources_full')).toBe(true);
     });
+  });
+
+  it('renders and searches manager-only display overrides', async () => {
+    seedMods([
+      baseMod({
+        name: 'manifest-gibberish',
+        folder_name: 'UnreadableFolder',
+        description: 'raw desc',
+        display_name: 'Readable Name',
+        display_description: 'Human-maintained description',
+      }),
+    ]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => {
+      expect(screen.getByText('Readable Name')).toBeInTheDocument();
+    });
+    expect(screen.getByText('manifest-gibberish')).toBeInTheDocument();
+    expect(screen.getByText('Human-maintained description')).toBeInTheDocument();
+
+    await user.type(screen.getByPlaceholderText(/Search 1 mod/), 'readable');
+    expect(screen.getByText('Readable Name')).toBeInTheDocument();
+  });
+
+  it('Source editor saves display name and description overrides separately from source links', async () => {
+    seedMods([baseMod({ name: 'SrcMod', folder_name: 'SrcMod' })]);
+    registerInvokeHandler('set_mod_display_overrides', () => ({
+      display_name: 'Friendly Src',
+      display_description: 'Clear description',
+    }));
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await waitFor(() => { expect(screen.getByText('SrcMod')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    await user.click(screen.getAllByRole('menuitem', { name: /Edit sources/ })[0]);
+
+    await user.type(screen.getByPlaceholderText('SrcMod'), 'Friendly Src');
+    await user.type(screen.getByPlaceholderText('Base library'), 'Clear description');
+    await user.click(screen.getByRole('button', { name: /Save sources/ }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls()).toContainEqual({
+        cmd: 'set_mod_display_overrides',
+        args: {
+          modName: 'SrcMod',
+          folderName: 'SrcMod',
+          displayName: 'Friendly Src',
+          displayDescription: 'Clear description',
+        },
+      });
+    });
+  });
+
+  it('Source editor does not clear existing display overrides when only links change', async () => {
+    seedMods([
+      baseMod({
+        name: 'manifest-gibberish',
+        folder_name: 'UnreadableFolder',
+        github_url: null,
+        display_name: 'Readable Name',
+        display_description: 'Human-maintained description',
+      }),
+    ]);
+    registerInvokeHandler('set_mod_sources_full', () => ({
+      github_repo: 'owner/repo',
+      github_auto_detected: false,
+      nexus_url: null,
+      pinned: false,
+    }));
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await waitFor(() => { expect(screen.getByText('Readable Name')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    await user.click(screen.getAllByRole('menuitem', { name: /Edit sources/ })[0]);
+
+    await user.type(screen.getByPlaceholderText('owner/repo'), 'owner/repo');
+    await user.click(screen.getByRole('button', { name: /Save sources/ }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'set_mod_sources_full')).toBe(true);
+    });
+    expect(getInvokeCalls().some((c) => c.cmd === 'set_mod_display_overrides')).toBe(false);
+  });
+
+  it('Clear all links preserves existing display overrides after refresh', async () => {
+    let scanCount = 0;
+    registerInvokeHandler('get_installed_mods', () => {
+      scanCount += 1;
+      return [baseMod({
+        name: 'manifest-gibberish',
+        folder_name: 'UnreadableFolder',
+        github_url: scanCount === 1 ? 'https://github.com/old/link' : null,
+        display_name: 'Readable Name',
+        display_description: 'Human-maintained description',
+      })];
+    });
+    registerInvokeHandler('set_mod_source', () => ({
+      github_repo: null,
+      github_auto_detected: false,
+      nexus_url: null,
+      display_name: 'Readable Name',
+      display_description: 'Human-maintained description',
+    }));
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await waitFor(() => { expect(screen.getByText('Readable Name')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    await user.click(screen.getAllByRole('menuitem', { name: /Edit sources/ })[0]);
+
+    await user.click(screen.getByRole('button', { name: /Clear all links/ }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls()).toContainEqual({
+        cmd: 'set_mod_source',
+        args: {
+          modName: 'manifest-gibberish',
+          folderName: 'UnreadableFolder',
+          sourceUrl: '',
+        },
+      });
+    });
+    expect(screen.getByText('Readable Name')).toBeInTheDocument();
+    expect(screen.getAllByText('Human-maintained description').length).toBeGreaterThan(0);
   });
 
   it('Source editor reopen shows the saved GitHub value, not the stale manifest URL', async () => {

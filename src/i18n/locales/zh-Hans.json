@@ -160,8 +160,15 @@
       "duplicateDefault": "{{name}}（副本）"
     },
     "tabs": {
-      "following": "关注中",
+      "following": "所有方案",
       "publishedByYou": "你发布的"
+    },
+    "assignments": {
+      "open": "模组库",
+      "title": "模组库",
+      "subtitle": "查看所有已安装模组、哪些方案使用了它们，并在不切换方案的情况下重新分配。",
+      "description": "查看所有已安装模组、哪些方案使用了它们，并在不切换方案的情况下重新分配。",
+      "back": "返回方案"
     },
     "activity": {
       "hasUpdates": "{{count}} 个整合包有更新",
@@ -301,6 +308,41 @@
       "cantCopyToClipboard": "无法复制到剪贴板",
       "shareMessageCopied": "分享消息已复制 — 粘贴到 Discord / 聊天",
       "activated": "已切换到「{{name}}」"
+    },
+    "library": {
+      "loading": "正在加载模组库...",
+      "installedActive": "已安装并启用",
+      "installedDisabled": "已安装并禁用",
+      "disabledInProfile": "已禁用",
+      "readOnly": "只读",
+      "readOnlyTitle": "关注的方案为只读。复制该方案后即可编辑。",
+      "noProfiles": "还没有方案",
+      "empty": {
+        "title": "未安装任何模组",
+        "hint": "先安装模组，然后使用模组库选择每个方案包含哪些模组。"
+      },
+      "toastAdded": "已将 {{mod}} 添加到 {{profile}}",
+      "toastRemoved": "已从 {{profile}} 移除 {{mod}}",
+      "toastFailed": "更新关联失败：{{error}}"
+    },
+    "loadOrder": {
+      "buttonTitle": "自定义 {{name}} 的加载顺序",
+      "dialogLabel": "{{name}} 的加载顺序",
+      "title": "{{name}} 的加载顺序",
+      "subtitle": "顶部最先加载。如果顺序无效，STS2 仍可能根据依赖关系重新排序。",
+      "note": "此顺序会随方案保存，并在该方案处于当前状态或被激活时写入 STS2 设置。",
+      "empty": "此方案没有可排序的模组。",
+      "disabled": "已禁用",
+      "moveUp": "上移 {{name}}",
+      "moveDown": "下移 {{name}}",
+      "save": "保存顺序",
+      "toastSavedApplied": "{{name}} 的加载顺序已保存，并已应用到 settings.save。",
+      "toastSavedInactive": "{{name}} 的加载顺序已保存。激活此方案时会应用该顺序。",
+      "toastSavedSettingsMissing": "{{name}} 的加载顺序已保存，但未找到 settings.save。请先启动一次 STS2，然后再激活此方案。",
+      "toastSavedSettingsMultiple": "{{name}} 的加载顺序已保存，但找到了多个 settings.save，因此没有修改任何文件。",
+      "toastSavedGameRunning": "{{name}} 的加载顺序已保存，但 STS2 正在运行。关闭游戏后激活该方案即可应用。",
+      "toastSavedSettingsFailed": "{{name}} 的加载顺序已保存，但无法更新 settings.save。",
+      "toastFailed": "保存加载顺序失败：{{error}}"
     }
   },
   "browse": {
@@ -738,7 +780,12 @@
     "otherLinkHint": "用于不在 GitHub 或 Nexus 上的模组。",
     "nexusOnlyMessage": "仅限 Nexus 模组 — 尝试从 Nexus 描述中获取 GitHub 仓库，以便从两个来源检查更新。",
     "searching": "搜索中…",
-    "findGitHub": "查找 GitHub"
+    "findGitHub": "查找 GitHub",
+    "displayName": "显示名称",
+    "displayDescription": "显示描述",
+    "displayDescriptionPlaceholder": "显示在模组列表中",
+    "displayNameHint": "可选，仅在管理器中显示。清单名称保持不变。",
+    "displayDescriptionHint": "可选，仅用于管理器，方便说明难懂或未翻译的模组。"
   },
   "onboarding": {
     "stepIndicator": "步骤 {{step}} / 3",
@@ -1282,6 +1329,15 @@
     },
     "title": "你的模组",
     "searchPlaceholder": "搜索模组…",
+    "sort": {
+      "label": "排序",
+      "nameAsc": "名称 A-Z",
+      "nameDesc": "名称 Z-A",
+      "enabledFirst": "已启用优先",
+      "disabledFirst": "已禁用优先",
+      "largestFirst": "体积最大优先",
+      "visualOnly": "仅影响显示：此排序不会改变加载顺序。"
+    },
     "audit": {
       "run": "审计模组",
       "running": "检查中…",

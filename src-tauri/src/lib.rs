@@ -292,6 +292,9 @@ pub fn run() {
             nexus::nexus_get_latest_added,
             // Profiles
             profiles::list_profiles_cmd,
+            profiles::get_profile_memberships,
+            profiles::set_profile_mod_membership,
+            profiles::set_profile_load_order,
             profiles::create_profile,
             profiles::delete_profile_cmd,
             profiles::duplicate_profile,
@@ -314,6 +317,7 @@ pub fn run() {
             mod_sources::set_mod_source,
             mod_sources::set_mod_sources_full,
             mod_sources::set_mod_extras,
+            mod_sources::set_mod_display_overrides,
             mod_sources::set_mod_snooze,
             mod_sources::remove_mod_source,
             mod_sources::pin_mod,

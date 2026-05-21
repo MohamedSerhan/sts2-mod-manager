@@ -56,6 +56,8 @@ fn make_mod(name: &str, version: &str, folder: &str) -> ModInfo {
         author: None,
         note: None,
         custom_url: None,
+        display_name: None,
+        display_description: None,
     }
 }
 

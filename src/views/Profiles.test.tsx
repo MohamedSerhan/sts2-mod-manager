@@ -32,7 +32,7 @@ import userEvent from '@testing-library/user-event';
 import { ProfilesView } from './Profiles';
 import { AllProviders } from '../__test__/providers';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
-import type { ModInfo, Profile } from '../types';
+import type { LoadOrderSettingsStatus, ModInfo, Profile } from '../types';
 
 function Wrap() {
   return (
@@ -73,6 +73,19 @@ const baseMod = (overrides: Partial<ModInfo> = {}): ModInfo => ({
   custom_url: null,
   display_name: null,
   display_description: null,
+  ...overrides,
+});
+
+const profileMod = (overrides: Partial<Profile['mods'][number]> = {}): Profile['mods'][number] => ({
+  name: 'BaseLib',
+  version: '1.0.0',
+  source: null,
+  hash: null,
+  files: ['BaseLib/BaseLib.dll'],
+  enabled: true,
+  bundle_url: null,
+  folder_name: 'BaseLib',
+  mod_id: 'BaseLib',
   ...overrides,
 });
 
@@ -1015,6 +1028,33 @@ describe('<ProfilesView>', () => {
     expect(attempts).toBe(2);
   });
 
+  it('Mod Library shows display-name overrides, disabled installed state, and no-profile rows', async () => {
+    seedProfiles([baseProfile({ name: 'Stable' })]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [
+        {
+          name: 'raw-manifest-name',
+          display_name: 'Readable Name',
+          version: '9.9.9',
+          folder_name: null,
+          mod_id: 'raw-id',
+          installed_enabled: false,
+          profiles: [],
+        },
+      ],
+    }));
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.click(await screen.findByRole('button', { name: /Mod Library/i }));
+
+    expect(await screen.findByText('Readable Name')).toBeInTheDocument();
+    expect(screen.getByText('raw-manifest-name')).toBeInTheDocument();
+    expect(screen.getByText(/installed disabled/i)).toBeInTheDocument();
+    expect(screen.getByText(/No profiles yet/i)).toBeInTheDocument();
+  });
+
   it('opens a profile load-order editor and saves the reordered manifest', async () => {
     const user = userEvent.setup();
     seedProfiles([
@@ -1074,6 +1114,55 @@ describe('<ProfilesView>', () => {
     await waitFor(() => {
       expect(screen.getByText(/Load order saved for Stable/i)).toBeInTheDocument();
     });
+  });
+
+  const loadOrderStatusCases: Array<[LoadOrderSettingsStatus, RegExp]> = [
+    ['applied', /applied to settings\.save/i],
+    ['skipped_missing', /settings\.save was not found/i],
+    ['skipped_multiple', /multiple settings\.save files/i],
+    ['skipped_game_running', /STS2 is running/i],
+    ['failed', /settings\.save could not be updated/i],
+  ];
+
+  it.each(loadOrderStatusCases)('load-order save reports %s settings status', async (status, message) => {
+    const user = userEvent.setup();
+    seedProfiles([baseProfile({ name: 'Stable', mods: [profileMod()] })]);
+    registerInvokeHandler('set_profile_load_order', () => ({
+      profile: baseProfile({ name: 'Stable', mods: [profileMod()] }),
+      settings_status: status,
+      settings_path: status === 'applied' ? 'C:/Users/player/settings.save' : null,
+    }));
+
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Stable')).toBeInTheDocument(); });
+
+    await user.click(screen.getByRole('button', { name: /Customize load order for Stable/i }));
+    const dialog = await screen.findByRole('dialog', { name: /Load order for Stable/i });
+    await user.click(within(dialog).getByRole('button', { name: /Save order/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(message)).toBeInTheDocument();
+    });
+  });
+
+  it('load-order save backend failures leave the editor open and show an error toast', async () => {
+    const user = userEvent.setup();
+    seedProfiles([baseProfile({ name: 'Stable', mods: [profileMod()] })]);
+    registerInvokeHandler('set_profile_load_order', () => {
+      throw new Error('settings denied');
+    });
+
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Stable')).toBeInTheDocument(); });
+
+    await user.click(screen.getByRole('button', { name: /Customize load order for Stable/i }));
+    const dialog = await screen.findByRole('dialog', { name: /Load order for Stable/i });
+    await user.click(within(dialog).getByRole('button', { name: /Save order/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Failed to save load order: settings denied/i)).toBeInTheDocument();
+    });
+    expect(screen.getByRole('dialog', { name: /Load order for Stable/i })).toBeInTheDocument();
   });
 
   it('Share button opens the publish modal when profile is unpublished', async () => {

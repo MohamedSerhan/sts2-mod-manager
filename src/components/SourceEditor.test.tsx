@@ -174,6 +174,28 @@ describe('<SourceEditor>', () => {
     expect(descEl.value).toBe('Readable description');
   });
 
+  it('clear buttons next to display override fields reset those values', async () => {
+    const user = userEvent.setup();
+    renderEditor(
+      baseMod({
+        description: 'Manifest description',
+        display_name: 'Friendly Base',
+        display_description: 'Readable description',
+      }),
+    );
+    const nameEl = screen.getByPlaceholderText('BaseLib') as HTMLInputElement;
+    const nameField = nameEl.closest('.gf-src-edit-field') as HTMLElement;
+    expect(nameField).not.toBeNull();
+    await user.click(within(nameField).getByText('clear'));
+    expect(nameEl.value).toBe('');
+
+    const descEl = screen.getByPlaceholderText('Manifest description') as HTMLTextAreaElement;
+    const descField = descEl.closest('.gf-src-edit-field') as HTMLElement;
+    expect(descField).not.toBeNull();
+    await user.click(within(descField).getByText('clear'));
+    expect(descEl.value).toBe('');
+  });
+
   it('initial Note + custom_url come from mod fields', () => {
     renderEditor(
       baseMod({

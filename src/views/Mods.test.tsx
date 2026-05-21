@@ -118,12 +118,48 @@ describe('<ModsView>', () => {
     expectTextBefore('AutoPath', 'BaseLib');
     expectTextBefore('BaseLib', 'ZuluPatch');
 
+    await user.selectOptions(sort, 'nameDesc');
+    expectTextBefore('ZuluPatch', 'BaseLib');
+    expectTextBefore('BaseLib', 'AutoPath');
+
+    await user.selectOptions(sort, 'enabledFirst');
+    expectTextBefore('AutoPath', 'ZuluPatch');
+    expectTextBefore('ZuluPatch', 'BaseLib');
+
     await user.selectOptions(sort, 'disabledFirst');
     expectTextBefore('BaseLib', 'AutoPath');
 
     await user.selectOptions(sort, 'largestFirst');
     expectTextBefore('AutoPath', 'BaseLib');
     expectTextBefore('BaseLib', 'ZuluPatch');
+  });
+
+  it('sorts display-name ties by stable mod identity', async () => {
+    seedMods([
+      baseMod({
+        name: 'raw-zeta',
+        display_name: 'Readable',
+        folder_name: null,
+        mod_id: 'zeta',
+        size_bytes: 2048,
+      }),
+      baseMod({
+        name: 'raw-alpha',
+        display_name: 'Readable',
+        folder_name: null,
+        mod_id: 'alpha',
+        size_bytes: 2048,
+      }),
+    ]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => {
+      expect(screen.getByText('raw-zeta')).toBeInTheDocument();
+    });
+
+    await user.selectOptions(screen.getByRole('combobox', { name: /Sort/i }), 'largestFirst');
+
+    expectTextBefore('raw-alpha', 'raw-zeta');
   });
 
   it('makes clear that Mods tab sorting is visual and not load order', async () => {

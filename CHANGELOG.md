@@ -27,6 +27,18 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Security
+
+---
+
+## [1.6.0] - 2026-05-21
+
+### Added
+
 - Mod Library lets you see installed mods across profiles and add or remove them without switching profiles.
 - Profiles now include a load-order editor so you can arrange how a profile's mods load.
 - Mods can now have custom names and descriptions in the manager without changing their installed files.

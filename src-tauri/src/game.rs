@@ -1265,10 +1265,9 @@ mod steam_launch_planner_tests {
     //! two strategies; the actual `Command::spawn` is exercised by the
     //! WebDriver smoke (which is the only test layer that can verify
     //! the game actually launches).
-    use super::{
-        linux_steam_launch_attempts, plan_steam_launch_primary, SteamLaunchPrimary,
-        STS2_STEAM_APPID,
-    };
+    #[cfg(target_os = "linux")]
+    use super::linux_steam_launch_attempts;
+    use super::{plan_steam_launch_primary, SteamLaunchPrimary, STS2_STEAM_APPID};
     use std::path::PathBuf;
 
     #[test]

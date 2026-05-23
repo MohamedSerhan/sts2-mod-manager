@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::download::{fetch_latest_release, fetch_releases};
 use crate::error::Result;
-use crate::mod_sources::{load_sources, lookup_entry, save_sources, update_installed_version, ModSourceEntry};
+use crate::mod_sources::{
+    load_sources, lookup_entry, save_sources, update_installed_version, ModSourceEntry,
+};
 use crate::mods::{scan_mods, ModInfo};
 use crate::state::AppState;
 
@@ -141,7 +143,10 @@ fn parse_github_url(source: &str) -> Option<(String, String)> {
     if host != "github.com" && host != "www.github.com" {
         return None;
     }
-    let segs: Vec<&str> = parsed.path_segments().map(|s| s.collect()).unwrap_or_default();
+    let segs: Vec<&str> = parsed
+        .path_segments()
+        .map(|s| s.collect())
+        .unwrap_or_default();
     if segs.len() < 2 || segs[0].is_empty() || segs[1].is_empty() {
         return None;
     }
@@ -173,9 +178,7 @@ fn resolve_github_repo(
                 // parsing. Existing DBs may have URL-form values stored
                 // from before set_mod_sources_full normalized input —
                 // we recover those instead of silently 404ing.
-                if let Some(pair) =
-                    parse_owner_repo(repo).or_else(|| parse_github_url(repo))
-                {
+                if let Some(pair) = parse_owner_repo(repo).or_else(|| parse_github_url(repo)) {
                     return Some(pair);
                 }
             }
@@ -220,7 +223,9 @@ pub async fn check_all_updates(
     for m in mods {
         // Skip pinned mods — they must be updated manually
         if let Some(entry) = sources.get(&m.name) {
-            if entry.pinned { continue; }
+            if entry.pinned {
+                continue;
+            }
         }
 
         let (owner, repo) = match resolve_github_repo(m, sources) {
@@ -249,7 +254,10 @@ pub async fn check_all_updates(
         if !has_downloadable_asset {
             log::info!(
                 "Skipping update for {} ({}/{}): release {} has no downloadable assets",
-                m.name, owner, repo, release.tag_name
+                m.name,
+                owner,
+                repo,
+                release.tag_name
             );
             continue;
         }
@@ -258,7 +266,10 @@ pub async fn check_all_updates(
         if !is_version_tag(&release.tag_name) {
             log::info!(
                 "Skipping update for {} ({}/{}): tag '{}' is not a valid version",
-                m.name, owner, repo, release.tag_name
+                m.name,
+                owner,
+                repo,
+                release.tag_name
             );
             continue;
         }
@@ -274,7 +285,8 @@ pub async fn check_all_updates(
             .unwrap_or(false);
 
         // Skip if versions match exactly, or version is unknown
-        if installed_ver_matches || latest == current || current == "unknown" || current == "0.0.0" {
+        if installed_ver_matches || latest == current || current == "unknown" || current == "0.0.0"
+        {
             continue;
         }
 
@@ -282,7 +294,11 @@ pub async fn check_all_updates(
         if !is_newer_version(current, latest) {
             log::info!(
                 "Skipping update for {} ({}/{}): installed {} >= latest {}",
-                m.name, owner, repo, current, latest
+                m.name,
+                owner,
+                repo,
+                current,
+                latest
             );
             continue;
         }
@@ -317,7 +333,9 @@ pub async fn check_all_updates(
 
             // Skip pinned mods
             if let Some(entry) = sources.get(&m.name) {
-                if entry.pinned { continue; }
+                if entry.pinned {
+                    continue;
+                }
             }
 
             let source_entry = match sources.get(&m.name) {
@@ -334,28 +352,31 @@ pub async fn check_all_updates(
                 None => continue,
             };
 
-            let nexus_url = source_entry.nexus_url.clone().unwrap_or_else(|| {
-                format!("https://www.nexusmods.com/{}/mods/{}", domain, mod_id)
-            });
+            let nexus_url = source_entry
+                .nexus_url
+                .clone()
+                .unwrap_or_else(|| format!("https://www.nexusmods.com/{}/mods/{}", domain, mod_id));
 
             match client.get_mod_info(domain, mod_id).await {
                 Ok(info) => {
                     if let Some(ref nv) = info.version {
                         // Best known installed version (same logic as audit)
-                        let sources_ver = source_entry
-                            .installed_version
-                            .as_deref()
-                            .unwrap_or("");
+                        let sources_ver = source_entry.installed_version.as_deref().unwrap_or("");
                         let manifest_ver = m.version.trim_start_matches('v');
                         let current_ver = if !sources_ver.is_empty() {
                             let sv = sources_ver.trim_start_matches('v');
-                            if is_newer_version(manifest_ver, sv) { sv } else { manifest_ver }
+                            if is_newer_version(manifest_ver, sv) {
+                                sv
+                            } else {
+                                manifest_ver
+                            }
                         } else {
                             manifest_ver
                         };
                         let nexus_ver = nv.trim_start_matches('v');
 
-                        if current_ver != "unknown" && current_ver != "0.0.0"
+                        if current_ver != "unknown"
+                            && current_ver != "0.0.0"
                             && is_newer_version(current_ver, nexus_ver)
                         {
                             updates.push(ModUpdate {
@@ -371,7 +392,12 @@ pub async fn check_all_updates(
                     }
                 }
                 Err(e) => {
-                    log::warn!("Nexus update check failed for {} (mod {}): {}", m.name, mod_id, e);
+                    log::warn!(
+                        "Nexus update check failed for {} (mod {}): {}",
+                        m.name,
+                        mod_id,
+                        e
+                    );
                 }
             }
         }
@@ -398,9 +424,14 @@ pub async fn check_for_updates(
 
     let installed = scan_mods(&mods_path);
     let sources_db = load_sources(&config_path);
-    check_all_updates(&installed, &sources_db.mods, token.as_deref(), nexus_key.as_deref())
-        .await
-        .map_err(|e| e.to_string())
+    check_all_updates(
+        &installed,
+        &sources_db.mods,
+        token.as_deref(),
+        nexus_key.as_deref(),
+    )
+    .await
+    .map_err(|e| e.to_string())
 }
 
 fn find_installed_mod<'a>(
@@ -409,7 +440,9 @@ fn find_installed_mod<'a>(
     folder_name: Option<&str>,
 ) -> Option<&'a ModInfo> {
     if let Some(folder) = folder_name {
-        installed.iter().find(|m| m.folder_name.as_deref() == Some(folder))
+        installed
+            .iter()
+            .find(|m| m.folder_name.as_deref() == Some(folder))
     } else {
         installed.iter().find(|m| m.name == name)
     }
@@ -484,7 +517,9 @@ fn delete_old_mod_install(old_info: &ModInfo, mods_path: &std::path::Path, label
     }
     for dir in &parent_dirs {
         if dir.is_dir()
-            && std::fs::read_dir(dir).map(|mut d| d.next().is_none()).unwrap_or(false)
+            && std::fs::read_dir(dir)
+                .map(|mut d| d.next().is_none())
+                .unwrap_or(false)
         {
             let _ = std::fs::remove_dir(dir);
         }
@@ -648,14 +683,20 @@ pub async fn update_mod(
     // mods share a display name (e.g. two CardArtEditor installs with
     // different GitHub sources).
     let mod_info = if let Some(ref folder) = folder_name {
-        installed.iter().find(|m| m.folder_name.as_deref() == Some(folder.as_str()))
+        installed
+            .iter()
+            .find(|m| m.folder_name.as_deref() == Some(folder.as_str()))
     } else {
         installed.iter().find(|m| m.name == name)
     }
     .ok_or_else(|| format!("Mod '{}' not found", name))?;
 
-    let (owner, repo) = resolve_github_repo(mod_info, &sources_db.mods)
-        .ok_or_else(|| format!("Mod '{}' has no GitHub source linked. Link one in the Mods view.", name))?;
+    let (owner, repo) = resolve_github_repo(mod_info, &sources_db.mods).ok_or_else(|| {
+        format!(
+            "Mod '{}' has no GitHub source linked. Link one in the Mods view.",
+            name
+        )
+    })?;
 
     // Resolve which tag we'll actually install BEFORE deleting the old
     // copy — same shape as repair_mod. If the walk-back can't find any
@@ -703,7 +744,12 @@ pub async fn update_mod(
             owner, repo, tag,
         );
         chosen_zip = crate::download::download_release_zip_to_cache(
-            &owner, &repo, &tag, &cache_path, None, token.as_deref(),
+            &owner,
+            &repo,
+            &tag,
+            &cache_path,
+            None,
+            token.as_deref(),
         )
         .await
         .map_err(|e| e.to_string())?;
@@ -717,7 +763,9 @@ pub async fn update_mod(
     // when the mod has no snapshot (rollout case) or no edits.
     let pre_update_preserved = {
         let old_info = if let Some(ref folder) = folder_name {
-            installed.iter().find(|m| m.folder_name.as_deref() == Some(folder.as_str()))
+            installed
+                .iter()
+                .find(|m| m.folder_name.as_deref() == Some(folder.as_str()))
         } else {
             installed.iter().find(|m| m.name == name)
         };
@@ -725,7 +773,10 @@ pub async fn update_mod(
             .and_then(|m| m.folder_name.clone().or_else(|| Some(m.name.clone())))
             .map(|folder| {
                 crate::mods::prepare_update_with_preserved_configs(
-                    &folder, &name, &mods_path, &config_path,
+                    &folder,
+                    &name,
+                    &mods_path,
+                    &config_path,
                 )
             })
             .unwrap_or_default()
@@ -737,7 +788,9 @@ pub async fn update_mod(
     // step on each other.
     {
         let old_info = if let Some(ref folder) = folder_name {
-            installed.iter().find(|m| m.folder_name.as_deref() == Some(folder.as_str()))
+            installed
+                .iter()
+                .find(|m| m.folder_name.as_deref() == Some(folder.as_str()))
         } else {
             installed.iter().find(|m| m.name == name)
         };
@@ -759,7 +812,9 @@ pub async fn update_mod(
             }
             for dir in &parent_dirs {
                 if dir.is_dir()
-                    && std::fs::read_dir(dir).map(|mut d| d.next().is_none()).unwrap_or(false)
+                    && std::fs::read_dir(dir)
+                        .map(|mut d| d.next().is_none())
+                        .unwrap_or(false)
                 {
                     let _ = std::fs::remove_dir(dir);
                 }
@@ -781,8 +836,8 @@ pub async fn update_mod(
         chosen_mgv.as_deref().unwrap_or("none"),
         pre_update_preserved.len(),
     );
-    let info = crate::mods::install_mod_from_zip(&chosen_zip, &mods_path)
-        .map_err(|e| e.to_string())?;
+    let info =
+        crate::mods::install_mod_from_zip(&chosen_zip, &mods_path).map_err(|e| e.to_string())?;
 
     // Only record the new installed_version if the install RESULT looks
     // healthy. install_mod_from_zip falls through to a stub with
@@ -810,7 +865,10 @@ pub async fn update_mod(
         // mod-configs-preserved event for the toast when anything was
         // actually preserved.
         let preserved_names = crate::mods::finalize_update_with_preserved_configs(
-            &info, &mods_path, pre_update_preserved, &config_path,
+            &info,
+            &mods_path,
+            pre_update_preserved,
+            &config_path,
         )
         .map_err(|e| e.to_string())?;
         crate::mod_sources::emit_configs_preserved(&app, &info.name, &preserved_names);
@@ -859,7 +917,8 @@ pub async fn repair_mod(
 ) -> std::result::Result<ModInfo, String> {
     log::info!(
         "repair_mod: walk-back repair requested for '{}' (folder: {:?})",
-        name, folder_name,
+        name,
+        folder_name,
     );
     crate::game::ensure_game_not_running()?;
 
@@ -880,13 +939,19 @@ pub async fn repair_mod(
     // re-extract whichever copy happens to scan first, possibly nuking
     // the mod the user wasn't trying to fix.
     let mod_info = if let Some(ref folder) = folder_name {
-        installed.iter().find(|m| m.folder_name.as_deref() == Some(folder.as_str()))
+        installed
+            .iter()
+            .find(|m| m.folder_name.as_deref() == Some(folder.as_str()))
     } else {
         installed.iter().find(|m| m.name == name)
     }
     .ok_or_else(|| format!("Mod '{}' not found", name))?;
-    let (owner, repo) = resolve_github_repo(mod_info, &sources_db.mods)
-        .ok_or_else(|| format!("Mod '{}' has no GitHub source linked. Link one in the Mods view.", name))?;
+    let (owner, repo) = resolve_github_repo(mod_info, &sources_db.mods).ok_or_else(|| {
+        format!(
+            "Mod '{}' has no GitHub source linked. Link one in the Mods view.",
+            name
+        )
+    })?;
 
     // Pick the candidate tag we're going to install BEFORE touching disk.
     // If the walk-back finds nothing compatible, we return an error and
@@ -915,7 +980,10 @@ pub async fn repair_mod(
         .or_else(|| Some(mod_info.name.clone()))
         .map(|folder| {
             crate::mods::prepare_update_with_preserved_configs(
-                &folder, &name, &mods_path, &config_path,
+                &folder,
+                &name,
+                &mods_path,
+                &config_path,
             )
         })
         .unwrap_or_default();
@@ -924,7 +992,9 @@ pub async fn repair_mod(
     // lookup we did above so we delete the exact mod we resolved earlier.
     {
         let old_info = if let Some(ref folder) = folder_name {
-            installed.iter().find(|m| m.folder_name.as_deref() == Some(folder.as_str()))
+            installed
+                .iter()
+                .find(|m| m.folder_name.as_deref() == Some(folder.as_str()))
         } else {
             installed.iter().find(|m| m.name == name)
         };
@@ -946,7 +1016,9 @@ pub async fn repair_mod(
             }
             for dir in &parent_dirs {
                 if dir.is_dir()
-                    && std::fs::read_dir(dir).map(|mut d| d.next().is_none()).unwrap_or(false)
+                    && std::fs::read_dir(dir)
+                        .map(|mut d| d.next().is_none())
+                        .unwrap_or(false)
                 {
                     let _ = std::fs::remove_dir(dir);
                 }
@@ -959,7 +1031,8 @@ pub async fn repair_mod(
             }
             log::info!(
                 "repair_mod: deleted old files for '{}' (preserving {} configs)",
-                name, pre_update_preserved.len(),
+                name,
+                pre_update_preserved.len(),
             );
         }
     }
@@ -985,7 +1058,10 @@ pub async fn repair_mod(
         // matters the same way it does for forward updates — user's
         // tweaks shouldn't die just because they fixed a broken install.
         let preserved_names = crate::mods::finalize_update_with_preserved_configs(
-            &info, &mods_path, pre_update_preserved, &config_path,
+            &info,
+            &mods_path,
+            pre_update_preserved,
+            &config_path,
         )
         .map_err(|e| e.to_string())?;
         crate::mod_sources::emit_configs_preserved(&app, &info.name, &preserved_names);
@@ -1016,7 +1092,8 @@ pub async fn rollback_mod(
 ) -> std::result::Result<ModInfo, String> {
     log::info!(
         "rollback_mod: requested for '{}' (folder: {:?})",
-        name, folder_name,
+        name,
+        folder_name,
     );
     crate::game::ensure_game_not_running()?;
 
@@ -1040,8 +1117,12 @@ pub async fn rollback_mod(
             name
         )
     })?;
-    let (owner, repo) = resolve_github_repo(mod_info, &sources_db.mods)
-        .ok_or_else(|| format!("Mod '{}' has no GitHub source linked. Link one in the Mods view.", name))?;
+    let (owner, repo) = resolve_github_repo(mod_info, &sources_db.mods).ok_or_else(|| {
+        format!(
+            "Mod '{}' has no GitHub source linked. Link one in the Mods view.",
+            name
+        )
+    })?;
 
     let chosen = pick_rollback_compatible_release(
         &owner,
@@ -1067,7 +1148,10 @@ pub async fn rollback_mod(
         .or_else(|| Some(mod_info.name.clone()))
         .map(|folder| {
             crate::mods::prepare_update_with_preserved_configs(
-                &folder, &name, &mods_path, &config_path,
+                &folder,
+                &name,
+                &mods_path,
+                &config_path,
             )
         })
         .unwrap_or_default();
@@ -1087,7 +1171,10 @@ pub async fn rollback_mod(
         }
 
         let preserved_names = crate::mods::finalize_update_with_preserved_configs(
-            &info, &mods_path, pre_update_preserved, &config_path,
+            &info,
+            &mods_path,
+            pre_update_preserved,
+            &config_path,
         )
         .map_err(|e| e.to_string())?;
         crate::mod_sources::emit_configs_preserved(&app, &info.name, &preserved_names);
@@ -1143,7 +1230,12 @@ pub async fn pick_compatible_release(
     for release in releases.iter().take(MAX_RELEASES_TO_WALK) {
         let tag = release.tag_name.as_str();
         let zip_path = match crate::download::download_release_zip_to_cache(
-            owner, repo, tag, cache_path, game_version, token,
+            owner,
+            repo,
+            tag,
+            cache_path,
+            game_version,
+            token,
         )
         .await
         {
@@ -1151,7 +1243,10 @@ pub async fn pick_compatible_release(
             Err(e) => {
                 log::warn!(
                     "Walk-back: skipping {}/{}@{} (download failed: {})",
-                    owner, repo, tag, e
+                    owner,
+                    repo,
+                    tag,
+                    e
                 );
                 continue;
             }
@@ -1161,14 +1256,17 @@ pub async fn pick_compatible_release(
             Err(e) => {
                 log::warn!(
                     "Walk-back: skipping {}/{}@{} (manifest peek failed: {})",
-                    owner, repo, tag, e
+                    owner,
+                    repo,
+                    tag,
+                    e
                 );
                 continue;
             }
         };
 
         let compatible = match (game_version, mgv.as_deref()) {
-            (_, None) => true, // mod doesn't care
+            (_, None) => true,       // mod doesn't care
             (None, Some(_)) => true, // we don't know game version → fail open
             (Some(gv), Some(req)) => game_version_satisfies(gv, req),
         };
@@ -1182,7 +1280,9 @@ pub async fn pick_compatible_release(
         last_required = mgv.or(last_required);
         log::info!(
             "Walk-back: {}/{}@{} requires game v{} (you have v{}), trying older release",
-            owner, repo, tag,
+            owner,
+            repo,
+            tag,
             last_required.as_deref().unwrap_or("?"),
             game_version.unwrap_or("?"),
         );
@@ -1192,7 +1292,8 @@ pub async fn pick_compatible_release(
         "No release of {}/{} is compatible with your game (v{}). \
          Lowest required minimum we saw: v{}. Update Slay the Spire 2 \
          (or switch Steam beta branches) and try again.",
-        owner, repo,
+        owner,
+        repo,
         game_version.unwrap_or("?"),
         last_required.as_deref().unwrap_or("?"),
     )))
@@ -1221,7 +1322,9 @@ async fn pick_rollback_compatible_release(
         .iter()
         .filter_map(|release| {
             let version = parse_version(&release.tag_name)?;
-            if target.matches_candidate(&version) && release.assets.iter().any(|a| is_mod_asset(&a.name)) {
+            if target.matches_candidate(&version)
+                && release.assets.iter().any(|a| is_mod_asset(&a.name))
+            {
                 Some((release, version))
             } else {
                 None
@@ -1231,14 +1334,21 @@ async fn pick_rollback_compatible_release(
     candidates.sort_by(|a, b| b.1.cmp(&a.1));
 
     if candidates.is_empty() {
-        return Err(crate::error::AppError::Other(target.no_candidate_message(owner, repo)));
+        return Err(crate::error::AppError::Other(
+            target.no_candidate_message(owner, repo),
+        ));
     }
 
     let mut last_required: Option<String> = None;
     for (release, _) in candidates.into_iter().take(MAX_RELEASES_TO_WALK) {
         let tag = release.tag_name.as_str();
         let zip_path = match crate::download::download_release_zip_to_cache(
-            owner, repo, tag, cache_path, game_version, token,
+            owner,
+            repo,
+            tag,
+            cache_path,
+            game_version,
+            token,
         )
         .await
         {
@@ -1246,7 +1356,10 @@ async fn pick_rollback_compatible_release(
             Err(e) => {
                 log::warn!(
                     "Rollback: skipping {}/{}@{} (download failed: {})",
-                    owner, repo, tag, e
+                    owner,
+                    repo,
+                    tag,
+                    e
                 );
                 continue;
             }
@@ -1256,7 +1369,10 @@ async fn pick_rollback_compatible_release(
             Err(e) => {
                 log::warn!(
                     "Rollback: skipping {}/{}@{} (manifest peek failed: {})",
-                    owner, repo, tag, e
+                    owner,
+                    repo,
+                    tag,
+                    e
                 );
                 continue;
             }
@@ -1277,7 +1393,9 @@ async fn pick_rollback_compatible_release(
         last_required = mgv.or(last_required);
         log::info!(
             "Rollback: {}/{}@{} requires game v{} (you have v{}), trying another release",
-            owner, repo, tag,
+            owner,
+            repo,
+            tag,
             last_required.as_deref().unwrap_or("?"),
             game_version.unwrap_or("?"),
         );
@@ -1332,14 +1450,26 @@ pub async fn update_all_mods(
         let token = s.github_token.clone();
         let nexus_key = s.nexus_api_key.clone();
         let game_version = s.game_version.clone();
-        (mods_path, cache_path, config_path, token, nexus_key, game_version)
+        (
+            mods_path,
+            cache_path,
+            config_path,
+            token,
+            nexus_key,
+            game_version,
+        )
     };
 
     let installed = scan_mods(&mods_path);
     let sources_db = load_sources(&config_path);
-    let updates = check_all_updates(&installed, &sources_db.mods, token.as_deref(), nexus_key.as_deref())
-        .await
-        .map_err(|e| e.to_string())?;
+    let updates = check_all_updates(
+        &installed,
+        &sources_db.mods,
+        token.as_deref(),
+        nexus_key.as_deref(),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
 
     let mut results = Vec::new();
     for update in &updates {
@@ -1372,14 +1502,18 @@ pub async fn update_all_mods(
                     // Resolve installed_version + manifest version folder-first so
                     // we compare against the EXACT mod we'd be updating, not
                     // whichever same-named mod scans first.
-                    let installed_tag = update.folder_name.as_ref()
+                    let installed_tag = update
+                        .folder_name
+                        .as_ref()
                         .and_then(|f| sources_db.mods.get(f))
                         .or_else(|| sources_db.mods.get(&update.mod_name))
                         .and_then(|e| e.installed_version.as_deref())
                         .map(|s| s.trim_start_matches('v'))
                         .unwrap_or("");
                     let manifest_ver = if let Some(ref folder) = update.folder_name {
-                        installed.iter().find(|m| m.folder_name.as_deref() == Some(folder.as_str()))
+                        installed
+                            .iter()
+                            .find(|m| m.folder_name.as_deref() == Some(folder.as_str()))
                     } else {
                         installed.iter().find(|m| m.name == update.mod_name)
                     }
@@ -1398,7 +1532,10 @@ pub async fn update_all_mods(
                 Err(e) => {
                     log::error!(
                         "update_all_mods: walk-back failed for '{}' ({}/{}): {}",
-                        update.mod_name, owner, repo, e
+                        update.mod_name,
+                        owner,
+                        repo,
+                        e
                     );
                     continue;
                 }
@@ -1409,7 +1546,12 @@ pub async fn update_all_mods(
                 owner, repo, update.latest_version,
             );
             let zip = match crate::download::download_release_zip_to_cache(
-                &owner, &repo, &update.latest_version, &cache_path, None, token.as_deref(),
+                &owner,
+                &repo,
+                &update.latest_version,
+                &cache_path,
+                None,
+                token.as_deref(),
             )
             .await
             {
@@ -1417,7 +1559,11 @@ pub async fn update_all_mods(
                 Err(e) => {
                     log::error!(
                         "update_all_mods: download failed for '{}' ({}/{}@{}): {}",
-                        update.mod_name, owner, repo, update.latest_version, e,
+                        update.mod_name,
+                        owner,
+                        repo,
+                        update.latest_version,
+                        e,
                     );
                     continue;
                 }
@@ -1428,7 +1574,9 @@ pub async fn update_all_mods(
         // Read user-edited configs BEFORE the destructive delete pass —
         // same prepare/finalize pattern as update_mod / repair_mod.
         let old_info_opt = if let Some(ref folder) = update.folder_name {
-            installed.iter().find(|m| m.folder_name.as_deref() == Some(folder.as_str()))
+            installed
+                .iter()
+                .find(|m| m.folder_name.as_deref() == Some(folder.as_str()))
         } else {
             installed.iter().find(|m| m.name == update.mod_name)
         };
@@ -1436,7 +1584,10 @@ pub async fn update_all_mods(
             .and_then(|m| m.folder_name.clone().or_else(|| Some(m.name.clone())))
             .map(|folder| {
                 crate::mods::prepare_update_with_preserved_configs(
-                    &folder, &update.mod_name, &mods_path, &config_path,
+                    &folder,
+                    &update.mod_name,
+                    &mods_path,
+                    &config_path,
                 )
             })
             .unwrap_or_default();
@@ -1462,7 +1613,9 @@ pub async fn update_all_mods(
             }
             for dir in &parent_dirs {
                 if dir.is_dir()
-                    && std::fs::read_dir(dir).map(|mut d| d.next().is_none()).unwrap_or(false)
+                    && std::fs::read_dir(dir)
+                        .map(|mut d| d.next().is_none())
+                        .unwrap_or(false)
                 {
                     let _ = std::fs::remove_dir(dir);
                 }
@@ -1499,7 +1652,10 @@ pub async fn update_all_mods(
                 // Write under folder_name when available — keeps two
                 // same-named mods independent in the sources DB and matches
                 // the folder-first read path in enrich_mods_with_sources.
-                let key = info.folder_name.clone().unwrap_or_else(|| info.name.clone());
+                let key = info
+                    .folder_name
+                    .clone()
+                    .unwrap_or_else(|| info.name.clone());
                 let entry = db.mods.entry(key).or_default();
                 entry.github_repo = Some(format!("{}/{}", owner, repo));
                 entry.installed_version = Some(chosen_tag.clone());
@@ -1510,17 +1666,23 @@ pub async fn update_all_mods(
                 // update produces one toast per affected mod (acceptable
                 // for the typical 1-2 preserve-affected mods in a batch).
                 match crate::mods::finalize_update_with_preserved_configs(
-                    &info, &mods_path, pre_update_preserved, &config_path,
+                    &info,
+                    &mods_path,
+                    pre_update_preserved,
+                    &config_path,
                 ) {
                     Ok(preserved_names) => {
                         crate::mod_sources::emit_configs_preserved(
-                            &app, &info.name, &preserved_names,
+                            &app,
+                            &info.name,
+                            &preserved_names,
                         );
                     }
                     Err(e) => {
                         log::error!(
                             "update_all_mods: finalize preserve for '{}' failed: {}",
-                            info.name, e,
+                            info.name,
+                            e,
                         );
                     }
                 }
@@ -1562,6 +1724,7 @@ mod version_helper_tests {
             author: None,
             note: None,
             custom_url: None,
+            tags: vec![],
             display_name: None,
             display_description: None,
         };
@@ -1617,6 +1780,12 @@ mod version_helper_tests {
     }
 
     #[test]
+    fn snooze_match_falls_back_to_nexus_version_when_github_tag_is_absent() {
+        assert!(audit_snooze_matches(Some("1.0.3"), None, Some("1.0.3")));
+        assert!(!audit_snooze_matches(Some("1.0.3"), None, Some("1.0.4")));
+    }
+
+    #[test]
     fn game_version_satisfies_fails_open_on_parse_errors() {
         // Strict happy path
         assert!(game_version_satisfies("0.105.0", "0.103.0"));
@@ -1650,11 +1819,18 @@ mod version_helper_tests {
             author: None,
             note: None,
             custom_url: None,
+            tags: vec![],
             display_name: None,
             display_description: None,
         };
-        assert!(install_is_incompatible(&mk(Some("0.110.0")), Some("0.105.0")));
-        assert!(!install_is_incompatible(&mk(Some("0.100.0")), Some("0.105.0")));
+        assert!(install_is_incompatible(
+            &mk(Some("0.110.0")),
+            Some("0.105.0")
+        ));
+        assert!(!install_is_incompatible(
+            &mk(Some("0.100.0")),
+            Some("0.105.0")
+        ));
         // Either side missing → not incompatible (fail open).
         assert!(!install_is_incompatible(&mk(None), Some("0.105.0")));
         assert!(!install_is_incompatible(&mk(Some("0.110.0")), None));
@@ -1662,7 +1838,10 @@ mod version_helper_tests {
 
     #[test]
     fn parse_github_source_extracts_owner_repo() {
-        assert_eq!(parse_github_source("github:foo/bar"), Some(("foo".into(), "bar".into())));
+        assert_eq!(
+            parse_github_source("github:foo/bar"),
+            Some(("foo".into(), "bar".into()))
+        );
         assert_eq!(parse_github_source("github:foo/"), None);
         assert_eq!(parse_github_source("github:/bar"), None);
         assert_eq!(parse_github_source("foo/bar"), None); // missing prefix
@@ -1670,7 +1849,10 @@ mod version_helper_tests {
 
     #[test]
     fn parse_owner_repo_splits_or_fails() {
-        assert_eq!(parse_owner_repo("foo/bar"), Some(("foo".into(), "bar".into())));
+        assert_eq!(
+            parse_owner_repo("foo/bar"),
+            Some(("foo".into(), "bar".into()))
+        );
         assert_eq!(parse_owner_repo("foo/"), None);
         assert_eq!(parse_owner_repo("/bar"), None);
         assert_eq!(parse_owner_repo("just-one"), None);
@@ -1689,10 +1871,7 @@ mod version_helper_tests {
             parse_owner_repo("https://github.com/BAKAOLC/STS2-MultiPlayerPotionView"),
             None,
         );
-        assert_eq!(
-            parse_owner_repo("http://github.com/owner/repo"),
-            None,
-        );
+        assert_eq!(parse_owner_repo("http://github.com/owner/repo"), None,);
         // Three-segment input (owner/repo/extra) is also not a bare pair.
         assert_eq!(parse_owner_repo("foo/bar/baz"), None);
     }
@@ -1707,7 +1886,10 @@ mod version_helper_tests {
             parse_github_url("https://github.com/ritsu/sts2-ritsulib.git"),
             Some(("ritsu".into(), "sts2-ritsulib".into())),
         );
-        assert_eq!(parse_github_url("https://example.com/ritsu/sts2-ritsulib"), None);
+        assert_eq!(
+            parse_github_url("https://example.com/ritsu/sts2-ritsulib"),
+            None
+        );
     }
 
     #[test]
@@ -1758,8 +1940,16 @@ mod version_helper_tests {
             "RitsuLib",
         )
         .expect("gate should fire when manifest_ver matches chosen");
-        assert!(msg.contains("(v0.2.32)"), "msg should contain (v0.2.32): {}", msg);
-        assert!(!msg.contains("vv0.2.32"), "msg should not contain vv0.2.32: {}", msg);
+        assert!(
+            msg.contains("(v0.2.32)"),
+            "msg should contain (v0.2.32): {}",
+            msg
+        );
+        assert!(
+            !msg.contains("vv0.2.32"),
+            "msg should not contain vv0.2.32: {}",
+            msg
+        );
     }
 
     /// Regression: pre-1.4.3 the gate's installed_tag lookup was
@@ -1796,7 +1986,8 @@ mod version_helper_tests {
             &info,
             &sources,
             &info.name,
-        ).is_some());
+        )
+        .is_some());
     }
 
     /// Inverse of the above: when the folder-keyed installed_version
@@ -1850,9 +2041,7 @@ mod version_helper_tests {
         sources.insert(
             "STS2-MultiPlayerPotionView-168-0-2-0-1774530567".into(),
             ModSourceEntry {
-                github_repo: Some(
-                    "https://github.com/BAKAOLC/STS2-MultiPlayerPotionView".into(),
-                ),
+                github_repo: Some("https://github.com/BAKAOLC/STS2-MultiPlayerPotionView".into()),
                 ..Default::default()
             },
         );
@@ -1898,7 +2087,9 @@ mod version_helper_tests {
             },
         );
         assert_eq!(
-            best_known_installed_version(&info, &sources).unwrap().to_string(),
+            best_known_installed_version(&info, &sources)
+                .unwrap()
+                .to_string(),
             "0.2.31",
         );
 
@@ -1910,7 +2101,9 @@ mod version_helper_tests {
             },
         );
         assert_eq!(
-            best_known_installed_version(&info, &sources).unwrap().to_string(),
+            best_known_installed_version(&info, &sources)
+                .unwrap()
+                .to_string(),
             "0.2.30",
         );
     }
@@ -2039,10 +2232,10 @@ pub struct ModAuditEntry {
     #[serde(default)]
     pub latest_compatible_tag: Option<String>,
     /// True when the user has snoozed the update suggestion for this mod
-    /// at its current `latest_release_with_assets_tag`. The audit still
+    /// at its current GitHub release tag or Nexus version. The audit still
     /// runs and the entry still appears in the list; the UI suppresses
     /// the "update available" badge and excludes the row from the audit
-    /// count. When the upstream tag advances past the snoozed one the
+    /// count. When the upstream version advances past the snoozed one the
     /// flag flips back to false automatically — the snooze auto-expires.
     /// Distinct from `pinned`: pinning is a hard freeze on auto-update,
     /// snoozing is "stop nagging me about THIS specific release."
@@ -2113,8 +2306,7 @@ pub async fn audit_mod_versions(
     // we skip the (slow) per-mod GitHub/Nexus calls for mods we don't care
     // about right now.
     if let Some(filter) = only.as_ref() {
-        let want: std::collections::HashSet<&str> =
-            filter.iter().map(|s| s.as_str()).collect();
+        let want: std::collections::HashSet<&str> = filter.iter().map(|s| s.as_str()).collect();
         all_mods.retain(|m| want.contains(m.name.as_str()));
     }
 
@@ -2147,9 +2339,7 @@ pub async fn audit_mod_versions(
     // buffer_unordered yields results in completion order. Re-sort by the mod's
     // display name so the UI render order is stable across audits (filesystem
     // scan order was non-deterministic anyway).
-    results.sort_by(|a, b| {
-        a.mod_name.to_lowercase().cmp(&b.mod_name.to_lowercase())
-    });
+    results.sort_by(|a, b| a.mod_name.to_lowercase().cmp(&b.mod_name.to_lowercase()));
 
     Ok(results)
 }
@@ -2165,7 +2355,9 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
     // (saved under its folder_name) wouldn't show as pinned in this audit,
     // and the Settings unpin click would no-op because we'd hand back a
     // pinned=false to the UI for an entry that IS pinned in the DB.
-    let source_entry = m.folder_name.as_ref()
+    let source_entry = m
+        .folder_name
+        .as_ref()
         .and_then(|f| ctx.sources_db.mods.get(f))
         .or_else(|| ctx.sources_db.mods.get(&m.name))
         .or_else(|| m.mod_id.as_ref().and_then(|i| ctx.sources_db.mods.get(i)));
@@ -2188,7 +2380,8 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
 
     let has_github = github_pair.is_some();
     let has_nexus = nexus_mod_id.is_some();
-    let has_any_source = has_github || has_nexus || auto_detected_github.is_some() || nexus_url.is_some();
+    let has_any_source =
+        has_github || has_nexus || auto_detected_github.is_some() || nexus_url.is_some();
 
     // --- GitHub version check ---
     let mut github_repo_str: Option<String> = None;
@@ -2226,11 +2419,14 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
             let per_page: u32 = 30;
 
             'outer: for page in 1..=max_pages {
-                let releases = match fetch_releases(&owner, &repo, page, per_page, ctx.token).await {
+                let releases = match fetch_releases(&owner, &repo, page, per_page, ctx.token).await
+                {
                     Ok(r) => r,
                     Err(_) => break,
                 };
-                if releases.is_empty() { break; }
+                if releases.is_empty() {
+                    break;
+                }
 
                 for release in &releases {
                     total_scanned += 1;
@@ -2240,7 +2436,9 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                     }
                     if release.assets.iter().any(|a| is_mod_asset(&a.name)) {
                         latest_release_with_assets_tag = Some(release.tag_name.clone());
-                        asset_names = release.assets.iter()
+                        asset_names = release
+                            .assets
+                            .iter()
                             .filter(|a| is_mod_asset(&a.name))
                             .map(|a| a.name.clone())
                             .collect();
@@ -2254,17 +2452,15 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                 let latest_ver = assets_tag.trim_start_matches('v');
                 let current_ver = m.version.trim_start_matches('v');
 
-                let installed_ver_matches = ctx.sources_db
+                let installed_ver_matches = ctx
+                    .sources_db
                     .mods
                     .get(&m.name)
                     .and_then(|e| e.installed_version.as_deref())
                     .map(|iv| iv.trim_start_matches('v') == latest_ver)
                     .unwrap_or(false);
 
-                if !installed_ver_matches
-                    && current_ver != "unknown"
-                    && current_ver != "0.0.0"
-                {
+                if !installed_ver_matches && current_ver != "unknown" && current_ver != "0.0.0" {
                     // Use semver comparison — only flag if latest > current
                     github_needs_update = is_newer_version(current_ver, latest_ver);
                 }
@@ -2283,7 +2479,12 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
             if github_needs_update {
                 if let Some(ref assets_tag) = latest_release_with_assets_tag.clone() {
                     match crate::download::download_release_zip_to_cache(
-                        &owner, &repo, assets_tag, ctx.cache_path, ctx.user_game_version, ctx.token,
+                        &owner,
+                        &repo,
+                        assets_tag,
+                        ctx.cache_path,
+                        ctx.user_game_version,
+                        ctx.token,
                     )
                     .await
                     {
@@ -2305,9 +2506,11 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                                 // so we don't re-download what we
                                 // already peeked.
                                 match pick_compatible_release(
-                                    &owner, &repo,
+                                    &owner,
+                                    &repo,
                                     ctx.user_game_version,
-                                    ctx.cache_path, ctx.token,
+                                    ctx.cache_path,
+                                    ctx.token,
                                 )
                                 .await
                                 {
@@ -2326,7 +2529,8 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                                         // switches the hint copy to
                                         // "you're already on the newest
                                         // compatible".
-                                        let installed_tag = ctx.sources_db
+                                        let installed_tag = ctx
+                                            .sources_db
                                             .mods
                                             .get(&m.name)
                                             .and_then(|e| e.installed_version.as_deref())
@@ -2344,8 +2548,10 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                                     Err(e) => {
                                         log::warn!(
                                             "audit: walk-back failed for {}/{} (game v{}): {}",
-                                            owner, repo,
-                                            ctx.user_game_version.unwrap_or("?"), e,
+                                            owner,
+                                            repo,
+                                            ctx.user_game_version.unwrap_or("?"),
+                                            e,
                                         );
                                         // Couldn't find a compatible
                                         // release — drop the update flag
@@ -2359,7 +2565,10 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                         Err(e) => {
                             log::warn!(
                                 "audit: failed to peek {}/{}@{} for compat check: {}",
-                                owner, repo, assets_tag, e,
+                                owner,
+                                repo,
+                                assets_tag,
+                                e,
                             );
                             // Peek failed → keep github_needs_update as
                             // the basic check decided. Update flow has
@@ -2423,7 +2632,11 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                         let current_ver = if !sources_ver.is_empty() {
                             // Use whichever is higher: sources DB or manifest
                             let sv = sources_ver.trim_start_matches('v');
-                            if is_newer_version(manifest_ver, sv) { sv } else { manifest_ver }
+                            if is_newer_version(manifest_ver, sv) {
+                                sv
+                            } else {
+                                manifest_ver
+                            }
                         } else {
                             manifest_ver
                         };
@@ -2458,7 +2671,8 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                             log::info!(
                                 "audit: suppressing Nexus update for '{}' — Nexus v{} matches \
                                  GitHub's game-version-blocked latest v{}",
-                                m.name, nexus_ver,
+                                m.name,
+                                nexus_ver,
                                 latest_release_with_assets_tag.as_deref().unwrap_or("?"),
                             );
                             nexus_update_available = false;
@@ -2466,7 +2680,12 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                     }
                 }
                 Err(e) => {
-                    log::warn!("Nexus API check failed for {} (mod {}): {}", m.name, mod_id, e);
+                    log::warn!(
+                        "Nexus API check failed for {} (mod {}): {}",
+                        m.name,
+                        mod_id,
+                        e
+                    );
                 }
             }
         }
@@ -2509,11 +2728,12 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
 
     // If GitHub errored (e.g. 404) but we have Nexus data, suppress the GitHub error —
     // the Nexus check is the authority. Also mark as auto-detected so UI treats it as informational.
-    let (final_error, final_auto_detected) = if github_error.is_some() && (nexus_url.is_some() || nexus_version.is_some()) {
-        (None, true) // suppress error, mark GitHub as informational
-    } else {
-        (github_error, is_auto_detected)
-    };
+    let (final_error, final_auto_detected) =
+        if github_error.is_some() && (nexus_url.is_some() || nexus_version.is_some()) {
+            (None, true) // suppress error, mark GitHub as informational
+        } else {
+            (github_error, is_auto_detected)
+        };
 
     let min_game_version = m.min_game_version.clone();
     let game_version_too_old = matches!(
@@ -2534,14 +2754,14 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
     } else {
         None
     };
-    // Snooze is matched against the upstream tag the user would actually
-    // be prompted to install. When that tag advances (upstream cuts a new
-    // release) `snoozed` flips false and the suggestion comes back — the
-    // snooze auto-expires.
-    let snoozed = match (snoozed_until_tag.as_deref(), latest_release_with_assets_tag.as_deref()) {
-        (Some(snooze), Some(latest)) => snooze == latest,
-        _ => false,
-    };
+    // Snooze is matched against the upstream version the user would be
+    // prompted about: GitHub release tag first, Nexus version otherwise.
+    // When that version advances, the suggestion comes back.
+    let snoozed = audit_snooze_matches(
+        snoozed_until_tag.as_deref(),
+        latest_release_with_assets_tag.as_deref(),
+        nexus_version.as_deref(),
+    );
     ModAuditEntry {
         mod_name: m.name.clone(),
         folder_name: m.folder_name.clone(),
@@ -2566,5 +2786,19 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
         latest_release_blocked_by_game_version,
         latest_compatible_tag,
         snoozed,
+    }
+}
+
+fn audit_snooze_matches(
+    snoozed_until_tag: Option<&str>,
+    latest_release_with_assets_tag: Option<&str>,
+    nexus_version: Option<&str>,
+) -> bool {
+    match (
+        snoozed_until_tag,
+        latest_release_with_assets_tag.or(nexus_version),
+    ) {
+        (Some(snooze), Some(latest)) => snooze == latest,
+        _ => false,
     }
 }

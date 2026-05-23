@@ -177,6 +177,7 @@ fn external_open_commands(path: &OsStr) -> Vec<Command> {
     open::commands(path)
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn open_commands_for_appimage(
     path: &OsStr,
     appdir: Option<&Path>,
@@ -218,12 +219,14 @@ fn open_commands_for_appimage(
         .collect()
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn is_kde_desktop(value: Option<&OsStr>) -> bool {
     value
         .map(|value| value.to_string_lossy().to_ascii_lowercase())
         .is_some_and(|value| value.contains("kde") || value.contains("plasma"))
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn resolve_program_in_path(program: &str, path_value: &OsStr) -> Option<PathBuf> {
     std::env::split_paths(path_value)
         .map(|dir| dir.join(program))
@@ -270,7 +273,9 @@ fn clean_path_like_value(value: &OsStr, appdir: Option<&Path>) -> Option<OsStrin
 
 #[cfg(test)]
 mod tests {
-    use super::{open_commands_for_appimage, prepare_external_command_for_appimage};
+    #[cfg(target_os = "linux")]
+    use super::open_commands_for_appimage;
+    use super::prepare_external_command_for_appimage;
     use std::env;
     use std::ffi::{OsStr, OsString};
     use std::path::{Path, PathBuf};

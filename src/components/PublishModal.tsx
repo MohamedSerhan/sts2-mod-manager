@@ -4,7 +4,6 @@ import { AlertTriangle, Check, Copy, ExternalLink, Info, Link as LinkIcon, Messa
 import { listen } from '@tauri-apps/api/event';
 import type { Profile, ShareResult } from '../types';
 import { shareProfile, reshareProfile, getApiKeyStatus, setModpackListing, openExternalUrl } from '../hooks/useTauri';
-import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { buildShareMessage, buildShareLink } from '../lib/shareImport';
 
@@ -40,13 +39,6 @@ interface ShareProgress {
 export function PublishModal({ open, profile, isReshare, onClose, onShared, onGoToSettings }: Props) {
   const toast = useToast();
   const { t } = useTranslation();
-  // Live disk state — the Rust share/reshare path re-snapshots disk before
-  // uploading, so the modal's preview has to mirror disk, not the saved
-  // profile.mods (which is the last snapshot and may be days stale).
-  // Without this, a user who toggles mods then opens the modal sees the
-  // pre-toggle counts and worries their changes won't ship — happened in
-  // practice after an import-then-delete left the profile manifest drifted.
-  const { mods: installedMods } = useApp();
   const [busy, setBusy] = useState(false);
   const [shared, setShared] = useState<ShareResult | null>(null);
   const [copied, setCopied] = useState<'code' | 'link' | 'msg' | null>(null);
@@ -98,15 +90,12 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
   // "20 mods · 0 GitHub · 0 Nexus" and confuse first-time curators.
   // The honest summary is just total + enabled split.
   //
-  // Counts come from the live disk scan (`installedMods`) — both
-  // `share_profile` and `reshare_profile` call `snapshot_current_with_paths`
-  // which re-scans `mods/` + `mods_disabled/` before uploading, so the
-  // preview must mirror the same source-of-truth. Reading from
-  // `profile.mods` would show whatever the last snapshot was, which can
-  // be many days stale (or worse — corrupted by a prior import).
-  const enabledCount = installedMods.filter((m) => m.enabled).length;
-  const disabledCount = installedMods.filter((m) => !m.enabled).length;
-  const totalCount = installedMods.length;
+  // Counts come from the saved profile manifest. Mod Library edits the
+  // manifest as a set of references into the local mod library, and publish
+  // must not silently re-add unrelated installed mods from disk.
+  const enabledCount = profile.mods.filter((m) => m.enabled).length;
+  const disabledCount = profile.mods.filter((m) => !m.enabled).length;
+  const totalCount = profile.mods.length;
 
   async function handlePublish() {
     // uncovered: dead at runtime — line 77 already short-circuits the render
@@ -134,7 +123,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
         const count = result.failed_uploads.length;
         const list = result.failed_uploads.slice(0, 5).join(', ');
         const more = result.failed_uploads.length > 5
-          ? `, +${result.failed_uploads.length - 5} more`
+          ? t('publish.failedUploadsMore', { count: result.failed_uploads.length - 5 })
           : '';
         toast.error(
           count === 1
@@ -525,7 +514,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
                         : t('publish.failedUploadsSummary_other', { count: shared.failed_uploads.length })}
                     </b>{' '}
                     {shared.failed_uploads.slice(0, 5).join(', ')}
-                    {shared.failed_uploads.length > 5 && `, +${shared.failed_uploads.length - 5} more`}.{' '}
+                    {shared.failed_uploads.length > 5 && t('publish.failedUploadsMore', { count: shared.failed_uploads.length - 5 })}.{' '}
                     {t('publish.failedUploadsHelp')}
                   </div>
                 </div>

@@ -165,7 +165,11 @@ pub fn list_profiles(profiles_path: &Path) -> Vec<Profile> {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) == Some("share") {
-                let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
+                let stem = path
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
                 if !seen_names.contains(&stem) {
                     // Create a placeholder profile -- will be fetched from GitHub on activation
                     profiles.push(Profile {
@@ -249,9 +253,11 @@ pub fn delete_profile(name: &str, profiles_path: &Path) -> Result<()> {
 ///
 /// `game_version_for_filter` controls the bug-#21 incompatibility filter:
 ///   - `Some(v)` — strip mods whose `min_game_version` exceeds `v`. Use
-///     this only when the snapshot is an *explicit* user action (kebab →
-///     Snapshot, share/re-share). Pass the cached `AppState.game_version`
-///     so the platform-specific mods/release_info layout is irrelevant.
+///     this only when the snapshot is an *explicit* user action that rewrites
+///     a profile from disk (create profile, kebab → Snapshot). Publishing
+///     uses the saved profile manifest instead. Pass the cached
+///     `AppState.game_version` so the platform-specific
+///     mods/release_info layout is irrelevant.
 ///   - `None` — preserve every scanned mod. Use this for non-publishing
 ///     internal snapshots where filtering would silently lose user data.
 pub fn snapshot_current_with_sources(
@@ -262,7 +268,8 @@ pub fn snapshot_current_with_sources(
     game_version_for_filter: Option<&str>,
 ) -> Result<Profile> {
     // Derive disabled path as sibling of mods_path (consistent with state.rs)
-    let disabled_path = mods_path.parent()
+    let disabled_path = mods_path
+        .parent()
         .unwrap_or(mods_path)
         .join("mods_disabled");
     snapshot_current_inner(
@@ -298,10 +305,7 @@ pub fn snapshot_current_with_paths(
 
 /// Helper: canonical identifier for a mod (prefer mod_id > folder_name > name).
 fn mod_key(name: &str, folder_name: Option<&str>, mod_id: Option<&str>) -> String {
-    mod_id
-        .or(folder_name)
-        .unwrap_or(name)
-        .to_lowercase()
+    mod_id.or(folder_name).unwrap_or(name).to_lowercase()
 }
 
 fn mod_identity_keys(name: &str, folder_name: Option<&str>, mod_id: Option<&str>) -> Vec<String> {
@@ -342,8 +346,10 @@ fn identity_lists_intersect(a: &[String], b: &[String]) -> bool {
 
 fn profile_mod_matches_installed(pm: &ProfileMod, installed: &ModInfo) -> bool {
     let profile_strong = strong_mod_identity_keys(pm.folder_name.as_deref(), pm.mod_id.as_deref());
-    let installed_strong =
-        strong_mod_identity_keys(installed.folder_name.as_deref(), installed.mod_id.as_deref());
+    let installed_strong = strong_mod_identity_keys(
+        installed.folder_name.as_deref(),
+        installed.mod_id.as_deref(),
+    );
 
     if !profile_strong.is_empty() && !installed_strong.is_empty() {
         return identity_lists_intersect(&profile_strong, &installed_strong);
@@ -464,8 +470,10 @@ fn snapshot_current_inner(
     let now = Utc::now();
 
     // Bug #21 mirror: when this snapshot represents an explicit user
-    // intent to publish state (kebab → Snapshot, share/re-share), strip
-    // mods whose `min_game_version` exceeds the user's current build.
+    // intent to rewrite a profile from disk (create profile, kebab →
+    // Snapshot), strip mods whose `min_game_version` exceeds the user's
+    // current build. Publishing performs the same compatibility guard
+    // against the saved manifest without re-adding every installed mod.
     // The subscription-side fix (build_synced_profile_snapshot in
     // subscriptions.rs, commit 37df97f) filters via the SkippedMod list
     // collected during the download phase; here we don't have that
@@ -521,16 +529,20 @@ fn snapshot_current_inner(
             .into_iter()
             .find_map(|key| existing_by_key.get(&key));
 
-        let source = m.source.clone().or_else(|| {
-            crate::mod_sources::lookup_entry(
-                &sources_db.mods,
-                m.folder_name.as_deref(),
-                &m.name,
-                m.mod_id.as_deref(),
-            )
+        let source = m
+            .source
+            .clone()
+            .or_else(|| {
+                crate::mod_sources::lookup_entry(
+                    &sources_db.mods,
+                    m.folder_name.as_deref(),
+                    &m.name,
+                    m.mod_id.as_deref(),
+                )
                 .and_then(|e| e.github_repo.as_ref())
                 .map(|repo| format!("github:{}", repo))
-        }).or_else(|| existing.and_then(|pm| pm.source.clone()));
+            })
+            .or_else(|| existing.and_then(|pm| pm.source.clone()));
 
         let version = if version_is_wildcard(&m.version) {
             existing
@@ -553,15 +565,22 @@ fn snapshot_current_inner(
             name: m.name.clone(),
             version,
             source,
-            hash: m.hash.clone().or_else(|| existing.and_then(|pm| pm.hash.clone())),
+            hash: m
+                .hash
+                .clone()
+                .or_else(|| existing.and_then(|pm| pm.hash.clone())),
             files: if m.files.is_empty() {
                 existing.map(|pm| pm.files.clone()).unwrap_or_default()
             } else {
                 m.files.clone()
             },
-            folder_name: m.folder_name.clone()
+            folder_name: m
+                .folder_name
+                .clone()
                 .or_else(|| existing.and_then(|pm| pm.folder_name.clone())),
-            mod_id: m.mod_id.clone()
+            mod_id: m
+                .mod_id
+                .clone()
                 .or_else(|| existing.and_then(|pm| pm.mod_id.clone())),
             enabled,
             bundle_url,
@@ -618,13 +637,18 @@ fn snapshot_current_inner(
 
     let profile = Profile {
         name: name.to_string(),
-        game_version: existing_profile.as_ref().and_then(|p| p.game_version.clone()),
+        game_version: existing_profile
+            .as_ref()
+            .and_then(|p| p.game_version.clone()),
         created_by: existing_profile
             .as_ref()
             .and_then(|p| p.created_by.clone())
             .filter(|created_by| created_by.trim() != APP_CREATED_BY),
         mods: profile_mods,
-        created_at: existing_profile.as_ref().map(|p| p.created_at).unwrap_or(now),
+        created_at: existing_profile
+            .as_ref()
+            .map(|p| p.created_at)
+            .unwrap_or(now),
         updated_at: now,
         public: existing_profile.as_ref().and_then(|p| p.public),
     };
@@ -657,12 +681,18 @@ pub fn apply_profile_with_pins(
     use std::collections::HashMap;
 
     let is_pinned = |m: &crate::mods::ModInfo| -> bool {
-        if pinned.contains(&m.name) { return true; }
+        if pinned.contains(&m.name) {
+            return true;
+        }
         if let Some(ref folder) = m.folder_name {
-            if pinned.contains(folder) { return true; }
+            if pinned.contains(folder) {
+                return true;
+            }
         }
         if let Some(ref id) = m.mod_id {
-            if pinned.contains(id) { return true; }
+            if pinned.contains(id) {
+                return true;
+            }
         }
         false
     };
@@ -706,17 +736,26 @@ pub fn apply_profile_with_pins(
     let current_enabled = scan_mods(mods_path);
     for m in &current_enabled {
         if is_pinned(m) {
-            log::info!("Profile apply: skipping pinned mod '{}' (currently enabled)", m.name);
+            log::info!(
+                "Profile apply: skipping frozen mod '{}' (currently enabled)",
+                m.name
+            );
             continue;
         }
         let should_be_enabled = lookup(m).unwrap_or(false);
         if !should_be_enabled {
             log::info!(
                 "Profile apply: disabling '{}' (folder={:?}, mod_id={:?})",
-                m.name, m.folder_name, m.mod_id
+                m.name,
+                m.folder_name,
+                m.mod_id
             );
             if let Err(e) = crate::mods::move_mod_by_info(m, mods_path, disabled_path) {
-                log::warn!("move_mod_by_info failed for '{}': {} -- falling back to disable_mod", m.name, e);
+                log::warn!(
+                    "move_mod_by_info failed for '{}': {} -- falling back to disable_mod",
+                    m.name,
+                    e
+                );
                 if let Err(e2) = crate::mods::disable_mod(&m.name, mods_path, disabled_path) {
                     log::error!("disable_mod fallback also failed for '{}': {}", m.name, e2);
                 }
@@ -728,17 +767,26 @@ pub fn apply_profile_with_pins(
     let current_disabled = scan_disabled_mods(disabled_path);
     for m in &current_disabled {
         if is_pinned(m) {
-            log::info!("Profile apply: skipping pinned mod '{}' (currently disabled)", m.name);
+            log::info!(
+                "Profile apply: skipping frozen mod '{}' (currently disabled)",
+                m.name
+            );
             continue;
         }
         let should_be_enabled = lookup(m).unwrap_or(false);
         if should_be_enabled {
             log::info!(
                 "Profile apply: enabling '{}' (folder={:?}, mod_id={:?})",
-                m.name, m.folder_name, m.mod_id
+                m.name,
+                m.folder_name,
+                m.mod_id
             );
             if let Err(e) = crate::mods::move_mod_by_info(m, disabled_path, mods_path) {
-                log::warn!("move_mod_by_info failed for '{}': {} -- falling back to enable_mod", m.name, e);
+                log::warn!(
+                    "move_mod_by_info failed for '{}': {} -- falling back to enable_mod",
+                    m.name,
+                    e
+                );
                 if let Err(e2) = crate::mods::enable_mod(&m.name, mods_path, disabled_path) {
                     log::error!("enable_mod fallback also failed for '{}': {}", m.name, e2);
                 }
@@ -754,16 +802,26 @@ pub fn apply_profile_with_pins(
         .chain(current_disabled.iter())
         .flat_map(|m| {
             let mut ids = vec![m.name.clone()];
-            if let Some(ref f) = m.folder_name { ids.push(f.clone()); }
-            if let Some(ref i) = m.mod_id { ids.push(i.clone()); }
+            if let Some(ref f) = m.folder_name {
+                ids.push(f.clone());
+            }
+            if let Some(ref i) = m.mod_id {
+                ids.push(i.clone());
+            }
             ids
         })
         .collect();
     for pm in &profile.mods {
         if pm.enabled {
             let found = on_disk_ids.contains(&pm.name)
-                || pm.folder_name.as_ref().map_or(false, |f| on_disk_ids.contains(f))
-                || pm.mod_id.as_ref().map_or(false, |i| on_disk_ids.contains(i));
+                || pm
+                    .folder_name
+                    .as_ref()
+                    .map_or(false, |f| on_disk_ids.contains(f))
+                || pm
+                    .mod_id
+                    .as_ref()
+                    .map_or(false, |i| on_disk_ids.contains(i));
             if !found {
                 log::error!(
                     "Profile apply: profile expects '{}' enabled but no matching mod found on disk (folder={:?}, mod_id={:?})",
@@ -891,18 +949,16 @@ pub(crate) fn set_profile_mod_membership_from_paths(
             .iter()
             .any(|pm| profile_mod_matches_target(pm, mod_name, folder_name, mod_id));
         if !already_in_profile {
-            let installed = merge_active_disabled_mods(
-                scan_mods(mods_path),
-                scan_disabled_mods(disabled_path),
-            )
-            .into_iter()
-            .find(|m| installed_mod_matches_target(m, mod_name, folder_name, mod_id))
-            .ok_or_else(|| {
-                AppError::ModNotFound(format!(
-                    "Installed mod '{}' was not found; refresh the mod list and try again.",
-                    mod_name
-                ))
-            })?;
+            let installed =
+                merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path))
+                    .into_iter()
+                    .find(|m| installed_mod_matches_target(m, mod_name, folder_name, mod_id))
+                    .ok_or_else(|| {
+                        AppError::ModNotFound(format!(
+                            "Installed mod '{}' was not found; refresh the mod list and try again.",
+                            mod_name
+                        ))
+                    })?;
             profile.mods.push(profile_mod_from_installed(&installed));
         }
     } else {
@@ -1120,15 +1176,13 @@ pub(crate) fn write_profile_load_order_to_settings_file(
         ));
     }
 
-    let mods_enabled = profile.mods.iter().any(|pm| pm.enabled)
-        || extra_mods.iter().any(|m| m.enabled);
+    let mods_enabled =
+        profile.mods.iter().any(|pm| pm.enabled) || extra_mods.iter().any(|m| m.enabled);
 
     let root = settings.as_object_mut().ok_or_else(|| {
         AppError::InvalidProfile("settings.save must contain a JSON object".into())
     })?;
-    let mod_settings = root
-        .entry("mod_settings")
-        .or_insert_with(|| json!({}));
+    let mod_settings = root.entry("mod_settings").or_insert_with(|| json!({}));
     if !mod_settings.is_object() {
         *mod_settings = json!({});
     }
@@ -1185,7 +1239,9 @@ fn find_settings_save_path() -> SettingsSaveResolution {
         candidates.extend(settings_save_candidates_under(&PathBuf::from(root)));
     }
     if let Some(data_dir) = dirs::data_dir() {
-        candidates.extend(settings_save_candidates_under(&data_dir.join("SlayTheSpire2")));
+        candidates.extend(settings_save_candidates_under(
+            &data_dir.join("SlayTheSpire2"),
+        ));
     }
     candidates.sort();
     candidates.dedup();
@@ -1223,10 +1279,13 @@ fn sync_profile_load_order_to_settings(
     };
 
     let pinned_set = crate::mod_sources::load_pinned_set(config_path);
-    let pinned_mods = merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path))
-        .into_iter()
-        .filter(|m| disk_mod_matches_pin(m, &pinned_set) && !profile_contains_disk_mod(profile, m))
-        .collect::<Vec<_>>();
+    let pinned_mods =
+        merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path))
+            .into_iter()
+            .filter(|m| {
+                disk_mod_matches_pin(m, &pinned_set) && !profile_contains_disk_mod(profile, m)
+            })
+            .collect::<Vec<_>>();
 
     match write_profile_load_order_to_settings_file(profile, &settings_path, &pinned_mods) {
         Ok(()) => (
@@ -1248,7 +1307,9 @@ fn sync_profile_load_order_to_settings(
 }
 
 #[tauri::command]
-pub fn list_profiles_cmd(state: tauri::State<'_, AppState>) -> std::result::Result<Vec<Profile>, String> {
+pub fn list_profiles_cmd(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<Profile>, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     Ok(list_profiles(&s.profiles_path))
 }
@@ -1260,13 +1321,8 @@ pub fn get_profile_memberships(
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
     let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
-    profile_membership_matrix(
-        mods_path,
-        disabled_path,
-        &s.profiles_path,
-        &s.config_path,
-    )
-    .map_err(|e| e.to_string())
+    profile_membership_matrix(mods_path, disabled_path, &s.profiles_path, &s.config_path)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1320,23 +1376,21 @@ pub fn set_profile_load_order(
     )
     .map_err(|e| e.to_string())?;
 
-    let (settings_status, settings_path) =
-        if active_profile.as_deref() == Some(profile_name.as_str()) {
-            if crate::game::is_game_running() {
-                (LoadOrderSettingsStatus::SkippedGameRunning, None)
-            } else if let (Some(mods_path), Some(disabled_path)) = (mods_path.as_ref(), disabled_path.as_ref()) {
-                sync_profile_load_order_to_settings(
-                    &profile,
-                    mods_path,
-                    disabled_path,
-                    &config_path,
-                )
-            } else {
-                (LoadOrderSettingsStatus::SkippedMissing, None)
-            }
+    let (settings_status, settings_path) = if active_profile.as_deref()
+        == Some(profile_name.as_str())
+    {
+        if crate::game::is_game_running() {
+            (LoadOrderSettingsStatus::SkippedGameRunning, None)
+        } else if let (Some(mods_path), Some(disabled_path)) =
+            (mods_path.as_ref(), disabled_path.as_ref())
+        {
+            sync_profile_load_order_to_settings(&profile, mods_path, disabled_path, &config_path)
         } else {
-            (LoadOrderSettingsStatus::SkippedInactive, None)
-        };
+            (LoadOrderSettingsStatus::SkippedMissing, None)
+        }
+    } else {
+        (LoadOrderSettingsStatus::SkippedInactive, None)
+    };
 
     Ok(ProfileLoadOrderUpdate {
         profile,
@@ -1353,8 +1407,8 @@ pub fn create_profile(
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
     // Explicit user action — apply the bug-#21 filter using the cached
-    // game_version so incompatible mods don't get published into a
-    // shared profile. AppState.game_version is set on the canonical
+    // game_version so incompatible mods don't get saved into a new
+    // profile. AppState.game_version is set on the canonical
     // game root, so this is also the macOS-correct source.
     let game_version = s.game_version.clone();
     snapshot_current_with_sources(
@@ -1379,7 +1433,9 @@ pub fn delete_profile_cmd(
 
     // Also clean up any matching subscription
     let mut db = crate::subscriptions::load_subscriptions(&config_path);
-    let to_remove: Vec<String> = db.subscriptions.iter()
+    let to_remove: Vec<String> = db
+        .subscriptions
+        .iter()
         .filter(|(_, sub)| sub.profile_name == name)
         .map(|(id, _)| id.clone())
         .collect();
@@ -1388,7 +1444,11 @@ pub fn delete_profile_cmd(
     }
     if !to_remove.is_empty() {
         let _ = crate::subscriptions::save_subscriptions(&db, &config_path);
-        log::info!("Cleaned up {} subscription(s) for deleted profile '{}'", to_remove.len(), name);
+        log::info!(
+            "Cleaned up {} subscription(s) for deleted profile '{}'",
+            to_remove.len(),
+            name
+        );
     }
     Ok(true)
 }
@@ -1474,11 +1534,20 @@ async fn switch_profile_from_paths(
             // Local .json missing -- check for .share file to re-fetch from GitHub
             let share_file = profiles_path.join(format!("{}.share", sanitize_filename(name)));
             if share_file.exists() {
-                log::info!("Profile '{}' JSON missing, re-fetching from share code", name);
-                let share_content = std::fs::read_to_string(&share_file).map_err(|e| e.to_string())?;
-                let share_info: serde_json::Value = serde_json::from_str(&share_content).map_err(|e| e.to_string())?;
-                let owner = share_info["owner"].as_str().ok_or("Share file missing owner")?;
-                let code = share_info["code"].as_str().ok_or("Share file missing code")?;
+                log::info!(
+                    "Profile '{}' JSON missing, re-fetching from share code",
+                    name
+                );
+                let share_content =
+                    std::fs::read_to_string(&share_file).map_err(|e| e.to_string())?;
+                let share_info: serde_json::Value =
+                    serde_json::from_str(&share_content).map_err(|e| e.to_string())?;
+                let owner = share_info["owner"]
+                    .as_str()
+                    .ok_or("Share file missing owner")?;
+                let code = share_info["code"]
+                    .as_str()
+                    .ok_or("Share file missing code")?;
                 let filename = format!("{}.json", code.replace('-', "").to_lowercase());
                 let fetched = crate::sharing::fetch_shared_profile(owner, &filename, token)
                     .await
@@ -1487,7 +1556,10 @@ async fn switch_profile_from_paths(
                 let _ = save_profile(&fetched, profiles_path);
                 fetched
             } else {
-                return Err(format!("Profile '{}' not found (no local data or share code)", name));
+                return Err(format!(
+                    "Profile '{}' not found (no local data or share code)",
+                    name
+                ));
             }
         }
     };
@@ -1508,7 +1580,8 @@ async fn switch_profile_from_paths(
         .collect();
 
     // Build a map from identifiers to on-disk mod info (for version comparison)
-    let mut on_disk_by_id: std::collections::HashMap<String, &crate::mods::ModInfo> = std::collections::HashMap::new();
+    let mut on_disk_by_id: std::collections::HashMap<String, &crate::mods::ModInfo> =
+        std::collections::HashMap::new();
     for m in &all_on_disk {
         on_disk_by_id.insert(m.name.clone(), m);
         if let Some(ref folder) = m.folder_name {
@@ -1526,21 +1599,25 @@ async fn switch_profile_from_paths(
 
     for pm in &profile.mods {
         // Find matching on-disk mod
-        let on_disk_mod = on_disk_by_id.get(&pm.name)
+        let on_disk_mod = on_disk_by_id
+            .get(&pm.name)
             .or_else(|| pm.folder_name.as_ref().and_then(|f| on_disk_by_id.get(f)))
             .or_else(|| pm.mod_id.as_ref().and_then(|id| on_disk_by_id.get(id)))
             .copied();
 
         if on_disk_mod.is_none() && profile_mod_matches_pin(pm, &pinned_set) {
             log::info!(
-                "switch_profile: pinned mod '{}' is missing on disk; restoring from profile",
+                "switch_profile: frozen mod '{}' is missing on disk; restoring from profile",
                 pm.name
             );
         }
 
         // Pinned mods keep their installed version when there is one to preserve.
         if should_skip_pinned_profile_mod_download(pm, on_disk_mod, &pinned_set) {
-            log::info!("switch_profile: skipping pinned mod '{}' (preserving installed version)", pm.name);
+            log::info!(
+                "switch_profile: skipping frozen mod '{}' (preserving installed version)",
+                pm.name
+            );
             continue;
         }
 
@@ -1549,8 +1626,10 @@ async fn switch_profile_from_paths(
             let profile_ver = pm.version.trim_start_matches('v');
 
             let version_ok = disk_ver == profile_ver
-                || profile_ver == "unknown" || profile_ver == "0.0.0"
-                || disk_ver == "unknown" || disk_ver == "0.0.0";
+                || profile_ver == "unknown"
+                || profile_ver == "0.0.0"
+                || disk_ver == "unknown"
+                || disk_ver == "0.0.0";
             let content_ok = profile_content_matches_disk(pm, disk_mod);
 
             if version_ok && content_ok {
@@ -1573,7 +1652,11 @@ async fn switch_profile_from_paths(
             // Cache the current version before deleting (so user can switch back later)
             crate::mods::cache_mod_version(
                 disk_mod,
-                if disk_mod.enabled { mods_path } else { disabled_path },
+                if disk_mod.enabled {
+                    mods_path
+                } else {
+                    disabled_path
+                },
                 cache_path,
             );
 
@@ -1583,23 +1666,40 @@ async fn switch_profile_from_paths(
             if version_mismatch
                 && crate::mods::get_cached_mod_path(cache_path, &pm.name, &pm.version).is_some()
             {
-                let base = if disk_mod.enabled { mods_path } else { disabled_path };
+                let base = if disk_mod.enabled {
+                    mods_path
+                } else {
+                    disabled_path
+                };
                 crate::mods::delete_mod_files_by_info(disk_mod, base);
-                match crate::mods::restore_mod_from_cache(cache_path, &pm.name, &pm.version, mods_path) {
+                match crate::mods::restore_mod_from_cache(
+                    cache_path,
+                    &pm.name,
+                    &pm.version,
+                    mods_path,
+                ) {
                     Ok(()) => {
                         log::info!("Restored '{}' v{} from local cache", pm.name, pm.version);
                         downloaded_count += 1;
                         continue;
                     }
                     Err(e) => {
-                        log::warn!("Cache restore failed for '{}': {} -- trying bundle", pm.name, e);
+                        log::warn!(
+                            "Cache restore failed for '{}': {} -- trying bundle",
+                            pm.name,
+                            e
+                        );
                     }
                 }
             }
 
             // Try bundle_url next
             if pm.bundle_url.is_some() {
-                let base = if disk_mod.enabled { mods_path } else { disabled_path };
+                let base = if disk_mod.enabled {
+                    mods_path
+                } else {
+                    disabled_path
+                };
                 crate::mods::delete_mod_files_by_info(disk_mod, base);
                 // Fall through to the download logic below
             } else {
@@ -1611,7 +1711,10 @@ async fn switch_profile_from_paths(
             }
         }
 
-        log::info!("Mod '{}' needs download (missing or version mismatch)", pm.name);
+        log::info!(
+            "Mod '{}' needs download (missing or version mismatch)",
+            pm.name
+        );
 
         let mut downloaded = false;
 
@@ -1626,43 +1729,54 @@ async fn switch_profile_from_paths(
                     downloaded = true;
                 }
                 Err(e) => {
-                    log::warn!("Bundle download failed for '{}': {} -- trying GitHub fallback", pm.name, e);
+                    log::warn!(
+                        "Bundle download failed for '{}': {} -- trying GitHub fallback",
+                        pm.name,
+                        e
+                    );
                 }
             }
         }
 
         // Fallback: try GitHub source
         if !downloaded {
-            let github_repo = pm.source.as_ref().and_then(|s| {
-                if let Some(repo) = s.strip_prefix("github:") {
-                    return Some(repo.to_string());
-                }
-                if s.contains("github.com/") {
-                    let parts: Vec<&str> = s.split("github.com/").collect();
-                    if parts.len() > 1 {
-                        let repo_path = parts[1].trim_end_matches('/');
-                        let segs: Vec<&str> = repo_path.splitn(3, '/').collect();
-                        if segs.len() >= 2 {
-                            return Some(format!("{}/{}", segs[0], segs[1]));
+            let github_repo = pm
+                .source
+                .as_ref()
+                .and_then(|s| {
+                    if let Some(repo) = s.strip_prefix("github:") {
+                        return Some(repo.to_string());
+                    }
+                    if s.contains("github.com/") {
+                        let parts: Vec<&str> = s.split("github.com/").collect();
+                        if parts.len() > 1 {
+                            let repo_path = parts[1].trim_end_matches('/');
+                            let segs: Vec<&str> = repo_path.splitn(3, '/').collect();
+                            if segs.len() >= 2 {
+                                return Some(format!("{}/{}", segs[0], segs[1]));
+                            }
                         }
                     }
-                }
-                None
-            }).or_else(|| {
-                crate::mod_sources::lookup_entry(
-                    &mod_sources_db.mods,
-                    pm.folder_name.as_deref(),
-                    &pm.name,
-                    pm.mod_id.as_deref(),
-                ).and_then(|e| e.github_repo.clone())
-            });
+                    None
+                })
+                .or_else(|| {
+                    crate::mod_sources::lookup_entry(
+                        &mod_sources_db.mods,
+                        pm.folder_name.as_deref(),
+                        &pm.name,
+                        pm.mod_id.as_deref(),
+                    )
+                    .and_then(|e| e.github_repo.clone())
+                });
 
             if let Some(repo) = github_repo {
                 let parts: Vec<&str> = repo.splitn(2, '/').collect();
                 if parts.len() == 2 {
                     match crate::download::download_and_install_github_mod(
                         parts[0], parts[1], None, mods_path, cache_path, token,
-                    ).await {
+                    )
+                    .await
+                    {
                         Ok(info) => {
                             log::info!("Downloaded mod '{}' from GitHub", info.name);
                             downloaded_count += 1;
@@ -1711,11 +1825,19 @@ async fn switch_profile_from_paths(
             final_identifiers.insert(id.clone());
         }
     }
-    let still_missing: Vec<String> = profile.mods.iter()
+    let still_missing: Vec<String> = profile
+        .mods
+        .iter()
         .filter(|pm| {
             !final_identifiers.contains(&pm.name)
-                && !pm.folder_name.as_ref().map_or(false, |f| final_identifiers.contains(f))
-                && !pm.mod_id.as_ref().map_or(false, |id| final_identifiers.contains(id))
+                && !pm
+                    .folder_name
+                    .as_ref()
+                    .map_or(false, |f| final_identifiers.contains(f))
+                && !pm
+                    .mod_id
+                    .as_ref()
+                    .map_or(false, |id| final_identifiers.contains(id))
         })
         .map(|pm| pm.name.clone())
         .collect();
@@ -1737,7 +1859,11 @@ pub async fn switch_profile(
     let (mods_path, disabled_path, profiles_path, config_path, cache_path, token) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let mods = s.mods_path.as_ref().ok_or("Game path not set")?.clone();
-        let disabled = s.disabled_mods_path.as_ref().ok_or("Game path not set")?.clone();
+        let disabled = s
+            .disabled_mods_path
+            .as_ref()
+            .ok_or("Game path not set")?
+            .clone();
         let profiles = s.profiles_path.clone();
         let config = s.config_path.clone();
         let cache = s.cache_path.clone();
@@ -1861,7 +1987,11 @@ pub fn get_profile_drift(
     Ok(compute_profile_drift(&profile, mods_path, disabled_path))
 }
 
-fn compute_profile_drift(profile: &Profile, mods_path: &Path, disabled_path: &Path) -> ProfileDrift {
+fn compute_profile_drift(
+    profile: &Profile,
+    mods_path: &Path,
+    disabled_path: &Path,
+) -> ProfileDrift {
     // Build a map of profile mods: key -> (enabled, version, display_name)
     let mut profile_map: std::collections::HashMap<String, (bool, String, String)> =
         std::collections::HashMap::new();
@@ -1975,7 +2105,11 @@ async fn repair_profile_from_paths(
     let pinned_set = crate::mod_sources::load_pinned_set(config_path);
     let mut profile_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
     for pm in &profile.mods {
-        profile_keys.insert(mod_key(&pm.name, pm.folder_name.as_deref(), pm.mod_id.as_deref()));
+        profile_keys.insert(mod_key(
+            &pm.name,
+            pm.folder_name.as_deref(),
+            pm.mod_id.as_deref(),
+        ));
     }
     let disabled_orphans: Vec<String> = crate::mods::scan_mods(mods_path)
         .into_iter()
@@ -2024,7 +2158,11 @@ pub async fn repair_profile(
     let (mods_path, disabled_path, profiles_path, config_path, cache_path, token) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let mods = s.mods_path.as_ref().ok_or("Game path not set")?.clone();
-        let disabled = s.disabled_mods_path.as_ref().ok_or("Game path not set")?.clone();
+        let disabled = s
+            .disabled_mods_path
+            .as_ref()
+            .ok_or("Game path not set")?
+            .clone();
         let profiles = s.profiles_path.clone();
         let config = s.config_path.clone();
         let cache = s.cache_path.clone();
@@ -2193,10 +2331,7 @@ mod snapshot_metadata_tests {
                     version: "v3.1.2".into(),
                     source: Some("github:Alchyr/STS2-BaseLib".into()),
                     hash: Some("known-hash".into()),
-                    files: vec![
-                        "BaseLib/BaseLib.json".into(),
-                        "BaseLib/BaseLib.dll".into(),
-                    ],
+                    files: vec!["BaseLib/BaseLib.json".into(), "BaseLib/BaseLib.dll".into()],
                     folder_name: Some("BaseLib".into()),
                     mod_id: Some("baselib".into()),
                     enabled: true,
@@ -2361,15 +2496,35 @@ mod profile_membership_tests {
         .unwrap();
 
         assert_eq!(
-            grid.profiles.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+            grid.profiles
+                .iter()
+                .map(|p| p.name.as_str())
+                .collect::<Vec<_>>(),
             vec!["Alpha", "Beta"]
         );
-        let base = grid.mods.iter().find(|m| m.folder_name.as_deref() == Some("BaseLib")).unwrap();
-        assert!(base.profiles.iter().any(|p| p.profile_name == "Alpha" && p.included && p.enabled));
-        assert!(base.profiles.iter().any(|p| p.profile_name == "Beta" && !p.included));
+        let base = grid
+            .mods
+            .iter()
+            .find(|m| m.folder_name.as_deref() == Some("BaseLib"))
+            .unwrap();
+        assert!(base
+            .profiles
+            .iter()
+            .any(|p| p.profile_name == "Alpha" && p.included && p.enabled));
+        assert!(base
+            .profiles
+            .iter()
+            .any(|p| p.profile_name == "Beta" && !p.included));
 
-        let auto = grid.mods.iter().find(|m| m.folder_name.as_deref() == Some("AutoPath")).unwrap();
-        assert!(!auto.installed_enabled, "disabled library mods should still be visible in the matrix");
+        let auto = grid
+            .mods
+            .iter()
+            .find(|m| m.folder_name.as_deref() == Some("AutoPath"))
+            .unwrap();
+        assert!(
+            !auto.installed_enabled,
+            "disabled library mods should still be visible in the matrix"
+        );
     }
 
     #[test]
@@ -2404,9 +2559,18 @@ mod profile_membership_tests {
         assert_eq!(entry.name, "Library Only");
         assert_eq!(entry.folder_name.as_deref(), Some("LibraryOnly"));
         assert_eq!(entry.version, "1.2.3");
-        assert!(!entry.enabled, "adding a disabled library mod should preserve its disabled profile state");
-        assert!(disabled_path.join("LibraryOnly").join("LibraryOnly.dll").exists());
-        assert!(!mods_path.join("LibraryOnly").exists(), "editing membership must not apply the profile");
+        assert!(
+            !entry.enabled,
+            "adding a disabled library mod should preserve its disabled profile state"
+        );
+        assert!(disabled_path
+            .join("LibraryOnly")
+            .join("LibraryOnly.dll")
+            .exists());
+        assert!(
+            !mods_path.join("LibraryOnly").exists(),
+            "editing membership must not apply the profile"
+        );
     }
 
     #[test]
@@ -2465,7 +2629,12 @@ mod profile_membership_tests {
         fs::create_dir_all(&profiles_path).unwrap();
 
         write_mod(&mods_path, "card_art_editor", "Card Art Editor", "1.0.0");
-        write_mod(&mods_path, "card_art_editor_beta", "Card Art Editor", "2.0.0-beta");
+        write_mod(
+            &mods_path,
+            "card_art_editor_beta",
+            "Card Art Editor",
+            "2.0.0-beta",
+        );
         let mut profile = empty_profile("Stable");
         profile.mods.push(ProfileMod {
             name: "Card Art Editor".into(),
@@ -2505,8 +2674,14 @@ mod profile_membership_tests {
             .unwrap();
         assert_eq!(stable.version, "1.0.0");
         assert_eq!(beta.version, "2.0.0-beta");
-        assert!(stable.profiles.iter().any(|p| p.profile_name == "Stable" && p.included));
-        assert!(beta.profiles.iter().any(|p| p.profile_name == "Stable" && !p.included));
+        assert!(stable
+            .profiles
+            .iter()
+            .any(|p| p.profile_name == "Stable" && p.included));
+        assert!(beta
+            .profiles
+            .iter()
+            .any(|p| p.profile_name == "Stable" && !p.included));
     }
 
     #[test]
@@ -2523,7 +2698,10 @@ mod profile_membership_tests {
         write_mod(&mods_path, "card_art_editor", "Card Art Editor", "1.0.0");
         write_mod(&mods_path, "card_art_editor_v2", "Card Art Editor", "2.0.0");
         let mut profile = empty_profile("Beta");
-        for (folder, version) in [("card_art_editor", "1.0.0"), ("card_art_editor_v2", "2.0.0")] {
+        for (folder, version) in [
+            ("card_art_editor", "1.0.0"),
+            ("card_art_editor_v2", "2.0.0"),
+        ] {
             profile.mods.push(ProfileMod {
                 name: "Card Art Editor".into(),
                 version: version.into(),
@@ -2553,8 +2731,14 @@ mod profile_membership_tests {
         .unwrap();
 
         assert_eq!(updated.mods.len(), 1);
-        assert_eq!(updated.mods[0].folder_name.as_deref(), Some("card_art_editor"));
-        assert!(mods_path.join("card_art_editor_v2").join("card_art_editor_v2.dll").exists());
+        assert_eq!(
+            updated.mods[0].folder_name.as_deref(),
+            Some("card_art_editor")
+        );
+        assert!(mods_path
+            .join("card_art_editor_v2")
+            .join("card_art_editor_v2.dll")
+            .exists());
     }
 
     #[test]
@@ -2615,8 +2799,15 @@ mod profile_membership_tests {
         fs::create_dir_all(&profiles_path).unwrap();
 
         let mut profile = empty_profile("Stable");
-        profile.mods.push(profile_mod_entry("BaseLib", "BaseLib", "1.0.0", true));
-        profile.mods.push(profile_mod_entry("Card Art Editor", "CardArtEditor", "2.0.0", false));
+        profile
+            .mods
+            .push(profile_mod_entry("BaseLib", "BaseLib", "1.0.0", true));
+        profile.mods.push(profile_mod_entry(
+            "Card Art Editor",
+            "CardArtEditor",
+            "2.0.0",
+            false,
+        ));
         save_profile(&profile, &profiles_path).unwrap();
 
         let updated = set_profile_load_order_from_paths(
@@ -2639,7 +2830,11 @@ mod profile_membership_tests {
         .unwrap();
 
         assert_eq!(
-            updated.mods.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(),
+            updated
+                .mods
+                .iter()
+                .map(|m| m.name.as_str())
+                .collect::<Vec<_>>(),
             vec!["Card Art Editor", "BaseLib"]
         );
         assert_eq!(
@@ -2647,7 +2842,10 @@ mod profile_membership_tests {
             Some("https://example.test/CardArtEditor.zip"),
             "reordering must not rebuild or lose share/download metadata"
         );
-        assert_eq!(updated.mods[1].source.as_deref(), Some("github:example/BaseLib"));
+        assert_eq!(
+            updated.mods[1].source.as_deref(),
+            Some("github:example/BaseLib")
+        );
     }
 
     #[test]
@@ -2671,8 +2869,15 @@ mod profile_membership_tests {
         .unwrap();
 
         let mut profile = empty_profile("Stable");
-        profile.mods.push(profile_mod_entry("Card Art Editor", "CardArtEditor", "2.0.0", true));
-        profile.mods.push(profile_mod_entry("BaseLib", "BaseLib", "1.0.0", false));
+        profile.mods.push(profile_mod_entry(
+            "Card Art Editor",
+            "CardArtEditor",
+            "2.0.0",
+            true,
+        ));
+        profile
+            .mods
+            .push(profile_mod_entry("BaseLib", "BaseLib", "1.0.0", false));
         let pinned = vec![ModInfo {
             name: "Pinned Utility".into(),
             version: "1.0.0".into(),
@@ -2692,6 +2897,7 @@ mod profile_membership_tests {
             author: None,
             note: None,
             custom_url: None,
+            tags: vec![],
             display_name: None,
             display_description: None,
         }];
@@ -2715,7 +2921,10 @@ mod profile_membership_tests {
             fs::read_dir(tmp.path())
                 .unwrap()
                 .flatten()
-                .any(|entry| entry.file_name().to_string_lossy().starts_with("settings.save.sts2mm-bak")),
+                .any(|entry| entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("settings.save.sts2mm-bak")),
             "settings.save should be backed up before the manager rewrites it"
         );
     }
@@ -2754,7 +2963,10 @@ mod profile_membership_tests {
             fs::read_dir(tmp.path())
                 .unwrap()
                 .flatten()
-                .any(|entry| entry.file_name().to_string_lossy().starts_with("settings.save.sts2mm-bak")),
+                .any(|entry| entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("settings.save.sts2mm-bak")),
             "the backup should be retained for manual inspection"
         );
     }
@@ -2799,6 +3011,7 @@ mod pinned_download_tests {
             author: None,
             note: None,
             custom_url: None,
+            tags: vec![],
             display_name: None,
             display_description: None,
         }
@@ -2891,7 +3104,8 @@ mod modpack_flow_tests {
     ) -> Vec<u8> {
         let cursor = std::io::Cursor::new(Vec::new());
         let mut zw = zip::ZipWriter::new(cursor);
-        let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        let opts =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
         let manifest = format!(
             r#"{{
   "id": "{mod_id}",
@@ -2903,14 +3117,19 @@ mod modpack_flow_tests {
   "dependencies": []
 }}"#
         );
-        zw.start_file(format!("{folder}/{folder}.json"), opts).unwrap();
+        zw.start_file(format!("{folder}/{folder}.json"), opts)
+            .unwrap();
         zw.write_all(manifest.as_bytes()).unwrap();
-        zw.start_file(format!("{folder}/{folder}.dll"), opts).unwrap();
+        zw.start_file(format!("{folder}/{folder}.dll"), opts)
+            .unwrap();
         zw.write_all(marker.as_bytes()).unwrap();
-        zw.start_file(format!("{folder}/{folder}.pck"), opts).unwrap();
+        zw.start_file(format!("{folder}/{folder}.pck"), opts)
+            .unwrap();
         zw.write_all(format!("pck:{marker}").as_bytes()).unwrap();
-        zw.start_file(format!("{folder}/config/settings.cfg"), opts).unwrap();
-        zw.write_all(format!("setting={marker}").as_bytes()).unwrap();
+        zw.start_file(format!("{folder}/config/settings.cfg"), opts)
+            .unwrap();
+        zw.write_all(format!("setting={marker}").as_bytes())
+            .unwrap();
         zw.finish().unwrap().into_inner()
     }
 
@@ -3010,7 +3229,11 @@ mod modpack_flow_tests {
         let dll = root.join(folder).join(format!("{folder}.dll"));
         let pck = root.join(folder).join(format!("{folder}.pck"));
         let cfg = root.join(folder).join("config").join("settings.cfg");
-        assert_eq!(fs::read_to_string(&dll).unwrap(), marker, "wrong DLL marker for {folder}");
+        assert_eq!(
+            fs::read_to_string(&dll).unwrap(),
+            marker,
+            "wrong DLL marker for {folder}"
+        );
         assert_eq!(
             fs::read_to_string(&pck).unwrap(),
             format!("pck:{marker}"),
@@ -3067,20 +3290,108 @@ mod modpack_flow_tests {
             "Pack A",
             &paths.profiles,
             vec![
-                publish_mod(&server, "/a/shared.zip", "SharedCore", "SharedCore", "Shared Core", "1.0.0", "shared-from-a", true, Some("github:qa/shared")).await,
-                publish_mod(&server, "/a/alpha.zip", "AlphaOnly", "AlphaOnly", "Alpha Only", "1.0.0", "alpha", true, None).await,
-                publish_mod(&server, "/a/disabled.zip", "AlphaDisabled", "AlphaDisabled", "Alpha Disabled", "1.0.0", "alpha-disabled", false, None).await,
-                publish_mod(&server, "/a/same.zip", "SameInBoth", "SameInBoth", "Same In Both", "1.0.0", "same", true, Some("github:qa/same")).await,
+                publish_mod(
+                    &server,
+                    "/a/shared.zip",
+                    "SharedCore",
+                    "SharedCore",
+                    "Shared Core",
+                    "1.0.0",
+                    "shared-from-a",
+                    true,
+                    Some("github:qa/shared"),
+                )
+                .await,
+                publish_mod(
+                    &server,
+                    "/a/alpha.zip",
+                    "AlphaOnly",
+                    "AlphaOnly",
+                    "Alpha Only",
+                    "1.0.0",
+                    "alpha",
+                    true,
+                    None,
+                )
+                .await,
+                publish_mod(
+                    &server,
+                    "/a/disabled.zip",
+                    "AlphaDisabled",
+                    "AlphaDisabled",
+                    "Alpha Disabled",
+                    "1.0.0",
+                    "alpha-disabled",
+                    false,
+                    None,
+                )
+                .await,
+                publish_mod(
+                    &server,
+                    "/a/same.zip",
+                    "SameInBoth",
+                    "SameInBoth",
+                    "Same In Both",
+                    "1.0.0",
+                    "same",
+                    true,
+                    Some("github:qa/same"),
+                )
+                .await,
             ],
         );
         save_pack(
             "Pack B",
             &paths.profiles,
             vec![
-                publish_mod(&server, "/b/shared.zip", "SharedCore", "SharedCore", "Shared Core", "1.0.0", "shared-from-b", true, Some("github:qa/shared")).await,
-                publish_mod(&server, "/b/beta.zip", "BetaOnly", "BetaOnly", "Beta Only", "1.0.0", "beta", true, None).await,
-                publish_mod(&server, "/b/disabled.zip", "BetaDisabled", "BetaDisabled", "Beta Disabled", "1.0.0", "beta-disabled", false, None).await,
-                publish_mod(&server, "/b/same.zip", "SameInBoth", "SameInBoth", "Same In Both", "1.0.0", "same", true, Some("github:qa/same")).await,
+                publish_mod(
+                    &server,
+                    "/b/shared.zip",
+                    "SharedCore",
+                    "SharedCore",
+                    "Shared Core",
+                    "1.0.0",
+                    "shared-from-b",
+                    true,
+                    Some("github:qa/shared"),
+                )
+                .await,
+                publish_mod(
+                    &server,
+                    "/b/beta.zip",
+                    "BetaOnly",
+                    "BetaOnly",
+                    "Beta Only",
+                    "1.0.0",
+                    "beta",
+                    true,
+                    None,
+                )
+                .await,
+                publish_mod(
+                    &server,
+                    "/b/disabled.zip",
+                    "BetaDisabled",
+                    "BetaDisabled",
+                    "Beta Disabled",
+                    "1.0.0",
+                    "beta-disabled",
+                    false,
+                    None,
+                )
+                .await,
+                publish_mod(
+                    &server,
+                    "/b/same.zip",
+                    "SameInBoth",
+                    "SameInBoth",
+                    "Same In Both",
+                    "1.0.0",
+                    "same",
+                    true,
+                    Some("github:qa/same"),
+                )
+                .await,
             ],
         );
 
@@ -3096,8 +3407,16 @@ mod modpack_flow_tests {
         )
         .await
         .unwrap();
-        assert!(repair_a.missing_mods.is_empty(), "repair A missing mods: {:?}", repair_a.missing_mods);
-        assert!(repair_a.failed_downloads.is_empty(), "repair A failed downloads: {:?}", repair_a.failed_downloads);
+        assert!(
+            repair_a.missing_mods.is_empty(),
+            "repair A missing mods: {:?}",
+            repair_a.missing_mods
+        );
+        assert!(
+            repair_a.failed_downloads.is_empty(),
+            "repair A failed downloads: {:?}",
+            repair_a.failed_downloads
+        );
         assert_enabled(&paths, &["SharedCore", "AlphaOnly", "SameInBoth"]);
         assert_disabled_contains(&paths, &["AlphaDisabled"]);
         assert_marker(&paths.mods, "SharedCore", "shared-from-a");
@@ -3114,8 +3433,16 @@ mod modpack_flow_tests {
         )
         .await
         .unwrap();
-        assert!(switch_b.missing_mods.is_empty(), "switch B missing mods: {:?}", switch_b.missing_mods);
-        assert!(switch_b.failed_downloads.is_empty(), "switch B failed downloads: {:?}", switch_b.failed_downloads);
+        assert!(
+            switch_b.missing_mods.is_empty(),
+            "switch B missing mods: {:?}",
+            switch_b.missing_mods
+        );
+        assert!(
+            switch_b.failed_downloads.is_empty(),
+            "switch B failed downloads: {:?}",
+            switch_b.failed_downloads
+        );
         assert_enabled(&paths, &["SharedCore", "BetaOnly", "SameInBoth"]);
         assert_disabled_contains(&paths, &["AlphaOnly", "AlphaDisabled", "BetaDisabled"]);
         assert_marker(&paths.mods, "SharedCore", "shared-from-b");
@@ -3132,8 +3459,16 @@ mod modpack_flow_tests {
         )
         .await
         .unwrap();
-        assert!(switch_a.missing_mods.is_empty(), "switch A missing mods: {:?}", switch_a.missing_mods);
-        assert!(switch_a.failed_downloads.is_empty(), "switch A failed downloads: {:?}", switch_a.failed_downloads);
+        assert!(
+            switch_a.missing_mods.is_empty(),
+            "switch A missing mods: {:?}",
+            switch_a.missing_mods
+        );
+        assert!(
+            switch_a.failed_downloads.is_empty(),
+            "switch A failed downloads: {:?}",
+            switch_a.failed_downloads
+        );
         assert_enabled(&paths, &["SharedCore", "AlphaOnly", "SameInBoth"]);
         assert_disabled_contains(&paths, &["BetaOnly", "BetaDisabled", "AlphaDisabled"]);
         assert_marker(&paths.mods, "SharedCore", "shared-from-a");
@@ -3151,10 +3486,21 @@ mod modpack_flow_tests {
         )
         .await
         .unwrap();
-        assert!(repair_b.missing_mods.is_empty(), "repair B missing mods: {:?}", repair_b.missing_mods);
-        assert!(repair_b.failed_downloads.is_empty(), "repair B failed downloads: {:?}", repair_b.failed_downloads);
+        assert!(
+            repair_b.missing_mods.is_empty(),
+            "repair B missing mods: {:?}",
+            repair_b.missing_mods
+        );
+        assert!(
+            repair_b.failed_downloads.is_empty(),
+            "repair B failed downloads: {:?}",
+            repair_b.failed_downloads
+        );
         assert_enabled(&paths, &["SharedCore", "BetaOnly", "SameInBoth"]);
-        assert_eq!(folder_names(&paths.disabled), HashSet::from(["BetaDisabled".to_string()]));
+        assert_eq!(
+            folder_names(&paths.disabled),
+            HashSet::from(["BetaDisabled".to_string()])
+        );
         assert_marker(&paths.mods, "SharedCore", "shared-from-b");
         assert_no_root_artifacts(&paths);
     }
@@ -3167,14 +3513,49 @@ mod modpack_flow_tests {
         save_pack(
             "Pack A",
             &paths.profiles,
-            vec![publish_mod(&server, "/pin/a.zip", "PinnedShared", "PinnedShared", "Pinned Shared", "1.0.0", "pinned-a", true, None).await],
+            vec![
+                publish_mod(
+                    &server,
+                    "/pin/a.zip",
+                    "PinnedShared",
+                    "PinnedShared",
+                    "Pinned Shared",
+                    "1.0.0",
+                    "pinned-a",
+                    true,
+                    None,
+                )
+                .await,
+            ],
         );
         save_pack(
             "Pack B",
             &paths.profiles,
             vec![
-                publish_mod(&server, "/pin/b.zip", "PinnedShared", "PinnedShared", "Pinned Shared", "1.0.0", "pinned-b", true, None).await,
-                publish_mod(&server, "/pin/beta.zip", "PinnedBeta", "PinnedBeta", "Pinned Beta", "1.0.0", "pinned-beta", true, None).await,
+                publish_mod(
+                    &server,
+                    "/pin/b.zip",
+                    "PinnedShared",
+                    "PinnedShared",
+                    "Pinned Shared",
+                    "1.0.0",
+                    "pinned-b",
+                    true,
+                    None,
+                )
+                .await,
+                publish_mod(
+                    &server,
+                    "/pin/beta.zip",
+                    "PinnedBeta",
+                    "PinnedBeta",
+                    "Pinned Beta",
+                    "1.0.0",
+                    "pinned-beta",
+                    true,
+                    None,
+                )
+                .await,
             ],
         );
         crate::mod_sources::save_sources(
@@ -3232,7 +3613,11 @@ mod modpack_flow_tests {
         )
         .await
         .unwrap();
-        assert!(repair_b.missing_mods.is_empty(), "repair B missing mods: {:?}", repair_b.missing_mods);
+        assert!(
+            repair_b.missing_mods.is_empty(),
+            "repair B missing mods: {:?}",
+            repair_b.missing_mods
+        );
         assert_enabled(&paths, &["PinnedShared", "PinnedBeta"]);
         assert_marker(&paths.mods, "PinnedShared", "pinned-b");
     }
@@ -3245,7 +3630,20 @@ mod modpack_flow_tests {
         save_pack(
             "Clean Pack",
             &paths.profiles,
-            vec![publish_mod(&server, "/clean/main.zip", "CleanMain", "CleanMain", "Clean Main", "1.0.0", "clean", true, None).await],
+            vec![
+                publish_mod(
+                    &server,
+                    "/clean/main.zip",
+                    "CleanMain",
+                    "CleanMain",
+                    "Clean Main",
+                    "1.0.0",
+                    "clean",
+                    true,
+                    None,
+                )
+                .await,
+            ],
         );
         install_loose_mod(&paths.mods, "PinnedExtra", "pinned-extra");
         install_loose_mod(&paths.mods, "UnpinnedExtra", "unpinned-extra");
@@ -3276,16 +3674,26 @@ mod modpack_flow_tests {
         .unwrap();
 
         assert!(
-            repair.disabled_orphans.contains(&"UnpinnedExtra".to_string()),
+            repair
+                .disabled_orphans
+                .contains(&"UnpinnedExtra".to_string()),
             "repair should report ordinary orphan mods that were moved out of the active folder"
         );
         assert!(
             !repair.disabled_orphans.contains(&"PinnedExtra".to_string()),
             "repair should not delete pinned user-owned mods"
         );
-        assert!(paths.mods.join("PinnedExtra").join("PinnedExtra.dll").exists());
+        assert!(paths
+            .mods
+            .join("PinnedExtra")
+            .join("PinnedExtra.dll")
+            .exists());
         assert!(!paths.mods.join("UnpinnedExtra").exists());
-        assert!(paths.disabled.join("UnpinnedExtra").join("UnpinnedExtra.dll").exists());
+        assert!(paths
+            .disabled
+            .join("UnpinnedExtra")
+            .join("UnpinnedExtra.dll")
+            .exists());
     }
 
     #[test]
@@ -3300,6 +3708,9 @@ mod modpack_flow_tests {
             !drift.added.contains(&"LibraryOnly".to_string()),
             "disabled library mods should not count as active profile drift"
         );
-        assert!(!drift.has_drift, "disabled library extras should not keep the Repair banner alive");
+        assert!(
+            !drift.has_drift,
+            "disabled library extras should not keep the Repair banner alive"
+        );
     }
 }

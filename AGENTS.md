@@ -35,6 +35,31 @@ Supported languages must be translated before a release can go out. The
 release script runs `npm run qa:i18n` outside `SKIP_QA`, so missing keys or
 English fallback prose block release even during emergency hotfixes.
 
+## Scalability is a feature requirement
+
+Design mod-management flows for large local libraries and many profiles, not
+just the maintainer's current test set. Users may have hundreds of installed
+mods, several versions of the same mod, and many saved profiles.
+
+When adding or changing a feature that lists, sorts, toggles, publishes, or
+syncs mods:
+
+1. Treat the local Mod Library as the durable container of installed files.
+   Profiles should reference the mods they need; publishing a profile must not
+   silently re-add every mod found on disk.
+2. Keep render work bounded. Prefer search, sorting, pagination, windowing, or
+   other incremental rendering over dumping every mod/profile cross-product
+   into the DOM.
+3. Preserve scroll/focus state when toggling membership or checkboxes in long
+   lists. Do not refresh the whole view unless the data truly changed outside
+   the current interaction.
+4. Add tests with large counts (at least 100 mods when practical) for new list
+   or matrix UI so performance and layout assumptions are visible to future
+   agents.
+5. Name UI states precisely. Distinguish disk storage state (active in
+   `mods/` vs stored in `mods_disabled/`) from profile membership state (in
+   profile, not in profile, disabled in profile).
+
 ### Anti-patterns to reject
 
 - Hardcoded English in JSX (`<button>Save</button>`).

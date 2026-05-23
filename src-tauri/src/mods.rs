@@ -60,6 +60,10 @@ pub struct ModInfo {
     /// Populated by `mod_sources::enrich_mods_with_sources`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_url: Option<String>,
+    /// Manager-only organization tags/categories from mod_sources.json.
+    /// These do not affect mod identity, updates, or profile membership.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
     /// User-facing display name override from mod_sources.json. This does
     /// not replace `name`, because `name` is still part of the stable mod
     /// identity used by profiles, updates, and file operations.
@@ -132,7 +136,12 @@ struct RawManifest {
     /// Additional fields that might contain URLs
     #[serde(alias = "Homepage", alias = "homepage")]
     homepage: Option<String>,
-    #[serde(alias = "Repository", alias = "repository", alias = "Repo", alias = "repo")]
+    #[serde(
+        alias = "Repository",
+        alias = "repository",
+        alias = "Repo",
+        alias = "repo"
+    )]
     repository: Option<String>,
     #[serde(alias = "Url", alias = "url", alias = "URL")]
     url: Option<String>,
@@ -175,10 +184,13 @@ fn hash_file(path: &Path) -> Option<String> {
 
 /// Calculate total size of files in a list relative to a base directory.
 fn calculate_mod_size(base_dir: &Path, files: &[String]) -> u64 {
-    files.iter().map(|f| {
-        let path = base_dir.join(f);
-        path.metadata().map(|m| m.len()).unwrap_or(0)
-    }).sum()
+    files
+        .iter()
+        .map(|f| {
+            let path = base_dir.join(f);
+            path.metadata().map(|m| m.len()).unwrap_or(0)
+        })
+        .sum()
 }
 
 /// Collect all files belonging to a mod entry (the .json and co-located .dll/.pck files).
@@ -313,7 +325,8 @@ fn parse_manifest(manifest_path: &Path, base_dir: &Path, enabled: bool) -> Optio
         Err(e) => {
             log::warn!(
                 "parse_manifest: could not read '{}': {}",
-                manifest_path.display(), e,
+                manifest_path.display(),
+                e,
             );
             return None;
         }
@@ -331,7 +344,10 @@ fn parse_manifest(manifest_path: &Path, base_dir: &Path, enabled: bool) -> Optio
                         "parse_manifest: strict deserialize failed for '{}': {} — \
                          recovered name='{}' version='{}' via lenient fallback. \
                          File this as a schema drift report with the manifest contents.",
-                        manifest_path.display(), e, partial.name, partial.version,
+                        manifest_path.display(),
+                        e,
+                        partial.name,
+                        partial.version,
                     );
                     partial
                 }
@@ -341,7 +357,8 @@ fn parse_manifest(manifest_path: &Path, base_dir: &Path, enabled: bool) -> Optio
                          lenient fallback could not extract version/name either. \
                          The mod will fall through to the DLL-only path and show \
                          with version 'unknown'.",
-                        manifest_path.display(), e,
+                        manifest_path.display(),
+                        e,
                     );
                     return None;
                 }
@@ -362,10 +379,13 @@ fn parse_manifest(manifest_path: &Path, base_dir: &Path, enabled: bool) -> Optio
     // Determine the folder name on disk
     let folder_name = if manifest_path.parent() == Some(base_dir) {
         // Top-level manifest: folder_name is the json stem
-        manifest_path.file_stem().map(|s| s.to_string_lossy().to_string())
+        manifest_path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
     } else {
         // Subdirectory manifest: folder_name is the immediate parent dir name
-        manifest_path.parent()
+        manifest_path
+            .parent()
             .and_then(|p| p.file_name())
             .map(|n| n.to_string_lossy().to_string())
     };
@@ -420,9 +440,7 @@ fn parse_manifest(manifest_path: &Path, base_dir: &Path, enabled: bool) -> Optio
             let url_str = cap.as_str();
             if github_url.is_none() && url_str.contains("github.com/") {
                 // Clean up trailing slashes, .git suffix
-                let clean = url_str
-                    .trim_end_matches('/')
-                    .trim_end_matches(".git");
+                let clean = url_str.trim_end_matches('/').trim_end_matches(".git");
                 github_url = Some(clean.to_string());
             }
             if nexus_url.is_none() && url_str.contains("nexusmods.com/") {
@@ -460,6 +478,7 @@ fn parse_manifest(manifest_path: &Path, base_dir: &Path, enabled: bool) -> Optio
         author: raw.author,
         note: None,
         custom_url: None,
+        tags: vec![],
         display_name: None,
         display_description: None,
     })
@@ -476,7 +495,8 @@ fn dll_only_mod(dll_path: &Path, base_dir: &Path, enabled: bool) -> ModInfo {
     let folder_name = if dll_path.parent() == Some(base_dir) {
         Some(name.clone())
     } else {
-        dll_path.parent()
+        dll_path
+            .parent()
             .and_then(|p| p.file_name())
             .map(|n| n.to_string_lossy().to_string())
     };
@@ -484,7 +504,11 @@ fn dll_only_mod(dll_path: &Path, base_dir: &Path, enabled: bool) -> ModInfo {
     let file_name = if let Ok(rel) = dll_path.strip_prefix(base_dir) {
         rel.to_string_lossy().to_string()
     } else {
-        dll_path.file_name().unwrap_or_default().to_string_lossy().to_string()
+        dll_path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string()
     };
 
     let size_bytes = dll_path.metadata().map(|m| m.len()).unwrap_or(0);
@@ -517,6 +541,7 @@ fn dll_only_mod(dll_path: &Path, base_dir: &Path, enabled: bool) -> ModInfo {
         author: None,
         note: None,
         custom_url: None,
+        tags: vec![],
         display_name: None,
         display_description: None,
     }
@@ -569,7 +594,8 @@ fn try_load_mod_from(
                     found_names.insert(normalize_name(folder));
                 }
                 for f in &info.files {
-                    if let Some(stem) = std::path::Path::new(f).file_stem().and_then(|s| s.to_str()) {
+                    if let Some(stem) = std::path::Path::new(f).file_stem().and_then(|s| s.to_str())
+                    {
                         found_names.insert(normalize_name(stem));
                     }
                 }
@@ -612,8 +638,12 @@ pub fn scan_disabled_mods(disabled_path: &Path) -> Vec<ModInfo> {
 fn mod_quality(info: &ModInfo) -> u32 {
     let mut score = 0;
     let v = info.version.trim();
-    if !v.is_empty() && v != "unknown" && v != "0.0.0" { score += 100; }
-    if !info.description.trim().is_empty() { score += 20; }
+    if !v.is_empty() && v != "unknown" && v != "0.0.0" {
+        score += 100;
+    }
+    if !info.description.trim().is_empty() {
+        score += 20;
+    }
     score += info.files.len() as u32;
     score
 }
@@ -706,7 +736,9 @@ fn scan_mods_inner(dir: &Path, enabled: bool) -> Vec<ModInfo> {
                         found_names.insert(normalize_name(stem));
                     }
                     for f in &info.files {
-                        if let Some(stem) = std::path::Path::new(f).file_stem().and_then(|s| s.to_str()) {
+                        if let Some(stem) =
+                            std::path::Path::new(f).file_stem().and_then(|s| s.to_str())
+                        {
                             found_names.insert(normalize_name(stem));
                         }
                     }
@@ -884,7 +916,10 @@ fn cleanup_empty_parent_dirs(base: &Path, file_rels: &[String]) {
 
     for file_rel in file_rels {
         let Some(rel_path) = safe_mod_relative_path(file_rel) else {
-            log::warn!("Skipping unsafe path '{}' during parent-dir cleanup", file_rel);
+            log::warn!(
+                "Skipping unsafe path '{}' during parent-dir cleanup",
+                file_rel
+            );
             continue;
         };
         let mut parent = rel_path.parent();
@@ -900,7 +935,11 @@ fn cleanup_empty_parent_dirs(base: &Path, file_rels: &[String]) {
     let mut parent_dirs: Vec<PathBuf> = parent_dirs.into_iter().collect();
     parent_dirs.sort_by_key(|path| std::cmp::Reverse(path.components().count()));
     for dir in parent_dirs {
-        if dir.is_dir() && fs::read_dir(&dir).map(|mut d| d.next().is_none()).unwrap_or(false) {
+        if dir.is_dir()
+            && fs::read_dir(&dir)
+                .map(|mut d| d.next().is_none())
+                .unwrap_or(false)
+        {
             let _ = fs::remove_dir(&dir);
         }
     }
@@ -1038,7 +1077,12 @@ pub fn delete_mod_files_by_info(mod_info: &ModInfo, base_path: &Path) {
 
     cleanup_empty_parent_dirs(base_path, &mod_info.files);
 
-    log::info!("Deleted {} files for mod '{}' from {}", mod_info.files.len(), mod_info.name, base_path.display());
+    log::info!(
+        "Deleted {} files for mod '{}' from {}",
+        mod_info.files.len(),
+        mod_info.name,
+        base_path.display()
+    );
 }
 
 // ── Local Mod Version Cache ────────────────────────────────────────────────
@@ -1046,7 +1090,13 @@ pub fn delete_mod_files_by_info(mod_info: &ModInfo, base_path: &Path) {
 /// Sanitize a string for use in filenames.
 fn sanitize_for_filename(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -1111,7 +1161,9 @@ pub fn path_is_inside(path: &Path, root: &Path) -> bool {
 fn mod_cache_path(cache_path: &Path, mod_name: &str, version: &str) -> PathBuf {
     let safe_name = sanitize_for_filename(mod_name);
     let safe_ver = sanitize_for_filename(version.trim_start_matches('v'));
-    cache_path.join("mod_versions").join(format!("{}_{}.zip", safe_name, safe_ver))
+    cache_path
+        .join("mod_versions")
+        .join(format!("{}_{}.zip", safe_name, safe_ver))
 }
 
 /// Cache a mod's current files to a local versioned zip.
@@ -1163,7 +1215,8 @@ pub fn cache_mod_version(
             if let Ok(entries) = fs::read_dir(&file_path) {
                 for entry in entries.flatten() {
                     if entry.path().is_file() {
-                        let entry_rel = format!("{}/{}", normalized, entry.file_name().to_string_lossy());
+                        let entry_rel =
+                            format!("{}/{}", normalized, entry.file_name().to_string_lossy());
                         if zip_writer.start_file(&entry_rel, options).is_err() {
                             continue;
                         }
@@ -1178,11 +1231,19 @@ pub fn cache_mod_version(
 
     match zip_writer.finish() {
         Ok(_) => {
-            log::info!("Cached mod '{}' v{} to local cache", mod_info.name, mod_info.version);
+            log::info!(
+                "Cached mod '{}' v{} to local cache",
+                mod_info.name,
+                mod_info.version
+            );
             Some(dest)
         }
         Err(e) => {
-            log::warn!("Failed to finalize cache zip for '{}': {}", mod_info.name, e);
+            log::warn!(
+                "Failed to finalize cache zip for '{}': {}",
+                mod_info.name,
+                e
+            );
             let _ = fs::remove_file(&dest);
             None
         }
@@ -1192,7 +1253,11 @@ pub fn cache_mod_version(
 /// Check if a cached version of a mod exists locally.
 pub fn get_cached_mod_path(cache_path: &Path, mod_name: &str, version: &str) -> Option<PathBuf> {
     let path = mod_cache_path(cache_path, mod_name, version);
-    if path.exists() { Some(path) } else { None }
+    if path.exists() {
+        Some(path)
+    } else {
+        None
+    }
 }
 
 /// Restore a mod from the local version cache by extracting its zip to mods_path.
@@ -1215,7 +1280,8 @@ pub fn restore_mod_from_cache(
         .map_err(|e| AppError::Other(format!("Invalid cache zip for '{}': {}", mod_name, e)))?;
 
     for i in 0..archive.len() {
-        let mut entry = archive.by_index(i)
+        let mut entry = archive
+            .by_index(i)
             .map_err(|e| AppError::Other(e.to_string()))?;
         let Some(outpath) = entry.enclosed_name().map(|p| mods_path.join(p)) else {
             continue;
@@ -1286,19 +1352,25 @@ fn peek_manifest_name(archive: &mut zip::ZipArchive<fs::File>) -> Option<String>
             if std::io::Read::read_to_string(&mut entry, &mut buf).is_ok() {
                 if let Ok(val) = serde_json::from_str::<serde_json::Value>(strip_utf8_bom(&buf)) {
                     // Prefer Id (game uses this for dependency resolution), then PckName, then Name
-                    if let Some(id) = val.get("Id").or_else(|| val.get("id"))
+                    if let Some(id) = val
+                        .get("Id")
+                        .or_else(|| val.get("id"))
                         .and_then(|v| v.as_str())
                         .filter(|s| !s.is_empty())
                     {
                         return Some(id.to_string());
                     }
-                    if let Some(pck) = val.get("PckName").or_else(|| val.get("pck_name"))
+                    if let Some(pck) = val
+                        .get("PckName")
+                        .or_else(|| val.get("pck_name"))
                         .and_then(|v| v.as_str())
                         .filter(|s| !s.is_empty())
                     {
                         return Some(pck.to_string());
                     }
-                    if let Some(name) = val.get("Name").or_else(|| val.get("name"))
+                    if let Some(name) = val
+                        .get("Name")
+                        .or_else(|| val.get("name"))
                         .and_then(|v| v.as_str())
                         .filter(|s| !s.is_empty())
                     {
@@ -1430,12 +1502,17 @@ pub fn read_user_edited_configs(
             Err(e) => {
                 log::error!(
                     "Skipping preserve of '{}' under {:?}: read failed: {}",
-                    rel, mod_folder, e
+                    rel,
+                    mod_folder,
+                    e
                 );
                 continue;
             }
         };
-        preserved.push(PreservedConfig { rel_path: rel, bytes });
+        preserved.push(PreservedConfig {
+            rel_path: rel,
+            bytes,
+        });
     }
     preserved
 }
@@ -1443,17 +1520,18 @@ pub fn read_user_edited_configs(
 /// Write every preserved config back into `mod_folder`, creating parent
 /// directories as needed. Each restore overwrites whatever the new
 /// install put at that path — which is exactly the point.
-pub fn restore_preserved_configs(
-    mod_folder: &Path,
-    preserved: &[PreservedConfig],
-) -> Result<()> {
+pub fn restore_preserved_configs(mod_folder: &Path, preserved: &[PreservedConfig]) -> Result<()> {
     for p in preserved {
         let dest = mod_folder.join(&p.rel_path);
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent).map_err(AppError::from)?;
         }
         fs::write(&dest, &p.bytes).map_err(AppError::from)?;
-        log::info!("Restored user-edited config '{}' under {:?}", p.rel_path, mod_folder);
+        log::info!(
+            "Restored user-edited config '{}' under {:?}",
+            p.rel_path,
+            mod_folder
+        );
     }
     Ok(())
 }
@@ -1523,7 +1601,9 @@ pub fn finalize_update_with_preserved_configs(
             log::error!(
                 "Failed to restore preserved configs for '{}' after update: {}. \
                  User edits to {:?} are LOST.",
-                new_info.name, e, preserved_names,
+                new_info.name,
+                e,
+                preserved_names,
             );
             return Err(e);
         }
@@ -1556,12 +1636,7 @@ pub fn snapshot_after_fresh_install(info: &ModInfo, mods_path: &Path, config_pat
     if snapshot.is_empty() {
         return; // mod ships no tracked configs; skip the empty write
     }
-    crate::mod_sources::save_config_snapshot(
-        Some(&folder_name),
-        &info.name,
-        snapshot,
-        config_path,
-    );
+    crate::mod_sources::save_config_snapshot(Some(&folder_name), &info.name, snapshot, config_path);
 }
 
 /// Install a mod from any supported archive format into the mods directory.
@@ -1608,7 +1683,10 @@ fn install_mod_from_archive_unchecked(archive_path: &Path, mods_path: &Path) -> 
         "zip" => install_mod_from_zip(archive_path, mods_path),
         "7z" => {
             let staging = tempfile::tempdir().map_err(|e| {
-                AppError::Other(format!("Could not create temp staging dir for 7z extract: {}", e))
+                AppError::Other(format!(
+                    "Could not create temp staging dir for 7z extract: {}",
+                    e
+                ))
             })?;
             extract_7z_to_dir(archive_path, staging.path())?;
             let repack_zip = staging.path().join("__sts2mm_repack.zip");
@@ -1617,7 +1695,10 @@ fn install_mod_from_archive_unchecked(archive_path: &Path, mods_path: &Path) -> 
         }
         "rar" => {
             let staging = tempfile::tempdir().map_err(|e| {
-                AppError::Other(format!("Could not create temp staging dir for rar extract: {}", e))
+                AppError::Other(format!(
+                    "Could not create temp staging dir for rar extract: {}",
+                    e
+                ))
             })?;
             extract_rar_to_dir(archive_path, staging.path())?;
             let repack_zip = staging.path().join("__sts2mm_repack.zip");
@@ -1639,7 +1720,11 @@ fn normalized_installed_rel(path: &str) -> String {
 
 fn mod_identity_intersects(a: &ModInfo, b: &ModInfo) -> bool {
     let mut a_keys = std::collections::HashSet::new();
-    for candidate in [a.mod_id.as_deref(), a.folder_name.as_deref(), Some(a.name.as_str())] {
+    for candidate in [
+        a.mod_id.as_deref(),
+        a.folder_name.as_deref(),
+        Some(a.name.as_str()),
+    ] {
         if let Some(value) = candidate {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
@@ -1648,12 +1733,16 @@ fn mod_identity_intersects(a: &ModInfo, b: &ModInfo) -> bool {
         }
     }
 
-    [b.mod_id.as_deref(), b.folder_name.as_deref(), Some(b.name.as_str())]
-        .into_iter()
-        .flatten()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .any(|value| a_keys.contains(&value.to_lowercase()))
+    [
+        b.mod_id.as_deref(),
+        b.folder_name.as_deref(),
+        Some(b.name.as_str()),
+    ]
+    .into_iter()
+    .flatten()
+    .map(str::trim)
+    .filter(|value| !value.is_empty())
+    .any(|value| a_keys.contains(&value.to_lowercase()))
 }
 
 fn installed_info_is_visible_after_extract(info: &ModInfo, mods_path: &Path) -> bool {
@@ -1685,27 +1774,41 @@ fn extract_7z_to_dir(seven_z_path: &Path, dest_dir: &Path) -> Result<()> {
 /// (`__MACOSX/`, `._*`) the same way the zip path does — both formats
 /// pick up these turds when archives get repackaged on macOS.
 fn extract_rar_to_dir(rar_path: &Path, dest_dir: &Path) -> Result<()> {
-    let mut archive = unrar::Archive::new(rar_path).open_for_processing()
+    let mut archive = unrar::Archive::new(rar_path)
+        .open_for_processing()
         .map_err(|e| AppError::Other(format!("Failed to open rar archive: {}", e)))?;
-    while let Some(header) = archive.read_header()
+    while let Some(header) = archive
+        .read_header()
         .map_err(|e| AppError::Other(format!("Failed to read rar header: {}", e)))?
     {
         let entry_name = header.entry().filename.to_string_lossy().to_string();
-        if entry_name.starts_with("__MACOSX") || entry_name.contains("/._") || entry_name.starts_with("._") {
-            archive = header.skip()
-                .map_err(|e| AppError::Other(format!("Failed to skip rar entry '{}': {}", entry_name, e)))?;
+        if entry_name.starts_with("__MACOSX")
+            || entry_name.contains("/._")
+            || entry_name.starts_with("._")
+        {
+            archive = header.skip().map_err(|e| {
+                AppError::Other(format!("Failed to skip rar entry '{}': {}", entry_name, e))
+            })?;
             continue;
         }
         if header.entry().is_directory() {
-            archive = header.skip()
-                .map_err(|e| AppError::Other(format!("Failed to skip rar directory '{}': {}", entry_name, e)))?;
+            archive = header.skip().map_err(|e| {
+                AppError::Other(format!(
+                    "Failed to skip rar directory '{}': {}",
+                    entry_name, e
+                ))
+            })?;
             continue;
         }
         // Use unrar's destination-aware extract so the C library handles
         // path traversal sanitization. install_mod_from_zip's enclosed_name
         // gate then re-checks at the final destination boundary.
-        archive = header.extract_with_base(dest_dir)
-            .map_err(|e| AppError::Other(format!("Failed to extract rar entry '{}': {}", entry_name, e)))?;
+        archive = header.extract_with_base(dest_dir).map_err(|e| {
+            AppError::Other(format!(
+                "Failed to extract rar entry '{}': {}",
+                entry_name, e
+            ))
+        })?;
     }
     Ok(())
 }
@@ -1719,11 +1822,15 @@ fn extract_rar_to_dir(rar_path: &Path, dest_dir: &Path) -> Result<()> {
 /// repack doesn't try to include the partially-written zip in itself —
 /// would otherwise truncate to zero on the first read pass.
 fn repack_dir_as_zip(src_dir: &Path, dest_zip: &Path) -> Result<()> {
-    let dest_file = fs::File::create(dest_zip)
-        .map_err(|e| AppError::Other(format!("Could not create repack zip at {:?}: {}", dest_zip, e)))?;
+    let dest_file = fs::File::create(dest_zip).map_err(|e| {
+        AppError::Other(format!(
+            "Could not create repack zip at {:?}: {}",
+            dest_zip, e
+        ))
+    })?;
     let mut writer = zip::ZipWriter::new(dest_file);
-    let opts: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Stored);
+    let opts: zip::write::SimpleFileOptions =
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
     let dest_name = dest_zip.file_name().unwrap_or_default().to_os_string();
 
     for entry in WalkDir::new(src_dir).into_iter().flatten() {
@@ -1741,9 +1848,9 @@ fn repack_dir_as_zip(src_dir: &Path, dest_zip: &Path) -> Result<()> {
         if rel.is_empty() {
             continue;
         }
-        writer
-            .start_file(&rel, opts)
-            .map_err(|e| AppError::Other(format!("Repack: start_file failed for {}: {}", rel, e)))?;
+        writer.start_file(&rel, opts).map_err(|e| {
+            AppError::Other(format!("Repack: start_file failed for {}: {}", rel, e))
+        })?;
         let bytes = fs::read(path)
             .map_err(|e| AppError::Other(format!("Repack: read failed for {:?}: {}", path, e)))?;
         IoWrite::write_all(&mut writer, &bytes)
@@ -1803,17 +1910,18 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
     // outer folder of the same name (e.g. "Foo/Foo/Foo.dll"). Strip the outer
     // level so the mod ends up at "Foo/Foo.dll" rather than nested two deep,
     // which would confuse scan_mods (it only descends one level).
-    let strip_redundant_outer: Option<String> = if all_top_dirs.len() == 1 && !all_entries.is_empty() {
-        let outer = all_top_dirs.iter().next().cloned().unwrap();
-        let nested_prefix = format!("{}/{}/", outer, outer);
-        if all_entries.iter().all(|n| n.starts_with(&nested_prefix)) {
-            Some(outer)
+    let strip_redundant_outer: Option<String> =
+        if all_top_dirs.len() == 1 && !all_entries.is_empty() {
+            let outer = all_top_dirs.iter().next().cloned().unwrap();
+            let nested_prefix = format!("{}/{}/", outer, outer);
+            if all_entries.iter().all(|n| n.starts_with(&nested_prefix)) {
+                Some(outer)
+            } else {
+                None
+            }
         } else {
             None
-        }
-    } else {
-        None
-    };
+        };
 
     let zip_stem = zip_path
         .file_stem()
@@ -1836,9 +1944,14 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
     // then DLL/PCK stem, then a Nexus-suffix-stripped zip stem.
     let wrap_folder_name = {
         let manifest_name = peek_manifest_name(&mut archive);
-        let dll_stem = relevant_entries.iter()
+        let dll_stem = relevant_entries
+            .iter()
             .find(|n| {
-                let ext = Path::new(n).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                let ext = Path::new(n)
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("")
+                    .to_lowercase();
                 ext == "dll" || ext == "pck"
             })
             .and_then(|n| Path::new(n).file_name())
@@ -1850,8 +1963,8 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
 
     // True when the zip already has every file under a single top-level
     // directory. Those zips are well-behaved — preserve their structure.
-    let has_clean_single_top_dir = all_top_dirs.len() == 1
-        && all_entries.iter().all(|n| n.contains('/'));
+    let has_clean_single_top_dir =
+        all_top_dirs.len() == 1 && all_entries.iter().all(|n| n.contains('/'));
 
     let mut extracted_files = Vec::new();
     let mut manifest: Option<ModInfo> = None;
@@ -1920,7 +2033,9 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
         // RitsuLib bug: it spilled root files alongside subfolders, and
         // updates couldn't clean leftovers because tracking was stem-based.
         let rel_path = if let Some(ref outer) = strip_redundant_outer {
-            name.strip_prefix(&format!("{}/", outer)).unwrap_or(&name).to_string()
+            name.strip_prefix(&format!("{}/", outer))
+                .unwrap_or(&name)
+                .to_string()
         } else if has_clean_single_top_dir {
             name.clone()
         } else if all_entries.len() == 1 {
@@ -1988,6 +2103,7 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
                 author: None,
                 note: None,
                 custom_url: None,
+                tags: vec![],
                 display_name: None,
                 display_description: None,
             })
@@ -2006,7 +2122,9 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
 /// version strings. The disabled files stay on disk so the user can recover
 /// them manually if needed.
 #[tauri::command]
-pub fn get_installed_mods(state: tauri::State<'_, AppState>) -> std::result::Result<Vec<ModInfo>, String> {
+pub fn get_installed_mods(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<ModInfo>, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
 
     let active_mods = s
@@ -2057,12 +2175,7 @@ pub fn get_installed_mods(state: tauri::State<'_, AppState>) -> std::result::Res
             .as_deref()
             .unwrap_or(&a.name)
             .to_lowercase()
-            .cmp(
-                &b.display_name
-                    .as_deref()
-                    .unwrap_or(&b.name)
-                    .to_lowercase(),
-            )
+            .cmp(&b.display_name.as_deref().unwrap_or(&b.name).to_lowercase())
             .then_with(|| dedup_key(a).cmp(&dedup_key(b)))
     });
 
@@ -2108,11 +2221,17 @@ pub fn toggle_mod(
     // path) could move the wrong copy.
     let move_result = if let Some(ref folder) = folder_name {
         let mods_in_src = scan_mods_inner(src, enable);
-        match mods_in_src.iter().find(|m| m.folder_name.as_deref() == Some(folder.as_str())).cloned() {
+        match mods_in_src
+            .iter()
+            .find(|m| m.folder_name.as_deref() == Some(folder.as_str()))
+            .cloned()
+        {
             Some(info) => move_mod_by_info(&info, src, dest),
             None => Err(crate::error::AppError::ModNotFound(format!(
                 "No mod with folder '{}' (display name '{}') in {}",
-                folder, name, src.display()
+                folder,
+                name,
+                src.display()
             ))),
         }
     } else {
@@ -2127,7 +2246,8 @@ pub fn toggle_mod(
                 Some(info) => move_mod_by_info(&info, src, dest),
                 None => Err(crate::error::AppError::ModNotFound(format!(
                     "No files found for mod '{}' in {}",
-                    name, src.display()
+                    name,
+                    src.display()
                 ))),
             }
         })
@@ -2151,7 +2271,11 @@ pub fn delete_mod_cmd(
     crate::game::ensure_game_not_running()?;
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?.clone();
-    let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?.clone();
+    let disabled_path = s
+        .disabled_mods_path
+        .as_ref()
+        .ok_or("Game path not set")?
+        .clone();
     drop(s);
 
     delete_mod_from_paths(&name, folder_name.as_deref(), &mods_path, &disabled_path)
@@ -2174,13 +2298,19 @@ fn delete_mod_from_paths(
         .collect();
 
     let found = if let Some(folder) = folder_name {
-        all_mods.iter().find(|m| m.folder_name.as_deref() == Some(folder))
+        all_mods
+            .iter()
+            .find(|m| m.folder_name.as_deref() == Some(folder))
     } else {
         all_mods.iter().find(|m| m.name == name)
     };
 
     if let Some(info) = found {
-        let base_path = if info.enabled { mods_path } else { disabled_path };
+        let base_path = if info.enabled {
+            mods_path
+        } else {
+            disabled_path
+        };
 
         // Collect parent dirs to clean up later
         let mut parent_dirs = std::collections::HashSet::new();
@@ -2213,7 +2343,10 @@ fn delete_mod_from_paths(
         for dir in &parent_dirs {
             if dir.is_dir() {
                 // Only remove if empty
-                if fs::read_dir(dir).map(|mut d| d.next().is_none()).unwrap_or(false) {
+                if fs::read_dir(dir)
+                    .map(|mut d| d.next().is_none())
+                    .unwrap_or(false)
+                {
                     let _ = fs::remove_dir(dir);
                 }
             }
@@ -2245,7 +2378,10 @@ fn delete_mod_from_paths(
                     .to_string_lossy()
                     .to_string();
 
-                if fstem == name || normalize_name(&fstem) == norm || normalize_name(&entry_name) == norm {
+                if fstem == name
+                    || normalize_name(&fstem) == norm
+                    || normalize_name(&entry_name) == norm
+                {
                     if entry.path().is_dir() {
                         let _ = fs::remove_dir_all(entry.path());
                     } else {
@@ -2271,7 +2407,11 @@ pub fn enable_all_mods(state: tauri::State<'_, AppState>) -> std::result::Result
     crate::game::ensure_game_not_running()?;
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?.clone();
-    let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?.clone();
+    let disabled_path = s
+        .disabled_mods_path
+        .as_ref()
+        .ok_or("Game path not set")?
+        .clone();
     drop(s);
 
     let _ = fs::create_dir_all(&mods_path);
@@ -2298,9 +2438,9 @@ pub fn enable_all_mods(state: tauri::State<'_, AppState>) -> std::result::Result
                     Ok(())
                 })
             } else {
-                fs::rename(&src, &dest).or_else(|_| {
-                    fs::copy(&src, &dest).and_then(|_| fs::remove_file(&src))
-                }).map(|_| ())
+                fs::rename(&src, &dest)
+                    .or_else(|_| fs::copy(&src, &dest).and_then(|_| fs::remove_file(&src)))
+                    .map(|_| ())
             };
 
             if let Err(e) = result {
@@ -2322,7 +2462,11 @@ pub fn disable_all_mods(state: tauri::State<'_, AppState>) -> std::result::Resul
     crate::game::ensure_game_not_running()?;
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?.clone();
-    let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?.clone();
+    let disabled_path = s
+        .disabled_mods_path
+        .as_ref()
+        .ok_or("Game path not set")?
+        .clone();
     drop(s);
 
     let _ = fs::create_dir_all(&disabled_path);
@@ -2349,9 +2493,9 @@ pub fn disable_all_mods(state: tauri::State<'_, AppState>) -> std::result::Resul
                     Ok(())
                 })
             } else {
-                fs::rename(&src, &dest).or_else(|_| {
-                    fs::copy(&src, &dest).and_then(|_| fs::remove_file(&src))
-                }).map(|_| ())
+                fs::rename(&src, &dest)
+                    .or_else(|_| fs::copy(&src, &dest).and_then(|_| fs::remove_file(&src)))
+                    .map(|_| ())
             };
 
             if let Err(e) = result {
@@ -2372,7 +2516,11 @@ pub fn delete_all_mods(state: tauri::State<'_, AppState>) -> std::result::Result
     crate::game::ensure_game_not_running()?;
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?.clone();
-    let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?.clone();
+    let disabled_path = s
+        .disabled_mods_path
+        .as_ref()
+        .ok_or("Game path not set")?
+        .clone();
     drop(s);
 
     let count = delete_all_mods_from_paths(&mods_path, &disabled_path)?;
@@ -2414,8 +2562,7 @@ fn validate_mod_root_pair(
 ) -> std::result::Result<(), String> {
     let mods_name_ok = path_file_name_eq(mods_path, "mods");
     let disabled_name_ok = path_file_name_eq(disabled_path, "mods_disabled");
-    let same_parent = mods_path.parent().is_some()
-        && mods_path.parent() == disabled_path.parent();
+    let same_parent = mods_path.parent().is_some() && mods_path.parent() == disabled_path.parent();
 
     if mods_name_ok && disabled_name_ok && same_parent {
         Ok(())
@@ -2438,7 +2585,10 @@ fn path_file_name_eq(path: &Path, expected: &str) -> bool {
 
 /// Install a mod from a local file (zip / 7z / rar archive).
 #[tauri::command]
-pub fn install_mod_from_file(path: String, state: tauri::State<'_, AppState>) -> std::result::Result<ModInfo, String> {
+pub fn install_mod_from_file(
+    path: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<ModInfo, String> {
     crate::game::ensure_game_not_running()?;
     let (mods_path, config_path) = {
         let s = state.lock().map_err(|e| e.to_string())?;
@@ -2469,10 +2619,8 @@ pub fn check_dependencies(mod_name: &str, mods_path: &Path) -> Vec<String> {
         Err(_) => return Vec::new(),
     };
 
-    let installed: std::collections::HashSet<String> = scan_mods(mods_path)
-        .into_iter()
-        .map(|m| m.name)
-        .collect();
+    let installed: std::collections::HashSet<String> =
+        scan_mods(mods_path).into_iter().map(|m| m.name).collect();
 
     raw.dependencies
         .into_iter()
@@ -2492,7 +2640,10 @@ pub fn get_dependents(mod_name: &str, mods_path: &Path) -> Vec<String> {
 
 /// Tauri command: return missing dependencies for a mod.
 #[tauri::command]
-pub fn check_mod_dependencies(name: String, state: tauri::State<'_, AppState>) -> std::result::Result<Vec<String>, String> {
+pub fn check_mod_dependencies(
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<String>, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
     Ok(check_dependencies(&name, mods_path))
@@ -2500,7 +2651,10 @@ pub fn check_mod_dependencies(name: String, state: tauri::State<'_, AppState>) -
 
 /// Tauri command: return mods that depend on the given mod.
 #[tauri::command]
-pub fn get_mod_dependents(name: String, state: tauri::State<'_, AppState>) -> std::result::Result<Vec<String>, String> {
+pub fn get_mod_dependents(
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<String>, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
     Ok(get_dependents(&name, mods_path))
@@ -2611,7 +2765,8 @@ mod lenient_parse_tests {
     #[test]
     fn lenient_parse_strips_bom() {
         let with_bom = "\u{FEFF}{\"name\": \"X\", \"version\": \"1.0\"}";
-        let raw = super::parse_manifest_lenient(with_bom).expect("BOM-prefixed content must still parse");
+        let raw =
+            super::parse_manifest_lenient(with_bom).expect("BOM-prefixed content must still parse");
         assert_eq!(raw.name, "X");
         assert_eq!(raw.version, "1.0");
     }
@@ -2648,9 +2803,7 @@ mod bom_helper_tests {
 /// same scan / move / parse code paths the live app uses.
 #[cfg(test)]
 mod user_scenario_tests {
-    use super::{
-        move_mod_by_info, parse_manifest, scan_disabled_mods, scan_mods,
-    };
+    use super::{move_mod_by_info, parse_manifest, scan_disabled_mods, scan_mods};
     use std::fs;
     use tempfile::TempDir;
 
@@ -2739,7 +2892,11 @@ mod user_scenario_tests {
     fn disabling_one_same_named_mod_leaves_the_other_active() {
         let tmp = make_two_cardarteditor_fixture();
         let mods_path = tmp.path();
-        let disabled_path = tmp.path().parent().unwrap().join("mods_disabled_test_for_scenario");
+        let disabled_path = tmp
+            .path()
+            .parent()
+            .unwrap()
+            .join("mods_disabled_test_for_scenario");
         fs::create_dir_all(&disabled_path).unwrap();
         // Drop-handler cleanup so a failed assertion doesn't leak a
         // sibling directory next to the tempdir.
@@ -2772,11 +2929,13 @@ mod user_scenario_tests {
             .collect();
 
         assert_eq!(
-            active_folders, vec!["card_art_editor"],
+            active_folders,
+            vec!["card_art_editor"],
             "only the untouched CardArtEditor should remain active"
         );
         assert_eq!(
-            disabled_folders, vec!["card_art_editor_v2"],
+            disabled_folders,
+            vec!["card_art_editor_v2"],
             "only the disabled CardArtEditor should be in mods_disabled"
         );
 
@@ -2911,8 +3070,8 @@ mod user_scenario_tests {
         {
             let f = fs::File::create(&zip_path).unwrap();
             let mut zw = zip::ZipWriter::new(f);
-            let opts = SimpleFileOptions::default()
-                .compression_method(zip::CompressionMethod::Stored);
+            let opts =
+                SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
             zw.start_file("BaseLib/BaseLib.json", opts).unwrap();
             zw.write_all(&bom_manifest).unwrap();
             zw.start_file("BaseLib/BaseLib.dll", opts).unwrap();
@@ -3000,6 +3159,7 @@ mod dedup_identity_tests {
             author: None,
             note: None,
             custom_url: None,
+            tags: vec![],
             display_name: None,
             display_description: None,
         }
@@ -3021,7 +3181,11 @@ mod dedup_identity_tests {
             mod_with("Card Art Editor", Some("card_art_editor_v2"), "2.0.0"),
             "test",
         );
-        assert_eq!(mods.len(), 2, "Same-name mods in different folders must NOT collapse");
+        assert_eq!(
+            mods.len(),
+            2,
+            "Same-name mods in different folders must NOT collapse"
+        );
         assert_eq!(mods[0].folder_name.as_deref(), Some("card_art_editor"));
         assert_eq!(mods[1].folder_name.as_deref(), Some("card_art_editor_v2"));
     }
@@ -3056,7 +3220,11 @@ mod dedup_identity_tests {
         let mut mods = Vec::new();
         upsert_mod_dedup(&mut mods, mod_with("My Mod", None, "1.0.0"), "test");
         upsert_mod_dedup(&mut mods, mod_with("my-mod", None, "1.0.0"), "test");
-        assert_eq!(mods.len(), 1, "Normalized-name dedup must still apply when folder is missing");
+        assert_eq!(
+            mods.len(),
+            1,
+            "Normalized-name dedup must still apply when folder is missing"
+        );
     }
 
     #[test]
@@ -3105,8 +3273,7 @@ mod archive_dispatch_tests {
 
         let cursor = std::io::Cursor::new(Vec::new());
         let mut zw = zip::ZipWriter::new(cursor);
-        let opts = SimpleFileOptions::default()
-            .compression_method(zip::CompressionMethod::Stored);
+        let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
         for (name, bytes) in entries {
             zw.start_file(name, opts).unwrap();
             zw.write_all(&bytes).unwrap();
@@ -3127,7 +3294,10 @@ mod archive_dispatch_tests {
         let err = install_mod_from_archive(&bogus, mods_tmp.path()).unwrap_err();
         let msg = format!("{}", err);
         assert!(
-            msg.contains("Unsupported archive format") && msg.contains(".zip") && msg.contains(".7z") && msg.contains(".rar"),
+            msg.contains("Unsupported archive format")
+                && msg.contains(".zip")
+                && msg.contains(".7z")
+                && msg.contains(".rar"),
             "rejection error should list the three supported formats, got: {}",
             msg,
         );
@@ -3212,7 +3382,10 @@ mod archive_dispatch_tests {
         write_zip_file(
             &inner_zip,
             vec![
-                ("InnerMod/InnerMod.json", br#"{"name":"InnerMod","version":"1.0.0"}"#.to_vec()),
+                (
+                    "InnerMod/InnerMod.json",
+                    br#"{"name":"InnerMod","version":"1.0.0"}"#.to_vec(),
+                ),
                 ("InnerMod/InnerMod.dll", b"dll".to_vec()),
             ],
         );
@@ -3242,12 +3415,13 @@ mod archive_dispatch_tests {
     fn install_mod_from_archive_rejects_deeply_nested_archive_chain_and_cleans_up() {
         let tmp = tempfile::tempdir().unwrap();
         let inner_mod_zip = zip_bytes(vec![
-            ("DeepMod/DeepMod.json", br#"{"id":"DeepMod","name":"DeepMod","version":"3.0.0"}"#.to_vec()),
+            (
+                "DeepMod/DeepMod.json",
+                br#"{"id":"DeepMod","name":"DeepMod","version":"3.0.0"}"#.to_vec(),
+            ),
             ("DeepMod/DeepMod.dll", b"dll".to_vec()),
         ]);
-        let middle_zip = zip_bytes(vec![
-            ("level-two/level-three/DeepMod.zip", inner_mod_zip),
-        ]);
+        let middle_zip = zip_bytes(vec![("level-two/level-three/DeepMod.zip", inner_mod_zip)]);
         let outer_zip = tmp.path().join("OuterPackage.zip");
         write_zip_file(
             &outer_zip,
@@ -3398,7 +3572,10 @@ mod config_snapshot_tests {
         let tmp = tempdir().unwrap();
         let absent = tmp.path().join("does-not-exist");
         let snap = snapshot_mod_configs(&absent);
-        assert!(snap.is_empty(), "missing folder must return empty, not panic");
+        assert!(
+            snap.is_empty(),
+            "missing folder must return empty, not panic"
+        );
     }
 
     #[test]
@@ -3439,7 +3616,10 @@ mod config_snapshot_tests {
         let preserved = read_user_edited_configs(folder, &snap);
         let names: std::collections::HashSet<&str> =
             preserved.iter().map(|p| p.rel_path.as_str()).collect();
-        assert!(names.contains("override.cfg"), "user-created files must be preserved");
+        assert!(
+            names.contains("override.cfg"),
+            "user-created files must be preserved"
+        );
         assert!(
             !names.contains("shipped.cfg"),
             "untouched shipped configs stay as-is so upstream defaults can be refreshed"
@@ -3475,7 +3655,10 @@ mod config_snapshot_tests {
             },
         ];
         restore_preserved_configs(folder, &preserved).unwrap();
-        assert_eq!(fs::read(folder.join("lang/custom.ini")).unwrap(), b"[user]\nhello=world");
+        assert_eq!(
+            fs::read(folder.join("lang/custom.ini")).unwrap(),
+            b"[user]\nhello=world"
+        );
         assert_eq!(fs::read(folder.join("settings.cfg")).unwrap(), b"k=2");
     }
 
@@ -3510,7 +3693,11 @@ mod config_snapshot_tests {
         //    say a new key the author added.
         fs::remove_dir_all(&mod_folder).unwrap();
         fs::create_dir_all(&mod_folder).unwrap();
-        write_at(&mod_folder, "settings.cfg", b"vendor-default-v2-with-new-keys");
+        write_at(
+            &mod_folder,
+            "settings.cfg",
+            b"vendor-default-v2-with-new-keys",
+        );
         write_at(&mod_folder, "lang/en.ini", b"hello");
         write_at(&mod_folder, "lang/de.ini", b"hallo"); // brand new locale shipped upstream
 
@@ -3657,13 +3844,8 @@ mod profile_manifest_refresh_tests {
         )
         .unwrap();
 
-        delete_mod_from_paths(
-            "BaseLib",
-            Some("BaseLib"),
-            &mods_path,
-            &disabled_path,
-        )
-        .expect("single delete succeeds");
+        delete_mod_from_paths("BaseLib", Some("BaseLib"), &mods_path, &disabled_path)
+            .expect("single delete succeeds");
 
         assert!(
             fs::read_dir(&mods_path).unwrap().next().is_none(),
@@ -3693,7 +3875,10 @@ mod profile_manifest_refresh_tests {
             version: "1.0.0".into(),
             description: String::new(),
             enabled: true,
-            files: vec!["../SlayTheSpire2.exe".into(), "BadManifest/BadManifest.dll".into()],
+            files: vec![
+                "../SlayTheSpire2.exe".into(),
+                "BadManifest/BadManifest.dll".into(),
+            ],
             source: None,
             hash: None,
             dependencies: vec![],
@@ -3707,6 +3892,7 @@ mod profile_manifest_refresh_tests {
             author: None,
             note: None,
             custom_url: None,
+            tags: vec![],
             display_name: None,
             display_description: None,
         };

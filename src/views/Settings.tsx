@@ -8,13 +8,15 @@ import {
   ClipboardCheck,
   ExternalLink,
   Download,
-  Pin,
-  PinOff,
+  Snowflake,
+  Sun,
   Archive,
   RotateCcw,
   Trash2,
   Play,
   Check,
+  Clock,
+  AlertTriangle,
 } from 'lucide-react';
 import { isUpToDate } from '../lib/auditState';
 import { GITHUB_TOKEN_TEMPLATE_URL } from '../lib/githubLinks';
@@ -42,6 +44,7 @@ import {
   getApiKeyStatus,
   pinMod,
   unpinMod,
+  setModSnooze,
   updateMod,
   createBackup,
   createBackupPreserving,
@@ -52,9 +55,13 @@ import {
   setLaunchMode,
 } from '../hooks/useTauri';
 import type { LaunchMode } from '../hooks/useTauri';
-import type { BackupInfo } from '../types';
+import type { BackupInfo, ModAuditEntry } from '../types';
 
 type Tab = 'general' | 'accounts' | 'backups' | 'audit' | 'advanced';
+
+function auditSnoozeTarget(entry: ModAuditEntry): string | null {
+  return entry.latest_release_with_assets_tag ?? entry.nexus_version ?? null;
+}
 
 // v5 — tabbed Settings shell. Tabs are stateful; tab content is rendered
 // inline beneath the tab strip. All existing handlers preserved.
@@ -324,6 +331,20 @@ export function SettingsView() {
       toast.error(t('settings.audit.updateFailedToast', { name: modName, error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setUpdatingMod(null);
+    }
+  }
+
+  async function handleAuditSnooze(entry: ModAuditEntry, latestTag: string | null) {
+    try {
+      await setModSnooze(entry.mod_name, latestTag, entry.folder_name ?? null);
+      toast.success(
+        latestTag
+          ? t('settings.audit.snoozedToast', { name: entry.mod_name })
+          : t('settings.audit.unsnoozedToast', { name: entry.mod_name }),
+      );
+      await refreshAuditEntries([entry.mod_name]);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -705,7 +726,7 @@ export function SettingsView() {
               // a bulk Update all.
               const ghUpdates = auditResults
                 ? auditResults
-                    .filter((r) => r.needs_update && r.github_repo && r.latest_release_with_assets_tag)
+                    .filter((r) => r.needs_update && !r.snoozed && r.github_repo && r.latest_release_with_assets_tag)
                     .map((r) => r.mod_name)
                 : [];
               return (
@@ -782,6 +803,8 @@ export function SettingsView() {
                     // error count.
                     const isGone = !hasRealError && !!entry.latest_release_tag && !entry.latest_release_with_assets_tag;
                     const isIncompatible = !!entry.game_version_too_old;
+                    const isLatestBlocked = !!entry.latest_release_blocked_by_game_version;
+                    const snoozeTarget = auditSnoozeTarget(entry);
                     // Incompatible takes precedence over OK so the row reads
                     // as "won't load" instead of "up to date" — but updates
                     // and real errors still take precedence over it,
@@ -790,9 +813,9 @@ export function SettingsView() {
                     // the game-version mismatch.
                     const state: 'ok' | 'update' | 'gone' | 'unlinked' | 'error' | 'incompatible' =
                       hasRealError ? 'error'
-                        : entry.needs_update ? 'update'
+                        : entry.needs_update && !entry.snoozed ? 'update'
                         : !hasAnySource ? 'unlinked'
-                        : isIncompatible ? 'incompatible'
+                        : (isIncompatible || isLatestBlocked) ? 'incompatible'
                         : isGone ? 'gone'
                         : 'ok';
                     const ledClass = {
@@ -823,12 +846,23 @@ export function SettingsView() {
                             )}
                             {entry.pinned && (
                               <span className="gf-pill" style={{ background: 'var(--indigo-elev)', color: 'var(--ink-mute)' }}>
-                                <Pin size={9} /> {t('settings.audit.pinned')}
+                                <Snowflake size={9} /> {t('settings.audit.pinned')}
+                              </span>
+                            )}
+                            {isLatestBlocked && (
+                              <span className="gf-pill gf-pill-warn" title={t('settings.audit.updateBlockedTitle')}>
+                                <AlertTriangle size={9} /> {t('settings.audit.updateBlockedByGameVersion')}
+                              </span>
+                            )}
+                            {entry.snoozed && (
+                              <span className="gf-pill" style={{ background: 'var(--indigo-elev)', color: 'var(--ink-mute)' }} title={t('settings.audit.snoozedTitle')}>
+                                <Clock size={9} /> {t('settings.audit.snoozed')}
                               </span>
                             )}
                           </span>
                           <span className="flex items-center gap-2">
                             {entry.needs_update &&
+                              !entry.snoozed &&
                               entry.github_repo &&
                               entry.latest_release_with_assets_tag &&
                               (entry.update_source === 'github' || entry.update_source === 'both') && (
@@ -852,7 +886,11 @@ export function SettingsView() {
                                 className="gf-btn gf-btn-sm"
                                 title={
                                   entry.latest_release_blocked_by_game_version && entry.latest_compatible_tag
-                                    ? t('settings.updateGameBlocked', { version: entry.latest_release_with_assets_tag, compatibleVersion: entry.latest_compatible_tag })
+                                    ? t('settings.updateGameBlocked', {
+                                        version: entry.latest_release_with_assets_tag,
+                                        required: entry.latest_release_min_game_version ?? '?',
+                                        compatibleVersion: entry.latest_compatible_tag,
+                                      })
                                     : t('settings.downloadInstall', { tag: entry.latest_compatible_tag ?? entry.latest_release_with_assets_tag })
                                 }
                               >
@@ -860,6 +898,26 @@ export function SettingsView() {
                                   <><RefreshCw size={10} className="animate-spin" /> {t('settings.audit.updating')}</>
                                 ) : (
                                   <><Download size={10} /> {t('settings.audit.update')}</>
+                                )}
+                              </button>
+                            )}
+                            {snoozeTarget && (entry.needs_update || entry.snoozed) && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void handleAuditSnooze(entry, entry.snoozed ? null : snoozeTarget);
+                                }}
+                                className="gf-btn-3 gf-btn-2-sm"
+                                title={
+                                  entry.snoozed
+                                    ? t('settings.audit.showUpdateAgainTooltip')
+                                    : t('settings.audit.skipUpdateTooltip', { version: snoozeTarget.replace(/^v/, '') })
+                                }
+                              >
+                                {entry.snoozed ? (
+                                  <><Check size={9} /> {t('settings.audit.showUpdateAgain')}</>
+                                ) : (
+                                  <><Clock size={9} /> {t('settings.audit.skipUpdate')}</>
                                 )}
                               </button>
                             )}
@@ -879,7 +937,7 @@ export function SettingsView() {
                                     await pinMod(entry.mod_name, folder);
                                     toast.success(t('settings.pinnedToast', { name: entry.mod_name }));
                                   }
-                                  // Pin/unpin only flips the `pinned` flag
+                                  // Freeze/unfreeze only flips the `pinned` flag
                                   // and recomputes needs_update for THIS
                                   // row. No need to re-fetch every other
                                   // mod's source.
@@ -891,7 +949,7 @@ export function SettingsView() {
                               className="gf-btn-3 gf-btn-2-sm"
                               title={entry.pinned ? t('settings.audit.unpinTooltip') : t('settings.audit.pinTooltip')}
                             >
-                              {entry.pinned ? <><PinOff size={9} /> {t('settings.audit.unpin')}</> : <><Pin size={9} /> {t('settings.audit.pin')}</>}
+                              {entry.pinned ? <><Sun size={9} /> {t('settings.audit.unpin')}</> : <><Snowflake size={9} /> {t('settings.audit.pin')}</>}
                             </button>
                             <span
                               className="gf-audit-mono"
@@ -903,6 +961,8 @@ export function SettingsView() {
                             >
                               {hasRealError
                                 ? t('settings.audit.error')
+                                : entry.snoozed
+                                ? t('settings.audit.snoozedVersion', { version: snoozeTarget?.replace(/^v/, '') ?? '?' })
                                 : entry.needs_update
                                 ? t('settings.audit.versionArrow', {
                                     installed: entry.installed_version,
@@ -947,7 +1007,7 @@ export function SettingsView() {
                               {entry.nexus_version ? t('settings.audit.nexusVersion', { version: entry.nexus_version }) : t('settings.nexusFallback')}
                             </a>
                           )}
-                          {entry.nexus_update_available && entry.nexus_url && (
+                          {entry.nexus_update_available && !entry.snoozed && entry.nexus_url && (
                             <a
                               href={nexusFilesUrl(entry.nexus_url) ?? `${entry.nexus_url}?tab=files`}
                               target="_blank"
@@ -1016,7 +1076,7 @@ export function SettingsView() {
                 {(() => {
                   const incompatibleCount = auditResults.filter(r => r.game_version_too_old).length;
                   const okCount = auditResults.filter(isUpToDate).length;
-                  const updateCount = auditResults.filter(r => r.needs_update).length;
+                  const updateCount = auditResults.filter(r => r.needs_update && !r.snoozed).length;
                   const goneCount = auditResults.filter(r =>
                     !(r.error && !r.github_auto_detected) &&
                     r.latest_release_tag &&

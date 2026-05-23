@@ -314,7 +314,7 @@ describe('<DiagnosticBundle>', () => {
     });
   });
 
-  it('renders enabled, pinned, github_url, nexus_url, and disabled mods in the bundle', async () => {
+  it('renders enabled, frozen, github_url, nexus_url, and disabled mods in the bundle', async () => {
     registerInvokeHandler('get_installed_mods', () => [
       {
         name: 'Alpha', version: '1.0', enabled: true, pinned: true,
@@ -336,8 +336,8 @@ describe('<DiagnosticBundle>', () => {
     fireEvent.click(getGenerateButton());
 
     const ta = await screen.findByDisplayValue(/Support Bundle/) as HTMLTextAreaElement;
-    // Enabled tick + pinned marker + github url for Alpha.
-    expect(ta.value).toMatch(/✓ Alpha 1\.0 \[pinned\] <https:\/\/github\.com\/x\/a>/);
+    // Enabled tick + frozen marker + github url for Alpha.
+    expect(ta.value).toMatch(/✓ Alpha 1\.0 \[frozen\] <https:\/\/github\.com\/x\/a>/);
     // Disabled marker + nexus url for Beta.
     expect(ta.value).toMatch(/✗ Beta 2\.0 <https:\/\/nexusmods\.com\/b>/);
   });

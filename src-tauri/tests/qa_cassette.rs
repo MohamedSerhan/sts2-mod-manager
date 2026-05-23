@@ -58,6 +58,7 @@ fn make_mod(name: &str, version: &str, folder: &str) -> ModInfo {
         custom_url: None,
         display_name: None,
         display_description: None,
+        tags: Vec::new(),
     }
 }
 

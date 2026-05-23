@@ -112,7 +112,7 @@ interface KebabItemProps {
   disabled?: boolean;
   /**
    * Optional dim secondary line shown under the main label. Use for plain-
-   * language explanations of jargon-y actions ("Pin", "Repair", etc.) so a
+   * language explanations of jargon-y actions ("Freeze", "Repair", etc.) so a
    * first-time user knows what they're about to do without hovering.
    */
   description?: ReactNode;

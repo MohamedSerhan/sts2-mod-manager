@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, X, GitBranch, ExternalLink, Search, Save, StickyNote, Link as LinkIcon, Type, FileText } from 'lucide-react';
+import { Check, X, GitBranch, ExternalLink, Search, Save, StickyNote, Link as LinkIcon, Type, FileText, Tags } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ModInfo } from '../types';
 
@@ -28,6 +28,7 @@ interface Props {
     customUrl: string,
     displayName: string,
     displayDescription: string,
+    tags: string,
   ) => void | Promise<void>;
 }
 
@@ -55,6 +56,7 @@ export function SourceEditor({
   const [customUrl, setCustomUrl] = useState<string>(mod.custom_url ?? '');
   const [displayName, setDisplayName] = useState<string>(mod.display_name ?? '');
   const [displayDescription, setDisplayDescription] = useState<string>(mod.display_description ?? '');
+  const [tags, setTags] = useState<string>((mod.tags ?? []).join(', '));
 
   const ghOk = github.trim().length > 0;
   const nxOk = nexus.trim().length > 0;
@@ -257,6 +259,34 @@ export function SourceEditor({
         </div>
       </div>
 
+      <div className="gf-src-edit-grid">
+        <div className="gf-src-edit-field">
+          <label className="gf-src-edit-label">
+            <Tags size={11} style={{ marginRight: 4 }} />
+            {t('sourceEditor.tags')}
+            {tags && (
+              <button
+                type="button"
+                className="gf-src-edit-clear"
+                onClick={() => setTags('')}
+              >
+                {t('sourceEditor.clear')}
+              </button>
+            )}
+          </label>
+          <div className="gf-src-edit-input">
+            <input
+              value={tags}
+              onChange={(e) => setTags(e.target.value)}
+              placeholder={t('sourceEditor.tagsPlaceholder')}
+            />
+          </div>
+          <div className="gf-src-edit-hint">
+            <span>{t('sourceEditor.tagsHint')}</span>
+          </div>
+        </div>
+      </div>
+
       {onlyNexus && (
         <div
           style={{
@@ -292,7 +322,7 @@ export function SourceEditor({
         <button className="gf-btn-3" onClick={onClose}>{t('common.cancel')}</button>
         <button
           className="gf-btn gf-btn-sm"
-          onClick={() => onSave(github, nexus, note, customUrl, displayName, displayDescription)}
+          onClick={() => onSave(github, nexus, note, customUrl, displayName, displayDescription, tags)}
           disabled={saving}
         >
           <Save size={11} /> {saving ? t('sourceEditor.saving') : t('sourceEditor.saveSources')}

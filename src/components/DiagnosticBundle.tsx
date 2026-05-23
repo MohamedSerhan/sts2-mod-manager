@@ -67,7 +67,7 @@ export function DiagnosticBundle({ open, onClose }: Props) {
         t('diagnosticBundle.reportProfileName', { name: activeProfile || 'Vanilla' }),
         '',
         t('diagnosticBundle.reportInstalledModsSection'),
-        ...mods.map((m) => `  ${m.enabled ? '✓' : '✗'} ${m.name} ${m.version}${m.pinned ? ' [pinned]' : ''}${m.github_url ? ` <${m.github_url}>` : ''}${m.nexus_url ? ` <${m.nexus_url}>` : ''}`),
+        ...mods.map((m) => `  ${m.enabled ? '✓' : '✗'} ${m.name} ${m.version}${m.pinned ? ' [frozen]' : ''}${m.github_url ? ` <${m.github_url}>` : ''}${m.nexus_url ? ` <${m.nexus_url}>` : ''}`),
         '',
         t('diagnosticBundle.reportLogTailSection'),
         t('diagnosticBundle.reportLogSource', { path: redact(logPath) }),

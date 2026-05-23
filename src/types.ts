@@ -27,6 +27,9 @@ export interface ModInfo {
   /** User-saved non-GitHub/non-Nexus URL (Patreon, X, Discord, etc).
    *  Shown as an external-link chip alongside GitHub/Nexus on the row. */
   custom_url?: string | null;
+  /** User-owned organization tags/categories. These are manager-only labels
+   *  and never participate in mod identity, updates, or profile matching. */
+  tags?: string[];
   /** User-facing label override. The manifest name remains in `name`. */
   display_name?: string | null;
   /** User-facing description override. The manifest description remains
@@ -203,6 +206,7 @@ export interface ModSourceEntry {
   nexus_mod_id: number | null;
   note?: string | null;
   custom_url?: string | null;
+  tags?: string[];
   display_name?: string | null;
   display_description?: string | null;
   snoozed_until_tag?: string | null;

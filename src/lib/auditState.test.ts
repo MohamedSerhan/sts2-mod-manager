@@ -87,6 +87,16 @@ describe('isUpToDate', () => {
       isUpToDate(entry({ github_repo: 'a/b', game_version_too_old: true })),
     ).toBe(false);
   });
+
+  it('returns false when a newer release exists but is blocked by the game version', () => {
+    expect(
+      isUpToDate(entry({
+        github_repo: 'a/b',
+        latest_release_with_assets_tag: 'v2',
+        latest_release_blocked_by_game_version: true,
+      })),
+    ).toBe(false);
+  });
 });
 
 describe('countGithubUpdates', () => {

@@ -510,14 +510,14 @@ async function specToggleMovesQaTestModToDisabled(driver) {
 }
 
 /**
- * Cassette-mode spec: pin QaTestMod (the only mod with a pending
+ * Cassette-mode spec: freeze QaTestMod (the only mod with a pending
  * update via cassette), re-run the audit, and assert the count
- * collapses to "Up to date". The pin should suppress the row from
+ * collapses to "Up to date". The freeze should suppress the row from
  * the pending count even though the cassette would otherwise return
  * a newer version. Locks the contract on the
  * `!a.pinned` filter in `auditPendingCount` (Mods.tsx:122).
  */
-async function specPinSuppressesPendingUpdate(driver) {
+async function specFreezeSuppressesPendingUpdate(driver) {
   const mods = await waitForElement(
     driver,
     By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Mods']"),
@@ -540,16 +540,16 @@ async function specPinSuppressesPendingUpdate(driver) {
   );
   await kebab.click();
 
-  const pinItem = await waitForElement(
+  const freezeItem = await waitForElement(
     driver,
-    By.xpath("//button[@role='menuitem'][contains(., 'Pin this mod')]"),
-    'Pin this mod menu item',
+    By.xpath("//button[@role='menuitem'][contains(., 'Freeze this mod')]"),
+    'Freeze this mod menu item',
   );
-  await pinItem.click();
+  await freezeItem.click();
   // Backend write + refresh roundtrip.
   await delay(800);
 
-  // Now re-run the audit; QaTestMod is pinned so its pending update
+  // Now re-run the audit; QaTestMod is frozen so its pending update
   // shouldn't count. The toolbar should read "Up to date".
   //
   // Target the ghost ↻ re-audit button by aria-label, NOT the generic
@@ -586,7 +586,7 @@ async function specPinSuppressesPendingUpdate(driver) {
       return spans.length > 0;
     },
     30_000,
-    'audit did not settle to "Up to date" after pinning QaTestMod',
+    'audit did not settle to "Up to date" after freezing QaTestMod',
   );
 }
 
@@ -716,21 +716,21 @@ async function specCreateProfile(driver) {
 }
 
 /**
- * v1.3.1 contract: a mod pinned while one profile is active still
- * shows the "Pinned" pill after the user round-trips through another
- * profile and back. Pin state lives in mod_sources.json (config dir),
+ * v1.3.1 contract: a mod frozen while one profile is active still
+ * shows the "Frozen" pill after the user round-trips through another
+ * profile and back. Freeze state lives in mod_sources.json (config dir),
  * not the profile manifest, so any future refactor that accidentally
- * folds pins into the per-profile snapshot — or has switch_profile
+ * folds freeze state into the per-profile snapshot — or has switch_profile
  * stomp on mod_sources during apply — would break this assertion.
  *
  * Flow:
  *   1. Profiles → create + activate "Orig" profile (becomes active).
- *   2. Mods → pin QaTestMod via kebab. Verify "Pinned" pill rendered.
+ *   2. Mods → freeze QaTestMod via kebab. Verify "Frozen" pill rendered.
  *   3. Profiles → create + activate "Other" profile.
  *   4. Profiles → switch back to "Orig".
- *   5. Mods → assert QaTestMod still shows the "Pinned" pill.
+ *   5. Mods → assert QaTestMod still shows the "Frozen" pill.
  */
-async function specProfileSwitchPreservesPins(driver) {
+async function specProfileSwitchPreservesFreeze(driver) {
   const suffix = Date.now().toString(36);
   const origName = `QA Orig ${suffix}`;
   const otherName = `QA Switch ${suffix}`;
@@ -741,7 +741,7 @@ async function specProfileSwitchPreservesPins(driver) {
   await activateProfile(driver, origName);
   await waitForToastsToClear(driver);
 
-  // Pin QaTestMod from the Mods view.
+  // Freeze QaTestMod from the Mods view.
   await navToMods(driver);
   await waitForElement(
     driver,
@@ -756,19 +756,19 @@ async function specProfileSwitchPreservesPins(driver) {
     'QaTestMod kebab button',
   );
   await kebab.click();
-  const pinItem = await waitForElement(
+  const freezeItem = await waitForElement(
     driver,
-    By.xpath("//button[@role='menuitem'][contains(., 'Pin this mod')]"),
-    'Pin this mod menu item',
+    By.xpath("//button[@role='menuitem'][contains(., 'Freeze this mod')]"),
+    'Freeze this mod menu item',
   );
-  await pinItem.click();
-  // Wait for the durable indicator (Pinned pill) to render — proves the
+  await freezeItem.click();
+  // Wait for the durable indicator (Frozen pill) to render — proves the
   // backend write landed and React picked up the source-list change.
   //
-  // We match the pill via `normalize-space(.)='Pinned'`, not `text()`,
+  // We match the pill via `normalize-space(.)='Frozen'`, not `text()`,
   // because the JSX renders the icon and label as siblings:
-  //     <span><Pin/> {t('mods.pinned')}</span>
-  // which React emits as two adjacent text nodes (" " + "Pinned"). XPath
+  //     <span><Snowflake/> {t('mods.pinned')}</span>
+  // which React emits as two adjacent text nodes (" " + "Frozen"). XPath
   // 1.0's `string(text())` converts the node-set to a string by taking
   // only the FIRST text node, so `normalize-space(text())` collapses to
   // "" and never matches. `.` flattens the whole subtree, which is what
@@ -776,9 +776,9 @@ async function specProfileSwitchPreservesPins(driver) {
   await waitForElement(
     driver,
     By.xpath(
-      "//*[normalize-space(text())='QaTestMod']/ancestor::*[contains(@class,'gf-mod-pinned')][1]//*[normalize-space(.)='Pinned']",
+      "//*[normalize-space(text())='QaTestMod']/ancestor::*[contains(@class,'gf-mod-pinned')][1]//*[normalize-space(.)='Frozen']",
     ),
-    '"Pinned" pill on QaTestMod row after pin',
+    '"Frozen" pill on QaTestMod row after freeze',
     8_000,
   );
 
@@ -792,14 +792,14 @@ async function specProfileSwitchPreservesPins(driver) {
   await activateProfile(driver, origName);
   await waitForToastsToClear(driver);
 
-  // Verify the pin survived the switch round trip.
+  // Verify the freeze survived the switch round trip.
   await navToMods(driver);
   await waitForElement(
     driver,
     By.xpath(
-      "//*[normalize-space(text())='QaTestMod']/ancestor::*[contains(@class,'gf-mod-pinned')][1]//*[normalize-space(.)='Pinned']",
+      "//*[normalize-space(text())='QaTestMod']/ancestor::*[contains(@class,'gf-mod-pinned')][1]//*[normalize-space(.)='Frozen']",
     ),
-    '"Pinned" pill on QaTestMod row after profile-switch round trip',
+    '"Frozen" pill on QaTestMod row after profile-switch round trip',
     10_000,
   );
 }
@@ -1257,7 +1257,7 @@ async function specAuditAgainstCassettesShowsOnePending(driver) {
   // `contains(text(),...)`: the pill button is `<Download/> {t(...)}`,
   // which React emits as two adjacent text nodes — XPath 1.0's
   // node-set-to-string conversion would only see the first (whitespace)
-  // text node. See specProfileSwitchPreservesPins for the longer note.
+  // text node. See specProfileSwitchPreservesFreeze for the longer note.
   await waitForElement(
     driver,
     By.xpath("//*[contains(text(),'QaTestMod')]/ancestor::*[contains(@class,'gf-mod-row') or contains(@class,'gf-card')][1]//*[contains(.,'Update available')]"),
@@ -1567,7 +1567,7 @@ const BASE_SPECS = [
 
 const CASSETTE_SPECS = [
   ['audit shows "1 update" with cassette + fixture mods', specAuditAgainstCassettesShowsOnePending],
-  ['pin on QaTestMod suppresses its pending update', specPinSuppressesPendingUpdate],
+  ['freeze on QaTestMod suppresses its pending update', specFreezeSuppressesPendingUpdate],
   // TODO scenario-005: drive a friend-install of a profile whose bundle_url
   // points at a github.com release asset (e.g. the qa-fixture
   // TheCursedMod_v0.2.7.zip under qa/fixtures/github-releases/...). Would
@@ -1590,7 +1590,7 @@ const STATE_SPECS = [
   ['toggle off moves QaTestMod to mods_disabled/', specToggleMovesQaTestModToDisabled],
   ['delete UpToDateMod via kebab → Remove mod…', specDeleteUpToDateMod],
   ['create profile via Profiles → New profile', specCreateProfile],
-  ['profile switch preserves pins (v1.3.1 contract)', specProfileSwitchPreservesPins],
+  ['profile switch preserves freeze state (v1.3.1 contract)', specProfileSwitchPreservesFreeze],
   ['#22: toggle state sticky across profile switch', specToggleStickyAcrossProfileSwitch],
   ['#20: disabled library extras are preserved', specDisabledLibraryExtrasArePreserved],
   ['#21: skipped mods not in fresh snapshot', specSkippedModAbsentFromSnapshot],

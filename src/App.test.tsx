@@ -125,6 +125,62 @@ describe('<App>', () => {
     });
   });
 
+  it('Mods tab Mod Library bridge opens the profile assignment workspace', async () => {
+    registerInvokeHandler('get_installed_mods', () => [{
+      name: 'BaseLib',
+      version: '1.0.0',
+      description: 'Base library',
+      enabled: true,
+      files: ['BaseLib/BaseLib.dll'],
+      source: null,
+      hash: null,
+      dependencies: [],
+      size_bytes: 1024,
+      folder_name: 'BaseLib',
+      mod_id: 'BaseLib',
+      github_url: null,
+      nexus_url: null,
+      pinned: false,
+      min_game_version: null,
+      author: 'QA',
+      tags: [],
+      display_name: null,
+      display_description: null,
+    }]);
+    registerInvokeHandler('list_profiles_cmd', () => [{
+      name: 'Stable',
+      mods: [],
+      created_at: '2026-01-01T00:00:00Z',
+      created_by: null,
+      game_version: '0.105.0',
+    }]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [{
+        name: 'BaseLib',
+        version: '1.0.0',
+        folder_name: 'BaseLib',
+        mod_id: 'BaseLib',
+        installed_enabled: true,
+        profiles: [
+          { profile_name: 'Stable', included: false, enabled: false, editable: true },
+        ],
+      }],
+    }));
+
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    await user.click(getNavButton('Mods'));
+    await waitFor(() => { expect(screen.getByText(/Your mods/i)).toBeInTheDocument(); });
+
+    await user.click(screen.getByRole('button', { name: /Mod Library/i }));
+
+    expect(await screen.findByRole('heading', { name: /Mod Library/i })).toBeInTheDocument();
+    expect((await screen.findAllByText('BaseLib')).length).toBeGreaterThan(0);
+    expect(screen.getByRole('checkbox', { name: 'Stable' })).not.toBeChecked();
+  });
+
   it('clicking Settings nav swaps to the Settings view', async () => {
     const user = userEvent.setup();
     render(<App />);
@@ -156,6 +212,26 @@ describe('<App>', () => {
     await user.click(getNavButton('Browse Modpacks'));
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Browse Modpacks' })).toBeInTheDocument();
+    });
+  });
+
+  it('Browse Modpacks empty-state Profiles button routes to Profiles', async () => {
+    registerInvokeHandler('fetch_modpack_browser_page', () => ({
+      cards: [],
+      page: 1,
+      has_next_page: false,
+      stale: false,
+      fetched_at: Math.floor(Date.now() / 1000),
+    }));
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    await user.click(getNavButton('Browse Modpacks'));
+
+    await user.click(await screen.findByRole('button', { name: /Go to Profiles/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Your packs/i)).toBeInTheDocument();
     });
   });
 

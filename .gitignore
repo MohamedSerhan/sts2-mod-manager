@@ -49,6 +49,7 @@ godot.log
 
 # Local-only — design bundle copy + icon-regen artifacts
 .claude/
+.superpowers/
 src-tauri/icons/_backup/
 src-tauri/icons/.icon-source.png
 

@@ -336,10 +336,11 @@ export async function setModDisplayOverrides(
 }
 
 /**
- * Snooze update suggestions for this mod at a specific upstream tag. When
- * upstream advances past that tag the snooze auto-expires. Pass `null` or
- * an empty string for `latestTag` to clear the snooze. Distinct from pin,
- * which is a hard freeze.
+ * Snooze update suggestions for this mod at a specific upstream version.
+ * GitHub rows use a release tag; Nexus-only rows use the Nexus version.
+ * When upstream advances past that value the snooze auto-expires. Pass
+ * `null` or an empty string for `latestTag` to clear the snooze. Distinct
+ * from pin, which is a hard freeze.
  */
 export async function setModSnooze(
   modName: string,
@@ -350,7 +351,20 @@ export async function setModSnooze(
 }
 
 /**
- * Pin a mod so its enabled/disabled state and version survive modpack
+ * Set manager-only tags/categories for a mod. These are display/filtering
+ * metadata only; mod identity and profile membership continue to use the
+ * manifest name/folder/id.
+ */
+export async function setModTags(
+  modName: string,
+  tags: string[],
+  folderName: string | null = null,
+): Promise<ModSourceEntry> {
+  return invoke('set_mod_tags', { modName, folderName, tags });
+}
+
+/**
+ * Freeze a mod so its enabled/disabled state and version survive modpack
  * applies and update sweeps. Pass `folderName` (from `mod.folder_name`)
  * so two mods with the same display name can be pinned independently.
  * When omitted (legacy callers, e.g. the Settings audit table), the pin

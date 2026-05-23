@@ -15,8 +15,8 @@ import {
   X,
   GitBranch,
   ExternalLink,
-  Pin,
-  PinOff,
+  Snowflake,
+  Sun,
   Wrench,
   ClipboardCheck,
   Download,
@@ -24,6 +24,8 @@ import {
   Check,
   Clock,
   RotateCcw,
+  Tags,
+  ListChecks,
 } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { Card } from '../components/Card';
@@ -52,6 +54,7 @@ import {
   setModExtras,
   setModDisplayOverrides,
   setModSnooze,
+  setModTags,
   findGithubFromNexus,
   pinMod,
   unpinMod,
@@ -69,6 +72,37 @@ function displayNameFor(mod: ModInfo): string {
 
 function displayDescriptionFor(mod: ModInfo): string {
   return mod.display_description?.trim() || mod.description;
+}
+
+function ghRepoFromUrl(url: string | null): string {
+  if (!url) return '';
+  const match = url.match(/^https?:\/\/github\.com\/([^/]+\/[^/?#]+)/);
+  if (match) return match[1].replace(/\.git$/, '');
+  return url;
+}
+
+function cleanOptional(value: string): string | null {
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function parseManagerTags(input: string): string[] {
+  const tags: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of input.split(',')) {
+    const tag = raw.trim();
+    if (!tag) continue;
+    const key = tag.toLocaleLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    tags.push(tag);
+  }
+  return tags;
+}
+
+function sameTags(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((tag, index) => tag === b[index]);
 }
 
 type ModSortMode = 'nameAsc' | 'nameDesc' | 'enabledFirst' | 'disabledFirst' | 'largestFirst';
@@ -126,12 +160,18 @@ function gameVersionSatisfies(current: string | null | undefined, required: stri
   return cPatch >= rPatch;
 }
 
-export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: boolean } = {}) {
+interface ModsViewProps {
+  advancedMode?: boolean;
+  onOpenModLibrary?: () => void;
+}
+
+export function ModsView({ advancedMode: advancedModeProp, onOpenModLibrary }: ModsViewProps = {}) {
   const { t } = useTranslation();
   const { mods, refreshMods, refreshAll, gameRunning, gameInfo, notifyNexusOpen, auditResults, auditing, runAudit, refreshAuditEntries, updatingAll, updateAllGithub } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
   const [filter, setFilter] = useState('');
+  const [tagFilter, setTagFilter] = useState('');
   const [sortMode, setSortMode] = useState<ModSortMode>('nameAsc');
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [quickAddUrl, setQuickAddUrl] = useState('');
@@ -435,15 +475,35 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
 
   const filtered = useMemo(() => {
     const term = filter.trim().toLowerCase();
-    const visible = term
-      ? mods.filter((m) =>
-          displayNameFor(m).toLowerCase().includes(term)
-          || m.name.toLowerCase().includes(term)
-          || (m.folder_name?.toLowerCase().includes(term) ?? false),
-        )
-      : mods;
+    const tagKey = tagFilter.toLocaleLowerCase();
+    const visible = mods.filter((m) => {
+      const tags = m.tags ?? [];
+      const tagMatched = !tagKey || tags.some((tag) => tag.toLocaleLowerCase() === tagKey);
+      if (!tagMatched) return false;
+      if (!term) return true;
+      return displayNameFor(m).toLowerCase().includes(term)
+        || m.name.toLowerCase().includes(term)
+        || (m.folder_name?.toLowerCase().includes(term) ?? false)
+        || tags.some((tag) => tag.toLowerCase().includes(term));
+    });
     return sortMods(visible, sortMode);
-  }, [mods, filter, sortMode]);
+  }, [mods, filter, tagFilter, sortMode]);
+
+  const tagOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const mod of mods) {
+      for (const tag of mod.tags ?? []) {
+        const trimmed = tag.trim();
+        if (!trimmed) continue;
+        const key = trimmed.toLocaleLowerCase();
+        if (!seen.has(key)) seen.set(key, trimmed);
+      }
+    }
+    return [...seen.values()].sort((a, b) => a.localeCompare(b, undefined, {
+      sensitivity: 'base',
+      numeric: true,
+    }));
+  }, [mods]);
 
   // Display names that appear on more than one installed mod. These rows
   // get a folder/author subtitle so the user can tell two same-named
@@ -494,7 +554,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
             const ghUpdateCount = auditResults ? countGithubUpdates(auditResults) : 0;
             const ghUpdateNames = auditResults
               ? auditResults
-                  .filter(r => r.needs_update && r.github_repo && r.latest_release_with_assets_tag)
+                  .filter(r => r.needs_update && !r.snoozed && r.github_repo && r.latest_release_with_assets_tag)
                   .map(r => r.mod_name)
               : [];
 
@@ -584,6 +644,18 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
             <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
             {refreshing ? t('common.refreshing') : t('common.refresh')}
           </Button>
+          {onOpenModLibrary && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={onOpenModLibrary}
+              title={t('mods.openModLibraryTitle')}
+            >
+              <ListChecks size={14} />
+              {t('mods.openModLibrary')}
+              <Badge variant="beta" className="gf-tab-beta" ariaHidden>{t('common.beta')}</Badge>
+            </Button>
+          )}
         </div>
       </div>
 
@@ -638,6 +710,21 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
             <option value="largestFirst">{t('mods.sort.largestFirst')}</option>
           </select>
         </label>
+        {tagOptions.length > 0 && (
+          <label className="gf-sort-control">
+            <span>{t('mods.tags.label')}</span>
+            <select
+              aria-label={t('mods.tags.label')}
+              value={tagFilter}
+              onChange={(e) => setTagFilter(e.target.value)}
+            >
+              <option value="">{t('mods.tags.all')}</option>
+              {tagOptions.map((tag) => (
+                <option key={tag} value={tag}>{tag}</option>
+              ))}
+            </select>
+          </label>
+        )}
         <div className="gf-sort-note">{t('mods.sort.visualOnly')}</div>
         {/* Per-screen Advanced toggle (v5 batch 2) */}
         <button
@@ -702,7 +789,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
 
             // Audit row for this mod (if an audit has been run). Drives the
             // inline "update available" pill + game-compat warning. We
-            // intentionally don't surface the pill for pinned mods or
+            // intentionally don't surface the pill for frozen mods or
             // game-version-blocked rows — the audit table in Settings still
             // shows those details for users who want the full picture.
             //
@@ -726,7 +813,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
             // game-version compatibility (see updater.rs: when the latest
             // GitHub release is blocked by min_game_version AND Nexus has
             // the same version, the flag is suppressed so we don't send
-            // the user to download an incompatible build). Pinned and
+            // the user to download an incompatible build). Frozen and
             // snoozed states piggy-back on the GitHub pill's gates for
             // consistency with what Settings shows.
             const nexusFilesHref = mod.nexus_url ? nexusFilesUrl(mod.nexus_url) ?? `${mod.nexus_url}?tab=files` : null;
@@ -770,12 +857,21 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                           </span>
                         )}
                         <span className="text-sm text-text-dim">v{mod.version}</span>
+                        {(mod.tags ?? []).map((tag) => (
+                          <span
+                            key={tag}
+                            className="gf-pill gf-mod-tag"
+                            title={t('mods.tags.title', { tag })}
+                          >
+                            <Tags size={9} /> {tag}
+                          </span>
+                        ))}
                         {mod.pinned && (
                           <span
                             className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300"
                             title={t('mods.pinnedTitle')}
                           >
-                            <Pin size={9} /> {t('mods.pinned')}
+                            <Snowflake size={9} /> {t('mods.pinned')}
                           </span>
                         )}
                         {auditRow && isUpToDate(auditRow) && (
@@ -938,7 +1034,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                     <KebabMenu title={t('mods.modActions')}>
                       <KebabSection>
                         <KebabItem
-                          icon={mod.pinned ? <PinOff size={12} /> : <Pin size={12} />}
+                          icon={mod.pinned ? <Sun size={12} /> : <Snowflake size={12} />}
                           onClick={() => handleTogglePin(mod.name, mod.folder_name, mod.pinned)}
                           description={
                             mod.pinned
@@ -1151,7 +1247,7 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                         setFindingGithub(null);
                       }
                     }}
-                    onSave={async (gh, nx, note, customUrl, displayName, displayDescription) => {
+                    onSave={async (gh, nx, note, customUrl, displayName, displayDescription, tagsInput) => {
                       try {
                         setSavingSource(true);
                         // Two separate commands by design: setModSourcesFull
@@ -1159,10 +1255,26 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                         // clears those links), setModExtras owns the
                         // free-form note + custom URL. They write to the
                         // same source entry but don't clobber each other.
-                        await setModSourcesFull(mod.name, gh.trim() || null, nx.trim() || null, mod.folder_name);
-                        await setModExtras(mod.name, note.trim() || null, customUrl.trim() || null, mod.folder_name);
-                        const nextDisplayName = displayName.trim() || null;
-                        const nextDisplayDescription = displayDescription.trim() || null;
+                        const nextGithub = cleanOptional(gh);
+                        const nextNexus = cleanOptional(nx);
+                        if (
+                          nextGithub !== (cleanOptional(ghRepoFromUrl(mod.github_url)))
+                          || nextNexus !== (mod.nexus_url ?? null)
+                        ) {
+                          await setModSourcesFull(mod.name, nextGithub, nextNexus, mod.folder_name);
+                        }
+
+                        const nextNote = cleanOptional(note);
+                        const nextCustomUrl = cleanOptional(customUrl);
+                        if (
+                          nextNote !== (mod.note ?? null)
+                          || nextCustomUrl !== (mod.custom_url ?? null)
+                        ) {
+                          await setModExtras(mod.name, nextNote, nextCustomUrl, mod.folder_name);
+                        }
+
+                        const nextDisplayName = cleanOptional(displayName);
+                        const nextDisplayDescription = cleanOptional(displayDescription);
                         if (
                           nextDisplayName !== (mod.display_name ?? null)
                           || nextDisplayDescription !== (mod.display_description ?? null)
@@ -1173,6 +1285,11 @@ export function ModsView({ advancedMode: advancedModeProp }: { advancedMode?: bo
                             nextDisplayDescription,
                             mod.folder_name,
                           );
+                        }
+
+                        const nextTags = parseManagerTags(tagsInput);
+                        if (!sameTags(nextTags, mod.tags ?? [])) {
+                          await setModTags(mod.name, nextTags, mod.folder_name);
                         }
                         await refreshMods();
                         toast.success(t('mods.toast.sourcesSaved', { name: displayNameFor(mod) }));

@@ -10,8 +10,8 @@ mod game;
 // reachable through the IPC surface; this just makes the integration
 // tests tractable.
 pub mod mod_sources;
-pub mod mods;
 mod modpack_browser;
+pub mod mods;
 mod nexus;
 pub mod profiles;
 mod qa_cassette;
@@ -203,7 +203,10 @@ pub fn run() {
         let lm_file = s.config_path.join("launch_mode.txt");
         if let Ok(raw) = std::fs::read_to_string(&lm_file) {
             if let Some(mode) = state::LaunchMode::parse(&raw) {
-                log::info!("Restored launch mode from previous session: {}", mode.as_str());
+                log::info!(
+                    "Restored launch mode from previous session: {}",
+                    mode.as_str()
+                );
                 s.launch_mode = mode;
             } else {
                 log::warn!(
@@ -319,6 +322,7 @@ pub fn run() {
             mod_sources::set_mod_extras,
             mod_sources::set_mod_display_overrides,
             mod_sources::set_mod_snooze,
+            mod_sources::set_mod_tags,
             mod_sources::remove_mod_source,
             mod_sources::pin_mod,
             mod_sources::unpin_mod,

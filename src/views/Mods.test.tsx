@@ -16,10 +16,10 @@ import type { ModInfo } from '../types';
  * copy, audit-result-driven button label transitions, etc.
  */
 
-function Wrap(props: { advancedMode?: boolean } = {}) {
+function Wrap(props: { advancedMode?: boolean; onOpenModLibrary?: () => void } = {}) {
   return (
     <AllProviders>
-      <ModsView advancedMode={props.advancedMode} />
+      <ModsView advancedMode={props.advancedMode} onOpenModLibrary={props.onOpenModLibrary} />
     </AllProviders>
   );
 }
@@ -41,6 +41,7 @@ const baseMod = (overrides: Partial<ModInfo> = {}): ModInfo => ({
   pinned: false,
   min_game_version: null,
   author: 'Alchyr',
+  tags: [],
   display_name: null,
   display_description: null,
   ...overrides,
@@ -81,6 +82,26 @@ describe('<ModsView>', () => {
     expect(screen.getByText(/2 installed.*1 active.*1 disabled/i)).toBeInTheDocument();
   });
 
+  it('offers a Mod Library bridge so users can assign installed mods to profiles from Mods', async () => {
+    seedMods([baseMod({ name: 'BaseLib', folder_name: 'BaseLib' })]);
+    const onOpenModLibrary = vi.fn();
+    const user = userEvent.setup();
+    render(<Wrap onOpenModLibrary={onOpenModLibrary} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('BaseLib')).toBeInTheDocument();
+    });
+    const bridge = screen.getByRole('button', { name: /Mod Library/i });
+    expect(within(bridge).getByText('Beta')).toBeInTheDocument();
+    expect(bridge).toHaveAttribute(
+      'title',
+      expect.stringMatching(/profiles include each installed mod/i),
+    );
+
+    await user.click(bridge);
+    expect(onOpenModLibrary).toHaveBeenCalledTimes(1);
+  });
+
   it('search filter narrows the visible rows', async () => {
     seedMods([
       baseMod({ name: 'BaseLib', folder_name: 'BaseLib' }),
@@ -100,6 +121,26 @@ describe('<ModsView>', () => {
     });
     expect(screen.getByText('AutoPath')).toBeInTheDocument();
     expect(screen.queryByText('CardArtEditor')).toBeNull();
+  });
+
+  it('manager tags render on rows and can filter large libraries by category', async () => {
+    seedMods([
+      baseMod({ name: 'BaseLib', folder_name: 'BaseLib', tags: ['utility', 'beta'] }),
+      baseMod({ name: 'CardArtEditor', folder_name: 'CardArtEditor', tags: ['visual'] }),
+      baseMod({ name: 'NoTag', folder_name: 'NoTag', tags: [] }),
+    ]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => {
+      expect(screen.getByText('BaseLib')).toBeInTheDocument();
+    });
+    expect(screen.getAllByText('utility').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('visual').length).toBeGreaterThan(0);
+
+    await user.selectOptions(screen.getByRole('combobox', { name: /Tag/i }), 'utility');
+    expect(screen.getByText('BaseLib')).toBeInTheDocument();
+    expect(screen.queryByText('CardArtEditor')).toBeNull();
+    expect(screen.queryByText('NoTag')).toBeNull();
   });
 
   it('sort dropdown supports common mod-library orders', async () => {
@@ -424,13 +465,14 @@ describe('<ModsView>', () => {
     expect(screen.queryByRole('menuitem', { name: /Remove mod/ })).toBeNull();
   });
 
-  it('kebab → Pin / Unpin toggles via pin_mod / unpin_mod', async () => {
+  it('kebab → Freeze / Unfreeze toggles via pin_mod / unpin_mod', async () => {
     seedMods([baseMod({ name: 'AutoPath', folder_name: 'AutoPath', pinned: false })]);
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('AutoPath')).toBeInTheDocument(); });
     await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    await user.click(screen.getByRole('menuitem', { name: /Pin this mod/ }));
+    expect(screen.getByText(/Don't update, replace, enable, or disable this mod/)).toBeInTheDocument();
+    await user.click(screen.getByRole('menuitem', { name: /Freeze this mod/ }));
     await waitFor(() => {
       expect(getInvokeCalls().some(
         (c) => c.cmd === 'pin_mod' && c.args?.modName === 'AutoPath',
@@ -647,10 +689,10 @@ describe('<ModsView>', () => {
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
-    // Snoozed-update pill renders elsewhere (the dim "Snoozed" tag), but the
+    // Skipped-update pill renders elsewhere (the dim "Skipped" tag), but the
     // actionable Download-from-Nexus button must stay off until the user
     // unsnoozes via the kebab — same gate the GitHub pill uses.
-    await screen.findByText(/Snoozed/);
+    await screen.findByText(/Skipped/);
     expect(screen.queryByText(/Download from Nexus/)).toBeNull();
   });
 
@@ -780,11 +822,11 @@ describe('<ModsView>', () => {
     });
   });
 
-  it('Pinned badge renders next to a pinned mod', async () => {
+  it('Frozen badge renders next to a frozen mod', async () => {
     seedMods([baseMod({ name: 'PinnedMod', folder_name: 'PinnedMod', pinned: true })]);
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('PinnedMod')).toBeInTheDocument(); });
-    expect(screen.getByText('Pinned')).toBeInTheDocument();
+    expect(screen.getByText('Frozen')).toBeInTheDocument();
   });
 
   it('min-game-version warning shows when mod requires a newer game', async () => {
@@ -1018,6 +1060,83 @@ describe('<ModsView>', () => {
     expect(screen.queryByRole('button', { name: /Update \d+ mod/ })).toBeNull();
   });
 
+  it('kebab Skip update suggestion stores the current upstream release tag', async () => {
+    seedMods([baseMod({ github_url: 'https://github.com/foo/bar' })]);
+    registerInvokeHandler('audit_mod_versions', () => [{
+      mod_name: 'BaseLib',
+      folder_name: 'BaseLib',
+      installed_version: '3.1.2',
+      latest_release_with_assets_tag: 'v3.2.0',
+      latest_has_assets: true,
+      needs_update: true,
+      asset_names: [],
+      releases_scanned: 1,
+      github_auto_detected: false,
+      github_repo: 'foo/bar',
+      pinned: false,
+      nexus_update_available: false,
+      update_source: 'github',
+      snoozed: false,
+    }]);
+    registerInvokeHandler('set_mod_snooze', () => ({}));
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Audit mods' }));
+    await screen.findByText(/Update available/i);
+
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    await user.click(screen.getByRole('menuitem', { name: /Skip this update/i }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls()).toContainEqual(expect.objectContaining({
+        cmd: 'set_mod_snooze',
+        args: { modName: 'BaseLib', folderName: 'BaseLib', latestTag: 'v3.2.0' },
+      }));
+    });
+    expect(await screen.findByText(/Skipped updates for BaseLib until next release/i)).toBeInTheDocument();
+  });
+
+  it('kebab Show update again clears a skipped update suggestion', async () => {
+    seedMods([baseMod({ github_url: 'https://github.com/foo/bar' })]);
+    registerInvokeHandler('audit_mod_versions', () => [{
+      mod_name: 'BaseLib',
+      folder_name: 'BaseLib',
+      installed_version: '3.1.2',
+      latest_release_with_assets_tag: 'v3.2.0',
+      latest_has_assets: true,
+      needs_update: true,
+      asset_names: [],
+      releases_scanned: 1,
+      github_auto_detected: false,
+      github_repo: 'foo/bar',
+      pinned: false,
+      nexus_update_available: false,
+      update_source: 'github',
+      snoozed: true,
+      snoozed_until_tag: 'v3.2.0',
+    }]);
+    registerInvokeHandler('set_mod_snooze', () => ({}));
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Audit mods' }));
+    await screen.findByText(/Skipped/i);
+
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    await user.click(screen.getByRole('menuitem', { name: /Show update again/i }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls()).toContainEqual(expect.objectContaining({
+        cmd: 'set_mod_snooze',
+        args: { modName: 'BaseLib', folderName: 'BaseLib', latestTag: null },
+      }));
+    });
+    expect(await screen.findByText(/Update suggestions restored for BaseLib/i)).toBeInTheDocument();
+  });
+
   it('Refresh button is rendered', async () => {
     seedMods([baseMod()]);
     render(<Wrap />);
@@ -1127,6 +1246,33 @@ describe('<ModsView>', () => {
         },
       });
     });
+  });
+
+  it('Source editor saves manager tags without changing source links', async () => {
+    seedMods([baseMod({ name: 'SrcMod', folder_name: 'SrcMod' })]);
+    registerInvokeHandler('set_mod_tags', () => ({
+      tags: ['utility', 'beta'],
+    }));
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await waitFor(() => { expect(screen.getByText('SrcMod')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    await user.click(screen.getAllByRole('menuitem', { name: /Edit sources/ })[0]);
+
+    await user.type(screen.getByPlaceholderText(/utility, beta/i), 'utility, beta');
+    await user.click(screen.getByRole('button', { name: /Save sources/ }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls()).toContainEqual({
+        cmd: 'set_mod_tags',
+        args: {
+          modName: 'SrcMod',
+          folderName: 'SrcMod',
+          tags: ['utility', 'beta'],
+        },
+      });
+    });
+    expect(getInvokeCalls().some((c) => c.cmd === 'set_mod_sources_full')).toBe(false);
   });
 
   it('Source editor does not clear existing display overrides when only links change', async () => {
@@ -1465,9 +1611,9 @@ describe('<ModsView>', () => {
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('PinFail')).toBeInTheDocument(); });
     await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    await user.click(screen.getByRole('menuitem', { name: /Pin this mod/ }));
+    await user.click(screen.getByRole('menuitem', { name: /Freeze this mod/ }));
     await waitFor(() => {
-      expect(screen.getByText(/Failed to pin PinFail.*locked/)).toBeInTheDocument();
+      expect(screen.getByText(/Failed to freeze PinFail.*locked/)).toBeInTheDocument();
     });
   });
 
@@ -1475,16 +1621,16 @@ describe('<ModsView>', () => {
     {
       cmd: 'pin_mod',
       mod: baseMod({ name: 'PinFailZh', folder_name: 'PinFailZh', pinned: false }),
-      menuName: /固定此模组/,
-      expected: /固定 PinFailZh 失败：locked/,
-      leakedEnglish: /pin PinFailZh/,
+      menuName: /冻结此模组/,
+      expected: /冻结 PinFailZh 失败：locked/,
+      leakedEnglish: /freeze PinFailZh/,
     },
     {
       cmd: 'unpin_mod',
       mod: baseMod({ name: 'UnpinFailZh', folder_name: 'UnpinFailZh', pinned: true }),
-      menuName: /取消固定此模组/,
-      expected: /取消固定 UnpinFailZh 失败：locked/,
-      leakedEnglish: /unpin UnpinFailZh/,
+      menuName: /解除冻结此模组/,
+      expected: /解除冻结 UnpinFailZh 失败：locked/,
+      leakedEnglish: /unfreeze UnpinFailZh/,
     },
   ])('$cmd failure localizes the action in Simplified Chinese', async ({ cmd, mod, menuName, expected, leakedEnglish }) => {
     await i18n.changeLanguage('zh-Hans');
@@ -1508,11 +1654,11 @@ describe('<ModsView>', () => {
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('PinnedMod')).toBeInTheDocument(); });
     await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    await user.click(screen.getByRole('menuitem', { name: /Unpin this mod/ }));
+    await user.click(screen.getByRole('menuitem', { name: /Unfreeze this mod/ }));
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'unpin_mod')).toBe(true);
     });
-    expect(screen.getByText(/Unpinned PinnedMod/)).toBeInTheDocument();
+    expect(screen.getByText(/Unfrozen PinnedMod/)).toBeInTheDocument();
   });
 
   it('delete_mod failure surfaces a toast', async () => {
@@ -2192,9 +2338,9 @@ describe('<ModsView>', () => {
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('P')).toBeInTheDocument(); });
     await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    await user.click(screen.getByRole('menuitem', { name: /Pin this mod/ }));
+    await user.click(screen.getByRole('menuitem', { name: /Freeze this mod/ }));
     await waitFor(() => {
-      expect(screen.getByText(/Failed to pin P.*bare-pin/)).toBeInTheDocument();
+      expect(screen.getByText(/Failed to freeze P.*bare-pin/)).toBeInTheDocument();
     });
   });
 
@@ -2676,7 +2822,7 @@ describe('<ModsView>', () => {
 
   // ── SourceEditor empty github trim → null fallback (839) ─────────
 
-  it('Source editor: saving with both fields empty passes null github + nexus', async () => {
+  it('Source editor: saving with no changes skips source-link writes', async () => {
     seedMods([baseMod({ name: 'EmptySave', folder_name: 'EmptySave' })]);
     registerInvokeHandler('set_mod_sources_full', () => ({
       github_repo: null,
@@ -2691,14 +2837,11 @@ describe('<ModsView>', () => {
     const items = screen.getAllByRole('menuitem', { name: /Edit sources/ });
     await user.click(items[0]);
     await waitFor(() => { expect(screen.getByText('Sources for EmptySave')).toBeInTheDocument(); });
-    // Click Save without typing anything — both fields trim to empty
-    // → null fallbacks.
     await user.click(screen.getByRole('button', { name: /Save sources/ }));
     await waitFor(() => {
-      expect(getInvokeCalls().some(
-        (c) => c.cmd === 'set_mod_sources_full' && c.args?.githubRepo === null,
-      )).toBe(true);
+      expect(screen.queryByText('Sources for EmptySave')).toBeNull();
     });
+    expect(getInvokeCalls().some((c) => c.cmd === 'set_mod_sources_full')).toBe(false);
   });
 
   // ── Repair "no github" early-return (line 184) ───────────────────

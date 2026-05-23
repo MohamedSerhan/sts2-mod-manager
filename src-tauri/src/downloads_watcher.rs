@@ -182,12 +182,12 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                             if let Some(entry) = entry {
                                 if entry.pinned {
                                     log::info!(
-                                        "Downloads watcher: skipping '{}' — mod is pinned",
+                                        "Downloads watcher: skipping '{}' — mod is frozen",
                                         existing.name
                                     );
                                     let _ = app.emit("mod-auto-install-failed", serde_json::json!({
                                         "file_name": path.file_name().unwrap_or_default().to_string_lossy().to_string(),
-                                        "error": format!("'{}' is pinned and cannot be auto-updated. Unpin it first.", existing.name)
+                                        "error": format!("'{}' is frozen and cannot be auto-updated. Unfreeze it first.", existing.name)
                                     }));
                                     continue;
                                 }

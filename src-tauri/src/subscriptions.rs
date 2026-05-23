@@ -441,7 +441,7 @@ async fn apply_subscription_update_inner(
                     || d.mod_id.as_ref().map_or(false, |i| pinned_set.contains(i))
             });
         if is_pinned {
-            log::info!("Subscription update: skipping pinned mod '{}' (preserving installed version)", pm.name);
+            log::info!("Subscription update: skipping frozen mod '{}' (preserving installed version)", pm.name);
             continue;
         }
 

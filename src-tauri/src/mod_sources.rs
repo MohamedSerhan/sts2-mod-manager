@@ -50,6 +50,11 @@ pub struct ModSourceEntry {
     /// later without breaking this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_url: Option<String>,
+    /// Manager-owned organization tags/categories. These are purely
+    /// presentation/filtering metadata and are never used for mod identity,
+    /// updates, or profile matching.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
     /// Optional user-facing display name. Stored separately from manifest
     /// identity so users can label confusing upstream mods without changing
     /// profile/update matching.
@@ -64,7 +69,8 @@ pub struct ModSourceEntry {
     /// match what's inside the file (Nexus version drift is the common case),
     /// or when they've decided to skip a specific release. When a NEWER
     /// release appears upstream, this auto-expires — `snoozed_until_tag`
-    /// is matched against the actual current tag, so a new tag stops the
+    /// is matched against the actual current release tag or Nexus version,
+    /// so a new upstream version stops the
     /// match and the suggestion comes back. Distinct from `pinned`, which
     /// is a hard freeze on auto-update entirely.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -89,7 +95,9 @@ pub struct ModSourceEntry {
     pub config_hashes: HashMap<String, String>,
 }
 
-fn is_false(v: &bool) -> bool { !*v }
+fn is_false(v: &bool) -> bool {
+    !*v
+}
 
 /// The entire mod sources database. Entries are keyed either by
 /// `folder_name` (newer write path; preferred since folders are unique
@@ -210,10 +218,13 @@ pub fn emit_configs_preserved<R: tauri::Runtime>(
     if files.is_empty() {
         return;
     }
-    let _ = app.emit("mod-configs-preserved", ConfigsPreservedEvent {
-        mod_name: mod_name.to_string(),
-        files: files.to_vec(),
-    });
+    let _ = app.emit(
+        "mod-configs-preserved",
+        ConfigsPreservedEvent {
+            mod_name: mod_name.to_string(),
+            files: files.to_vec(),
+        },
+    );
 }
 
 /// Read a mod's stored config-file hash snapshot. Returns an empty map
@@ -253,7 +264,9 @@ pub fn save_config_snapshot(
     if let Err(e) = save_sources(&db, config_path) {
         log::error!(
             "Failed to save config snapshot for '{}' (folder {:?}): {}",
-            mod_name, folder_name, e
+            mod_name,
+            folder_name,
+            e
         );
     }
 }
@@ -304,6 +317,9 @@ pub fn migrate_source_entry(old_name: &str, new_name: &str, config_path: &Path) 
     if dest.custom_url.is_none() {
         dest.custom_url = old.custom_url;
     }
+    if dest.tags.is_empty() {
+        dest.tags = old.tags;
+    }
     if dest.display_name.is_none() {
         dest.display_name = old.display_name;
     }
@@ -322,12 +338,15 @@ pub fn migrate_source_entry(old_name: &str, new_name: &str, config_path: &Path) 
     if let Err(e) = save_sources(&db, config_path) {
         log::error!(
             "Failed to migrate source entry from '{}' to '{}': {}",
-            old_name, new_name, e
+            old_name,
+            new_name,
+            e
         );
     } else {
         log::info!(
             "Migrated source entry on rename: '{}' → '{}'",
-            old_name, new_name
+            old_name,
+            new_name
         );
     }
 }
@@ -391,6 +410,9 @@ pub fn carry_source_entry(
     if dest.custom_url.is_none() {
         dest.custom_url = old.custom_url;
     }
+    if dest.tags.is_empty() {
+        dest.tags = old.tags;
+    }
     if dest.display_name.is_none() {
         dest.display_name = old.display_name;
     }
@@ -409,12 +431,19 @@ pub fn carry_source_entry(
     if let Err(e) = save_sources(&db, config_path) {
         log::error!(
             "Failed to carry source entry forward from ({:?}/{}) to ({:?}/{}): {}",
-            old_folder, old_name, new_folder, new_name, e
+            old_folder,
+            old_name,
+            new_folder,
+            new_name,
+            e
         );
     } else {
         log::info!(
             "Carried source entry forward: ({:?}/{}) → ({:?}/{})",
-            old_folder, old_name, new_folder, new_name
+            old_folder,
+            old_name,
+            new_folder,
+            new_name
         );
     }
 }
@@ -444,7 +473,9 @@ pub fn attach_nexus_source(
     if let Err(e) = save_sources(&db, config_path) {
         log::error!(
             "Failed to attach Nexus source for '{}' (folder {:?}): {}",
-            mod_name, folder_name, e
+            mod_name,
+            folder_name,
+            e
         );
     }
 }
@@ -464,7 +495,10 @@ pub fn enrich_mods_with_sources(mods: &mut [ModInfo], config_path: &Path) {
         // instead of leaking across both rows. Display-name lookup is kept
         // as a fallback for legacy entries created before pin_mod started
         // saving by folder.
-        let entry = m.folder_name.as_ref().and_then(|f| db.mods.get(f))
+        let entry = m
+            .folder_name
+            .as_ref()
+            .and_then(|f| db.mods.get(f))
             .or_else(|| db.mods.get(&m.name))
             .or_else(|| m.mod_id.as_ref().and_then(|i| db.mods.get(i)));
         if let Some(entry) = entry {
@@ -499,6 +533,7 @@ pub fn enrich_mods_with_sources(mods: &mut [ModInfo], config_path: &Path) {
             // to the GitHub/Nexus chips and the kebab menu.
             m.note = entry.note.clone();
             m.custom_url = entry.custom_url.clone();
+            m.tags = entry.tags.clone();
             m.display_name = entry.display_name.clone();
             m.display_description = entry.display_description.clone();
         }
@@ -554,7 +589,10 @@ pub fn parse_source_url(url: &str) -> Option<ModSourceEntry> {
             if host != "github.com" && host != "www.github.com" {
                 return None;
             }
-            let segs: Vec<&str> = parsed.path_segments().map(|s| s.collect()).unwrap_or_default();
+            let segs: Vec<&str> = parsed
+                .path_segments()
+                .map(|s| s.collect())
+                .unwrap_or_default();
             if segs.len() >= 2 && !segs[0].is_empty() && !segs[1].is_empty() {
                 // Strip ".git" clone-URL suffix so the canonical form
                 // matches what parse_github_url (in updater.rs) produces.
@@ -591,7 +629,10 @@ pub fn parse_source_url(url: &str) -> Option<ModSourceEntry> {
     // Nexus URL
     if trimmed.contains("nexusmods.com/") {
         if let Ok(parsed) = url::Url::parse(trimmed) {
-            let segs: Vec<&str> = parsed.path_segments().map(|s| s.collect()).unwrap_or_default();
+            let segs: Vec<&str> = parsed
+                .path_segments()
+                .map(|s| s.collect())
+                .unwrap_or_default();
             if segs.len() >= 3 && segs[1] == "mods" {
                 if let Ok(mod_id) = segs[2].parse::<u64>() {
                     return Some(ModSourceEntry {
@@ -678,12 +719,8 @@ pub fn set_mod_source(
     let key = folder_name.clone().unwrap_or_else(|| mod_name.clone());
 
     if source_url.trim().is_empty() {
-        return clear_mod_source_links_from_path(
-            &mod_name,
-            folder_name.as_deref(),
-            &s.config_path,
-        )
-        .map_err(|e| e.to_string());
+        return clear_mod_source_links_from_path(&mod_name, folder_name.as_deref(), &s.config_path)
+            .map_err(|e| e.to_string());
     }
 
     let entry = parse_source_url(&source_url).ok_or_else(|| {
@@ -790,6 +827,22 @@ fn clean_optional_string(value: Option<String>) -> Option<String> {
     })
 }
 
+fn clean_tags(tags: Vec<String>) -> Vec<String> {
+    let mut cleaned = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for tag in tags {
+        let trimmed = tag.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let key = trimmed.to_lowercase();
+        if seen.insert(key) {
+            cleaned.push(trimmed.to_string());
+        }
+    }
+    cleaned
+}
+
 fn clear_source_link_fields(entry: &mut ModSourceEntry) {
     entry.github_repo = None;
     entry.github_auto_detected = false;
@@ -808,6 +861,7 @@ fn source_entry_has_any_metadata(entry: &ModSourceEntry) -> bool {
         || entry.pinned
         || entry.note.is_some()
         || entry.custom_url.is_some()
+        || !entry.tags.is_empty()
         || entry.display_name.is_some()
         || entry.display_description.is_some()
         || entry.snoozed_until_tag.is_some()
@@ -837,9 +891,7 @@ pub(crate) fn clear_mod_source_links_from_path(
     } else {
         None
     };
-    let result = primary
-        .or(legacy)
-        .unwrap_or_else(ModSourceEntry::default);
+    let result = primary.or(legacy).unwrap_or_else(ModSourceEntry::default);
     save_sources(&db, config_path)?;
     Ok(result)
 }
@@ -867,6 +919,41 @@ pub fn set_mod_extras(
     let result = entry.clone();
     save_sources(&db, &s.config_path).map_err(|e| e.to_string())?;
     Ok(result)
+}
+
+pub(crate) fn set_mod_tags_from_path(
+    mod_name: &str,
+    folder_name: Option<&str>,
+    tags: Vec<String>,
+    config_path: &Path,
+) -> Result<ModSourceEntry> {
+    let mut db = load_sources(config_path);
+    let key = folder_name
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| mod_name.to_string());
+    let entry = db.mods.entry(key.clone()).or_default();
+    entry.tags = clean_tags(tags);
+    let result = entry.clone();
+    if !source_entry_has_any_metadata(entry) {
+        db.mods.remove(&key);
+    }
+    save_sources(&db, config_path)?;
+    Ok(result)
+}
+
+/// Set manager-only organization tags/categories for a mod. Tags are
+/// display/filter metadata only; they never affect mod identity, profile
+/// membership, or update matching.
+#[tauri::command]
+pub fn set_mod_tags(
+    mod_name: String,
+    folder_name: Option<String>,
+    tags: Vec<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<ModSourceEntry, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    set_mod_tags_from_path(&mod_name, folder_name.as_deref(), tags, &s.config_path)
+        .map_err(|e| e.to_string())
 }
 
 pub(crate) fn set_mod_display_overrides_from_path(
@@ -910,8 +997,8 @@ pub fn set_mod_display_overrides(
     .map_err(|e| e.to_string())
 }
 
-/// Snooze update suggestions for this mod until a release tag newer than
-/// `latest_tag` appears. Passing an empty string or None clears the snooze.
+/// Snooze update suggestions for this mod until an upstream version newer
+/// than `latest_tag` appears. Passing an empty string or None clears the snooze.
 /// Folder-first write. Distinct from pin (which is a hard freeze): a
 /// snoozed mod can still be updated manually, and the snooze auto-expires
 /// when upstream advances past `latest_tag`.
@@ -928,7 +1015,11 @@ pub fn set_mod_snooze(
     let entry = db.mods.entry(key).or_default();
     entry.snoozed_until_tag = latest_tag.and_then(|s| {
         let t = s.trim().to_string();
-        if t.is_empty() { None } else { Some(t) }
+        if t.is_empty() {
+            None
+        } else {
+            Some(t)
+        }
     });
     let result = entry.clone();
     save_sources(&db, &s.config_path).map_err(|e| e.to_string())?;
@@ -1016,7 +1107,10 @@ pub async fn find_github_from_nexus(
 ) -> std::result::Result<Option<String>, String> {
     let (config_path, nexus_key, github_token) = {
         let s = state.lock().map_err(|e| e.to_string())?;
-        let key = s.nexus_api_key.clone().ok_or("Nexus API key not set. Add it in Settings.")?;
+        let key = s
+            .nexus_api_key
+            .clone()
+            .ok_or("Nexus API key not set. Add it in Settings.")?;
         (s.config_path.clone(), key, s.github_token.clone())
     };
 
@@ -1028,8 +1122,13 @@ pub async fn find_github_from_nexus(
         .ok_or(format!("No source entry for '{}'", mod_name))?;
     let write_key = folder_name.clone().unwrap_or_else(|| mod_name.clone());
 
-    let game_domain = entry.nexus_game_domain.clone().unwrap_or_else(|| "slaythespire2".to_string());
-    let mod_id = entry.nexus_mod_id.ok_or("No Nexus mod ID for this mod. Set a Nexus URL first.")?;
+    let game_domain = entry
+        .nexus_game_domain
+        .clone()
+        .unwrap_or_else(|| "slaythespire2".to_string());
+    let mod_id = entry
+        .nexus_mod_id
+        .ok_or("No Nexus mod ID for this mod. Set a Nexus URL first.")?;
 
     // Step 1: Try extracting from Nexus description
     let repo = extract_github_from_nexus(&nexus_key, &game_domain, mod_id).await;
@@ -1060,15 +1159,25 @@ pub async fn find_github_from_nexus(
             if query.trim().is_empty() {
                 continue;
             }
-            let search_query = format!("{} slay-the-spire-2 OR sts2 OR \"slay the spire 2\"", query);
+            let search_query =
+                format!("{} slay-the-spire-2 OR sts2 OR \"slay the spire 2\"", query);
             let results = search_github_repos_relevance(&search_query, github_token.as_deref())
                 .await
                 .unwrap_or_default();
 
             // Find a result that matches by name similarity
-            let norm_name = query.to_lowercase().replace(' ', "").replace('-', "").replace('_', "");
+            let norm_name = query
+                .to_lowercase()
+                .replace(' ', "")
+                .replace('-', "")
+                .replace('_', "");
             for r in &results {
-                let norm_repo = r.name.to_lowercase().replace(' ', "").replace('-', "").replace('_', "");
+                let norm_repo = r
+                    .name
+                    .to_lowercase()
+                    .replace(' ', "")
+                    .replace('-', "")
+                    .replace('_', "");
                 if norm_repo.contains(&norm_name) || norm_name.contains(&norm_repo) {
                     let repo = r.full_name.clone();
                     let mut db = load_sources(&config_path);
@@ -1099,7 +1208,12 @@ pub async fn extract_github_from_nexus(
     let info = match client.get_mod_info(game_domain, mod_id).await {
         Ok(i) => i,
         Err(e) => {
-            log::warn!("Nexus API call failed for {}/{}: {}", game_domain, mod_id, e);
+            log::warn!(
+                "Nexus API call failed for {}/{}: {}",
+                game_domain,
+                mod_id,
+                e
+            );
             return None;
         }
     };
@@ -1143,7 +1257,8 @@ pub async fn extract_github_from_nexus(
         // by searching the raw text
         for caps in re.captures_iter(text) {
             if let Some(m) = caps.get(1) {
-                let repo = m.as_str()
+                let repo = m
+                    .as_str()
                     .trim_end_matches('/')
                     .trim_end_matches(".git")
                     .to_string();
@@ -1154,7 +1269,8 @@ pub async fn extract_github_from_nexus(
                     if parts[1] != "issues" && parts[1] != "releases" && parts[1] != "wiki" {
                         log::info!(
                             "Found GitHub repo '{}' in Nexus description for mod {}",
-                            repo, mod_id
+                            repo,
+                            mod_id
                         );
                         return Some(repo);
                     }
@@ -1224,8 +1340,20 @@ fn normalize(s: &str) -> String {
 /// Strip common STS2 prefixes/suffixes from a mod name for broader matching.
 fn strip_sts2_affixes(name: &str) -> Option<String> {
     let lower = name.to_lowercase();
-    let prefixes = ["sts2", "sts2-", "sts2_", "slay the spire 2 ", "slaythe spire2"];
-    let suffixes = [" sts2", "-sts2", "_sts2", " for sts2", " for slay the spire 2"];
+    let prefixes = [
+        "sts2",
+        "sts2-",
+        "sts2_",
+        "slay the spire 2 ",
+        "slaythe spire2",
+    ];
+    let suffixes = [
+        " sts2",
+        "-sts2",
+        "_sts2",
+        " for sts2",
+        " for slay the spire 2",
+    ];
 
     let mut stripped = lower.clone();
     for p in &prefixes {
@@ -1292,11 +1420,7 @@ fn extract_author(m: &ModInfo) -> Option<String> {
 fn score_repo(repo: &GitHubRepo, mod_name: &str, folder_name: Option<&str>) -> u32 {
     let norm_mod = normalize(mod_name);
     let norm_repo = normalize(&repo.name);
-    let desc_lower = repo
-        .description
-        .as_deref()
-        .unwrap_or("")
-        .to_lowercase();
+    let desc_lower = repo.description.as_deref().unwrap_or("").to_lowercase();
 
     // Exact normalized name match → highest score
     if norm_repo == norm_mod {
@@ -1313,8 +1437,8 @@ fn score_repo(repo: &GitHubRepo, mod_name: &str, folder_name: Option<&str>) -> u
     // Repo name contains mod name or vice versa (normalized)
     if norm_repo.contains(&norm_mod) || norm_mod.contains(&norm_repo) {
         // Prefer closer length matches
-        let len_ratio = norm_mod.len().min(norm_repo.len()) as f64
-            / norm_mod.len().max(norm_repo.len()) as f64;
+        let len_ratio =
+            norm_mod.len().min(norm_repo.len()) as f64 / norm_mod.len().max(norm_repo.len()) as f64;
         return 60 + (len_ratio * 30.0) as u32;
     }
 
@@ -1398,13 +1522,14 @@ pub async fn auto_detect_sources(
     // never had a source set — manifest-declared URLs are author-intent,
     // not a guess, so initial population is OK.
     for m in &installed {
-        let already_linked = lookup_entry(&db.mods, m.folder_name.as_deref(), &m.name, m.mod_id.as_deref())
-            .map(|e| {
-                e.github_repo.is_some()
-                    || e.nexus_url.is_some()
-                    || e.nexus_mod_id.is_some()
-            })
-            .unwrap_or(false);
+        let already_linked = lookup_entry(
+            &db.mods,
+            m.folder_name.as_deref(),
+            &m.name,
+            m.mod_id.as_deref(),
+        )
+        .map(|e| e.github_repo.is_some() || e.nexus_url.is_some() || e.nexus_mod_id.is_some())
+        .unwrap_or(false);
         if already_linked {
             continue;
         }
@@ -1479,7 +1604,12 @@ pub async fn auto_detect_sources(
         // Nexus link OR a GitHub repo, we leave the mod alone. The user
         // can still trigger a manual re-link from the Mods view if they
         // genuinely want a different source.
-        if let Some(entry) = lookup_entry(&db.mods, m.folder_name.as_deref(), &m.name, m.mod_id.as_deref()) {
+        if let Some(entry) = lookup_entry(
+            &db.mods,
+            m.folder_name.as_deref(),
+            &m.name,
+            m.mod_id.as_deref(),
+        ) {
             let has_github = entry.github_repo.is_some();
             let has_nexus = entry.nexus_mod_id.is_some() || entry.nexus_url.is_some();
             if has_github || has_nexus {
@@ -1699,6 +1829,7 @@ mod enrich_priority_tests {
             author: None,
             note: None,
             custom_url: None,
+            tags: vec![],
             display_name: None,
             display_description: None,
         }
@@ -1779,9 +1910,7 @@ mod enrich_priority_tests {
             config,
             "STS2-MultiPlayerPotionView",
             ModSourceEntry {
-                github_repo: Some(
-                    "https://github.com/BAKAOLC/STS2-MultiPlayerPotionView".into(),
-                ),
+                github_repo: Some("https://github.com/BAKAOLC/STS2-MultiPlayerPotionView".into()),
                 github_auto_detected: false,
                 ..Default::default()
             },
@@ -1838,7 +1967,11 @@ mod enrich_priority_tests {
                 ..Default::default()
             },
         );
-        let mut mods = vec![mod_with("manifest-gibberish", Some("UnreadableFolder"), None)];
+        let mut mods = vec![mod_with(
+            "manifest-gibberish",
+            Some("UnreadableFolder"),
+            None,
+        )];
 
         enrich_mods_with_sources(&mut mods, config);
 
@@ -1848,6 +1981,52 @@ mod enrich_priority_tests {
             mods[0].display_description.as_deref(),
             Some("Human-maintained description"),
         );
+    }
+
+    #[test]
+    fn tags_enrich_as_manager_owned_categories() {
+        let tmp = tempdir().unwrap();
+        let config = tmp.path();
+        write_entry(
+            config,
+            "ReadableFolder",
+            ModSourceEntry {
+                tags: vec!["utility".into(), "beta".into()],
+                ..Default::default()
+            },
+        );
+        let mut mods = vec![mod_with("ManifestName", Some("ReadableFolder"), None)];
+
+        enrich_mods_with_sources(&mut mods, config);
+
+        assert_eq!(
+            mods[0].tags,
+            vec!["utility".to_string(), "beta".to_string()]
+        );
+    }
+
+    #[test]
+    fn set_tags_trims_deduplicates_and_clears_values() {
+        let tmp = tempdir().unwrap();
+        let config = tmp.path();
+
+        let saved = set_mod_tags_from_path(
+            "ManifestName",
+            Some("FolderName"),
+            vec![
+                " utility ".into(),
+                "beta".into(),
+                "utility".into(),
+                " ".into(),
+            ],
+            config,
+        )
+        .unwrap();
+        assert_eq!(saved.tags, vec!["utility".to_string(), "beta".to_string()]);
+
+        let cleared =
+            set_mod_tags_from_path("ManifestName", Some("FolderName"), vec![], config).unwrap();
+        assert!(cleared.tags.is_empty());
     }
 
     #[test]
@@ -1864,7 +2043,10 @@ mod enrich_priority_tests {
         )
         .unwrap();
         assert_eq!(saved.display_name.as_deref(), Some("Friendly Name"));
-        assert_eq!(saved.display_description.as_deref(), Some("Better description"));
+        assert_eq!(
+            saved.display_description.as_deref(),
+            Some("Better description")
+        );
 
         let cleared = set_mod_display_overrides_from_path(
             "ManifestName",
@@ -1895,6 +2077,7 @@ mod enrich_priority_tests {
                 pinned: true,
                 note: Some("keep note".into()),
                 custom_url: Some("https://example.test/post".into()),
+                tags: vec!["utility".into()],
                 display_name: Some("Readable Name".into()),
                 display_description: Some("Human-maintained description".into()),
                 snoozed_until_tag: Some("v1.1.0".into()),
@@ -1905,12 +2088,8 @@ mod enrich_priority_tests {
             },
         );
 
-        let cleared = clear_mod_source_links_from_path(
-            "ManifestName",
-            Some("FolderName"),
-            config,
-        )
-        .unwrap();
+        let cleared =
+            clear_mod_source_links_from_path("ManifestName", Some("FolderName"), config).unwrap();
 
         assert_eq!(cleared.github_repo, None);
         assert_eq!(cleared.nexus_url, None);
@@ -1922,6 +2101,7 @@ mod enrich_priority_tests {
             Some("Human-maintained description"),
         );
         assert_eq!(cleared.note.as_deref(), Some("keep note"));
+        assert_eq!(cleared.tags, vec!["utility".to_string()]);
         assert!(cleared.pinned);
         assert_eq!(cleared.installed_version.as_deref(), Some("v1.0.0"));
         assert_eq!(cleared.snoozed_until_tag.as_deref(), Some("v1.1.0"));
@@ -1948,15 +2128,14 @@ mod enrich_priority_tests {
             },
         );
 
-        let cleared = clear_mod_source_links_from_path(
-            "ManifestName",
-            Some("FolderName"),
-            config,
-        )
-        .unwrap();
+        let cleared =
+            clear_mod_source_links_from_path("ManifestName", Some("FolderName"), config).unwrap();
 
         assert_eq!(cleared.github_repo, None);
-        assert_eq!(cleared.display_name.as_deref(), Some("Readable Legacy Name"));
+        assert_eq!(
+            cleared.display_name.as_deref(),
+            Some("Readable Legacy Name")
+        );
         let db = load_sources(config);
         assert!(
             !db.mods.contains_key("FolderName"),
@@ -2059,9 +2238,7 @@ mod normalize_input_tests {
     #[test]
     fn normalize_full_github_url_strips_to_owner_repo() {
         assert_eq!(
-            normalize_github_repo_input(
-                "https://github.com/BAKAOLC/STS2-MultiPlayerPotionView"
-            ),
+            normalize_github_repo_input("https://github.com/BAKAOLC/STS2-MultiPlayerPotionView"),
             Some("BAKAOLC/STS2-MultiPlayerPotionView".into()),
         );
     }
@@ -2085,9 +2262,7 @@ mod normalize_input_tests {
     #[test]
     fn normalize_scheme_less_github_url() {
         assert_eq!(
-            normalize_github_repo_input(
-                "github.com/BAKAOLC/STS2-MultiPlayerPotionView"
-            ),
+            normalize_github_repo_input("github.com/BAKAOLC/STS2-MultiPlayerPotionView"),
             Some("BAKAOLC/STS2-MultiPlayerPotionView".into()),
         );
         assert_eq!(
@@ -2185,13 +2360,19 @@ mod carry_and_attach_tests {
 
         // The folder-keyed entry must still expose the Nexus link unchanged.
         let db = load_sources(config);
-        let entry = db.mods.get(folder).expect("folder-keyed entry must still exist");
+        let entry = db
+            .mods
+            .get(folder)
+            .expect("folder-keyed entry must still exist");
         assert_eq!(
             entry.nexus_mod_id,
             Some(42),
             "Nexus mod ID must survive the carry — losing it is the user-reported bug"
         );
-        assert!(entry.nexus_url.is_some(), "Nexus URL must survive the carry");
+        assert!(
+            entry.nexus_url.is_some(),
+            "Nexus URL must survive the carry"
+        );
     }
 
     #[test]
@@ -2276,13 +2457,7 @@ mod carry_and_attach_tests {
             save_sources(&db, config).unwrap();
         }
 
-        carry_source_entry(
-            Some("OldFolder"),
-            "x",
-            Some("NewFolder"),
-            "x",
-            config,
-        );
+        carry_source_entry(Some("OldFolder"), "x", Some("NewFolder"), "x", config);
 
         let db = load_sources(config);
         let dest = db.mods.get("NewFolder").unwrap();
@@ -2325,7 +2500,10 @@ mod carry_and_attach_tests {
             "must reuse the existing folder-keyed entry, not split state across two keys — \
              the split was the underlying bug behind 'I set a Nexus URL, audit still says no source'"
         );
-        let entry = db.mods.get("MyMod").expect("folder-keyed entry must persist");
+        let entry = db
+            .mods
+            .get("MyMod")
+            .expect("folder-keyed entry must persist");
         assert_eq!(entry.nexus_mod_id, Some(100));
         assert_eq!(
             entry.installed_version.as_deref(),

@@ -26,7 +26,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { ProfilesView } from './Profiles';
@@ -34,10 +34,10 @@ import { AllProviders } from '../__test__/providers';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
 import type { LoadOrderSettingsStatus, ModInfo, Profile } from '../types';
 
-function Wrap() {
+function Wrap(props: React.ComponentProps<typeof ProfilesView> = {}) {
   return (
     <AllProviders>
-      <ProfilesView />
+      <ProfilesView {...props} />
     </AllProviders>
   );
 }
@@ -401,6 +401,34 @@ describe('<ProfilesView>', () => {
     await waitFor(() => {
       expect(screen.getByText(/Switched to profile "B"/)).toBeInTheDocument();
     });
+  });
+
+  it('Switch cancel leaves a drifted active profile untouched', async () => {
+    seedProfiles([
+      baseProfile({ name: 'A' }),
+      baseProfile({ name: 'B' }),
+    ]);
+    registerInvokeHandler('get_active_profile', () => 'A');
+    registerInvokeHandler('get_profile_drift', (args) => ({
+      profile_name: args?.name,
+      added: ['LooseMod'],
+      removed: [],
+      toggled: [],
+      version_changed: [],
+      has_drift: args?.name === 'A',
+    }));
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('B')).toBeInTheDocument(); });
+    const activate = screen.getAllByRole('button').find((b) => /Switch to/.test(b.textContent ?? ''));
+    expect(activate).toBeDefined();
+    await user.click(activate!);
+
+    const modal = await confirmModal();
+    await user.click(modal.getByRole('button', { name: /Stay here/i }));
+
+    expect(getInvokeCalls().some((call) => call.cmd === 'switch_profile')).toBe(false);
   });
 
   it('switch_profile with downloads + missing + failed builds the combined info toast', async () => {
@@ -923,6 +951,31 @@ describe('<ProfilesView>', () => {
     expect(screen.getByRole('checkbox', { name: 'Beta' })).not.toBeChecked();
   });
 
+  it('opens Mod Library directly when requested from another view', async () => {
+    seedProfiles([baseProfile({ name: 'Stable' })]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [
+        {
+          name: 'BaseLib',
+          version: '1.0.0',
+          folder_name: 'BaseLib',
+          mod_id: 'BaseLib',
+          installed_enabled: true,
+          profiles: [
+            { profile_name: 'Stable', included: true, enabled: true, editable: true },
+          ],
+        },
+      ],
+    }));
+
+    render(<Wrap openModLibrarySignal={1} />);
+
+    expect(await screen.findByRole('heading', { name: /Mod Library/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Back to profiles/i })).toBeInTheDocument();
+    expect((await screen.findAllByText('BaseLib')).length).toBeGreaterThan(0);
+  });
+
   it('Mod Library action shows the installed count before opening and is marked beta', async () => {
     seedProfiles([baseProfile({ name: 'Alpha' })]);
     registerInvokeHandler('get_installed_mods', () => [
@@ -978,6 +1031,36 @@ describe('<ProfilesView>', () => {
     expect(screen.getByRole('checkbox', { name: 'Stable' })).toBeChecked();
     expect(getInvokeCalls().filter((call) => call.cmd === 'get_profile_memberships')).toHaveLength(1);
     expect(getInvokeCalls().some((call) => call.cmd === 'switch_profile')).toBe(false);
+  });
+
+  it('Mod Library surfaces membership update failures without changing the checkbox', async () => {
+    seedProfiles([baseProfile({ name: 'Stable' })]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [
+        {
+          name: 'Library Only',
+          version: '1.2.3',
+          folder_name: 'LibraryOnly',
+          mod_id: 'LibraryOnly',
+          installed_enabled: false,
+          profiles: [
+            { profile_name: 'Stable', included: false, enabled: false, editable: true },
+          ],
+        },
+      ],
+    }));
+    registerInvokeHandler('set_profile_mod_membership', () => {
+      throw new Error('profile locked');
+    });
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.click(await screen.findByRole('button', { name: /Mod Library/i }));
+    await user.click(await screen.findByRole('checkbox', { name: 'Stable' }));
+
+    expect(await screen.findByText(/Failed to update membership: profile locked/i)).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Stable' })).not.toBeChecked();
   });
 
   it('Mod Library disables followed profile membership edits', async () => {
@@ -1051,8 +1134,351 @@ describe('<ProfilesView>', () => {
 
     expect(await screen.findByText('Readable Name')).toBeInTheDocument();
     expect(screen.getByText('raw-manifest-name')).toBeInTheDocument();
-    expect(screen.getByText(/installed disabled/i)).toBeInTheDocument();
+    expect(screen.getByText(/Inactive \(kept installed\)/i)).toBeInTheDocument();
     expect(screen.getByText(/No profiles yet/i)).toBeInTheDocument();
+  });
+
+  it('Mod Library separates library storage state from profile membership state', async () => {
+    seedProfiles([baseProfile({ name: 'Stable' }), baseProfile({ name: 'Beta' })]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [
+        { name: 'Stable', editable: true },
+        { name: 'Beta', editable: true },
+      ],
+      mods: [
+        {
+          name: 'Combo Patch',
+          version: '1.0.0',
+          folder_name: 'ComboPatch',
+          mod_id: 'ComboPatch',
+          installed_enabled: true,
+          profiles: [
+            { profile_name: 'Stable', included: false, enabled: false, editable: true },
+            { profile_name: 'Beta', included: true, enabled: false, editable: true },
+          ],
+        },
+      ],
+    }));
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.click(await screen.findByRole('button', { name: /Mod Library/i }));
+
+    expect(await screen.findByText('Combo Patch')).toBeInTheDocument();
+    expect(screen.getByText(/Active in game folder/i)).toBeInTheDocument();
+    expect(screen.getByText(/Mod Library still shows every installed mod/i)).toBeInTheDocument();
+    expect(screen.getByText(/Not in profile/i)).toBeInTheDocument();
+    expect(screen.getByText(/Disabled in profile/i)).toBeInTheDocument();
+    expect(screen.getByText('1 profile')).toBeInTheDocument();
+  });
+
+  it('Mod Library stores and activates a mod without changing profile membership', async () => {
+    seedProfiles([baseProfile({ name: 'Stable' })]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [
+        {
+          name: 'Loose Active Mod',
+          version: '1.0.0',
+          folder_name: 'LooseActive',
+          mod_id: 'loose-active',
+          installed_enabled: true,
+          profiles: [
+            { profile_name: 'Stable', included: false, enabled: false, editable: true },
+          ],
+        },
+      ],
+    }));
+    registerInvokeHandler('toggle_mod', () => undefined);
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.click(await screen.findByRole('button', { name: /Mod Library/i }));
+
+    await user.click(await screen.findByRole('button', { name: /Disable Loose Active Mod in game and keep it installed/i }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls()).toContainEqual({
+        cmd: 'toggle_mod',
+        args: {
+          name: 'Loose Active Mod',
+          folderName: 'LooseActive',
+          enable: false,
+        },
+      });
+    });
+    expect(screen.getByRole('checkbox', { name: 'Stable' })).not.toBeChecked();
+    expect(getInvokeCalls().filter((call) => call.cmd === 'set_profile_mod_membership')).toHaveLength(0);
+    expect(await screen.findByText(/Inactive \(kept installed\)/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Loose Active Mod disabled in game and kept installed/i)).toBeInTheDocument();
+
+    await user.click(await screen.findByRole('button', { name: /Activate Loose Active Mod in game folder/i }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls()).toContainEqual({
+        cmd: 'toggle_mod',
+        args: {
+          name: 'Loose Active Mod',
+          folderName: 'LooseActive',
+          enable: true,
+        },
+      });
+    });
+    expect(await screen.findByText(/Active in game folder/i)).toBeInTheDocument();
+  });
+
+  it('Mod Library bulk-stores only active mods unused by every profile', async () => {
+    seedProfiles([baseProfile({ name: 'Stable' }), baseProfile({ name: 'Beta' })]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [
+        { name: 'Stable', editable: true },
+        { name: 'Beta', editable: true },
+      ],
+      mods: [
+        {
+          name: 'Unused Active',
+          version: '1.0.0',
+          folder_name: 'UnusedActive',
+          mod_id: 'unused-active',
+          installed_enabled: true,
+          profiles: [
+            { profile_name: 'Stable', included: false, enabled: false, editable: true },
+            { profile_name: 'Beta', included: false, enabled: false, editable: true },
+          ],
+        },
+        {
+          name: 'Used Active',
+          version: '1.0.0',
+          folder_name: 'UsedActive',
+          mod_id: 'used-active',
+          installed_enabled: true,
+          profiles: [
+            { profile_name: 'Stable', included: true, enabled: true, editable: true },
+            { profile_name: 'Beta', included: false, enabled: false, editable: true },
+          ],
+        },
+        {
+          name: 'Unused Stored',
+          version: '1.0.0',
+          folder_name: 'UnusedStored',
+          mod_id: 'unused-stored',
+          installed_enabled: false,
+          profiles: [
+            { profile_name: 'Stable', included: false, enabled: false, editable: true },
+            { profile_name: 'Beta', included: false, enabled: false, editable: true },
+          ],
+        },
+      ],
+    }));
+    registerInvokeHandler('toggle_mod', () => undefined);
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.click(await screen.findByRole('button', { name: /Mod Library/i }));
+
+    await user.click(await screen.findByRole('button', { name: /Disable 1 unused active mod/i }));
+
+    await waitFor(() => {
+      const toggles = getInvokeCalls().filter((call) => call.cmd === 'toggle_mod');
+      expect(toggles).toEqual([
+        {
+          cmd: 'toggle_mod',
+          args: {
+            name: 'Unused Active',
+            folderName: 'UnusedActive',
+            enable: false,
+          },
+        },
+      ]);
+    });
+    const unusedRow = screen.getByText('Unused Active').closest('.gf-profile-library-row') as HTMLElement;
+    const usedRow = screen.getByText('Used Active').closest('.gf-profile-library-row') as HTMLElement;
+    expect(within(unusedRow).getByText(/Inactive \(kept installed\)/i)).toBeInTheDocument();
+    expect(within(usedRow).getByText(/Active in game folder/i)).toBeInTheDocument();
+    expect(await screen.findByText(/1 unused active mod disabled in game/i)).toBeInTheDocument();
+  });
+
+  it('Mod Library leaves storage state unchanged when storing one mod fails', async () => {
+    seedProfiles([baseProfile({ name: 'Stable' })]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [
+        {
+          name: 'Locked Active Mod',
+          version: '1.0.0',
+          folder_name: 'LockedActive',
+          mod_id: 'locked-active',
+          installed_enabled: true,
+          profiles: [
+            { profile_name: 'Stable', included: false, enabled: false, editable: true },
+          ],
+        },
+      ],
+    }));
+    registerInvokeHandler('toggle_mod', () => {
+      throw new Error('disk locked');
+    });
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.click(await screen.findByRole('button', { name: /Mod Library/i }));
+    await user.click(await screen.findByRole('button', { name: /Disable Locked Active Mod in game and keep it installed/i }));
+
+    expect(await screen.findByText(/Failed to move Locked Active Mod: disk locked/i)).toBeInTheDocument();
+    expect(screen.getByText(/Active in game folder/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Disable Locked Active Mod in game and keep it installed/i })).toBeEnabled();
+  });
+
+  it('Mod Library reports partial failures while storing unused active mods', async () => {
+    seedProfiles([baseProfile({ name: 'Stable' })]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [
+        {
+          name: 'Stores Cleanly',
+          version: '1.0.0',
+          folder_name: 'StoresCleanly',
+          mod_id: 'stores-cleanly',
+          installed_enabled: true,
+          profiles: [
+            { profile_name: 'Stable', included: false, enabled: false, editable: true },
+          ],
+        },
+        {
+          name: 'Fails To Store',
+          version: '1.0.0',
+          folder_name: 'FailsToStore',
+          mod_id: 'fails-to-store',
+          installed_enabled: true,
+          profiles: [
+            { profile_name: 'Stable', included: false, enabled: false, editable: true },
+          ],
+        },
+      ],
+    }));
+    registerInvokeHandler('toggle_mod', (args) => {
+      if (args?.name === 'Fails To Store') {
+        throw new Error('busy');
+      }
+      return undefined;
+    });
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.click(await screen.findByRole('button', { name: /Mod Library/i }));
+    await user.click(await screen.findByRole('button', { name: /Disable 2 unused active mods/i }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls().filter((call) => call.cmd === 'toggle_mod')).toHaveLength(2);
+    });
+    const storedRow = screen.getByText('Stores Cleanly').closest('.gf-profile-library-row') as HTMLElement;
+    const failedRow = screen.getByText('Fails To Store').closest('.gf-profile-library-row') as HTMLElement;
+    expect(within(storedRow).getByText(/Inactive \(kept installed\)/i)).toBeInTheDocument();
+    expect(within(failedRow).getByText(/Active in game folder/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Disabled 1 of 2 unused active mods. Failed: Fails To Store/i)).toBeInTheDocument();
+  });
+
+  it('Mod Library caps the initial rendered rows and can reveal more for large libraries', async () => {
+    seedProfiles([baseProfile({ name: 'Stable' })]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: Array.from({ length: 105 }, (_, index) => ({
+        name: `Library Mod ${index + 1}`,
+        version: '1.0.0',
+        folder_name: `LibraryMod${index + 1}`,
+        mod_id: `LibraryMod${index + 1}`,
+        installed_enabled: index % 2 === 0,
+        profiles: [
+          { profile_name: 'Stable', included: false, enabled: false, editable: true },
+        ],
+      })),
+    }));
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.click(await screen.findByRole('button', { name: /Mod Library/i }));
+
+    expect(await screen.findByText(/Showing 100 of 105/i)).toBeInTheDocument();
+    expect(screen.queryByText('Library Mod 105')).toBeNull();
+    await user.click(screen.getByRole('button', { name: /Show 5 more/i }));
+    expect(await screen.findByText('Library Mod 105')).toBeInTheDocument();
+  });
+
+  it('Mod Library search and sort controls work without changing membership', async () => {
+    seedProfiles([baseProfile({ name: 'Stable' }), baseProfile({ name: 'Beta' })]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [
+        { name: 'Stable', editable: true },
+        { name: 'Beta', editable: true },
+      ],
+      mods: [
+        {
+          name: 'Zeta Stored',
+          version: '1.0.0',
+          folder_name: 'zeta-folder',
+          mod_id: 'zeta-id',
+          installed_enabled: false,
+          profiles: [
+            { profile_name: 'Stable', included: false, enabled: false, editable: true },
+            { profile_name: 'Beta', included: false, enabled: false, editable: true },
+          ],
+        },
+        {
+          name: 'Alpha Active',
+          version: '1.0.0',
+          folder_name: 'alpha-folder',
+          mod_id: 'alpha-id',
+          installed_enabled: true,
+          profiles: [
+            { profile_name: 'Stable', included: true, enabled: true, editable: true },
+            { profile_name: 'Beta', included: false, enabled: false, editable: true },
+          ],
+        },
+        {
+          name: 'Heavy Used',
+          display_name: 'Most Used Patch',
+          version: '1.0.0',
+          folder_name: 'heavy-folder',
+          mod_id: 'heavy-id',
+          installed_enabled: false,
+          profiles: [
+            { profile_name: 'Stable', included: true, enabled: true, editable: true },
+            { profile_name: 'Beta', included: true, enabled: true, editable: true },
+          ],
+        },
+      ],
+    }));
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.click(await screen.findByRole('button', { name: /Mod Library/i }));
+
+    const titles = () => Array.from(document.querySelectorAll('.gf-profile-library-title'))
+      .map((el) => el.textContent?.trim() ?? '');
+    expect(await screen.findByText('Alpha Active')).toBeInTheDocument();
+    expect(titles()[0]).toContain('Alpha Active');
+
+    await user.selectOptions(screen.getByRole('combobox', { name: /Sort/i }), 'nameDesc');
+    expect(titles()[0]).toContain('Zeta Stored');
+
+    await user.selectOptions(screen.getByRole('combobox', { name: /Sort/i }), 'activeFirst');
+    expect(titles()[0]).toContain('Alpha Active');
+
+    await user.selectOptions(screen.getByRole('combobox', { name: /Sort/i }), 'storedFirst');
+    expect(titles()[0]).toContain('Most Used Patch');
+
+    await user.selectOptions(screen.getByRole('combobox', { name: /Sort/i }), 'profilesMost');
+    expect(titles()[0]).toContain('Most Used Patch');
+    expect(screen.getByText('2 profiles')).toBeInTheDocument();
+
+    await user.type(screen.getByRole('textbox', { name: /Search Mod Library/i }), 'zeta-folder');
+    expect(titles()).toHaveLength(1);
+    expect(titles()[0]).toContain('Zeta Stored');
+    expect(getInvokeCalls().filter((call) => call.cmd === 'set_profile_mod_membership')).toHaveLength(0);
+
+    await user.clear(screen.getByRole('textbox', { name: /Search Mod Library/i }));
+    await user.type(screen.getByRole('textbox', { name: /Search Mod Library/i }), 'missing-library-mod');
+    expect(await screen.findByText(/No matching mods/i)).toBeInTheDocument();
   });
 
   it('opens a profile load-order editor and saves the reordered manifest', async () => {
@@ -1105,6 +1531,8 @@ describe('<ProfilesView>', () => {
     await user.click(screen.getByRole('button', { name: /Customize load order for Stable/i }));
     const dialog = await screen.findByRole('dialog', { name: /Load order for Stable/i });
     expect(within(dialog).getByText(/Top loads first/i)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: /Move BaseLib down/i }));
+    await user.click(within(dialog).getByRole('button', { name: /Move BaseLib up/i }));
     await user.click(within(dialog).getByRole('button', { name: /Move Card Art Editor up/i }));
     await user.click(within(dialog).getByRole('button', { name: /Save order/i }));
 
@@ -1113,6 +1541,57 @@ describe('<ProfilesView>', () => {
     });
     await waitFor(() => {
       expect(screen.getByText(/Load order saved for Stable/i)).toBeInTheDocument();
+    });
+  });
+
+  it('profile load-order rows can be reordered with drag and drop', async () => {
+    const user = userEvent.setup();
+    seedProfiles([
+      baseProfile({
+        name: 'Stable',
+        mods: [
+          profileMod({ name: 'BaseLib', folder_name: 'BaseLib', mod_id: 'BaseLib' }),
+          profileMod({ name: 'Card Art Editor', folder_name: 'CardArtEditor', mod_id: 'CardArtEditor' }),
+        ],
+      }),
+    ]);
+    registerInvokeHandler('set_profile_load_order', (args) => {
+      expect(args?.orderedMods).toEqual([
+        { name: 'Card Art Editor', folderName: 'CardArtEditor', modId: 'CardArtEditor' },
+        { name: 'BaseLib', folderName: 'BaseLib', modId: 'BaseLib' },
+      ]);
+      return {
+        profile: baseProfile({ name: 'Stable' }),
+        settings_status: 'skipped_inactive',
+        settings_path: null,
+      };
+    });
+
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Stable')).toBeInTheDocument(); });
+
+    await user.click(screen.getByRole('button', { name: /Load order/i }));
+    const dialog = await screen.findByRole('dialog', { name: /Load order for Stable/i });
+    const baseRow = within(dialog).getByRole('listitem', { name: /BaseLib.*position 1/i });
+    const cardRow = within(dialog).getByRole('listitem', { name: /Card Art Editor.*position 2/i });
+    const dataTransfer = {
+      data: new Map<string, string>(),
+      setData(type: string, value: string) { this.data.set(type, value); },
+      getData(type: string) { return this.data.get(type) ?? ''; },
+      effectAllowed: '',
+      dropEffect: '',
+    };
+
+    fireEvent.dragStart(cardRow, { dataTransfer });
+    fireEvent.dragOver(baseRow, { dataTransfer });
+    fireEvent.dragLeave(baseRow, { dataTransfer });
+    fireEvent.dragOver(baseRow, { dataTransfer });
+    fireEvent.dragEnd(cardRow, { dataTransfer });
+    fireEvent.drop(baseRow, { dataTransfer });
+    await user.click(within(dialog).getByRole('button', { name: /Save order/i }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls().some((call) => call.cmd === 'set_profile_load_order')).toBe(true);
     });
   });
 

@@ -374,7 +374,7 @@ describe('<SettingsView>', () => {
     });
   });
 
-  it('Audit table pin/unpin button triggers pin_mod or unpin_mod', async () => {
+  it('Audit table freeze/unfreeze button triggers pin_mod or unpin_mod', async () => {
     registerInvokeHandler('audit_mod_versions', () => [{
       mod_name: 'X',
       folder_name: 'X',
@@ -395,7 +395,7 @@ describe('<SettingsView>', () => {
     const run = await screen.findAllByRole('button', { name: /Run audit/i });
     await user.click(run[0]);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    const pinBtns = screen.getAllByRole('button').filter((b) => /Pin|pinned/i.test(b.textContent ?? '' ) || /Pin/i.test(b.getAttribute('title') ?? ''));
+    const pinBtns = screen.getAllByRole('button').filter((b) => /Freeze|frozen/i.test(b.textContent ?? '' ) || /Freeze/i.test(b.getAttribute('title') ?? ''));
     expect(pinBtns.length).toBeGreaterThan(0);
     await user.click(pinBtns[0]);
     await waitFor(() => {
@@ -505,7 +505,7 @@ describe('<SettingsView>', () => {
     });
   });
 
-  it('Audit table shows pinned indicator for pinned rows', async () => {
+  it('Audit table shows frozen indicator for frozen rows', async () => {
     registerInvokeHandler('audit_mod_versions', () => [{
       mod_name: 'Foo',
       folder_name: 'Foo',
@@ -525,8 +525,8 @@ describe('<SettingsView>', () => {
     const runBtns = await screen.findAllByRole('button', { name: /Run audit/i });
     await user.click(runBtns[0]);
     await waitFor(() => { expect(screen.getByText('Foo')).toBeInTheDocument(); });
-    // Pinned indicator surfaces somewhere on the row.
-    expect(screen.queryAllByText(/Pinned|pinned/i).length).toBeGreaterThan(0);
+    // Frozen indicator surfaces somewhere on the row.
+    expect(screen.queryAllByText(/Frozen|frozen/i).length).toBeGreaterThan(0);
   });
 
   it('Backups tab Restore + Delete buttons trigger their commands', async () => {
@@ -1177,6 +1177,106 @@ describe('<SettingsView>', () => {
     });
   });
 
+  it('Audit row Skip this update snoozes the current GitHub release tag', async () => {
+    registerInvokeHandler('audit_mod_versions', (args) => {
+      if (args?.only) {
+        return [{
+          mod_name: 'M', folder_name: 'm_folder', installed_version: '1.0',
+          latest_release_with_assets_tag: 'v2.0',
+          needs_update: true, pinned: false, asset_names: [],
+          releases_scanned: 1, latest_has_assets: true,
+          github_auto_detected: false, nexus_update_available: false,
+          github_repo: 'foo/m', update_source: 'github',
+          snoozed: true,
+        }];
+      }
+      return [{
+        mod_name: 'M', folder_name: 'm_folder', installed_version: '1.0',
+        latest_release_with_assets_tag: 'v2.0',
+        needs_update: true, pinned: false, asset_names: [],
+        releases_scanned: 1, latest_has_assets: true,
+        github_auto_detected: false, nexus_update_available: false,
+        github_repo: 'foo/m', update_source: 'github',
+        snoozed: false,
+      }];
+    });
+    registerInvokeHandler('set_mod_snooze', () => ({}));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: /Audit/ }));
+    const runBtns = await screen.findAllByRole('button', { name: /Run audit/i });
+    await user.click(runBtns[0]);
+    await user.click(await screen.findByRole('button', { name: /Skip this update/i }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some(
+        (c) => c.cmd === 'set_mod_snooze'
+          && c.args?.modName === 'M'
+          && c.args?.folderName === 'm_folder'
+          && c.args?.latestTag === 'v2.0',
+      )).toBe(true);
+    });
+  });
+
+  it('Audit row Skip this update works for Nexus-only version drift', async () => {
+    registerInvokeHandler('audit_mod_versions', () => [{
+      mod_name: 'Nx', folder_name: 'Nx', installed_version: '1.0',
+      latest_release_with_assets_tag: null,
+      needs_update: true, pinned: false, asset_names: [],
+      releases_scanned: 0, latest_has_assets: false,
+      github_auto_detected: false,
+      nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/99',
+      nexus_version: '1.0.3',
+      nexus_update_available: true,
+      update_source: 'nexus',
+      snoozed: false,
+    }]);
+    registerInvokeHandler('set_mod_snooze', () => ({}));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: /Audit/ }));
+    const runBtns = await screen.findAllByRole('button', { name: /Run audit/i });
+    await user.click(runBtns[0]);
+    await user.click(await screen.findByRole('button', { name: /Skip this update/i }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some(
+        (c) => c.cmd === 'set_mod_snooze'
+          && c.args?.modName === 'Nx'
+          && c.args?.latestTag === '1.0.3',
+      )).toBe(true);
+    });
+  });
+
+  it('Audit row snoozed updates are marked skipped and can be shown again', async () => {
+    registerInvokeHandler('audit_mod_versions', () => [{
+      mod_name: 'M', folder_name: 'M', installed_version: '1.0',
+      latest_release_with_assets_tag: 'v2.0',
+      needs_update: true, pinned: false, asset_names: [],
+      releases_scanned: 1, latest_has_assets: true,
+      github_auto_detected: false, nexus_update_available: false,
+      github_repo: 'foo/m', update_source: 'github',
+      snoozed: true,
+    }]);
+    registerInvokeHandler('set_mod_snooze', () => ({}));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: /Audit/ }));
+    const runBtns = await screen.findAllByRole('button', { name: /Run audit/i });
+    await user.click(runBtns[0]);
+    await screen.findByText(/Skipped v2\.0 until next release/i);
+    expect(screen.queryByRole('button', { name: /^Update$/i })).toBeNull();
+    await user.click(screen.getByRole('button', { name: /Show update again/i }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some(
+        (c) => c.cmd === 'set_mod_snooze'
+          && c.args?.modName === 'M'
+          && c.args?.latestTag === null,
+      )).toBe(true);
+    });
+  });
+
   it('Audit row Update button error path surfaces a toast', async () => {
     registerInvokeHandler('audit_mod_versions', () => [{
       mod_name: 'M', folder_name: 'M', installed_version: '1.0',
@@ -1346,7 +1446,7 @@ describe('<SettingsView>', () => {
     });
   });
 
-  it('Audit pin button error path surfaces a toast', async () => {
+  it('Audit freeze button error path surfaces a toast', async () => {
     registerInvokeHandler('audit_mod_versions', () => [{
       mod_name: 'X', folder_name: 'X', installed_version: '1.0',
       needs_update: false, pinned: false, asset_names: [],
@@ -1361,14 +1461,14 @@ describe('<SettingsView>', () => {
     const runBtns = await screen.findAllByRole('button', { name: /Run audit/i });
     await user.click(runBtns[0]);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    const pinBtn = screen.getAllByRole('button').find((b) => /^Pin$/i.test(b.textContent?.trim() ?? ''));
+    const pinBtn = screen.getAllByRole('button').find((b) => /^Freeze$/i.test(b.textContent?.trim() ?? ''));
     await user.click(pinBtn!);
     await waitFor(() => {
       expect(screen.queryByText(/pin fail/)).toBeInTheDocument();
     });
   });
 
-  it('Audit unpin button invokes unpin_mod for pinned rows', async () => {
+  it('Audit unfreeze button invokes unpin_mod for frozen rows', async () => {
     registerInvokeHandler('audit_mod_versions', () => [{
       mod_name: 'P', folder_name: 'P', installed_version: '1.0',
       needs_update: false, pinned: true, asset_names: [],
@@ -1383,7 +1483,7 @@ describe('<SettingsView>', () => {
     const runBtns = await screen.findAllByRole('button', { name: /Run audit/i });
     await user.click(runBtns[0]);
     await waitFor(() => { expect(screen.getByText('P')).toBeInTheDocument(); });
-    const unpinBtn = screen.getAllByRole('button').find((b) => /Unpin/.test(b.textContent ?? ''));
+    const unpinBtn = screen.getAllByRole('button').find((b) => /Unfreeze/.test(b.textContent ?? ''));
     await user.click(unpinBtn!);
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'unpin_mod')).toBe(true);
@@ -1458,6 +1558,7 @@ describe('<SettingsView>', () => {
     const runBtns = await screen.findAllByRole('button', { name: /Run audit/i });
     await user.click(runBtns[0]);
     await waitFor(() => { expect(screen.getByText('OnLatestCompat')).toBeInTheDocument(); });
+    expect(screen.getByText(/Update blocked by game version/i)).toBeInTheDocument();
     expect(screen.queryByText(/newest version that runs on your game/i)).toBeInTheDocument();
   });
 
@@ -1905,7 +2006,7 @@ describe('<SettingsView>', () => {
     const runBtns = await screen.findAllByRole('button', { name: /Run audit/i });
     await user.click(runBtns[0]);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    const pinBtn = screen.getAllByRole('button').find((b) => /^Pin$/i.test(b.textContent?.trim() ?? ''));
+    const pinBtn = screen.getAllByRole('button').find((b) => /^Freeze$/i.test(b.textContent?.trim() ?? ''));
     await user.click(pinBtn!);
     await waitFor(() => {
       expect(screen.queryByText(/p string/)).toBeInTheDocument();
@@ -2148,6 +2249,7 @@ describe('<SettingsView>', () => {
     const runBtns = await screen.findAllByRole('button', { name: /Run audit/i });
     await user.click(runBtns[0]);
     await waitFor(() => {
+      expect(screen.getByText(/Update blocked by game version/i)).toBeInTheDocument();
       expect(screen.queryByText(/newest compatible/i)).toBeInTheDocument();
     });
   });

@@ -22,6 +22,7 @@ const baseMod = (overrides: Partial<ModInfo> = {}): ModInfo => ({
   pinned: false,
   min_game_version: null,
   author: null,
+  tags: [],
   display_name: null,
   display_description: null,
   ...overrides,
@@ -118,6 +119,7 @@ describe('<SourceEditor>', () => {
       '',
       '',
       '',
+      '',
     );
   });
 
@@ -141,6 +143,7 @@ describe('<SourceEditor>', () => {
       'https://example.com/post/1',
       '',
       '',
+      '',
     );
   });
 
@@ -158,6 +161,27 @@ describe('<SourceEditor>', () => {
       '',
       'Friendly Base',
       'Readable description',
+      '',
+    );
+  });
+
+  it('Tags field round-trips comma-separated categories through onSave', async () => {
+    const onSave = vi.fn();
+    const user = userEvent.setup();
+    renderEditor(baseMod({ tags: ['utility', 'beta'] }), { onSave });
+    const tagsEl = screen.getByPlaceholderText(/utility, beta/i) as HTMLInputElement;
+    expect(tagsEl.value).toBe('utility, beta');
+    await user.clear(tagsEl);
+    await user.type(tagsEl, 'QoL, beta, UI');
+    await user.click(screen.getByRole('button', { name: /Save sources/ }));
+    expect(onSave).toHaveBeenCalledWith(
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      'QoL, beta, UI',
     );
   });
 

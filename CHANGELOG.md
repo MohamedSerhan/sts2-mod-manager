@@ -27,9 +27,23 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ### Added
 
+- The Mods tab now has a Mod Library shortcut for assigning installed mods to profiles.
+- Mod Library can keep unused mods installed but inactive, and can disable unused active mods in one action.
+- Mods now support manager-only tags so you can organize and filter large libraries.
+- Audit now lets you skip a specific update until a newer release appears.
+
 ### Changed
 
+- "Pin" is now "Freeze" with clearer hints about keeping a mod's version and on/off state unchanged.
+- Mod Library now labels profile membership separately from whether a mod is active in the game folder.
+- Large Mod Library lists now start in smaller batches with search, sort, and "show more" controls.
+
 ### Fixed
+
+- Publishing a profile no longer includes every installed mod by default; it uses the mods selected for that profile.
+- Mod Library membership stays separate from enable/disable state, so unused mods can stay stored without cluttering shared profiles.
+- Update audit now clearly marks updates blocked by your current STS2 version.
+- Toast notifications no longer block quick follow-up clicks in menus.
 
 ### Security
 

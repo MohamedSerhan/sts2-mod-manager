@@ -96,6 +96,7 @@ function AppInner() {
   const [appVersion, setAppVersion] = useState('');
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showProfileSwitcher, setShowProfileSwitcher] = useState(false);
+  const [openModLibrarySignal, setOpenModLibrarySignal] = useState(0);
   // Bumped whenever something elsewhere in the UI wants Home's share-code
   // input to grab focus + pulse (e.g. clicking "Add pack" in the profile
   // switcher). Each bump triggers a one-shot effect in Home; the value
@@ -814,8 +815,20 @@ function AppInner() {
                 focusCodeBarSignal={focusCodeBarSignal}
               />
             )}
-            {activeView === 'profiles' && <ProfilesView onGoToSettings={() => setActiveView('settings')} />}
-            {activeView === 'mods' && <ModsView />}
+            {activeView === 'profiles' && (
+              <ProfilesView
+                onGoToSettings={() => setActiveView('settings')}
+                openModLibrarySignal={openModLibrarySignal}
+              />
+            )}
+            {activeView === 'mods' && (
+              <ModsView
+                onOpenModLibrary={() => {
+                  setOpenModLibrarySignal((signal) => signal + 1);
+                  setActiveView('profiles');
+                }}
+              />
+            )}
             {activeView === 'browse-mods' && <BrowseView onGoToSettings={() => setActiveView('settings')} />}
             {activeView === 'browse-modpacks' && (
               <BrowseModpacksView onGoToProfiles={() => setActiveView('profiles')} />

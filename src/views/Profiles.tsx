@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Plus,
@@ -22,6 +22,8 @@ import {
   ListChecks,
   ArrowUp,
   ArrowDown,
+  GripVertical,
+  Search,
 } from 'lucide-react';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
@@ -43,6 +45,7 @@ import {
   importProfile,
   getProfileMemberships,
   setProfileModMembership,
+  toggleMod,
   setProfileLoadOrder,
   getShareInfo,
   getProfileDrift,
@@ -54,12 +57,20 @@ import { importShareCodeSmart, buildShareMessage, buildShareLink } from '../lib/
 import type { ProfileDrift } from '../hooks/useTauri';
 import type { LoadOrderSettingsStatus, Profile, ProfileMembershipGrid, ProfileMembershipMod, ProfileMembershipState, ShareResult } from '../types';
 
+const LIBRARY_PAGE_SIZE = 100;
+const LIBRARY_BULK_STORAGE_KEY = '__bulk_storage__';
+
+type LibrarySortMode = 'nameAsc' | 'nameDesc' | 'activeFirst' | 'storedFirst' | 'profilesMost';
+
 interface ProfilesViewProps {
   /** Navigates to Settings → Accounts. Passed down to PublishModal's
    *  pre-flight "GitHub token missing" prompt so the curator gets a
    *  one-click route to the token field instead of having to discover
    *  it themselves. */
   onGoToSettings?: () => void;
+  /** Incremented by the App shell when another view wants to open the
+   *  Mod Library workspace directly. */
+  openModLibrarySignal?: number;
 }
 
 function membershipKey(row: ProfileMembershipMod, profileName: string): string {
@@ -74,7 +85,36 @@ function membershipDisplayName(row: ProfileMembershipMod): string {
   return row.display_name?.trim() || row.name;
 }
 
-export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
+function membershipProfileCount(row: ProfileMembershipMod): number {
+  return row.profiles.filter((profile) => profile.included).length;
+}
+
+function libraryStorageKey(row: ProfileMembershipMod): string {
+  return `storage::${membershipRowKey(row)}`;
+}
+
+function unusedActiveLibraryRows(rows: ProfileMembershipMod[]): ProfileMembershipMod[] {
+  return rows.filter((row) => row.installed_enabled && membershipProfileCount(row) === 0);
+}
+
+function compareMembershipDisplayName(a: ProfileMembershipMod, b: ProfileMembershipMod): number {
+  const byName = membershipDisplayName(a).localeCompare(membershipDisplayName(b), undefined, {
+    sensitivity: 'base',
+    numeric: true,
+  });
+  if (byName !== 0) return byName;
+  return membershipRowKey(a).localeCompare(membershipRowKey(b), undefined, {
+    sensitivity: 'base',
+    numeric: true,
+  });
+}
+
+function membershipStateLabelKey(state: ProfileMembershipState): string {
+  if (!state.included) return 'profiles.library.notInProfile';
+  return state.enabled ? 'profiles.library.inProfile' : 'profiles.library.disabledInProfile';
+}
+
+export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: ProfilesViewProps = {}) {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -98,9 +138,15 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
   const [membershipLoading, setMembershipLoading] = useState(false);
   const [membershipError, setMembershipError] = useState<string | null>(null);
   const [membershipSaving, setMembershipSaving] = useState<string | null>(null);
+  const [libraryFilter, setLibraryFilter] = useState('');
+  const [librarySort, setLibrarySort] = useState<LibrarySortMode>('nameAsc');
+  const [libraryVisibleLimit, setLibraryVisibleLimit] = useState(LIBRARY_PAGE_SIZE);
+  const [libraryStorageSaving, setLibraryStorageSaving] = useState<string | null>(null);
   const [loadOrderProfile, setLoadOrderProfile] = useState<Profile | null>(null);
   const [loadOrderDraft, setLoadOrderDraft] = useState<Profile['mods']>([]);
   const [loadOrderSaving, setLoadOrderSaving] = useState(false);
+  const [draggedLoadOrderIndex, setDraggedLoadOrderIndex] = useState<number | null>(null);
+  const [dragOverLoadOrderIndex, setDragOverLoadOrderIndex] = useState<number | null>(null);
   const { t, i18n } = useTranslation();
   const { mods, refreshAll, setActiveProfile, activeProfile, subUpdates, refreshSubUpdates } = useApp();
   const toastCtx = useToast();
@@ -182,6 +228,16 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
     }
   }, [showModAssignments, loadMemberships]);
 
+  useEffect(() => {
+    setLibraryVisibleLimit(LIBRARY_PAGE_SIZE);
+  }, [libraryFilter, librarySort, showModAssignments]);
+
+  useEffect(() => {
+    if (openModLibrarySignal > 0) {
+      openModAssignments();
+    }
+  }, [openModLibrarySignal]);
+
   function openModAssignments() {
     setShowModAssignments(true);
     setShowCreate(false);
@@ -223,6 +279,24 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
       if (nextIndex < 0 || nextIndex >= prev.length) return prev;
       const next = [...prev];
       [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+      return next;
+    });
+  }
+
+  function moveLoadOrderItemTo(fromIndex: number, toIndex: number) {
+    setLoadOrderDraft((prev) => {
+      if (
+        fromIndex < 0
+        || toIndex < 0
+        || fromIndex >= prev.length
+        || toIndex >= prev.length
+        || fromIndex === toIndex
+      ) {
+        return prev;
+      }
+      const next = [...prev];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
       return next;
     });
   }
@@ -283,7 +357,7 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
   }
 
   async function handleToggleMembership(row: ProfileMembershipMod, state: ProfileMembershipState) {
-    if (!state.editable || membershipSaving) return;
+    if (!state.editable || membershipSaving || libraryStorageSaving) return;
     const nextIncluded = !state.included;
     const key = membershipKey(row, state.profile_name);
     try {
@@ -329,6 +403,78 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
       toastCtx.error(t('profiles.library.toastFailed', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setMembershipSaving(null);
+    }
+  }
+
+  function markLibraryRowsStored(rowKeys: Set<string>, installedEnabled: boolean) {
+    setMembershipGrid((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        mods: prev.mods.map((mod) => (
+          rowKeys.has(membershipRowKey(mod))
+            ? { ...mod, installed_enabled: installedEnabled }
+            : mod
+        )),
+      };
+    });
+  }
+
+  async function handleToggleLibraryStorage(row: ProfileMembershipMod) {
+    if (libraryStorageSaving || membershipSaving) return;
+    const nextEnabled = !row.installed_enabled;
+    const key = libraryStorageKey(row);
+    try {
+      setLibraryStorageSaving(key);
+      await toggleMod(row.name, row.folder_name, nextEnabled);
+      markLibraryRowsStored(new Set([membershipRowKey(row)]), nextEnabled);
+      await refreshAll();
+      await refreshShareAndDrift();
+      toastCtx.success(
+        nextEnabled
+          ? t('profiles.library.toastActivated', { mod: membershipDisplayName(row) })
+          : t('profiles.library.toastStored', { mod: membershipDisplayName(row) }),
+      );
+    } catch (e) {
+      toastCtx.error(t('profiles.library.toastStorageFailed', {
+        mod: membershipDisplayName(row),
+        error: e instanceof Error ? e.message : String(e),
+      }));
+    } finally {
+      setLibraryStorageSaving(null);
+    }
+  }
+
+  async function handleStoreUnusedActiveMods(rows: ProfileMembershipMod[]) {
+    if (rows.length === 0 || libraryStorageSaving || membershipSaving) return;
+    const storedKeys = new Set<string>();
+    const failedNames: string[] = [];
+    try {
+      setLibraryStorageSaving(LIBRARY_BULK_STORAGE_KEY);
+      for (const row of rows) {
+        try {
+          await toggleMod(row.name, row.folder_name, false);
+          storedKeys.add(membershipRowKey(row));
+        } catch {
+          failedNames.push(membershipDisplayName(row));
+        }
+      }
+      if (storedKeys.size > 0) {
+        markLibraryRowsStored(storedKeys, false);
+        await refreshAll();
+        await refreshShareAndDrift();
+      }
+      if (failedNames.length > 0) {
+        toastCtx.error(t('profiles.library.toastBulkStorageFailed', {
+          stored: storedKeys.size,
+          total: rows.length,
+          mods: failedNames.slice(0, 3).join(', '),
+        }));
+      } else {
+        toastCtx.success(t('profiles.library.toastBulkStored', { count: storedKeys.size }));
+      }
+    } finally {
+      setLibraryStorageSaving(null);
     }
   }
 
@@ -593,6 +739,40 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
     }
   }
 
+  const filteredLibraryRows = useMemo(() => {
+    if (!membershipGrid) return [];
+    const query = libraryFilter.trim().toLowerCase();
+    const rows = query
+      ? membershipGrid.mods.filter((row) => {
+          const haystack = [
+            row.name,
+            row.display_name ?? '',
+            row.folder_name ?? '',
+            row.mod_id ?? '',
+            row.version,
+          ].join(' ').toLowerCase();
+          return haystack.includes(query);
+        })
+      : membershipGrid.mods;
+    const sorted = [...rows];
+    sorted.sort((a, b) => {
+      if (librarySort === 'nameDesc') return compareMembershipDisplayName(b, a);
+      if (librarySort === 'activeFirst') {
+        return Number(b.installed_enabled) - Number(a.installed_enabled) || compareMembershipDisplayName(a, b);
+      }
+      if (librarySort === 'storedFirst') {
+        return Number(a.installed_enabled) - Number(b.installed_enabled) || compareMembershipDisplayName(a, b);
+      }
+      if (librarySort === 'profilesMost') {
+        return membershipProfileCount(b) - membershipProfileCount(a) || compareMembershipDisplayName(a, b);
+      }
+      return compareMembershipDisplayName(a, b);
+    });
+    return sorted;
+  }, [membershipGrid, libraryFilter, librarySort]);
+
+  const visibleLibraryRows = filteredLibraryRows.slice(0, libraryVisibleLimit);
+
   function renderLoadOrderModal() {
     if (!loadOrderProfile) return null;
     return (
@@ -614,9 +794,44 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
             {loadOrderDraft.length === 0 ? (
               <div className="gf-empty-sub">{t('profiles.loadOrder.empty')}</div>
             ) : (
-              <div className="gf-load-order-list">
+              <div className="gf-load-order-list" role="list">
                 {loadOrderDraft.map((mod, index) => (
-                  <div className="gf-load-order-row" key={`${mod.folder_name ?? mod.mod_id ?? mod.name}-${index}`}>
+                  <div
+                    className={`gf-load-order-row ${dragOverLoadOrderIndex === index ? 'drag-over' : ''}`}
+                    key={`${mod.folder_name ?? mod.mod_id ?? mod.name}-${index}`}
+                    role="listitem"
+                    draggable={!loadOrderSaving}
+                    aria-label={t('profiles.loadOrder.rowLabel', { name: mod.name, position: index + 1 })}
+                    onDragStart={(event) => {
+                      if (loadOrderSaving) return;
+                      setDraggedLoadOrderIndex(index);
+                      event.dataTransfer.effectAllowed = 'move';
+                      event.dataTransfer.setData('text/plain', String(index));
+                    }}
+                    onDragOver={(event) => {
+                      if (loadOrderSaving) return;
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = 'move';
+                      setDragOverLoadOrderIndex(index);
+                    }}
+                    onDragLeave={() => {
+                      if (dragOverLoadOrderIndex === index) setDragOverLoadOrderIndex(null);
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      const from = draggedLoadOrderIndex ?? Number.parseInt(event.dataTransfer.getData('text/plain'), 10);
+                      if (Number.isFinite(from)) moveLoadOrderItemTo(from, index);
+                      setDraggedLoadOrderIndex(null);
+                      setDragOverLoadOrderIndex(null);
+                    }}
+                    onDragEnd={() => {
+                      setDraggedLoadOrderIndex(null);
+                      setDragOverLoadOrderIndex(null);
+                    }}
+                  >
+                    <div className="gf-load-order-drag" title={t('profiles.loadOrder.dragHandle')}>
+                      <GripVertical size={14} />
+                    </div>
                     <div className="gf-load-order-rank">{index + 1}</div>
                     <div className="gf-load-order-main">
                       <div className="gf-load-order-name">{mod.name}</div>
@@ -701,6 +916,7 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
     }
 
     const grid = membershipGrid;
+    const unusedActiveRows = unusedActiveLibraryRows(grid.mods);
     if (grid.mods.length === 0) {
       return (
         <div className="gf-empty">
@@ -712,8 +928,61 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
     }
 
     return (
-      <div className="space-y-2">
-        {grid.mods.map((row) => (
+      <div className="gf-profile-library">
+        <div className="gf-profile-library-toolbar">
+          <label className="gf-profile-library-search">
+            <Search size={13} />
+            <input
+              value={libraryFilter}
+              onChange={(event) => setLibraryFilter(event.target.value)}
+              placeholder={t('profiles.library.searchPlaceholder', { count: grid.mods.length })}
+              aria-label={t('profiles.library.searchLabel')}
+            />
+          </label>
+          <div className="gf-profile-library-toolbar-actions">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={unusedActiveRows.length === 0 || libraryStorageSaving !== null || membershipSaving !== null}
+              onClick={() => handleStoreUnusedActiveMods(unusedActiveRows)}
+              aria-label={
+                unusedActiveRows.length === 0
+                  ? t('profiles.library.bulkStoreNone')
+                  : t('profiles.library.bulkStoreUnused', { count: unusedActiveRows.length })
+              }
+            >
+              {libraryStorageSaving === LIBRARY_BULK_STORAGE_KEY ? (
+                <RefreshCw size={13} className="animate-spin" />
+              ) : (
+                <Download size={13} />
+              )}
+              {unusedActiveRows.length === 0
+                ? t('profiles.library.bulkStoreNone')
+                : t('profiles.library.bulkStoreUnused', { count: unusedActiveRows.length })}
+            </Button>
+            <label className="gf-sort-control gf-profile-library-sort">
+              <span>{t('profiles.library.sort.label')}</span>
+              <select
+                value={librarySort}
+                onChange={(event) => setLibrarySort(event.target.value as LibrarySortMode)}
+                aria-label={t('profiles.library.sort.label')}
+              >
+                <option value="nameAsc">{t('profiles.library.sort.nameAsc')}</option>
+                <option value="nameDesc">{t('profiles.library.sort.nameDesc')}</option>
+                <option value="activeFirst">{t('profiles.library.sort.activeFirst')}</option>
+                <option value="storedFirst">{t('profiles.library.sort.storedFirst')}</option>
+                <option value="profilesMost">{t('profiles.library.sort.profilesMost')}</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div className="gf-profile-library-help">{t('profiles.library.storageHelp')}</div>
+        {filteredLibraryRows.length === 0 ? (
+          <div className="gf-empty">
+            <div className="gf-empty-title">{t('profiles.library.noMatches.title')}</div>
+            <div className="gf-empty-sub">{t('profiles.library.noMatches.hint')}</div>
+          </div>
+        ) : visibleLibraryRows.map((row) => (
           <Card
             key={membershipRowKey(row)}
             className="gf-profile-library-row"
@@ -731,12 +1000,42 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
                 <div className="gf-profile-library-meta">
                   <span>{row.version}</span>
                   {row.folder_name && <span>{row.folder_name}</span>}
-                  <span>
+                  <span className={`gf-profile-library-storage ${row.installed_enabled ? 'active' : 'stored'}`}>
                     {row.installed_enabled
-                      ? t('profiles.library.installedActive')
-                      : t('profiles.library.installedDisabled')}
+                      ? t('profiles.library.storageActive')
+                      : t('profiles.library.storageDisabled')}
                   </span>
+                  <span>{t('profiles.library.profileUseCount', { count: membershipProfileCount(row) })}</span>
                 </div>
+              </div>
+              <div className="gf-profile-library-storage-actions">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => handleToggleLibraryStorage(row)}
+                  disabled={libraryStorageSaving !== null || membershipSaving !== null}
+                  aria-label={
+                    row.installed_enabled
+                      ? t('profiles.library.storeAria', { mod: membershipDisplayName(row) })
+                      : t('profiles.library.activateAria', { mod: membershipDisplayName(row) })
+                  }
+                  title={
+                    row.installed_enabled
+                      ? t('profiles.library.storeAria', { mod: membershipDisplayName(row) })
+                      : t('profiles.library.activateAria', { mod: membershipDisplayName(row) })
+                  }
+                >
+                  {libraryStorageSaving === libraryStorageKey(row) ? (
+                    <RefreshCw size={13} className="animate-spin" />
+                  ) : row.installed_enabled ? (
+                    <Download size={13} />
+                  ) : (
+                    <Play size={13} />
+                  )}
+                  {row.installed_enabled
+                    ? t('profiles.library.storeAction')
+                    : t('profiles.library.activateAction')}
+                </Button>
               </div>
             </div>
             <div className="gf-profile-memberships">
@@ -754,14 +1053,12 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
                     <input
                       type="checkbox"
                       checked={state.included}
-                      disabled={!state.editable || membershipSaving !== null}
+                      disabled={!state.editable || membershipSaving !== null || libraryStorageSaving !== null}
                       onChange={() => handleToggleMembership(row, state)}
                       aria-label={state.profile_name}
                     />
                     <span className="gf-profile-membership-name">{state.profile_name}</span>
-                    {state.included && !state.enabled && (
-                      <span className="gf-profile-membership-note">{t('profiles.library.disabledInProfile')}</span>
-                    )}
+                    <span className="gf-profile-membership-note">{t(membershipStateLabelKey(state))}</span>
                     {!state.editable && (
                       <span className="gf-profile-membership-note">{t('profiles.library.readOnly')}</span>
                     )}
@@ -772,6 +1069,25 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
             </div>
           </Card>
         ))}
+        {filteredLibraryRows.length > visibleLibraryRows.length && (
+          <div className="gf-profile-library-footer">
+            <span>
+              {t('profiles.library.showing', {
+                shown: visibleLibraryRows.length,
+                total: filteredLibraryRows.length,
+              })}
+            </span>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setLibraryVisibleLimit((limit) => limit + LIBRARY_PAGE_SIZE)}
+            >
+              {t('profiles.library.showMore', {
+                count: Math.min(LIBRARY_PAGE_SIZE, filteredLibraryRows.length - visibleLibraryRows.length),
+              })}
+            </Button>
+          </div>
+        )}
       </div>
     );
   }
@@ -1230,7 +1546,7 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
               </div>
               <div className="flex items-center gap-1">
                 <Button
-                  variant="ghost"
+                  variant="secondary"
                   size="sm"
                   onClick={() => openLoadOrderEditor(profile)}
                   title={t('profiles.loadOrder.buttonTitle', { name: profile.name })}
@@ -1238,6 +1554,7 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
                   disabled={profile.mods.length === 0}
                 >
                   <ListOrdered size={14} />
+                  {t('profiles.loadOrder.button')}
                 </Button>
                 {activeProfile === profile.name ? (
                   <Button
@@ -1356,12 +1673,10 @@ export function ProfilesView({ onGoToSettings }: ProfilesViewProps = {}) {
           // Optimistically patch share info so the row flips Share→Re-share
           // immediately even before the reload below settles.
           setShareInfoMap((prev) => ({ ...prev, [publishTarget!.profile.name]: result }));
-          // Share/Re-share takes a fresh snapshot of disk into the profile,
-          // so after it finishes the profile and disk should match again.
-          // Reload the profile list — that bumps the `profiles` state
-          // reference, which trips the effect that re-derives drift, so
-          // the "out of sync" banner clears immediately instead of
-          // hanging around until the user navigates away and back.
+          // Share/Re-share enriches the saved profile manifest with bundle
+          // URLs and listing state. Reload the profile list so the row shows
+          // the persisted manifest immediately instead of waiting for a
+          // navigation round-trip.
           loadProfiles();
         }}
       />

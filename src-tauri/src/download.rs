@@ -65,7 +65,9 @@ fn build_client(token: Option<&str>) -> reqwest::Client {
     );
     headers.insert(
         reqwest::header::USER_AGENT,
-        concat!("sts2-mod-manager/", env!("CARGO_PKG_VERSION")).parse().unwrap(),
+        concat!("sts2-mod-manager/", env!("CARGO_PKG_VERSION"))
+            .parse()
+            .unwrap(),
     );
     if let Some(tok) = token {
         if let Ok(val) = format!("Bearer {}", tok).parse() {
@@ -93,17 +95,38 @@ pub async fn fetch_latest_release(
         return Ok(release);
     }
     let client = build_client(token);
-    log::debug!("GitHub API: fetch latest release {}/{} (token={})", owner, repo, token.is_some());
+    log::debug!(
+        "GitHub API: fetch latest release {}/{} (token={})",
+        owner,
+        repo,
+        token.is_some()
+    );
     let resp = client.get(&url).send().await.map_err(|e| {
-        log::warn!("GitHub fetch_latest_release request failed for {}/{}: {}", owner, repo, e);
+        log::warn!(
+            "GitHub fetch_latest_release request failed for {}/{}: {}",
+            owner,
+            repo,
+            e
+        );
         e
     })?;
     let resp = resp.error_for_status().map_err(|e| {
-        log::warn!("GitHub fetch_latest_release HTTP error for {}/{}: {}", owner, repo, e);
+        log::warn!(
+            "GitHub fetch_latest_release HTTP error for {}/{}: {}",
+            owner,
+            repo,
+            e
+        );
         e
     })?;
     let release: GitHubRelease = resp.json().await?;
-    log::debug!("GitHub API: {}/{} latest = {} ({} assets)", owner, repo, release.tag_name, release.assets.len());
+    log::debug!(
+        "GitHub API: {}/{} latest = {} ({} assets)",
+        owner,
+        repo,
+        release.tag_name,
+        release.assets.len()
+    );
     Ok(release)
 }
 
@@ -116,10 +139,7 @@ pub async fn fetch_releases(
     per_page: u32,
     token: Option<&str>,
 ) -> Result<Vec<GitHubRelease>> {
-    let url = format!(
-        "https://api.github.com/repos/{}/{}/releases",
-        owner, repo
-    );
+    let url = format!("https://api.github.com/repos/{}/{}/releases", owner, repo);
     // Cassette layer strips query params, so paginated calls all resolve
     // to the same on-disk file. The harness only ever needs page 1.
     if let Some(bytes) = crate::qa_cassette::intercept_get(&url) {
@@ -195,10 +215,7 @@ fn repo_mentions_sts2(repo: &GitHubRepo) -> bool {
     SIGNALS.iter().any(|s| collapsed.contains(s))
 }
 
-async fn fetch_one_search(
-    client: &reqwest::Client,
-    q: &str,
-) -> Result<Vec<GitHubRepo>> {
+async fn fetch_one_search(client: &reqwest::Client, q: &str) -> Result<Vec<GitHubRepo>> {
     let resp = client
         .get("https://api.github.com/search/repositories")
         .query(&[("q", q), ("per_page", "100")])
@@ -230,10 +247,7 @@ async fn fetch_one_search(
 /// STS2 qualifier optional. The OR-joined `topic:` version returned 0
 /// because GitHub's parser doesn't handle that combination cleanly.
 /// Sticking to implicit-AND queries keeps results predictable.
-pub async fn search_github_repos(
-    query: &str,
-    token: Option<&str>,
-) -> Result<Vec<GitHubRepo>> {
+pub async fn search_github_repos(query: &str, token: Option<&str>) -> Result<Vec<GitHubRepo>> {
     let client = build_client(token);
     let q1 = format!("{} sts2", query);
     let q2 = format!("{} topic:slay-the-spire-2", query);
@@ -261,7 +275,10 @@ pub async fn search_github_repos(
     }
     match b {
         Ok(list) => push_unique(list),
-        Err(e) => log::warn!("search_github_repos query (topic:slay-the-spire-2) failed: {}", e),
+        Err(e) => log::warn!(
+            "search_github_repos query (topic:slay-the-spire-2) failed: {}",
+            e
+        ),
     }
     match c {
         Ok(list) => push_unique(list),
@@ -269,10 +286,7 @@ pub async fn search_github_repos(
     }
 
     let total = merged.len();
-    let filtered: Vec<GitHubRepo> = merged
-        .into_iter()
-        .filter(repo_mentions_sts2)
-        .collect();
+    let filtered: Vec<GitHubRepo> = merged.into_iter().filter(repo_mentions_sts2).collect();
     log::debug!(
         "search_github_repos: kept {}/{} repos after STS2 relevance filter (query: {})",
         filtered.len(),
@@ -358,7 +372,13 @@ where
 /// cached release zips by owner/repo/tag without colliding on disk.
 fn slugify(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -399,9 +419,10 @@ pub async fn download_release_zip_to_cache(
         )));
     }
 
-    let dir = cache_path
-        .join("repair-walkback")
-        .join(format!("{}__{}", slugify(owner), slugify(repo)));
+    let dir =
+        cache_path
+            .join("repair-walkback")
+            .join(format!("{}__{}", slugify(owner), slugify(repo)));
     std::fs::create_dir_all(&dir)?;
     let dest = dir.join(format!("{}__{}", slugify(tag), asset.name));
 
@@ -418,11 +439,21 @@ pub async fn download_release_zip_to_cache(
         .map_err(|e| {
             log::error!(
                 "Walk-back: download failed for {}/{}@{} asset '{}': {}",
-                owner, repo, tag, asset.name, e
+                owner,
+                repo,
+                tag,
+                asset.name,
+                e
             );
             e
         })?;
-    log::debug!("Walk-back: downloaded {}/{}@{} -> {}", owner, repo, tag, dest.display());
+    log::debug!(
+        "Walk-back: downloaded {}/{}@{} -> {}",
+        owner,
+        repo,
+        tag,
+        dest.display()
+    );
     Ok(dest)
 }
 
@@ -469,7 +500,8 @@ pub fn peek_zip_min_game_version(zip_path: &Path) -> Result<Option<String>> {
             Err(_) => continue,
         };
         // Try both case variants the ecosystem uses.
-        let mgv = val.get("min_game_version")
+        let mgv = val
+            .get("min_game_version")
             .or_else(|| val.get("MinGameVersion"))
             .and_then(|v| v.as_str())
             .map(|s| s.trim().trim_start_matches('v').to_string())
@@ -505,14 +537,14 @@ pub async fn install_compatible_github_mod(
 ) -> Result<(crate::mods::ModInfo, String, bool)> {
     if user_game_version.is_none() {
         // No way to compare — fall through to legacy "install latest" path.
-        let info = download_and_install_github_mod(owner, repo, None, mods_path, cache_path, token).await?;
+        let info = download_and_install_github_mod(owner, repo, None, mods_path, cache_path, token)
+            .await?;
         return Ok((info, String::new(), false));
     }
 
-    let chosen = crate::updater::pick_compatible_release(
-        owner, repo, user_game_version, cache_path, token,
-    )
-    .await?;
+    let chosen =
+        crate::updater::pick_compatible_release(owner, repo, user_game_version, cache_path, token)
+            .await?;
 
     // Determine if this was actually a walk-back (i.e. we picked something
     // older than latest) so the caller can toast about it. Cheap second
@@ -672,45 +704,56 @@ pub async fn download_and_install_github_mod(
 ) -> Result<ModInfo> {
     log::info!(
         "Downloading GitHub mod {}/{} (tag={}, mods_path={}, cache_path={})",
-        owner, repo, tag.unwrap_or("<latest>"),
-        mods_path.display(), cache_path.display()
+        owner,
+        repo,
+        tag.unwrap_or("<latest>"),
+        mods_path.display(),
+        cache_path.display()
     );
     let release = match tag {
         Some(t) => fetch_release_by_tag(owner, repo, t, token).await?,
         None => fetch_latest_release(owner, repo, token).await?,
     };
 
-    let asset = find_best_asset_for_game_version(&release, None).ok_or_else(|| {
-        log::error!(
-            "No downloadable assets in release {} for {}/{} (assets: {:?})",
-            release.tag_name, owner, repo,
-            release.assets.iter().map(|a| &a.name).collect::<Vec<_>>()
-        );
-        AppError::Other(format!(
-            "No downloadable assets found in release {} for {}/{}",
-            release.tag_name, owner, repo
-        ))
-    })?
-    .clone();
+    let asset = find_best_asset_for_game_version(&release, None)
+        .ok_or_else(|| {
+            log::error!(
+                "No downloadable assets in release {} for {}/{} (assets: {:?})",
+                release.tag_name,
+                owner,
+                repo,
+                release.assets.iter().map(|a| &a.name).collect::<Vec<_>>()
+            );
+            AppError::Other(format!(
+                "No downloadable assets found in release {} for {}/{}",
+                release.tag_name, owner, repo
+            ))
+        })?
+        .clone();
 
     log::info!(
         "Selected asset '{}' for {}/{} v{} ({} bytes)",
-        asset.name, owner, repo, release.tag_name, asset.size
+        asset.name,
+        owner,
+        repo,
+        release.tag_name,
+        asset.size
     );
 
     let dest = cache_path.join(&asset.name);
 
     download_file(&asset.browser_download_url, &dest, |downloaded, total| {
-        log::debug!(
-            "Downloading {}: {}/{}",
-            asset.name,
-            downloaded,
-            total
-        );
+        log::debug!("Downloading {}: {}/{}", asset.name, downloaded, total);
     })
     .await
     .map_err(|e| {
-        log::error!("Download failed for {}/{} asset '{}': {}", owner, repo, asset.name, e);
+        log::error!(
+            "Download failed for {}/{} asset '{}': {}",
+            owner,
+            repo,
+            asset.name,
+            e
+        );
         e
     })?;
 
@@ -754,6 +797,7 @@ pub async fn download_and_install_github_mod(
             author: None,
             note: None,
             custom_url: None,
+            tags: vec![],
             display_name: None,
             display_description: None,
         })
@@ -806,12 +850,24 @@ pub async fn download_github_mod(
     // route through the compatibility-aware installer so we don't land
     // a release the game can't load.
     let mod_info = if let Some(t) = tag.as_deref() {
-        download_and_install_github_mod(&owner, &repo, Some(t), &mods_path, &cache_path, token.as_deref())
-            .await
-            .map_err(|e| e.to_string())?
+        download_and_install_github_mod(
+            &owner,
+            &repo,
+            Some(t),
+            &mods_path,
+            &cache_path,
+            token.as_deref(),
+        )
+        .await
+        .map_err(|e| e.to_string())?
     } else {
         let (info, _chosen_tag, _walked_back) = install_compatible_github_mod(
-            &owner, &repo, &mods_path, &cache_path, game_version.as_deref(), token.as_deref(),
+            &owner,
+            &repo,
+            &mods_path,
+            &cache_path,
+            game_version.as_deref(),
+            token.as_deref(),
         )
         .await
         .map_err(|e| e.to_string())?;
@@ -822,7 +878,10 @@ pub async fn download_github_mod(
     // folder_name when available so two same-named mods with different
     // GitHub origins each retain their own source link.
     let mut db = crate::mod_sources::load_sources(&config_path);
-    let key = mod_info.folder_name.clone().unwrap_or_else(|| mod_info.name.clone());
+    let key = mod_info
+        .folder_name
+        .clone()
+        .unwrap_or_else(|| mod_info.name.clone());
     let entry = db.mods.entry(key).or_default();
     entry.github_repo = Some(format!("{}/{}", owner, repo));
     let _ = crate::mod_sources::save_sources(&db, &config_path);
@@ -899,6 +958,7 @@ pub async fn download_url_mod(
             author: None,
             note: None,
             custom_url: None,
+            tags: vec![],
             display_name: None,
             display_description: None,
         })
@@ -968,7 +1028,10 @@ mod asset_selection_tests {
     #[test]
     fn slugify_replaces_spaces_slashes_and_special_characters() {
         assert_eq!(slugify("foo bar/baz\\qux"), "foo_bar_baz_qux");
-        assert_eq!(slugify("user@host:path?q=1#frag!"), "user_host_path_q_1_frag_");
+        assert_eq!(
+            slugify("user@host:path?q=1#frag!"),
+            "user_host_path_q_1_frag_"
+        );
     }
 
     #[test]
@@ -1056,8 +1119,7 @@ mod asset_selection_tests {
             "STS2.RitsuLib.0.2.31.github.zip",
         ]);
 
-        let chosen = find_best_asset_for_game_version(&release, None)
-            .expect("should choose a zip");
+        let chosen = find_best_asset_for_game_version(&release, None).expect("should choose a zip");
 
         assert_eq!(chosen.name, "STS2.RitsuLib.0.2.31.github.zip");
     }
@@ -1073,8 +1135,7 @@ mod asset_selection_tests {
             .expect("should choose a zip");
 
         assert_eq!(
-            chosen.name,
-            "STS2.RitsuLib.Compat.0.104.0.0.2.31.github.zip",
+            chosen.name, "STS2.RitsuLib.Compat.0.104.0.0.2.31.github.zip",
             "when a release has compat-specific assets but none support the user's game, \
              pick the lowest incompatible compat asset rather than the plain latest asset. \
              The walk-back layer can then reject the release from that asset's manifest."

@@ -15,6 +15,7 @@ export function isUpToDate(entry: ModAuditEntry): boolean {
     Boolean(entry.latest_release_tag) && !entry.latest_release_with_assets_tag;
   if (goneNoAssets) return false;
   if (entry.game_version_too_old) return false;
+  if (entry.latest_release_blocked_by_game_version) return false;
   return true;
 }
 

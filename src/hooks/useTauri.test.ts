@@ -61,6 +61,8 @@ import {
   setGamePath,
   setGithubToken,
   setLaunchMode,
+  setModSnooze,
+  setModTags,
   setModSource,
   setModSourcesFull,
   setNexusApiKey,
@@ -315,6 +317,18 @@ describe('useTauri wrappers — command names + arg shapes', () => {
     expect(lastCall()).toEqual({
       cmd: 'unpin_mod',
       args: { modName: 'BaseLib', folderName: null },
+    });
+
+    await setModSnooze('BaseLib', 'v3.2.0', 'BaseLib-folder');
+    expect(lastCall()).toEqual({
+      cmd: 'set_mod_snooze',
+      args: { modName: 'BaseLib', folderName: 'BaseLib-folder', latestTag: 'v3.2.0' },
+    });
+
+    await setModTags('BaseLib', ['utility', 'beta'], 'BaseLib-folder');
+    expect(lastCall()).toEqual({
+      cmd: 'set_mod_tags',
+      args: { modName: 'BaseLib', folderName: 'BaseLib-folder', tags: ['utility', 'beta'] },
     });
 
     await autoDetectSources();

@@ -27,6 +27,18 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Security
+
+---
+
+## [1.6.1] - 2026-05-23
+
+### Added
+
 - The Mods tab now has a Mod Library shortcut for assigning installed mods to profiles.
 - Mod Library can keep unused mods installed but inactive, and can disable unused active mods in one action.
 - Mods now support manager-only tags so you can organize and filter large libraries.

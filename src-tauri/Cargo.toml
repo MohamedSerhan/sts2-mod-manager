@@ -1,6 +1,6 @@
 [package]
 name = "sts2-mod-manager"
-version = "1.6.0"
+version = "1.6.1"
 description = "STS2 Mod Manager - A Tauri App"
 authors = ["you"]
 edition = "2021"

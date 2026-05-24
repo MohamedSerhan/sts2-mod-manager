@@ -975,6 +975,17 @@ body {
 .gf-pill-toolbar { padding: 6px 10px; font-size: 13px; }
 .gf-mod-tag { background: oklch(0.45 0.08 250 / 0.18); color: oklch(0.82 0.08 250); border: 1px solid oklch(0.55 0.08 250 / 0.25); text-transform: none; }
 
+/* 1.7.0 — per-row chip strip in the Mods view. Separates the "storage"
+   chip (active in game vs stored on disk) from the "membership" chip
+   (in / not in / included-off in the active modpack) so the two states
+   read independently. */
+.gf-mod-row-chips {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
 /* ── Browse grid ──────────────────────────────────────────────────── */
 .gf-browse-grid {
   display: grid;

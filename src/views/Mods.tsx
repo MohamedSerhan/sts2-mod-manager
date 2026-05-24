@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { countGithubUpdates, isUpToDate } from '../lib/auditState';
 import { nexusFilesUrl } from '../lib/nexusUrl';
@@ -38,7 +38,7 @@ import { useConfirm } from '../components/ConfirmDialog';
 import { KebabMenu, KebabSection, KebabDivider, KebabItem } from '../components/KebabMenu';
 import { SourceEditor } from '../components/SourceEditor';
 import { Copy } from 'lucide-react';
-import type { ModInfo } from '../types';
+import type { ModInfo, ProfileMembershipGrid } from '../types';
 import {
   toggleMod,
   deleteMod,
@@ -56,6 +56,7 @@ import {
   setModSnooze,
   setModTags,
   findGithubFromNexus,
+  getProfileMemberships,
   pinMod,
   unpinMod,
   repairMod,
@@ -167,7 +168,7 @@ interface ModsViewProps {
 
 export function ModsView({ advancedMode: advancedModeProp, onOpenModLibrary }: ModsViewProps = {}) {
   const { t } = useTranslation();
-  const { mods, refreshMods, refreshAll, gameRunning, gameInfo, notifyNexusOpen, auditResults, auditing, runAudit, refreshAuditEntries, updatingAll, updateAllGithub } = useApp();
+  const { mods, refreshMods, refreshAll, gameRunning, gameInfo, notifyNexusOpen, auditResults, auditing, runAudit, refreshAuditEntries, updatingAll, updateAllGithub, activeProfile } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
   const [filter, setFilter] = useState('');
@@ -213,6 +214,47 @@ export function ModsView({ advancedMode: advancedModeProp, onOpenModLibrary }: M
     }
     return m;
   }, [auditResults]);
+
+  // 1.7.0 — per-row "in this modpack" chip. We pull the full membership
+  // grid (one round-trip) and look up each row by folder name / mod
+  // name. The grid only matters when there's an active modpack — when
+  // there isn't, we just skip the chip entirely. We re-fetch on the
+  // installed-mods list changing because adding/removing a mod can
+  // change which rows the grid covers.
+  const [memberships, setMemberships] = useState<ProfileMembershipGrid | null>(null);
+  useEffect(() => {
+    if (!activeProfile) {
+      setMemberships(null);
+      return;
+    }
+    let cancelled = false;
+    getProfileMemberships()
+      .then((grid) => { if (!cancelled) setMemberships(grid); })
+      .catch(() => { if (!cancelled) setMemberships(null); });
+    return () => { cancelled = true; };
+  }, [activeProfile, mods]);
+
+  // Lookup: row → 'in' (included & enabled in active pack), 'includedOff'
+  // (included but disabled in the pack overlay), 'notIn' (not in the
+  // pack), or null (no active pack / no data — caller should skip the
+  // chip). Index by folder_name first since two mods can share a display
+  // name; fall back to mod name for legacy entries.
+  const membershipByKey = useMemo(() => {
+    const m = new Map<string, 'in' | 'includedOff' | 'notIn'>();
+    if (!activeProfile || !memberships) return m;
+    for (const row of memberships.mods) {
+      const key = row.folder_name ?? row.name;
+      const inActive = row.profiles.find((p) => p.profile_name === activeProfile);
+      if (!inActive || !inActive.included) {
+        m.set(key, 'notIn');
+      } else if (inActive.enabled) {
+        m.set(key, 'in');
+      } else {
+        m.set(key, 'includedOff');
+      }
+    }
+    return m;
+  }, [activeProfile, memberships]);
 
   async function handleCheckUpdates() {
     await runAudit();
@@ -523,7 +565,14 @@ export function ModsView({ advancedMode: advancedModeProp, onOpenModLibrary }: M
       {/* Header */}
       <div className="gf-page-head">
         <div>
-          <h1 className="gf-page-title">{t('mods.title')}</h1>
+          {/* 1.7.0 — heading reframed from "Your mods" to "All installed
+              mods" so users don't read it as "the active modpack's mods".
+              A real user (Solo) hit that confusion repeatedly. The
+              subtitle below the count clarifies the relationship between
+              this screen and the active modpack, and the link routes
+              over to the modpack mod-library workspace where the per-
+              pack membership lives. */}
+          <h1 className="gf-page-title">{t('mods.allInstalledTitle')}</h1>
           <p className="gf-page-sub">
             {t('mods.subtitle', { total: totalCount, enabled: enabledCount, disabled: disabledCount > 0 ? t('mods.subtitleDisabledSuffix', { count: disabledCount }) : '' })}
             {advancedMode && linkedCount > 0 && (
@@ -532,6 +581,16 @@ export function ModsView({ advancedMode: advancedModeProp, onOpenModLibrary }: M
               </span>
             )}
           </p>
+          <p className="gf-page-sub">{t('mods.allInstalledSubtitle')}</p>
+          {onOpenModLibrary && (
+            <button
+              type="button"
+              className="gf-link-button"
+              onClick={onOpenModLibrary}
+            >
+              {t('mods.manageActiveModpackLink')}
+            </button>
+          )}
         </div>
         <div className="gf-page-actions">
           <Button variant="secondary" size="sm" onClick={handleOpenFolder}>
@@ -826,9 +885,16 @@ export function ModsView({ advancedMode: advancedModeProp, onOpenModLibrary }: M
             const isUpdatingThisRow = updatingKey === rowKey;
             const auditError = auditRow?.error ?? null;
 
+            // 1.7.0 — membership chip is sourced from the active modpack's
+            // membership grid. Null = no active modpack OR no row for this
+            // mod (newly installed since the grid was fetched), and we skip
+            // the chip in both cases.
+            const membership = membershipByKey.get(rowKey) ?? membershipByKey.get(mod.name) ?? null;
+
             return (
               <Card
                 key={rowKey}
+                data-testid="mod-row"
                 className={`hover:bg-surface-hover transition-colors ${mod.pinned ? 'gf-mod-pinned' : ''}`}
               >
                 <div className="flex items-center justify-between">
@@ -996,6 +1062,33 @@ export function ModsView({ advancedMode: advancedModeProp, onOpenModLibrary }: M
                         )}
                         {mod.size_bytes > 0 && (
                           <span className="text-xs text-text-dim">{formatBytes(mod.size_bytes)}</span>
+                        )}
+                      </div>
+                      {/* 1.7.0 — storage + membership chips. The two are
+                          deliberately separated: a mod can be "stored"
+                          on disk (disabled in the game folder) while
+                          still being included in the active modpack
+                          (Solo's confusion case). Membership chip is
+                          hidden when there's no active modpack. */}
+                      <div className="gf-mod-row-chips">
+                        <Badge
+                          variant={mod.enabled ? 'ok' : 'github'}
+                          title={mod.enabled ? undefined : t('modpack.storage.storedHint')}
+                        >
+                          {mod.enabled ? t('modpack.storage.active') : t('modpack.storage.stored')}
+                        </Badge>
+                        {membership && (
+                          <Badge
+                            variant={membership === 'in' ? 'ok' : membership === 'includedOff' ? 'update' : 'github'}
+                          >
+                            {t(
+                              membership === 'in'
+                                ? 'modpack.membership.in'
+                                : membership === 'includedOff'
+                                  ? 'modpack.membership.includedOff'
+                                  : 'modpack.membership.notIn'
+                            )}
+                          </Badge>
                         )}
                       </div>
                       {displayDescription && (

@@ -1405,6 +1405,9 @@
       "rollbackFailed": "Rollback failed for '{{name}}': {{error}}"
     },
     "title": "Your mods",
+    "allInstalledTitle": "All installed mods",
+    "allInstalledSubtitle": "Every mod installed on your computer. Your active modpack decides which ones load in the game.",
+    "manageActiveModpackLink": "Manage active modpack →",
     "searchPlaceholder": "Search mods…",
     "sort": {
       "label": "Sort",

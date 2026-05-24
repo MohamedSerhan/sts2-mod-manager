@@ -1405,6 +1405,9 @@
       "snoozed": "已跳过 {{name}} 的更新提示，直到下个版本"
     },
     "title": "你的模组",
+    "allInstalledTitle": "已安装的所有模组",
+    "allInstalledSubtitle": "你已安装到本地的所有模组。当前的模组包决定哪些模组会被加载到游戏中。",
+    "manageActiveModpackLink": "管理当前模组包 →",
     "searchPlaceholder": "搜索模组…",
     "sort": {
       "label": "排序",

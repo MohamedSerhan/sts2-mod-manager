@@ -121,7 +121,7 @@ describe('<App>', () => {
     //  don't need a Skip-setup click.)
     await user.click(getNavButton('Mods'));
     await waitFor(() => {
-      expect(screen.getByText(/Your mods/i)).toBeInTheDocument();
+      expect(screen.getByText(/All installed mods/i)).toBeInTheDocument();
     });
   });
 
@@ -172,7 +172,7 @@ describe('<App>', () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     await user.click(getNavButton('Mods'));
-    await waitFor(() => { expect(screen.getByText(/Your mods/i)).toBeInTheDocument(); });
+    await waitFor(() => { expect(screen.getByText(/All installed mods/i)).toBeInTheDocument(); });
 
     await user.click(screen.getByRole('button', { name: /Mod Library/i }));
 
@@ -254,7 +254,7 @@ describe('<App>', () => {
     // (Onboarding overlay is suppressed by default in beforeEach so we
     //  don't need a Skip-setup click.)
     await user.click(getNavButton('Mods'));
-    await waitFor(() => { expect(screen.getByText(/Your mods/i)).toBeInTheDocument(); });
+    await waitFor(() => { expect(screen.getByText(/All installed mods/i)).toBeInTheDocument(); });
     await user.click(getNavButton('Home'));
     // Home view shows the share-code input.
     await waitFor(() => {
@@ -716,7 +716,7 @@ describe('<App>', () => {
     //  don't need a Skip-setup click.)
     // Navigate to a non-home view first so we can observe the switch.
     await user.click(getNavButton('Mods'));
-    await waitFor(() => { expect(screen.getByText(/Your mods/i)).toBeInTheDocument(); });
+    await waitFor(() => { expect(screen.getByText(/All installed mods/i)).toBeInTheDocument(); });
     // Open switcher, click Add modpack.
     const chip = document.querySelector('button.gf-prof') as HTMLButtonElement | null;
     expect(chip).toBeTruthy();
@@ -1159,7 +1159,7 @@ describe('<App>', () => {
     //  don't need a Skip-setup click.)
     // Navigate to Mods so we can prove the deep-link bounces us back to Home.
     await user.click(getNavButton('Mods'));
-    await waitFor(() => { expect(screen.getByText(/Your mods/i)).toBeInTheDocument(); });
+    await waitFor(() => { expect(screen.getByText(/All installed mods/i)).toBeInTheDocument(); });
     await fireTauriEvent('sts2mm-open-url', 'sts2mm://import/alice/AA5A-315D-61AE');
     // After route() fires, view should have switched to home — the
     // share-code placeholder is the canonical Home signal.
@@ -1271,7 +1271,7 @@ describe('<App>', () => {
     const manageMods = await screen.findByRole('button', { name: /Manage mods/i });
     await user.click(manageMods);
     await waitFor(() => {
-      expect(screen.getByText(/Your mods/i)).toBeInTheDocument();
+      expect(screen.getByText(/All installed mods/i)).toBeInTheDocument();
     });
   });
 

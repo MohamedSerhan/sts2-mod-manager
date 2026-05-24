@@ -2985,4 +2985,146 @@ describe('<ModsView>', () => {
     });
     expect(screen.queryByText(/Failed/)).toBeNull();
   });
+
+  // ── all-installed-mods framing (1.7.0) ────────────────────────────
+  // The Mods view was previously titled "Your mods", which a real user
+  // (Solo) read as "the active modpack's mods". The view actually shows
+  // every mod installed on disk — independent of which modpack is
+  // currently active. These tests pin the renamed heading + subtitle
+  // and the "Manage active modpack →" bridge that routes back to the
+  // Modpacks view's mod library workspace.
+  describe('all-installed-mods framing', () => {
+    it('uses the All installed mods heading and explanatory subtitle', async () => {
+      seedMods([baseMod({ name: 'BaseLib', folder_name: 'BaseLib' })]);
+      render(<Wrap />);
+      expect(await screen.findByRole('heading', { name: /all installed mods/i })).toBeInTheDocument();
+      expect(screen.getByText(/every mod installed on your computer/i)).toBeInTheDocument();
+    });
+
+    it('Manage active modpack link calls onOpenModLibrary', async () => {
+      const onOpen = vi.fn();
+      seedMods([baseMod({ name: 'BaseLib', folder_name: 'BaseLib' })]);
+      const user = userEvent.setup();
+      render(<Wrap onOpenModLibrary={onOpen} />);
+      const link = await screen.findByRole('button', { name: /manage active modpack/i });
+      await user.click(link);
+      expect(onOpen).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ── per-row storage + membership chips (1.7.0) ─────────────────────
+  // Solo's confusion case: a mod can be "disabled in game" (enabled=false
+  // on disk, lives in `disabled_mods/` or whichever shadow path the
+  // backend uses) while still being a member of the active modpack. Without
+  // separate chips for storage vs. membership, the row was unreadable.
+  describe('per-row state chips', () => {
+    type Membership = 'in' | 'notIn' | 'includedOff' | 'noActive';
+
+    function setupRow(active: boolean, membership: Membership): void {
+      seedMods([
+        baseMod({ name: 'TargetMod', folder_name: 'TargetMod', enabled: active }),
+      ]);
+      if (membership === 'noActive') {
+        registerInvokeHandler('get_active_profile', () => null);
+        return;
+      }
+      registerInvokeHandler('get_active_profile', () => 'TestPack');
+      const included = membership === 'in' || membership === 'includedOff';
+      const enabled = membership === 'in';
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'TestPack', editable: true }],
+        mods: [
+          {
+            name: 'TargetMod',
+            version: '3.1.2',
+            folder_name: 'TargetMod',
+            mod_id: 'targetmod',
+            installed_enabled: active,
+            profiles: [
+              { profile_name: 'TestPack', included, enabled, editable: true },
+            ],
+          },
+        ],
+      }));
+    }
+
+    // Loud row lookup — `findByText` resolves once the mod name
+    // appears in the DOM. The .closest() throw catches regressions in
+    // the row's outer markup (no `data-testid="mod-row"` wrapper).
+    async function getModRow(modName: string): Promise<HTMLElement> {
+      const nameNode = await screen.findByText(modName);
+      const row = nameNode.closest('[data-testid="mod-row"]');
+      if (!(row instanceof HTMLElement)) {
+        throw new Error(`No data-testid="mod-row" wrapper around "${modName}"`);
+      }
+      return row;
+    }
+
+    // The membership chip arrives one tick after the storage chip because
+    // it depends on a separate `get_profile_memberships` round-trip
+    // gated on `activeProfile` being set first. Loud waiter — throws if
+    // the chip never appears in the row.
+    async function waitForMembershipChip(row: HTMLElement, wording: RegExp): Promise<HTMLElement> {
+      await waitFor(() => {
+        expect(within(row).getByText(wording)).toBeInTheDocument();
+      });
+      return within(row).getByText(wording);
+    }
+
+    it('shows Active in game + In this modpack when both true', async () => {
+      setupRow(true, 'in');
+      render(<Wrap />);
+      const row = await getModRow('TargetMod');
+      expect(within(row).getByText(/active in game/i)).toBeInTheDocument();
+      await waitForMembershipChip(row, /^in this modpack$/i);
+    });
+
+    it('shows Stored + Not in this modpack when neither', async () => {
+      setupRow(false, 'notIn');
+      render(<Wrap />);
+      const row = await getModRow('TargetMod');
+      expect(within(row).getByText(/^stored$/i)).toBeInTheDocument();
+      await waitForMembershipChip(row, /not in this modpack/i);
+    });
+
+    it('shows Active in game + Not in this modpack', async () => {
+      setupRow(true, 'notIn');
+      render(<Wrap />);
+      const row = await getModRow('TargetMod');
+      expect(within(row).getByText(/active in game/i)).toBeInTheDocument();
+      await waitForMembershipChip(row, /not in this modpack/i);
+    });
+
+    // Solo's confusion case — without the chip pair, a row that reads
+    // "disabled" in game with a checkmark in the active modpack was
+    // ambiguous. Both chips appearing on the same row defuses it.
+    it("shows Stored + In this modpack (Solo's confusion case)", async () => {
+      setupRow(false, 'in');
+      render(<Wrap />);
+      const row = await getModRow('TargetMod');
+      expect(within(row).getByText(/^stored$/i)).toBeInTheDocument();
+      await waitForMembershipChip(row, /^in this modpack$/i);
+    });
+
+    it('shows Included, off in this modpack when included but disabled', async () => {
+      setupRow(true, 'includedOff');
+      render(<Wrap />);
+      const row = await getModRow('TargetMod');
+      await waitForMembershipChip(row, /included, off in this modpack/i);
+    });
+
+    it('hides membership chip when no active modpack', async () => {
+      setupRow(true, 'noActive');
+      render(<Wrap />);
+      const row = await getModRow('TargetMod');
+      // Storage chip still visible…
+      expect(within(row).getByText(/active in game/i)).toBeInTheDocument();
+      // …but no membership wording anywhere on the row. Wait one tick
+      // to ensure any pending membership-fetch effects had a chance to
+      // resolve before asserting absence.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(within(row).queryByText(/in this modpack/i)).toBeNull();
+      expect(within(row).queryByText(/not in this modpack/i)).toBeNull();
+    });
+  });
 });

@@ -72,8 +72,10 @@ function Wrap(props: Partial<React.ComponentProps<typeof HomeView>> = {}) {
         onGoToSettings={props.onGoToSettings ?? (() => {})}
         onGoToMods={props.onGoToMods ?? (() => {})}
         onGoToProfiles={props.onGoToProfiles ?? (() => {})}
+        onGoToBrowseModpacks={props.onGoToBrowseModpacks ?? (() => {})}
         onSwitchPack={props.onSwitchPack ?? (() => {})}
         onLaunch={props.onLaunch ?? (() => {})}
+        onBumpFocusCodeBar={props.onBumpFocusCodeBar}
         focusCodeBarSignal={props.focusCodeBarSignal}
       />
     </AllProviders>
@@ -204,17 +206,23 @@ describe('<HomeView>', () => {
   });
 
   it('navigates via the launcher callback when Launch is clicked', async () => {
+    // Active modpack ⇒ launcher-first hero with the prominent Play button.
+    registerInvokeHandler('get_active_profile', () => 'MyPack');
+    registerInvokeHandler('list_profiles_cmd', () => [
+      { name: 'MyPack', mods: [], created_at: '2026-01-01' },
+    ]);
     const onLaunch = vi.fn();
     const user = userEvent.setup();
     render(<Wrap onLaunch={onLaunch} />);
     await waitFor(() => {
-      expect(screen.getByPlaceholderText(/username\/AA5A-315D-61AE/i)).toBeInTheDocument();
+      expect(screen.getByText('MyPack')).toBeInTheDocument();
     });
-    // The Launch button always renders in the hero (enabled when onLaunch
-    // is provided). Click it and assert the callback fired — that's the
-    // contract the prop exists for.
-    const launchBtn = screen.getAllByRole('button').find((b) => /Launch/.test(b.textContent ?? ''));
-    expect(launchBtn).toBeDefined();
+    // The hero Play button uses t('app.launch.modded') = "Launch". Scope
+    // by the gf-hero-play class so the topbar's own Launch button doesn't
+    // win the lookup. (HomeView doesn't render the topbar — the hero
+    // button is the only one in this DOM.)
+    const launchBtn = document.querySelector('.gf-hero-play') as HTMLButtonElement | null;
+    expect(launchBtn).not.toBeNull();
     await user.click(launchBtn!);
     expect(onLaunch).toHaveBeenCalled();
   });
@@ -298,15 +306,21 @@ describe('<HomeView>', () => {
     expect(onGoToSettings).toHaveBeenCalled();
   });
 
-  it('hero shows "Vanilla" when no active profile', async () => {
+  it('renders the empty-state hero when no active profile', async () => {
+    // 1.7 reorganization replaces the "Vanilla" continue-with hero with
+    // a friendly empty state pointing at three guided CTAs.
     registerInvokeHandler('get_active_profile', () => null);
     render(<Wrap />);
     await waitFor(() => {
-      expect(screen.getByText('Vanilla')).toBeInTheDocument();
+      expect(screen.getByText(/Start with a modpack/i)).toBeInTheDocument();
     });
   });
 
-  it('renders "Continue with" eyebrow on hero', async () => {
+  it('renders "Continue with" eyebrow on hero when a modpack is active', async () => {
+    registerInvokeHandler('get_active_profile', () => 'MyPack');
+    registerInvokeHandler('list_profiles_cmd', () => [
+      { name: 'MyPack', mods: [], created_at: '2026-01-01' },
+    ]);
     render(<Wrap />);
     await waitFor(() => {
       expect(screen.getByText(/Continue with/i)).toBeInTheDocument();
@@ -327,7 +341,7 @@ describe('<HomeView>', () => {
     expect(repair).toBeDefined();
   });
 
-  it('"Switch pack" button calls onSwitchPack', async () => {
+  it('"Switch modpack" button calls onSwitchPack', async () => {
     registerInvokeHandler('get_active_profile', () => 'MyPack');
     registerInvokeHandler('list_profiles_cmd', () => [
       { name: 'MyPack', mods: [], created_at: '2026-01-01' },
@@ -336,10 +350,9 @@ describe('<HomeView>', () => {
     const user = userEvent.setup();
     render(<Wrap onSwitchPack={onSwitchPack} />);
     await waitFor(() => { expect(screen.getByText('MyPack')).toBeInTheDocument(); });
-    const buttons = screen.getAllByRole('button');
-    const switchBtn = buttons.find((b) => /Switch pack/i.test(b.textContent ?? ''));
-    expect(switchBtn).toBeDefined();
-    await user.click(switchBtn!);
+    // 1.7 hero uses t('app.switchActivePack') = "Switch modpack".
+    const switchBtn = screen.getByRole('button', { name: /Switch modpack/i });
+    await user.click(switchBtn);
     expect(onSwitchPack).toHaveBeenCalled();
   });
 
@@ -369,7 +382,7 @@ describe('<HomeView>', () => {
     expect(onGoToProfiles).toHaveBeenCalled();
   });
 
-  it('"Share this pack" CTA appears for unpublished active profile', async () => {
+  it('"Share modpack" CTA appears for unpublished active profile', async () => {
     registerInvokeHandler('get_active_profile', () => 'MyPack');
     registerInvokeHandler('list_profiles_cmd', () => [
       { name: 'MyPack', mods: [], created_at: '2026-01-01' },
@@ -378,9 +391,11 @@ describe('<HomeView>', () => {
     registerInvokeHandler('get_subscriptions', () => []);
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('MyPack')).toBeInTheDocument(); });
+    // 1.7: "Share this pack" → t('modpack.share') = "Share modpack" in
+    // the hero secondary-actions row.
     await waitFor(() => {
       const buttons = screen.getAllByRole('button');
-      expect(buttons.some((b) => /Share this pack/i.test(b.textContent ?? ''))).toBe(true);
+      expect(buttons.some((b) => /Share modpack/i.test(b.textContent ?? ''))).toBe(true);
     });
   });
 
@@ -415,38 +430,13 @@ describe('<HomeView>', () => {
     });
   });
 
-  it('subUpdate banner renders for non-active sub with pending update', async () => {
-    registerInvokeHandler('get_active_profile', () => 'CurrentPack');
-    registerInvokeHandler('get_subscriptions', () => [
-      { share_id: 'alice/abcd', profile_name: 'AlicePack', last_synced: '2026-05-01', last_known_remote_sha: 'sha', subscribed_at: '2026-01-01' },
-    ]);
-    registerInvokeHandler('check_subscription_updates', () => [
-      { share_id: 'alice/abcd', profile_name: 'AlicePack', has_update: true, added_mods: ['X', 'Y'], updated_mods: [], removed_mods: ['Z'], remote_profile: null },
-    ]);
-    render(<Wrap />);
-    await waitFor(() => {
-      expect(screen.queryByText(/Updates available/)).toBeInTheDocument();
-    });
-  });
-
-  it('subUpdate Review button opens SubUpdateDetail modal', async () => {
-    registerInvokeHandler('get_active_profile', () => 'CurrentPack');
-    registerInvokeHandler('get_subscriptions', () => [
-      { share_id: 'alice/abcd', profile_name: 'AlicePack', last_synced: '2026-05-01', last_known_remote_sha: 'sha', subscribed_at: '2026-01-01' },
-    ]);
-    registerInvokeHandler('check_subscription_updates', () => [
-      { share_id: 'alice/abcd', profile_name: 'AlicePack', has_update: true, added_mods: ['NewMod'], updated_mods: [], removed_mods: [], remote_profile: null },
-    ]);
-    const user = userEvent.setup();
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.queryByText(/Updates available/)).toBeInTheDocument(); });
-    const review = screen.getAllByRole('button').find((b) => /^Review$/.test(b.textContent?.trim() ?? ''));
-    expect(review).toBeDefined();
-    await user.click(review!);
-    await waitFor(() => {
-      expect(screen.queryAllByText(/AlicePack/).length).toBeGreaterThan(0);
-    });
-  });
+  // The 1.7 redesign removed the full-width "Pending Updates" banner
+  // for non-active subscriptions. Updates for non-active modpacks are
+  // now surfaced inside their Other-Pack row (via the per-row pill +
+  // Activate button) — those rows are exercised by the other-sub-row
+  // tests below. The active modpack's pending update is now a contextual
+  // "Sync available" pill in the hero (see the launcher-first sync-pill
+  // test in the 1.7 describe block at the bottom of this file).
 
   it('other-sub row: unlink button shows confirmation', async () => {
     registerInvokeHandler('get_active_profile', () => 'CurrentPack');
@@ -464,16 +454,28 @@ describe('<HomeView>', () => {
     });
   });
 
-  it('empty-state card shows when no subscriptions exist', async () => {
+  it('empty-state hero shows the friendly guidance copy when no modpack is active', async () => {
+    // 1.7: the "Follow a friend's pack" empty card is replaced by the
+    // launcher-first empty hero (heading + body + three CTAs).
+    registerInvokeHandler('get_active_profile', () => null);
     registerInvokeHandler('get_subscriptions', () => []);
     render(<Wrap />);
     await waitFor(() => {
-      expect(screen.queryByText(/Follow a friend's pack/)).toBeInTheDocument();
+      expect(screen.getByText(/Start with a modpack/i)).toBeInTheDocument();
     });
+    expect(
+      screen.getByText(/A modpack is a saved set of mods/i),
+    ).toBeInTheDocument();
   });
 
-  it('Sync button fires apply_subscription_update', async () => {
-    registerInvokeHandler('get_active_profile', () => 'CurrentPack');
+  it('hero Sync button fires apply_subscription_update for the active modpack', async () => {
+    // 1.7: the per-row Sync button moved out of the non-active banner
+    // (banner removed). The active modpack's pending update now surfaces
+    // as a "Sync updates" secondary button in the hero.
+    registerInvokeHandler('get_active_profile', () => 'AlicePack');
+    registerInvokeHandler('list_profiles_cmd', () => [
+      { name: 'AlicePack', mods: [], created_at: '2026-01-01' },
+    ]);
     registerInvokeHandler('get_subscriptions', () => [
       { share_id: 'alice/abcd', profile_name: 'AlicePack', last_synced: '2026-05-01', last_known_remote_sha: 'sha', subscribed_at: '2026-01-01' },
     ]);
@@ -483,16 +485,15 @@ describe('<HomeView>', () => {
     registerInvokeHandler('apply_subscription_update', () => ({ name: 'AlicePack', mods: [], created_at: '2026-01-01' }));
     const user = userEvent.setup();
     render(<Wrap />);
-    await waitFor(() => { expect(screen.queryByText(/Updates available/)).toBeInTheDocument(); });
-    const sync = screen.getAllByRole('button').find((b) => /^Sync$/.test(b.textContent?.trim() ?? ''));
-    expect(sync).toBeDefined();
-    await user.click(sync!);
+    await waitFor(() => { expect(screen.getByText(/Sync available/i)).toBeInTheDocument(); });
+    const sync = screen.getByRole('button', { name: /Sync updates/i });
+    await user.click(sync);
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'apply_subscription_update')).toBe(true);
     });
   });
 
-  it('publish modal opens when "Share this pack" CTA is clicked', async () => {
+  it('publish modal opens when the "Share modpack" CTA is clicked', async () => {
     registerInvokeHandler('get_active_profile', () => 'MyPack');
     registerInvokeHandler('list_profiles_cmd', () => [
       { name: 'MyPack', mods: [], created_at: '2026-01-01' },
@@ -502,10 +503,10 @@ describe('<HomeView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('MyPack')).toBeInTheDocument(); });
-    const buttons = screen.getAllByRole('button');
-    const shareBtn = buttons.find((b) => /Share this pack/i.test(b.textContent ?? ''));
-    expect(shareBtn).toBeDefined();
-    await user.click(shareBtn!);
+    // 1.7 label: t('modpack.share') = "Share modpack" in the hero
+    // secondary-actions row.
+    const shareBtn = await screen.findByRole('button', { name: /Share modpack/i });
+    await user.click(shareBtn);
     // PublishModal opens — its Publish action button is the unambiguous
     // signal that the modal mounted (not just the pack name on the page).
     await waitFor(() => {
@@ -814,22 +815,24 @@ describe('<HomeView> subscription banner & active-update banner', () => {
     ]);
   }
 
-  it('active-update inline banner shows count text + View changes / Sync updates', async () => {
+  it('active-update hero shows the Sync pill + View changes / Sync updates secondary buttons', async () => {
+    // 1.7: the active modpack's pending update is no longer a tinted
+    // inline banner with count text. It's a "Sync available" pill in the
+    // hero header plus two contextual secondary buttons.
     withActiveUpdate();
     render(<Wrap />);
-    // 2 added + 0 updated + 1 removed = 3 → "3 updates from author"
     await waitFor(() => {
-      expect(screen.getByText(/3 updates from author/)).toBeInTheDocument();
+      expect(screen.getByText(/Sync available/i)).toBeInTheDocument();
     });
-    expect(screen.getByRole('button', { name: /View changes/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Sync updates/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /View changes/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Sync updates/i })).toBeInTheDocument();
   });
 
   it('active-update "View changes" opens the SubUpdateDetail modal', async () => {
     withActiveUpdate();
     const user = userEvent.setup();
     render(<Wrap />);
-    const view = await screen.findByRole('button', { name: /View changes/ });
+    const view = await screen.findByRole('button', { name: /View changes/i });
     await user.click(view);
     await waitFor(() => {
       expect(screen.getByText(/3 updates available — MyPack/)).toBeInTheDocument();
@@ -845,7 +848,7 @@ describe('<HomeView> subscription banner & active-update banner', () => {
     }));
     const user = userEvent.setup();
     render(<Wrap />);
-    const sync = await screen.findByRole('button', { name: /Sync updates/ });
+    const sync = await screen.findByRole('button', { name: /Sync updates/i });
     await user.click(sync);
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'apply_subscription_update')).toBe(true);
@@ -856,7 +859,12 @@ describe('<HomeView> subscription banner & active-update banner', () => {
   });
 
   it('SubUpdateDetail "Apply all" funnels through handleApplySubUpdate then closes the modal', async () => {
-    registerInvokeHandler('get_active_profile', () => 'CurrentPack');
+    // 1.7: the "Review" entry-point lives in the hero (active modpack)
+    // labelled "View changes" — the non-active full-width banner is gone.
+    registerInvokeHandler('get_active_profile', () => 'AlicePack');
+    registerInvokeHandler('list_profiles_cmd', () => [
+      { name: 'AlicePack', mods: [], created_at: '2026-01-01' },
+    ]);
     registerInvokeHandler('get_subscriptions', () => [
       { share_id: 'alice/abcd', profile_name: 'AlicePack', last_synced: '2026-05-01', last_known_remote_sha: 'sha', subscribed_at: '2026-01-01' },
     ]);
@@ -866,8 +874,8 @@ describe('<HomeView> subscription banner & active-update banner', () => {
     registerInvokeHandler('apply_subscription_update', () => ({ name: 'AlicePack', mods: [], created_at: '2026-01-01' }));
     const user = userEvent.setup();
     render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText(/Updates available/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /^Review$/ }));
+    await waitFor(() => { expect(screen.getByText(/Sync available/i)).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: /View changes/i }));
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Apply all/ })).toBeInTheDocument();
     });
@@ -1281,7 +1289,7 @@ describe('<HomeView> other-sub row actions (Activate, Unlink, Repair)', () => {
 });
 
 describe('<HomeView> Share-this-pack CTA error paths + PublishModal close', () => {
-  it('"Share this pack" click loads the profile and opens PublishModal', async () => {
+  it('"Share modpack" click loads the profile and opens PublishModal', async () => {
     registerInvokeHandler('get_active_profile', () => 'MyPack');
     registerInvokeHandler('list_profiles_cmd', () => [
       { name: 'MyPack', mods: [], created_at: '2026-01-01' },
@@ -1291,7 +1299,7 @@ describe('<HomeView> Share-this-pack CTA error paths + PublishModal close', () =
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('MyPack')).toBeInTheDocument(); });
-    const share = screen.getAllByRole('button').find((b) => /Share this pack/i.test(b.textContent ?? ''));
+    const share = screen.getAllByRole('button').find((b) => /Share modpack/i.test(b.textContent ?? ''));
     expect(share).toBeDefined();
     await user.click(share!);
     // PublishModal renders a "Publish" / preview surface. We close it via
@@ -1303,7 +1311,7 @@ describe('<HomeView> Share-this-pack CTA error paths + PublishModal close', () =
     });
   });
 
-  it('"Share this pack" missing-profile path shows "Couldn\'t find this profile" error', async () => {
+  it('"Share modpack" missing-profile path shows "Couldn\'t find this profile" error', async () => {
     registerInvokeHandler('get_active_profile', () => 'MyPack');
     // No matching profile in list_profiles_cmd → list.find(...) returns
     // undefined → toast.error branch.
@@ -1315,14 +1323,14 @@ describe('<HomeView> Share-this-pack CTA error paths + PublishModal close', () =
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('MyPack')).toBeInTheDocument(); });
-    const share = screen.getAllByRole('button').find((b) => /Share this pack/i.test(b.textContent ?? ''));
+    const share = screen.getAllByRole('button').find((b) => /Share modpack/i.test(b.textContent ?? ''));
     await user.click(share!);
     await waitFor(() => {
       expect(screen.getByText(/Couldn't find this profile on disk\./)).toBeInTheDocument();
     });
   });
 
-  it('"Share this pack" list_profiles_cmd failure surfaces a "Couldn\'t load" toast', async () => {
+  it('"Share modpack" list_profiles_cmd failure surfaces a "Couldn\'t load" toast', async () => {
     registerInvokeHandler('get_active_profile', () => 'MyPack');
     // Default to a working profile list while the page mounts. After
     // the hero is on screen, flip to a thrower so only the click-driven
@@ -1337,7 +1345,7 @@ describe('<HomeView> Share-this-pack CTA error paths + PublishModal close', () =
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('MyPack')).toBeInTheDocument(); });
-    const share = screen.getAllByRole('button').find((b) => /Share this pack/i.test(b.textContent ?? ''));
+    const share = screen.getAllByRole('button').find((b) => /Share modpack/i.test(b.textContent ?? ''));
     breakIt = true;
     await user.click(share!);
     await waitFor(() => {
@@ -1376,12 +1384,19 @@ describe('<HomeView> remaining coverage targets', () => {
     expect(screen.queryByTitle('Click to copy the share code')).toBeNull();
     await waitFor(() => {
       const buttons = screen.getAllByRole('button');
-      expect(buttons.some((b) => /Share this pack/i.test(b.textContent ?? ''))).toBe(true);
+      expect(buttons.some((b) => /Share modpack/i.test(b.textContent ?? ''))).toBe(true);
     });
   });
 
   it('SubUpdateDetail X-button close hits the setUpdateDetail(null) handler', async () => {
-    registerInvokeHandler('get_active_profile', () => 'CurrentPack');
+    // 1.7: entry to SubUpdateDetail moved to the hero's "View changes"
+    // secondary button (active modpack with a pending update). The
+    // pending-updates banner that used to host a "Review" button on
+    // each row is gone.
+    registerInvokeHandler('get_active_profile', () => 'AlicePack');
+    registerInvokeHandler('list_profiles_cmd', () => [
+      { name: 'AlicePack', mods: [], created_at: '2026-01-01' },
+    ]);
     registerInvokeHandler('get_subscriptions', () => [
       { share_id: 'alice/abcd', profile_name: 'AlicePack', last_synced: '2026-05-01', last_known_remote_sha: 'sha', subscribed_at: '2026-01-01' },
     ]);
@@ -1390,8 +1405,8 @@ describe('<HomeView> remaining coverage targets', () => {
     ]);
     const user = userEvent.setup();
     render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText(/Updates available/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /^Review$/ }));
+    await waitFor(() => { expect(screen.getByText(/Sync available/i)).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: /View changes/i }));
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Apply all/ })).toBeInTheDocument();
     });
@@ -1428,7 +1443,7 @@ describe('<HomeView> remaining coverage targets', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('MyPack')).toBeInTheDocument(); });
-    const share = screen.getAllByRole('button').find((b) => /Share this pack/i.test(b.textContent ?? ''));
+    const share = screen.getAllByRole('button').find((b) => /Share modpack/i.test(b.textContent ?? ''));
     await user.click(share!);
     // PublishModal mounts. Find its Publish button.
     const publishBtn = await screen.findByRole('button', { name: /^Publish$/i });
@@ -1483,7 +1498,7 @@ describe('<HomeView> remaining coverage targets', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('MyPack')).toBeInTheDocument(); });
-    const share = screen.getAllByRole('button').find((b) => /Share this pack/i.test(b.textContent ?? ''));
+    const share = screen.getAllByRole('button').find((b) => /Share modpack/i.test(b.textContent ?? ''));
     await user.click(share!);
     const publishBtn = await screen.findByRole('button', { name: /^Publish$/i });
     await user.click(publishBtn);
@@ -1570,8 +1585,15 @@ describe('<HomeView> remaining coverage targets', () => {
     });
   });
 
-  it('activeUpdate banner singular grammar: "1 update from author"', async () => {
+  it('active modpack with a pending update renders the "Sync available" pill in the hero', async () => {
+    // 1.7: the tinted "{count} update(s) from author" inline banner in
+    // the hero was replaced with a single "Sync available" pill — no
+    // count text. (The count detail is one click away in the View
+    // Changes modal.)
     registerInvokeHandler('get_active_profile', () => 'MyPack');
+    registerInvokeHandler('list_profiles_cmd', () => [
+      { name: 'MyPack', mods: [], created_at: '2026-01-01' },
+    ]);
     registerInvokeHandler('get_subscriptions', () => [
       { share_id: 'alice/abcd', profile_name: 'MyPack', last_synced: '2026-05-01', last_known_remote_sha: 'sha', subscribed_at: '2026-01-01' },
     ]);
@@ -1580,7 +1602,7 @@ describe('<HomeView> remaining coverage targets', () => {
     ]);
     render(<Wrap />);
     await waitFor(() => {
-      expect(screen.getByText(/1 update from author/)).toBeInTheDocument();
+      expect(screen.getByText(/Sync available/i)).toBeInTheDocument();
     });
   });
 
@@ -1639,19 +1661,11 @@ describe('<HomeView> remaining coverage targets', () => {
     expect(Array.from(avatars).some((a) => a.textContent === 'P')).toBe(true);
   });
 
-  it('removed-mods style branch fires when the update only contains removals', async () => {
-    registerInvokeHandler('get_active_profile', () => 'CurrentPack');
-    registerInvokeHandler('get_subscriptions', () => [
-      { share_id: 'alice/abcd', profile_name: 'AlicePack', last_synced: '2026-05-01', last_known_remote_sha: 'sha', subscribed_at: '2026-01-01' },
-    ]);
-    registerInvokeHandler('check_subscription_updates', () => [
-      { share_id: 'alice/abcd', profile_name: 'AlicePack', has_update: true, added_mods: [], updated_mods: [], removed_mods: ['gone1', 'gone2'], remote_profile: null },
-    ]);
-    render(<Wrap />);
-    await waitFor(() => {
-      expect(screen.getByText(/-2 removed/)).toBeInTheDocument();
-    });
-  });
+  // (Removed: the "-2 removed" assertion targeted the per-row delta
+  // chips inside the standalone Pending Updates banner. The 1.7 redesign
+  // deleted that banner — updates for non-active modpacks live in the
+  // Other-Packs rows now, with a single "{count} updates" pill rather
+  // than per-kind +/-/updated chips.)
 
   it('handleUnsubscribe non-Error throw → String(e) toast text (instanceof-Error false branch)', async () => {
     registerInvokeHandler('get_active_profile', () => 'CurrentPack');
@@ -1720,7 +1734,7 @@ describe('<HomeView> remaining coverage targets', () => {
     });
   });
 
-  it('"Share this pack" non-Error throw → String(e) toast text', async () => {
+  it('"Share modpack" non-Error throw → String(e) toast text', async () => {
     registerInvokeHandler('get_active_profile', () => 'MyPack');
     let breakIt = false;
     registerInvokeHandler('list_profiles_cmd', () => {
@@ -1733,7 +1747,7 @@ describe('<HomeView> remaining coverage targets', () => {
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('MyPack')).toBeInTheDocument(); });
     breakIt = true;
-    const share = screen.getAllByRole('button').find((b) => /Share this pack/i.test(b.textContent ?? ''));
+    const share = screen.getAllByRole('button').find((b) => /Share modpack/i.test(b.textContent ?? ''));
     await user.click(share!);
     await waitFor(() => {
       expect(screen.getByText(/Couldn't load profile: list-fail-str/)).toBeInTheDocument();
@@ -1783,11 +1797,11 @@ describe('<HomeView> remaining coverage targets', () => {
     registerInvokeHandler('apply_subscription_update', () => ({ name: 'AlicePack', mods: [], created_at: '2026-01-01' }));
     const user = userEvent.setup();
     render(<Wrap />);
+    // 1.7: the non-active full-width "Updates available" banner is gone.
+    // Wait for the Other-Packs row instead — its per-row "{count} updates"
+    // pill is the unambiguous signal that subUpdates landed.
     await waitFor(() => {
-      // The non-active "Updates available" section renders once the
-      // sub-update list is loaded — implies both subs and updates are in
-      // place for the smart router to see.
-      expect(screen.getByText(/Updates available/)).toBeInTheDocument();
+      expect(screen.getByText(/^1 update$/i)).toBeInTheDocument();
     });
     // Type and click Add Pack.
     const input = screen.getByPlaceholderText(/username\/AA5A-315D-61AE/i);
@@ -1806,6 +1820,234 @@ describe('<HomeView> remaining coverage targets', () => {
     });
     await waitFor(() => {
       expect(screen.getByText(/Synced "AlicePack" — you're up to date!/)).toBeInTheDocument();
+    });
+  });
+});
+
+// ── 1.7 launcher-first reorganization tests ────────────────────────────
+//
+// Behavioral contracts for the new shape:
+//   - Empty state hero shows three guided CTAs (Paste / Create / Browse).
+//   - Create CTA opens CreateModpackWizard.
+//   - Browse CTA fires onGoToBrowseModpacks.
+//   - Paste CTA bumps onBumpFocusCodeBar so the existing focus+pulse
+//     effect runs on the share-code input.
+//   - Active hero shows a prominent Play button + a "Sync available" pill
+//     when subUpdates has a match, hidden otherwise.
+//   - "Not yet shared" pill shows only when the active modpack is local
+//     AND unpublished.
+
+describe('<HomeView> launcher-first empty-state hero', () => {
+  beforeEach(() => {
+    registerInvokeHandler('get_active_profile', () => null);
+    registerInvokeHandler('get_subscriptions', () => []);
+    registerInvokeHandler('list_profiles_cmd', () => []);
+  });
+
+  it('shows the empty-state title and body copy', async () => {
+    render(<Wrap />);
+    expect(await screen.findByText(/Start with a modpack/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/A modpack is a saved set of mods/i),
+    ).toBeInTheDocument();
+  });
+
+  it("renders Paste / Create / Browse CTAs side by side", async () => {
+    render(<Wrap />);
+    expect(
+      await screen.findByRole('button', { name: /Paste a friend's code/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /^Create modpack$/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /^Browse modpacks$/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('Create CTA opens the CreateModpackWizard dialog', async () => {
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.click(
+      await screen.findByRole('button', { name: /^Create modpack$/i }),
+    );
+    // CreateModpackWizard renders as role="dialog" with
+    // aria-label=t('createModpack.title') = "Create modpack".
+    expect(
+      await screen.findByRole('dialog', { name: /Create modpack/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('Browse CTA calls onGoToBrowseModpacks', async () => {
+    const onGoToBrowseModpacks = vi.fn();
+    const user = userEvent.setup();
+    render(<Wrap onGoToBrowseModpacks={onGoToBrowseModpacks} />);
+    await user.click(
+      await screen.findByRole('button', { name: /^Browse modpacks$/i }),
+    );
+    expect(onGoToBrowseModpacks).toHaveBeenCalledTimes(1);
+  });
+
+  it('Paste CTA bumps onBumpFocusCodeBar (so the parent re-runs the focus+pulse effect)', async () => {
+    const onBumpFocusCodeBar = vi.fn();
+    const user = userEvent.setup();
+    render(<Wrap onBumpFocusCodeBar={onBumpFocusCodeBar} />);
+    await user.click(
+      await screen.findByRole('button', { name: /Paste a friend's code/i }),
+    );
+    expect(onBumpFocusCodeBar).toHaveBeenCalledTimes(1);
+  });
+
+  it('Paste CTA falls back to focusing the share-code input directly when no parent signal handler is wired', async () => {
+    // When the test harness omits onBumpFocusCodeBar, the CTA should
+    // still leave the user on a focused share-code input rather than no-op.
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.click(
+      await screen.findByRole('button', { name: /Paste a friend's code/i }),
+    );
+    await waitFor(() => {
+      const input = screen.getByPlaceholderText(/username\/AA5A-315D-61AE/i);
+      expect(document.activeElement).toBe(input);
+    });
+  });
+
+  it('does not render the active-hero Play button when no modpack is active', async () => {
+    render(<Wrap />);
+    await screen.findByText(/Start with a modpack/i);
+    expect(document.querySelector('.gf-hero-play')).toBeNull();
+  });
+});
+
+describe('<HomeView> launcher-first active hero', () => {
+  function withActive(profile = 'Daily Pack', overrides: Record<string, unknown> = {}) {
+    registerInvokeHandler('get_active_profile', () => profile);
+    registerInvokeHandler('list_profiles_cmd', () => [
+      { name: profile, mods: [], created_at: '2026-01-01' },
+    ]);
+    registerInvokeHandler('get_installed_mods', () => [
+      { name: 'A', enabled: true },
+      { name: 'B', enabled: true },
+      { name: 'C', enabled: false },
+    ]);
+    registerInvokeHandler('get_subscriptions', () => overrides.subs ?? []);
+    registerInvokeHandler(
+      'check_subscription_updates',
+      () => overrides.updates ?? [],
+    );
+    registerInvokeHandler(
+      'get_share_info',
+      () => overrides.shareInfo ?? null,
+    );
+  }
+
+  it('shows the prominent Play button + active-modpack name', async () => {
+    withActive('Daily Pack');
+    render(<Wrap />);
+    expect(await screen.findByText('Daily Pack')).toBeInTheDocument();
+    const play = document.querySelector('.gf-hero-play') as HTMLButtonElement | null;
+    expect(play).not.toBeNull();
+    expect(play!.textContent).toMatch(/Launch/i);
+  });
+
+  it('renders the mod count using the modpack-scoped enabled-mods total', async () => {
+    withActive('Daily Pack');
+    render(<Wrap />);
+    await screen.findByText('Daily Pack');
+    // get_installed_mods returns 2 enabled + 1 disabled → "2 mods".
+    await waitFor(() => {
+      expect(screen.getByText(/^2 mods$/)).toBeInTheDocument();
+    });
+  });
+
+  it('shows the "Sync available" pill when subUpdates lists the active modpack', async () => {
+    withActive('Daily Pack', {
+      subs: [
+        {
+          share_id: 'alice/abcd',
+          profile_name: 'Daily Pack',
+          last_synced: '2026-05-01',
+          last_known_remote_sha: 'sha',
+          subscribed_at: '2026-01-01',
+        },
+      ],
+      updates: [
+        {
+          share_id: 'alice/abcd',
+          profile_name: 'Daily Pack',
+          has_update: true,
+          added_mods: ['New'],
+          updated_mods: [],
+          removed_mods: [],
+          remote_profile: null,
+        },
+      ],
+    });
+    render(<Wrap />);
+    expect(await screen.findByText(/Sync available/i)).toBeInTheDocument();
+  });
+
+  it('hides the "Sync available" pill when subUpdates has no active match', async () => {
+    withActive('Daily Pack');
+    render(<Wrap />);
+    await screen.findByText('Daily Pack');
+    expect(screen.queryByText(/Sync available/i)).toBeNull();
+  });
+
+  it('shows the "Not yet shared" pill for a local unpublished modpack', async () => {
+    // Local, unsubscribed, no share info → canShareActive = true.
+    withActive('My Local Pack');
+    render(<Wrap />);
+    await screen.findByText('My Local Pack');
+    expect(await screen.findByText(/Not yet shared/i)).toBeInTheDocument();
+  });
+
+  it('hides the "Not yet shared" pill once the modpack is published', async () => {
+    withActive('My Local Pack', {
+      shareInfo: {
+        owner: 'alice',
+        code: 'AA5A-315D-61AE',
+        url: 'https://github.com/alice/sts2mm-profiles',
+        remote_path: 'My_Local_Pack.json',
+      },
+    });
+    render(<Wrap />);
+    await screen.findByText('My Local Pack');
+    // Give the share-info effect a chance to settle.
+    await waitFor(() => {
+      // The "Share modpack" button collapses once activeProfileShare lands;
+      // its absence is the signal that canShareActive is false.
+      const buttons = screen.getAllByRole('button');
+      expect(buttons.some((b) => /^Share modpack$/i.test(b.textContent ?? ''))).toBe(false);
+    });
+    expect(screen.queryByText(/Not yet shared/i)).toBeNull();
+  });
+});
+
+describe('<HomeView> launcher-first wizard integration', () => {
+  it('creating a modpack without share-now closes the wizard and refreshes state', async () => {
+    registerInvokeHandler('get_active_profile', () => null);
+    registerInvokeHandler('get_subscriptions', () => []);
+    registerInvokeHandler('list_profiles_cmd', () => []);
+    registerInvokeHandler('audit_mod_versions', () => []);
+    registerInvokeHandler('create_profile_cmd', (args: any) => ({
+      name: args?.name,
+      mods: [],
+      created_at: '2026-01-01',
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.click(
+      await screen.findByRole('button', { name: /^Create modpack$/i }),
+    );
+    // Wait for the wizard dialog.
+    expect(
+      await screen.findByRole('dialog', { name: /Create modpack/i }),
+    ).toBeInTheDocument();
+    // Cancel out — we only need the open/close lifecycle wired to Home.
+    await user.click(screen.getByRole('button', { name: /^Cancel$/i }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /Create modpack/i })).toBeNull();
     });
   });
 });

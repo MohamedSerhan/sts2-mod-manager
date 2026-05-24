@@ -1265,27 +1265,23 @@ describe('<App>', () => {
     });
   });
 
-  it("Home's 'Manage mods' button routes to Mods view", async () => {
-    // The Hero "Manage mods" button (Home.tsx:548) calls onGoToMods,
-    // which is the inline `() => setActiveView('mods')` arrow at
-    // App.tsx:683.
-    const user = userEvent.setup();
-    render(<App />);
-    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    const manageMods = await screen.findByRole('button', { name: /Manage mods/i });
-    await user.click(manageMods);
-    await waitFor(() => {
-      expect(screen.getByText(/All installed mods/i)).toBeInTheDocument();
-    });
-  });
+  // (Removed: the Hero "Manage mods" button was deleted in the 1.7
+  // launcher-first redesign — the hero now centers on Play with only
+  // Switch / Sync / Share / Repair as secondary actions. The sidebar
+  // "Mods" nav covers `setActiveView('mods')` already, and that wiring
+  // is exercised by every test below that calls getNavButton('Mods').)
 
-  it("Home's hero 'Switch pack' button opens the ProfileSwitcher", async () => {
-    // Home hero button "Switch to a different pack" (Home.tsx:557)
-    // wires to onSwitchPack → setShowProfileSwitcher(true) (App.tsx:685).
+  it("Home's hero 'Switch modpack' button opens the ProfileSwitcher", async () => {
+    // 1.7: the hero "Switch modpack" button only exists when an active
+    // modpack is present. Seed one so the active-state hero renders.
+    registerInvokeHandler('get_active_profile', () => 'CurrentPack');
+    registerInvokeHandler('list_profiles_cmd', () => [
+      { name: 'CurrentPack', mods: [], created_at: '2026-01-01' },
+    ]);
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    // The exact label varies — find by title attribute.
+    // Title-attribute lookup stays the same (t('home.switchPackTitle')).
     const switchPack = await screen.findByTitle(/Switch to a different pack/i);
     await user.click(switchPack);
     // ProfileSwitcher's "Add modpack" foot button is the unambiguous

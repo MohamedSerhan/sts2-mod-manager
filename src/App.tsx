@@ -810,8 +810,10 @@ function AppInner() {
                 onGoToSettings={() => setActiveView('settings')}
                 onGoToMods={() => setActiveView('mods')}
                 onGoToProfiles={() => setActiveView('profiles')}
+                onGoToBrowseModpacks={() => setActiveView('browse-modpacks')}
                 onSwitchPack={() => setShowProfileSwitcher(true)}
                 onLaunch={handleLaunchGame}
+                onBumpFocusCodeBar={() => setFocusCodeBarSignal((s) => s + 1)}
                 focusCodeBarSignal={focusCodeBarSignal}
               />
             )}

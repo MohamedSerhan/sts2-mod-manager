@@ -1212,6 +1212,47 @@ body {
 }
 .gf-hero-shortcut-tip .gf-kbd { margin: 0 1px; }
 
+/* Launcher-first hero (1.7) ───────────────────────────────────────────
+   Active state: name + meta on the left, one prominent Play button on
+   the right. Wraps on narrow widths so Play sits below the meta block.
+   Empty state: stacked friendly copy with three big CTAs underneath. */
+.gf-hero-active-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.gf-hero-active-meta { flex: 1 1 240px; min-width: 0; }
+.gf-hero-pills { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.gf-hero-play { font-size: 15px; padding: 12px 26px; flex-shrink: 0; }
+
+.gf-hero-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+.gf-hero-empty-title {
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  margin: 0;
+}
+.gf-hero-empty-body {
+  font-size: 14px;
+  color: var(--ink-mute);
+  margin: 0 0 8px 0;
+  max-width: 64ch;
+}
+.gf-hero-empty-ctas {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
 /* Prominent share-code chip in the hero — click to copy, with a paired
    "copy as message" sub-action for one-liner sharing in Discord/etc.
    Sized to feel like the primary share affordance, not a hidden one. */

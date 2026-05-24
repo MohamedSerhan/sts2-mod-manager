@@ -11,11 +11,11 @@ import {
   ChevronRight,
   Plus,
   Share2,
-  AlertTriangle,
   Copy,
   Check,
   MessageSquare,
   Link as LinkIcon,
+  Compass,
 } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
@@ -23,6 +23,7 @@ import { useConfirm } from '../components/ConfirmDialog';
 import { SubUpdateDetail } from '../components/SubUpdateDetail';
 import { AboutCard } from '../components/AboutCard';
 import { WhatsNewCard } from '../components/WhatsNewCard';
+import { CreateModpackWizard } from '../components/CreateModpackWizard';
 import {
   checkSubscriptionUpdates,
   applySubscriptionUpdate,
@@ -139,13 +140,24 @@ function ShareCodeChip({ code, packName }: { code: string; packName: string }) {
   );
 }
 
-// v5 — Single-hero "Continue with" home. Hero = active pack; quick-add code
-// underneath; followed packs as compact rows below. Code-only quick-add
-// (no URL, no zip) — those are progressive-disclosed elsewhere.
+// v6 — Launcher-first home. Hero is the prominent active-modpack
+// showcase with one obvious next action (Play); when no modpack is
+// active, an empty-state hero with three guided CTAs (Paste / Create /
+// Browse) takes over. Quick-add code input lives below the hero for
+// the warm-state case. Followed packs become a secondary card under
+// the hero. The dedicated "Pending Updates" banner is gone — pending
+// updates for the active modpack now surface as a "Sync available"
+// pill in the hero itself.
 interface HomeProps {
   onGoToSettings: () => void;
+  /** Kept in the props shape for callers that still pass it (App.tsx
+   *  wires it through). The hero no longer has a "Manage mods" button
+   *  in 1.7's launcher-first redesign, so this prop is now a no-op
+   *  inside Home itself — but removing it from the type would force a
+   *  cascade through every render-site for no behavioral gain. */
   onGoToMods?: () => void;
   onGoToProfiles?: () => void;
+  onGoToBrowseModpacks?: () => void;
   onSwitchPack?: () => void;
   onLaunch?: () => void;
   /**
@@ -154,8 +166,17 @@ interface HomeProps {
    * share-code input so the user sees where to type.
    */
   focusCodeBarSignal?: number;
+  /**
+   * Invoked by the empty-state hero's "Paste a friend's code" CTA. The
+   * App owns `focusCodeBarSignal`, so the CTA asks the parent to bump
+   * the signal — which then drives the existing scroll+focus+pulse
+   * effect inside Home. Optional so callers (and tests) that don't
+   * provide it still work — the CTA falls back to focusing the input
+   * directly.
+   */
+  onBumpFocusCodeBar?: () => void;
 }
-export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchPack, onLaunch, focusCodeBarSignal }: HomeProps) {
+export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfiles, onGoToBrowseModpacks, onSwitchPack, onLaunch, focusCodeBarSignal, onBumpFocusCodeBar }: HomeProps) {
   const { t } = useTranslation();
   const { gameInfo, mods, refreshAll, activeProfile, refreshSubUpdates, subUpdates: ctxSubUpdates } = useApp();
   const toast = useToast();
@@ -182,6 +203,11 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
   // the hero gets a "Share this pack" button that opens the modal
   // directly on Home (no detour through Profiles).
   const [publishTarget, setPublishTarget] = useState<{ profile: Profile; isReshare: boolean } | null>(null);
+  // CreateModpackWizard visibility — owned by the empty-state hero's
+  // "Create modpack" CTA. On success, if the user picked "share now",
+  // we look up the freshly-created profile and route it into
+  // PublishModal via the existing `publishTarget` plumbing.
+  const [showCreateWizard, setShowCreateWizard] = useState(false);
 
   useEffect(() => {
     loadSubscriptions();
@@ -427,6 +453,24 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
     }
   }
 
+  /** Open PublishModal for the active modpack — used by the hero's
+   *  Share button and reused by the CreateModpackWizard's "share now"
+   *  follow-through. Looks up the on-disk Profile so PublishModal gets
+   *  the exact same shape it sees from Profiles view. */
+  async function openPublishForActive(profileName?: string) {
+    const target = profileName ?? activeProfile;
+    if (!target) return;
+    try {
+      const list = await listProfiles();
+      const p = list.find((q) => q.name === target);
+      if (p) setPublishTarget({ profile: p, isReshare: false });
+      else toast.error(t('home.toast.profileNotFoundOnDisk'));
+    } catch (e) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      toast.error(t('home.toast.couldntLoadProfile', { error: errMsg }));
+    }
+  }
+
   async function handleActivateModpack(profileName: string) {
     if (activeProfile && activeProfile !== profileName) {
       try {
@@ -484,15 +528,9 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
     ? `${activeProfileShare.owner}/${activeProfileShare.code}`
     : null;
   // True if the active profile is locally owned (the user's own) and
-  // hasn't been published yet — drives the "Share this pack" CTA.
+  // hasn't been published yet — drives the "Share this pack" CTA and
+  // the "Not yet shared" pill.
   const canShareActive = !!activeProfile && !activeSub && !activeProfileShare;
-  // Code lives in its own ShareCodeChip below, so it's not duplicated
-  // in the meta line. The meta keeps just mod count + sync recency.
-  const heroMeta = activeSub
-    ? t('home.heroMetaSubscribed', { count: enabledMods.length, date: new Date(activeSub.last_synced).toLocaleDateString() })
-    : activeProfileShare
-    ? t('home.heroMetaOwn', { count: enabledMods.length })
-    : t('home.heroMetaLocal', { count: enabledMods.length, type: activeProfile ? t('home.heroMetaLocalProfile') : t('home.heroMetaBuiltinVanilla') });
 
   return (
     <div className="gf-body">
@@ -529,84 +567,85 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
         </div>
       )}
 
-      {/* Hero — single "Continue with" pattern */}
-      <div className="gf-hero">
-        <div className="gf-hero-eyebrow">{t('home.continueWith')}</div>
-        <div className="gf-hero-title">
-          {heroName}
-          <span className="gf-pill gf-pill-active">{t('common.active')}</span>
-        </div>
-        <div className="gf-hero-meta">{heroMeta}</div>
-
-        {heroCode && <ShareCodeChip code={heroCode} packName={heroName} />}
-
-        {activeUpdate && (
-          <div
-            style={{
-              marginTop: 14,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              padding: '10px 12px',
-              borderRadius: 8,
-              background: 'var(--gf-tint)',
-              border: '1px solid var(--gf-line)',
-              color: 'var(--gf)',
-              fontSize: 12.5,
-            }}
-          >
-            <span className="gf-dot gf-dot-warn" />
-            <span style={{ flex: 1, fontWeight: 600 }}>
-              {t('home.updateAvailableCount', { count: (activeUpdate.added_mods.length || 0) + (activeUpdate.updated_mods.length || 0) + (activeUpdate.removed_mods.length || 0) })}
-            </span>
+      {/* Hero — launcher-first. Two shapes:
+            · Active modpack       → name + mod count + Play (one big CTA)
+                                     plus pill row (sync/unshared) and
+                                     small secondary actions.
+            · No active modpack    → friendly empty-state with three
+                                     guided CTAs (Paste / Create / Browse).
+          The pending-updates banner that used to live below the empty
+          state is gone — sync state for the active modpack is now a
+          contextual pill in this hero. */}
+      {activeProfile ? (
+        <div className="gf-hero gf-hero-active">
+          <div className="gf-hero-eyebrow">{t('home.continueWith')}</div>
+          <div className="gf-hero-active-row">
+            <div className="gf-hero-active-meta">
+              <div className="gf-hero-title">
+                {heroName}
+                <span className="gf-pill gf-pill-active">{t('common.active')}</span>
+              </div>
+              <div className="gf-hero-meta">
+                {t('home.heroModCount', { count: enabledMods.length })}
+              </div>
+              <div className="gf-hero-pills">
+                {activeUpdate && (
+                  <span className="gf-pill gf-pill-update">{t('home.syncPillReady')}</span>
+                )}
+                {canShareActive && (
+                  <span className="gf-pill gf-pill-warn">{t('home.sharePillReady')}</span>
+                )}
+              </div>
+            </div>
             <button
-              className="gf-btn-2 gf-btn-2-sm"
-              onClick={() => setUpdateDetail(activeUpdate)}
-              disabled={applyingSub === activeUpdate.share_id}
+              className="gf-btn gf-btn-lg gf-hero-play"
+              onClick={onLaunch}
+              disabled={!onLaunch}
+              title={onLaunch ? t('home.launchTitle') : t('home.noLaunchTitle')}
             >
-              {t('home.viewChanges')}
-            </button>
-            <button
-              className="gf-btn gf-btn-sm"
-              onClick={() => handleApplySubUpdate(activeUpdate.share_id)}
-              disabled={applyingSub === activeUpdate.share_id}
-            >
-              {applyingSub === activeUpdate.share_id ? (
-                <RefreshCw size={11} className="animate-spin" />
-              ) : (
-                <Download size={11} />
-              )}
-              {t('home.syncUpdates')}
+              <Play size={14} fill="currentColor" /> {t('app.launch.modded')}
             </button>
           </div>
-        )}
 
-        <div className="gf-hero-actions">
-          <button
-            className="gf-btn gf-btn-lg"
-            onClick={onLaunch}
-            disabled={!onLaunch}
-            title={onLaunch ? t('home.launchTitle') : t('home.noLaunchTitle')}
-          >
-            <Play size={11} fill="currentColor" /> {t('home.launchWithPack')}
-          </button>
-          <button
-            className="gf-btn-2"
-            onClick={onGoToMods}
-            title={t('home.manageModsTitle')}
-          >
-            {t('home.manageMods')}
-          </button>
-          <button
-            className="gf-btn-2"
-            onClick={onSwitchPack}
-            title={t('home.switchPackTitle')}
-          >
-            {t('home.switchPack')}
-          </button>
-          {activeProfile && (
+          {heroCode && <ShareCodeChip code={heroCode} packName={heroName} />}
+
+          <div className="gf-hero-actions">
             <button
               className="gf-btn-2"
+              onClick={onSwitchPack}
+              title={t('home.switchPackTitle')}
+            >
+              {t('app.switchActivePack')}
+            </button>
+            {activeUpdate && (
+              <button
+                className="gf-btn-2"
+                onClick={() => handleApplySubUpdate(activeUpdate.share_id)}
+                disabled={applyingSub === activeUpdate.share_id}
+                title={t('home.syncUpdates')}
+              >
+                {applyingSub === activeUpdate.share_id ? (
+                  <RefreshCw size={11} className="animate-spin" />
+                ) : (
+                  <Download size={11} />
+                )}
+                {t('home.heroSyncBtn')}
+              </button>
+            )}
+            {activeUpdate && (
+              <button
+                className="gf-btn-3"
+                onClick={() => setUpdateDetail(activeUpdate)}
+                disabled={applyingSub === activeUpdate.share_id}
+              >
+                {t('home.viewChanges')}
+              </button>
+            )}
+            {/* Repair only as a quiet secondary action — kept so users
+                with drift can still recover from Home without bouncing
+                to Profiles. */}
+            <button
+              className="gf-btn-3"
               onClick={() => handleRepair(activeProfile)}
               disabled={repairing}
               title={t('home.reapplyTitle')}
@@ -618,41 +657,67 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
               )}
               {repairing ? t('home.repairing') : t('home.repair')}
             </button>
-          )}
-          {/* Share-this-pack CTA — only renders when the active profile
-              is the curator's own and hasn't been published yet. After
-              publishing, the ShareCodeChip above takes over and this
-              button collapses. */}
-          {canShareActive && activeProfile && (
-            <button
-              className="gf-btn-2"
-              onClick={async () => {
-                // Load the real Profile object from disk so PublishModal
-                // gets the exact same shape it would from Profiles view.
-                try {
-                  const list = await listProfiles();
-                  const p = list.find((p) => p.name === activeProfile);
-                  if (p) setPublishTarget({ profile: p, isReshare: false });
-                  else toast.error(t('home.toast.profileNotFoundOnDisk'));
-                } catch (e) {
-                  const errMsg = e instanceof Error ? e.message : String(e);
-                  toast.error(t('home.toast.couldntLoadProfile', { error: errMsg }));
-                }
-              }}
-              title={t('home.shareThisPackTitle')}
-            >
-              <Share2 size={11} /> {t('home.shareThisPack')}
-            </button>
-          )}
-        </div>
-        {activeProfile && (
+            {/* Share-this-pack CTA — only renders when the active modpack
+                is the user's own and hasn't been published yet. After
+                publishing, the ShareCodeChip above takes over and this
+                button collapses. */}
+            {canShareActive && (
+              <button
+                className="gf-btn-2"
+                onClick={() => openPublishForActive()}
+                title={t('home.shareThisPackTitle')}
+              >
+                <Share2 size={11} /> {t('modpack.share')}
+              </button>
+            )}
+          </div>
           <div className="gf-hero-shortcut-tip">
             {t('home.shortcutTip', { shortcut: 'Ctrl+L' })}
           </div>
-        )}
-      </div>
+        </div>
+      ) : (
+        <div className="gf-hero gf-hero-empty">
+          <h1 className="gf-hero-empty-title">{t('home.heroEmptyTitle')}</h1>
+          <p className="gf-hero-empty-body">{t('home.heroEmptyBody')}</p>
+          <div className="gf-hero-empty-ctas">
+            <button
+              type="button"
+              className="gf-btn gf-btn-lg"
+              onClick={() => {
+                // Prefer the parent-owned signal so the existing scroll
+                // + focus + pulse effect fires. Fall back to focusing
+                // the input directly if the prop isn't wired (tests).
+                if (onBumpFocusCodeBar) {
+                  onBumpFocusCodeBar();
+                } else if (codeInputRef.current) {
+                  codeInputRef.current.focus();
+                }
+              }}
+            >
+              {t('home.heroEmptyPasteCta')}
+            </button>
+            <button
+              type="button"
+              className="gf-btn-2 gf-btn-lg"
+              onClick={() => setShowCreateWizard(true)}
+            >
+              <Plus size={14} /> {t('home.heroEmptyCreateCta')}
+            </button>
+            <button
+              type="button"
+              className="gf-btn-2 gf-btn-lg"
+              onClick={() => onGoToBrowseModpacks?.()}
+            >
+              <Compass size={14} /> {t('home.heroEmptyBrowseCta')}
+            </button>
+          </div>
+        </div>
+      )}
 
-      {/* Quick Add — code only */}
+      {/* Quick Add — code only. Lives below the hero in warm state so
+          subscribed users can paste a new code without navigating; in
+          empty state the Paste CTA above scrolls + focuses this same
+          input. */}
       <div
         ref={codeBarRef}
         className={`gf-quickadd${codeBarPulse ? ' gf-quickadd-pulse' : ''}`}
@@ -802,72 +867,15 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
         </>
       )}
 
-      {/* Pending update banner for non-active subs */}
-      {subUpdates.filter((s) => s.profile_name !== activeProfile).length > 0 && (
-        <>
-          <div className="gf-section-head">
-            <div className="gf-section-eyebrow">{t('home.pendingUpdates')}</div>
-          </div>
-          {subUpdates
-            .filter((s) => s.profile_name !== activeProfile)
-            .map((sub) => (
-              <div
-                key={sub.share_id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 12,
-                  padding: '11px 14px',
-                  background: 'var(--gf-tint)',
-                  border: '1px solid var(--gf-line)',
-                  borderRadius: 8,
-                  marginBottom: 6,
-                }}
-              >
-                <AlertTriangle size={14} style={{ color: 'var(--gf)' }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>{sub.profile_name}</div>
-                  <div style={{ fontSize: 11.5, color: 'var(--ink-mute)', marginTop: 2 }}>
-                    {sub.added_mods.length > 0 && <span style={{ color: 'var(--ok)' }}>+{sub.added_mods.length}{t('home.newLabel')} </span>}
-                    {sub.updated_mods.length > 0 && <span style={{ color: 'var(--gf)' }}>{sub.updated_mods.length}{t('home.updatedLabel')} </span>}
-                    {sub.removed_mods.length > 0 && <span style={{ color: 'var(--danger)' }}>-{sub.removed_mods.length}{t('home.removedLabel')}</span>}
-                  </div>
-                </div>
-                <button
-                  className="gf-btn-2 gf-btn-2-sm"
-                  onClick={() => setUpdateDetail(sub)}
-                  disabled={applyingSub === sub.share_id}
-                >
-                  {t('home.review')}
-                </button>
-                <button
-                  className="gf-btn gf-btn-sm"
-                  onClick={() => handleApplySubUpdate(sub.share_id)}
-                  disabled={applyingSub === sub.share_id}
-                >
-                  {applyingSub === sub.share_id ? <RefreshCw size={11} className="animate-spin" /> : <Download size={11} />}
-                  {t('home.sync')}
-                </button>
-              </div>
-            ))}
-        </>
-      )}
+      {/* Pending updates for non-active modpacks remain visible inside
+          the "Other packs" rows above (each row has its own pill +
+          Apply via Activate). The dedicated full-width Pending Updates
+          banner that used to live here was removed in 1.7 — pending
+          updates for the ACTIVE modpack now surface as a contextual
+          "Sync available" pill in the hero. */}
 
-      {/* Empty state — no packs yet */}
-      {subscriptions.length === 0 && (
-        <>
-          <div className="gf-section-head">
-            <div className="gf-section-eyebrow">{t('home.yourPacks')}</div>
-          </div>
-          <div className="gf-empty-card">
-            <div style={{ width: 36, height: 36, borderRadius: 8, background: 'var(--indigo-elev)', display: 'grid', placeItems: 'center', fontSize: 18 }}>
-              <Plus size={16} />
-            </div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{t('home.followFriendsPack')}</div>
-            <div style={{ fontSize: 11.5, color: 'var(--ink-dim)' }}>{t('home.pasteCodeAbove')}</div>
-          </div>
-        </>
-      )}
+      {/* When the user follows zero modpacks, the empty-state hero
+          above carries the guidance — no extra empty-card needed. */}
 
       {/* About — Home footer. Reference info + support actions, low
           visual weight, separator rule on top. */}
@@ -908,6 +916,25 @@ export function HomeView({ onGoToSettings, onGoToMods, onGoToProfiles, onSwitchP
           setActiveProfileShare(result);
         }}
       />
+
+      {/* Create-modpack wizard driven from the empty-state hero's
+          "Create modpack" CTA. On success: refresh state so the new
+          modpack appears, then — if the user picked "share now" —
+          route the freshly-created profile into PublishModal via the
+          existing `publishTarget` plumbing. */}
+      {showCreateWizard && (
+        <CreateModpackWizard
+          onClose={() => setShowCreateWizard(false)}
+          onCreated={async ({ name, sharedNow }) => {
+            setShowCreateWizard(false);
+            await refreshAll();
+            await loadSubscriptions();
+            if (sharedNow) {
+              await openPublishForActive(name);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

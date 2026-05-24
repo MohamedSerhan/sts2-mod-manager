@@ -2331,3 +2331,48 @@ body {
 @keyframes gf-spin {
   to { transform: rotate(360deg); }
 }
+
+/* ── Help view (1.7 modpack UX) ───────────────────────────────────── */
+/* Container is .gf-help-view (NOT .gf-help — that's already taken by
+   the inline form-help text class up around line 2129). */
+.gf-help-view {
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.gf-help-header h1 { margin: 0 0 4px 0; }
+.gf-help-subtitle { opacity: 0.7; margin: 0; color: var(--ink-mute); }
+.gf-help-steps {
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gf-faq { display: flex; flex-direction: column; }
+.gf-faq-item {
+  border-bottom: 1px solid var(--indigo-line);
+  padding: 10px 0;
+}
+.gf-faq-item:last-child { border-bottom: none; }
+.gf-faq-q {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+  padding: 4px 0;
+}
+.gf-faq-q:hover { color: var(--gf); }
+.gf-faq-q svg { transition: transform 0.15s; flex-shrink: 0; }
+.gf-faq-q .rot-r { transform: rotate(-90deg); }
+.gf-faq-answer {
+  padding: 8px 0 4px 22px;
+  opacity: 0.85;
+  font-size: 13px;
+}

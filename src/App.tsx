@@ -39,7 +39,7 @@ import { BrowseView } from './views/Browse';
 import { BrowseModpacksView } from './views/BrowseModpacks';
 import { ProfilesView } from './views/Profiles';
 import { SettingsView } from './views/Settings';
-import { TutorialView } from './views/Tutorial';
+import { HelpView } from './views/Help';
 import { launchGame, launchVanilla, installModFromFile, openExternalUrl } from './hooks/useTauri';
 
 type View = 'home' | 'profiles' | 'mods' | 'browse-mods' | 'browse-modpacks' | 'tutorial' | 'settings';
@@ -833,7 +833,7 @@ function AppInner() {
             {activeView === 'browse-modpacks' && (
               <BrowseModpacksView onGoToProfiles={() => setActiveView('profiles')} />
             )}
-            {activeView === 'tutorial' && <TutorialView onGoToSettings={() => setActiveView('settings')} />}
+            {activeView === 'tutorial' && <HelpView onGoToSettings={() => setActiveView('settings')} />}
             {activeView === 'settings' && <SettingsView />}
 
             {/* First-launch onboarding wizard (v5 batch 4) */}

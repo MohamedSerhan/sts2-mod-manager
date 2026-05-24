@@ -88,7 +88,7 @@ describe('<App>', () => {
 
   /** Get a sidebar nav button by its label. The sidebar nav uses
    *  `.gf-nav` on every nav button, which lets us disambiguate from
-   *  the onboarding overlay's "Settings" / "Tutorial" mentions. */
+   *  the onboarding overlay's "Settings" / "Help" mentions. */
   function getNavButton(label: string): HTMLButtonElement {
     const buttons = screen.getAllByRole('button', { name: label });
     const nav = buttons.find((b) => b.className.includes('gf-nav'));
@@ -395,7 +395,7 @@ describe('<App>', () => {
     });
   });
 
-  it('clicking Tutorial swaps to the Tutorial view', async () => {
+  it('clicking Help swaps to the Help view', async () => {
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
@@ -403,7 +403,7 @@ describe('<App>', () => {
     //  don't need a Skip-setup click.)
     await user.click(getNavButton('Help'));
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /Tutorial/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 1, name: /^Help$/i })).toBeInTheDocument();
     });
   });
 
@@ -1237,7 +1237,11 @@ describe('<App>', () => {
 
   // ── View-callback wiring (covers the inline `() => setActiveView(...)`
   // arrow callbacks passed into HomeView / ProfilesView / BrowseView /
-  // TutorialView / OnboardingOverlay / LaunchSpinner) ─────────────────
+  // OnboardingOverlay / LaunchSpinner) ─────────────────────────────────
+  // Note: HelpView (1.7) is self-contained and no longer surfaces an
+  // inline Settings deep-link, so there's no Help -> Settings wiring
+  // test here. The onGoToSettings prop remains for future contextual
+  // links but is currently unused.
   it("Home's Settings shortcut (game-not-detected banner) routes to Settings", async () => {
     // Default mock: `valid: false`, so HomeView renders the
     // "Game not detected" banner with a "Settings" button wired to
@@ -1287,34 +1291,6 @@ describe('<App>', () => {
     // ProfileSwitcher's "Add modpack" foot button is the unambiguous
     // signal the popover mounted.
     await screen.findByRole('button', { name: /Add modpack/i });
-  });
-
-  it("TutorialView -> Settings inline link uses the App's setActiveView callback", async () => {
-    // The Tutorial view's UserGuide has an inline "Settings" deep-link
-    // button (Tutorial.tsx:234) that calls onGoToSettings →
-    // setActiveView('settings') inline at App.tsx:693. The link lives
-    // inside the "Full reference" collapsible (collapsed by default).
-    const user = userEvent.setup();
-    render(<App />);
-    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    await user.click(getNavButton('Help'));
-    // Expand the full reference so the inline Settings link is in the DOM.
-    const expandRef = await screen.findByRole('button', { name: /Full reference/i });
-    await user.click(expandRef);
-    // Find the inline Settings button by class (disambiguates from
-    // sidebar nav and the FriendHero "Settings" mention).
-    const inlineSettings = await waitFor(() => {
-      const btns = Array.from(document.querySelectorAll(
-        'button.text-primary',
-      )) as HTMLButtonElement[];
-      const found = btns.find((b) => /^Settings$/i.test(b.textContent?.trim() ?? ''));
-      if (!found) throw new Error('inline Settings button not yet rendered');
-      return found;
-    });
-    await user.click(inlineSettings);
-    await waitFor(() => {
-      expect(screen.getByText('Game Path')).toBeInTheDocument();
-    });
   });
 
   it("Browse view 'Open Settings' button (Nexus key missing) routes to Settings", async () => {

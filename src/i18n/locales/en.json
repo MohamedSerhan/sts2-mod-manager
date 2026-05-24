@@ -1098,6 +1098,60 @@
     "updatesPill_one": "{{count}} update",
     "updatesPill_other": "{{count}} updates"
   },
+  "help": {
+    "title": "Help",
+    "subtitle": "Quick answers and step-by-step guides.",
+    "faqHeading": "FAQ",
+    "playerQuickStart": {
+      "title": "Playing modpacks",
+      "step1": "Choose a modpack by pasting a friend's code on Home, browsing public modpacks, or creating your own.",
+      "step2": "When you've added a modpack, switch to it from Home or the topbar so it becomes your active modpack.",
+      "step3": "Click Launch to start STS2 with the mods from your active modpack loaded.",
+      "step4": "Switch modpacks anytime — the app updates your game folder so you don't have to manage files manually."
+    },
+    "creatorQuickStart": {
+      "title": "Making modpacks",
+      "step1": "Open Create Modpack and choose how to start: from your active mods, empty, or by cloning an existing modpack.",
+      "step2": "Pick which installed mods belong to this modpack. You can change membership later.",
+      "step3": "Check the health summary so you know how many mods have linked sources and which ones have available updates.",
+      "step4": "When you're ready to share, click Share. The app walks you through a one-time GitHub setup so friends can install your modpack from a short code.",
+      "step5": "Maintain your modpack later by running Mod Health, accepting updates, or freezing mods at a known good version."
+    },
+    "faq": {
+      "modpackWhat": {
+        "q": "What is a modpack and why do I need one?",
+        "a": "A modpack is a saved set of mods plus a load order. The mod manager applies the modpack to your game folder so you don't have to install or enable mods one by one. Modpacks make it easy to switch between curated experiences or share your setup with friends."
+      },
+      "storedMeaning": {
+        "q": "What does 'Stored' mean for a mod?",
+        "a": "Stored means the mod is installed on your computer but isn't currently in the game folder. Stored mods stay available — you can move them back into the active game folder anytime by toggling them on, or include them in a modpack."
+      },
+      "githubWhy": {
+        "q": "Why do I need GitHub to share a modpack?",
+        "a": "To share a modpack, the app needs somewhere to host the modpack's information and any bundled mod files. The app uses a small public GitHub repository that it creates and manages for you. GitHub is free, the app only needs permission to manage that one repository, and your friends never need a GitHub account — they just use the share code."
+      },
+      "blockedUpdate": {
+        "q": "Why is this mod update blocked?",
+        "a": "A mod update can be blocked because it requires a newer version of STS2 than the one you have installed. Often the mod author releases the new version when the STS2 beta branch is updated. Switching STS2 to the matching beta branch on Steam usually unblocks the update."
+      },
+      "freeze": {
+        "q": "What does 'Freeze' do?",
+        "a": "Freezing a mod locks it at its current version. The mod manager won't update or change the mod until you unfreeze it. Use Freeze when a mod is working and you want to keep it stable while other mods update."
+      },
+      "skipUpdate": {
+        "q": "What does 'Skip this update' do?",
+        "a": "Skip hides one specific update — usually one that's known to be broken or that you're not ready for. The mod stays at its current version, and the skipped update stops showing up. When a newer release appears later, you'll see that one as a normal update."
+      },
+      "nexusManual": {
+        "q": "Why must I download some mods from Nexus manually?",
+        "a": "Nexus Mods requires you to download some mods manually through your web browser. The mod manager opens the right page for you and watches your Downloads folder, so when the file finishes downloading the app automatically installs it into the correct mod."
+      },
+      "publishedSubset": {
+        "q": "Why isn't every installed mod in my published modpack?",
+        "a": "A published modpack only includes the mods you marked as part of that modpack. Mods that are installed but not in the modpack stay on your computer as 'stored' and are not sent to friends. This keeps shared modpacks small and avoids accidentally publishing your private mods."
+      }
+    }
+  },
   "settings": {
     "title": "Settings",
     "subtitle": "Configure game paths, accounts, and preferences",

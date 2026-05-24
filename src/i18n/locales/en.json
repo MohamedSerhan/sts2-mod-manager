@@ -69,6 +69,26 @@
   "confirm": {
     "typePhrase": "Type <0>{{phrase}}</0> to confirm:"
   },
+  "modpack": {
+    "singular": "Modpack",
+    "plural": "Modpacks",
+    "active": "Active modpack",
+    "create": "Create modpack",
+    "switch": "Switch modpack",
+    "share": "Share modpack",
+    "reshare": "Re-share modpack",
+    "delete": "Delete modpack",
+    "membership": {
+      "in": "In this modpack",
+      "notIn": "Not in this modpack",
+      "includedOff": "Included, off in this modpack"
+    },
+    "storage": {
+      "active": "Active in game",
+      "stored": "Stored",
+      "storedHint": "Installed on disk but not in the game folder"
+    }
+  },
   "launch": {
     "title": "Launching Slay the Spire 2",
     "titleVanilla": "Launching Slay the Spire 2 (vanilla)",
@@ -98,14 +118,14 @@
     "updateCheckFailed": "Update check failed: {{error}}"
   },
   "profileSwitcher": {
-    "title": "Switch active pack",
-    "empty": "No profiles yet. Add a pack to get started.",
+    "title": "Modpacks",
+    "empty": "No modpacks yet. Add one to get started.",
     "mods_one": "{{count}} mod",
     "mods_other": "{{count}} mods",
     "updates_one": " · {{count}} update",
     "updates_other": " · {{count}} updates",
     "active": "ACTIVE",
-    "addPack": "Add pack",
+    "addPack": "Add modpack",
     "manageAll": "Manage all",
     "downloadedStatus": "{{downloaded}} downloaded, {{missing}} still missing."
   },
@@ -328,19 +348,19 @@
     "confirm": {
       "switch": {
         "title": "Switch away from \"{{name}}\"?",
-        "body": "This profile has unsaved changes on disk. Switching applies another manifest and those working changes will not be saved to the current profile.",
-        "warning": "Use Save changes first if you want the current install to become the profile manifest.",
+        "body": "This modpack has unsaved changes on disk. Switching applies another manifest and those working changes will not be saved to the current modpack.",
+        "warning": "Use Save changes first if you want the current install to become the modpack manifest.",
         "confirmLabel": "Switch anyway",
         "cancelLabel": "Stay here"
       },
       "delete": {
-        "title": "Delete profile \"{{name}}\"?",
-        "body": "The profile manifest will be removed. Mod files on disk stay where they are.",
-        "confirmLabel": "Delete profile"
+        "title": "Delete modpack \"{{name}}\"?",
+        "body": "The modpack manifest will be removed. Mod files on disk stay where they are.",
+        "confirmLabel": "Delete modpack"
       },
       "repair": {
         "title": "Repair \"{{name}}\"?",
-        "bodyWithOrphans": "Re-applies the manifest and moves {{count}} active mod(s) that aren't in the profile to mods_disabled: {{list}}.",
+        "bodyWithOrphans": "Re-applies the manifest and moves {{count}} active mod(s) that aren't in the modpack to mods_disabled: {{list}}.",
         "bodyNoOrphans": "Re-applies the manifest. No active extra mods to disable — drift will be fixed by toggling state.",
         "confirmLabel": "Repair",
         "backupCheckbox": "Make a backup before repairing"
@@ -349,11 +369,11 @@
     "toast": {
       "synced": "Synced \"{{name}}\" — you're up to date.",
       "syncFailed": "Sync failed: {{error}}",
-      "created": "Profile \"{{name}}\" created",
-      "createFailed": "Failed to create profile: {{error}}",
+      "created": "Modpack \"{{name}}\" created",
+      "createFailed": "Failed to create modpack: {{error}}",
       "snapshotCreated": "Snapshot \"{{name}}\" created with {{count}} mods",
       "snapshotFailed": "Failed to snapshot: {{error}}",
-      "switched": "Switched to profile \"{{name}}\"",
+      "switched": "Switched to modpack \"{{name}}\"",
       "switchedWithDetails": "Switched to \"{{name}}\". {{details}}",
       "switchFailed": "Failed to switch: {{error}}",
       "repaired": "Repaired \"{{name}}\"",
@@ -363,13 +383,13 @@
       "savedChanges": "Saved changes to \"{{name}}\"",
       "savedChangesWithReShare": "Saved changes to \"{{name}}\". Re-share when you're ready to publish them.",
       "saveFailed": "Failed to save changes: {{error}}",
-      "exported": "Profile JSON copied to clipboard!",
+      "exported": "Modpack JSON copied to clipboard!",
       "exportFailed": "Failed to export: {{error}}",
-      "deleted": "Profile \"{{name}}\" deleted",
+      "deleted": "Modpack \"{{name}}\" deleted",
       "deleteFailed": "Failed to delete: {{error}}",
       "duplicated": "Duplicated as \"{{name}}\"",
       "duplicateFailed": "Failed to duplicate: {{error}}",
-      "imported": "Imported profile \"{{name}}\"",
+      "imported": "Imported modpack \"{{name}}\"",
       "importFailed": "Failed to import: {{error}}",
       "importedModpack": "Imported modpack \"{{name}}\" — {{count}} mods. You're now subscribed for updates!",
       "reapplied": "Re-applied \"{{name}}\".",
@@ -458,11 +478,11 @@
   },
   "nav": {
     "home": "Home",
-    "profiles": "Profiles",
+    "profiles": "Modpacks",
     "mods": "Mods",
     "browseMods": "Browse Mods",
     "browseModpacks": "Browse Modpacks",
-    "tutorial": "Tutorial",
+    "tutorial": "Help",
     "settings": "Settings"
   },
   "app": {
@@ -480,7 +500,7 @@
     "installAndRestartLabel": "Install & Restart",
     "launch": {
       "moddedTitle": "Launch Slay the Spire 2 with {{profile}}",
-      "noActiveProfile": "no active profile",
+      "noActiveProfile": "no active modpack",
       "vanilla": "Vanilla - no mods",
       "modded": "Launch"
     },
@@ -496,8 +516,9 @@
     "sts2Detected": "STS2 detected",
     "gameNotFound": "Game not found",
     "modCount": "{{enabled}} active / {{total}} mods",
-    "switchActivePack": "Switch active pack",
-    "activeProfile": "Active Profile",
+    "switchActivePack": "Switch modpack",
+    "activeProfile": "Active modpack",
+    "manageAllModpacks": "Manage all modpacks",
     "nexusPendingToast": "Opened {{modName}} on Nexus. Click \"Slow Download\" / \"Manual\" — the app will auto-install when the zip lands in your Downloads folder.",
     "auditFailed": "Audit failed: {{error}}",
     "updateConfirmTitle_one": "Update {{count}} mod?",
@@ -892,7 +913,7 @@
   "publish": {
     "publishTitle": "Publish {{name}}",
     "reshareTitle": "Re-share {{name}}?",
-    "profilePublished": "Profile published",
+    "profilePublished": "Modpack published",
     "updatePushed": "Update pushed",
     "publishSubtitle": "Uploads your mod files to a GitHub repo on your account so friends can install them.",
     "reshareSubtitle": "Same code — followers will see an update prompt next time they open the app.",
@@ -933,7 +954,7 @@
     "failedUploads_other": "{{count}} mods failed to upload: {{list}}{{more}}. Friends installing this code will see \"missing mod\" for these — re-publish to retry.",
     "listedPublicly": "Listed publicly:",
     "updatePushedToast": "Update pushed to followers",
-    "profilePublishedToast": "Profile published",
+    "profilePublishedToast": "Modpack published",
     "publishFailed": "Failed to publish: {{error}}",
     "couldntCopy": "Could not copy to clipboard",
     "couldntOpenBrowser": "Couldn't open browser: {{error}}",

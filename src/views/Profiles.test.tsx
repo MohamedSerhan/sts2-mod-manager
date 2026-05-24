@@ -184,7 +184,7 @@ describe('<ProfilesView>', () => {
     });
     // Toast text confirms the success branch ran.
     await waitFor(() => {
-      expect(screen.getByText(/Profile "Vacation Pack" created/)).toBeInTheDocument();
+      expect(screen.getByText(/Modpack "Vacation Pack" created/)).toBeInTheDocument();
     });
   });
 
@@ -215,7 +215,7 @@ describe('<ProfilesView>', () => {
     await user.type(input, 'Bad');
     await user.click(screen.getByRole('button', { name: 'Create' }));
     await waitFor(() => {
-      expect(screen.getByText(/Failed to create profile.*disk full/)).toBeInTheDocument();
+      expect(screen.getByText(/Failed to create modpack.*disk full/)).toBeInTheDocument();
     });
   });
 
@@ -399,7 +399,7 @@ describe('<ProfilesView>', () => {
       expect(getInvokeCalls().some((c) => c.cmd === 'switch_profile')).toBe(true);
     });
     await waitFor(() => {
-      expect(screen.getByText(/Switched to profile "B"/)).toBeInTheDocument();
+      expect(screen.getByText(/Switched to modpack "B"/)).toBeInTheDocument();
     });
   });
 
@@ -492,7 +492,7 @@ describe('<ProfilesView>', () => {
       expect(getInvokeCalls().some((c) => c.cmd === 'import_profile_cmd')).toBe(true);
     });
     await waitFor(() => {
-      expect(screen.getByText(/Imported profile "Imported"/)).toBeInTheDocument();
+      expect(screen.getByText(/Imported modpack "Imported"/)).toBeInTheDocument();
     });
   });
 
@@ -1959,7 +1959,7 @@ describe('<ProfilesView>', () => {
       expect(getInvokeCalls().some((c) => c.cmd === 'export_profile_cmd')).toBe(true);
     });
     await waitFor(() => {
-      expect(screen.getByText(/Profile JSON copied to clipboard/)).toBeInTheDocument();
+      expect(screen.getByText(/Modpack JSON copied to clipboard/)).toBeInTheDocument();
     });
     expect(clipboardWrite).toHaveBeenCalledWith('{"name":"Exportable","mods":[]}');
   });
@@ -2013,16 +2013,16 @@ describe('<ProfilesView>', () => {
     const del = await screen.findByRole('menuitem', { name: /Delete profile/ });
     await user.click(del);
     await waitFor(() => {
-      expect(screen.getByText(/Delete profile "Doomed"/)).toBeInTheDocument();
+      expect(screen.getByText(/Delete modpack "Doomed"/)).toBeInTheDocument();
     });
-    await user.click(await screen.findByRole('button', { name: /Delete profile/ }));
+    await user.click(await screen.findByRole('button', { name: /Delete modpack/ }));
     await waitFor(() => {
       expect(getInvokeCalls().some(
         (c) => c.cmd === 'delete_profile_cmd' && c.args?.name === 'Doomed',
       )).toBe(true);
     });
     await waitFor(() => {
-      expect(screen.getByText(/Profile "Doomed" deleted/)).toBeInTheDocument();
+      expect(screen.getByText(/Modpack "Doomed" deleted/)).toBeInTheDocument();
     });
   });
 
@@ -2050,7 +2050,7 @@ describe('<ProfilesView>', () => {
     await user.click(kebabs[0]);
     const del = await screen.findByRole('menuitem', { name: /Delete profile/ });
     await user.click(del);
-    await user.click(await screen.findByRole('button', { name: /Delete profile/ }));
+    await user.click(await screen.findByRole('button', { name: /Delete modpack/ }));
     await waitFor(() => {
       expect(screen.getByText(/Failed to delete.*busy/)).toBeInTheDocument();
     });
@@ -2534,7 +2534,7 @@ describe('<ProfilesView>', () => {
     await user.type(input, 'Bad');
     await user.click(screen.getByRole('button', { name: 'Create' }));
     await waitFor(() => {
-      expect(screen.getByText(/Failed to create profile.*plain-string-error/)).toBeInTheDocument();
+      expect(screen.getByText(/Failed to create modpack.*plain-string-error/)).toBeInTheDocument();
     });
   });
 

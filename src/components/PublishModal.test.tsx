@@ -321,8 +321,8 @@ describe('<PublishModal>', () => {
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'share_profile')).toBe(true);
     });
-    // Success state: title flips to "Profile published" and share code is visible.
-    await waitForModalTitle('Profile published');
+    // Success state: title flips to "Modpack published" and share code is visible.
+    await waitForModalTitle('Modpack published');
     expect(screen.getByText(`${shareOk.owner}/${shareOk.code}`)).toBeInTheDocument();
     expect(onShared).toHaveBeenCalledWith(shareOk);
     // Done button surfaces in the footer (not Publish).
@@ -356,7 +356,7 @@ describe('<PublishModal>', () => {
     const publishBtn = await screen.findByRole('button', { name: /Publish/ });
     await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
     await user.click(publishBtn);
-    await waitForModalTitle('Profile published');
+    await waitForModalTitle('Modpack published');
     // Inline warning panel AND toast both contain the failure summary.
     // The panel splits the count and list across separate elements; the
     // toast is a single string. Assert each variant ≥ 1.
@@ -379,7 +379,7 @@ describe('<PublishModal>', () => {
     const publishBtn = await screen.findByRole('button', { name: /Publish/ });
     await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
     await user.click(publishBtn);
-    await waitForModalTitle('Profile published');
+    await waitForModalTitle('Modpack published');
     // Toast (single string) confirms the singular wording with no +more.
     const toastEl = await screen.findByText(/1 mod failed to upload: SoloMod/);
     expect(toastEl.textContent).not.toMatch(/\+\d+ more/);
@@ -399,7 +399,7 @@ describe('<PublishModal>', () => {
     const publishBtn = await screen.findByRole('button', { name: /Publish/ });
     await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
     await user.click(publishBtn);
-    await waitForModalTitle('Profile published');
+    await waitForModalTitle('Modpack published');
     // "+2 more" suffix in both panel and toast.
     const matches = screen.getAllByText(/m1, m2, m3, m4, m5, \+2 more/);
     expect(matches.length).toBeGreaterThanOrEqual(2);
@@ -455,7 +455,7 @@ describe('<PublishModal>', () => {
     // Header close button is disabled while busy.
     expect(screen.getByTitle('Close')).toBeDisabled();
     resolveShare(shareOk);
-    await waitForModalTitle('Profile published');
+    await waitForModalTitle('Modpack published');
   });
 
   it('share-progress listener: bundling event renders mod counter + progress bar', async () => {
@@ -501,7 +501,7 @@ describe('<PublishModal>', () => {
       expect(screen.queryByText(/Bundling mod 3 of 10/)).toBeNull();
     });
     resolveShare(shareOk);
-    await waitForModalTitle('Profile published');
+    await waitForModalTitle('Modpack published');
   });
 
   it('share-progress listener: uploading-manifest stage shows manifest copy', async () => {
@@ -532,7 +532,7 @@ describe('<PublishModal>', () => {
     });
     await screen.findByText(/Uploading profile manifest/);
     resolveShare(shareOk);
-    await waitForModalTitle('Profile published');
+    await waitForModalTitle('Modpack published');
   });
 
   it('does not close on backdrop click while busy', async () => {
@@ -553,7 +553,7 @@ describe('<PublishModal>', () => {
     fireEvent.click(backdrop);
     expect(onClose).not.toHaveBeenCalled();
     resolveShare(shareOk);
-    await waitForModalTitle('Profile published');
+    await waitForModalTitle('Modpack published');
   });
 
   // ── Success state copy buttons (lines 335-351) ────────────────────
@@ -577,7 +577,7 @@ describe('<PublishModal>', () => {
     const publishBtn = await screen.findByRole('button', { name: /Publish/ });
     await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
     await user.click(publishBtn);
-    await waitForModalTitle('Profile published');
+    await waitForModalTitle('Modpack published');
     return user;
   }
 
@@ -667,7 +667,7 @@ describe('<PublishModal>', () => {
     const publishBtn = await screen.findByRole('button', { name: /Publish/ });
     await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
     await user.click(publishBtn);
-    await waitForModalTitle('Profile published');
+    await waitForModalTitle('Modpack published');
     expect(screen.queryByRole('button', { name: /Open my profiles repo/ })).toBeNull();
   });
 
@@ -680,7 +680,7 @@ describe('<PublishModal>', () => {
     const publishBtn = await screen.findByRole('button', { name: /Publish/ });
     await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
     await user.click(publishBtn);
-    await waitForModalTitle('Profile published');
+    await waitForModalTitle('Modpack published');
     await user.click(screen.getByRole('button', { name: 'Done' }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
@@ -830,7 +830,7 @@ describe('<PublishModal>', () => {
       await user.click(radios[1]);
     }
     await user.click(publishBtn);
-    await waitForModalTitle('Profile published');
+    await waitForModalTitle('Modpack published');
     return user;
   }
 

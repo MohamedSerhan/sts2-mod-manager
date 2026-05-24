@@ -45,17 +45,17 @@ import { launchGame, launchVanilla, installModFromFile, openExternalUrl } from '
 type View = 'home' | 'profiles' | 'mods' | 'browse-mods' | 'browse-modpacks' | 'tutorial' | 'settings';
 type ResizeDirection = 'East' | 'North' | 'NorthEast' | 'NorthWest' | 'South' | 'SouthEast' | 'SouthWest' | 'West';
 
-// v5 IA — 4 main nav items, Tutorial+Settings in the foot. Backups absorbed
+// v5 IA — 4 main nav items, Help+Settings in the foot. Backups absorbed
 // into Settings as a tab. Dashboard cut (was redundant with Home).
 const NAV: { id: View; label: string; icon: typeof Home }[] = [
   { id: 'home',     label: 'Home',     icon: Home },
-  { id: 'profiles', label: 'Profiles', icon: Layers },
+  { id: 'profiles', label: 'Modpacks', icon: Layers },
   { id: 'mods',     label: 'Mods',     icon: Package },
   { id: 'browse-mods',     label: 'Browse Mods',     icon: Search },
   { id: 'browse-modpacks', label: 'Browse Modpacks', icon: Boxes },
 ];
 const FOOT_NAV: { id: View; label: string; icon: typeof Home }[] = [
-  { id: 'tutorial', label: 'Tutorial', icon: GraduationCap },
+  { id: 'tutorial', label: 'Help',     icon: GraduationCap },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
 

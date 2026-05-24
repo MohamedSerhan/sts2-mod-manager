@@ -102,13 +102,13 @@ describe('<App>', () => {
       expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument();
     });
     expect(getNavButton('Home')).toBeInTheDocument();
-    expect(getNavButton('Profiles')).toBeInTheDocument();
+    expect(getNavButton('Modpacks')).toBeInTheDocument();
     expect(getNavButton('Mods')).toBeInTheDocument();
     expect(getNavButton('Browse Mods')).toBeInTheDocument();
     const modpacksNav = getNavButton('Browse Modpacks');
     expect(modpacksNav).toBeInTheDocument();
     expect(within(modpacksNav).getByText('Beta')).toBeInTheDocument();
-    expect(getNavButton('Tutorial')).toBeInTheDocument();
+    expect(getNavButton('Help')).toBeInTheDocument();
     expect(getNavButton('Settings')).toBeInTheDocument();
   });
 
@@ -241,7 +241,7 @@ describe('<App>', () => {
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     // (Onboarding overlay is suppressed by default in beforeEach so we
     //  don't need a Skip-setup click.)
-    await user.click(getNavButton('Profiles'));
+    await user.click(getNavButton('Modpacks'));
     await waitFor(() => {
       expect(screen.getByText(/Your packs/i)).toBeInTheDocument();
     });
@@ -401,7 +401,7 @@ describe('<App>', () => {
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     // (Onboarding overlay is suppressed by default in beforeEach so we
     //  don't need a Skip-setup click.)
-    await user.click(getNavButton('Tutorial'));
+    await user.click(getNavButton('Help'));
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: /Tutorial/i })).toBeInTheDocument();
     });
@@ -613,8 +613,13 @@ describe('<App>', () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     await waitFor(() => {
+      // The Profiles nav button (id='profiles') now labels as "Modpacks".
+      // Disambiguate from "Browse Modpacks" via exact label match on the
+      // nav-label span text.
       const profilesNav = screen.getAllByRole('button').find(
-        (b) => b.className.includes('gf-nav') && /Profiles/.test(b.textContent ?? ''),
+        (b) =>
+          b.className.includes('gf-nav') &&
+          b.querySelector('.gf-nav-label')?.textContent === 'Modpacks',
       );
       expect(profilesNav?.textContent).toContain('1');
     });
@@ -693,8 +698,9 @@ describe('<App>', () => {
     const chip = document.querySelector('button.gf-prof') as HTMLButtonElement | null;
     expect(chip).toBeTruthy();
     await user.click(chip!);
-    // ProfileSwitcher reveals an "Add a pack" / "Manage all" foot button.
-    const switcher = await screen.findByText(/Switch active pack/i);
+    // ProfileSwitcher's "Add modpack" / "Manage all" foot button is the
+    // unambiguous signal the popover mounted.
+    const switcher = await screen.findByRole('button', { name: /Add modpack/i });
     expect(switcher).toBeInTheDocument();
   });
 
@@ -711,13 +717,12 @@ describe('<App>', () => {
     // Navigate to a non-home view first so we can observe the switch.
     await user.click(getNavButton('Mods'));
     await waitFor(() => { expect(screen.getByText(/Your mods/i)).toBeInTheDocument(); });
-    // Open switcher, click Add pack.
+    // Open switcher, click Add modpack.
     const chip = document.querySelector('button.gf-prof') as HTMLButtonElement | null;
     expect(chip).toBeTruthy();
     await user.click(chip!);
-    await screen.findByText(/Switch active pack/i);
-    // The "Add pack" foot button lives in .gf-pop-foot.
-    const addBtn = await screen.findByText(/Add pack/i);
+    // The "Add modpack" foot button lives in .gf-pop-foot.
+    const addBtn = await screen.findByRole('button', { name: /Add modpack/i });
     await user.click(addBtn);
     // Home view should be active — its placeholder is visible.
     await waitFor(() => {
@@ -738,8 +743,8 @@ describe('<App>', () => {
     const chip = document.querySelector('button.gf-prof') as HTMLButtonElement | null;
     expect(chip).toBeTruthy();
     await user.click(chip!);
-    await screen.findByText(/Switch active pack/i);
-    const manageBtn = await screen.findByText(/Manage all/i);
+    // "Manage all" foot button is unambiguous once the popover mounts.
+    const manageBtn = await screen.findByRole('button', { name: /Manage all/i });
     await user.click(manageBtn);
     await waitFor(() => {
       expect(screen.getByText(/Your packs/i)).toBeInTheDocument();
@@ -1279,8 +1284,9 @@ describe('<App>', () => {
     // The exact label varies — find by title attribute.
     const switchPack = await screen.findByTitle(/Switch to a different pack/i);
     await user.click(switchPack);
-    // ProfileSwitcher's header.
-    await screen.findByText(/Switch active pack/i);
+    // ProfileSwitcher's "Add modpack" foot button is the unambiguous
+    // signal the popover mounted.
+    await screen.findByRole('button', { name: /Add modpack/i });
   });
 
   it("TutorialView -> Settings inline link uses the App's setActiveView callback", async () => {
@@ -1291,7 +1297,7 @@ describe('<App>', () => {
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    await user.click(getNavButton('Tutorial'));
+    await user.click(getNavButton('Help'));
     // Expand the full reference so the inline Settings link is in the DOM.
     const expandRef = await screen.findByRole('button', { name: /Full reference/i });
     await user.click(expandRef);
@@ -1564,7 +1570,7 @@ describe('<App>', () => {
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    await user.click(getNavButton('Profiles'));
+    await user.click(getNavButton('Modpacks'));
     await waitFor(() => { expect(screen.getByText('MyPack')).toBeInTheDocument(); });
     const shareBtn = screen.getAllByRole('button').find(
       (b) => /^Share$/.test(b.textContent?.trim() ?? ''),
@@ -1799,8 +1805,12 @@ describe('<App>', () => {
     // length=0 (default), the badge span is NOT rendered.
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    // The Profiles nav button now labels as "Modpacks". Disambiguate
+    // from "Browse Modpacks" via exact .gf-nav-label match.
     const profilesNav = screen.getAllByRole('button').find(
-      (b) => b.className.includes('gf-nav') && /Profiles/.test(b.textContent ?? ''),
+      (b) =>
+        b.className.includes('gf-nav') &&
+        b.querySelector('.gf-nav-label')?.textContent === 'Modpacks',
     );
     expect(profilesNav).toBeDefined();
     // No gf-nav-badge span inside.

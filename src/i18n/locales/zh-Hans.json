@@ -69,6 +69,26 @@
   "confirm": {
     "typePhrase": "输入 <0>{{phrase}}</0> 以确认："
   },
+  "modpack": {
+    "singular": "模组包",
+    "plural": "模组包",
+    "active": "当前模组包",
+    "create": "创建模组包",
+    "switch": "切换模组包",
+    "share": "分享模组包",
+    "reshare": "重新分享模组包",
+    "delete": "删除模组包",
+    "membership": {
+      "in": "已加入此模组包",
+      "notIn": "未加入此模组包",
+      "includedOff": "已加入但在此模组包中已关闭"
+    },
+    "storage": {
+      "active": "已激活于游戏",
+      "stored": "已存储",
+      "storedHint": "已安装到本地但未放入游戏文件夹"
+    }
+  },
   "launch": {
     "title": "正在启动 Slay the Spire 2",
     "titleVanilla": "正在启动 Slay the Spire 2（原版）",
@@ -98,14 +118,14 @@
     "updateCheckFailed": "更新检查失败：{{error}}"
   },
   "profileSwitcher": {
-    "title": "切换当前整合包",
-    "empty": "暂无方案。添加整合包以开始。",
+    "title": "模组包",
+    "empty": "暂无模组包。添加一个以开始。",
     "mods_one": "{{count}} 个模组",
     "mods_other": "{{count}} 个模组",
     "updates_one": " · {{count}} 个更新",
     "updates_other": " · {{count}} 个更新",
     "active": "当前",
-    "addPack": "添加整合包",
+    "addPack": "添加模组包",
     "manageAll": "管理全部",
     "downloadedStatus": "已下载 {{downloaded}} 个，仍有 {{missing}} 个缺失。"
   },
@@ -255,19 +275,19 @@
     "confirm": {
       "switch": {
         "title": "确定要切换离开 \"{{name}}\" 吗？",
-        "body": "此方案在磁盘上有未保存的更改。切换将应用另一个清单，这些工作更改不会保存到当前方案中。",
-        "warning": "如果希望当前安装状态成为方案清单，请先使用\"保存更改\"。",
+        "body": "此模组包在磁盘上有未保存的更改。切换将应用另一个清单，这些工作更改不会保存到当前模组包中。",
+        "warning": "如果希望当前安装状态成为模组包清单，请先使用\"保存更改\"。",
         "confirmLabel": "仍然切换",
         "cancelLabel": "留在此处"
       },
       "delete": {
-        "title": "删除方案 \"{{name}}\"？",
-        "body": "方案清单将被移除。磁盘上的模组文件保持不变。",
-        "confirmLabel": "删除方案"
+        "title": "删除模组包 \"{{name}}\"？",
+        "body": "模组包清单将被移除。磁盘上的模组文件保持不变。",
+        "confirmLabel": "删除模组包"
       },
       "repair": {
         "title": "修复 \"{{name}}\"？",
-        "bodyWithOrphans": "重新应用清单并将 {{count}} 个不在方案中的活跃模组移动到 mods_disabled：{{list}}。",
+        "bodyWithOrphans": "重新应用清单并将 {{count}} 个不在模组包中的活跃模组移动到 mods_disabled：{{list}}。",
         "bodyNoOrphans": "重新应用清单。没有需要禁用的额外活跃模组 — 切换状态即可修复偏离。",
         "confirmLabel": "修复",
         "backupCheckbox": "修复前创建备份"
@@ -276,11 +296,11 @@
     "toast": {
       "synced": "已同步 \"{{name}}\" — 你已是最新版本。",
       "syncFailed": "同步失败：{{error}}",
-      "created": "方案 \"{{name}}\" 已创建",
-      "createFailed": "创建方案失败：{{error}}",
+      "created": "模组包 \"{{name}}\" 已创建",
+      "createFailed": "创建模组包失败：{{error}}",
       "snapshotCreated": "快照 \"{{name}}\" 已创建，包含 {{count}} 个模组",
       "snapshotFailed": "创建快照失败：{{error}}",
-      "switched": "已切换到方案 \"{{name}}\"",
+      "switched": "已切换到模组包 \"{{name}}\"",
       "switchedWithDetails": "已切换到 \"{{name}}\"。{{details}}",
       "switchFailed": "切换失败：{{error}}",
       "repaired": "已修复 \"{{name}}\"",
@@ -290,13 +310,13 @@
       "savedChanges": "更改已保存到 \"{{name}}\"",
       "savedChangesWithReShare": "更改已保存到 \"{{name}}\"。准备好发布时请重新分享。",
       "saveFailed": "保存更改失败：{{error}}",
-      "exported": "方案 JSON 已复制到剪贴板！",
+      "exported": "模组包 JSON 已复制到剪贴板！",
       "exportFailed": "导出失败：{{error}}",
-      "deleted": "方案 \"{{name}}\" 已删除",
+      "deleted": "模组包 \"{{name}}\" 已删除",
       "deleteFailed": "删除失败：{{error}}",
       "duplicated": "已复制为 \"{{name}}\"",
       "duplicateFailed": "复制失败：{{error}}",
-      "imported": "已导入方案 \"{{name}}\"",
+      "imported": "已导入模组包 \"{{name}}\"",
       "importFailed": "导入失败：{{error}}",
       "importedModpack": "已导入整合包 \"{{name}}\" — {{count}} 个模组。你现在已订阅更新！",
       "reapplied": "已重新应用 \"{{name}}\"。",
@@ -458,11 +478,11 @@
   },
   "nav": {
     "home": "首页",
-    "profiles": "配置",
+    "profiles": "模组包",
     "mods": "模组",
     "browseMods": "浏览模组",
     "browseModpacks": "浏览模组包",
-    "tutorial": "教程",
+    "tutorial": "帮助",
     "settings": "设置"
   },
   "app": {
@@ -480,7 +500,7 @@
     "installAndRestartLabel": "安装并重启",
     "launch": {
       "moddedTitle": "以 {{profile}} 启动 STS2",
-      "noActiveProfile": "无活动配置",
+      "noActiveProfile": "无当前模组包",
       "vanilla": "原版 - 无模组",
       "modded": "启动"
     },
@@ -496,8 +516,9 @@
     "sts2Detected": "已检测到 STS2",
     "gameNotFound": "未找到游戏",
     "modCount": "{{enabled}} 激活 / {{total}} 模组",
-    "switchActivePack": "切换当前方案",
-    "activeProfile": "当前方案",
+    "switchActivePack": "切换模组包",
+    "activeProfile": "当前模组包",
+    "manageAllModpacks": "管理全部模组包",
     "nexusPendingToast": "已在 Nexus 上打开 {{modName}}。点击 \"Slow Download\" / \"Manual\" — 当 zip 文件下载到你的 Downloads 文件夹时，应用会自动安装。",
     "auditFailed": "审计失败：{{error}}",
     "updateConfirmTitle_one": "更新 {{count}} 个模组？",
@@ -892,7 +913,7 @@
   "publish": {
     "publishTitle": "发布 {{name}}",
     "reshareTitle": "重新分享 {{name}}？",
-    "profilePublished": "配置已发布",
+    "profilePublished": "模组包已发布",
     "updatePushed": "更新已推送",
     "publishSubtitle": "将你的模组文件上传到你账户的 GitHub 仓库，好友即可安装。",
     "reshareSubtitle": "同一代码 — 关注者下次打开应用时将看到更新提示。",
@@ -933,7 +954,7 @@
     "failedUploads_other": "{{count}} 个模组上传失败：{{list}}{{more}}。安装此代码的好友将看到这些模组\"缺失\" — 重新发布以重试。",
     "listedPublicly": "公开列出：",
     "updatePushedToast": "更新已推送给关注者",
-    "profilePublishedToast": "配置已发布",
+    "profilePublishedToast": "模组包已发布",
     "publishFailed": "发布失败：{{error}}",
     "couldntCopy": "无法复制到剪贴板",
     "couldntOpenBrowser": "无法打开浏览器：{{error}}",

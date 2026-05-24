@@ -2010,7 +2010,7 @@ describe('<ProfilesView>', () => {
     const kebabs = screen.getAllByRole('button', { name: /More actions/ });
     expect(kebabs.length).toBeGreaterThan(0);
     await user.click(kebabs[0]);
-    const del = await screen.findByRole('menuitem', { name: /Delete profile/ });
+    const del = await screen.findByRole('menuitem', { name: /Delete modpack/ });
     await user.click(del);
     await waitFor(() => {
       expect(screen.getByText(/Delete modpack "Doomed"/)).toBeInTheDocument();
@@ -2033,7 +2033,7 @@ describe('<ProfilesView>', () => {
     await waitFor(() => { expect(screen.getByText('SafePack')).toBeInTheDocument(); });
     const kebabs = screen.getAllByRole('button', { name: /More actions/ });
     await user.click(kebabs[0]);
-    const del = await screen.findByRole('menuitem', { name: /Delete profile/ });
+    const del = await screen.findByRole('menuitem', { name: /Delete modpack/ });
     await user.click(del);
     const modal = await confirmModal();
     await user.click(modal.getByRole('button', { name: 'Cancel' }));
@@ -2048,7 +2048,7 @@ describe('<ProfilesView>', () => {
     await waitFor(() => { expect(screen.getByText('Stubborn')).toBeInTheDocument(); });
     const kebabs = screen.getAllByRole('button', { name: /More actions/ });
     await user.click(kebabs[0]);
-    const del = await screen.findByRole('menuitem', { name: /Delete profile/ });
+    const del = await screen.findByRole('menuitem', { name: /Delete modpack/ });
     await user.click(del);
     await user.click(await screen.findByRole('button', { name: /Delete modpack/ }));
     await waitFor(() => {

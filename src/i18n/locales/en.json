@@ -342,7 +342,7 @@
       "copyShareLink": "Copy share link",
       "copyShareMessage": "Copy share message (paste-ready: intro + link + code)",
       "copyShareMessageLabel": "Copy share message",
-      "deleteProfile": "Delete profile...",
+      "deleteProfile": "Delete modpack...",
       "copyInstallLinkTitle": "Copy install link (clickable in Discord / chat)"
     },
     "confirm": {

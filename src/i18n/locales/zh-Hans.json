@@ -269,7 +269,7 @@
       "copyShareLink": "复制分享链接",
       "copyShareMessage": "复制分享消息（可直接粘贴：介绍语 + 链接 + 分享码）",
       "copyShareMessageLabel": "复制分享消息",
-      "deleteProfile": "删除方案...",
+      "deleteProfile": "删除模组包...",
       "copyInstallLinkTitle": "复制安装链接（可在 Discord / 聊天中点击）"
     },
     "confirm": {

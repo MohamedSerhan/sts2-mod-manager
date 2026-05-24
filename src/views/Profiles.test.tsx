@@ -148,7 +148,7 @@ describe('<ProfilesView>', () => {
     seedProfiles([]);
     render(<Wrap />);
     await waitFor(() => {
-      expect(screen.getByText(/No profiles yet/i)).toBeInTheDocument();
+      expect(screen.getByText(/No modpacks yet/i)).toBeInTheDocument();
     });
   });
 
@@ -173,8 +173,8 @@ describe('<ProfilesView>', () => {
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('Existing')).toBeInTheDocument(); });
 
-    await user.click(screen.getByRole('button', { name: /New profile/ }));
-    const input = await screen.findByPlaceholderText('My Profile');
+    await user.click(screen.getByRole('button', { name: /Create modpack/i }));
+    const input = await screen.findByPlaceholderText('My modpack');
     await user.type(input, 'Vacation Pack');
     await user.click(screen.getByRole('button', { name: 'Create' }));
     await waitFor(() => {
@@ -194,8 +194,8 @@ describe('<ProfilesView>', () => {
     const user = setupUserWithClipboard();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /New profile/ }));
-    const input = await screen.findByPlaceholderText('My Profile');
+    await user.click(screen.getByRole('button', { name: /Create modpack/i }));
+    const input = await screen.findByPlaceholderText('My modpack');
     await user.type(input, 'KeyCreated{Enter}');
     await waitFor(() => {
       expect(getInvokeCalls().some(
@@ -210,8 +210,8 @@ describe('<ProfilesView>', () => {
     const user = setupUserWithClipboard();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /New profile/ }));
-    const input = await screen.findByPlaceholderText('My Profile');
+    await user.click(screen.getByRole('button', { name: /Create modpack/i }));
+    const input = await screen.findByPlaceholderText('My modpack');
     await user.type(input, 'Bad');
     await user.click(screen.getByRole('button', { name: 'Create' }));
     await waitFor(() => {
@@ -224,13 +224,13 @@ describe('<ProfilesView>', () => {
     const user = setupUserWithClipboard();
     render(<Wrap />);
     await waitFor(() => {
-      expect(screen.getByText(/No profiles yet/i)).toBeInTheDocument();
+      expect(screen.getByText(/No modpacks yet/i)).toBeInTheDocument();
     });
-    const newBtns = screen.getAllByRole('button', { name: /New profile/ });
+    const newBtns = screen.getAllByRole('button', { name: /Create modpack/i });
     await user.click(newBtns[0]);
-    expect(screen.getByPlaceholderText('My Profile')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('My modpack')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(screen.queryByPlaceholderText('My Profile')).toBeNull();
+    expect(screen.queryByPlaceholderText('My modpack')).toBeNull();
   });
 
   it('refuses to submit when the name is empty (whitespace only)', async () => {
@@ -238,8 +238,8 @@ describe('<ProfilesView>', () => {
     const user = setupUserWithClipboard();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /New profile/ }));
-    const input = await screen.findByPlaceholderText('My Profile');
+    await user.click(screen.getByRole('button', { name: /Create modpack/i }));
+    const input = await screen.findByPlaceholderText('My modpack');
     await user.type(input, '   ');
     await user.click(screen.getByRole('button', { name: 'Create' }));
     expect(getInvokeCalls().some((c) => c.cmd === 'create_profile')).toBe(false);
@@ -259,7 +259,7 @@ describe('<ProfilesView>', () => {
     ]);
     render(<Wrap />);
     await waitFor(() => {
-      expect(screen.getByText(/pack has updates|packs have updates/i)).toBeInTheDocument();
+      expect(screen.getByText(/modpack has updates|modpacks have updates/i)).toBeInTheDocument();
     });
   });
 
@@ -334,7 +334,7 @@ describe('<ProfilesView>', () => {
     });
   });
 
-  it('Snapshot current invokes snapshot_profile via the prompt + success toast', async () => {
+  it('Snapshot active modpack invokes snapshot_profile via the prompt + success toast', async () => {
     seedProfiles([baseProfile({ name: 'X' })]);
     registerInvokeHandler('snapshot_profile', (args) =>
       baseProfile({ name: String(args?.name), mods: [{ name: 'a' } as any, { name: 'b' } as any] }),
@@ -345,7 +345,7 @@ describe('<ProfilesView>', () => {
       const user = userEvent.setup();
       render(<Wrap />);
       await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-      await user.click(screen.getByRole('button', { name: /Snapshot current/ }));
+      await user.click(screen.getByRole('button', { name: /Snapshot active modpack/ }));
       await waitFor(() => {
         expect(getInvokeCalls().some(
           (c) => c.cmd === 'snapshot_profile' && c.args?.name === 'Snap-1',
@@ -368,7 +368,7 @@ describe('<ProfilesView>', () => {
       const user = userEvent.setup();
       render(<Wrap />);
       await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-      await user.click(screen.getByRole('button', { name: /Snapshot current/ }));
+      await user.click(screen.getByRole('button', { name: /Snapshot active modpack/ }));
       await waitFor(() => {
         expect(screen.getByText(/Failed to snapshot.*readonly/)).toBeInTheDocument();
       });
@@ -461,7 +461,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Add by code/i }));
+    await user.click(screen.getByRole('button', { name: /Add modpack code/i }));
     expect(screen.getByPlaceholderText(/username\/XXXX/)).toBeInTheDocument();
   });
 
@@ -470,7 +470,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Add by code/i }));
+    await user.click(screen.getByRole('button', { name: /Add modpack code/i }));
     expect(screen.getByPlaceholderText(/username\/XXXX/)).toBeInTheDocument();
     // The form's Cancel button (there's also one in the create form, but it's hidden).
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -483,7 +483,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Import JSON/ }));
+    await user.click(screen.getByRole('button', { name: /Import modpack JSON/ }));
     const textarea = await screen.findByPlaceholderText(/"name":/);
     await user.click(textarea);
     await user.paste('{"name":"X"}');
@@ -501,7 +501,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Import JSON/ }));
+    await user.click(screen.getByRole('button', { name: /Import modpack JSON/ }));
     await user.click(screen.getByRole('button', { name: 'Import' }));
     expect(getInvokeCalls().some((c) => c.cmd === 'import_profile_cmd')).toBe(false);
   });
@@ -512,7 +512,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Import JSON/ }));
+    await user.click(screen.getByRole('button', { name: /Import modpack JSON/ }));
     const textarea = await screen.findByPlaceholderText(/"name":/);
     await user.click(textarea);
     await user.paste('not json');
@@ -527,7 +527,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Import JSON/ }));
+    await user.click(screen.getByRole('button', { name: /Import modpack JSON/ }));
     expect(screen.getByPlaceholderText(/"name":/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByPlaceholderText(/"name":/)).toBeNull();
@@ -644,7 +644,7 @@ describe('<ProfilesView>', () => {
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('DriftedPack')).toBeInTheDocument(); });
     // The banner's Repair button has a unique title.
-    const repairBanner = await screen.findByTitle('Re-apply manifest and disable extra active mods');
+    const repairBanner = await screen.findByTitle('Re-apply manifest and store extra active mods');
     await user.click(repairBanner);
     // Confirm modal opens; click the Repair button in its foot.
     const modal = await confirmModal();
@@ -719,7 +719,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('DriftedPack')).toBeInTheDocument(); });
-    const repairBanner = await screen.findByTitle('Re-apply manifest and disable extra active mods');
+    const repairBanner = await screen.findByTitle('Re-apply manifest and store extra active mods');
     await user.click(repairBanner);
     await waitFor(() => {
       expect(screen.getByText(/No active extra mods to disable/)).toBeInTheDocument();
@@ -750,7 +750,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('DriftedPack')).toBeInTheDocument(); });
-    const repairBanner = await screen.findByTitle('Re-apply manifest and disable extra active mods');
+    const repairBanner = await screen.findByTitle('Re-apply manifest and store extra active mods');
     await user.click(repairBanner);
     const modal = await confirmModal();
     await user.click(modal.getByRole('button', { name: 'Cancel' }));
@@ -778,7 +778,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('DriftedPack')).toBeInTheDocument(); });
-    const repairBanner = await screen.findByTitle('Re-apply manifest and disable extra active mods');
+    const repairBanner = await screen.findByTitle('Re-apply manifest and store extra active mods');
     await user.click(repairBanner);
     const checkbox = await screen.findByRole('checkbox');
     expect(checkbox).not.toBeChecked();
@@ -812,7 +812,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('DriftedPack')).toBeInTheDocument(); });
-    const repairBanner = await screen.findByTitle('Re-apply manifest and disable extra active mods');
+    const repairBanner = await screen.findByTitle('Re-apply manifest and store extra active mods');
     await user.click(repairBanner);
     await user.click(await screen.findByRole('checkbox'));
     const modal = await confirmModal();
@@ -837,7 +837,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('DriftedPack')).toBeInTheDocument(); });
-    const repairBanner = await screen.findByTitle('Re-apply manifest and disable extra active mods');
+    const repairBanner = await screen.findByTitle('Re-apply manifest and store extra active mods');
     await user.click(repairBanner);
     const modal = await confirmModal();
     await user.click(modal.getByRole('button', { name: 'Repair' }));
@@ -860,7 +860,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('BigDrift')).toBeInTheDocument(); });
-    const repairBanner = await screen.findByTitle('Re-apply manifest and disable extra active mods');
+    const repairBanner = await screen.findByTitle('Re-apply manifest and store extra active mods');
     await user.click(repairBanner);
     await waitFor(() => {
       // "Orph1, Orph2, ... Orph8, …4 more"
@@ -876,7 +876,7 @@ describe('<ProfilesView>', () => {
       const user = userEvent.setup();
       render(<Wrap />);
       await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-      await user.click(screen.getByRole('button', { name: /Snapshot current/ }));
+      await user.click(screen.getByRole('button', { name: /Snapshot active modpack/ }));
       expect(getInvokeCalls().some((c) => c.cmd === 'snapshot_profile')).toBe(false);
     } finally {
       window.prompt = origPrompt;
@@ -891,7 +891,7 @@ describe('<ProfilesView>', () => {
       const user = userEvent.setup();
       render(<Wrap />);
       await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-      await user.click(screen.getByRole('button', { name: /Snapshot current/ }));
+      await user.click(screen.getByRole('button', { name: /Snapshot active modpack/ }));
       expect(getInvokeCalls().some((c) => c.cmd === 'snapshot_profile')).toBe(false);
     } finally {
       window.prompt = origPrompt;
@@ -906,10 +906,10 @@ describe('<ProfilesView>', () => {
     const publishedBtn = screen.getByRole('button', { name: /Published by you/i });
     await user.click(publishedBtn);
     expect(publishedBtn.className).toContain('active');
-    const allPacksBtn = screen.getByRole('button', { name: /^All packs/i });
+    const allPacksBtn = screen.getByRole('button', { name: /^All modpacks/i });
     await user.click(allPacksBtn);
     expect(allPacksBtn.className).toContain('active');
-    expect(screen.getByRole('button', { name: /Mod Library/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Mod library/i })).toBeInTheDocument();
   });
 
   it('Mod Library opens a dedicated library workspace from a special action row', async () => {
@@ -938,13 +938,13 @@ describe('<ProfilesView>', () => {
     const { container } = render(<Wrap />);
     const specialRow = container.querySelector('.gf-profile-special-actions');
     expect(specialRow).not.toBeNull();
-    expect(specialRow).toContainElement(await screen.findByRole('button', { name: /Mod Library/i }));
-    expect(container.querySelector('.gf-page-actions')).not.toContainElement(screen.getByRole('button', { name: /Mod Library/i }));
-    expect(screen.getByText(/See every installed mod, which profiles use it, and reassign mods without switching profiles/i)).toBeInTheDocument();
-    await user.click(await screen.findByRole('button', { name: /Mod Library/i }));
+    expect(specialRow).toContainElement(await screen.findByRole('button', { name: /Mod library/i }));
+    expect(container.querySelector('.gf-page-actions')).not.toContainElement(screen.getByRole('button', { name: /Mod library/i }));
+    expect(screen.getByText(/Every mod you've installed\. Toggle which modpacks each one belongs to\./i)).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: /Mod library/i }));
 
-    expect(await screen.findByRole('heading', { name: /Mod Library/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Back to profiles/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /Mod library/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Back to modpacks/i })).toBeInTheDocument();
     expect((await screen.findAllByText('BaseLib')).length).toBeGreaterThan(0);
     expect(screen.getByText('1.0.0')).toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: 'Alpha' })).toBeChecked();
@@ -971,8 +971,8 @@ describe('<ProfilesView>', () => {
 
     render(<Wrap openModLibrarySignal={1} />);
 
-    expect(await screen.findByRole('heading', { name: /Mod Library/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Back to profiles/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /Mod library/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Back to modpacks/i })).toBeInTheDocument();
     expect((await screen.findAllByText('BaseLib')).length).toBeGreaterThan(0);
   });
 
@@ -985,7 +985,7 @@ describe('<ProfilesView>', () => {
 
     render(<Wrap />);
 
-    const action = await screen.findByRole('button', { name: /Mod Library.*2/i });
+    const action = await screen.findByRole('button', { name: /Mod library.*2/i });
     expect(within(action).getByText('Beta')).toBeInTheDocument();
   });
 
@@ -1134,8 +1134,8 @@ describe('<ProfilesView>', () => {
 
     expect(await screen.findByText('Readable Name')).toBeInTheDocument();
     expect(screen.getByText('raw-manifest-name')).toBeInTheDocument();
-    expect(screen.getByText(/Inactive \(kept installed\)/i)).toBeInTheDocument();
-    expect(screen.getByText(/No profiles yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/^Stored$/i)).toBeInTheDocument();
+    expect(screen.getByText(/No modpacks yet/i)).toBeInTheDocument();
   });
 
   it('Mod Library separates library storage state from profile membership state', async () => {
@@ -1165,11 +1165,11 @@ describe('<ProfilesView>', () => {
     await user.click(await screen.findByRole('button', { name: /Mod Library/i }));
 
     expect(await screen.findByText('Combo Patch')).toBeInTheDocument();
-    expect(screen.getByText(/Active in game folder/i)).toBeInTheDocument();
-    expect(screen.getByText(/Mod Library still shows every installed mod/i)).toBeInTheDocument();
-    expect(screen.getByText(/Not in profile/i)).toBeInTheDocument();
-    expect(screen.getByText(/Disabled in profile/i)).toBeInTheDocument();
-    expect(screen.getByText('1 profile')).toBeInTheDocument();
+    expect(screen.getByText(/^Active in game$/i)).toBeInTheDocument();
+    expect(screen.getByText(/The mod library shows every installed mod/i)).toBeInTheDocument();
+    expect(screen.getByText(/Not in this modpack/i)).toBeInTheDocument();
+    expect(screen.getByText(/Included, off in this modpack/i)).toBeInTheDocument();
+    expect(screen.getByText('1 modpack')).toBeInTheDocument();
   });
 
   it('Mod Library stores and activates a mod without changing profile membership', async () => {
@@ -1195,7 +1195,7 @@ describe('<ProfilesView>', () => {
     render(<Wrap />);
     await user.click(await screen.findByRole('button', { name: /Mod Library/i }));
 
-    await user.click(await screen.findByRole('button', { name: /Disable Loose Active Mod in game and keep it installed/i }));
+    await user.click(await screen.findByRole('button', { name: /Store Loose Active Mod \(keep installed but move out of the game folder\)/i }));
 
     await waitFor(() => {
       expect(getInvokeCalls()).toContainEqual({
@@ -1209,10 +1209,10 @@ describe('<ProfilesView>', () => {
     });
     expect(screen.getByRole('checkbox', { name: 'Stable' })).not.toBeChecked();
     expect(getInvokeCalls().filter((call) => call.cmd === 'set_profile_mod_membership')).toHaveLength(0);
-    expect(await screen.findByText(/Inactive \(kept installed\)/i)).toBeInTheDocument();
-    expect(await screen.findByText(/Loose Active Mod disabled in game and kept installed/i)).toBeInTheDocument();
+    expect(await screen.findByText(/^Stored$/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Loose Active Mod stored \(kept installed, moved out of the game folder\)/i)).toBeInTheDocument();
 
-    await user.click(await screen.findByRole('button', { name: /Activate Loose Active Mod in game folder/i }));
+    await user.click(await screen.findByRole('button', { name: /Activate Loose Active Mod in the game folder/i }));
 
     await waitFor(() => {
       expect(getInvokeCalls()).toContainEqual({
@@ -1224,7 +1224,7 @@ describe('<ProfilesView>', () => {
         },
       });
     });
-    expect(await screen.findByText(/Active in game folder/i)).toBeInTheDocument();
+    expect(await screen.findByText(/^Active in game$/i)).toBeInTheDocument();
   });
 
   it('Mod Library bulk-stores only active mods unused by every profile', async () => {
@@ -1276,7 +1276,7 @@ describe('<ProfilesView>', () => {
     render(<Wrap />);
     await user.click(await screen.findByRole('button', { name: /Mod Library/i }));
 
-    await user.click(await screen.findByRole('button', { name: /Disable 1 unused active mod/i }));
+    await user.click(await screen.findByRole('button', { name: /Store 1 unused active mod/i }));
 
     await waitFor(() => {
       const toggles = getInvokeCalls().filter((call) => call.cmd === 'toggle_mod');
@@ -1293,9 +1293,9 @@ describe('<ProfilesView>', () => {
     });
     const unusedRow = screen.getByText('Unused Active').closest('.gf-profile-library-row') as HTMLElement;
     const usedRow = screen.getByText('Used Active').closest('.gf-profile-library-row') as HTMLElement;
-    expect(within(unusedRow).getByText(/Inactive \(kept installed\)/i)).toBeInTheDocument();
-    expect(within(usedRow).getByText(/Active in game folder/i)).toBeInTheDocument();
-    expect(await screen.findByText(/1 unused active mod disabled in game/i)).toBeInTheDocument();
+    expect(within(unusedRow).getByText(/^Stored$/i)).toBeInTheDocument();
+    expect(within(usedRow).getByText(/^Active in game$/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Stored 1 unused active mod/i)).toBeInTheDocument();
   });
 
   it('Mod Library leaves storage state unchanged when storing one mod fails', async () => {
@@ -1322,11 +1322,11 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await user.click(await screen.findByRole('button', { name: /Mod Library/i }));
-    await user.click(await screen.findByRole('button', { name: /Disable Locked Active Mod in game and keep it installed/i }));
+    await user.click(await screen.findByRole('button', { name: /Store Locked Active Mod \(keep installed but move out of the game folder\)/i }));
 
     expect(await screen.findByText(/Failed to move Locked Active Mod: disk locked/i)).toBeInTheDocument();
-    expect(screen.getByText(/Active in game folder/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Disable Locked Active Mod in game and keep it installed/i })).toBeEnabled();
+    expect(screen.getByText(/^Active in game$/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Store Locked Active Mod \(keep installed but move out of the game folder\)/i })).toBeEnabled();
   });
 
   it('Mod Library reports partial failures while storing unused active mods', async () => {
@@ -1366,16 +1366,16 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await user.click(await screen.findByRole('button', { name: /Mod Library/i }));
-    await user.click(await screen.findByRole('button', { name: /Disable 2 unused active mods/i }));
+    await user.click(await screen.findByRole('button', { name: /Store 2 unused active mods/i }));
 
     await waitFor(() => {
       expect(getInvokeCalls().filter((call) => call.cmd === 'toggle_mod')).toHaveLength(2);
     });
     const storedRow = screen.getByText('Stores Cleanly').closest('.gf-profile-library-row') as HTMLElement;
     const failedRow = screen.getByText('Fails To Store').closest('.gf-profile-library-row') as HTMLElement;
-    expect(within(storedRow).getByText(/Inactive \(kept installed\)/i)).toBeInTheDocument();
-    expect(within(failedRow).getByText(/Active in game folder/i)).toBeInTheDocument();
-    expect(await screen.findByText(/Disabled 1 of 2 unused active mods. Failed: Fails To Store/i)).toBeInTheDocument();
+    expect(within(storedRow).getByText(/^Stored$/i)).toBeInTheDocument();
+    expect(within(failedRow).getByText(/^Active in game$/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Stored 1 of 2 unused active mods. Failed: Fails To Store/i)).toBeInTheDocument();
   });
 
   it('Mod Library caps the initial rendered rows and can reveal more for large libraries', async () => {
@@ -1469,7 +1469,7 @@ describe('<ProfilesView>', () => {
 
     await user.selectOptions(screen.getByRole('combobox', { name: /Sort/i }), 'profilesMost');
     expect(titles()[0]).toContain('Most Used Patch');
-    expect(screen.getByText('2 profiles')).toBeInTheDocument();
+    expect(screen.getByText('2 modpacks')).toBeInTheDocument();
 
     await user.type(screen.getByRole('textbox', { name: /Search Mod Library/i }), 'zeta-folder');
     expect(titles()).toHaveLength(1);
@@ -1751,7 +1751,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('Active')).toBeInTheDocument(); });
-    const reapply = screen.getAllByTitle(/Re-apply this profile/i);
+    const reapply = screen.getAllByTitle(/Re-apply this modpack/i);
     expect(reapply.length).toBeGreaterThan(0);
     await user.click(reapply[0]);
     await waitFor(() => {
@@ -1765,7 +1765,7 @@ describe('<ProfilesView>', () => {
     let resolver!: (v: unknown) => void;
     registerInvokeHandler('list_profiles_cmd', () => new Promise((r) => { resolver = r; }));
     render(<Wrap />);
-    expect(screen.getByText(/Loading profiles/i)).toBeInTheDocument();
+    expect(screen.getByText(/Loading modpacks/i)).toBeInTheDocument();
     resolver([]);
   });
 
@@ -2171,7 +2171,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Add by code/i }));
+    await user.click(screen.getByRole('button', { name: /Add modpack code/i }));
     const input = await screen.findByPlaceholderText(/username\/XXXX/);
     await user.type(input, 'alice/AA5A-315D-61AE');
     await user.click(screen.getByRole('button', { name: /^Import$/ }));
@@ -2195,7 +2195,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Add by code/i }));
+    await user.click(screen.getByRole('button', { name: /Add modpack code/i }));
     const input = await screen.findByPlaceholderText(/username\/XXXX/);
     await user.type(input, 'alice/AA5A-315D-61AE{Enter}');
     // Confirm dialog appears.
@@ -2209,7 +2209,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Add by code/i }));
+    await user.click(screen.getByRole('button', { name: /Add modpack code/i }));
     await user.click(screen.getByRole('button', { name: /^Import$/ }));
     expect(getInvokeCalls().some((c) => c.cmd === 'fetch_shared_profile_cmd')).toBe(false);
   });
@@ -2223,7 +2223,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Add by code/i }));
+    await user.click(screen.getByRole('button', { name: /Add modpack code/i }));
     const input = await screen.findByPlaceholderText(/username\/XXXX/);
     await user.type(input, 'alice/AA5A-315D-61AE');
     await user.click(screen.getByRole('button', { name: /^Import$/ }));
@@ -2244,7 +2244,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Add by code/i }));
+    await user.click(screen.getByRole('button', { name: /Add modpack code/i }));
     const input = await screen.findByPlaceholderText(/username\/XXXX/);
     await user.type(input, 'alice/AA5A-315D-61AE');
     await user.click(screen.getByRole('button', { name: /^Import$/ }));
@@ -2268,7 +2268,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('Match')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Add by code/i }));
+    await user.click(screen.getByRole('button', { name: /Add modpack code/i }));
     const input = await screen.findByPlaceholderText(/username\/XXXX/);
     await user.type(input, 'alice/AA5A-315D-61AE');
     await user.click(screen.getByRole('button', { name: /^Import$/ }));
@@ -2293,7 +2293,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('OtherInstalled')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Add by code/i }));
+    await user.click(screen.getByRole('button', { name: /Add modpack code/i }));
     const input = await screen.findByPlaceholderText(/username\/XXXX/);
     await user.type(input, 'alice/AA5A-315D-61AE');
     await user.click(screen.getByRole('button', { name: /^Import$/ }));
@@ -2336,7 +2336,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getAllByText('MyPack').length).toBeGreaterThan(0); });
-    await user.click(screen.getByRole('button', { name: /Add by code/i }));
+    await user.click(screen.getByRole('button', { name: /Add modpack code/i }));
     const input = await screen.findByPlaceholderText(/username\/XXXX/);
     await user.type(input, 'alice/AA5A-315D-61AE');
     await user.click(screen.getByRole('button', { name: /^Import$/ }));
@@ -2379,33 +2379,33 @@ describe('<ProfilesView>', () => {
     seedProfiles([baseProfile({ name: 'X' })]);
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    expect(screen.getByRole('button', { name: /Snapshot current/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Snapshot active modpack/ })).toBeInTheDocument();
   });
 
-  it('header toolbar toggles: Add by code closes Import JSON + Create forms', async () => {
+  it('header toolbar toggles: Add modpack code closes Import modpack JSON + Create forms', async () => {
     seedProfiles([baseProfile({ name: 'X' })]);
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    // Open Import JSON first.
-    await user.click(screen.getByRole('button', { name: /Import JSON/ }));
+    // Open Import modpack JSON first.
+    await user.click(screen.getByRole('button', { name: /Import modpack JSON/ }));
     expect(screen.getByPlaceholderText(/"name":/)).toBeInTheDocument();
-    // Then click Add by code — it should hide Import JSON.
-    await user.click(screen.getByRole('button', { name: /Add by code/i }));
+    // Then click Add modpack code — it should hide Import modpack JSON.
+    await user.click(screen.getByRole('button', { name: /Add modpack code/i }));
     expect(screen.queryByPlaceholderText(/"name":/)).toBeNull();
     expect(screen.getByPlaceholderText(/username\/XXXX/)).toBeInTheDocument();
   });
 
-  it('header toolbar toggles: New profile closes Import JSON + Add by code forms', async () => {
+  it('header toolbar toggles: Create modpack closes Import modpack JSON + Add modpack code forms', async () => {
     seedProfiles([baseProfile({ name: 'X' })]);
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Add by code/i }));
+    await user.click(screen.getByRole('button', { name: /Add modpack code/i }));
     expect(screen.getByPlaceholderText(/username\/XXXX/)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /New profile/ }));
+    await user.click(screen.getByRole('button', { name: /Create modpack/i }));
     expect(screen.queryByPlaceholderText(/username\/XXXX/)).toBeNull();
-    expect(screen.getByPlaceholderText('My Profile')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('My modpack')).toBeInTheDocument();
   });
 
   it('PublishModal onShared callback patches shareInfoMap (Share label flips to Re-share)', async () => {
@@ -2456,9 +2456,9 @@ describe('<ProfilesView>', () => {
       { share_id: 's2', profile_name: 'Beta', has_update: true, added_mods: [], updated_mods: [], removed_mods: [] },
     ]);
     render(<Wrap />);
-    // 2 packs → "2 packs have updates".
+    // 2 modpacks → "2 modpacks have updates".
     await waitFor(() => {
-      expect(screen.getByText(/2 packs have updates/)).toBeInTheDocument();
+      expect(screen.getByText(/2 modpacks have updates/)).toBeInTheDocument();
     });
     // Activity row with no added/updated/removed counts falls back to the
     // generic "curator pushed an update" summary (covers the `||` fallback
@@ -2478,9 +2478,9 @@ describe('<ProfilesView>', () => {
     }));
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('GenericDrift')).toBeInTheDocument(); });
-    // The fallback string from `... || 'profile and disk are out of sync'`.
+    // The fallback string from `... || 'modpack and disk are out of sync'`.
     await waitFor(() => {
-      expect(screen.getByText(/profile and disk are out of sync/)).toBeInTheDocument();
+      expect(screen.getByText(/modpack and disk are out of sync/)).toBeInTheDocument();
     });
   });
 
@@ -2529,8 +2529,8 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /New profile/ }));
-    const input = await screen.findByPlaceholderText('My Profile');
+    await user.click(screen.getByRole('button', { name: /Create modpack/i }));
+    const input = await screen.findByPlaceholderText('My modpack');
     await user.type(input, 'Bad');
     await user.click(screen.getByRole('button', { name: 'Create' }));
     await waitFor(() => {

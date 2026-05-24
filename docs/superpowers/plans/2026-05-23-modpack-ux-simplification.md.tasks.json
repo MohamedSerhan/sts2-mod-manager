@@ -4,20 +4,20 @@
     {
       "id": 1,
       "subject": "Task 1: Vocabulary keys + top-level rename",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Add the new Modpack vocabulary to both locales, switch sidebar nav, topbar profile chip, and globally-visible Profile-language strings (toasts, confirm dialogs, share-import dialogs) to the new vocabulary. No layout changes.\n\n**Files:** src/i18n/locales/en.json, src/i18n/locales/zh-Hans.json, src/App.tsx, src/components/ProfileSwitcher.tsx, src/components/QuickAddModal.tsx, src/views/Home.test.tsx, src/components/ProfileSwitcher.test.tsx, src/components/QuickAddModal.test.tsx\n\n**Verify:** npx vitest run src/views/Home.test.tsx src/components/ProfileSwitcher.test.tsx src/components/QuickAddModal.test.tsx src/i18n/locales/parity.test.ts\n\n```json:metadata\n{\"files\": [\"src/i18n/locales/en.json\", \"src/i18n/locales/zh-Hans.json\", \"src/App.tsx\", \"src/components/ProfileSwitcher.tsx\", \"src/components/QuickAddModal.tsx\"], \"verifyCommand\": \"npx vitest run src/views/Home.test.tsx src/components/ProfileSwitcher.test.tsx src/components/QuickAddModal.test.tsx src/i18n/locales/parity.test.ts\", \"acceptanceCriteria\": [\"Sidebar shows Modpacks and Help labels\", \"Topbar shows Active modpack eyebrow\", \"ProfileSwitcher uses modpack vocabulary\", \"QuickAddModal uses modpack vocabulary\", \"Confirm dialogs say modpack not profile\", \"qa:i18n passes\", \"targeted vitest passes\", \"no Rust/TS identifier renames\"]}\n```"
     },
     {
       "id": 2,
       "subject": "Task 2: Mods view — All Installed Mods reframing",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [1],
       "description": "**Goal:** Make Mods view unambiguously read as 'all installed mods'. Add membership context chips (in this modpack / stored / not in this modpack) so Solo's confusion case reads cleanly.\n\n**Files:** src/views/Mods.tsx, src/views/Mods.test.tsx, src/i18n/locales/en.json, src/i18n/locales/zh-Hans.json, src/styles.css\n\n**Verify:** npx vitest run src/views/Mods.test.tsx\n\n```json:metadata\n{\"files\": [\"src/views/Mods.tsx\", \"src/views/Mods.test.tsx\", \"src/i18n/locales/en.json\", \"src/i18n/locales/zh-Hans.json\", \"src/styles.css\"], \"verifyCommand\": \"npx vitest run src/views/Mods.test.tsx\", \"acceptanceCriteria\": [\"Page heading is All installed mods\", \"Subtitle explains scope vs active modpack\", \"Each row shows storage chip (Active in game or Stored)\", \"Each row shows membership chip when active modpack exists\", \"Solo's case (stored on disk but in active modpack) reads cleanly\", \"No behavior regression in toggle handlers\", \"4 new state-combination tests pass\"]}\n```"
     },
     {
       "id": 3,
       "subject": "Task 3: Modpacks view — membership + stored wording",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [1],
       "description": "**Goal:** Replace user-facing Profiles/Profile/Disable-in-game wording in Profiles.tsx with Modpacks/Modpack/Active-in-game/Stored/In-this-modpack. Mod Library workspace becomes canonical membership editor.\n\n**Files:** src/views/Profiles.tsx, src/views/Profiles.test.tsx, src/i18n/locales/en.json, src/i18n/locales/zh-Hans.json\n\n**Verify:** npx vitest run src/views/Profiles.test.tsx\n\n```json:metadata\n{\"files\": [\"src/views/Profiles.tsx\", \"src/views/Profiles.test.tsx\", \"src/i18n/locales/en.json\", \"src/i18n/locales/zh-Hans.json\"], \"verifyCommand\": \"npx vitest run src/views/Profiles.test.tsx\", \"acceptanceCriteria\": [\"Page heading reads Modpacks\", \"Action buttons use modpack vocabulary\", \"Mod Library subtitle present and explains membership\", \"Membership labels use 'In this modpack' wording\", \"Storage labels use Active in game/Stored not Disable in game\", \"Toast messages use modpack wording\", \"Profiles.test.tsx green after assertion updates\", \"No backend identifier renames\"]}\n```"
     },
@@ -85,5 +85,5 @@
       "description": "**Goal:** Run full QA gauntlet, confirm coverage thresholds (ratchet branches to 91 if achievable), manual responsive smoke at three window widths, bump version to 1.7.0.\n\n**USER-ORDERED GATE — NON-SKIPPABLE.**\n\n**Files:** package.json, src-tauri/Cargo.toml, src-tauri/tauri.conf.json, CHANGELOG.md, vitest.config.ts\n\n**Verify:** npx tsc --noEmit && cargo check --manifest-path=src-tauri/Cargo.toml && npx vitest run && npm run qa:i18n && cargo test --manifest-path=src-tauri/Cargo.toml && npm run qa:coverage\n\n```json:metadata\n{\"files\": [\"package.json\", \"src-tauri/Cargo.toml\", \"src-tauri/tauri.conf.json\", \"CHANGELOG.md\", \"vitest.config.ts\"], \"verifyCommand\": \"npx tsc --noEmit && cargo check --manifest-path=src-tauri/Cargo.toml && npx vitest run && npm run qa:i18n && cargo test --manifest-path=src-tauri/Cargo.toml && npm run qa:coverage\", \"acceptanceCriteria\": [\"tsc --noEmit exits 0\", \"cargo check exits 0\", \"vitest run passes 100%\", \"qa:coverage meets thresholds (lines>=96, funcs>=96, branches>=90, statements>=96)\", \"cargo test exits 0\", \"qa:i18n exits 0\", \"no if(btn){click(btn)} antipatterns in new/modified tests\", \"manual responsive smoke captured at wide/medium/narrow widths\", \"all three version files read 1.7.0\"], \"userGate\": true, \"tags\": [\"user-gate\"], \"requireEvidenceTokens\": [[\"tsc-pass\"], [\"vitest-pass\"], [\"coverage-pass\"], [\"cargo-test-pass\"], [\"i18n-parity-pass\"], [\"responsive-smoke-captured\"]]}\n```"
     }
   ],
-  "lastUpdated": "2026-05-23T19:45:00Z"
+  "lastUpdated": "2026-05-24T16:20:00Z"
 }

@@ -165,14 +165,14 @@
   },
   "profiles": {
     "page": {
-      "title": "Your packs",
-      "subtitle": "All the packs you follow, plus your own"
+      "title": "Modpacks",
+      "subtitle": "All the modpacks you follow, plus your own"
     },
     "actions": {
-      "addByCode": "Add by code",
-      "importJson": "Import JSON",
-      "snapshotCurrent": "Snapshot current",
-      "newProfile": "New profile"
+      "addByCode": "Add modpack code",
+      "importJson": "Import modpack JSON",
+      "snapshotCurrent": "Snapshot active modpack",
+      "newProfile": "Create modpack"
     },
     "prompt": {
       "snapshotName": "Enter snapshot name:",
@@ -180,19 +180,19 @@
       "duplicateDefault": "{{name}} (copy)"
     },
     "tabs": {
-      "following": "All packs",
+      "following": "All modpacks",
       "publishedByYou": "Published by you"
     },
     "assignments": {
-      "open": "Mod Library",
-      "title": "Mod Library",
-      "subtitle": "See every installed mod, which profiles use it, and reassign mods without switching profiles.",
-      "description": "See every installed mod, which profiles use it, and reassign mods without switching profiles.",
-      "back": "Back to profiles"
+      "open": "Mod library",
+      "title": "Mod library",
+      "subtitle": "Every mod you've installed. Toggle which modpacks each one belongs to.",
+      "description": "Every mod you've installed. Toggle which modpacks each one belongs to.",
+      "back": "Back to modpacks"
     },
     "activity": {
-      "hasUpdates": "{{count}} pack has updates",
-      "haveUpdates": "{{count}} packs have updates",
+      "hasUpdates": "{{count}} modpack has updates",
+      "haveUpdates": "{{count}} modpacks have updates",
       "summary": {
         "added": "+{{count}} added",
         "updated": "{{count}} updated",
@@ -204,61 +204,61 @@
     },
     "switching": {
       "activating": "Activating \"{{name}}\"",
-      "fetching": "Fetching profile data and downloading missing mods...",
+      "fetching": "Fetching modpack data and downloading missing mods...",
       "eta": "This may take a minute depending on the number of mods."
     },
     "drift": {
       "title": "{{name}} has drifted",
       "desc": "{{details}}",
-      "hint": "since the manifest. Save changes to update the profile, or Repair to restore it.",
+      "hint": "since the manifest. Save changes to update the modpack, or Repair to restore it.",
       "newItems": "{{count}} new",
       "removedItems": "{{count}} removed",
       "toggledItems": "{{count}} toggled",
       "versionChanged": "{{count}} version-changed",
-      "outOfSyncFallback": "profile and disk are out of sync",
+      "outOfSyncFallback": "modpack and disk are out of sync",
       "saveChanges": "Save changes",
       "repair": "Repair",
-      "repairTitle": "Re-apply manifest and disable extra active mods"
+      "repairTitle": "Re-apply manifest and store extra active mods"
     },
     "form": {
-      "codeLabel": "Profile Code (from a friend)",
+      "codeLabel": "Modpack code (from a friend)",
       "codePlaceholder": "username/XXXX-XXXX-XXXX",
-      "nameLabel": "Profile Name",
-      "namePlaceholder": "My Profile",
-      "jsonLabel": "Paste profile JSON",
+      "nameLabel": "Modpack name",
+      "namePlaceholder": "My modpack",
+      "jsonLabel": "Paste modpack JSON",
       "jsonPlaceholder": "{\"name\": \"...\", \"mods\": [...]}"
     },
-    "loading": "Loading profiles...",
+    "loading": "Loading modpacks...",
     "empty": {
       "following": {
-        "title": "No profiles yet",
-        "hint": "Create a profile to save your mod configuration, or import a code from a friend."
+        "title": "No modpacks yet",
+        "hint": "Create a modpack to save your mod configuration, or import a code from a friend."
       },
       "published": {
         "title": "You haven't published anything yet",
-        "hint": "Share a profile to make it appear here. Friends paste your code to install the same set of mods."
+        "hint": "Share a modpack to make it appear here. Friends paste your code to install the same set of mods."
       }
     },
     "library": {
-      "loading": "Loading Mod Library...",
-      "searchLabel": "Search Mod Library",
+      "loading": "Loading mod library...",
+      "searchLabel": "Search mod library",
       "searchPlaceholder_one": "Search {{count}} library mod",
       "searchPlaceholder_other": "Search {{count}} library mods",
-      "storageHelp": "Mod Library still shows every installed mod. Active means the files are in the game folder; inactive means they are kept installed but moved out of the active game folder. Profile checkboxes decide which profiles reference the mod.",
-      "storageActive": "Active in game folder",
-      "storageDisabled": "Inactive (kept installed)",
-      "storeAction": "Disable in Game",
-      "activateAction": "Activate in Game",
-      "storeAria": "Disable {{mod}} in game and keep it installed",
-      "activateAria": "Activate {{mod}} in game folder",
-      "bulkStoreUnused_one": "Disable {{count}} unused active mod",
-      "bulkStoreUnused_other": "Disable {{count}} unused active mods",
+      "storageHelp": "The mod library shows every installed mod. \"Active in game\" means the files are in the game folder; \"Stored\" means the files are kept installed but moved out of the game folder. Modpack checkboxes decide which modpacks include each mod.",
+      "storageActive": "Active in game",
+      "storageDisabled": "Stored",
+      "storeAction": "Store (keep installed but inactive)",
+      "activateAction": "Activate in game",
+      "storeAria": "Store {{mod}} (keep installed but move out of the game folder)",
+      "activateAria": "Activate {{mod}} in the game folder",
+      "bulkStoreUnused_one": "Store {{count}} unused active mod",
+      "bulkStoreUnused_other": "Store {{count}} unused active mods",
       "bulkStoreNone": "No unused active mods",
-      "inProfile": "In profile",
-      "notInProfile": "Not in profile",
-      "disabledInProfile": "Disabled in profile",
-      "profileUseCount_one": "{{count}} profile",
-      "profileUseCount_other": "{{count}} profiles",
+      "inProfile": "In this modpack",
+      "notInProfile": "Not in this modpack",
+      "disabledInProfile": "Included, off in this modpack",
+      "profileUseCount_one": "{{count}} modpack",
+      "profileUseCount_other": "{{count}} modpacks",
       "showing": "Showing {{shown}} of {{total}}",
       "showMore": "Show {{count}} more",
       "sort": {
@@ -266,15 +266,15 @@
         "nameAsc": "Name A-Z",
         "nameDesc": "Name Z-A",
         "activeFirst": "Active first",
-        "storedFirst": "Inactive first",
-        "profilesMost": "Most profiles"
+        "storedFirst": "Stored first",
+        "profilesMost": "Most modpacks"
       },
       "readOnly": "Read-only",
-      "readOnlyTitle": "Followed profiles are read-only. Duplicate the profile to edit it.",
-      "noProfiles": "No profiles yet",
+      "readOnlyTitle": "Followed modpacks are read-only. Duplicate the modpack to edit it.",
+      "noProfiles": "No modpacks yet",
       "empty": {
         "title": "No installed mods",
-        "hint": "Install mods first, then use Mod Library to choose which profiles include each one."
+        "hint": "Install mods first, then use the mod library to choose which modpacks include each one."
       },
       "noMatches": {
         "title": "No matching mods",
@@ -283,12 +283,12 @@
       "toastAdded": "Added {{mod}} to {{profile}}",
       "toastRemoved": "Removed {{mod}} from {{profile}}",
       "toastFailed": "Failed to update membership: {{error}}",
-      "toastStored": "{{mod}} disabled in game and kept installed",
+      "toastStored": "{{mod}} stored (kept installed, moved out of the game folder)",
       "toastActivated": "Activated {{mod}} in the game folder",
       "toastStorageFailed": "Failed to move {{mod}}: {{error}}",
-      "toastBulkStored_one": "{{count}} unused active mod disabled in game",
-      "toastBulkStored_other": "{{count}} unused active mods disabled in game",
-      "toastBulkStorageFailed": "Disabled {{stored}} of {{total}} unused active mods. Failed: {{mods}}"
+      "toastBulkStored_one": "Stored {{count}} unused active mod",
+      "toastBulkStored_other": "Stored {{count}} unused active mods",
+      "toastBulkStorageFailed": "Stored {{stored}} of {{total}} unused active mods. Failed: {{mods}}"
     },
     "loadOrder": {
       "button": "Load order",
@@ -296,19 +296,19 @@
       "dialogLabel": "Load order for {{name}}",
       "title": "Load order for {{name}}",
       "subtitle": "Top loads first. STS2 can still re-sort dependencies if an order is invalid.",
-      "note": "Drag rows or use the arrow buttons. This order is stored with the profile and written to STS2 settings when the profile is active or activated.",
+      "note": "Drag rows or use the arrow buttons. This order is stored with the modpack and written to STS2 settings when the modpack is active or activated.",
       "rowLabel": "{{name}}, position {{position}}",
       "dragHandle": "Drag to reorder",
-      "empty": "This profile has no mods to order.",
-      "disabled": "disabled",
+      "empty": "This modpack has no mods to order.",
+      "disabled": "off",
       "moveUp": "Move {{name}} up",
       "moveDown": "Move {{name}} down",
       "save": "Save order",
       "toastSavedApplied": "Load order saved for {{name}} and applied to settings.save.",
-      "toastSavedInactive": "Load order saved for {{name}}. It will apply when you activate this profile.",
-      "toastSavedSettingsMissing": "Load order saved for {{name}}, but settings.save was not found. Launch STS2 once, then activate this profile.",
+      "toastSavedInactive": "Load order saved for {{name}}. It will apply when you activate this modpack.",
+      "toastSavedSettingsMissing": "Load order saved for {{name}}, but settings.save was not found. Launch STS2 once, then activate this modpack.",
       "toastSavedSettingsMultiple": "Load order saved for {{name}}, but multiple settings.save files were found so none were changed.",
-      "toastSavedGameRunning": "Load order saved for {{name}}, but STS2 is running. Close the game and activate the profile to apply it.",
+      "toastSavedGameRunning": "Load order saved for {{name}}, but STS2 is running. Close the game and activate the modpack to apply it.",
       "toastSavedSettingsFailed": "Load order saved for {{name}}, but settings.save could not be updated.",
       "toastFailed": "Failed to save load order: {{error}}"
     },
@@ -328,8 +328,8 @@
       "switchTo": "Switch to",
       "share": "Share",
       "reShare": "Re-share",
-      "restore": "Re-apply this profile to match the manifest",
-      "activateProfile": "Activate profile (enable these mods)",
+      "restore": "Re-apply this modpack to match the manifest",
+      "activateProfile": "Activate modpack (enable these mods)",
       "shareTitle": "Share — friends paste the code to install",
       "reShareTitle": "Re-share — same code, friends see an update",
       "moreActions": "More actions"

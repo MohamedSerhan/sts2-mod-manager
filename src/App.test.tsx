@@ -231,7 +231,7 @@ describe('<App>', () => {
     await user.click(await screen.findByRole('button', { name: /Go to Profiles/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/Your packs/i)).toBeInTheDocument();
+      expect(screen.getByText(/All the modpacks you follow/i)).toBeInTheDocument();
     });
   });
 
@@ -243,7 +243,7 @@ describe('<App>', () => {
     //  don't need a Skip-setup click.)
     await user.click(getNavButton('Modpacks'));
     await waitFor(() => {
-      expect(screen.getByText(/Your packs/i)).toBeInTheDocument();
+      expect(screen.getByText(/All the modpacks you follow/i)).toBeInTheDocument();
     });
   });
 
@@ -747,7 +747,7 @@ describe('<App>', () => {
     const manageBtn = await screen.findByRole('button', { name: /Manage all/i });
     await user.click(manageBtn);
     await waitFor(() => {
-      expect(screen.getByText(/Your packs/i)).toBeInTheDocument();
+      expect(screen.getByText(/All the modpacks you follow/i)).toBeInTheDocument();
     });
   });
 
@@ -1620,7 +1620,7 @@ describe('<App>', () => {
     const viewAll = await screen.findByRole('button', { name: /View all in Profiles/i });
     await user.click(viewAll);
     await waitFor(() => {
-      expect(screen.getByText(/Your packs/i)).toBeInTheDocument();
+      expect(screen.getByText(/All the modpacks you follow/i)).toBeInTheDocument();
     });
   });
 

@@ -165,14 +165,14 @@
   },
   "profiles": {
     "page": {
-      "title": "你的整合包",
-      "subtitle": "你关注的以及自己创建的所有整合包"
+      "title": "模组包",
+      "subtitle": "你关注的以及自己创建的所有模组包"
     },
     "actions": {
-      "addByCode": "通过代码添加",
-      "importJson": "导入 JSON",
-      "snapshotCurrent": "快照当前状态",
-      "newProfile": "新建方案"
+      "addByCode": "添加模组包代码",
+      "importJson": "导入模组包 JSON",
+      "snapshotCurrent": "快照当前模组包",
+      "newProfile": "创建模组包"
     },
     "prompt": {
       "snapshotName": "输入快照名称：",
@@ -180,19 +180,19 @@
       "duplicateDefault": "{{name}}（副本）"
     },
     "tabs": {
-      "following": "所有方案",
+      "following": "所有模组包",
       "publishedByYou": "你发布的"
     },
     "assignments": {
       "open": "模组库",
       "title": "模组库",
-      "subtitle": "查看所有已安装模组、哪些方案使用了它们，并在不切换方案的情况下重新分配。",
-      "description": "查看所有已安装模组、哪些方案使用了它们，并在不切换方案的情况下重新分配。",
-      "back": "返回方案"
+      "subtitle": "你已安装的所有模组。切换这些模组在每个模组包中的归属。",
+      "description": "你已安装的所有模组。切换这些模组在每个模组包中的归属。",
+      "back": "返回模组包"
     },
     "activity": {
-      "hasUpdates": "{{count}} 个整合包有更新",
-      "haveUpdates": "{{count}} 个整合包有更新",
+      "hasUpdates": "{{count}} 个模组包有更新",
+      "haveUpdates": "{{count}} 个模组包有更新",
       "summary": {
         "added": "新增 {{count}} 个",
         "updated": "更新 {{count}} 个",
@@ -204,39 +204,39 @@
     },
     "switching": {
       "activating": "正在激活 \"{{name}}\"",
-      "fetching": "正在获取方案数据并下载缺失的模组...",
+      "fetching": "正在获取模组包数据并下载缺失的模组...",
       "eta": "这可能需要几分钟，取决于模组数量。"
     },
     "drift": {
       "title": "{{name}} 已发生偏离",
       "desc": "{{details}}",
-      "hint": "自清单记录以来。保存更改以更新方案，或修复以恢复。",
+      "hint": "自清单记录以来。保存更改以更新模组包，或修复以恢复。",
       "newItems": "{{count}} 个新增",
       "removedItems": "{{count}} 个移除",
       "toggledItems": "{{count}} 个切换",
       "versionChanged": "{{count}} 个版本变更",
-      "outOfSyncFallback": "方案与磁盘状态不同步",
+      "outOfSyncFallback": "模组包与磁盘状态不同步",
       "saveChanges": "保存更改",
       "repair": "修复",
-      "repairTitle": "重新应用清单并禁用多余的启用模组"
+      "repairTitle": "重新应用清单并存储多余的启用模组"
     },
     "form": {
-      "codeLabel": "方案代码（来自好友）",
+      "codeLabel": "模组包代码（来自好友）",
       "codePlaceholder": "username/XXXX-XXXX-XXXX",
-      "nameLabel": "方案名称",
-      "namePlaceholder": "我的方案",
-      "jsonLabel": "粘贴方案 JSON",
+      "nameLabel": "模组包名称",
+      "namePlaceholder": "我的模组包",
+      "jsonLabel": "粘贴模组包 JSON",
       "jsonPlaceholder": "{\"name\": \"...\", \"mods\": [...]}"
     },
-    "loading": "正在加载方案...",
+    "loading": "正在加载模组包...",
     "empty": {
       "following": {
-        "title": "还没有方案",
-        "hint": "创建一个方案来保存你的模组配置，或从好友处导入代码。"
+        "title": "还没有模组包",
+        "hint": "创建一个模组包来保存你的模组配置，或从好友处导入代码。"
       },
       "published": {
         "title": "你还没有发布任何内容",
-        "hint": "分享一个方案使其显示在此处。好友粘贴你的代码即可安装相同的模组集。"
+        "hint": "分享一个模组包使其显示在此处。好友粘贴你的代码即可安装相同的模组集。"
       }
     },
     "card": {
@@ -255,8 +255,8 @@
       "switchTo": "切换到",
       "share": "分享",
       "reShare": "重新分享",
-      "restore": "重新应用此方案以匹配清单",
-      "activateProfile": "激活方案（启用这些模组）",
+      "restore": "重新应用此模组包以匹配清单",
+      "activateProfile": "激活模组包（启用这些模组）",
       "shareTitle": "分享 — 好友粘贴代码即可安装",
       "reShareTitle": "重新分享 — 相同代码，好友会看到更新",
       "moreActions": "更多操作"
@@ -334,21 +334,21 @@
       "searchLabel": "搜索模组库",
       "searchPlaceholder_one": "搜索 {{count}} 个库中模组",
       "searchPlaceholder_other": "搜索 {{count}} 个库中模组",
-      "storageHelp": "模组库仍会显示每个已安装模组。活跃表示文件在游戏模组文件夹中；非活跃表示文件仍保留安装，但已移出活跃游戏模组文件夹。方案复选框决定哪些方案引用该模组。",
-      "storageActive": "在游戏文件夹中活跃",
-      "storageDisabled": "非活跃（保留安装）",
-      "storeAction": "在游戏中禁用",
-      "activateAction": "在游戏中启用",
-      "storeAria": "在游戏中禁用 {{mod}} 并保留安装",
-      "activateAria": "将 {{mod}} 启用到游戏文件夹",
-      "bulkStoreUnused_one": "禁用 {{count}} 个未使用的活跃模组",
-      "bulkStoreUnused_other": "禁用 {{count}} 个未使用的活跃模组",
+      "storageHelp": "模组库会显示所有已安装的模组。\"已激活于游戏\"表示文件在游戏文件夹中;\"已存储\"表示文件仍保留安装，但已移出游戏文件夹。模组包复选框决定哪些模组包包含该模组。",
+      "storageActive": "已激活于游戏",
+      "storageDisabled": "已存储",
+      "storeAction": "存储（保留安装但不激活）",
+      "activateAction": "在游戏中激活",
+      "storeAria": "存储 {{mod}}（保留安装但移出游戏文件夹）",
+      "activateAria": "将 {{mod}} 激活到游戏文件夹",
+      "bulkStoreUnused_one": "存储 {{count}} 个未使用的活跃模组",
+      "bulkStoreUnused_other": "存储 {{count}} 个未使用的活跃模组",
       "bulkStoreNone": "没有未使用的活跃模组",
-      "inProfile": "在方案中",
-      "notInProfile": "不在方案中",
-      "disabledInProfile": "在方案中禁用",
-      "profileUseCount_one": "{{count}} 个方案",
-      "profileUseCount_other": "{{count}} 个方案",
+      "inProfile": "已加入此模组包",
+      "notInProfile": "未加入此模组包",
+      "disabledInProfile": "已加入但在此模组包中已关闭",
+      "profileUseCount_one": "{{count}} 个模组包",
+      "profileUseCount_other": "{{count}} 个模组包",
       "showing": "正在显示 {{shown}} / {{total}}",
       "showMore": "再显示 {{count}} 个",
       "sort": {
@@ -356,15 +356,15 @@
         "nameAsc": "名称 A-Z",
         "nameDesc": "名称 Z-A",
         "activeFirst": "活跃优先",
-        "storedFirst": "非活跃优先",
-        "profilesMost": "方案最多"
+        "storedFirst": "已存储优先",
+        "profilesMost": "模组包最多"
       },
       "readOnly": "只读",
-      "readOnlyTitle": "关注的方案为只读。复制该方案后即可编辑。",
-      "noProfiles": "还没有方案",
+      "readOnlyTitle": "关注的模组包为只读。复制该模组包后即可编辑。",
+      "noProfiles": "还没有模组包",
       "empty": {
         "title": "未安装任何模组",
-        "hint": "先安装模组，然后使用模组库选择每个方案包含哪些模组。"
+        "hint": "先安装模组，然后使用模组库选择每个模组包包含哪些模组。"
       },
       "noMatches": {
         "title": "没有匹配的模组",
@@ -373,12 +373,12 @@
       "toastAdded": "已将 {{mod}} 添加到 {{profile}}",
       "toastRemoved": "已从 {{profile}} 移除 {{mod}}",
       "toastFailed": "更新关联失败：{{error}}",
-      "toastStored": "{{mod}} 已在游戏中禁用并保留安装",
-      "toastActivated": "已将 {{mod}} 启用到游戏文件夹",
+      "toastStored": "{{mod}} 已存储（保留安装，已移出游戏文件夹）",
+      "toastActivated": "已将 {{mod}} 激活到游戏文件夹",
       "toastStorageFailed": "移动 {{mod}} 失败：{{error}}",
-      "toastBulkStored_one": "{{count}} 个未使用的活跃模组已在游戏中禁用",
-      "toastBulkStored_other": "{{count}} 个未使用的活跃模组已在游戏中禁用",
-      "toastBulkStorageFailed": "已禁用 {{stored}} / {{total}} 个未使用的活跃模组。失败：{{mods}}"
+      "toastBulkStored_one": "已存储 {{count}} 个未使用的活跃模组",
+      "toastBulkStored_other": "已存储 {{count}} 个未使用的活跃模组",
+      "toastBulkStorageFailed": "已存储 {{stored}} / {{total}} 个未使用的活跃模组。失败：{{mods}}"
     },
     "loadOrder": {
       "button": "加载顺序",
@@ -386,19 +386,19 @@
       "dialogLabel": "{{name}} 的加载顺序",
       "title": "{{name}} 的加载顺序",
       "subtitle": "顶部最先加载。如果顺序无效，STS2 仍可能根据依赖关系重新排序。",
-      "note": "拖动行或使用箭头按钮。此顺序会随方案保存，并在该方案处于当前状态或被激活时写入 STS2 设置。",
+      "note": "拖动行或使用箭头按钮。此顺序会随模组包保存，并在该模组包处于当前状态或被激活时写入 STS2 设置。",
       "rowLabel": "{{name}}，第 {{position}} 位",
       "dragHandle": "拖动以重新排序",
-      "empty": "此方案没有可排序的模组。",
-      "disabled": "已禁用",
+      "empty": "此模组包没有可排序的模组。",
+      "disabled": "已关闭",
       "moveUp": "上移 {{name}}",
       "moveDown": "下移 {{name}}",
       "save": "保存顺序",
       "toastSavedApplied": "{{name}} 的加载顺序已保存，并已应用到 settings.save。",
-      "toastSavedInactive": "{{name}} 的加载顺序已保存。激活此方案时会应用该顺序。",
-      "toastSavedSettingsMissing": "{{name}} 的加载顺序已保存，但未找到 settings.save。请先启动一次 STS2，然后再激活此方案。",
+      "toastSavedInactive": "{{name}} 的加载顺序已保存。激活此模组包时会应用该顺序。",
+      "toastSavedSettingsMissing": "{{name}} 的加载顺序已保存，但未找到 settings.save。请先启动一次 STS2，然后再激活此模组包。",
       "toastSavedSettingsMultiple": "{{name}} 的加载顺序已保存，但找到了多个 settings.save，因此没有修改任何文件。",
-      "toastSavedGameRunning": "{{name}} 的加载顺序已保存，但 STS2 正在运行。关闭游戏后激活该方案即可应用。",
+      "toastSavedGameRunning": "{{name}} 的加载顺序已保存，但 STS2 正在运行。关闭游戏后激活该模组包即可应用。",
       "toastSavedSettingsFailed": "{{name}} 的加载顺序已保存，但无法更新 settings.save。",
       "toastFailed": "保存加载顺序失败：{{error}}"
     }

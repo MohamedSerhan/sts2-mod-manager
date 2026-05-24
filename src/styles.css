@@ -2376,3 +2376,113 @@ body {
   opacity: 0.85;
   font-size: 13px;
 }
+
+/* ── CreateModpackWizard ──────────────────────────────────────────────
+ * 4-step "create a modpack" guided dialog. Re-uses the existing
+ * .gf-modal-back / .gf-modal shell so the backdrop, blur, animation,
+ * and header/foot padding all match other dialogs (PublishModal etc.).
+ */
+.gf-create-wizard { width: min(640px, 95vw); max-height: 85vh; }
+.gf-create-wizard-step-indicator {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-mute);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  background: var(--indigo-elev);
+  border-radius: 999px;
+}
+
+.gf-create-wizard-strategy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gf-create-wizard-strategy-option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--indigo-line);
+  background: var(--indigo-panel);
+  border-radius: 8px;
+  text-align: left;
+  cursor: pointer;
+  color: var(--ink);
+  font-family: inherit;
+  transition: border-color 0.15s, background 0.15s;
+}
+.gf-create-wizard-strategy-option:hover {
+  border-color: var(--gf-line, var(--indigo-line));
+  background: var(--indigo-elev);
+}
+.gf-create-wizard-strategy-option.is-active {
+  border-color: var(--gf-line, var(--indigo-line));
+  background: var(--indigo-elev);
+}
+.gf-create-wizard-strategy-title { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.gf-create-wizard-strategy-desc { font-size: 12px; color: var(--ink-mute); line-height: 1.45; }
+.gf-create-wizard-clone-pick { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+
+.gf-create-wizard-choose { display: flex; flex-direction: column; gap: 10px; }
+.gf-create-wizard-choose-controls { display: flex; gap: 10px; align-items: flex-end; }
+.gf-create-wizard-choose-controls .gf-set-input { flex: 1; }
+.gf-create-wizard-sort { display: flex; flex-direction: column; gap: 3px; }
+.gf-create-wizard-selected-count {
+  font-size: 12px; color: var(--ink-mute); margin-top: 2px;
+}
+.gf-create-wizard-list {
+  display: flex; flex-direction: column;
+  max-height: 320px; overflow-y: auto;
+  border: 1px solid var(--indigo-line);
+  border-radius: 8px;
+  background: oklch(0.20 0.025 270 / 0.5);
+}
+.gf-create-wizard-list-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 12px;
+  font-size: 12.5px; color: var(--ink);
+  border-bottom: 1px solid var(--indigo-line);
+  cursor: pointer;
+}
+.gf-create-wizard-list-row:last-child { border-bottom: 0; }
+.gf-create-wizard-list-row:hover { background: var(--indigo-elev); }
+.gf-create-wizard-list-name { flex: 1; }
+.gf-create-wizard-list-meta {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11.5px; color: var(--ink-dim);
+}
+.gf-create-wizard-empty {
+  padding: 24px 12px; text-align: center; color: var(--ink-mute); font-size: 12.5px;
+}
+
+.gf-create-wizard-health-loading {
+  padding: 24px 12px; color: var(--ink-mute); font-size: 13px; text-align: center;
+}
+.gf-create-wizard-health-list {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.gf-create-wizard-health-list li {
+  padding: 10px 14px;
+  background: oklch(0.20 0.025 270 / 0.5);
+  border: 1px solid var(--indigo-line);
+  border-radius: 8px;
+  font-size: 13px; color: var(--ink);
+}
+
+.gf-create-wizard-finish { display: flex; flex-direction: column; gap: 12px; }
+.gf-create-wizard-share-hint {
+  font-size: 12px; color: var(--ink-mute); line-height: 1.5;
+  padding: 8px 12px;
+  background: oklch(0.20 0.025 270 / 0.4);
+  border-radius: 6px;
+}
+.gf-create-wizard-error {
+  font-size: 12.5px; color: oklch(0.82 0.16 25);
+  padding: 8px 12px;
+  background: oklch(0.55 0.13 25 / 0.10);
+  border: 1px solid oklch(0.55 0.13 25 / 0.35);
+  border-radius: 7px;
+}

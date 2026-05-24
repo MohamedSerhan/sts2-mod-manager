@@ -33,9 +33,9 @@ import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../components/ConfirmDialog';
 import { KebabMenu, KebabSection, KebabDivider, KebabItem } from '../components/KebabMenu';
 import { PublishModal } from '../components/PublishModal';
+import { CreateModpackWizard } from '../components/CreateModpackWizard';
 import {
   listProfiles,
-  createProfile,
   switchProfile,
   repairProfile,
   snapshotProfile,
@@ -118,8 +118,7 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [newName, setNewName] = useState('');
-  const [showCreate, setShowCreate] = useState(false);
+  const [showCreateWizard, setShowCreateWizard] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [importJson, setImportJson] = useState('');
   const [showImportCode, setShowImportCode] = useState(false);
@@ -240,7 +239,6 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
 
   function openModAssignments() {
     setShowModAssignments(true);
-    setShowCreate(false);
     setShowImport(false);
     setShowImportCode(false);
   }
@@ -475,19 +473,6 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
       }
     } finally {
       setLibraryStorageSaving(null);
-    }
-  }
-
-  async function handleCreate() {
-    if (!newName.trim()) return;
-    try {
-      const profile = await createProfile(newName.trim());
-      setProfiles((prev) => [...prev, profile]);
-      setNewName('');
-      setShowCreate(false);
-      toastCtx.success(t('profiles.toast.created', { name: profile.name }));
-    } catch (e) {
-      toastCtx.error(t('profiles.toast.createFailed', { error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
@@ -1129,7 +1114,6 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
             onClick={() => {
               setShowImportCode(!showImportCode);
               setShowImport(false);
-              setShowCreate(false);
             }}
           >
             <Key size={14} />
@@ -1141,7 +1125,6 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
             onClick={() => {
               setShowImport(!showImport);
               setShowImportCode(false);
-              setShowCreate(false);
             }}
           >
             <Upload size={14} />
@@ -1152,7 +1135,10 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
             {t('profiles.actions.snapshotCurrent')}
           </Button>
           <Button size="sm" onClick={() => {
-            setShowCreate(!showCreate);
+            // Open the guided wizard. Close any inline panels that
+            // would otherwise compete for vertical space behind the
+            // modal.
+            setShowCreateWizard(true);
             setShowImport(false);
             setShowImportCode(false);
           }}>
@@ -1333,35 +1319,6 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
             variant="ghost"
             size="sm"
             onClick={() => setShowImportCode(false)}
-          >
-            {t('common.cancel')}
-          </Button>
-        </Card>
-      )}
-
-      {/* Create Profile Form */}
-      {showCreate && (
-        <Card className="flex gap-2 items-end">
-          <div className="flex-1">
-            <label className="text-xs text-text-muted block mb-1">
-              {t('profiles.form.nameLabel')}
-            </label>
-            <input
-              type="text"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder={t('profiles.form.namePlaceholder')}
-              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-text placeholder:text-text-dim focus:outline-none focus:ring-2 focus:ring-primary/50"
-              onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
-            />
-          </div>
-          <Button size="sm" onClick={handleCreate}>
-            {t('common.create')}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowCreate(false)}
           >
             {t('common.cancel')}
           </Button>
@@ -1661,6 +1618,28 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
         );
       })()}
         </>
+      )}
+
+      {showCreateWizard && (
+        <CreateModpackWizard
+          onClose={() => setShowCreateWizard(false)}
+          onCreated={async ({ name, sharedNow }) => {
+            // Close the wizard immediately so it doesn't sit on top of
+            // the new pack's row, then refresh so the new manifest shows
+            // up. If the user picked "Create and share now", hand off to
+            // PublishModal once the list has the new row available.
+            setShowCreateWizard(false);
+            toastCtx.success(t('profiles.toast.created', { name }));
+            await loadProfiles();
+            if (sharedNow) {
+              const fresh = await listProfiles().catch(() => [] as Profile[]);
+              const profile = fresh.find((p) => p.name === name);
+              if (profile) {
+                setPublishTarget({ profile, isReshare: false });
+              }
+            }
+          }}
+        />
       )}
 
       <PublishModal

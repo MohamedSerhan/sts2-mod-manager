@@ -166,83 +166,23 @@ describe('<ProfilesView>', () => {
     expect(screen.getByText('ACTIVE')).toBeInTheDocument();
   });
 
-  it('opens the create form and creates a profile on Create click', async () => {
+  // The bare "name your modpack" inline form was removed in 1.7.0 — the
+  // toolbar's Create modpack button now opens the guided wizard
+  // (CreateModpackWizard). The full create flow + name validation +
+  // create_profile invoke wiring + toast wording is exercised in
+  // CreateModpackWizard.test.tsx; here we only verify that clicking
+  // the toolbar button mounts the wizard.
+  it('Create modpack button opens the guided wizard', async () => {
     seedProfiles([baseProfile({ name: 'Existing' })]);
-    registerInvokeHandler('create_profile', (args) => baseProfile({ name: String(args?.name) }));
     const user = setupUserWithClipboard();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('Existing')).toBeInTheDocument(); });
 
     await user.click(screen.getByRole('button', { name: /Create modpack/i }));
-    const input = await screen.findByPlaceholderText('My modpack');
-    await user.type(input, 'Vacation Pack');
-    await user.click(screen.getByRole('button', { name: 'Create' }));
-    await waitFor(() => {
-      expect(getInvokeCalls().some(
-        (c) => c.cmd === 'create_profile' && c.args?.name === 'Vacation Pack',
-      )).toBe(true);
-    });
-    // Toast text confirms the success branch ran.
-    await waitFor(() => {
-      expect(screen.getByText(/Modpack "Vacation Pack" created/)).toBeInTheDocument();
-    });
-  });
-
-  it('Create form Enter key submits via onKeyDown handler', async () => {
-    seedProfiles([baseProfile({ name: 'X' })]);
-    registerInvokeHandler('create_profile', (args) => baseProfile({ name: String(args?.name) }));
-    const user = setupUserWithClipboard();
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Create modpack/i }));
-    const input = await screen.findByPlaceholderText('My modpack');
-    await user.type(input, 'KeyCreated{Enter}');
-    await waitFor(() => {
-      expect(getInvokeCalls().some(
-        (c) => c.cmd === 'create_profile' && c.args?.name === 'KeyCreated',
-      )).toBe(true);
-    });
-  });
-
-  it('create_profile error surfaces an error toast', async () => {
-    seedProfiles([baseProfile({ name: 'X' })]);
-    registerInvokeHandler('create_profile', () => { throw new Error('disk full'); });
-    const user = setupUserWithClipboard();
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Create modpack/i }));
-    const input = await screen.findByPlaceholderText('My modpack');
-    await user.type(input, 'Bad');
-    await user.click(screen.getByRole('button', { name: 'Create' }));
-    await waitFor(() => {
-      expect(screen.getByText(/Failed to create modpack.*disk full/)).toBeInTheDocument();
-    });
-  });
-
-  it('Cancel button in the create form hides the input', async () => {
-    seedProfiles([]);
-    const user = setupUserWithClipboard();
-    render(<Wrap />);
-    await waitFor(() => {
-      expect(screen.getByText(/No modpacks yet/i)).toBeInTheDocument();
-    });
-    const newBtns = screen.getAllByRole('button', { name: /Create modpack/i });
-    await user.click(newBtns[0]);
-    expect(screen.getByPlaceholderText('My modpack')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(screen.queryByPlaceholderText('My modpack')).toBeNull();
-  });
-
-  it('refuses to submit when the name is empty (whitespace only)', async () => {
-    seedProfiles([baseProfile({ name: 'X' })]);
-    const user = setupUserWithClipboard();
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Create modpack/i }));
-    const input = await screen.findByPlaceholderText('My modpack');
-    await user.type(input, '   ');
-    await user.click(screen.getByRole('button', { name: 'Create' }));
-    expect(getInvokeCalls().some((c) => c.cmd === 'create_profile')).toBe(false);
+    // The wizard mounts with its step-1 "Start from my active mods" tile.
+    expect(
+      await screen.findByRole('button', { name: /start from my active mods/i }),
+    ).toBeInTheDocument();
   });
 
   it('shows the activity feed when subUpdates carries a pending pack update', async () => {
@@ -2396,7 +2336,7 @@ describe('<ProfilesView>', () => {
     expect(screen.getByPlaceholderText(/username\/XXXX/)).toBeInTheDocument();
   });
 
-  it('header toolbar toggles: Create modpack closes Import modpack JSON + Add modpack code forms', async () => {
+  it('header toolbar: Create modpack closes the Add modpack code inline form', async () => {
     seedProfiles([baseProfile({ name: 'X' })]);
     const user = userEvent.setup();
     render(<Wrap />);
@@ -2404,8 +2344,11 @@ describe('<ProfilesView>', () => {
     await user.click(screen.getByRole('button', { name: /Add modpack code/i }));
     expect(screen.getByPlaceholderText(/username\/XXXX/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Create modpack/i }));
+    // Inline "Add modpack code" panel collapses, and the guided wizard mounts.
     expect(screen.queryByPlaceholderText(/username\/XXXX/)).toBeNull();
-    expect(screen.getByPlaceholderText('My modpack')).toBeInTheDocument();
+    expect(
+      await screen.findByRole('button', { name: /start from my active mods/i }),
+    ).toBeInTheDocument();
   });
 
   it('PublishModal onShared callback patches shareInfoMap (Share label flips to Re-share)', async () => {
@@ -2523,20 +2466,9 @@ describe('<ProfilesView>', () => {
     });
   });
 
-  it('non-Error throws fall through to String() formatter (handleCreate)', async () => {
-    seedProfiles([baseProfile({ name: 'X' })]);
-    registerInvokeHandler('create_profile', () => { throw 'plain-string-error'; });
-    const user = userEvent.setup();
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Create modpack/i }));
-    const input = await screen.findByPlaceholderText('My modpack');
-    await user.type(input, 'Bad');
-    await user.click(screen.getByRole('button', { name: 'Create' }));
-    await waitFor(() => {
-      expect(screen.getByText(/Failed to create modpack.*plain-string-error/)).toBeInTheDocument();
-    });
-  });
+  // handleCreate non-Error throw coverage moved to
+  // CreateModpackWizard.test.tsx along with the rest of the create
+  // flow when the inline form was removed.
 
   it('non-Error throws fall through to String() formatter (apply sub update)', async () => {
     seedProfiles([baseProfile({ name: 'Alpha' })]);

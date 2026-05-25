@@ -155,15 +155,22 @@ describe('<PublishModal>', () => {
     expect(screen.queryByText(/disabled \(/)).toBeNull();
   });
 
-  it('shows the GitHub-token-missing pre-flight warning when no token is set', async () => {
+  it('renders the inline ShareSetupPanel when no GitHub token is set', async () => {
     tokenIsSet(false);
     render(<Wrap />);
+    // The old red "GitHub token required" warning block is gone — the
+    // modal now renders the ShareSetupPanel inline with a plain-language
+    // explanation, the token field, and a "Configure later" escape hatch.
     await waitFor(() => {
-      expect(screen.getByText('GitHub token required')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Set up sharing' })).toBeInTheDocument();
     });
-    // Publish button must be disabled in the blocked state.
+    // Token field is present so the curator can paste without leaving.
+    expect(screen.getByLabelText('Paste your token here')).toBeInTheDocument();
+    // The publish button stays disabled while no token has been saved.
     const publishBtn = screen.getByRole('button', { name: /Publish/ });
     expect(publishBtn).toBeDisabled();
+    // Old block's "GitHub token required" copy must not surface anymore.
+    expect(screen.queryByText('GitHub token required')).toBeNull();
   });
 
   it('publish button is disabled while token status is still loading (null)', async () => {
@@ -174,13 +181,15 @@ describe('<PublishModal>', () => {
     expect(publishBtn).toBeDisabled();
   });
 
-  it('treats get_api_key_status rejection as token-missing (block + warning)', async () => {
+  it('treats get_api_key_status rejection as token-missing (renders ShareSetupPanel)', async () => {
     registerInvokeHandler('get_api_key_status', () => {
       throw new Error('boom');
     });
     render(<Wrap />);
+    // Status-fetch failure should land the user in the same setup panel,
+    // not in a stuck loading state with a disabled Publish button.
     await waitFor(() => {
-      expect(screen.getByText('GitHub token required')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Set up sharing' })).toBeInTheDocument();
     });
   });
 
@@ -242,28 +251,63 @@ describe('<PublishModal>', () => {
     });
   });
 
-  it('Open Settings → Accounts CTA fires onGoToSettings and closes modal', async () => {
+  it('"Configure later in Settings" still routes to Settings and closes the modal', async () => {
     tokenIsSet(false);
     const onGoToSettings = vi.fn();
     const onClose = vi.fn();
     const user = userEvent.setup();
     render(<Wrap onGoToSettings={onGoToSettings} onClose={onClose} />);
-    const goBtn = await screen.findByRole('button', { name: /Open Settings/ });
+    const goBtn = await screen.findByRole('button', { name: /Configure later in Settings/ });
     await user.click(goBtn);
     expect(onGoToSettings).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('does NOT render Open Settings CTA when onGoToSettings is undefined', async () => {
+  it('"Configure later in Settings" still closes when onGoToSettings is undefined', async () => {
+    // Parents that don't wire a Settings router still get a graceful close —
+    // the panel's button no longer requires the optional callback.
     tokenIsSet(false);
-    // Force undefined explicitly.
+    const onClose = vi.fn();
+    const user = userEvent.setup();
     render(
       <AllProviders>
-        <PublishModal open profile={profile} onClose={() => {}} />
+        <PublishModal open profile={profile} onClose={onClose} />
       </AllProviders>,
     );
-    await screen.findByText('GitHub token required');
-    expect(screen.queryByRole('button', { name: /Open Settings/ })).toBeNull();
+    const goBtn = await screen.findByRole('button', { name: /Configure later in Settings/ });
+    await user.click(goBtn);
+    // No callback to call → the modal just closes. No throw.
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('Save token transitions to the publish flow without closing', async () => {
+    // Token starts missing, then set_github_token flips backend state to
+    // "set". After save, the modal must re-check status and reveal the
+    // pre-flight render (pack name + Publish button) without closing.
+    let backendTokenSet = false;
+    registerInvokeHandler('get_api_key_status', () => ({
+      nexus_api_key_set: false,
+      github_token_set: backendTokenSet,
+    }));
+    registerInvokeHandler('set_github_token', () => {
+      backendTokenSet = true;
+      return true;
+    });
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    render(<Wrap onClose={onClose} />);
+    // Wait for the ShareSetupPanel to mount.
+    const tokenInput = await screen.findByLabelText('Paste your token here');
+    await user.type(tokenInput, 'ghp_validtoken');
+    const saveBtn = screen.getByRole('button', { name: 'Save and continue' });
+    await user.click(saveBtn);
+    // Transition: the setup panel goes away and the normal pre-flight
+    // render (with the pack name field) takes over. Modal must not close.
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { name: 'Set up sharing' })).toBeNull();
+    });
+    expect(await screen.findByText(/Publish My Pack/)).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('Cancel button closes the modal (footer)', async () => {

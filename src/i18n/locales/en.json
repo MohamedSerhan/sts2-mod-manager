@@ -1044,6 +1044,19 @@
     "switchDialogActivatePrompt": "Activate it now to switch your active modpack? You can switch back to your current saved manifest any time.",
     "switchDialogTitle": "Switch to \"{{profileName}}\"?"
   },
+  "shareSetup": {
+    "title": "Set up sharing",
+    "explainLine1": "To share modpacks with friends, the app saves your modpack list to a small public GitHub repository.",
+    "explainLine2": "GitHub is free, and the app only needs permission to manage that one repository.",
+    "explainLine3": "Your friends don't need a GitHub account — they just use the share code or install link.",
+    "createTokenLink": "Open GitHub to create a token",
+    "tokenLabel": "Paste your token here",
+    "tokenPlaceholder": "ghp_… or github_pat_…",
+    "saveBtn": "Save and continue",
+    "saving": "Saving…",
+    "saveError": "That token didn't work. Check it has the right scope and try again.",
+    "settingsEscape": "Configure later in Settings"
+  },
   "home": {
     "unlinkTitle": "Unlink from \"{{name}}\"?",
     "unlinkBody": "You'll stop receiving updates from the curator. The mods stay installed.",

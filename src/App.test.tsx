@@ -1523,13 +1523,14 @@ describe('<App>', () => {
     });
   });
 
-  it('ProfilesView PublishModal "Open Settings → Accounts" routes to Settings', async () => {
+  it('ProfilesView PublishModal "Configure later in Settings" routes to Settings', async () => {
     // Trigger flow:
     //   1. Mount with a profile that's not yet shared and github_token_set = false.
     //   2. Navigate to Profiles, click the Share button on the profile row.
-    //   3. PublishModal renders the "GitHub token required" block with the
-    //      "Open Settings → Accounts" button.
-    //   4. Clicking it calls onGoToSettings which is App.tsx:690's inline
+    //   3. PublishModal renders the inline ShareSetupPanel (replaces the
+    //      old red "GitHub token required" block) with a
+    //      "Configure later in Settings" escape-hatch button.
+    //   4. Clicking it calls onGoToSettings which is App.tsx's inline
     //      `() => setActiveView('settings')` arrow.
     registerInvokeHandler('get_api_key_status', () => ({
       nexus_api_key_set: false,
@@ -1549,12 +1550,12 @@ describe('<App>', () => {
     ) as HTMLButtonElement | undefined;
     expect(shareBtn).toBeDefined();
     await user.click(shareBtn!);
-    // PublishModal renders the "Open Settings → Accounts" button when
-    // tokenSet === false.
-    const openSettingsBtn = await screen.findByRole('button', {
-      name: /Open Settings.*Accounts/i,
+    // ShareSetupPanel renders the "Configure later in Settings" button
+    // when tokenSet === false — same end behavior as the old CTA.
+    const configureLaterBtn = await screen.findByRole('button', {
+      name: /Configure later in Settings/i,
     });
-    await user.click(openSettingsBtn);
+    await user.click(configureLaterBtn);
     // App routed to Settings view.
     await waitFor(() => {
       expect(screen.getByText('Game Path')).toBeInTheDocument();

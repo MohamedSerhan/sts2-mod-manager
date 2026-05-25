@@ -6,6 +6,7 @@ import type { Profile, ShareResult } from '../types';
 import { shareProfile, reshareProfile, getApiKeyStatus, setModpackListing, openExternalUrl } from '../hooks/useTauri';
 import { useToast } from '../contexts/ToastContext';
 import { buildShareMessage, buildShareLink } from '../lib/shareImport';
+import { ShareSetupPanel } from './ShareSetupPanel';
 
 // Publish-current modal. Three states:
 //   1) Pre-flight    — show what's included AND any blockers (missing
@@ -206,45 +207,31 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
         </div>
 
         <div className="gf-modal-body">
-          {/* Pre-flight: token missing — block the publish click and
-              point the user at Settings instead of letting them hit
-              a raw error toast. */}
+          {/* Pre-flight: token missing — show the inline ShareSetupPanel
+              right inside the share modal. It explains in plain language
+              WHY GitHub is needed and lets the curator paste a token +
+              save without leaving the share flow. After a successful save,
+              `onSaved` re-checks the token status; the modal naturally
+              transitions to the normal publish-ready render. Curators who
+              would still prefer to manage the token from Settings can
+              click "Configure later in Settings". */}
           {blockedByMissingToken && (
-            <div
-              style={{
-                background: 'oklch(0.55 0.13 25 / 0.10)',
-                border: '1px solid oklch(0.55 0.13 25 / 0.35)',
-                borderRadius: 8,
-                padding: '12px 14px',
-                marginBottom: 14,
-                display: 'flex',
-                gap: 10,
-                alignItems: 'flex-start',
+            <ShareSetupPanel
+              onSaved={async () => {
+                try {
+                  const status = await getApiKeyStatus();
+                  setTokenSet(status.github_token_set);
+                } catch {
+                  // Ignore — the user can retry. The panel keeps its own
+                  // inline error state when set_github_token itself fails;
+                  // a status re-check failure here is rare and recoverable.
+                }
               }}
-            >
-              <AlertTriangle size={16} style={{ color: 'oklch(0.78 0.16 25)', marginTop: 1, flexShrink: 0 }} />
-              <div style={{ flex: 1, fontSize: 12.5, lineHeight: 1.55 }}>
-                <div style={{ fontWeight: 600, color: 'var(--ink)', marginBottom: 4 }}>
-                  {t('publish.tokenRequired')}
-                </div>
-                <div style={{ color: 'var(--ink-mute)' }}>
-                  <Trans i18nKey="publish.tokenExplanation">
-                    <code />
-                    <code />
-                    <code />
-                  </Trans>
-                </div>
-                {onGoToSettings && (
-                  <button
-                    className="gf-btn-2 gf-btn-2-sm"
-                    style={{ marginTop: 10 }}
-                    onClick={() => { onGoToSettings(); handleDone(); }}
-                  >
-                    {t('publish.openSettings')}
-                  </button>
-                )}
-              </div>
-            </div>
+              onConfigureLater={() => {
+                onGoToSettings?.();
+                handleDone();
+              }}
+            />
           )}
 
           {!shared && !blockedByMissingToken && !busy && (

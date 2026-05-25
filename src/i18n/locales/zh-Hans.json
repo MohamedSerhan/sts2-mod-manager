@@ -1044,6 +1044,19 @@
     "switchDialogActivatePrompt": "现在激活它以切换当前模组包？你可以随时切换回当前保存的清单。",
     "switchDialogTitle": "切换到 \"{{profileName}}\"？"
   },
+  "shareSetup": {
+    "title": "设置分享",
+    "explainLine1": "要与好友分享模组包，应用会将你的模组包清单保存到一个小型的公开 GitHub 仓库。",
+    "explainLine2": "GitHub 是免费的，应用只需要管理这一个仓库的权限。",
+    "explainLine3": "你的好友不需要 GitHub 账号——他们只需使用分享码或安装链接。",
+    "createTokenLink": "打开 GitHub 创建令牌",
+    "tokenLabel": "在此粘贴你的令牌",
+    "tokenPlaceholder": "ghp_… 或 github_pat_…",
+    "saveBtn": "保存并继续",
+    "saving": "保存中…",
+    "saveError": "该令牌无效。请检查它是否具有正确的权限范围，然后重试。",
+    "settingsEscape": "稍后在设置中配置"
+  },
   "home": {
     "unlinkTitle": "取消关联 \"{{name}}\"？",
     "unlinkBody": "你将停止从作者接收更新。模组将保持已安装状态。",

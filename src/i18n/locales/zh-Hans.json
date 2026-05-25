@@ -1125,8 +1125,6 @@
     "syncPillReady": "可同步",
     "sharePillReady": "尚未分享",
     "heroSyncBtn": "同步更新",
-    "otherPacksCompact_one": "{{count}} 个其他整合包",
-    "otherPacksCompact_other": "{{count}} 个其他整合包",
     "heroModCount_one": "{{count}} 个模组",
     "heroModCount_other": "{{count}} 个模组",
     "toast": {

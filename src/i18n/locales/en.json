@@ -1125,8 +1125,6 @@
     "syncPillReady": "Sync available",
     "sharePillReady": "Not yet shared",
     "heroSyncBtn": "Sync updates",
-    "otherPacksCompact_one": "{{count}} other modpack",
-    "otherPacksCompact_other": "{{count}} other modpacks",
     "heroModCount_one": "{{count}} mod",
     "heroModCount_other": "{{count}} mods",
     "toast": {

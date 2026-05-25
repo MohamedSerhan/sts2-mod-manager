@@ -526,6 +526,11 @@
     "tabs": {
       "yours": "Yours",
       "browse": "Browse"
+    },
+    "quickAdd": {
+      "label": "Add a modpack by code",
+      "placeholder": "username/AA5A-315D-61AE",
+      "addBtn": "Add"
     }
   },
   "library": {
@@ -1145,11 +1150,9 @@
     "yourPacks": "Your packs",
     "followFriendsPack": "Follow a friend's pack",
     "pasteCodeAbove": "Paste their share code in the box above.",
-    "heroEmptyTitle": "Start with a modpack",
-    "heroEmptyBody": "A modpack is a saved set of mods. Pick one a friend shared, browse public ones, or create your own.",
-    "heroEmptyPasteCta": "Paste a friend's code",
-    "heroEmptyCreateCta": "Create modpack",
-    "heroEmptyBrowseCta": "Browse modpacks",
+    "heroEmptyTitle": "Pick a modpack to play",
+    "heroEmptyBody": "Modpacks are saved sets of mods. Choose one from your modpacks page, browse public ones, or create your own.",
+    "heroEmptyCta": "Open Modpacks",
     "syncPillReady": "Sync available",
     "sharePillReady": "Not yet shared",
     "heroSyncBtn": "Sync updates",

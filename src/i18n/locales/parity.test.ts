@@ -10,6 +10,7 @@ const SAME_AS_ENGLISH_ALLOWED = new Set([
   'browseDetail.github',
   'browseDetail.nexus',
   'home.hero.placeholder',
+  'modpacks.quickAdd.placeholder',
   'mods.gitHub',
   'mods.nexus',
   'onboarding.step1.browsePlaceholderLinux',

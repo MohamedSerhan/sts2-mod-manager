@@ -278,9 +278,11 @@ describe('<App>', () => {
     await user.click(getNavButton('Library'));
     await waitFor(() => { expect(screen.getByText(/All installed mods/i)).toBeInTheDocument(); });
     await user.click(getNavButton('Home'));
-    // Home view shows the share-code input.
+    // 1.7 v7 — Home is the single-block launcher. With no active modpack
+    // the empty-state hero shows the "Pick a modpack to play" title.
+    // (The old share-code placeholder lives on the Modpacks toolbar now.)
     await waitFor(() => {
-      expect(screen.getByPlaceholderText(/username\/AA5A-315D-61AE/i)).toBeInTheDocument();
+      expect(screen.getByText(/Pick a modpack to play/i)).toBeInTheDocument();
     });
   });
 
@@ -375,12 +377,14 @@ describe('<App>', () => {
 
   it('Ctrl+L while typing in an input does NOT launch', async () => {
     registerInvokeHandler('launch_game', () => true);
+    const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    // (Onboarding overlay is suppressed by default in beforeEach so we
-    //  don't need a Skip-setup click.)
-    // Focus the share-code input (a text input).
-    const input = screen.getByPlaceholderText(/username\/AA5A-315D-61AE/i) as HTMLInputElement;
+    // 1.7 v7 — the share-code input moved from Home to the Modpacks
+    // toolbar. Navigate there so we have a text input on screen to
+    // focus.
+    await user.click(getNavButton('Modpacks'));
+    const input = await screen.findByLabelText(/Add a modpack by code/i) as HTMLInputElement;
     input.focus();
     // Dispatch keydown from the input target — the App's keyboard handler
     // is on `window`, so the event must bubble.
@@ -1191,10 +1195,10 @@ describe('<App>', () => {
     await user.click(getNavButton('Library'));
     await waitFor(() => { expect(screen.getByText(/All installed mods/i)).toBeInTheDocument(); });
     await fireTauriEvent('sts2mm-open-url', 'sts2mm://import/alice/AA5A-315D-61AE');
-    // After route() fires, view should have switched to home — the
-    // share-code placeholder is the canonical Home signal.
+    // After route() fires, view should have switched to Home — assert
+    // the empty-state hero title (1.7 v7 single-block launcher).
     await waitFor(() => {
-      expect(screen.getByPlaceholderText(/username\/AA5A-315D-61AE/i)).toBeInTheDocument();
+      expect(screen.getByText(/Pick a modpack to play/i)).toBeInTheDocument();
     });
   });
 
@@ -1344,11 +1348,12 @@ describe('<App>', () => {
     });
   });
 
-  it('Onboarding "Follow a friend" routes to Home + bumps focusCodeBarSignal', async () => {
+  it('Onboarding "Follow a friend" routes to Modpacks + focuses Quick-Add input', async () => {
     // Walk the onboarding wizard from step 1 to step 3 and pick the
     // "Follow a friend (paste code)" option, which calls onComplete()
-    // then onAddCode() — the latter is App.tsx:702's inline
-    // setActiveView('home') arrow.
+    // then onAddCode(). In 1.7 v7 onAddCode routes to the Modpacks
+    // view (where Quick-Add lives) and bumps focusModpacksCodeBarSignal
+    // so ProfilesView focuses its toolbar input.
     localStorage.removeItem('sts2mm-onboarded');
     const user = userEvent.setup();
     render(<App />);
@@ -1366,11 +1371,11 @@ describe('<App>', () => {
     const follow = await screen.findByRole('button', { name: /Follow a friend/i });
     await user.click(follow);
     // After onComplete + onAddCode, the onboarding is dismissed AND the
-    // Home view's share-code placeholder is in the DOM.
+    // Modpacks toolbar Quick-Add input is in the DOM.
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: /Skip setup/i })).toBeNull();
     });
-    expect(screen.getByPlaceholderText(/username\/AA5A-315D-61AE/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Add a modpack by code/i)).toBeInTheDocument();
   });
 
   it("LaunchSpinner's 'Hide' button calls onCancel and dismisses the spinner", async () => {
@@ -1594,36 +1599,21 @@ describe('<App>', () => {
     });
   });
 
-  it("Home's 'View all in Profiles' link routes to Profiles (otherSubs path)", async () => {
-    // The Home view's "Your other packs" section renders a "View all in
-    // Profiles" inline link (Home.tsx:644) that calls
-    // `() => onGoToProfiles?.()` → setActiveView('profiles') inline at
-    // App.tsx:684. The section only appears when otherSubs.length > 0.
-    registerInvokeHandler('get_active_profile', () => 'main-pack');
-    registerInvokeHandler('get_subscriptions', () => [
-      {
-        share_id: 'alice/AAAA-BBBB-CCCC',
-        profile_name: 'other-pack',
-        subscribed_at: '2026-01-01',
-        last_synced_at: '2026-01-02',
-        auto_update: true,
-        last_audit_kind: null,
-        last_audit_summary: null,
-        last_audit_at: null,
-        snoozed_at: null,
-        snoozed_versions_json: null,
-      },
-    ]);
-    registerInvokeHandler('list_profiles_cmd', () => [
-      { name: 'main-pack', mods: [], created_at: '2026-01-01' },
-      { name: 'other-pack', mods: [], created_at: '2026-01-01' },
-    ]);
+  it("Home's empty-state CTA routes to Profiles (1.7 v7 single-block launcher)", async () => {
+    // The 1.7 v7 Home is a single-block launcher. The "Your other packs"
+    // inline section + "View all in Profiles" link were removed; their
+    // replacement is the empty-state hero's "Open Modpacks" CTA which
+    // calls `onGoToProfiles?.()` → setActiveView('profiles'). Verify
+    // that route here.
+    registerInvokeHandler('get_active_profile', () => null);
+    registerInvokeHandler('get_subscriptions', () => []);
+    registerInvokeHandler('list_profiles_cmd', () => []);
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    // Wait for the otherSubs section heading.
-    const viewAll = await screen.findByRole('button', { name: /View all in Profiles/i });
-    await user.click(viewAll);
+    // Empty-state hero shows the "Open Modpacks" primary CTA.
+    const openModpacks = await screen.findByRole('button', { name: /^Open Modpacks$/i });
+    await user.click(openModpacks);
     await waitFor(() => {
       expect(screen.getByText(/All the modpacks you follow/i)).toBeInTheDocument();
     });

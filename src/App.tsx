@@ -102,11 +102,12 @@ function AppInner() {
   const [showProfileSwitcher, setShowProfileSwitcher] = useState(false);
   const [openModLibrarySignal, setOpenModLibrarySignal] = useState(0);
   const [showHelpDrawer, setShowHelpDrawer] = useState(false);
-  // Bumped whenever something elsewhere in the UI wants Home's share-code
-  // input to grab focus + pulse (e.g. clicking "Add pack" in the profile
-  // switcher). Each bump triggers a one-shot effect in Home; the value
-  // itself is meaningless, only the change matters.
-  const [focusCodeBarSignal, setFocusCodeBarSignal] = useState(0);
+  // Bumped whenever a sibling view (ProfileSwitcher's "Add pack",
+  // onboarding's paste-code action) wants the Modpacks toolbar's
+  // Quick-Add input to focus + pulse. The bump triggers a one-shot
+  // effect inside ProfilesView. Replaces the 1.7-v6 `focusCodeBarSignal`
+  // pump that targeted Home's now-removed Quick-Add card.
+  const [focusModpacksCodeBarSignal, setFocusModpacksCodeBarSignal] = useState(0);
   const [launching, setLaunching] = useState<null | 'modded' | 'vanilla'>(null);
 
   useEffect(() => { getVersion().then(setAppVersion).catch(() => {}); }, []);
@@ -698,8 +699,11 @@ function AppInner() {
                 <ProfileSwitcher
                   onClose={() => setShowProfileSwitcher(false)}
                   onAddPack={() => {
-                    setActiveView('home');
-                    setFocusCodeBarSignal((n) => n + 1);
+                    // Quick-Add lives on Modpacks now (1.7 v7). Route
+                    // there and pulse the toolbar input so the user sees
+                    // where to type.
+                    setActiveView('profiles');
+                    setFocusModpacksCodeBarSignal((n) => n + 1);
                   }}
                   onManageAll={() => setActiveView('profiles')}
                 />
@@ -816,8 +820,6 @@ function AppInner() {
                 onGoToBrowseModpacks={() => setActiveView('browse-modpacks')}
                 onSwitchPack={() => setShowProfileSwitcher(true)}
                 onLaunch={handleLaunchGame}
-                onBumpFocusCodeBar={() => setFocusCodeBarSignal((s) => s + 1)}
-                focusCodeBarSignal={focusCodeBarSignal}
               />
             )}
             {/* Modpacks view. The legacy 'browse-modpacks' view-id
@@ -828,6 +830,7 @@ function AppInner() {
                 onGoToSettings={() => setActiveView('settings')}
                 openModLibrarySignal={openModLibrarySignal}
                 initialTab={activeView === 'browse-modpacks' ? 'browse' : 'yours'}
+                focusQuickAddSignal={focusModpacksCodeBarSignal}
               />
             )}
             {/* Library view. The legacy 'browse-mods' view-id
@@ -856,7 +859,13 @@ function AppInner() {
                 gameInfo={gameInfo}
                 onSkip={dismissOnboarding}
                 onComplete={dismissOnboarding}
-                onAddCode={() => setActiveView('home')}
+                onAddCode={() => {
+                  // 1.7 v7 — share-code input now lives in the Modpacks
+                  // toolbar. Route there and pulse the input so the user
+                  // sees the paste-zone.
+                  setActiveView('profiles');
+                  setFocusModpacksCodeBarSignal((n) => n + 1);
+                }}
                 refreshGame={refreshAll}
               />
             )}

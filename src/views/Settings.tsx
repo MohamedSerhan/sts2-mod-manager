@@ -33,6 +33,7 @@ import { LogsViewer } from '../components/LogsViewer';
 import { DiagnosticBundle } from '../components/DiagnosticBundle';
 import { AutoDetectModal } from '../components/AutoDetectModal';
 import { LanguageSelect } from '../components/LanguageSelect';
+import { AboutCard } from '../components/AboutCard';
 import { HelpContent } from './Help';
 import {
   detectGamePath,
@@ -542,6 +543,12 @@ export function SettingsView() {
               </h3>
               <LanguageSelect />
             </Card>
+
+            {/* 1.7.0 v7 — About card relocated from the Home page footer.
+                Home is now the single-block launcher; reference info +
+                support links live in Settings → General where they're
+                discoverable but out of the way. */}
+            <AboutCard />
           </>
         )}
 

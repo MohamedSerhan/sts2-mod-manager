@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Plus,
@@ -78,6 +78,12 @@ interface ProfilesViewProps {
    *  Provided so the App shell can honor the legacy
    *  'browse-modpacks' view-id as a redirect. */
   initialTab?: 'yours' | 'browse';
+  /** 1.7.0 v7 — incremented by the App shell when a sibling surface
+   *  (ProfileSwitcher's "Add pack", onboarding's "Follow a friend")
+   *  wants the toolbar Quick-Add input to grab focus + pulse. Each
+   *  bump triggers a one-shot effect; the value itself is
+   *  meaningless, only the change matters. */
+  focusQuickAddSignal?: number;
 }
 
 function membershipKey(row: ProfileMembershipMod, profileName: string): string {
@@ -121,7 +127,7 @@ function membershipStateLabelKey(state: ProfileMembershipState): string {
   return state.enabled ? 'profiles.library.inProfile' : 'profiles.library.disabledInProfile';
 }
 
-export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0, initialTab = 'yours' }: ProfilesViewProps = {}) {
+export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0, initialTab = 'yours', focusQuickAddSignal }: ProfilesViewProps = {}) {
   // 1.7.0 outer Yours/Browse tabs. 'yours' renders the user's
   // followed/published modpack list (the legacy Profiles content);
   // 'browse' renders the public modpack browser (formerly its own
@@ -137,6 +143,28 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0, initial
     setOuterTab(initialTab);
   }, [initialTab]);
 
+  // 1.7.0 v7 — react to the App-owned focus signal by scrolling the
+  // Quick-Add row into view, focusing the input, and pulsing the row
+  // briefly so the user sees the paste-zone. Skip the very first
+  // render (signal=0 or undefined).
+  useEffect(() => {
+    if (!focusQuickAddSignal) return;
+    // Ensure we're on the Yours tab — the Quick-Add row lives in the
+    // Yours toolbar above the tabs, and we don't want to silently hide
+    // the focus pump if the user happens to be on Browse.
+    setOuterTab('yours');
+    const row = quickAddRowRef.current;
+    if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const input = quickAddInputRef.current;
+    if (input) {
+      // Wait one frame so the scroll starts before focus steals it back.
+      requestAnimationFrame(() => input.focus({ preventScroll: true }));
+    }
+    setQuickAddPulse(true);
+    const timer = window.setTimeout(() => setQuickAddPulse(false), 1400);
+    return () => window.clearTimeout(timer);
+  }, [focusQuickAddSignal]);
+
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -146,6 +174,15 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0, initial
   const [showImportCode, setShowImportCode] = useState(false);
   const [importCode, setImportCode] = useState('');
   const [importingCode, setImportingCode] = useState(false);
+  // 1.7.0 v7 — always-visible Quick-Add row above the tabs. Same import
+  // pipeline as the toggle-able panel above; we keep both because the
+  // toolbar button is the discoverable "Add modpack code" affordance
+  // for users who want a labelled panel, while the inline row is the
+  // one-paste fast-path. Both call handleImportFromCode (which already
+  // routes via importShareCodeSmart + confirm pipeline).
+  const quickAddInputRef = useRef<HTMLInputElement | null>(null);
+  const quickAddRowRef = useRef<HTMLDivElement | null>(null);
+  const [quickAddPulse, setQuickAddPulse] = useState(false);
   const [copiedProfileCode, setCopiedProfileCode] = useState<string | null>(null);
   const [shareInfoMap, setShareInfoMap] = useState<Record<string, ShareResult>>({});
   const [publishTarget, setPublishTarget] = useState<{ profile: Profile; isReshare: boolean } | null>(null);
@@ -1178,6 +1215,49 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0, initial
           )}
         </div>
       </div>
+      )}
+
+      {/* 1.7.0 v7 — always-visible Quick-Add code paste row.
+          Relocated from Home (which is now the single-block launcher).
+          The Modpacks toolbar already owns Create / Import-JSON /
+          Snapshot, so Quick-Add lives here next to those affordances.
+          Shown on the Yours tab — the Browse tab is for public packs
+          which install via the row CTAs, not via a typed code.
+          The toggle-able "Add modpack code" panel above remains for
+          users who arrive via the button; both call the same
+          handleImportFromCode pipeline. */}
+      {!showModAssignments && outerTab === 'yours' && (
+        <div
+          ref={quickAddRowRef}
+          className={`gf-quickadd${quickAddPulse ? ' gf-quickadd-pulse' : ''}`}
+          style={{ marginTop: 0, marginBottom: 14 }}
+        >
+          <div className="gf-quickadd-eyebrow">{t('modpacks.quickAdd.label')}</div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 11 }}>
+            <input
+              ref={quickAddInputRef}
+              className="gf-input-hero"
+              aria-label={t('modpacks.quickAdd.label')}
+              placeholder={t('modpacks.quickAdd.placeholder')}
+              value={importCode}
+              onChange={(e) => setImportCode(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleImportFromCode()}
+              disabled={importingCode}
+            />
+            <Button
+              size="sm"
+              onClick={handleImportFromCode}
+              disabled={importingCode || !importCode.trim()}
+            >
+              {importingCode ? (
+                <RefreshCw size={14} className="animate-spin" />
+              ) : (
+                <Plus size={14} />
+              )}
+              {t('modpacks.quickAdd.addBtn')}
+            </Button>
+          </div>
+        </div>
       )}
 
       {/* 1.7.0 — outer Yours/Browse tab strip. Hidden while the mod-

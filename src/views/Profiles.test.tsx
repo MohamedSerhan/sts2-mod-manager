@@ -2556,3 +2556,149 @@ describe('<ProfilesView>', () => {
     expect(screen.getByText('Shared')).toBeInTheDocument();
   });
 });
+
+// ── 1.7.0 v7 — Quick-Add code paste input relocated from Home ──────────
+//
+// Home is now the single-block launcher; the share-code input lives in
+// the Modpacks toolbar above the Yours/Browse tabs.
+//
+// Behavioral contracts:
+//   - The input is ALWAYS visible on the Yours tab toolbar (not gated on
+//     a "show code panel" toggle).
+//   - It has an aria-label so screen readers can find it.
+//   - Add button submits, runs `importShareCodeSmart` (which fetches
+//     the manifest and routes to the install / activate / sync /
+//     apply-update branch), and the existing toast+confirm pipeline
+//     fires per outcome.
+//   - The same focus signal that the App fires from ProfileSwitcher's
+//     "Add pack" focuses the input.
+describe('<ProfilesView> toolbar Quick-Add (relocated from Home v7)', () => {
+  it('Quick-Add input is visible in the Modpacks toolbar (no toggle required)', async () => {
+    seedProfiles([baseProfile({ name: 'Alpha' })]);
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Alpha')).toBeInTheDocument(); });
+    // The new input has an aria-label matching the label key.
+    expect(
+      screen.getByLabelText(/Add a modpack by code/i),
+    ).toBeInTheDocument();
+    // And an "Add" button right next to it.
+    expect(
+      screen.getByRole('button', { name: /^Add$/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('Quick-Add input is hidden on the Browse tab (modpack management lives on Yours)', async () => {
+    seedProfiles([baseProfile({ name: 'Alpha' })]);
+    registerInvokeHandler('fetch_modpack_browser_page', () => ({
+      cards: [],
+      page: 1,
+      has_next_page: false,
+      stale: false,
+      fetched_at: Math.floor(Date.now() / 1000),
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Alpha')).toBeInTheDocument(); });
+    // Sanity — visible on Yours.
+    expect(screen.getByLabelText(/Add a modpack by code/i)).toBeInTheDocument();
+    // Switch to Browse — the toolbar Quick-Add row hides because
+    // it's part of the Yours surface.
+    await user.click(screen.getByRole('button', { name: /^Browse$/i }));
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Browse Modpacks' })).toBeInTheDocument();
+    });
+    expect(screen.queryByLabelText(/Add a modpack by code/i)).toBeNull();
+  });
+
+  it('"Add" button is disabled when the input is empty', async () => {
+    seedProfiles([baseProfile({ name: 'Alpha' })]);
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Alpha')).toBeInTheDocument(); });
+    const input = screen.getByLabelText(/Add a modpack by code/i) as HTMLInputElement;
+    expect(input.value).toBe('');
+    expect(screen.getByRole('button', { name: /^Add$/i })).toBeDisabled();
+  });
+
+  it('typing a code + clicking Add fires the import-share-code pipeline', async () => {
+    seedProfiles([baseProfile({ name: 'Existing' })]);
+    // Smart-router success path: fetch_shared_profile_cmd returns a
+    // manifest, the confirm dialog fires, then install_shared_profile.
+    registerInvokeHandler('fetch_shared_profile_cmd', () => ({
+      name: 'Imported',
+      mods: [],
+      created_at: '2026-01-01',
+    }));
+    registerInvokeHandler('install_shared_profile', () => ({
+      name: 'Imported',
+      mods: [],
+      created_at: '2026-01-01',
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Existing')).toBeInTheDocument(); });
+    const input = screen.getByLabelText(/Add a modpack by code/i);
+    await user.type(input, 'alice/AAAA-BBBB-CCCC');
+    const addBtn = screen.getByRole('button', { name: /^Add$/i });
+    expect(addBtn).toBeEnabled();
+    await user.click(addBtn);
+    // The smart router triggers fetch_shared_profile_cmd at minimum.
+    await waitFor(() => {
+      const cmds = getInvokeCalls().map((c) => c.cmd);
+      expect(
+        cmds.some((c) =>
+          c === 'fetch_shared_profile_cmd' ||
+          c === 'install_shared_profile' ||
+          c === 'get_share_info',
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it('pressing Enter in the Quick-Add input also submits', async () => {
+    seedProfiles([baseProfile({ name: 'Existing' })]);
+    registerInvokeHandler('fetch_shared_profile_cmd', () => ({
+      name: 'Imported',
+      mods: [],
+      created_at: '2026-01-01',
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Existing')).toBeInTheDocument(); });
+    const input = screen.getByLabelText(/Add a modpack by code/i);
+    await user.type(input, 'alice/AAAA-BBBB-CCCC{Enter}');
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'fetch_shared_profile_cmd')).toBe(true);
+    });
+  });
+
+  it('focusQuickAddSignal bump focuses the toolbar input (used by ProfileSwitcher Add pack)', async () => {
+    seedProfiles([baseProfile({ name: 'Alpha' })]);
+    const { rerender } = render(<Wrap focusQuickAddSignal={1} />);
+    await waitFor(() => { expect(screen.getByText('Alpha')).toBeInTheDocument(); });
+    // The effect fires inside a requestAnimationFrame — wait until the
+    // input is the active element.
+    await waitFor(() => {
+      const input = screen.getByLabelText(/Add a modpack by code/i);
+      expect(document.activeElement).toBe(input);
+    });
+    // Bumping the signal re-runs the effect — input remains focusable
+    // after another bump.
+    rerender(<Wrap focusQuickAddSignal={2} />);
+    await waitFor(() => {
+      expect(screen.getByLabelText(/Add a modpack by code/i)).toBeInTheDocument();
+    });
+  });
+
+  it('failing import surfaces a "Failed to import" toast (error pipeline preserved)', async () => {
+    seedProfiles([baseProfile({ name: 'Existing' })]);
+    registerInvokeHandler('fetch_shared_profile_cmd', () => { throw new Error('manifest not found'); });
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Existing')).toBeInTheDocument(); });
+    const input = screen.getByLabelText(/Add a modpack by code/i);
+    await user.type(input, 'unknown/AAAA-BBBB-CCCC{Enter}');
+    await waitFor(() => {
+      expect(screen.getByText(/Failed to import: manifest not found/)).toBeInTheDocument();
+    });
+  });
+});

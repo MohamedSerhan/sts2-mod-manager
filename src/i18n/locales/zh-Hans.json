@@ -526,6 +526,11 @@
     "tabs": {
       "yours": "我的",
       "browse": "浏览"
+    },
+    "quickAdd": {
+      "label": "通过分享码添加整合包",
+      "placeholder": "username/AA5A-315D-61AE",
+      "addBtn": "添加"
     }
   },
   "library": {
@@ -1145,11 +1150,9 @@
     "yourPacks": "你的方案",
     "followFriendsPack": "关注好友的方案",
     "pasteCodeAbove": "在上方粘贴他们的分享码。",
-    "heroEmptyTitle": "从一个整合包开始",
-    "heroEmptyBody": "整合包是一组保存好的模组。可以选朋友分享的、浏览公开的，或者自己创建一个。",
-    "heroEmptyPasteCta": "粘贴朋友的分享码",
-    "heroEmptyCreateCta": "创建整合包",
-    "heroEmptyBrowseCta": "浏览整合包",
+    "heroEmptyTitle": "挑选一个整合包游玩",
+    "heroEmptyBody": "整合包是一组保存好的模组。可以从整合包页面中选择，浏览公开整合包，或者自己创建一个。",
+    "heroEmptyCta": "打开整合包",
     "syncPillReady": "可同步",
     "sharePillReady": "尚未分享",
     "heroSyncBtn": "同步更新",

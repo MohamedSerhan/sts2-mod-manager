@@ -37,6 +37,7 @@ import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../components/ConfirmDialog';
 import { KebabMenu, KebabSection, KebabDivider, KebabItem } from '../components/KebabMenu';
 import { SourceEditor } from '../components/SourceEditor';
+import { BrowseView } from './Browse';
 import { Copy } from 'lucide-react';
 import type { ModInfo, ProfileMembershipGrid } from '../types';
 import {
@@ -164,9 +165,26 @@ function gameVersionSatisfies(current: string | null | undefined, required: stri
 interface ModsViewProps {
   advancedMode?: boolean;
   onOpenModLibrary?: () => void;
+  /** Forwarded to BrowseView's "Nexus key missing → open Settings"
+   *  banner. Only consumed when the Browse tab is active. */
+  onGoToSettings?: () => void;
+  /** 1.7.0 — initial outer-tab selection. 'browse' lands users on the
+   *  Browse-mods tab (the absorbed top-level view); 'installed' is
+   *  the default and shows installed mods. Provided so the App shell
+   *  can honor the legacy 'browse-mods' view-id as a redirect. */
+  initialTab?: 'installed' | 'browse';
 }
 
-export function ModsView({ advancedMode: advancedModeProp, onOpenModLibrary }: ModsViewProps = {}) {
+export function ModsView({ advancedMode: advancedModeProp, onOpenModLibrary, onGoToSettings, initialTab = 'installed' }: ModsViewProps = {}) {
+  // 1.7.0 outer Installed/Browse tabs. 'installed' is the existing
+  // Mods view content; 'browse' renders the public mod browser
+  // (formerly its own sidebar entry).
+  const [outerTab, setOuterTab] = useState<'installed' | 'browse'>(initialTab);
+  // Reflect prop changes if App re-renders us with a new initialTab
+  // (e.g. legacy 'browse-mods' view-id arrives via a deep-link).
+  useEffect(() => {
+    setOuterTab(initialTab);
+  }, [initialTab]);
   const { t } = useTranslation();
   const { mods, refreshMods, refreshAll, gameRunning, gameInfo, notifyNexusOpen, auditResults, auditing, runAudit, refreshAuditEntries, updatingAll, updateAllGithub, activeProfile } = useApp();
   const toast = useToast();
@@ -562,7 +580,10 @@ export function ModsView({ advancedMode: advancedModeProp, onOpenModLibrary }: M
 
   return (
     <div className="gf-body">
-      {/* Header */}
+      {/* Header — only on the Installed tab. The Browse tab's
+          BrowseView component renders its own page-head, so we'd
+          stack two headers if this stayed unconditional. */}
+      {outerTab === 'installed' && (
       <div className="gf-page-head">
         <div>
           {/* 1.7.0 — heading reframed from "Your mods" to "All installed
@@ -717,7 +738,30 @@ export function ModsView({ advancedMode: advancedModeProp, onOpenModLibrary }: M
           )}
         </div>
       </div>
+      )}
 
+      {/* 1.7.0 — outer Installed/Browse tab strip. 'browse' renders
+          the public mod browser absorbed from the old top-level
+          sidebar entry. */}
+      <div className="gf-tabs" style={{ marginBottom: 14 }}>
+        <button
+          className={`gf-tab ${outerTab === 'installed' ? 'active' : ''}`}
+          onClick={() => setOuterTab('installed')}
+        >
+          {t('library.tabs.installed')}
+        </button>
+        <button
+          className={`gf-tab ${outerTab === 'browse' ? 'active' : ''}`}
+          onClick={() => setOuterTab('browse')}
+        >
+          {t('library.tabs.browse')}
+        </button>
+      </div>
+
+      {outerTab === 'browse' && <BrowseView onGoToSettings={onGoToSettings} />}
+
+      {outerTab === 'installed' && (
+        <>
       {/* Quick Add URL Form (advanced only) */}
       {advancedMode && showQuickAdd && (
         <Card className="flex gap-3 items-end">
@@ -1400,6 +1444,8 @@ export function ModsView({ advancedMode: advancedModeProp, onOpenModLibrary }: M
             );
           })}
         </div>
+      )}
+        </>
       )}
     </div>
   );

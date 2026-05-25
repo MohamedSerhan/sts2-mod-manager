@@ -26,16 +26,20 @@ const FAQ_KEYS = [
 
 type FaqKey = (typeof FAQ_KEYS)[number];
 
-export function HelpView({ onGoToSettings: _onGoToSettings }: HelpViewProps) {
+/**
+ * Renders the three Help content cards (Player quick start, Creator
+ * quick start, FAQ). Exported separately from <HelpView> so the
+ * HelpDrawer (topbar ? icon) and the Settings → Help tab can render
+ * the same content without each view re-implementing the structure.
+ *
+ * NB: caller owns layout chrome (page header / drawer header). This
+ * component renders cards only.
+ */
+export function HelpContent() {
   const { t } = useTranslation();
 
   return (
-    <div className="gf-help-view">
-      <header className="gf-help-header">
-        <h1>{t('help.title')}</h1>
-        <p className="gf-help-subtitle">{t('help.subtitle')}</p>
-      </header>
-
+    <>
       <Card>
         <h2>{t('help.playerQuickStart.title')}</h2>
         <ol className="gf-help-steps">
@@ -65,6 +69,21 @@ export function HelpView({ onGoToSettings: _onGoToSettings }: HelpViewProps) {
           ))}
         </div>
       </Card>
+    </>
+  );
+}
+
+export function HelpView({ onGoToSettings: _onGoToSettings }: HelpViewProps) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="gf-help-view">
+      <header className="gf-help-header">
+        <h1>{t('help.title')}</h1>
+        <p className="gf-help-subtitle">{t('help.subtitle')}</p>
+      </header>
+
+      <HelpContent />
     </div>
   );
 }

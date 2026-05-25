@@ -7,12 +7,10 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   Home,
   Package,
-  Search,
-  Boxes,
   Layers,
   Settings,
   Play,
-  GraduationCap,
+  HelpCircle,
   ExternalLink,
   AlertTriangle,
   ChevronDown,
@@ -27,35 +25,41 @@ import { cn } from './lib/utils';
 import { ToastProvider, useToast } from './contexts/ToastContext';
 import { AppProvider, useApp } from './contexts/AppContext';
 import { ConfirmProvider, useConfirm } from './components/ConfirmDialog';
-import { Badge } from './components/Badge';
 import { importShareCodeSmart } from './lib/shareImport';
 import { getSubscriptions } from './hooks/useTauri';
 import { OnboardingOverlay } from './components/OnboardingOverlay';
 import { LaunchSpinner } from './components/LaunchSpinner';
 import { ProfileSwitcher } from './components/ProfileSwitcher';
+import { HelpDrawer } from './components/HelpDrawer';
 import { HomeView } from './views/Home';
 import { ModsView } from './views/Mods';
-import { BrowseView } from './views/Browse';
-import { BrowseModpacksView } from './views/BrowseModpacks';
 import { ProfilesView } from './views/Profiles';
 import { SettingsView } from './views/Settings';
 import { HelpView } from './views/Help';
 import { launchGame, launchVanilla, installModFromFile, openExternalUrl } from './hooks/useTauri';
 
+// View IDs include legacy ones ('browse-mods', 'browse-modpacks',
+// 'tutorial') so internal handlers + deep-links that pre-date the
+// 1.7.0 IA collapse still resolve to a sensible surface — the view
+// router below maps them onto the new Library/Modpacks tabs or the
+// Help view. The sidebar itself only exposes the four canonical ids.
 type View = 'home' | 'profiles' | 'mods' | 'browse-mods' | 'browse-modpacks' | 'tutorial' | 'settings';
 type ResizeDirection = 'East' | 'North' | 'NorthEast' | 'NorthWest' | 'South' | 'SouthEast' | 'SouthWest' | 'West';
 
-// v5 IA — 4 main nav items, Help+Settings in the foot. Backups absorbed
-// into Settings as a tab. Dashboard cut (was redundant with Home).
+// 1.7.0 IA — sidebar collapsed from 7 items to 4 total: Home /
+// Modpacks / Library / Settings. The three top items live in NAV and
+// the Settings entry lives in FOOT_NAV (pinned to the bottom of the
+// sidebar). Browse Mods is now a tab inside Library (formerly Mods).
+// Browse Modpacks is now a tab inside Modpacks. Help moved out of the
+// sidebar entirely — a `?` icon in the topbar opens a slide-out
+// HelpDrawer, and the same content also lives as a Settings tab. The
+// user's central note: each sidebar item should map to ONE thing.
 const NAV: { id: View; label: string; icon: typeof Home }[] = [
   { id: 'home',     label: 'Home',     icon: Home },
   { id: 'profiles', label: 'Modpacks', icon: Layers },
-  { id: 'mods',     label: 'Mods',     icon: Package },
-  { id: 'browse-mods',     label: 'Browse Mods',     icon: Search },
-  { id: 'browse-modpacks', label: 'Browse Modpacks', icon: Boxes },
+  { id: 'mods',     label: 'Library',  icon: Package },
 ];
 const FOOT_NAV: { id: View; label: string; icon: typeof Home }[] = [
-  { id: 'tutorial', label: 'Help',     icon: GraduationCap },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
@@ -97,6 +101,7 @@ function AppInner() {
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showProfileSwitcher, setShowProfileSwitcher] = useState(false);
   const [openModLibrarySignal, setOpenModLibrarySignal] = useState(0);
+  const [showHelpDrawer, setShowHelpDrawer] = useState(false);
   // Bumped whenever something elsewhere in the UI wants Home's share-code
   // input to grab focus + pulse (e.g. clicking "Add pack" in the profile
   // switcher). Each bump triggers a one-shot effect in Home; the value
@@ -581,7 +586,7 @@ function AppInner() {
           </div>
         )}
 
-        {/* Sidebar — 4 main nav, foot has Tutorial+Settings, status block, version */}
+        {/* Sidebar — 3 main nav (Home/Modpacks/Library), foot has Settings, status block, version */}
         <nav className="gf-sidebar">
           <div className="gf-brand">
             <div className="gf-brand-mark">✦</div>
@@ -597,13 +602,14 @@ function AppInner() {
             // available" cards consume, lifted to AppContext so the
             // sidebar can read it from anywhere.
             const badge = id === 'profiles' && subUpdates.length > 0 ? subUpdates.length : null;
-            const navLabels: Record<View, string> = {
+            // Per-id sidebar label. Only the four canonical ids appear
+            // in NAV (home / profiles / mods / settings); the legacy
+            // ids are routed through the JSX below but never appear
+            // in the sidebar so we don't translate them here.
+            const navLabels: Partial<Record<View, string>> = {
               home: t('nav.home'),
               profiles: t('nav.profiles'),
               mods: t('nav.mods'),
-              'browse-mods': t('nav.browseMods'),
-              'browse-modpacks': t('nav.browseModpacks'),
-              tutorial: t('nav.tutorial'),
               settings: t('nav.settings'),
             };
             return (
@@ -614,16 +620,6 @@ function AppInner() {
               >
                 <Icon size={14} className="gf-nav-icon" />
                 <span className="gf-nav-label">{navLabels[id]}</span>
-                {id === 'browse-modpacks' && (
-                  <Badge
-                    variant="beta"
-                    className="gf-nav-beta"
-                    title={t('browseModpacks.betaTitle')}
-                    ariaHidden
-                  >
-                    {t('common.beta')}
-                  </Badge>
-                )}
                 {badge !== null && (
                   <span className="gf-nav-badge" title={badge === 1 ? t('app.packUpdateTooltip_one', { badge }) : t('app.packUpdateTooltip_other', { badge })}>
                     {badge}
@@ -635,13 +631,9 @@ function AppInner() {
 
           <div className="gf-side-foot">
             {FOOT_NAV.map(({ id, icon: Icon }) => {
-              const footLabels: Record<View, string> = {
-                home: t('nav.home'),
-                profiles: t('nav.profiles'),
-                mods: t('nav.mods'),
-                'browse-mods': t('nav.browseMods'),
-                'browse-modpacks': t('nav.browseModpacks'),
-                tutorial: t('nav.tutorial'),
+              // After the 1.7.0 IA collapse the only foot-nav entry is
+              // Settings. The map shape stays in case we add more later.
+              const footLabels: Partial<Record<View, string>> = {
                 settings: t('nav.settings'),
               };
               return (
@@ -715,6 +707,17 @@ function AppInner() {
             </div>
 
             <div className="flex gap-1.5">
+              {/* 1.7.0 — Help moved out of the sidebar. The `?` button
+                  opens a slide-out HelpDrawer (right side) that renders
+                  the same content the Settings → Help tab shows. */}
+              <button
+                onClick={() => setShowHelpDrawer(true)}
+                title={t('topbar.help')}
+                aria-label={t('topbar.help')}
+                className="gf-btn-3 gf-btn-icon"
+              >
+                <HelpCircle size={16} />
+              </button>
               <button
                 onClick={handleLaunchVanilla}
                 disabled={gameRunning}
@@ -817,24 +820,33 @@ function AppInner() {
                 focusCodeBarSignal={focusCodeBarSignal}
               />
             )}
-            {activeView === 'profiles' && (
+            {/* Modpacks view. The legacy 'browse-modpacks' view-id
+                redirects here with the Browse tab pre-selected so old
+                handlers / deep-links keep working without rewiring. */}
+            {(activeView === 'profiles' || activeView === 'browse-modpacks') && (
               <ProfilesView
                 onGoToSettings={() => setActiveView('settings')}
                 openModLibrarySignal={openModLibrarySignal}
+                initialTab={activeView === 'browse-modpacks' ? 'browse' : 'yours'}
               />
             )}
-            {activeView === 'mods' && (
+            {/* Library view. The legacy 'browse-mods' view-id
+                redirects here with the Browse tab pre-selected so the
+                Nexus "open settings" handler etc. keep working. */}
+            {(activeView === 'mods' || activeView === 'browse-mods') && (
               <ModsView
                 onOpenModLibrary={() => {
                   setOpenModLibrarySignal((signal) => signal + 1);
                   setActiveView('profiles');
                 }}
+                onGoToSettings={() => setActiveView('settings')}
+                initialTab={activeView === 'browse-mods' ? 'browse' : 'installed'}
               />
             )}
-            {activeView === 'browse-mods' && <BrowseView onGoToSettings={() => setActiveView('settings')} />}
-            {activeView === 'browse-modpacks' && (
-              <BrowseModpacksView onGoToProfiles={() => setActiveView('profiles')} />
-            )}
+            {/* Backward compat: the 'tutorial' view-id (used by
+                onboarding callbacks etc.) still renders the standalone
+                Help page. New surfaces use HelpDrawer (topbar `?`) or
+                the Settings → Help tab instead. */}
             {activeView === 'tutorial' && <HelpView onGoToSettings={() => setActiveView('settings')} />}
             {activeView === 'settings' && <SettingsView />}
 
@@ -856,6 +868,9 @@ function AppInner() {
                 onCancel={() => setLaunching(null)}
               />
             )}
+
+            {/* Slide-out Help drawer, opened from the topbar `?`. */}
+            <HelpDrawer open={showHelpDrawer} onClose={() => setShowHelpDrawer(false)} />
           </main>
         </div>
       </div>

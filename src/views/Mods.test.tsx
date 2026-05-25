@@ -16,10 +16,20 @@ import type { ModInfo } from '../types';
  * copy, audit-result-driven button label transitions, etc.
  */
 
-function Wrap(props: { advancedMode?: boolean; onOpenModLibrary?: () => void } = {}) {
+function Wrap(props: {
+  advancedMode?: boolean;
+  onOpenModLibrary?: () => void;
+  onGoToSettings?: () => void;
+  initialTab?: 'installed' | 'browse';
+} = {}) {
   return (
     <AllProviders>
-      <ModsView advancedMode={props.advancedMode} onOpenModLibrary={props.onOpenModLibrary} />
+      <ModsView
+        advancedMode={props.advancedMode}
+        onOpenModLibrary={props.onOpenModLibrary}
+        onGoToSettings={props.onGoToSettings}
+        initialTab={props.initialTab}
+      />
     </AllProviders>
   );
 }
@@ -65,6 +75,38 @@ describe('<ModsView>', () => {
     render(<Wrap />);
     await waitFor(() => {
       expect(screen.getByText(/0 installed/)).toBeInTheDocument();
+    });
+  });
+
+  // ── 1.7.0 outer Installed/Browse tabs ─────────────────────────────
+  it('outer tab strip: Installed is the default; switching to Browse renders BrowseView', async () => {
+    // 1.7.0 — Browse Mods is now a tab inside this view. Default tab
+    // is Installed (existing All-installed-mods page). The Browse tab
+    // surfaces the GitHub sub-tab as a structural marker.
+    seedMods([]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => {
+      expect(screen.getByText(/All installed mods/i)).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /^Browse$/i }));
+    // BrowseView's GitHub source sub-tab proves we switched.
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /GitHub/i })).toBeInTheDocument();
+    });
+    // Switch back — the All-installed-mods header reappears.
+    await user.click(screen.getByRole('button', { name: /^Installed$/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/All installed mods/i)).toBeInTheDocument();
+    });
+  });
+
+  it('initialTab=browse opens straight on the Browse tab', async () => {
+    // Backward-compat path: legacy view-id 'browse-mods' is routed
+    // by App.tsx to this view with initialTab='browse'.
+    render(<Wrap initialTab="browse" />);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /GitHub/i })).toBeInTheDocument();
     });
   });
 

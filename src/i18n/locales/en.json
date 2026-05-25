@@ -522,14 +522,29 @@
     "betaTitle": "The public modpack browser is still being tuned.",
     "installingNamed": "Installing {{name}}"
   },
+  "modpacks": {
+    "tabs": {
+      "yours": "Yours",
+      "browse": "Browse"
+    }
+  },
+  "library": {
+    "tabs": {
+      "installed": "Installed",
+      "browse": "Browse"
+    }
+  },
   "nav": {
     "home": "Home",
     "profiles": "Modpacks",
-    "mods": "Mods",
+    "mods": "Library",
     "browseMods": "Browse Mods",
     "browseModpacks": "Browse Modpacks",
     "tutorial": "Help",
     "settings": "Settings"
+  },
+  "topbar": {
+    "help": "Help"
   },
   "app": {
     "closeSts2First": "Close STS2 first",
@@ -1229,7 +1244,8 @@
       "accounts": "Accounts",
       "backups": "Backups",
       "audit": "Audit",
-      "advanced": "Advanced"
+      "advanced": "Advanced",
+      "help": "Help"
     },
     "general": {
       "gamePath": "Game Path",

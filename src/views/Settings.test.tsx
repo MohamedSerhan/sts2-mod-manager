@@ -23,7 +23,7 @@ function Wrap() {
  * Accounts, and the Audit-tab empty + populated states.
  */
 describe('<SettingsView>', () => {
-  it('renders the tab strip with five tabs', async () => {
+  it('renders the tab strip with six tabs (1.7.0 added Help)', async () => {
     render(<Wrap />);
     await waitFor(() => {
       expect(screen.getByText('Settings')).toBeInTheDocument();
@@ -33,6 +33,23 @@ describe('<SettingsView>', () => {
     expect(screen.getByRole('button', { name: /Backups/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Audit/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Advanced/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Help$/ })).toBeInTheDocument();
+  });
+
+  it('clicking the Help tab renders the shared HelpContent (FAQ items)', async () => {
+    // 1.7.0 — Help is reachable both from the topbar `?` drawer and
+    // from this tab. Both render <HelpContent />.
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Settings')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: /^Help$/ }));
+    // The FAQ heading is unique to HelpContent and proves the shared
+    // sub-component rendered.
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: /what is a modpack/i }),
+      ).toBeInTheDocument();
+    });
   });
 
   it('starts on the General tab and shows the Game Path field', async () => {

@@ -26,7 +26,7 @@
  *    against `useEffect` cleanup, which is fragile and low-value.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import App from './App';
@@ -96,30 +96,42 @@ describe('<App>', () => {
     return nav as HTMLButtonElement;
   }
 
-  it('renders the sidebar nav buttons', async () => {
+  it('renders the four sidebar nav items (1.7.0 IA collapse)', async () => {
+    // 1.7.0 — sidebar shrunk from 7 items to 4. Browse Mods became a
+    // tab inside Library; Browse Modpacks became a tab inside Modpacks;
+    // Help moved to the topbar `?` icon (HelpDrawer) + Settings → Help
+    // tab. The sidebar now reads Home / Modpacks / Library / Settings.
     render(<App />);
     await waitFor(() => {
       expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument();
     });
     expect(getNavButton('Home')).toBeInTheDocument();
     expect(getNavButton('Modpacks')).toBeInTheDocument();
-    expect(getNavButton('Mods')).toBeInTheDocument();
-    expect(getNavButton('Browse Mods')).toBeInTheDocument();
-    const modpacksNav = getNavButton('Browse Modpacks');
-    expect(modpacksNav).toBeInTheDocument();
-    expect(within(modpacksNav).getByText('Beta')).toBeInTheDocument();
-    expect(getNavButton('Help')).toBeInTheDocument();
+    expect(getNavButton('Library')).toBeInTheDocument();
     expect(getNavButton('Settings')).toBeInTheDocument();
+    // Browse Mods / Browse Modpacks / Help should NOT be sidebar
+    // buttons any more. Use queryAllByRole + filter to assert absence
+    // without throwing for the missing names.
+    const sidebarNavs = screen.getAllByRole('button').filter((b) =>
+      b.className.includes('gf-nav'),
+    );
+    const labels = sidebarNavs.map((b) => b.textContent?.trim() ?? '');
+    expect(labels).not.toContain('Browse Mods');
+    expect(labels).not.toContain('Browse Modpacks');
+    // "Help" can appear on the topbar `?` button (aria-label) but
+    // must not appear as a sidebar nav entry.
+    expect(labels.find((l) => /^Help$/.test(l))).toBeUndefined();
+    // Topbar `?` icon — open the drawer.
+    expect(screen.getByRole('button', { name: /^Help$/i })).toBeInTheDocument();
   });
 
-  it('clicking Mods nav swaps the body to the Mods view', async () => {
+  it('clicking Library nav swaps the body to the Library (Installed) view', async () => {
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    // Dismiss the onboarding overlay if it shows up
-    // (Onboarding overlay is suppressed by default in beforeEach so we
-    //  don't need a Skip-setup click.)
-    await user.click(getNavButton('Mods'));
+    // Sidebar item renamed Mods → Library in 1.7.0; default tab is
+    // Installed, which shows the existing "All installed mods" page.
+    await user.click(getNavButton('Library'));
     await waitFor(() => {
       expect(screen.getByText(/All installed mods/i)).toBeInTheDocument();
     });
@@ -171,7 +183,7 @@ describe('<App>', () => {
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    await user.click(getNavButton('Mods'));
+    await user.click(getNavButton('Library'));
     await waitFor(() => { expect(screen.getByText(/All installed mods/i)).toBeInTheDocument(); });
 
     await user.click(screen.getByRole('button', { name: /Mod Library/i }));
@@ -193,29 +205,38 @@ describe('<App>', () => {
     });
   });
 
-  it('clicking Browse Mods swaps to the Browse view', async () => {
+  it('Library → Browse tab shows the public mod browser', async () => {
+    // 1.7.0 — Browse Mods is no longer its own sidebar entry. It now
+    // lives as a tab inside the Library view. Navigate Library → click
+    // the Browse tab → assert the GitHub sub-tab button is present.
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    // (Onboarding overlay is suppressed by default in beforeEach so we
-    //  don't need a Skip-setup click.)
-    await user.click(getNavButton('Browse Mods'));
+    await user.click(getNavButton('Library'));
+    await user.click(screen.getByRole('button', { name: /^Browse$/i }));
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /GitHub/i })).toBeInTheDocument();
     });
   });
 
-  it('clicking Browse Modpacks swaps to the modpack browser', async () => {
+  it('Modpacks → Browse tab shows the public modpack browser', async () => {
+    // 1.7.0 — Browse Modpacks is now a tab inside Modpacks, not a
+    // top-level sidebar entry.
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    await user.click(getNavButton('Browse Modpacks'));
+    await user.click(getNavButton('Modpacks'));
+    await user.click(screen.getByRole('button', { name: /^Browse$/i }));
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Browse Modpacks' })).toBeInTheDocument();
     });
   });
 
-  it('Browse Modpacks empty-state Profiles button routes to Profiles', async () => {
+  it('Browse Modpacks empty-state CTA returns user to the Yours tab', async () => {
+    // Before 1.7.0 the BrowseModpacks empty-state button routed to
+    // the standalone Profiles view. Now it stays inside Modpacks and
+    // flips the outer tab back to Yours — same intent, no nav round
+    // trip.
     registerInvokeHandler('fetch_modpack_browser_page', () => ({
       cards: [],
       page: 1,
@@ -226,7 +247,8 @@ describe('<App>', () => {
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    await user.click(getNavButton('Browse Modpacks'));
+    await user.click(getNavButton('Modpacks'));
+    await user.click(screen.getByRole('button', { name: /^Browse$/i }));
 
     await user.click(await screen.findByRole('button', { name: /Go to Profiles/i }));
 
@@ -253,7 +275,7 @@ describe('<App>', () => {
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     // (Onboarding overlay is suppressed by default in beforeEach so we
     //  don't need a Skip-setup click.)
-    await user.click(getNavButton('Mods'));
+    await user.click(getNavButton('Library'));
     await waitFor(() => { expect(screen.getByText(/All installed mods/i)).toBeInTheDocument(); });
     await user.click(getNavButton('Home'));
     // Home view shows the share-code input.
@@ -395,16 +417,24 @@ describe('<App>', () => {
     });
   });
 
-  it('clicking Help swaps to the Help view', async () => {
+  it('topbar ? icon opens the HelpDrawer (1.7.0: Help left the sidebar)', async () => {
+    // 1.7.0 — Help is no longer a sidebar entry. Clicking the topbar
+    // `?` icon opens a slide-out drawer that renders the same
+    // <HelpContent /> the Settings → Help tab uses. The drawer is a
+    // role=dialog aria-label="Help".
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    // (Onboarding overlay is suppressed by default in beforeEach so we
-    //  don't need a Skip-setup click.)
-    await user.click(getNavButton('Help'));
-    await waitFor(() => {
-      expect(screen.getByRole('heading', { level: 1, name: /^Help$/i })).toBeInTheDocument();
-    });
+    // Drawer should not be open initially.
+    expect(screen.queryByRole('dialog', { name: /^Help$/i })).not.toBeInTheDocument();
+    // Topbar `?` button is labeled "Help" via aria-label.
+    const helpBtn = screen.getByRole('button', { name: /^Help$/i });
+    await user.click(helpBtn);
+    // Drawer opens with the heading + FAQ content.
+    expect(await screen.findByRole('dialog', { name: /^Help$/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /what is a modpack/i }),
+    ).toBeInTheDocument();
   });
 
   it('Launch button text includes the active profile name when set', async () => {
@@ -715,7 +745,7 @@ describe('<App>', () => {
     // (Onboarding overlay is suppressed by default in beforeEach so we
     //  don't need a Skip-setup click.)
     // Navigate to a non-home view first so we can observe the switch.
-    await user.click(getNavButton('Mods'));
+    await user.click(getNavButton('Library'));
     await waitFor(() => { expect(screen.getByText(/All installed mods/i)).toBeInTheDocument(); });
     // Open switcher, click Add modpack.
     const chip = document.querySelector('button.gf-prof') as HTMLButtonElement | null;
@@ -1157,8 +1187,8 @@ describe('<App>', () => {
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     // (Onboarding overlay is suppressed by default in beforeEach so we
     //  don't need a Skip-setup click.)
-    // Navigate to Mods so we can prove the deep-link bounces us back to Home.
-    await user.click(getNavButton('Mods'));
+    // Navigate to Library so we can prove the deep-link bounces us back to Home.
+    await user.click(getNavButton('Library'));
     await waitFor(() => { expect(screen.getByText(/All installed mods/i)).toBeInTheDocument(); });
     await fireTauriEvent('sts2mm-open-url', 'sts2mm://import/alice/AA5A-315D-61AE');
     // After route() fires, view should have switched to home — the
@@ -1289,18 +1319,20 @@ describe('<App>', () => {
     await screen.findByRole('button', { name: /Add modpack/i });
   });
 
-  it("Browse view 'Open Settings' button (Nexus key missing) routes to Settings", async () => {
+  it("Library → Browse tab 'Open Settings' button (Nexus key missing) routes to Settings", async () => {
     // Force nexus_get_trending to reject with the special "Nexus API
     // key not set" sentinel so Browse renders its "Open Settings"
-    // deep-link button. That button calls onGoToSettings →
-    // setActiveView('settings') inline at App.tsx:692.
+    // deep-link button. The Browse view's onGoToSettings prop is now
+    // forwarded from ModsView (which itself receives it from App).
     registerInvokeHandler('nexus_get_trending', () => {
       throw new Error('Nexus API key not set');
     });
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    await user.click(getNavButton('Browse Mods'));
+    // 1.7.0: Browse Mods is a tab inside Library, not its own sidebar entry.
+    await user.click(getNavButton('Library'));
+    await user.click(screen.getByRole('button', { name: /^Browse$/i }));
     // Default Browse tab is github; switch to Nexus Trending so the
     // effect fires and surfaces the key-missing banner.
     const trendingTab = await screen.findByRole('button', { name: /Nexus Trending/i });

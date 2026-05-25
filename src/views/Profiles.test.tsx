@@ -152,6 +152,52 @@ describe('<ProfilesView>', () => {
     });
   });
 
+  // ── 1.7.0 outer Yours/Browse tabs ─────────────────────────────────
+  it('outer tab strip: Yours is the default; switching to Browse renders BrowseModpacksView', async () => {
+    // The outer tabs absorb the formerly-standalone Browse Modpacks
+    // surface into Modpacks. Default tab is Yours (followed +
+    // published modpacks). The Browse tab renders the public modpack
+    // browser whose heading is "Browse Modpacks".
+    seedProfiles([baseProfile({ name: 'Alpha' })]);
+    registerInvokeHandler('fetch_modpack_browser_page', () => ({
+      cards: [],
+      page: 1,
+      has_next_page: false,
+      stale: false,
+      fetched_at: Math.floor(Date.now() / 1000),
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    // Yours tab content (existing modpack list)
+    await waitFor(() => { expect(screen.getByText('Alpha')).toBeInTheDocument(); });
+    // Click Browse — outer tab
+    await user.click(screen.getByRole('button', { name: /^Browse$/i }));
+    // The public modpack browser heading appears
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Browse Modpacks' })).toBeInTheDocument();
+    });
+    // Switch back — the modpack row reappears
+    await user.click(screen.getByRole('button', { name: /^Yours$/i }));
+    await waitFor(() => { expect(screen.getByText('Alpha')).toBeInTheDocument(); });
+  });
+
+  it('initialTab=browse opens straight on the Browse tab', async () => {
+    // Backward-compat path: legacy view-id 'browse-modpacks' is
+    // routed by App.tsx to this view with initialTab='browse'. We
+    // verify the prop honoring here.
+    registerInvokeHandler('fetch_modpack_browser_page', () => ({
+      cards: [],
+      page: 1,
+      has_next_page: false,
+      stale: false,
+      fetched_at: Math.floor(Date.now() / 1000),
+    }));
+    render(<Wrap initialTab="browse" />);
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Browse Modpacks' })).toBeInTheDocument();
+    });
+  });
+
   it('renders profile cards with active badge for the active profile', async () => {
     seedProfiles([
       baseProfile({ name: 'Alpha' }),

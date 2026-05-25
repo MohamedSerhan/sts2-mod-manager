@@ -34,6 +34,7 @@ import { useConfirm } from '../components/ConfirmDialog';
 import { KebabMenu, KebabSection, KebabDivider, KebabItem } from '../components/KebabMenu';
 import { PublishModal } from '../components/PublishModal';
 import { CreateModpackWizard } from '../components/CreateModpackWizard';
+import { BrowseModpacksView } from './BrowseModpacks';
 import {
   listProfiles,
   switchProfile,
@@ -71,6 +72,12 @@ interface ProfilesViewProps {
   /** Incremented by the App shell when another view wants to open the
    *  Mod Library workspace directly. */
   openModLibrarySignal?: number;
+  /** 1.7.0 — initial outer-tab selection. 'browse' lands users on the
+   *  Browse-modpacks tab (the absorbed top-level view); 'yours' is
+   *  the default and shows the user's followed/published modpacks.
+   *  Provided so the App shell can honor the legacy
+   *  'browse-modpacks' view-id as a redirect. */
+  initialTab?: 'yours' | 'browse';
 }
 
 function membershipKey(row: ProfileMembershipMod, profileName: string): string {
@@ -114,7 +121,22 @@ function membershipStateLabelKey(state: ProfileMembershipState): string {
   return state.enabled ? 'profiles.library.inProfile' : 'profiles.library.disabledInProfile';
 }
 
-export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: ProfilesViewProps = {}) {
+export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0, initialTab = 'yours' }: ProfilesViewProps = {}) {
+  // 1.7.0 outer Yours/Browse tabs. 'yours' renders the user's
+  // followed/published modpack list (the legacy Profiles content);
+  // 'browse' renders the public modpack browser (formerly its own
+  // sidebar entry). The inner 'following'/'published' filter still
+  // lives below as the `tab` state — they're distinct concerns.
+  const [outerTab, setOuterTab] = useState<'yours' | 'browse'>(initialTab);
+  // If App re-renders us with a new initialTab (e.g. user navigates
+  // to 'browse-modpacks' from a deep-link after we're already
+  // mounted), reflect it. We use a ref-style effect rather than
+  // making outerTab fully controlled because the user can still
+  // click between tabs locally.
+  useEffect(() => {
+    setOuterTab(initialTab);
+  }, [initialTab]);
+
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1097,7 +1119,10 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
         </div>
       )}
 
-      {/* Header */}
+      {/* Header — hidden on the Browse tab because BrowseModpacksView
+          renders its own view-head and stacking two would crowd the
+          page. */}
+      {outerTab === 'yours' && (
       <div className="gf-page-head">
         <div>
           <h1 className="gf-page-title">{t('profiles.page.title')}</h1>
@@ -1106,6 +1131,10 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
           </p>
         </div>
         <div className="gf-page-actions">
+          {/* The page-action buttons are modpack-management actions
+              (create / import / snapshot). They only make sense on
+              the Yours tab — the Browse tab is read-only. Hidden on
+              the assignments workspace too. */}
           {!showModAssignments && (
             <>
           <Button
@@ -1149,7 +1178,38 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
           )}
         </div>
       </div>
+      )}
 
+      {/* 1.7.0 — outer Yours/Browse tab strip. Hidden while the mod-
+          assignments workspace is open (that's a focused sub-flow
+          which renders its own back button). */}
+      {!showModAssignments && (
+        <div className="gf-tabs" style={{ marginBottom: 14 }}>
+          <button
+            className={`gf-tab ${outerTab === 'yours' ? 'active' : ''}`}
+            onClick={() => setOuterTab('yours')}
+          >
+            {t('modpacks.tabs.yours')}
+          </button>
+          <button
+            className={`gf-tab ${outerTab === 'browse' ? 'active' : ''}`}
+            onClick={() => setOuterTab('browse')}
+          >
+            {t('modpacks.tabs.browse')}
+          </button>
+        </div>
+      )}
+
+      {/* Browse tab — public modpack browser absorbed from the old
+          top-level sidebar entry. Wires the curator's "switch to your
+          modpacks" CTA back to our Yours tab so the user stays inside
+          the Modpacks surface. */}
+      {!showModAssignments && outerTab === 'browse' && (
+        <BrowseModpacksView onGoToProfiles={() => setOuterTab('yours')} />
+      )}
+
+      {(showModAssignments || outerTab === 'yours') && (
+        <>
       {showModAssignments ? (
         <>
           <div className="gf-assignment-head">
@@ -1617,6 +1677,8 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
         </div>
         );
       })()}
+        </>
+      )}
         </>
       )}
 

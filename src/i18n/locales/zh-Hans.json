@@ -522,14 +522,29 @@
     "betaTitle": "公开模组浏览器仍在调整中。",
     "installingNamed": "正在安装 {{name}}"
   },
+  "modpacks": {
+    "tabs": {
+      "yours": "我的",
+      "browse": "浏览"
+    }
+  },
+  "library": {
+    "tabs": {
+      "installed": "已安装",
+      "browse": "浏览"
+    }
+  },
   "nav": {
     "home": "首页",
     "profiles": "模组包",
-    "mods": "模组",
+    "mods": "模组库",
     "browseMods": "浏览模组",
     "browseModpacks": "浏览模组包",
     "tutorial": "帮助",
     "settings": "设置"
+  },
+  "topbar": {
+    "help": "帮助"
   },
   "app": {
     "closeSts2First": "请先关闭 STS2",
@@ -1229,7 +1244,8 @@
       "accounts": "账号",
       "backups": "备份",
       "audit": "审计",
-      "advanced": "高级"
+      "advanced": "高级",
+      "help": "帮助"
     },
     "general": {
       "gamePath": "游戏路径",

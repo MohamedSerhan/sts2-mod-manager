@@ -2587,3 +2587,47 @@ body {
   border: 1px solid oklch(0.55 0.13 25 / 0.35);
   border-radius: 7px;
 }
+
+/* ── Side-out drawer (1.7.0) ─────────────────────────────────────────
+ * Used by HelpDrawer (topbar `?`). Backdrop covers the whole viewport
+ * so a click anywhere outside the drawer closes it; the drawer panel
+ * lives on the right edge. Z-index sits above the .gf-modal-back layer
+ * (50) but below the toast stack so toasts stay visible if a drawer
+ * action triggers one. */
+.gf-drawer-backdrop {
+  position: fixed; inset: 0;
+  background: oklch(0.10 0.02 270 / 0.6);
+  backdrop-filter: blur(4px);
+  z-index: 200;
+  animation: gf-fade-in 0.18s ease-out;
+}
+.gf-drawer {
+  position: fixed; top: 0; bottom: 0;
+  width: 440px; max-width: 90vw;
+  background: var(--indigo-panel);
+  border-left: 1px solid var(--indigo-line);
+  box-shadow: -8px 0 24px rgba(0,0,0,0.3);
+  display: flex; flex-direction: column;
+  animation: gf-drawer-slide-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.gf-drawer-right { right: 0; }
+@keyframes gf-drawer-slide-in {
+  from { transform: translateX(100%); opacity: 0.4; }
+  to   { transform: translateX(0); opacity: 1; }
+}
+.gf-drawer-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--indigo-line);
+}
+.gf-drawer-header h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.gf-drawer-body {
+  padding: 16px 18px;
+  flex: 1;
+  overflow-y: auto;
+}

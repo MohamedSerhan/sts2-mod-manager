@@ -33,6 +33,7 @@ import { LogsViewer } from '../components/LogsViewer';
 import { DiagnosticBundle } from '../components/DiagnosticBundle';
 import { AutoDetectModal } from '../components/AutoDetectModal';
 import { LanguageSelect } from '../components/LanguageSelect';
+import { HelpContent } from './Help';
 import {
   detectGamePath,
   setGamePath,
@@ -57,7 +58,7 @@ import {
 import type { LaunchMode } from '../hooks/useTauri';
 import type { BackupInfo, ModAuditEntry } from '../types';
 
-type Tab = 'general' | 'accounts' | 'backups' | 'audit' | 'advanced';
+type Tab = 'general' | 'accounts' | 'backups' | 'audit' | 'advanced' | 'help';
 
 function auditSnoozeTarget(entry: ModAuditEntry): string | null {
   return entry.latest_release_with_assets_tag ?? entry.nexus_version ?? null;
@@ -373,6 +374,9 @@ export function SettingsView() {
     { id: 'backups',  label: t('settings.tabs.backups'),  count: backups.length || undefined },
     { id: 'audit',    label: t('settings.tabs.audit'),    count: auditResults?.filter(r => r.needs_update).length || undefined },
     { id: 'advanced', label: t('settings.tabs.advanced') },
+    // 1.7.0 — Help reachable here as a tab as well as from the topbar
+    // ? icon (HelpDrawer). Both surfaces render the same <HelpContent />.
+    { id: 'help',     label: t('settings.tabs.help') },
     // About moved to the Home screen footer (v1.0.4) — kept the section in
     // history because the diag-bundle action and update-check now live there.
   ];
@@ -1155,6 +1159,12 @@ export function SettingsView() {
             <div className="gf-section-title">{t('settings.advanced.inAppLogs')}</div>
             <LogsViewer />
           </>
+        )}
+
+        {tab === 'help' && (
+          <div className="gf-help-view" style={{ padding: 0 }}>
+            <HelpContent />
+          </div>
         )}
 
       </div>

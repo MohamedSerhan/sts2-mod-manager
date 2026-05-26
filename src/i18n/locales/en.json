@@ -937,7 +937,15 @@
     "findGitHub": "Find GitHub"
   },
   "onboarding": {
-    "stepIndicator": "Step {{step}} of 3",
+    "title": "Welcome to STS2 Mod Manager",
+    "skip": "Skip setup",
+    "next": "Next",
+    "eyebrow": {
+      "step1": "Step 1 of 2 — Find your game",
+      "step2": "Step 2 of 2 — Pick your path",
+      "playerPath": "Player path",
+      "creatorPath": "Creator path"
+    },
     "step1": {
       "title": "Find your Slay the Spire 2 install",
       "subtitle": "We'll auto-detect via Steam. You can override anytime in Settings.",
@@ -952,50 +960,36 @@
       "browsePlaceholderMac": "~/Library/Application Support/Steam/steamapps/common/Slay the Spire 2",
       "browsePlaceholderLinux": "~/.steam/steam/steamapps/common/Slay the Spire 2",
       "browse": "Browse…",
-      "pathError": "This folder doesn't look like a Slay the Spire 2 install (no {{signature}} found) — pick the install root."
+      "pathError": "This folder doesn't look like a Slay the Spire 2 install (no {{signature}} found) — pick the install root.",
+      "continue": "Continue"
     },
     "step2": {
-      "title": "Connect your accounts (optional)",
-      "subtitle": "Nexus needs an API key for downloads. GitHub auth raises the rate limit. Skip both to start with public Browse only.",
-      "nexusLabel": "Nexus Mods API key (recommended)",
-      "nexusPlaceholder": "Paste your Nexus API key",
-      "testSave": "Test & save",
-      "testing": "Testing…",
-      "nexusSaved": "Saved — Nexus mods will appear in Browse.",
-      "nexusRejected": "Nexus rejected this key. ",
-      "generateNew": "Generate a new one →",
-      "nexusSkipHint": "Skip if you only use GitHub mods.",
-      "nexusFreeNote": "Free Nexus account is fine. To install a Nexus mod, you'll click \"Slow Download\" / \"Manual\" on Nexus — the app catches the zip from your Downloads folder. (Nexus Premium's instant-download API isn't wired in.)",
-      "ghLabel": "GitHub token (optional — raises rate limit 60→5000/hr)",
-      "ghPlaceholder": "ghp_… (or leave blank)",
-      "ghSaved": "Saved — Browse will use authenticated calls.",
-      "ghSkipHint": "Skipping is fine — you'll just hit rate limits faster on Browse.",
-      "ghRequiredNote": "<0>Required to publish modpacks</0> — needs <1>repo</1> scope (classic PAT) or <2>Contents: R/W</2> + <3>Administration: R/W</3> (fine-grained).",
-      "ghOpenError": "Couldn't open GitHub token page: {{error}}",
-      "createScopedToken": "Create scoped token"
+      "title": "What do you want to do?",
+      "subtitle": "Pick the path that fits — you can always switch later.",
+      "playerCta": "Play modpacks others made",
+      "playerDesc": "Paste a code a friend sent, or browse public modpacks.",
+      "creatorCta": "Make or share modpacks",
+      "creatorDesc": "Build a modpack from your installed mods and share it."
     },
-    "step3": {
-      "title": "Pick your first profile",
-      "subtitle": "Start vanilla, follow a friend's pack, or import a JSON. You can always switch.",
-      "optionVanilla": {
-        "title": "Vanilla — no mods",
-        "desc": "Game launches stock — toggle mods on later"
-      },
-      "optionFollow": {
-        "title": "Follow a friend (paste code)",
-        "desc": "Type or paste a code like jess/XYZ4"
-      },
-      "optionImport": {
-        "title": "Import profile JSON",
-        "desc": "Drop or pick a .json exported from another install"
-      },
-      "optionSkip": {
-        "title": "Skip — set up later",
-        "desc": "You can re-run setup from Settings → General"
-      }
+    "playerPath": {
+      "card1Title": "Modpacks are saved sets of mods",
+      "card1Body": "You'll see them on the Modpacks page.",
+      "card1Detail": "Switch between modpacks anytime — your game folder updates to match. Add a friend's code from the Modpacks toolbar to start.",
+      "card2Title": "Press Play to start",
+      "card2Body": "The Home screen runs the active modpack.",
+      "card2Detail": "When you have an active modpack, the Home screen shows it with a big Play button. That's the whole loop.",
+      "cta": "Got it"
     },
-    "skipSetup": "Skip setup",
-    "skipForNow": "Skip for now"
+    "creatorPath": {
+      "card1Title": "Build a modpack",
+      "card1Body": "Open Modpacks and click Create.",
+      "card1Detail": "The wizard walks you through picking mods from your library and checking they're healthy before you commit. Your installed mods are already there.",
+      "card2Title": "Share when you're ready",
+      "card2Body": "Sharing is one click — setup happens then, not now.",
+      "card2Detail": "Sharing a modpack needs a free GitHub account. The app handles that setup when you click Share — there's nothing to configure right now.",
+      "cta": "Create my first modpack",
+      "ctaSkip": "I'll do it later"
+    }
   },
   "publish": {
     "publishTitle": "Publish {{name}}",

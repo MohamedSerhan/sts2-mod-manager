@@ -1,31 +1,39 @@
 /**
- * Coverage notes for <OnboardingOverlay>:
+ * 1.7.0 T8 — branched first-launch onboarding flow.
  *
- * Intentionally-uncovered branches (documented to satisfy the ≥ 90 %
- * branch threshold without resorting to brittle ceremony):
+ * The overlay used to be a linear three-step wizard (detect game →
+ * credentials → profile choice). It's now a branched flow:
+ *   detect-game → audience choice → 2 teaching cards per audience.
  *
- * - Platform-signature ternaries in `handleBrowse`'s error message and
- *   the step-1 fallback view (Mac → `.app`, Linux → `.pck`, else
- *   `.exe`). jsdom hard-codes `navigator.platform` to one value per
- *   process, so only the host-platform branch is reachable. Overriding
- *   navigator across tests would bleed state — not worth it for a
- *   string literal swap.
- * - `handleTestNexus` / `handleSaveGh` early-return guards
- *   (`if (!key.trim()) return`). The button is `disabled` when the
- *   field is empty, so the guard is defensive belt-and-braces and
- *   isn't reachable via the UI without firing a synthetic click event.
- * - `next()`'s `else onComplete()` branch on line 130. The foot only
- *   renders the Next button when `step < 3` (`step < 3 ? <btn/> :
- *   null`), so the `step >= 3` arm of `next()` is unreachable via the
- *   UI. Step 3 completion is handled by the tile buttons via `pick()`,
- *   not by `next()`.
+ * Two big invariants the test suite enforces:
+ *
+ *   1. NO password-type input anywhere in the overlay. The credentials
+ *      step is gone; the new flow never asks for a Nexus API key or
+ *      a GitHub token at first launch. GitHub setup is deferred to
+ *      share time (ShareSetupPanel) and Nexus key entry happens on
+ *      the first manual Nexus install.
+ *
+ *   2. NO input labelled like a token/api-key field. We allow the
+ *      WORD "GitHub" in the creator-path card 2 body (because that
+ *      card explicitly tells the user the app handles GitHub setup
+ *      later, not now), but no labelled INPUT may be present.
+ *
+ * Intentionally-uncovered branches:
+ *
+ *   - Platform-signature ternaries in `handleBrowse`'s error message
+ *     and the detect-game fallback view. jsdom hard-codes
+ *     `navigator.platform` to one value per process — see the OG file
+ *     for the long explanation. Not worth bleeding state across tests
+ *     for a string-literal swap.
+ *   - `handleSomething` early-return guards on empty input strings:
+ *     the button is `disabled` when the field is empty, so the guard
+ *     is defensive belt-and-braces.
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
-import { openUrl } from '@tauri-apps/plugin-opener';
 
 import { OnboardingOverlay } from './OnboardingOverlay';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
@@ -35,72 +43,66 @@ type GameInfoLike = Partial<React.ComponentProps<typeof OnboardingOverlay>['game
 function setup(gameInfo: GameInfoLike | null = null) {
   const onSkip = vi.fn();
   const onComplete = vi.fn();
-  const onAddCode = vi.fn();
+  const onCreateModpack = vi.fn();
+  const onGoToHome = vi.fn();
+  const onGoToModpacks = vi.fn();
   const refreshGame = vi.fn(async () => {});
   render(
     <OnboardingOverlay
       gameInfo={gameInfo as any}
       onSkip={onSkip}
       onComplete={onComplete}
-      onAddCode={onAddCode}
+      onCreateModpack={onCreateModpack}
+      onGoToHome={onGoToHome}
+      onGoToModpacks={onGoToModpacks}
       refreshGame={refreshGame}
     />,
   );
-  return { onSkip, onComplete, onAddCode, refreshGame };
+  return { onSkip, onComplete, onCreateModpack, onGoToHome, onGoToModpacks, refreshGame };
 }
 
-/** Advance from step 1 → step 2 by clicking Next from an already-valid state. */
-async function advanceToStep2(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('button', { name: /^Next$/ }));
-  await waitFor(() => {
-    expect(screen.getByText(/Connect your accounts/)).toBeInTheDocument();
-  });
+/** Walk from a freshly mounted overlay (with a valid game seeded so the
+ *  detect-game step is already in its OK state) to the audience-choice
+ *  step. */
+async function advanceToAudience(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: /^Continue$/i }));
+  expect(await screen.findByText(/What do you want to do\?/i)).toBeInTheDocument();
 }
 
-/** Advance from step 1 → step 3 (via step 2's Skip-for-now / Next). */
-async function advanceToStep3(user: ReturnType<typeof userEvent.setup>) {
-  await advanceToStep2(user);
-  // On step 2 without saved creds, the primary advance button is labelled
-  // "Skip for now". After saving either credential it becomes "Next".
-  const advance =
-    screen.queryByRole('button', { name: /Skip for now/ }) ??
-    screen.getByRole('button', { name: /^Next$/ });
-  await user.click(advance);
-  await waitFor(() => {
-    expect(screen.getByText(/Pick your first profile/)).toBeInTheDocument();
-  });
-}
-
-describe('<OnboardingOverlay> step 1: game detect', () => {
+describe('<OnboardingOverlay> step 1: detect-game', () => {
   it('renders the step-1 heading on mount when game is not yet valid', () => {
     setup({ valid: false } as any);
-    expect(screen.getByText(/Find your Slay the Spire 2 install/)).toBeInTheDocument();
-    expect(screen.getByText(/Step 1 of 3/)).toBeInTheDocument();
+    expect(screen.getByText(/Find your Slay the Spire 2 install/i)).toBeInTheDocument();
+    expect(screen.getByText(/Step 1 of 2/i)).toBeInTheDocument();
   });
 
   it('offers a language override during onboarding', () => {
     setup({ valid: false } as any);
-
     expect(screen.getByLabelText('Language')).toBeInTheDocument();
   });
 
-  it('renders the gameNotFound view when gameInfo prop is null (no `?? false` fallback)', () => {
+  it('renders the gameNotFound view when gameInfo prop is null', () => {
     setup(null);
-    expect(screen.getByText(/Couldn't auto-detect/)).toBeInTheDocument();
+    expect(screen.getByText(/Couldn't auto-detect/i)).toBeInTheDocument();
   });
 
   it('renders the detected pill when initial gameInfo is valid', () => {
     setup({ valid: true, game_path: 'C:/STS2' } as any);
-    expect(screen.getByText(/Found Slay the Spire 2/)).toBeInTheDocument();
+    expect(screen.getByText(/Found Slay the Spire 2/i)).toBeInTheDocument();
     expect(screen.getByText('C:/STS2')).toBeInTheDocument();
   });
 
   it('Change button drops back to the manual-entry fallback', async () => {
     const user = userEvent.setup();
     setup({ valid: true, game_path: 'C:/STS2' } as any);
-    await user.click(screen.getByRole('button', { name: 'Change' }));
-    expect(screen.getByText(/Couldn't auto-detect/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Change/i }));
+    expect(screen.getByText(/Couldn't auto-detect/i)).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/Steam|Slay the Spire 2/)).toBeInTheDocument();
+  });
+
+  it('Continue button is disabled until the game is detected', () => {
+    setup({ valid: false } as any);
+    expect(screen.getByRole('button', { name: /^Continue$/i })).toBeDisabled();
   });
 
   it('Try again button invokes detect_game_path and shows detected pill on success', async () => {
@@ -115,11 +117,11 @@ describe('<OnboardingOverlay> step 1: game detect', () => {
     }));
     const user = userEvent.setup();
     const { refreshGame } = setup({ valid: false } as any);
-    await user.click(screen.getByRole('button', { name: /Try again/ }));
+    await user.click(screen.getByRole('button', { name: /Try again/i }));
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'detect_game_path')).toBe(true);
     });
-    expect(await screen.findByText(/Found Slay the Spire 2/)).toBeInTheDocument();
+    expect(await screen.findByText(/Found Slay the Spire 2/i)).toBeInTheDocument();
     expect(screen.getByText('C:/Games/STS2')).toBeInTheDocument();
     expect(refreshGame).toHaveBeenCalled();
   });
@@ -136,12 +138,11 @@ describe('<OnboardingOverlay> step 1: game detect', () => {
     }));
     const user = userEvent.setup();
     setup({ valid: false } as any);
-    await user.click(screen.getByRole('button', { name: /Try again/ }));
+    await user.click(screen.getByRole('button', { name: /Try again/i }));
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'detect_game_path')).toBe(true);
     });
-    // Still on the error sub-view.
-    expect(screen.getByText(/Couldn't auto-detect/)).toBeInTheDocument();
+    expect(screen.getByText(/Couldn't auto-detect/i)).toBeInTheDocument();
   });
 
   it('Try again button surfaces the gameNotFound state when detect_game_path throws', async () => {
@@ -150,11 +151,11 @@ describe('<OnboardingOverlay> step 1: game detect', () => {
     });
     const user = userEvent.setup();
     setup({ valid: false } as any);
-    await user.click(screen.getByRole('button', { name: /Try again/ }));
+    await user.click(screen.getByRole('button', { name: /Try again/i }));
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'detect_game_path')).toBe(true);
     });
-    expect(screen.getByText(/Couldn't auto-detect/)).toBeInTheDocument();
+    expect(screen.getByText(/Couldn't auto-detect/i)).toBeInTheDocument();
   });
 
   it('manual path input updates as the user types', async () => {
@@ -178,8 +179,8 @@ describe('<OnboardingOverlay> step 1: game detect', () => {
     }));
     const user = userEvent.setup();
     const { refreshGame } = setup({ valid: false } as any);
-    await user.click(screen.getByRole('button', { name: /Browse/ }));
-    expect(await screen.findByText(/Found Slay the Spire 2/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Browse/i }));
+    expect(await screen.findByText(/Found Slay the Spire 2/i)).toBeInTheDocument();
     expect(screen.getByText('D:/Picked')).toBeInTheDocument();
     expect(refreshGame).toHaveBeenCalled();
     expect(getInvokeCalls().some((c) => c.cmd === 'set_game_path')).toBe(true);
@@ -198,8 +199,8 @@ describe('<OnboardingOverlay> step 1: game detect', () => {
     }));
     const user = userEvent.setup();
     setup({ valid: false } as any);
-    await user.click(screen.getByRole('button', { name: /Browse/ }));
-    expect(await screen.findByText(/doesn't look like a Slay the Spire 2 install/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Browse/i }));
+    expect(await screen.findByText(/doesn't look like a Slay the Spire 2 install/i)).toBeInTheDocument();
   });
 
   it('Browse button surfaces the error message when set_game_path throws', async () => {
@@ -209,8 +210,8 @@ describe('<OnboardingOverlay> step 1: game detect', () => {
     });
     const user = userEvent.setup();
     setup({ valid: false } as any);
-    await user.click(screen.getByRole('button', { name: /Browse/ }));
-    expect(await screen.findByText(/permission denied/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Browse/i }));
+    expect(await screen.findByText(/permission denied/i)).toBeInTheDocument();
   });
 
   it('Browse falls back to the picked path when set_game_path validates but returns null game_path', async () => {
@@ -226,7 +227,7 @@ describe('<OnboardingOverlay> step 1: game detect', () => {
     }));
     const user = userEvent.setup();
     setup({ valid: false } as any);
-    await user.click(screen.getByRole('button', { name: /Browse/ }));
+    await user.click(screen.getByRole('button', { name: /Browse/i }));
     expect(await screen.findByText('D:/FallbackPicked')).toBeInTheDocument();
   });
 
@@ -238,14 +239,11 @@ describe('<OnboardingOverlay> step 1: game detect', () => {
     });
     const user = userEvent.setup();
     setup({ valid: false } as any);
-    await user.click(screen.getByRole('button', { name: /Browse/ }));
-    expect(await screen.findByText(/plain-string-error/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Browse/i }));
+    expect(await screen.findByText(/plain-string-error/i)).toBeInTheDocument();
   });
 
   it('Browse coerces non-string dialog selections via String() before validating', async () => {
-    // The dialog plugin can in theory return an object/array on some
-    // platforms; the component normalises via String(). We simulate by
-    // returning a value with a custom toString.
     const weird = { toString: () => 'E:/WeirdPath' };
     (openDialog as ReturnType<typeof vi.fn>).mockResolvedValueOnce(weird as unknown as string);
     registerInvokeHandler('set_game_path', () => ({
@@ -259,7 +257,7 @@ describe('<OnboardingOverlay> step 1: game detect', () => {
     }));
     const user = userEvent.setup();
     setup({ valid: false } as any);
-    await user.click(screen.getByRole('button', { name: /Browse/ }));
+    await user.click(screen.getByRole('button', { name: /Browse/i }));
     expect(await screen.findByText('E:/WeirdPath')).toBeInTheDocument();
   });
 
@@ -267,248 +265,267 @@ describe('<OnboardingOverlay> step 1: game detect', () => {
     (openDialog as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null);
     const user = userEvent.setup();
     setup({ valid: false } as any);
-    await user.click(screen.getByRole('button', { name: /Browse/ }));
-    // No state change — still on the gameNotFound view, no set_game_path invoke.
-    expect(screen.getByText(/Couldn't auto-detect/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Browse/i }));
+    expect(screen.getByText(/Couldn't auto-detect/i)).toBeInTheDocument();
     expect(getInvokeCalls().some((c) => c.cmd === 'set_game_path')).toBe(false);
   });
 });
 
-describe('<OnboardingOverlay> step 2: connect accounts', () => {
-  it('renders the step-2 heading after Next from step 1', async () => {
+describe('<OnboardingOverlay> step 2: audience choice', () => {
+  it('renders the audience-choice heading after Continue from step 1', async () => {
     const user = userEvent.setup();
     setup({ valid: true, game_path: 'C:/STS2' } as any);
-    await advanceToStep2(user);
-    expect(screen.getByText(/Step 2 of 3/)).toBeInTheDocument();
+    await advanceToAudience(user);
+    expect(screen.getByText(/Step 2 of 2/i)).toBeInTheDocument();
   });
 
-  it("Test & save button is disabled until the Nexus key field has content", async () => {
+  it('shows two large audience buttons with descriptions', async () => {
     const user = userEvent.setup();
     setup({ valid: true, game_path: 'C:/STS2' } as any);
-    await advanceToStep2(user);
-    const testBtn = screen.getByRole('button', { name: /Test & save/ });
-    expect(testBtn).toBeDisabled();
-    const nexusInput = screen.getByPlaceholderText(/Paste your Nexus API key/);
-    await user.type(nexusInput, 'nexus-key-abc');
-    expect(testBtn).not.toBeDisabled();
+    await advanceToAudience(user);
+    expect(screen.getByRole('button', { name: /Play modpacks others made/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Make or share modpacks/i })).toBeInTheDocument();
   });
 
-  it('Test & save shows the success help text when set_nexus_api_key resolves', async () => {
-    registerInvokeHandler('set_nexus_api_key', () => undefined);
+  it('player button routes to the player-path card 1', async () => {
     const user = userEvent.setup();
     setup({ valid: true, game_path: 'C:/STS2' } as any);
-    await advanceToStep2(user);
-    await user.type(screen.getByPlaceholderText(/Paste your Nexus API key/), 'nexus-key-abc');
-    await user.click(screen.getByRole('button', { name: /Test & save/ }));
-    expect(await screen.findByText(/Nexus mods will appear in Browse/)).toBeInTheDocument();
-    expect(getInvokeCalls().some((c) => c.cmd === 'set_nexus_api_key')).toBe(true);
+    await advanceToAudience(user);
+    await user.click(screen.getByRole('button', { name: /Play modpacks others made/i }));
+    expect(await screen.findByText(/Modpacks are saved sets of mods/i)).toBeInTheDocument();
   });
 
-  it('Test & save surfaces the rejection help text when set_nexus_api_key throws', async () => {
-    registerInvokeHandler('set_nexus_api_key', () => {
-      throw new Error('401 invalid key');
-    });
+  it('creator button routes to the creator-path card 1', async () => {
     const user = userEvent.setup();
     setup({ valid: true, game_path: 'C:/STS2' } as any);
-    await advanceToStep2(user);
-    await user.type(screen.getByPlaceholderText(/Paste your Nexus API key/), 'bad-key');
-    await user.click(screen.getByRole('button', { name: /Test & save/ }));
-    expect(await screen.findByText(/Nexus rejected this key/)).toBeInTheDocument();
+    await advanceToAudience(user);
+    await user.click(screen.getByRole('button', { name: /Make or share modpacks/i }));
+    expect(await screen.findByText(/Build a modpack/i)).toBeInTheDocument();
   });
 
-  it('GitHub Save button is disabled until the token field has content', async () => {
+  it('Back from audience returns to detect-game', async () => {
     const user = userEvent.setup();
     setup({ valid: true, game_path: 'C:/STS2' } as any);
-    await advanceToStep2(user);
-    const saveBtn = screen.getByRole('button', { name: /^Save$/ });
-    expect(saveBtn).toBeDisabled();
-    await user.type(screen.getByPlaceholderText(/ghp_/), 'ghp_test123');
-    expect(saveBtn).not.toBeDisabled();
-  });
-
-  it('GitHub Save shows the saved help text when set_github_token resolves', async () => {
-    registerInvokeHandler('set_github_token', () => true);
-    const user = userEvent.setup();
-    setup({ valid: true, game_path: 'C:/STS2' } as any);
-    await advanceToStep2(user);
-    await user.type(screen.getByPlaceholderText(/ghp_/), 'ghp_test123');
-    await user.click(screen.getByRole('button', { name: /^Save$/ }));
-    expect(await screen.findByText(/Browse will use authenticated calls/)).toBeInTheDocument();
-    expect(getInvokeCalls().some((c) => c.cmd === 'set_github_token')).toBe(true);
-  });
-
-  it('Create scoped token opens the prefilled fine-grained GitHub token URL', async () => {
-    vi.mocked(openUrl).mockClear();
-    const user = userEvent.setup();
-    setup({ valid: true, game_path: 'C:/STS2' } as any);
-    await advanceToStep2(user);
-
-    await user.click(screen.getByRole('button', { name: /Create scoped token/i }));
-
-    await waitFor(() => {
-      expect(openUrl).toHaveBeenCalledTimes(1);
-    });
-    const url = new URL(String(vi.mocked(openUrl).mock.calls[0][0]));
-    expect(`${url.origin}${url.pathname}`).toBe('https://github.com/settings/personal-access-tokens/new');
-    expect(url.searchParams.get('name')).toBe('STS2 Mod Manager');
-    expect(url.searchParams.get('contents')).toBe('write');
-    expect(url.searchParams.get('administration')).toBe('write');
-  });
-
-  it('Create scoped token shows an inline error when the opener rejects', async () => {
-    vi.mocked(openUrl).mockRejectedValueOnce(new Error('no browser'));
-    const user = userEvent.setup();
-    setup({ valid: true, game_path: 'C:/STS2' } as any);
-    await advanceToStep2(user);
-
-    await user.click(screen.getByRole('button', { name: /Create scoped token/i }));
-
-    expect(await screen.findByText(/Couldn't open GitHub token page: no browser/)).toBeInTheDocument();
-  });
-
-  it('GitHub Save swallows the error silently (no UI change) when set_github_token throws', async () => {
-    registerInvokeHandler('set_github_token', () => {
-      throw new Error('rate limited');
-    });
-    const user = userEvent.setup();
-    setup({ valid: true, game_path: 'C:/STS2' } as any);
-    await advanceToStep2(user);
-    await user.type(screen.getByPlaceholderText(/ghp_/), 'ghp_test123');
-    await user.click(screen.getByRole('button', { name: /^Save$/ }));
-    // The component intentionally ignores GH token failures — verify the
-    // success help text does NOT appear and the muted "skipping is fine"
-    // help is still rendered.
-    await waitFor(() => {
-      expect(getInvokeCalls().some((c) => c.cmd === 'set_github_token')).toBe(true);
-    });
-    expect(screen.queryByText(/Browse will use authenticated calls/)).not.toBeInTheDocument();
-    expect(screen.getByText(/Skipping is fine/)).toBeInTheDocument();
-  });
-
-  it('shows "Skip for now" as the advance button when neither credential is saved', async () => {
-    const user = userEvent.setup();
-    setup({ valid: true, game_path: 'C:/STS2' } as any);
-    await advanceToStep2(user);
-    expect(screen.getByRole('button', { name: /Skip for now/ })).toBeInTheDocument();
-  });
-
-  it('switches the advance button to "Next" once the Nexus key is accepted', async () => {
-    registerInvokeHandler('set_nexus_api_key', () => undefined);
-    const user = userEvent.setup();
-    setup({ valid: true, game_path: 'C:/STS2' } as any);
-    await advanceToStep2(user);
-    await user.type(screen.getByPlaceholderText(/Paste your Nexus API key/), 'nexus-key-abc');
-    await user.click(screen.getByRole('button', { name: /Test & save/ }));
-    await screen.findByText(/Nexus mods will appear in Browse/);
-    expect(screen.getByRole('button', { name: /^Next$/ })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Skip for now/ })).not.toBeInTheDocument();
-  });
-
-  it('Back button on step 2 returns to step 1', async () => {
-    const user = userEvent.setup();
-    setup({ valid: true, game_path: 'C:/STS2' } as any);
-    await advanceToStep2(user);
-    await user.click(screen.getByRole('button', { name: /^Back$/ }));
-    expect(screen.getByText(/Find your Slay the Spire 2 install/)).toBeInTheDocument();
-  });
-
-  it('typing in the Nexus key input updates its value', async () => {
-    const user = userEvent.setup();
-    setup({ valid: true, game_path: 'C:/STS2' } as any);
-    await advanceToStep2(user);
-    const input = screen.getByPlaceholderText(/Paste your Nexus API key/) as HTMLInputElement;
-    await user.type(input, 'abc');
-    expect(input.value).toBe('abc');
+    await advanceToAudience(user);
+    await user.click(screen.getByRole('button', { name: /^Back$/i }));
+    expect(screen.getByText(/Find your Slay the Spire 2 install/i)).toBeInTheDocument();
   });
 });
 
-describe('<OnboardingOverlay> step 3: pick a profile', () => {
-  it('renders the four profile tiles on entry', async () => {
+describe('<OnboardingOverlay> player path', () => {
+  it('player card 1 → Next → player card 2', async () => {
     const user = userEvent.setup();
     setup({ valid: true, game_path: 'C:/STS2' } as any);
-    await advanceToStep3(user);
-    expect(screen.getByText(/Vanilla — no mods/)).toBeInTheDocument();
-    expect(screen.getByText(/Follow a friend/)).toBeInTheDocument();
-    expect(screen.getByText(/Import profile JSON/)).toBeInTheDocument();
-    expect(screen.getByText(/Skip — set up later/)).toBeInTheDocument();
+    await advanceToAudience(user);
+    await user.click(screen.getByRole('button', { name: /Play modpacks others made/i }));
+    await user.click(screen.getByRole('button', { name: /^Next$/i }));
+    expect(await screen.findByText(/Press Play to start/i)).toBeInTheDocument();
   });
 
-  it('Vanilla tile calls onComplete without onAddCode', async () => {
+  it('player card 2 "Got it" CTA calls onComplete + onGoToHome', async () => {
     const user = userEvent.setup();
-    const { onComplete, onAddCode } = setup({ valid: true, game_path: 'C:/STS2' } as any);
-    await advanceToStep3(user);
-    await user.click(screen.getByRole('button', { name: /Vanilla — no mods/ }));
+    const { onComplete, onGoToHome } = setup({ valid: true, game_path: 'C:/STS2' } as any);
+    await advanceToAudience(user);
+    await user.click(screen.getByRole('button', { name: /Play modpacks others made/i }));
+    await user.click(screen.getByRole('button', { name: /^Next$/i }));
+    await user.click(screen.getByRole('button', { name: /^Got it$/i }));
     expect(onComplete).toHaveBeenCalledTimes(1);
-    expect(onAddCode).not.toHaveBeenCalled();
+    expect(onGoToHome).toHaveBeenCalledTimes(1);
   });
 
-  it('Follow-a-friend tile calls onComplete and onAddCode', async () => {
-    const user = userEvent.setup();
-    const { onComplete, onAddCode } = setup({ valid: true, game_path: 'C:/STS2' } as any);
-    await advanceToStep3(user);
-    await user.click(screen.getByRole('button', { name: /Follow a friend/ }));
-    expect(onComplete).toHaveBeenCalledTimes(1);
-    expect(onAddCode).toHaveBeenCalledTimes(1);
-  });
-
-  it('Import-JSON tile calls onComplete without onAddCode', async () => {
-    const user = userEvent.setup();
-    const { onComplete, onAddCode } = setup({ valid: true, game_path: 'C:/STS2' } as any);
-    await advanceToStep3(user);
-    await user.click(screen.getByRole('button', { name: /Import profile JSON/ }));
-    expect(onComplete).toHaveBeenCalledTimes(1);
-    expect(onAddCode).not.toHaveBeenCalled();
-  });
-
-  it('Skip-for-later tile calls onComplete without onAddCode', async () => {
-    const user = userEvent.setup();
-    const { onComplete, onAddCode } = setup({ valid: true, game_path: 'C:/STS2' } as any);
-    await advanceToStep3(user);
-    await user.click(screen.getByRole('button', { name: /Skip — set up later/ }));
-    expect(onComplete).toHaveBeenCalledTimes(1);
-    expect(onAddCode).not.toHaveBeenCalled();
-  });
-
-  it('Back from step 3 returns to step 2', async () => {
+  it('player card 1 Back returns to audience choice', async () => {
     const user = userEvent.setup();
     setup({ valid: true, game_path: 'C:/STS2' } as any);
-    await advanceToStep3(user);
-    await user.click(screen.getByRole('button', { name: /^Back$/ }));
-    expect(screen.getByText(/Connect your accounts/)).toBeInTheDocument();
+    await advanceToAudience(user);
+    await user.click(screen.getByRole('button', { name: /Play modpacks others made/i }));
+    await user.click(screen.getByRole('button', { name: /^Back$/i }));
+    expect(screen.getByText(/What do you want to do\?/i)).toBeInTheDocument();
   });
 
-  it('hides the foot Next button entirely on step 3 (only Back + Skip setup remain)', async () => {
+  it('player card 2 Back returns to player card 1', async () => {
     const user = userEvent.setup();
     setup({ valid: true, game_path: 'C:/STS2' } as any);
-    await advanceToStep3(user);
-    expect(screen.queryByRole('button', { name: /^Next$/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Skip for now/ })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Back$/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Skip setup/ })).toBeInTheDocument();
+    await advanceToAudience(user);
+    await user.click(screen.getByRole('button', { name: /Play modpacks others made/i }));
+    await user.click(screen.getByRole('button', { name: /^Next$/i }));
+    await user.click(screen.getByRole('button', { name: /^Back$/i }));
+    expect(screen.getByText(/Modpacks are saved sets of mods/i)).toBeInTheDocument();
   });
 });
 
-describe('<OnboardingOverlay> Skip setup', () => {
-  it('clicks Skip setup on step 1 and triggers onSkip', async () => {
+describe('<OnboardingOverlay> creator path', () => {
+  it('creator card 1 → Next → creator card 2', async () => {
+    const user = userEvent.setup();
+    setup({ valid: true, game_path: 'C:/STS2' } as any);
+    await advanceToAudience(user);
+    await user.click(screen.getByRole('button', { name: /Make or share modpacks/i }));
+    await user.click(screen.getByRole('button', { name: /^Next$/i }));
+    expect(await screen.findByText(/Share when you're ready/i)).toBeInTheDocument();
+  });
+
+  it('creator card 2 "Create my first modpack" CTA calls onComplete + onCreateModpack', async () => {
+    const user = userEvent.setup();
+    const { onComplete, onCreateModpack } = setup({ valid: true, game_path: 'C:/STS2' } as any);
+    await advanceToAudience(user);
+    await user.click(screen.getByRole('button', { name: /Make or share modpacks/i }));
+    await user.click(screen.getByRole('button', { name: /^Next$/i }));
+    await user.click(screen.getByRole('button', { name: /Create my first modpack/i }));
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(onCreateModpack).toHaveBeenCalledTimes(1);
+  });
+
+  it('creator card 2 "I\'ll do it later" CTA calls onComplete only', async () => {
+    const user = userEvent.setup();
+    const { onComplete, onCreateModpack } = setup({ valid: true, game_path: 'C:/STS2' } as any);
+    await advanceToAudience(user);
+    await user.click(screen.getByRole('button', { name: /Make or share modpacks/i }));
+    await user.click(screen.getByRole('button', { name: /^Next$/i }));
+    await user.click(screen.getByRole('button', { name: /I'll do it later/i }));
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(onCreateModpack).not.toHaveBeenCalled();
+  });
+
+  it('creator card 1 Back returns to audience choice', async () => {
+    const user = userEvent.setup();
+    setup({ valid: true, game_path: 'C:/STS2' } as any);
+    await advanceToAudience(user);
+    await user.click(screen.getByRole('button', { name: /Make or share modpacks/i }));
+    await user.click(screen.getByRole('button', { name: /^Back$/i }));
+    expect(screen.getByText(/What do you want to do\?/i)).toBeInTheDocument();
+  });
+
+  it('creator card 2 Back returns to creator card 1', async () => {
+    const user = userEvent.setup();
+    setup({ valid: true, game_path: 'C:/STS2' } as any);
+    await advanceToAudience(user);
+    await user.click(screen.getByRole('button', { name: /Make or share modpacks/i }));
+    await user.click(screen.getByRole('button', { name: /^Next$/i }));
+    await user.click(screen.getByRole('button', { name: /^Back$/i }));
+    expect(screen.getByText(/Build a modpack/i)).toBeInTheDocument();
+  });
+});
+
+describe('<OnboardingOverlay> Skip behaviour', () => {
+  it('Skip button on detect-game calls onSkip', async () => {
     const user = userEvent.setup();
     const { onSkip, onComplete } = setup({ valid: false } as any);
-    await user.click(screen.getByRole('button', { name: /Skip setup/ }));
+    await user.click(screen.getByRole('button', { name: /Skip setup/i }));
     expect(onSkip).toHaveBeenCalledTimes(1);
     expect(onComplete).not.toHaveBeenCalled();
   });
 
-  it('Skip setup is reachable on every step', async () => {
+  it('Skip is reachable from every step in the player branch', async () => {
     const user = userEvent.setup();
     setup({ valid: true, game_path: 'C:/STS2' } as any);
-    expect(screen.getByRole('button', { name: /Skip setup/ })).toBeInTheDocument();
-    await advanceToStep2(user);
-    expect(screen.getByRole('button', { name: /Skip setup/ })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /Skip for now/ }));
-    expect(screen.getByRole('button', { name: /Skip setup/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Skip setup/i })).toBeInTheDocument();
+    await advanceToAudience(user);
+    expect(screen.getByRole('button', { name: /Skip setup/i })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Play modpacks others made/i }));
+    expect(screen.getByRole('button', { name: /Skip setup/i })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /^Next$/i }));
+    expect(screen.getByRole('button', { name: /Skip setup/i })).toBeInTheDocument();
   });
 
-  it('Back button is disabled on step 1', () => {
+  it('Skip is reachable from every step in the creator branch', async () => {
+    const user = userEvent.setup();
+    setup({ valid: true, game_path: 'C:/STS2' } as any);
+    expect(screen.getByRole('button', { name: /Skip setup/i })).toBeInTheDocument();
+    await advanceToAudience(user);
+    expect(screen.getByRole('button', { name: /Skip setup/i })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Make or share modpacks/i }));
+    expect(screen.getByRole('button', { name: /Skip setup/i })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /^Next$/i }));
+    expect(screen.getByRole('button', { name: /Skip setup/i })).toBeInTheDocument();
+  });
+
+  it('Back is disabled on detect-game', () => {
     setup({ valid: false } as any);
-    expect(screen.getByRole('button', { name: /^Back$/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^Back$/i })).toBeDisabled();
+  });
+});
+
+describe('<OnboardingOverlay> credentials invariants (T8)', () => {
+  // The new flow MUST NOT ask the user for any credentials. These tests
+  // walk every step in both branches and assert that no
+  // password-typed input ever appears, and no input is labelled like
+  // a token / api-key / nexus field.
+
+  function assertNoCredentialInputs() {
+    const container = document.body;
+    const passwordInputs = container.querySelectorAll('input[type="password"]');
+    expect(passwordInputs.length).toBe(0);
+
+    const allInputs = Array.from(container.querySelectorAll('input'));
+    const credentialLabeled = allInputs.filter((input) => {
+      const aria = input.getAttribute('aria-label') ?? '';
+      const placeholder = input.getAttribute('placeholder') ?? '';
+      const haystack = `${aria} ${placeholder}`.toLowerCase();
+      return /token|api[\s.-]?key|nexus/.test(haystack);
+    });
+    expect(credentialLabeled).toEqual([]);
+  }
+
+  it('detect-game step exposes no credential inputs', () => {
+    setup({ valid: false } as any);
+    assertNoCredentialInputs();
+  });
+
+  it('audience step exposes no credential inputs', async () => {
+    const user = userEvent.setup();
+    setup({ valid: true, game_path: 'C:/STS2' } as any);
+    await advanceToAudience(user);
+    assertNoCredentialInputs();
+  });
+
+  it('player card 1 exposes no credential inputs', async () => {
+    const user = userEvent.setup();
+    setup({ valid: true, game_path: 'C:/STS2' } as any);
+    await advanceToAudience(user);
+    await user.click(screen.getByRole('button', { name: /Play modpacks others made/i }));
+    assertNoCredentialInputs();
+  });
+
+  it('player card 2 exposes no credential inputs', async () => {
+    const user = userEvent.setup();
+    setup({ valid: true, game_path: 'C:/STS2' } as any);
+    await advanceToAudience(user);
+    await user.click(screen.getByRole('button', { name: /Play modpacks others made/i }));
+    await user.click(screen.getByRole('button', { name: /^Next$/i }));
+    assertNoCredentialInputs();
+  });
+
+  it('creator card 1 exposes no credential inputs', async () => {
+    const user = userEvent.setup();
+    setup({ valid: true, game_path: 'C:/STS2' } as any);
+    await advanceToAudience(user);
+    await user.click(screen.getByRole('button', { name: /Make or share modpacks/i }));
+    assertNoCredentialInputs();
+  });
+
+  it('creator card 2 exposes no credential inputs (even though GitHub is mentioned)', async () => {
+    const user = userEvent.setup();
+    setup({ valid: true, game_path: 'C:/STS2' } as any);
+    await advanceToAudience(user);
+    await user.click(screen.getByRole('button', { name: /Make or share modpacks/i }));
+    await user.click(screen.getByRole('button', { name: /^Next$/i }));
+    // Sanity check: the card *does* mention GitHub by name to explain
+    // it's handled at share time. We're verifying there's no input
+    // field, not the absence of the word.
+    const dialog = screen.getByText(/Share when you're ready/i).closest('.gf-wiz');
+    expect(dialog).toBeTruthy();
+    expect(within(dialog as HTMLElement).getByText(/GitHub/i)).toBeInTheDocument();
+    assertNoCredentialInputs();
+  });
+
+  it('does not invoke any credential-saving tauri commands', async () => {
+    const user = userEvent.setup();
+    setup({ valid: true, game_path: 'C:/STS2' } as any);
+    await advanceToAudience(user);
+    await user.click(screen.getByRole('button', { name: /Make or share modpacks/i }));
+    await user.click(screen.getByRole('button', { name: /^Next$/i }));
+    await user.click(screen.getByRole('button', { name: /I'll do it later/i }));
+    const calls = getInvokeCalls();
+    expect(calls.find((c) => c.cmd === 'set_nexus_api_key')).toBeUndefined();
+    expect(calls.find((c) => c.cmd === 'set_github_token')).toBeUndefined();
   });
 });

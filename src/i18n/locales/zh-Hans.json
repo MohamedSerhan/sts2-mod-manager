@@ -937,7 +937,15 @@
     "displayDescriptionHint": "可选，仅用于管理器，方便说明难懂或未翻译的模组。"
   },
   "onboarding": {
-    "stepIndicator": "步骤 {{step}} / 3",
+    "title": "欢迎使用 STS2 模组管理器",
+    "skip": "跳过设置",
+    "next": "下一步",
+    "eyebrow": {
+      "step1": "第 1 步 / 共 2 步 — 找到你的游戏",
+      "step2": "第 2 步 / 共 2 步 — 选择你的方向",
+      "playerPath": "玩家方向",
+      "creatorPath": "创作者方向"
+    },
     "step1": {
       "title": "找到你的 Slay the Spire 2 安装目录",
       "subtitle": "我们将通过 Steam 自动检测。你随时可以在设置中更改。",
@@ -952,50 +960,36 @@
       "browsePlaceholderMac": "~/Library/Application Support/Steam/steamapps/common/Slay the Spire 2",
       "browsePlaceholderLinux": "~/.steam/steam/steamapps/common/Slay the Spire 2",
       "browse": "浏览…",
-      "pathError": "此文件夹不像 Slay the Spire 2 的安装目录（未找到 {{signature}}）— 请选择安装根目录。"
+      "pathError": "此文件夹不像 Slay the Spire 2 的安装目录（未找到 {{signature}}）— 请选择安装根目录。",
+      "continue": "继续"
     },
     "step2": {
-      "title": "关联账号（可选）",
-      "subtitle": "Nexus 需要 API 密钥才能下载。GitHub 认证可提高速率限制。全部跳过只可使用公开浏览。",
-      "nexusLabel": "Nexus Mods API 密钥（推荐）",
-      "nexusPlaceholder": "粘贴你的 Nexus API 密钥",
-      "testSave": "测试并保存",
-      "testing": "测试中…",
-      "nexusSaved": "已保存 — Nexus 模组将显示在浏览中。",
-      "nexusRejected": "Nexus 拒绝了此密钥。",
-      "generateNew": "生成新密钥 →",
-      "nexusSkipHint": "如果只使用 GitHub 模组可跳过。",
-      "nexusFreeNote": "免费 Nexus 账户即可。安装 Nexus 模组时，点击 Nexus 上的 \"Slow Download\" / \"Manual\" — 应用会从你的下载文件夹中捕获 zip 文件。（Nexus Premium 的即时下载 API 尚未接入。）",
-      "ghLabel": "GitHub 令牌（可选 — 将速率限制从 60 提高到 5000/小时）",
-      "ghPlaceholder": "ghp_…（或留空）",
-      "ghSaved": "已保存 — 浏览将使用认证调用。",
-      "ghSkipHint": "跳过也没问题 — 只是浏览时更快达到速率限制。",
-      "ghRequiredNote": "<0>发布模组包需要</0> — 需要 <1>repo</1> 权限（经典 PAT）或 <2>Contents: R/W</2> + <3>Administration: R/W</3>（细粒度令牌）。",
-      "ghOpenError": "无法打开 GitHub 令牌页面：{{error}}",
-      "createScopedToken": "创建限定范围的令牌"
+      "title": "你想做什么？",
+      "subtitle": "选一个最适合你的方向 — 之后随时可以切换。",
+      "playerCta": "玩别人做好的模组包",
+      "playerDesc": "粘贴朋友发来的分享码，或浏览公开模组包。",
+      "creatorCta": "创建或分享模组包",
+      "creatorDesc": "从你已安装的模组打包出一个分享给别人。"
     },
-    "step3": {
-      "title": "选择你的首个配置",
-      "subtitle": "从原版开始、跟随好友的包，或导入 JSON。你可以随时切换。",
-      "optionVanilla": {
-        "title": "原版 — 无模组",
-        "desc": "游戏以原版启动 — 稍后可开启模组"
-      },
-      "optionFollow": {
-        "title": "跟随好友（粘贴代码）",
-        "desc": "输入或粘贴类似 jess/XYZ4 的代码"
-      },
-      "optionImport": {
-        "title": "导入配置 JSON",
-        "desc": "拖放或选择从其他安装导出的 .json 文件"
-      },
-      "optionSkip": {
-        "title": "跳过 — 稍后设置",
-        "desc": "你可以从 设置 → 通用 重新运行设置向导"
-      }
+    "playerPath": {
+      "card1Title": "模组包就是保存好的模组组合",
+      "card1Body": "它们会出现在模组包页面。",
+      "card1Detail": "你可以随时在模组包之间切换 — 游戏文件夹会自动同步。在模组包工具栏粘贴朋友的分享码就能开始。",
+      "card2Title": "按下「开始」即可游玩",
+      "card2Body": "主页会运行当前激活的模组包。",
+      "card2Detail": "只要有一个激活的模组包，主页就会显示它，并附带大大的「开始」按钮。整个流程就是这么简单。",
+      "cta": "我明白了"
     },
-    "skipSetup": "跳过设置",
-    "skipForNow": "暂时跳过"
+    "creatorPath": {
+      "card1Title": "构建一个模组包",
+      "card1Body": "打开模组包页面，点击「创建」。",
+      "card1Detail": "向导会引导你从模组库中挑选模组，并在确认前检查它们是否健康。你已安装的模组都已经在里面了。",
+      "card2Title": "准备好后再分享",
+      "card2Body": "分享只需一步 — 配置在那时进行，现在无需操心。",
+      "card2Detail": "分享一个模组包需要一个免费的 GitHub 账户。当你点击「分享」时，应用会自动处理这一设置 — 现在什么都不用配。",
+      "cta": "创建我的第一个模组包",
+      "ctaSkip": "我稍后再说"
+    }
   },
   "publish": {
     "publishTitle": "发布 {{name}}",

@@ -72,9 +72,15 @@ interface ProfilesViewProps {
    *  bump triggers a one-shot effect; the value itself is
    *  meaningless, only the change matters. */
   focusQuickAddSignal?: number;
+  /** 1.7.0 T8 — incremented by the App shell when the new branched
+   *  onboarding's creator-path CTA fires. Each bump opens the guided
+   *  CreateModpackWizard. Same one-shot signal pattern as the focus
+   *  variant; the value itself is meaningless, only the change
+   *  matters. */
+  openCreateWizardSignal?: number;
 }
 
-export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, initialTab = 'yours', focusQuickAddSignal }: ProfilesViewProps = {}) {
+export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, initialTab = 'yours', focusQuickAddSignal, openCreateWizardSignal }: ProfilesViewProps = {}) {
   // 1.7.0 outer Yours/Browse tabs. 'yours' renders the user's
   // followed/published modpack list (the legacy Profiles content);
   // 'browse' renders the public modpack browser (formerly its own
@@ -252,6 +258,19 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       setShowImportCode(false);
     }
   }, [openActiveModpackSignal, activeProfile]);
+
+  // 1.7.0 T8 — open the guided Create-modpack wizard when the App
+  // shell pumps the signal (branched onboarding's creator-path CTA).
+  // Skip the first render (signal=0 or undefined). Also drops the
+  // user onto the Yours tab + closes any competing inline panels so
+  // the wizard isn't fighting for screen space.
+  useEffect(() => {
+    if (!openCreateWizardSignal) return;
+    setOuterTab('yours');
+    setShowImport(false);
+    setShowImportCode(false);
+    setShowCreateWizard(true);
+  }, [openCreateWizardSignal]);
 
   // T16 review fix — orphan-modpack guard. If the open detail view's
   // modpack disappears (deleted while detail is open, or signal bumped

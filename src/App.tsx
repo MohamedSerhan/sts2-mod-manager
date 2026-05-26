@@ -113,6 +113,11 @@ function AppInner() {
   // effect inside ProfilesView. Replaces the 1.7-v6 `focusCodeBarSignal`
   // pump that targeted Home's now-removed Quick-Add card.
   const [focusModpacksCodeBarSignal, setFocusModpacksCodeBarSignal] = useState(0);
+  // 1.7.0 T8 — incremented when the branched onboarding's creator-
+  // path final CTA fires. ProfilesView observes the bump and opens
+  // the guided CreateModpackWizard. Same one-shot signal pattern as
+  // the focus pump above.
+  const [openCreateWizardSignal, setOpenCreateWizardSignal] = useState(0);
   const [launching, setLaunching] = useState<null | 'modded' | 'vanilla'>(null);
 
   useEffect(() => { getVersion().then(setAppVersion).catch(() => {}); }, []);
@@ -836,6 +841,7 @@ function AppInner() {
                 openActiveModpackSignal={openActiveModpackSignal}
                 initialTab={activeView === 'browse-modpacks' ? 'browse' : 'yours'}
                 focusQuickAddSignal={focusModpacksCodeBarSignal}
+                openCreateWizardSignal={openCreateWizardSignal}
               />
             )}
             {/* Library view. The legacy 'browse-mods' view-id
@@ -862,18 +868,33 @@ function AppInner() {
             {activeView === 'tutorial' && <HelpView onGoToSettings={() => setActiveView('settings')} />}
             {activeView === 'settings' && <SettingsView />}
 
-            {/* First-launch onboarding wizard (v5 batch 4) */}
+            {/* 1.7.0 T8 — branched first-launch onboarding. The flow
+                asks the user ONE question (Play vs Make/Share) then
+                teaches the relevant path through the new IA. GitHub
+                token + Nexus API key are NOT mentioned in onboarding —
+                share-time GitHub setup lives inside ShareSetupPanel,
+                and Nexus key entry happens on the first manual
+                Nexus install. */}
             {showOnboarding && (
               <OnboardingOverlay
                 gameInfo={gameInfo}
                 onSkip={dismissOnboarding}
                 onComplete={dismissOnboarding}
-                onAddCode={() => {
-                  // 1.7 v7 — share-code input now lives in the Modpacks
-                  // toolbar. Route there and pulse the input so the user
-                  // sees the paste-zone.
+                onCreateModpack={() => {
+                  // Creator-path final CTA. Close + route to Modpacks
+                  // + pump the Create-wizard signal so ProfilesView
+                  // opens the guided wizard on entry.
+                  dismissOnboarding();
                   setActiveView('profiles');
-                  setFocusModpacksCodeBarSignal((n) => n + 1);
+                  setOpenCreateWizardSignal((n) => n + 1);
+                }}
+                onGoToModpacks={() => {
+                  dismissOnboarding();
+                  setActiveView('profiles');
+                }}
+                onGoToHome={() => {
+                  dismissOnboarding();
+                  setActiveView('home');
                 }}
                 refreshGame={refreshAll}
               />

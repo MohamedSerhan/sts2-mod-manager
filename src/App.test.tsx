@@ -1394,34 +1394,54 @@ describe('<App>', () => {
     });
   });
 
-  it('Onboarding "Follow a friend" routes to Modpacks + focuses Quick-Add input', async () => {
-    // Walk the onboarding wizard from step 1 to step 3 and pick the
-    // "Follow a friend (paste code)" option, which calls onComplete()
-    // then onAddCode(). In 1.7 v7 onAddCode routes to the Modpacks
-    // view (where Quick-Add lives) and bumps focusModpacksCodeBarSignal
-    // so ProfilesView focuses its toolbar input.
+  it('Onboarding creator-path "Create my first modpack" routes to Modpacks + opens Create wizard', async () => {
+    // 1.7.0 T8 — branched onboarding flow. The legacy "Follow a friend"
+    // choice on step 3 is gone; the new step 2 asks the audience-
+    // segmentation question ("Play modpacks others made" vs "Make or
+    // share modpacks") and routes to a two-card teaching path. The
+    // creator path's final CTA calls onCreateModpack which bumps
+    // openCreateWizardSignal so ProfilesView opens its guided wizard.
+    registerInvokeHandler('detect_game_path', () => ({
+      game_path: 'C:/STS2',
+      mods_path: null,
+      disabled_mods_path: null,
+      mods_count: 0,
+      disabled_count: 0,
+      valid: true,
+      game_version: '0.105.0',
+    }));
     localStorage.removeItem('sts2mm-onboarded');
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: /Skip setup/i })).toBeInTheDocument();
     });
-    // Step 1 → 2. The primary action is "Next".
-    const next1 = await screen.findByRole('button', { name: /^Next$/i });
-    await user.click(next1);
-    // Step 2 → 3. With no nexus key + no GH token saved the button
-    // label is "Skip for now" rather than "Next".
-    const next2 = await screen.findByRole('button', { name: /Skip for now|^Next$/i });
-    await user.click(next2);
-    // Step 3 — pick the "Follow a friend" choice.
-    const follow = await screen.findByRole('button', { name: /Follow a friend/i });
-    await user.click(follow);
-    // After onComplete + onAddCode, the onboarding is dismissed AND the
-    // Modpacks toolbar Quick-Add input is in the DOM.
+    // Step 1 — game's not yet detected by default, so click Try again
+    // to use the registered detect_game_path mock above.
+    const tryAgain = await screen.findByRole('button', { name: /Try again/i });
+    await user.click(tryAgain);
+    // Now the "Continue" button is enabled.
+    const continueBtn = await screen.findByRole('button', { name: /^Continue$/i });
+    await waitFor(() => expect(continueBtn).not.toBeDisabled());
+    await user.click(continueBtn);
+    // Audience step — pick the creator path.
+    const creatorBtn = await screen.findByRole('button', { name: /Make or share modpacks/i });
+    await user.click(creatorBtn);
+    // Creator card 1 → Next → creator card 2.
+    await user.click(await screen.findByRole('button', { name: /^Next$/i }));
+    // Final CTA — closes onboarding and opens the Create wizard on the
+    // Modpacks page.
+    await user.click(await screen.findByRole('button', { name: /Create my first modpack/i }));
+    // Overlay is gone.
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: /Skip setup/i })).toBeNull();
     });
-    expect(screen.getByLabelText(/Add a modpack by code/i)).toBeInTheDocument();
+    // CreateModpackWizard mounted — its step-1 heading is "Start" and
+    // it surfaces a "Cancel" button. We use the Cancel button as the
+    // unambiguous signal the wizard is present.
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^Cancel$/i })).toBeInTheDocument();
+    });
   });
 
   it("LaunchSpinner's 'Hide' button calls onCancel and dismisses the spinner", async () => {

@@ -74,3 +74,30 @@ export function sanitizeTitle(body) {
   if (cutoff < 0) return s.slice(0, MAX_TITLE_CHARS); // no space found, hard-cut
   return s.slice(0, cutoff);
 }
+
+const BUG_HIGH_RE = /\b(crash(es|ed|ing)?|error|exception|broken|fails?|won['']?t (start|launch|open|install))\b/i;
+const BUG_MED_RE = /\b(bug|doesn['']?t work|not working|glitch)\b/i;
+const FEAT_HIGH_RE = /\b(feature request|would be nice|please add|can you add|suggestion)\b/i;
+const QUESTION_PREFIX_RE = /\b(how do i|where is|can someone)\b/i;
+const QUESTION_MARK_RE = /[?？]/;
+const KUDOS_WORD_RE = /\b(thanks|great|love|awesome|amazing|nice work|good job)\b/i;
+
+export function classify(text, _kind) {
+  const body = (text || '').trim();
+  if (!body) return { classification: 'needs-triage', confidence: 'low' };
+
+  if (BUG_HIGH_RE.test(body)) return { classification: 'bug', confidence: 'high' };
+  if (BUG_MED_RE.test(body)) return { classification: 'bug', confidence: 'medium' };
+  if (FEAT_HIGH_RE.test(body)) return { classification: 'feature-request', confidence: 'high' };
+
+  if (QUESTION_PREFIX_RE.test(body)) return { classification: 'question', confidence: 'medium' };
+  if (QUESTION_MARK_RE.test(body) && body.length < 200) {
+    return { classification: 'question', confidence: 'medium' };
+  }
+
+  if (body.length <= KUDOS_MAX_CHARS && KUDOS_WORD_RE.test(body)) {
+    return { classification: 'kudos', confidence: 'high' };
+  }
+
+  return { classification: 'needs-triage', confidence: 'low' };
+}

@@ -153,3 +153,99 @@ test('sanitizeTitle of all-punctuation returns input unchanged', () => {
 test('sanitizeTitle preserves non-ASCII content', () => {
   assert.equal(sanitizeTitle('崩溃 crash 启动'), '崩溃 crash 启动');
 });
+
+import { classify } from './nexus-triage.mjs';
+
+// bug_high
+for (const phrase of [
+  'app crashes on launch',
+  'it crashed yesterday',
+  'crashing every time I open it',
+  'I got an error popup',
+  'unhandled exception in profile import',
+  'profile is broken',
+  'launch fails immediately',
+  "won't start at all",
+  "won't launch from steam",
+  "won't open the share modal",
+  "won't install the deb",
+]) {
+  test(`classify: bug_high matches "${phrase}"`, () => {
+    const r = classify(phrase, 'comment');
+    assert.equal(r.classification, 'bug', `expected bug, got ${r.classification} for "${phrase}"`);
+    assert.equal(r.confidence, 'high');
+  });
+}
+
+// bug_med
+for (const phrase of [
+  'this looks like a bug',
+  "the share button doesn't work",
+  'profile switcher not working',
+  'visual glitch on the home view',
+]) {
+  test(`classify: bug_med matches "${phrase}"`, () => {
+    const r = classify(phrase, 'comment');
+    assert.equal(r.classification, 'bug', `expected bug, got ${r.classification} for "${phrase}"`);
+    assert.equal(r.confidence, 'medium');
+  });
+}
+
+// feat_high
+for (const phrase of [
+  'this is a feature request',
+  'would be nice to have dark mode',
+  'please add a search box',
+  'can you add a sort option',
+  'suggestion: keyboard shortcuts',
+]) {
+  test(`classify: feat_high matches "${phrase}"`, () => {
+    const r = classify(phrase, 'comment');
+    assert.equal(r.classification, 'feature-request', `expected feature-request, got ${r.classification} for "${phrase}"`);
+    assert.equal(r.confidence, 'high');
+  });
+}
+
+// question
+for (const phrase of [
+  'how do I install this?',
+  'where is the settings menu?',
+  'can someone explain the share flow?',
+  'is this compatible with vortex?',
+  '这怎么用？',  // zh-Hans full-width
+]) {
+  test(`classify: question matches "${phrase}"`, () => {
+    const r = classify(phrase, 'comment');
+    assert.equal(r.classification, 'question', `expected question, got ${r.classification} for "${phrase}"`);
+  });
+}
+
+// kudos boundary
+test('classify: kudos matches positive short comment at 79 chars', () => {
+  const body = 'thanks for this, great mod, works perfectly with my setup, love the polish!';
+  assert.ok(body.length <= 80, `body length ${body.length} should be <= 80`);
+  assert.equal(classify(body, 'comment').classification, 'kudos');
+});
+
+test('classify: kudos rejects positive comment at 81 chars', () => {
+  const body = 'thanks for this great mod, it works really well with my setup, love the polish!!!';
+  assert.ok(body.length > 80, `body length ${body.length} should be > 80`);
+  assert.equal(classify(body, 'comment').classification, 'needs-triage');
+});
+
+test('classify: positive + bug keyword goes to bug (priority order)', () => {
+  const body = 'thanks, but it crashed when I clicked share';
+  assert.equal(classify(body, 'comment').classification, 'bug');
+});
+
+// non-English
+test('classify: non-English non-keyword body defaults to needs-triage', () => {
+  assert.equal(classify('这是一条测试评论', 'comment').classification, 'needs-triage');
+});
+
+// edge cases
+test('classify: empty / whitespace / backticks → needs-triage', () => {
+  assert.equal(classify('', 'comment').classification, 'needs-triage');
+  assert.equal(classify('   ', 'comment').classification, 'needs-triage');
+  assert.equal(classify('```', 'comment').classification, 'needs-triage');
+});

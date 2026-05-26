@@ -124,7 +124,13 @@ describe('<ModsView>', () => {
     expect(screen.getByText(/2 installed.*1 active.*1 disabled/i)).toBeInTheDocument();
   });
 
-  it('offers a Mod Library bridge so users can assign installed mods to profiles from Mods', async () => {
+  it('offers a Manage-active-modpack page-header link (toolbar duplicate removed)', async () => {
+    // T16 review fix — the toolbar "Mod Library" button was removed.
+    // Its label described the dead cross-profile workspace and the
+    // page header already exposes the same handler via a non-misleading
+    // "Manage active modpack →" link. Pin both: (a) the toolbar no
+    // longer has a "Mod Library" affordance, (b) the page-header link
+    // still wires the handler.
     seedMods([baseMod({ name: 'BaseLib', folder_name: 'BaseLib' })]);
     const onManageActiveModpack = vi.fn();
     const user = userEvent.setup();
@@ -133,14 +139,13 @@ describe('<ModsView>', () => {
     await waitFor(() => {
       expect(screen.getByText('BaseLib')).toBeInTheDocument();
     });
-    const bridge = screen.getByRole('button', { name: /Mod Library/i });
-    expect(within(bridge).getByText('Beta')).toBeInTheDocument();
-    expect(bridge).toHaveAttribute(
-      'title',
-      expect.stringMatching(/profiles include each installed mod/i),
-    );
+    // No toolbar button labeled "Mod Library" — the toolbar duplicate
+    // is gone. (The page-header link is named "Manage active modpack",
+    // not "Mod Library", so this query stays unique.)
+    expect(screen.queryByRole('button', { name: /^Mod Library/i })).toBeNull();
 
-    await user.click(bridge);
+    const link = screen.getByRole('button', { name: /manage active modpack/i });
+    await user.click(link);
     expect(onManageActiveModpack).toHaveBeenCalledTimes(1);
   });
 

@@ -1799,7 +1799,12 @@ describe('<ProfilesView>', () => {
     });
   });
 
-  it.skip('Inline Copy share code button copies the chip code', async () => {
+  // T16 review fix — Copy chips restored on shared modpack cards.
+  // The old per-row Copy buttons disappeared in the card restructure;
+  // these tests pin the new chip-based affordance. Each chip is a real
+  // <button> that lives inside the card, stopPropagation-guards the
+  // card click, copies via navigator.clipboard, and toasts.
+  it('Copy share code chip on the card copies the chip code + toast', async () => {
     seedProfiles([baseProfile({ name: 'Published' })]);
     registerInvokeHandler('get_share_info', () => ({
       owner: 'alice',
@@ -1809,15 +1814,26 @@ describe('<ProfilesView>', () => {
     }));
     const user = setupUserWithClipboard();
     render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('alice/AA5A-315D-61AE')).toBeInTheDocument(); });
-    const copyBtn = await screen.findByTitle('Copy share code');
+    // Wait for the card to render with the Shared badge so we know
+    // shareInfoMap has populated and the chip row is mounted.
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Open Published modpack/i })).toBeInTheDocument();
+    });
+    const copyBtn = await screen.findByRole('button', { name: 'Copy share code' });
     await user.click(copyBtn);
     await waitFor(() => {
       expect(clipboardWrite).toHaveBeenCalledWith('alice/AA5A-315D-61AE');
     });
+    // Toast confirms — uses profiles.toast.shareCodeCopied i18n key.
+    await waitFor(() => {
+      expect(screen.getByText(/Share code copied/)).toBeInTheDocument();
+    });
+    // Critical: clicking the chip must NOT navigate into the detail
+    // view (stopPropagation guard). The list view stays mounted.
+    expect(screen.getByRole('button', { name: /Open Published modpack/i })).toBeInTheDocument();
   });
 
-  it.skip('Inline Copy install link button copies the HTTPS bridge URL + toast', async () => {
+  it('Copy share link chip on the card copies the install link + toast', async () => {
     seedProfiles([baseProfile({ name: 'Published' })]);
     registerInvokeHandler('get_share_info', () => ({
       owner: 'alice',
@@ -1827,37 +1843,40 @@ describe('<ProfilesView>', () => {
     }));
     const user = setupUserWithClipboard();
     render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('alice/AA5A-315D-61AE')).toBeInTheDocument(); });
-    const linkBtn = await screen.findByTitle(/Copy install link/i);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Open Published modpack/i })).toBeInTheDocument();
+    });
+    const linkBtn = await screen.findByRole('button', { name: 'Copy share link' });
     await user.click(linkBtn);
     await waitFor(() => {
       expect(clipboardWrite).toHaveBeenCalled();
     });
-    {
-      const calls = clipboardWrite.mock.calls;
-      expect((calls[calls.length - 1]?.[0] as string)).toMatch(/i\.html\?c=/);
-    }
+    // buildShareLink emits an https URL with the code query param.
+    const calls = clipboardWrite.mock.calls;
+    expect((calls[calls.length - 1]?.[0] as string)).toMatch(/i\.html\?c=/);
     await waitFor(() => {
       expect(screen.getByText(/Install link copied/)).toBeInTheDocument();
     });
   });
 
-  it.skip('Inline Copy install link clipboard reject surfaces error toast', async () => {
+  it('Copy share link chip clipboard reject surfaces error toast', async () => {
     seedProfiles([baseProfile({ name: 'Published' })]);
     registerInvokeHandler('get_share_info', () => ({
       owner: 'alice', code: 'AA5A-315D-61AE', url: '', remote_path: 'P.json',
     }));
     const user = setupUserWithClipboard(async () => { throw new Error('blocked'); });
     render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('alice/AA5A-315D-61AE')).toBeInTheDocument(); });
-    const linkBtn = await screen.findByTitle(/Copy install link/i);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Open Published modpack/i })).toBeInTheDocument();
+    });
+    const linkBtn = await screen.findByRole('button', { name: 'Copy share link' });
     await user.click(linkBtn);
     await waitFor(() => {
       expect(screen.getByText(/Couldn't copy to clipboard/)).toBeInTheDocument();
     });
   });
 
-  it.skip('Inline Copy share message button copies the paste-ready message + toast', async () => {
+  it('Copy share message chip on the card copies the paste-ready message + toast', async () => {
     seedProfiles([baseProfile({ name: 'Published' })]);
     registerInvokeHandler('get_share_info', () => ({
       owner: 'alice', code: 'AA5A-315D-61AE',
@@ -1865,30 +1884,32 @@ describe('<ProfilesView>', () => {
     }));
     const user = setupUserWithClipboard();
     render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('alice/AA5A-315D-61AE')).toBeInTheDocument(); });
-    const msgBtn = await screen.findByTitle(/Copy share message/i);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Open Published modpack/i })).toBeInTheDocument();
+    });
+    const msgBtn = await screen.findByRole('button', { name: 'Copy share message' });
     await user.click(msgBtn);
     await waitFor(() => {
       expect(clipboardWrite).toHaveBeenCalled();
     });
-    {
-      const calls = clipboardWrite.mock.calls;
-      expect((calls[calls.length - 1]?.[0] as string)).toMatch(/Join my Slay the Spire 2/);
-    }
+    const calls = clipboardWrite.mock.calls;
+    expect((calls[calls.length - 1]?.[0] as string)).toMatch(/Join my Slay the Spire 2/);
     await waitFor(() => {
       expect(screen.getByText(/Share message copied/)).toBeInTheDocument();
     });
   });
 
-  it.skip('Inline Copy share message clipboard reject surfaces error toast', async () => {
+  it('Copy share message chip clipboard reject surfaces error toast', async () => {
     seedProfiles([baseProfile({ name: 'Published' })]);
     registerInvokeHandler('get_share_info', () => ({
       owner: 'alice', code: 'AA5A-315D-61AE', url: '', remote_path: 'P.json',
     }));
     const user = setupUserWithClipboard(async () => { throw new Error('blocked'); });
     render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('alice/AA5A-315D-61AE')).toBeInTheDocument(); });
-    const msgBtn = await screen.findByTitle(/Copy share message/i);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Open Published modpack/i })).toBeInTheDocument();
+    });
+    const msgBtn = await screen.findByRole('button', { name: 'Copy share message' });
     await user.click(msgBtn);
     await waitFor(() => {
       expect(screen.getByText(/Couldn't copy to clipboard/)).toBeInTheDocument();
@@ -2056,108 +2077,11 @@ describe('<ProfilesView>', () => {
     });
   });
 
-  it.skip('Published kebab Copy share code item copies + toast', async () => {
-    seedProfiles([baseProfile({ name: 'Published' })]);
-    registerInvokeHandler('get_share_info', () => ({
-      owner: 'alice', code: 'AA5A-315D-61AE', url: '', remote_path: 'P.json',
-    }));
-    const user = setupUserWithClipboard();
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('Published')).toBeInTheDocument(); });
-    const kebabs = screen.getAllByRole('button', { name: /More actions/ });
-    expect(kebabs.length).toBeGreaterThan(0);
-    await user.click(kebabs[0]);
-    const copyCode = await screen.findByRole('menuitem', { name: /Copy share code/i });
-    await user.click(copyCode);
-    await waitFor(() => {
-      expect(clipboardWrite).toHaveBeenCalledWith('alice/AA5A-315D-61AE');
-    });
-    await waitFor(() => {
-      expect(screen.getByText(/Share code copied/)).toBeInTheDocument();
-    });
-  });
-
-  it.skip('Published kebab Copy share link item copies the HTTPS URL + toast', async () => {
-    seedProfiles([baseProfile({ name: 'Published' })]);
-    registerInvokeHandler('get_share_info', () => ({
-      owner: 'alice', code: 'AA5A-315D-61AE', url: '', remote_path: 'P.json',
-    }));
-    const user = setupUserWithClipboard();
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('Published')).toBeInTheDocument(); });
-    const kebabs = screen.getAllByRole('button', { name: /More actions/ });
-    await user.click(kebabs[0]);
-    const linkItem = await screen.findByRole('menuitem', { name: /Copy share link/i });
-    await user.click(linkItem);
-    await waitFor(() => {
-      expect(clipboardWrite).toHaveBeenCalled();
-    });
-    {
-      const calls = clipboardWrite.mock.calls;
-      expect((calls[calls.length - 1]?.[0] as string)).toMatch(/i\.html\?c=/);
-    }
-    await waitFor(() => {
-      expect(screen.getByText(/Install link copied/)).toBeInTheDocument();
-    });
-  });
-
-  it.skip('Published kebab Copy share link clipboard reject surfaces error toast', async () => {
-    seedProfiles([baseProfile({ name: 'Published' })]);
-    registerInvokeHandler('get_share_info', () => ({
-      owner: 'alice', code: 'AA5A-315D-61AE', url: '', remote_path: 'P.json',
-    }));
-    const user = setupUserWithClipboard(async () => { throw new Error('blocked'); });
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('Published')).toBeInTheDocument(); });
-    const kebabs = screen.getAllByRole('button', { name: /More actions/ });
-    await user.click(kebabs[0]);
-    const linkItem = await screen.findByRole('menuitem', { name: /Copy share link/i });
-    await user.click(linkItem);
-    await waitFor(() => {
-      expect(screen.getByText(/Couldn't copy to clipboard/)).toBeInTheDocument();
-    });
-  });
-
-  it.skip('Published kebab Copy share message item copies + toast', async () => {
-    seedProfiles([baseProfile({ name: 'Published' })]);
-    registerInvokeHandler('get_share_info', () => ({
-      owner: 'alice', code: 'AA5A-315D-61AE', url: '', remote_path: 'P.json',
-    }));
-    const user = setupUserWithClipboard();
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('Published')).toBeInTheDocument(); });
-    const kebabs = screen.getAllByRole('button', { name: /More actions/ });
-    await user.click(kebabs[0]);
-    const msgItem = await screen.findByRole('menuitem', { name: /Copy share message/i });
-    await user.click(msgItem);
-    await waitFor(() => {
-      expect(clipboardWrite).toHaveBeenCalled();
-    });
-    {
-      const calls = clipboardWrite.mock.calls;
-      expect((calls[calls.length - 1]?.[0] as string)).toMatch(/Join my Slay the Spire 2/);
-    }
-    await waitFor(() => {
-      expect(screen.getByText(/Share message copied/)).toBeInTheDocument();
-    });
-  });
-
-  it.skip('Published kebab Copy share message clipboard reject surfaces error toast', async () => {
-    seedProfiles([baseProfile({ name: 'Published' })]);
-    registerInvokeHandler('get_share_info', () => ({
-      owner: 'alice', code: 'AA5A-315D-61AE', url: '', remote_path: 'P.json',
-    }));
-    const user = setupUserWithClipboard(async () => { throw new Error('blocked'); });
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('Published')).toBeInTheDocument(); });
-    const kebabs = screen.getAllByRole('button', { name: /More actions/ });
-    await user.click(kebabs[0]);
-    const msgItem = await screen.findByRole('menuitem', { name: /Copy share message/i });
-    await user.click(msgItem);
-    await waitFor(() => {
-      expect(screen.getByText(/Couldn't copy to clipboard/)).toBeInTheDocument();
-    });
-  });
+  // Removed: 5 legacy kebab-Copy tests. The per-row kebab menu was
+  // replaced by the card-based list (T16); Copy actions now live as
+  // inline chips on the shared modpack card, covered by the 5 tests
+  // above. The PublishModal's success-view copy buttons are exercised
+  // separately in PublishModal.test.tsx.
 
   it('Import-by-code with a brand-new code installs via the smart router', async () => {
     seedProfiles([baseProfile({ name: 'X' })]);
@@ -2554,7 +2478,10 @@ describe('<ProfilesView>', () => {
     });
   });
 
-  it.skip('Published tab shows only profiles in shareInfoMap', async () => {
+  it('Published tab shows only profiles in shareInfoMap (card-based list)', async () => {
+    // T16 review fix — re-enabled after the row → card-list switch.
+    // Selectors now target the cards' aria-label ("Open <name> modpack")
+    // since the card text alone overlaps the share-code chip text.
     seedProfiles([
       baseProfile({ name: 'Unshared' }),
       baseProfile({ name: 'Shared' }),
@@ -2567,14 +2494,18 @@ describe('<ProfilesView>', () => {
     });
     const user = userEvent.setup();
     render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('Shared')).toBeInTheDocument(); });
-    // Switch to Published tab.
-    await user.click(screen.getByRole('button', { name: /Published by you/i }));
-    // Shared remains, Unshared filtered out.
+    // Default "Following" tab shows both cards.
     await waitFor(() => {
-      expect(screen.queryByText('Unshared')).toBeNull();
+      expect(screen.getByRole('button', { name: /Open Shared modpack/i })).toBeInTheDocument();
     });
-    expect(screen.getByText('Shared')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Open Unshared modpack/i })).toBeInTheDocument();
+    // Switch to Published tab — wait for share info to resolve so the
+    // filter has populated shareInfoMap.
+    await user.click(screen.getByRole('button', { name: /Published by you/i }));
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /Open Unshared modpack/i })).toBeNull();
+    });
+    expect(screen.getByRole('button', { name: /Open Shared modpack/i })).toBeInTheDocument();
   });
 });
 

@@ -137,10 +137,12 @@ describe('<App>', () => {
     });
   });
 
-  it('Mods tab Mod Library bridge opens the active modpack detail view', async () => {
-    // T16 — the "Mod Library" bridge in the Mods view now routes
-    // to the active modpack's detail view (where its mod editor
-    // lives) instead of a standalone Mod Library workspace.
+  it('Mods tab Manage-active-modpack link opens the active modpack detail view', async () => {
+    // T16 + review fix — the toolbar "Mod Library" button was removed
+    // (its label described the now-dead cross-profile workspace). The
+    // page header retains a clearer "Manage active modpack →" link
+    // wired to the same handler; clicking it lands on the active
+    // modpack's detail view (where its mod editor lives).
     registerInvokeHandler('get_installed_mods', () => [{
       name: 'BaseLib',
       version: '1.0.0',
@@ -190,15 +192,11 @@ describe('<App>', () => {
     await user.click(getNavButton('Library'));
     await waitFor(() => { expect(screen.getByText(/All installed mods/i)).toBeInTheDocument(); });
 
-    // The toolbar "Mod Library" button (in the Library/Mods view) is
-    // the one we want — the link button has a different label
-    // ("Manage active modpack →"). Use a more specific name to dodge
-    // any ambiguity if the link starts matching /Mod Library/i.
-    const bridge = screen.getAllByRole('button').find(
-      (b) => b.textContent?.trim().startsWith('Mod Library'),
-    );
-    expect(bridge).toBeDefined();
-    await user.click(bridge!);
+    // Click the page-header "Manage active modpack →" link — this
+    // is the only bridge into the modpack detail view from the Mods
+    // page (the toolbar duplicate was removed in the T16 review fix).
+    const link = await screen.findByRole('button', { name: /manage active modpack/i });
+    await user.click(link);
 
     // Land directly on the active modpack's detail view: H2 with the
     // modpack name + Back-to-list button + LibraryTable rendering.

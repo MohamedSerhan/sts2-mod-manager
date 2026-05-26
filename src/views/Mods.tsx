@@ -25,7 +25,6 @@ import {
   Clock,
   RotateCcw,
   Tags,
-  ListChecks,
 } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { Card } from '../components/Card';
@@ -729,18 +728,13 @@ export function ModsView({ advancedMode: advancedModeProp, onManageActiveModpack
             <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
             {refreshing ? t('common.refreshing') : t('common.refresh')}
           </Button>
-          {onManageActiveModpack && (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={onManageActiveModpack}
-              title={t('mods.openModLibraryTitle')}
-            >
-              <ListChecks size={14} />
-              {t('mods.openModLibrary')}
-              <Badge variant="beta" className="gf-tab-beta" ariaHidden>{t('common.beta')}</Badge>
-            </Button>
-          )}
+          {/* T16 review fix — toolbar "Mod Library" button removed.
+              It was a redundant + misleading entry point: the label
+              described the dead cross-profile workspace, and the page
+              header already exposes the same `onManageActiveModpack`
+              handler via a clearer "Manage active modpack →" link.
+              Keeping only the page-header link removes the duplicate
+              affordance and the stale copy. */}
         </div>
       </div>
       )}

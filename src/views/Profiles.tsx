@@ -3,7 +3,10 @@ import { useTranslation } from 'react-i18next';
 import {
   Plus,
   Camera,
+  Copy,
   Download,
+  Link as LinkIcon,
+  MessageSquare,
   Upload,
   Layers,
   RefreshCw,
@@ -40,7 +43,7 @@ import {
   applySubscriptionUpdate,
   getSubscriptions,
 } from '../hooks/useTauri';
-import { importShareCodeSmart } from '../lib/shareImport';
+import { importShareCodeSmart, buildShareLink, buildShareMessage } from '../lib/shareImport';
 import type { ProfileDrift } from '../hooks/useTauri';
 import type { LoadOrderSettingsStatus, Profile, ShareResult } from '../types';
 
@@ -164,6 +167,40 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     }
   }
 
+  /**
+   * Copy a share artifact (raw code, install link, or paste-ready
+   * message) to the clipboard from a shared modpack card chip.
+   *
+   * Review fix (T16): the old per-row Copy buttons were lost in the
+   * card restructure — users who just wanted to forward a friend the
+   * code had to click into detail → Share/Re-share → wait for the
+   * publish modal → copy. Restoring inline chips on the card keeps the
+   * fast-path one click away. Same `clipboard.writeText` shape +
+   * toast as PublishModal.handleCopy.
+   */
+  async function handleCardCopy(
+    profileName: string,
+    kind: 'code' | 'link' | 'msg',
+  ): Promise<void> {
+    const info = shareInfoMap[profileName];
+    if (!info) return;
+    const codeStr = `${info.owner}/${info.code}`;
+    const text
+      = kind === 'code' ? codeStr
+      : kind === 'link' ? buildShareLink(codeStr)
+      : buildShareMessage(profileName, codeStr, t);
+    try {
+      await navigator.clipboard.writeText(text);
+      toastCtx.success(
+        kind === 'code' ? t('profiles.toast.shareCodeCopied')
+        : kind === 'link' ? t('profiles.toast.installLinkCopied')
+        : t('profiles.toast.shareMessageCopied'),
+      );
+    } catch {
+      toastCtx.error(t('profiles.toast.cantCopyToClipboard'));
+    }
+  }
+
   useEffect(() => {
     loadProfiles();
   }, []);
@@ -215,6 +252,21 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       setShowImportCode(false);
     }
   }, [openActiveModpackSignal, activeProfile]);
+
+  // T16 review fix — orphan-modpack guard. If the open detail view's
+  // modpack disappears (deleted while detail is open, or signal bumped
+  // before profiles finished loading), bounce back to the list. This
+  // MUST live in an effect, not inline in render, or React StrictMode
+  // (and 19+ in general) will warn about setState during render.
+  useEffect(() => {
+    if (
+      selectedModpack !== null
+      && profiles.length > 0
+      && !profiles.find((p) => p.name === selectedModpack)
+    ) {
+      setSelectedModpack(null);
+    }
+  }, [profiles, selectedModpack]);
 
   async function loadProfiles() {
     try {
@@ -840,18 +892,15 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       {/* T16 — detail-view branch. When a modpack is selected the
           list area is replaced by ModpackDetail (Paradox-style
           drilldown). Reachable only from the Yours tab; clicking
-          Back returns to the list. */}
+          Back returns to the list. The orphan-modpack bounce-back
+          (profile deleted while detail open) is handled by a
+          useEffect above — render here is pure. */}
       {outerTab === 'yours' && selectedModpack !== null && !loading && (() => {
         const profile = profiles.find((p) => p.name === selectedModpack);
-        if (!profile) {
-          // Race: the modpack was deleted while the detail view was
-          // open, or the signal was bumped before the profile list
-          // finished loading. Bounce back to the list rather than
-          // rendering a stub view. Guard with !loading above so we
-          // don't bounce mid-mount before profiles are populated.
-          setSelectedModpack(null);
-          return null;
-        }
+        // The effect above clears selectedModpack on the next tick when
+        // the profile disappears; until that runs we render nothing so
+        // we don't flash a stale view.
+        if (!profile) return null;
         return (
           <ModpackDetail
             profile={profile}
@@ -1105,12 +1154,24 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
             const hasUpdate = subUpdates.some(
               (u) => u.profile_name === profile.name,
             );
+            // T16 review fix — shared cards now host inline Copy chips
+            // (share code / install link / share message). Because nested
+            // <button> isn't valid HTML, the card itself is a div with
+            // role="button" + keyboard handlers; the chips are real
+            // buttons that stopPropagation so they don't navigate.
             return (
-              <button
+              <div
                 key={profile.name}
-                type="button"
+                role="button"
+                tabIndex={0}
                 className={`gf-modpack-card ${isActive ? 'is-active' : ''}`}
                 onClick={() => setSelectedModpack(profile.name)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setSelectedModpack(profile.name);
+                  }
+                }}
                 aria-label={t('modpack.openDetailAria', { name: profile.name })}
               >
                 <div className="gf-modpack-card-header">
@@ -1153,8 +1214,51 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
                       {t('profiles.card.outOfSync')}
                     </span>
                   )}
+                  {isShared && (
+                    <div
+                      className="gf-modpack-card-copy-chips"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        type="button"
+                        className="gf-modpack-card-copy-chip"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCardCopy(profile.name, 'code');
+                        }}
+                        title={t('profiles.kebab.copyShareCode')}
+                        aria-label={t('profiles.kebab.copyShareCode')}
+                      >
+                        <Copy size={12} aria-hidden />
+                      </button>
+                      <button
+                        type="button"
+                        className="gf-modpack-card-copy-chip"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCardCopy(profile.name, 'link');
+                        }}
+                        title={t('profiles.kebab.copyShareLink')}
+                        aria-label={t('profiles.kebab.copyShareLink')}
+                      >
+                        <LinkIcon size={12} aria-hidden />
+                      </button>
+                      <button
+                        type="button"
+                        className="gf-modpack-card-copy-chip"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCardCopy(profile.name, 'msg');
+                        }}
+                        title={t('profiles.kebab.copyShareMessageLabel')}
+                        aria-label={t('profiles.kebab.copyShareMessageLabel')}
+                      >
+                        <MessageSquare size={12} aria-hidden />
+                      </button>
+                    </div>
+                  )}
                 </div>
-              </button>
+              </div>
             );
           })}
         </div>

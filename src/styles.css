@@ -363,6 +363,39 @@ body {
   font-size: 11px;
   color: var(--warn, #f59e0b);
 }
+/* T16 review fix — Copy chips on shared modpack cards. Compact ghost
+   icon-buttons that sit beside the share badge so users can copy the
+   share code / install link / paste-ready message directly from the
+   list without opening detail + Share modal. stopPropagation on
+   click keeps the parent card's click-to-open behavior intact. */
+.gf-modpack-card-copy-chips {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
+}
+.gf-modpack-card-copy-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--indigo-line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-mute);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.gf-modpack-card-copy-chip:hover {
+  color: var(--ink);
+  border-color: var(--accent, var(--ok));
+  background: oklch(0.22 0.04 250);
+}
+.gf-modpack-card-copy-chip:focus-visible {
+  outline: 2px solid var(--accent, var(--ok));
+  outline-offset: 1px;
+}
 
 /* 1.7.0 T16 — modpack detail (inline drilldown) */
 .gf-modpack-detail {

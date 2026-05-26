@@ -69,6 +69,9 @@ jobs:
         working-directory: src-tauri
         run: cargo check
 
+      - name: Test nexus-triage script
+        run: node --test scripts/nexus-triage.test.mjs
+
   build:
     if: ${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}
     # Job-level permissions are also declared here in addition to the

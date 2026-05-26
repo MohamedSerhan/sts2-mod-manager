@@ -26,6 +26,7 @@ import { useConfirm } from '../components/ConfirmDialog';
 import { ModpackDetail } from '../components/ModpackDetail';
 import { PublishModal } from '../components/PublishModal';
 import { CreateModpackWizard } from '../components/CreateModpackWizard';
+import { HelpHint } from '../components/HelpHint';
 import { BrowseModpacksView } from './BrowseModpacks';
 import {
   listProfiles,
@@ -786,7 +787,10 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       {outerTab === 'yours' && selectedModpack === null && (
       <div className="gf-page-head">
         <div>
-          <h1 className="gf-page-title">{t('profiles.page.title')}</h1>
+          <h1 className="gf-page-title">
+            {t('profiles.page.title')}
+            <HelpHint helpKey="modpackWhat" />
+          </h1>
           <p className="gf-page-sub">
             {t('profiles.page.subtitle')}
           </p>

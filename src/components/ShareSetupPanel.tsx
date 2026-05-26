@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { setGithubToken, openExternalUrl } from '../hooks/useTauri';
+import { HelpHint } from './HelpHint';
 
 /**
  * Inline GitHub setup explained in plain language at the moment the
@@ -55,6 +56,7 @@ export function ShareSetupPanel({ onSaved, onConfigureLater }: Props) {
     <section className="gf-share-setup" aria-labelledby="share-setup-title">
       <h2 id="share-setup-title" className="gf-share-setup-title">
         {t('shareSetup.title')}
+        <HelpHint helpKey="githubWhy" />
       </h2>
       <p>{t('shareSetup.explainLine1')}</p>
       <p>{t('shareSetup.explainLine2')}</p>

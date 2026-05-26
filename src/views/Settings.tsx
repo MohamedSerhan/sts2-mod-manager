@@ -444,11 +444,11 @@ export function SettingsView() {
                     <span>✓</span>
                     <span>
                       {t('settings.general.verified', { count: gameInfo.mods_count })} ·{' '}
-                      <button onClick={handleOpenGameFolder} className="hover:underline" style={{ background: 'none', border: 0, color: 'inherit', cursor: 'pointer', padding: 0 }}>
+                      <button type="button" onClick={handleOpenGameFolder} className="gf-link-button">
                         {t('settings.general.openGameFolder')}
                       </button>
                       {' · '}
-                      <button onClick={handleOpenModsFolder} className="hover:underline" style={{ background: 'none', border: 0, color: 'inherit', cursor: 'pointer', padding: 0 }}>
+                      <button type="button" onClick={handleOpenModsFolder} className="gf-link-button">
                         {t('settings.general.openModsFolder')}
                       </button>
                     </span>

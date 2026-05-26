@@ -38,6 +38,7 @@ import {
 import { AdvancedSection } from './AdvancedSection';
 import { Badge } from './Badge';
 import { Button } from './Button';
+import { HelpHint } from './HelpHint';
 import { LibraryTable } from './LibraryTable';
 import { useApp } from '../contexts/AppContext';
 import type { ModAuditEntry, Profile, ShareResult } from '../types';
@@ -235,6 +236,10 @@ export function ModpackDetail({
       )}
 
       <div className="gf-modpack-detail-body">
+        <h3 className="gf-modpack-detail-library-heading">
+          {t('modpack.libraryHeading')}
+          <HelpHint helpKey="modpackWhat" />
+        </h3>
         <LibraryTable
           modpackName={profile.name}
           onMembershipChanged={onLibraryChanged}

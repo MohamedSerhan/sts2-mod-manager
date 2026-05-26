@@ -23,6 +23,7 @@ import {
 
 import { Badge, getSourceVariant } from './Badge';
 import { Button } from './Button';
+import { HelpHint } from './HelpHint';
 import {
   KebabDivider,
   KebabItem,
@@ -516,15 +517,18 @@ export function ModRow(props: ModRowProps) {
                 </span>
               )}
               {audit?.latest_release_blocked_by_game_version && !audit.pinned && (
-                <span
-                  className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300"
-                  title={t('mods.gameVersionBlockedTitle', {
-                    target:
-                      audit.latest_release_with_assets_tag?.replace(/^v/, '') ?? '?',
-                  })}
-                >
-                  <AlertTriangle size={9} /> {t('mods.updateBlockedByGameVersion')}
-                </span>
+                <>
+                  <span
+                    className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300"
+                    title={t('mods.gameVersionBlockedTitle', {
+                      target:
+                        audit.latest_release_with_assets_tag?.replace(/^v/, '') ?? '?',
+                    })}
+                  >
+                    <AlertTriangle size={9} /> {t('mods.updateBlockedByGameVersion')}
+                  </span>
+                  <HelpHint helpKey="blockedUpdate" />
+                </>
               )}
               {auditError && (
                 <span

@@ -53,6 +53,7 @@
     "advanced": "Advanced",
     "showAdvanced": "Show advanced",
     "hideAdvanced": "Hide advanced",
+    "whatsThis": "What does this mean?",
     "parts": {
       "downloaded": "{{count}} downloaded",
       "failed": "{{count}} failed",
@@ -100,6 +101,7 @@
       "notIn": "Not in this modpack",
       "includedOff": "Included, off in this modpack"
     },
+    "libraryHeading": "Mods in this modpack",
     "storage": {
       "active": "Active in game",
       "stored": "Stored",

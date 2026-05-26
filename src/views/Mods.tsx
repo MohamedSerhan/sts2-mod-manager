@@ -25,6 +25,7 @@ import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../components/ConfirmDialog';
 import { SourceEditor } from '../components/SourceEditor';
+import { HelpHint } from '../components/HelpHint';
 import { BrowseView } from './Browse';
 import type { ModInfo, ProfileMembershipGrid } from '../types';
 import {
@@ -580,7 +581,10 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
           <p className="gf-page-sub">
             {t('mods.subtitle', { total: totalCount, enabled: enabledCount, disabled: disabledCount > 0 ? t('mods.subtitleDisabledSuffix', { count: disabledCount }) : '' })}
           </p>
-          <p className="gf-page-sub">{t('mods.allInstalledSubtitle')}</p>
+          <p className="gf-page-sub">
+            {t('mods.allInstalledSubtitle')}
+            <HelpHint helpKey="storedMeaning" />
+          </p>
           {onManageActiveModpack && (
             <button
               type="button"

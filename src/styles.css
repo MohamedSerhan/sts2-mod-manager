@@ -445,6 +445,14 @@ body {
   flex-direction: column;
   gap: 8px;
 }
+.gf-modpack-detail-library-heading {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 4px 0 0;
+  display: flex;
+  align-items: center;
+}
 .gf-modpack-detail-advanced {
   border-top: 1px solid var(--indigo-line);
   padding-top: 8px;
@@ -3104,4 +3112,57 @@ body {
   align-items: center;
   gap: 6px;
   padding-top: 4px;
+}
+
+/* ── Inline help hints ─────────────────────────────────────────────
+   Small "?" icon next to a label that opens a short popover sourced
+   from the FAQ. The icon stays muted until hover/open so it doesn't
+   compete with the primary copy. The popover is positioned just below
+   the icon and has its own elevation so it sits above sibling content. */
+.gf-help-hint {
+  position: relative;
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 4px;
+}
+.gf-help-hint-btn {
+  background: none;
+  border: none;
+  padding: 2px;
+  cursor: pointer;
+  opacity: 0.55;
+  color: inherit;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+.gf-help-hint-btn:hover,
+.gf-help-hint.open .gf-help-hint-btn {
+  opacity: 1;
+  background: oklch(0.22 0.04 280);
+}
+.gf-help-hint-btn:focus-visible {
+  outline: 2px solid var(--gf);
+  outline-offset: 2px;
+}
+.gf-help-hint-popover {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 6px;
+  background: var(--bg-card, #1a1d22);
+  border: 1px solid var(--indigo-line, rgba(255, 255, 255, 0.1));
+  border-radius: 6px;
+  padding: 10px 12px;
+  max-width: 320px;
+  min-width: 220px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink);
+  z-index: 100;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.32);
+  text-align: left;
 }

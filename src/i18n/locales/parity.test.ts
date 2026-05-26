@@ -13,6 +13,7 @@ const SAME_AS_ENGLISH_ALLOWED = new Set([
   'modpacks.quickAdd.placeholder',
   'mods.gitHub',
   'mods.nexus',
+  'mods.notePrefix',
   'onboarding.step1.browsePlaceholderLinux',
   'onboarding.step1.browsePlaceholderMac',
   'onboarding.step1.browsePlaceholderWindows',

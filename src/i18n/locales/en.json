@@ -1604,6 +1604,22 @@
     "searchPlaceholder_one": "Search {{count}} mod",
     "searchPlaceholder_other": "Search {{count}} mods",
     "updateAllLabel_one": "Update {{count}} mod",
-    "updateAllLabel_other": "Update {{count}} mods"
+    "updateAllLabel_other": "Update {{count}} mods",
+    "notePrefix": "📝",
+    "row": {
+      "expand": "Show details for {{name}}",
+      "collapse": "Hide details for {{name}}",
+      "openFolder": "Open folder",
+      "editSources": "Edit sources",
+      "findGithub": "Find GitHub from Nexus"
+    },
+    "kebab": {
+      "activate": "Activate in game",
+      "activateDesc": "Move this mod's files back into the game folder so STS2 loads it.",
+      "disable": "Disable in game",
+      "disableDesc": "Move this mod's files out of the game folder. The mod stays installed but won't load until you activate it again.",
+      "skipUpdate": "Skip this update",
+      "unsnooze": "Show update again"
+    }
   }
 }

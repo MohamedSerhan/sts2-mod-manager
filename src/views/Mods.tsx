@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { countGithubUpdates, isUpToDate } from '../lib/auditState';
+import { countGithubUpdates } from '../lib/auditState';
 import { nexusFilesUrl } from '../lib/nexusUrl';
 import {
   Search,
@@ -13,31 +13,19 @@ import {
   ToggleLeft,
   ToggleRight,
   X,
-  GitBranch,
-  ExternalLink,
-  Snowflake,
-  Sun,
-  Wrench,
   ClipboardCheck,
   Download,
-  AlertTriangle,
-  Check,
-  Clock,
-  RotateCcw,
-  Tags,
 } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
-import { Toggle } from '../components/Toggle';
-import { Badge, getSourceVariant } from '../components/Badge';
+import { Badge } from '../components/Badge';
+import { ModRow } from '../components/ModRow';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../components/ConfirmDialog';
-import { KebabMenu, KebabSection, KebabDivider, KebabItem } from '../components/KebabMenu';
 import { SourceEditor } from '../components/SourceEditor';
 import { BrowseView } from './Browse';
-import { Copy } from 'lucide-react';
 import type { ModInfo, ProfileMembershipGrid } from '../types';
 import {
   toggleMod,
@@ -64,15 +52,8 @@ import {
   updateMod,
 } from '../hooks/useTauri';
 
-// v5 — Advanced mode is per-screen, persisted in localStorage. Off by default.
-const ADVANCED_KEY = 'sts2mm-mods-advanced';
-
 function displayNameFor(mod: ModInfo): string {
   return mod.display_name?.trim() || mod.name;
-}
-
-function displayDescriptionFor(mod: ModInfo): string {
-  return mod.display_description?.trim() || mod.description;
 }
 
 function ghRepoFromUrl(url: string | null): string {
@@ -141,27 +122,11 @@ function sortMods(mods: ModInfo[], sortMode: ModSortMode): ModInfo[] {
   return sorted;
 }
 
-/**
- * Numeric semver compare for the small subset we actually see in
- * mod manifests + STS2's release_info.json: "MAJOR.MINOR.PATCH" with
- * an optional leading "v". Returns true when `current >= required`.
- *
- * Fails OPEN on parse hiccups — UI would rather skip the warning than
- * cry "won't load!" at the user because of a quirky version string.
- */
-function gameVersionSatisfies(current: string | null | undefined, required: string | null | undefined): boolean {
-  if (!current || !required) return true;
-  const parse = (v: string) =>
-    v.trim().replace(/^v/i, '').split('.').slice(0, 3).map((n) => Number.parseInt(n, 10));
-  const [cMaj, cMin, cPatch] = parse(current);
-  const [rMaj, rMin, rPatch] = parse(required);
-  if ([cMaj, cMin, cPatch, rMaj, rMin, rPatch].some((n) => Number.isNaN(n))) return true;
-  if (cMaj !== rMaj) return cMaj > rMaj;
-  if (cMin !== rMin) return cMin > rMin;
-  return cPatch >= rPatch;
-}
-
 interface ModsViewProps {
+  /** 1.7.0 T17 — legacy advanced-mode toggle was removed when the
+   *  per-row drawer absorbed source pills + Freeze/Delete disclosure.
+   *  The prop is kept (unused) so older callers don't break, but it
+   *  has no effect — Library is now uniformly "advanced". */
   advancedMode?: boolean;
   /** 1.7.0 T16 — handler for the "Manage active modpack →" bridge
    *  links. Routes the user to the Modpacks view with the active
@@ -179,7 +144,7 @@ interface ModsViewProps {
   initialTab?: 'installed' | 'browse';
 }
 
-export function ModsView({ advancedMode: advancedModeProp, onManageActiveModpack, onGoToSettings, initialTab = 'installed' }: ModsViewProps = {}) {
+export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = 'installed' }: ModsViewProps = {}) {
   // 1.7.0 outer Installed/Browse tabs. 'installed' is the existing
   // Mods view content; 'browse' renders the public mod browser
   // (formerly its own sidebar entry).
@@ -199,19 +164,16 @@ export function ModsView({ advancedMode: advancedModeProp, onManageActiveModpack
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [quickAddUrl, setQuickAddUrl] = useState('');
   const [quickAdding, setQuickAdding] = useState(false);
-  const [expandedMod, setExpandedMod] = useState<string | null>(null);
+  // 1.7.0 T17 — Library rows are now click-to-expand accordions. The
+  // expanded set holds every row whose drawer is open (multi-expand;
+  // power users routinely want to compare two rows side by side).
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(() => new Set());
+  // Per-row source editor opens inside the drawer. We track which row's
+  // editor is currently open separately so a user can close the editor
+  // without collapsing the row's drawer.
+  const [sourceEditorRowKey, setSourceEditorRowKey] = useState<string | null>(null);
   const [savingSource, setSavingSource] = useState(false);
   const [findingGithub, setFindingGithub] = useState<string | null>(null);
-  const [advancedMode, setAdvancedMode] = useState<boolean>(() => {
-    if (advancedModeProp !== undefined) return advancedModeProp;
-    try { return localStorage.getItem(ADVANCED_KEY) === 'true'; }
-    catch { return false; }
-  });
-  function toggleAdvanced() {
-    const next = !advancedMode;
-    setAdvancedMode(next);
-    try { localStorage.setItem(ADVANCED_KEY, String(next)); } catch {}
-  }
 
   const [refreshing, setRefreshing] = useState(false);
   // Per-row spinner state for inline Update button. Keyed by folder_name
@@ -302,10 +264,39 @@ export function ModsView({ advancedMode: advancedModeProp, onManageActiveModpack
     }
   }
 
+  function toggleExpand(rowKey: string): void {
+    setExpandedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(rowKey)) {
+        next.delete(rowKey);
+        // Closing a row closes its source editor too. Otherwise the
+        // editor would silently stay "open" for a row whose drawer is
+        // no longer visible, which surprises the user when they re-
+        // expand the row and the editor's already loaded.
+        if (sourceEditorRowKey === rowKey) setSourceEditorRowKey(null);
+      } else {
+        next.add(rowKey);
+      }
+      return next;
+    });
+  }
+
+  function openSourceEditor(rowKey: string): void {
+    setExpandedRows((prev) => {
+      // Make sure the drawer is open when the user requests Edit Sources
+      // from the kebab — the source editor sits inside the drawer, so
+      // opening it without opening the drawer would silently fail.
+      if (prev.has(rowKey)) return prev;
+      const next = new Set(prev);
+      next.add(rowKey);
+      return next;
+    });
+    setSourceEditorRowKey(rowKey);
+  }
+
   const totalCount = mods.length;
   const enabledCount = mods.filter((m) => m.enabled).length;
   const disabledCount = mods.filter((m) => !m.enabled).length;
-  const linkedCount = mods.filter((m) => m.github_url || m.nexus_url).length;
 
   async function handleToggle(name: string, folderName: string | null, enable: boolean) {
     try {
@@ -525,18 +516,6 @@ export function ModsView({ advancedMode: advancedModeProp, onManageActiveModpack
     }
   }
 
-  function startEditSource(rowKey: string) {
-    setExpandedMod(rowKey);
-  }
-
-  function formatBytes(bytes: number): string {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
-  }
-
   const filtered = useMemo(() => {
     const term = filter.trim().toLowerCase();
     const tagKey = tagFilter.toLocaleLowerCase();
@@ -600,11 +579,6 @@ export function ModsView({ advancedMode: advancedModeProp, onManageActiveModpack
           <h1 className="gf-page-title">{t('mods.allInstalledTitle')}</h1>
           <p className="gf-page-sub">
             {t('mods.subtitle', { total: totalCount, enabled: enabledCount, disabled: disabledCount > 0 ? t('mods.subtitleDisabledSuffix', { count: disabledCount }) : '' })}
-            {advancedMode && linkedCount > 0 && (
-              <span style={{ color: 'var(--ok)', marginLeft: 8 }}>
-                · {t('mods.linkedCount', { count: linkedCount })}
-              </span>
-            )}
           </p>
           <p className="gf-page-sub">{t('mods.allInstalledSubtitle')}</p>
           {onManageActiveModpack && (
@@ -622,18 +596,14 @@ export function ModsView({ advancedMode: advancedModeProp, onManageActiveModpack
             <FolderOpen size={14} />
             {t('mods.openFolder')}
           </Button>
-          {advancedMode && (
-            <>
-              <Button variant="secondary" size="sm" onClick={handleImportFile} disabled={gameRunning}>
-                <Upload size={14} />
-                {t('mods.importMod')}
-              </Button>
-              <Button variant="secondary" size="sm" onClick={() => setShowQuickAdd(!showQuickAdd)} disabled={gameRunning}>
-                <Link size={14} />
-                {t('mods.quickAddUrl')}
-              </Button>
-            </>
-          )}
+          <Button variant="secondary" size="sm" onClick={handleImportFile} disabled={gameRunning}>
+            <Upload size={14} />
+            {t('mods.importMod')}
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => setShowQuickAdd(!showQuickAdd)} disabled={gameRunning}>
+            <Link size={14} />
+            {t('mods.quickAddUrl')}
+          </Button>
           {(() => {
             const ghUpdateCount = auditResults ? countGithubUpdates(auditResults) : 0;
             const ghUpdateNames = auditResults
@@ -761,8 +731,9 @@ export function ModsView({ advancedMode: advancedModeProp, onManageActiveModpack
 
       {outerTab === 'installed' && (
         <>
-      {/* Quick Add URL Form (advanced only) */}
-      {advancedMode && showQuickAdd && (
+      {/* Quick Add URL Form — shown when the user clicks the toolbar
+          Quick-Add button. The advanced-mode gate was removed in T17. */}
+      {showQuickAdd && (
         <Card className="flex gap-3 items-end">
           <div className="flex-1">
             <label className="text-sm text-text-muted block mb-1.5">
@@ -828,18 +799,6 @@ export function ModsView({ advancedMode: advancedModeProp, onManageActiveModpack
           </label>
         )}
         <div className="gf-sort-note">{t('mods.sort.visualOnly')}</div>
-        {/* Per-screen Advanced toggle (v5 batch 2) */}
-        <button
-          type="button"
-          className={`gf-adv-toggle ${advancedMode ? 'on' : ''}`}
-          onClick={toggleAdvanced}
-          title={t('mods.advancedTitle')}
-        >
-          <span className="gf-adv-toggle-track">
-            <span className="gf-adv-toggle-dot" />
-          </span>
-          <span className="gf-adv-toggle-label">{t('mods.advanced')}</span>
-        </button>
         {mods.length > 0 && (
           <div className="flex gap-1.5">
             <Button variant="ghost" size="sm" onClick={handleEnableAll} disabled={gameRunning} title={gameRunning ? t('mods.closeSts2First') : t('mods.enableAll')}>
@@ -877,10 +836,7 @@ export function ModsView({ advancedMode: advancedModeProp, onManageActiveModpack
             // Row key uses folder_name when present — two mods sharing a
             // display name MUST have distinct keys or React will fuse them.
             const rowKey = mod.folder_name ?? mod.name;
-            const isExpanded = expandedMod === rowKey;
-            const hasLinks = mod.github_url || mod.nexus_url;
             const displayName = displayNameFor(mod);
-            const displayDescription = displayDescriptionFor(mod);
             const isDuplicate = duplicateNames.has(displayName);
             // When two mods share a display name, show a subtitle so the
             // user can tell them apart. Prefer author, fall back to the
@@ -888,484 +844,100 @@ export function ModsView({ advancedMode: advancedModeProp, onManageActiveModpack
             const disambiguator = isDuplicate
               ? (mod.author?.trim() || mod.folder_name || null)
               : null;
-
-            // Audit row for this mod (if an audit has been run). Drives the
-            // inline "update available" pill + game-compat warning. We
-            // intentionally don't surface the pill for frozen mods or
-            // game-version-blocked rows — the audit table in Settings still
-            // shows those details for users who want the full picture.
-            //
-            // Lookup is folder-first so two same-named mods get distinct
-            // audit rows (the CardArtEditor case). Backend audit now
-            // includes folder_name on every entry; the fallback to
-            // display name only fires for legacy data shapes.
+            // Audit row for this mod (if an audit has been run). Lookup
+            // is folder-first so two same-named mods get distinct audit
+            // rows (the CardArtEditor case).
             const auditRow = auditByKey.get(rowKey) ?? auditByKey.get(mod.name);
-            const compatibleTag = auditRow?.latest_compatible_tag ?? auditRow?.latest_release_with_assets_tag ?? null;
-            const showUpdatePill =
-              !!auditRow &&
-              auditRow.needs_update &&
-              !auditRow.pinned &&
-              !auditRow.snoozed &&
-              !auditRow.game_version_too_old &&
-              !auditRow.latest_release_blocked_by_game_version &&
-              !!compatibleTag &&
-              !!mod.github_url;
-            // Nexus-update pill — mirrors the Settings → Audit row.
-            // `nexus_update_available` is already gated by the backend on
-            // game-version compatibility (see updater.rs: when the latest
-            // GitHub release is blocked by min_game_version AND Nexus has
-            // the same version, the flag is suppressed so we don't send
-            // the user to download an incompatible build). Frozen and
-            // snoozed states piggy-back on the GitHub pill's gates for
-            // consistency with what Settings shows.
-            const nexusFilesHref = mod.nexus_url ? nexusFilesUrl(mod.nexus_url) ?? `${mod.nexus_url}?tab=files` : null;
-            const showNexusUpdatePill =
-              !!auditRow &&
-              auditRow.nexus_update_available &&
-              !auditRow.pinned &&
-              !auditRow.snoozed &&
-              !!nexusFilesHref;
-            const isUpdatingThisRow = updatingKey === rowKey;
-            const auditError = auditRow?.error ?? null;
-
             // 1.7.0 — membership chip is sourced from the active modpack's
             // membership grid. Null = no active modpack OR no row for this
             // mod (newly installed since the grid was fetched), and we skip
             // the chip in both cases.
             const membership = membershipByKey.get(rowKey) ?? membershipByKey.get(mod.name) ?? null;
-
+            const expanded = expandedRows.has(rowKey);
+            const editingSources = sourceEditorRowKey === rowKey;
             return (
-              <Card
+              <ModRow
                 key={rowKey}
-                data-testid="mod-row"
-                className={`hover:bg-surface-hover transition-colors ${mod.pinned ? 'gf-mod-pinned' : ''}`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4 min-w-0">
-                    <Toggle
-                      checked={mod.enabled}
-                      onChange={(checked) => handleToggle(mod.name, mod.folder_name, checked)}
-                      disabled={gameRunning}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2.5 flex-wrap">
-                        <span className="text-sm font-medium text-text truncate">
-                          {displayName}
-                          {mod.display_name && (
-                            <span className="ml-1.5 text-[10px] font-normal text-text-dim">
-                              {mod.name}
-                            </span>
-                          )}
-                        </span>
-                        {disambiguator && (
-                          <span
-                            className="text-xs text-text-dim"
-                            title={t('mods.disambiguatorTitle', { name: displayName, identifier: mod.author ? t('mods.disambiguatorAuthor', { author: mod.author }) : t('mods.disambiguatorFolder', { folder: mod.folder_name }) })}
-                          >
-                            · {disambiguator}
-                          </span>
-                        )}
-                        <span className="text-sm text-text-dim">v{mod.version}</span>
-                        {(mod.tags ?? []).map((tag) => (
-                          <span
-                            key={tag}
-                            className="gf-pill gf-mod-tag"
-                            title={t('mods.tags.title', { tag })}
-                          >
-                            <Tags size={9} /> {tag}
-                          </span>
-                        ))}
-                        {mod.pinned && (
-                          <span
-                            className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300"
-                            title={t('mods.pinnedTitle')}
-                          >
-                            <Snowflake size={9} /> {t('mods.pinned')}
-                          </span>
-                        )}
-                        {auditRow && isUpToDate(auditRow) && (
-                          <span
-                            className="gf-pill gf-pill-ok"
-                            title={t('mods.latestTitle')}
-                          >
-                            <Check size={9} /> {t('mods.latest')}
-                          </span>
-                        )}
-                        {showUpdatePill && (
-                          <button
-                            onClick={() => handleInlineUpdate(mod.name, mod.folder_name)}
-                            disabled={gameRunning || isUpdatingThisRow || updatingKey !== null}
-                            className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
-                            title={
-                              gameRunning
-                                ? t('mods.closeSts2FirstDot')
-                                : t('mods.updateClickTitle', { current: mod.version, target: compatibleTag?.replace(/^v/, '') })
-                            }
-                          >
-                            {isUpdatingThisRow ? (
-                              <><RefreshCw size={9} className="animate-spin" /> {t('mods.updating')}</>
-                            ) : (
-                              <><Download size={9} /> {t('mods.updateAvailable', { version: compatibleTag?.replace(/^v/, '') })}</>
-                            )}
-                          </button>
-                        )}
-                        {showNexusUpdatePill && (
-                          <a
-                            href={nexusFilesHref!}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={() => notifyNexusOpen(mod.name)}
-                            className="gf-pill gf-pill-update inline-flex items-center gap-1 hover:underline"
-                            title={t('mods.nexusUpdateTitle', { nexusVer: auditRow!.nexus_version ?? '?', localVer: mod.version })}
-                          >
-                            <Download size={9} /> {t('mods.downloadFromNexus')}
-                          </a>
-                        )}
-                        {auditRow?.snoozed && (
-                          <span
-                            className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-500/20 text-slate-300"
-                            title={t('mods.snoozedTitle', { version: auditRow.latest_release_with_assets_tag?.replace(/^v/, '') ?? '?' })}
-                          >
-                            💤 {t('mods.snoozed')}
-                          </span>
-                        )}
-                        {auditRow?.latest_release_blocked_by_game_version && !auditRow.pinned && (
-                          <span
-                            className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300"
-                            title={t('mods.gameVersionBlockedTitle', { target: auditRow.latest_release_with_assets_tag?.replace(/^v/, '') ?? '?' })}
-                          >
-                            <AlertTriangle size={9} /> {t('mods.updateBlockedByGameVersion')}
-                          </span>
-                        )}
-                        {auditError && (
-                          <span
-                            className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-red-500/20 text-red-300"
-                            title={auditError}
-                          >
-                            <AlertTriangle size={9} /> {t('mods.auditError')}
-                          </span>
-                        )}
-                        {mod.min_game_version &&
-                          !gameVersionSatisfies(gameInfo?.game_version, mod.min_game_version) && (
-                          <span
-                            className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded"
-                            style={{
-                              background: 'oklch(0.78 0.16 60 / 0.18)',
-                              color: 'oklch(0.85 0.16 60)',
-                            }}
-                            title={t('mods.minGameVersionTitle', { minVer: mod.min_game_version, yourVer: gameInfo?.game_version ?? 'unknown' })}
-                          >
-                            ⚠ {t('mods.needsGameVersion', { version: mod.min_game_version })}
-                          </span>
-                        )}
-                        {/* Source badges (advanced only) */}
-                        {advancedMode && mod.github_url ? (
-                          <a
-                            href={mod.github_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex"
-                            title={t('mods.viewOnGitHub', { url: mod.github_url })}
-                          >
-                            <Badge variant="github">
-                              <GitBranch size={10} className="mr-1" />
-                              {t('mods.gitHub')}
-                            </Badge>
-                          </a>
-                        ) : null}
-                        {advancedMode && mod.nexus_url ? (
-                          <a
-                            href={mod.nexus_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex"
-                            title={t('mods.viewOnNexus', { url: mod.nexus_url })}
-                          >
-                            <Badge variant="nexus">{t('mods.nexus')}</Badge>
-                          </a>
-                        ) : null}
-                        {advancedMode && mod.custom_url ? (
-                          <a
-                            href={mod.custom_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex"
-                            title={t('mods.openLink', { url: mod.custom_url })}
-                          >
-                            <Badge variant="default">
-                              <ExternalLink size={10} className="mr-1" />
-                              {t('mods.link')}
-                            </Badge>
-                          </a>
-                        ) : null}
-                        {advancedMode && !hasLinks && !mod.custom_url && (
-                          <Badge variant={getSourceVariant(mod.source)}>
-                            {mod.source ? t('mods.local') : t('mods.unlinked')}
-                          </Badge>
-                        )}
-                        {mod.size_bytes > 0 && (
-                          <span className="text-xs text-text-dim">{formatBytes(mod.size_bytes)}</span>
-                        )}
-                      </div>
-                      {/* 1.7.0 — storage + membership chips. The two are
-                          deliberately separated: a mod can be "stored"
-                          on disk (disabled in the game folder) while
-                          still being included in the active modpack
-                          (Solo's confusion case). Membership chip is
-                          hidden when there's no active modpack. */}
-                      <div className="gf-mod-row-chips">
-                        <Badge
-                          variant={mod.enabled ? 'ok' : 'github'}
-                          title={mod.enabled ? undefined : t('modpack.storage.storedHint')}
-                        >
-                          {mod.enabled ? t('modpack.storage.active') : t('modpack.storage.stored')}
-                        </Badge>
-                        {membership && (
-                          <Badge
-                            variant={membership === 'in' ? 'ok' : membership === 'includedOff' ? 'update' : 'github'}
-                          >
-                            {t(
-                              membership === 'in'
-                                ? 'modpack.membership.in'
-                                : membership === 'includedOff'
-                                  ? 'modpack.membership.includedOff'
-                                  : 'modpack.membership.notIn'
-                            )}
-                          </Badge>
-                        )}
-                      </div>
-                      {displayDescription && (
-                        <p className="text-sm text-text-muted mt-1 truncate">
-                          {displayDescription}
-                        </p>
-                      )}
-                      {mod.note && (
-                        <p
-                          className="text-xs text-text-dim mt-1 truncate"
-                          title={mod.note}
-                          style={{ fontStyle: 'italic' }}
-                        >
-                          📝 {mod.note}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 ml-4 shrink-0">
-                    {/* Advanced mode: promote Remove to a one-click button
-                        on the row (left of the kebab). Non-advanced mode
-                        keeps the Remove entry inside the kebab so the row
-                        stays tidy for casual users. */}
-                    {advancedMode && (
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        onClick={() => handleDelete(mod.name, mod.folder_name)}
-                        disabled={gameRunning}
-                        aria-label={t('mods.removeMod')}
-                        title={gameRunning ? t('mods.closeSts2First') : t('mods.removeMod')}
-                      >
-                        <Trash2 size={12} />
-                      </Button>
-                    )}
-                    <KebabMenu title={t('mods.modActions')}>
-                      <KebabSection>
-                        <KebabItem
-                          icon={mod.pinned ? <Sun size={12} /> : <Snowflake size={12} />}
-                          onClick={() => handleTogglePin(mod.name, mod.folder_name, mod.pinned)}
-                          description={
-                            mod.pinned
-                              ? t('mods.unpinDesc')
-                              : t('mods.pinDesc')
-                          }
-                        >
-                          {mod.pinned ? t('mods.unpinThisMod') : t('mods.pinThisMod')}
-                        </KebabItem>
-                        <KebabItem
-                          icon={<Copy size={12} />}
-                          onClick={() => {
-                            navigator.clipboard.writeText(mod.version).then(
-                              () => toast.success(t('mods.toast.versionCopied', { version: mod.version })),
-                              () => toast.error(t('mods.toast.couldNotCopy')),
-                            );
-                          }}
-                        >
-                          {t('mods.copyVersion', { version: mod.version })}
-                        </KebabItem>
-                        <KebabItem icon={<FolderOpen size={12} />} onClick={handleOpenFolder}>
-                          {t('mods.openModsFolder')}
-                        </KebabItem>
-                        {auditRow?.snoozed ? (
-                          <KebabItem
-                            icon={<Check size={12} />}
-                            onClick={async () => {
-                              try {
-                                await setModSnooze(mod.name, null, mod.folder_name);
-                                await refreshAuditEntries([mod.name]);
-                                toast.success(t('mods.toast.unsnoozed', { name: mod.name }));
-                              } catch (e) {
-                                toast.error(t('mods.toast.allFailed', { error: e instanceof Error ? e.message : String(e) }));
-                              }
-                            }}
-                            description={t('mods.unsnoozeDesc')}
-                          >
-                            {t('mods.unsnoozeUpdate')}
-                          </KebabItem>
-                        ) : (
-                          auditRow?.needs_update && !!auditRow.latest_release_with_assets_tag && (
-                            <KebabItem
-                              icon={<Clock size={12} />}
-                              onClick={async () => {
-                                try {
-                                  await setModSnooze(
-                                    mod.name,
-                                    auditRow.latest_release_with_assets_tag ?? null,
-                                    mod.folder_name,
-                                  );
-                                  await refreshAuditEntries([mod.name]);
-                                  toast.success(t('mods.toast.snoozed', { name: mod.name }));
-                                } catch (e) {
-                                  toast.error(t('mods.toast.allFailed', { error: e instanceof Error ? e.message : String(e) }));
-                                }
-                              }}
-                              description={t('mods.snoozeDesc', { version: auditRow.latest_release_with_assets_tag?.replace(/^v/, '') ?? '?' })}
-                            >
-                              {t('mods.snoozeUpdate')}
-                            </KebabItem>
-                          )
-                        )}
-                      </KebabSection>
-                      {advancedMode && (
-                        <>
-                          <KebabDivider />
-                          <KebabSection head={t('mods.sources')}>
-                            <KebabItem
-                              icon={<Link size={12} />}
-                              onClick={() =>
-                                isExpanded ? setExpandedMod(null) : startEditSource(rowKey)
-                              }
-                            >
-                              {isExpanded ? t('mods.closeSourceEditor') : t('mods.editSources')}
-                            </KebabItem>
-                            {mod.github_url && (
-                              <KebabItem
-                                icon={<GitBranch size={12} />}
-                                onClick={() => openExternalUrl(mod.github_url!).catch(() => {})}
-                              >
-                                {t('mods.viewOnGitHubKebab')}
-                              </KebabItem>
-                            )}
-                            {mod.nexus_url && (
-                              <KebabItem
-                                icon={<ExternalLink size={12} />}
-                                onClick={() => openExternalUrl(mod.nexus_url!).catch(() => {})}
-                              >
-                                {t('mods.viewOnNexusKebab')}
-                              </KebabItem>
-                            )}
-                            {mod.nexus_url && !mod.github_url && (
-                              <KebabItem
-                                icon={<GitBranch size={12} />}
-                                onClick={async () => {
-                                  try {
-                                    setFindingGithub(rowKey);
-                                    const repo = await findGithubFromNexus(mod.name, mod.folder_name);
-                                    if (repo) {
-                                      await refreshMods();
-                                      toast.success(t('mods.toast.foundGitHub', { repo }));
-                                    } else {
-                                      toast.info(t('mods.toast.noGitHubInNexus', { name: mod.name }));
-                                    }
-                                  } catch (e) {
-                                    toast.error(t('mods.toast.allFailed', { error: e instanceof Error ? e.message : String(e) }));
-                                  } finally {
-                                    setFindingGithub(null);
-                                  }
-                                }}
-                              >
-                                {t('mods.findGitHubFromNexus')}
-                              </KebabItem>
-                            )}
-                          </KebabSection>
-                          <KebabDivider />
-                          <KebabSection head={t('mods.recovery')}>
-                            <KebabItem
-                              icon={
-                                repairingMod === rowKey ? (
-                                  <RefreshCw size={12} className="animate-spin" />
-                                ) : (
-                                  <Wrench size={12} />
-                                )
-                              }
-                              onClick={() => handleRepair(mod.name, mod.folder_name, !!mod.github_url)}
-                              disabled={
-                                gameRunning ||
-                                repairingMod !== null ||
-                                !mod.github_url
-                              }
-                              description={
-                                mod.github_url
-                                  ? t('mods.repairDesc')
-                                  : t('mods.repairNeedSource')
-                              }
-                            >
-                              {repairingMod === rowKey ? t('mods.repairing') : t('mods.repairThisMod')}
-                            </KebabItem>
-                            <KebabItem
-                              icon={
-                                rollingBackMod === rowKey ? (
-                                  <RefreshCw size={12} className="animate-spin" />
-                                ) : (
-                                  <RotateCcw size={12} />
-                                )
-                              }
-                              onClick={() => handleRollback(mod.name, mod.folder_name, !!mod.github_url)}
-                              disabled={
-                                gameRunning ||
-                                repairingMod !== null ||
-                                rollingBackMod !== null ||
-                                !mod.github_url
-                              }
-                              description={
-                                mod.github_url
-                                  ? t('mods.rollbackDesc')
-                                  : t('mods.rollbackNeedSource')
-                              }
-                            >
-                              {rollingBackMod === rowKey ? (
-                                t('mods.rollingBack')
-                              ) : (
-                                <span className="inline-flex items-center gap-1">
-                                  {t('mods.rollBackOneVersion')}
-                                  <Badge variant="beta" ariaHidden>{t('common.beta')}</Badge>
-                                </span>
-                              )}
-                            </KebabItem>
-                          </KebabSection>
-                        </>
-                      )}
-                      {!advancedMode && (
-                        <>
-                          <KebabDivider />
-                          <KebabItem
-                            danger
-                            icon={<Trash2 size={12} />}
-                            onClick={() => handleDelete(mod.name, mod.folder_name)}
-                            disabled={gameRunning}
-                          >
-                            {t('mods.removeMod')}
-                          </KebabItem>
-                        </>
-                      )}
-                    </KebabMenu>
-                  </div>
-                </div>
-
-                {/* v5 Source editor drawer (advanced only) */}
-                {advancedMode && isExpanded && (
+                mod={mod}
+                disambiguator={disambiguator}
+                audit={auditRow}
+                membership={membership}
+                gameRunning={gameRunning}
+                gameVersion={gameInfo?.game_version}
+                isUpdating={updatingKey === rowKey}
+                isRepairing={repairingMod === rowKey}
+                isRollingBack={rollingBackMod === rowKey}
+                anyUpdating={updatingKey !== null}
+                anyRecoveryInFlight={repairingMod !== null || rollingBackMod !== null}
+                expanded={expanded}
+                onToggleExpand={() => toggleExpand(rowKey)}
+                onToggleStorage={() => handleToggle(mod.name, mod.folder_name, !mod.enabled)}
+                onTogglePin={() => handleTogglePin(mod.name, mod.folder_name, mod.pinned)}
+                onCopyVersion={() => {
+                  navigator.clipboard.writeText(mod.version).then(
+                    () => toast.success(t('mods.toast.versionCopied', { version: mod.version })),
+                    () => toast.error(t('mods.toast.couldNotCopy')),
+                  );
+                }}
+                onOpenModsFolder={handleOpenFolder}
+                onEditSources={() => openSourceEditor(rowKey)}
+                onFindGithubFromNexus={async () => {
+                  try {
+                    setFindingGithub(rowKey);
+                    const repo = await findGithubFromNexus(mod.name, mod.folder_name);
+                    if (repo) {
+                      await refreshMods();
+                      toast.success(t('mods.toast.foundGitHub', { repo }));
+                    } else {
+                      toast.info(t('mods.toast.noGitHubInNexus', { name: mod.name }));
+                    }
+                  } catch (e) {
+                    toast.error(t('mods.toast.allFailed', { error: e instanceof Error ? e.message : String(e) }));
+                  } finally {
+                    setFindingGithub(null);
+                  }
+                }}
+                onSnooze={async () => {
+                  try {
+                    await setModSnooze(
+                      mod.name,
+                      auditRow?.latest_release_with_assets_tag ?? null,
+                      mod.folder_name,
+                    );
+                    await refreshAuditEntries([mod.name]);
+                    toast.success(t('mods.toast.snoozed', { name: mod.name }));
+                  } catch (e) {
+                    toast.error(t('mods.toast.allFailed', { error: e instanceof Error ? e.message : String(e) }));
+                  }
+                }}
+                onUnsnooze={async () => {
+                  try {
+                    await setModSnooze(mod.name, null, mod.folder_name);
+                    await refreshAuditEntries([mod.name]);
+                    toast.success(t('mods.toast.unsnoozed', { name: mod.name }));
+                  } catch (e) {
+                    toast.error(t('mods.toast.allFailed', { error: e instanceof Error ? e.message : String(e) }));
+                  }
+                }}
+                onRepair={() => handleRepair(mod.name, mod.folder_name, !!mod.github_url)}
+                onRollback={() => handleRollback(mod.name, mod.folder_name, !!mod.github_url)}
+                onDelete={() => handleDelete(mod.name, mod.folder_name)}
+                onUpdate={() => handleInlineUpdate(mod.name, mod.folder_name)}
+                onOpenExternalUrl={(url) => {
+                  // Nexus URL clicks ALSO arm the downloads watcher
+                  // toast so the user knows we'll auto-install the zip
+                  // when it lands in their Downloads folder. Same logic
+                  // as the legacy inline Nexus update pill.
+                  if (mod.nexus_url && url === mod.nexus_url) {
+                    notifyNexusOpen(mod.name);
+                  }
+                  openExternalUrl(url).catch(() => {});
+                }}
+                sourceEditorSlot={editingSources ? (
                   <SourceEditor
                     mod={mod}
                     findingGithub={findingGithub === rowKey}
-                    onClose={() => setExpandedMod(null)}
+                    onClose={() => setSourceEditorRowKey(null)}
                     onClear={() => handleClearSource(mod.name, mod.folder_name)}
                     onFindGithub={async () => {
                       try {
@@ -1429,7 +1001,7 @@ export function ModsView({ advancedMode: advancedModeProp, onManageActiveModpack
                         }
                         await refreshMods();
                         toast.success(t('mods.toast.sourcesSaved', { name: displayNameFor(mod) }));
-                        setExpandedMod(null);
+                        setSourceEditorRowKey(null);
                       } catch (e) {
                         toast.error(t('mods.toast.allFailed', { error: e instanceof Error ? e.message : String(e) }));
                       } finally {
@@ -1438,8 +1010,8 @@ export function ModsView({ advancedMode: advancedModeProp, onManageActiveModpack
                     }}
                     saving={savingSource}
                   />
-                )}
-              </Card>
+                ) : undefined}
+              />
             );
           })}
         </div>

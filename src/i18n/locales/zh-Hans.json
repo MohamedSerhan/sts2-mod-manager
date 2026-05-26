@@ -1604,6 +1604,22 @@
     "searchPlaceholder_one": "搜索 {{count}} 个模组",
     "searchPlaceholder_other": "搜索 {{count}} 个模组",
     "updateAllLabel_one": "更新 {{count}} 个模组",
-    "updateAllLabel_other": "更新 {{count}} 个模组"
+    "updateAllLabel_other": "更新 {{count}} 个模组",
+    "notePrefix": "📝",
+    "row": {
+      "expand": "展开「{{name}}」的详情",
+      "collapse": "收起「{{name}}」的详情",
+      "openFolder": "打开文件夹",
+      "editSources": "编辑来源",
+      "findGithub": "从 Nexus 查找 GitHub"
+    },
+    "kebab": {
+      "activate": "在游戏中激活",
+      "activateDesc": "将此模组的文件移回游戏文件夹，让 STS2 加载它。",
+      "disable": "在游戏中停用",
+      "disableDesc": "将此模组的文件移出游戏文件夹。模组保持已安装状态，但需要重新激活后才会加载。",
+      "skipUpdate": "跳过此更新",
+      "unsnooze": "重新显示更新"
+    }
   }
 }

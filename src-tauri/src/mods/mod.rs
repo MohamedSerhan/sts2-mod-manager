@@ -1,14 +1,41 @@
 use std::fs;
 use std::io;
-use std::io::Write as IoWrite;
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use walkdir::WalkDir;
 
 use crate::error::{AppError, Result};
 use crate::state::AppState;
+
+// ── Submodules ─────────────────────────────────────────────────────────────
+//
+// `mods` was a 3.9k-line single file. Self-contained helpers (file
+// hashing, path sanitization, archive-format adapters) have been
+// peeled out into focused sub-modules so the orchestration in this
+// file is easier to follow. Re-exports below preserve the
+// `crate::mods::function_name` import surface the rest of the
+// codebase + integration tests rely on.
+//
+// Deeper splits (the scan_mods / parse_manifest pipeline, the
+// install_mod_from_zip workflow, the enable/disable state machine)
+// would each need to move ModInfo + RawManifest with them OR plumb
+// through cross-module imports for the 8 embedded test modules that
+// use `super::*` — that bigger move is deferred.
+mod install;
+mod scan;
+mod state;
+
+// Re-exports preserve the historic `crate::mods::strip_utf8_bom`,
+// `crate::mods::sanitize_path_segment`, etc. surface that the rest
+// of the codebase reaches via the same paths it used pre-split.
+pub use scan::strip_utf8_bom;
+pub use state::{move_directory, path_is_inside, sanitize_path_segment};
+
+// Crate-internal helpers used from within `mods/` itself.
+use install::{extract_7z_to_dir, extract_rar_to_dir, repack_dir_as_zip};
+use scan::{calculate_mod_size, collect_mod_files, hash_file};
+use state::sanitize_for_filename;
 
 /// Information about an installed mod.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -175,96 +202,9 @@ impl Default for RawManifest {
 }
 
 /// Compute SHA256 hash of a file.
-fn hash_file(path: &Path) -> Option<String> {
-    let data = fs::read(path).ok()?;
-    let mut hasher = Sha256::new();
-    hasher.update(&data);
-    Some(format!("{:x}", hasher.finalize()))
-}
-
-/// Calculate total size of files in a list relative to a base directory.
-fn calculate_mod_size(base_dir: &Path, files: &[String]) -> u64 {
-    files
-        .iter()
-        .map(|f| {
-            let path = base_dir.join(f);
-            path.metadata().map(|m| m.len()).unwrap_or(0)
-        })
-        .sum()
-}
-
-/// Collect all files belonging to a mod entry (the .json and co-located .dll/.pck files).
-fn collect_mod_files(manifest_path: &Path, base_dir: &Path) -> Vec<String> {
-    let parent = match manifest_path.parent() {
-        Some(p) => p,
-        None => return vec![manifest_path.to_string_lossy().to_string()],
-    };
-
-    let mut files = Vec::new();
-
-    // If the manifest is inside the base mods dir (not a subdirectory)
-    if parent == base_dir {
-        let stem = manifest_path
-            .file_stem()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
-
-        // Look for same-named .dll, .pck, .json files
-        if let Ok(entries) = fs::read_dir(parent) {
-            for entry in entries.flatten() {
-                let fname = entry.file_name().to_string_lossy().to_string();
-                let fstem = Path::new(&fname)
-                    .file_stem()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string();
-                if fstem == stem && entry.path().is_file() {
-                    files.push(fname);
-                }
-            }
-        }
-    } else {
-        // Manifest is in a subdirectory - collect all files in that subdirectory
-        for entry in WalkDir::new(parent).into_iter().flatten() {
-            if entry.file_type().is_file() {
-                if let Ok(rel) = entry.path().strip_prefix(base_dir) {
-                    files.push(rel.to_string_lossy().to_string());
-                }
-            }
-        }
-    }
-
-    if files.is_empty() {
-        if let Ok(rel) = manifest_path.strip_prefix(base_dir) {
-            files.push(rel.to_string_lossy().to_string());
-        } else {
-            files.push(
-                manifest_path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string(),
-            );
-        }
-    }
-
-    files
-}
-
-/// Strip a leading UTF-8 BOM (`EF BB BF` / `U+FEFF`) from a manifest body.
-///
-/// Windows tooling (Notepad, some authoring editors) writes JSON with a BOM
-/// by default. `serde_json::from_str` refuses to parse content that doesn't
-/// start with a JSON character — so any BOM-prefixed manifest fails strict
-/// parsing AND the lenient Value-based fallback. That's the actual cause of
-/// the "vunknown" report on BaseLib (a popular library mod whose author
-/// ships a BOM in `BaseLib.json`): both parsers gave up and the install
-/// fell through to the stub. Stripping once at read time fixes every
-/// manifest read in the codebase.
-pub fn strip_utf8_bom(s: &str) -> &str {
-    s.strip_prefix('\u{FEFF}').unwrap_or(s)
-}
+// Pure-helper functions moved to `mods/scan.rs`:
+//   hash_file, calculate_mod_size, collect_mod_files, strip_utf8_bom
+// — see the `use scan::{…}` block at the top of this file.
 
 /// Last-resort extraction of the fields the UI cares most about (version,
 /// name, description, author, id) when strict struct deserialization fails.
@@ -1036,24 +976,8 @@ fn move_mod_files(mod_name: &str, src: &Path, dest: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Recursively move a directory (copy + delete source).
-pub fn move_directory(src: &Path, dest: &Path) -> io::Result<()> {
-    fs::create_dir_all(dest)?;
-    for entry in fs::read_dir(src)?.flatten() {
-        let src_path = entry.path();
-        let dest_path = dest.join(entry.file_name());
-        if src_path.is_dir() {
-            move_directory(&src_path, &dest_path)?;
-        } else {
-            fs::rename(&src_path, &dest_path).or_else(|_| {
-                fs::copy(&src_path, &dest_path).and_then(|_| fs::remove_file(&src_path))
-            })?;
-        }
-    }
-    // Remove the now-empty source directory
-    let _ = fs::remove_dir(src);
-    Ok(())
-}
+// `move_directory` moved to `mods/state.rs`. Re-exported at the top
+// of this file so `crate::mods::move_directory` still resolves.
 
 /// Delete a mod's files from disk using its scanned file list.
 /// Used during profile switching to remove version-mismatched mods before reinstalling.
@@ -1087,75 +1011,9 @@ pub fn delete_mod_files_by_info(mod_info: &ModInfo, base_path: &Path) {
 
 // ── Local Mod Version Cache ────────────────────────────────────────────────
 
-/// Sanitize a string for use in filenames.
-fn sanitize_for_filename(s: &str) -> String {
-    s.chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
-
-/// Sanitize an attacker-influenced single path segment so it can't escape
-/// when joined onto a destination root. Replaces any path-separator-like
-/// characters and `..` with underscores. Used for `wrap_folder_name` and
-/// for URL-derived filenames in the download path — those strings can come
-/// from a manifest's Name/Id field, a zip stem, or a redirect URL, all of
-/// which are publisher-controlled and therefore untrusted.
-pub fn sanitize_path_segment(s: &str) -> String {
-    let mapped: String = s
-        .chars()
-        .map(|c| match c {
-            '/' | '\\' | ':' | '\0' => '_',
-            _ => c,
-        })
-        .collect();
-    let no_dotdot = mapped.replace("..", "_");
-    let trimmed = no_dotdot.trim_matches(|c: char| c == '.' || c.is_whitespace());
-    // Empty after trim → fall back. Also fall back if everything we have
-    // is the underscore replacement marker — that happens when the input
-    // was 100% path-special characters (e.g. "..", "...", "/", "\\:")
-    // and the result would be a useless folder name like "_".
-    if trimmed.is_empty() || trimmed.chars().all(|c| c == '_') {
-        "mod".to_string()
-    } else {
-        trimmed.to_string()
-    }
-}
-
-/// True if `path` resolves inside `root`. Handles the common case where
-/// `path` doesn't exist yet (we're about to create it) by walking the
-/// component list and tracking depth — `..` decrements depth, normal
-/// components increment it. Negative depth means the path escapes.
-///
-/// Falls through to canonicalize-and-prefix-check when both ends exist,
-/// for the symlink-resolved guarantee.
-pub fn path_is_inside(path: &Path, root: &Path) -> bool {
-    if let (Ok(p), Ok(r)) = (path.canonicalize(), root.canonicalize()) {
-        return p.starts_with(&r);
-    }
-    // Component walk: starting from `root`'s depth, ensure we never go below.
-    use std::path::Component;
-    let mut depth: i32 = 0;
-    // Strip the `root` prefix off `path` if it's there; otherwise treat
-    // `path` as the relative payload appended to `root`.
-    let rel = path.strip_prefix(root).unwrap_or(path);
-    for comp in rel.components() {
-        match comp {
-            Component::ParentDir => depth -= 1,
-            Component::CurDir | Component::Prefix(_) | Component::RootDir => {}
-            Component::Normal(_) => depth += 1,
-        }
-        if depth < 0 {
-            return false;
-        }
-    }
-    true
-}
+// Path-safety helpers moved to `mods/state.rs`:
+//   sanitize_for_filename, sanitize_path_segment, path_is_inside
+// — see the `use state::{…}` + `pub use state::{…}` blocks at the top.
 
 /// Build the local cache path for a specific mod version.
 fn mod_cache_path(cache_path: &Path, mod_name: &str, version: &str) -> PathBuf {
@@ -1765,102 +1623,9 @@ fn installed_info_is_visible_after_extract(info: &ModInfo, mods_path: &Path) -> 
 /// Decompress a `.7z` file into `dest_dir`. Preserves the archive's
 /// internal relative paths verbatim — the wrap-folder logic downstream
 /// expects to see whatever structure the author shipped.
-fn extract_7z_to_dir(seven_z_path: &Path, dest_dir: &Path) -> Result<()> {
-    sevenz_rust2::decompress_file(seven_z_path, dest_dir)
-        .map_err(|e| AppError::Other(format!("Failed to extract 7z archive: {}", e)))
-}
-
-/// Decompress a `.rar` file into `dest_dir`. Skips macOS junk
-/// (`__MACOSX/`, `._*`) the same way the zip path does — both formats
-/// pick up these turds when archives get repackaged on macOS.
-fn extract_rar_to_dir(rar_path: &Path, dest_dir: &Path) -> Result<()> {
-    let mut archive = unrar::Archive::new(rar_path)
-        .open_for_processing()
-        .map_err(|e| AppError::Other(format!("Failed to open rar archive: {}", e)))?;
-    while let Some(header) = archive
-        .read_header()
-        .map_err(|e| AppError::Other(format!("Failed to read rar header: {}", e)))?
-    {
-        let entry_name = header.entry().filename.to_string_lossy().to_string();
-        if entry_name.starts_with("__MACOSX")
-            || entry_name.contains("/._")
-            || entry_name.starts_with("._")
-        {
-            archive = header.skip().map_err(|e| {
-                AppError::Other(format!("Failed to skip rar entry '{}': {}", entry_name, e))
-            })?;
-            continue;
-        }
-        if header.entry().is_directory() {
-            archive = header.skip().map_err(|e| {
-                AppError::Other(format!(
-                    "Failed to skip rar directory '{}': {}",
-                    entry_name, e
-                ))
-            })?;
-            continue;
-        }
-        // Use unrar's destination-aware extract so the C library handles
-        // path traversal sanitization. install_mod_from_zip's enclosed_name
-        // gate then re-checks at the final destination boundary.
-        archive = header.extract_with_base(dest_dir).map_err(|e| {
-            AppError::Other(format!(
-                "Failed to extract rar entry '{}': {}",
-                entry_name, e
-            ))
-        })?;
-    }
-    Ok(())
-}
-
-/// Walk a directory and produce a stored-compression zip of its contents,
-/// rooted at `src_dir`. Used by the non-zip install path to funnel 7z and
-/// rar extractions back into install_mod_from_zip so the wrap-folder /
-/// zip-slip / manifest-discovery code only lives in one place.
-///
-/// Note: skips its own output file (`__sts2mm_repack.zip`) so an in-place
-/// repack doesn't try to include the partially-written zip in itself —
-/// would otherwise truncate to zero on the first read pass.
-fn repack_dir_as_zip(src_dir: &Path, dest_zip: &Path) -> Result<()> {
-    let dest_file = fs::File::create(dest_zip).map_err(|e| {
-        AppError::Other(format!(
-            "Could not create repack zip at {:?}: {}",
-            dest_zip, e
-        ))
-    })?;
-    let mut writer = zip::ZipWriter::new(dest_file);
-    let opts: zip::write::SimpleFileOptions =
-        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
-    let dest_name = dest_zip.file_name().unwrap_or_default().to_os_string();
-
-    for entry in WalkDir::new(src_dir).into_iter().flatten() {
-        let path = entry.path();
-        if path == dest_zip || path.file_name() == Some(&dest_name) {
-            continue;
-        }
-        if entry.file_type().is_dir() {
-            continue;
-        }
-        let rel = match path.strip_prefix(src_dir) {
-            Ok(r) => r.to_string_lossy().replace('\\', "/"),
-            Err(_) => continue,
-        };
-        if rel.is_empty() {
-            continue;
-        }
-        writer.start_file(&rel, opts).map_err(|e| {
-            AppError::Other(format!("Repack: start_file failed for {}: {}", rel, e))
-        })?;
-        let bytes = fs::read(path)
-            .map_err(|e| AppError::Other(format!("Repack: read failed for {:?}: {}", path, e)))?;
-        IoWrite::write_all(&mut writer, &bytes)
-            .map_err(|e| AppError::Other(format!("Repack: write failed for {}: {}", rel, e)))?;
-    }
-    writer
-        .finish()
-        .map_err(|e| AppError::Other(format!("Repack: finalize failed: {}", e)))?;
-    Ok(())
-}
+// Archive-extraction helpers moved to `mods/install.rs`:
+//   extract_7z_to_dir, extract_rar_to_dir, repack_dir_as_zip
+// — see the `use install::{…}` block at the top of this file.
 
 /// Install a mod from a zip archive into the mods directory.
 pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo> {

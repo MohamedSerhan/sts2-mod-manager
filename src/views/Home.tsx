@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
+import { useClipboard } from '../hooks/useClipboard';
 import { useConfirm } from '../components/ConfirmDialog';
 import { SubUpdateDetail } from '../components/SubUpdateDetail';
 import { WhatsNewCard } from '../components/WhatsNewCard';
@@ -64,21 +65,23 @@ function formatShareCode(shareId: string): string {
  *  toast stack. */
 function ShareCodeChip({ code, packName }: { code: string; packName: string }) {
   const { t } = useTranslation();
-  const [copied, setCopied] = useState<'code' | 'link' | 'msg' | null>(null);
-  const toast = useToast();
+  // useClipboard centralises the navigator.clipboard.writeText + toast +
+  // copied-state-reset triplet that previously lived inline here, in
+  // Profiles, and in PublishModal. The `kind` arg lets each chip
+  // highlight itself when active.
+  const { copy, copied } = useClipboard({ resetMs: 1600 });
 
   const link = buildShareLink(code);
   const message = buildShareMessage(packName, code, t);
 
   async function copyTo(kind: 'code' | 'link' | 'msg', value: string, label: string) {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(kind);
-      toast.success(label);
-      window.setTimeout(() => setCopied(null), 1600);
-    } catch (e) {
-      toast.error(t('profiles.toast.cantCopyToClipboard'));
-    }
+    await copy(value, kind, {
+      successMessage: label,
+      // The previous inline handler used `profiles.toast.cantCopyToClipboard`
+      // for failures — keep that exact key so the wording the user already
+      // saw on failure stays unchanged.
+      failureMessage: 'profiles.toast.cantCopyToClipboard',
+    });
   }
 
   return (

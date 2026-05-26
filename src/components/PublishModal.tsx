@@ -5,6 +5,7 @@ import { listen } from '@tauri-apps/api/event';
 import type { Profile, ShareResult } from '../types';
 import { shareProfile, reshareProfile, getApiKeyStatus, setModpackListing, openExternalUrl } from '../hooks/useTauri';
 import { useToast } from '../contexts/ToastContext';
+import { useClipboard } from '../hooks/useClipboard';
 import { buildShareMessage, buildShareLink } from '../lib/shareImport';
 import { ShareSetupPanel } from './ShareSetupPanel';
 import { MissingBundlesPanel, parseMissingBundlesError } from './MissingBundlesPanel';
@@ -41,9 +42,16 @@ interface ShareProgress {
 export function PublishModal({ open, profile, isReshare, onClose, onShared, onGoToSettings }: Props) {
   const toast = useToast();
   const { t } = useTranslation();
+  // Shared clipboard hook. PublishModal historically suppressed the
+  // success toast (the modal itself shows a clear "Copied" inline
+  // state, so an extra toast was overkill) — we preserve that by
+  // passing `successMessage: null` in handleCopy below. Reset is
+  // slightly longer here (1800ms) because the modal stays open and
+  // the user reads the inline state more carefully than a transient
+  // chip on a list row.
+  const { copy, copied } = useClipboard({ resetMs: 1800 });
   const [busy, setBusy] = useState(false);
   const [shared, setShared] = useState<ShareResult | null>(null);
-  const [copied, setCopied] = useState<'code' | 'link' | 'msg' | null>(null);
   const [tokenSet, setTokenSet] = useState<boolean | null>(null);
   const [progress, setProgress] = useState<ShareProgress | null>(null);
   const [visibility, setVisibility] = useState<'private' | 'public'>('private');
@@ -172,13 +180,14 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
       kind === 'code' ? codeStr
       : kind === 'link' ? buildShareLink(codeStr)
       : buildShareMessage(profile.name, codeStr, t);
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(kind);
-      setTimeout(() => setCopied(null), 1800);
-    } catch {
-      toast.error(t('publish.couldntCopy'));
-    }
+    // PublishModal historically did NOT toast on success — the inline
+    // "Copied" state on the button itself is feedback enough, and a
+    // toast on top of an already-open modal felt noisy. The hook
+    // honours that via `successMessage: null`.
+    await copy(text, kind, {
+      successMessage: null,
+      failureMessage: 'publish.couldntCopy',
+    });
   }
 
   function handleDone() {

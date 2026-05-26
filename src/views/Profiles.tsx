@@ -22,6 +22,7 @@ import { Button } from '../components/Button';
 import { Badge } from '../components/Badge';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
+import { useClipboard } from '../hooks/useClipboard';
 import { useConfirm } from '../components/ConfirmDialog';
 import { ModpackDetail } from '../components/ModpackDetail';
 import { PublishModal } from '../components/PublishModal';
@@ -156,6 +157,10 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
   const { t, i18n } = useTranslation();
   const { refreshAll, setActiveProfile, activeProfile, subUpdates, refreshSubUpdates } = useApp();
   const toastCtx = useToast();
+  // Shared clipboard hook — same one Home + PublishModal use, so a
+  // wording change for "Couldn't copy" propagates everywhere without
+  // hunting through three separate try/catch blocks.
+  const clipboard = useClipboard();
   const confirm = useConfirm();
   const [applyingSubId, setApplyingSubId] = useState<string | null>(null);
 
@@ -196,16 +201,14 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       = kind === 'code' ? codeStr
       : kind === 'link' ? buildShareLink(codeStr)
       : buildShareMessage(profileName, codeStr, t);
-    try {
-      await navigator.clipboard.writeText(text);
-      toastCtx.success(
-        kind === 'code' ? t('profiles.toast.shareCodeCopied')
-        : kind === 'link' ? t('profiles.toast.installLinkCopied')
-        : t('profiles.toast.shareMessageCopied'),
-      );
-    } catch {
-      toastCtx.error(t('profiles.toast.cantCopyToClipboard'));
-    }
+    const label =
+      kind === 'code' ? t('profiles.toast.shareCodeCopied')
+      : kind === 'link' ? t('profiles.toast.installLinkCopied')
+      : t('profiles.toast.shareMessageCopied');
+    await clipboard.copy(text, kind, {
+      successMessage: label,
+      failureMessage: 'profiles.toast.cantCopyToClipboard',
+    });
   }
 
   useEffect(() => {
@@ -549,8 +552,15 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
   async function handleExport(name: string) {
     try {
       const json = await exportProfile(name);
-      await navigator.clipboard.writeText(json);
-      toastCtx.success(t('profiles.toast.exported'));
+      // Use the shared hook for the clipboard write so the failure
+      // wording stays consistent with the rest of the app. The
+      // distinct export-failure message (when `exportProfile` itself
+      // rejects) stays as a separate toast — the export step failing
+      // is a different problem from the clipboard write failing.
+      await clipboard.copy(json, 'export', {
+        successMessage: t('profiles.toast.exported'),
+        failureMessage: 'profiles.toast.cantCopyToClipboard',
+      });
     } catch (e) {
       toastCtx.error(t('profiles.toast.exportFailed', { error: e instanceof Error ? e.message : String(e) }));
     }

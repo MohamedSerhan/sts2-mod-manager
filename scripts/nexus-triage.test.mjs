@@ -249,3 +249,72 @@ test('classify: empty / whitespace / backticks → needs-triage', () => {
   assert.equal(classify('   ', 'comment').classification, 'needs-triage');
   assert.equal(classify('```', 'comment').classification, 'needs-triage');
 });
+
+import { renderIssueBody } from './nexus-triage.mjs';
+
+// readFileSync is already imported above
+const TEMPLATE = readFileSync('scripts/nexus-triage-prompt.md', 'utf-8');
+
+const COMMENT_ITEM = {
+  kind: 'comment',
+  id: '12345',
+  body: 'the share button does nothing on click',
+  createdAt: '2026-05-25T10:00:00Z',
+  author: 'TestUser',
+  authorId: '999',
+  nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/856?tab=posts',
+};
+
+const BUG_ITEM = {
+  kind: 'bug',
+  id: '67',
+  title: 'Crash on launch with mods enabled',
+  body: 'Stack trace attached. Profile is broken.',
+  status: 'open',
+  gameVersion: '1.0.5',
+  createdAt: '2026-05-25T11:00:00Z',
+  author: 'BugReporter',
+  authorId: '888',
+  nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/856?tab=bugs',
+};
+
+test('renderIssueBody: comment item omits Title/GameVersion/Status lines', () => {
+  const out = renderIssueBody(COMMENT_ITEM, TEMPLATE, { classification: 'bug', confidence: 'medium' });
+  assert.ok(out.includes('@claude'), 'must start with @claude block');
+  assert.ok(out.includes('untrusted third-party content'), 'untrusted warning present');
+  assert.ok(out.includes('> the share button does nothing on click'), 'body quoted');
+  assert.ok(!out.includes('**Title:**'), 'no orphan Title line');
+  assert.ok(!out.includes('**Game version:**'), 'no orphan game version line');
+  assert.ok(!out.includes('**Nexus bug status:**'), 'no orphan bug status line');
+  assert.ok(out.includes('triage-bot:do-not-edit'), 'machine-readable footer present');
+  assert.ok(out.includes('"nexus_id": "12345"'), 'footer includes correct id');
+});
+
+test('renderIssueBody: bug item includes Title + GameVersion + Status lines', () => {
+  const out = renderIssueBody(BUG_ITEM, TEMPLATE, { classification: 'bug', confidence: 'high' });
+  assert.ok(out.includes('**Title:** Crash on launch with mods enabled'), 'Title line present');
+  assert.ok(out.includes('**Game version:** 1.0.5'), 'Game version line present');
+  assert.ok(out.includes('**Nexus bug status:** open'), 'Status line present');
+});
+
+test('renderIssueBody: body content rendered verbatim inside blockquote', () => {
+  const item = { ...COMMENT_ITEM, body: 'has `backticks` and <b>html</b> and @everyone mention' };
+  const out = renderIssueBody(item, TEMPLATE, { classification: 'needs-triage', confidence: 'low' });
+  assert.ok(out.includes('`backticks`'), 'backticks preserved in body');
+  assert.ok(out.includes('<b>html</b>'), 'HTML preserved in body');
+  assert.ok(out.includes('@everyone'), 'mention preserved in body (inside blockquote, safe)');
+});
+
+test('renderIssueBody: non-ASCII author preserved', () => {
+  const item = { ...COMMENT_ITEM, author: '测试用户', authorId: '777' };
+  const out = renderIssueBody(item, TEMPLATE, { classification: 'question', confidence: 'medium' });
+  assert.ok(out.includes('[@测试用户]'), 'non-ASCII author rendered');
+});
+
+test('renderIssueBody: snapshot timestamp is ISO 8601 UTC with Z suffix', () => {
+  const out = renderIssueBody(COMMENT_ITEM, TEMPLATE, { classification: 'bug', confidence: 'high' });
+  const match = out.match(/\*\*Snapshot taken:\*\* (\S+)/);
+  assert.ok(match, 'snapshot line present');
+  assert.match(match[1], /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/, `ISO 8601 format: got ${match[1]}`);
+  assert.ok(match[1].endsWith('Z'), `UTC Z suffix: got ${match[1]}`);
+});

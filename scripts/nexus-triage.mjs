@@ -101,3 +101,30 @@ export function classify(text, _kind) {
 
   return { classification: 'needs-triage', confidence: 'low' };
 }
+
+export function renderIssueBody(item, template, { classification, confidence }) {
+  const titleLine = item.title ? `**Title:** ${item.title}\n` : '';
+  const gameVersionLine = item.gameVersion ? `**Game version:** ${item.gameVersion}\n` : '';
+  const statusLine = item.status ? `**Nexus bug status:** ${item.status}\n` : '';
+
+  const subs = {
+    '{TITLE_LINE}': titleLine,
+    '{GAMEVERSION_LINE}': gameVersionLine,
+    '{STATUS_LINE}': statusLine,
+    '{kind}': item.kind,
+    '{author}': item.author,
+    '{authorId}': item.authorId,
+    '{createdAt}': item.createdAt,
+    '{body}': item.body,
+    '{classification}': classification,
+    '{confidence}': confidence,
+    '{nexus_url}': item.nexus_url,
+    '{id}': item.id,
+    '{timestamp_iso8601_utc}': new Date().toISOString(),
+  };
+  let out = template;
+  for (const [k, v] of Object.entries(subs)) {
+    out = out.split(k).join(v);
+  }
+  return out;
+}

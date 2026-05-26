@@ -210,6 +210,19 @@ describe('<SettingsView>', () => {
     await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
   });
 
+  it('shows AboutCard in the General tab (relocated from Home in 1.7.0 v7)', async () => {
+    // 1.7.0 v7 — AboutCard was removed from the Home footer and now
+    // lives at the bottom of Settings → General. The General tab is the
+    // default tab, so a fresh render must surface AboutCard's signature
+    // content (the author link is the most unique target — "Mohamed
+    // Serhan" only appears inside AboutCard).
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
+    const authorLink = await screen.findByText('Mohamed Serhan');
+    expect(authorLink.tagName).toBe('A');
+    expect(authorLink).toHaveAttribute('href', 'https://github.com/MohamedSerhan');
+  });
+
   it('runs the audit-from-Mods code path the same way', async () => {
     registerInvokeHandler('audit_mod_versions', () => [
       { mod_name: 'X', folder_name: 'X', installed_version: '1.0', needs_update: false, pinned: false, asset_names: [], releases_scanned: 0, latest_has_assets: false, nexus_update_available: false, github_auto_detected: false },

@@ -764,6 +764,38 @@ describe('<App>', () => {
     });
   });
 
+  it('ProfileSwitcher "Add pack" focuses the Modpacks Quick-Add input (full pipeline)', async () => {
+    // The companion test above asserts the view-routing half of the
+    // wiring. This one closes the focus-pipeline gap flagged in the
+    // 1.7.0 Task 15 review: App.tsx bumps `focusModpacksCodeBarSignal`
+    // → ProfilesView's effect calls `input.focus()` inside
+    // `requestAnimationFrame`. The Profiles unit suite covers the
+    // signal-in-isolation case (Profiles.test.tsx: "focusQuickAddSignal
+    // bump focuses the toolbar input"); this end-to-end test verifies
+    // the App shell actually wires the callback through.
+    registerInvokeHandler('get_active_profile', () => 'MyPack');
+    registerInvokeHandler('list_profiles_cmd', () => [
+      { name: 'MyPack', mods: [], created_at: '2026-01-01' },
+    ]);
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    // Start on Library so the switch to Modpacks is observable.
+    await user.click(getNavButton('Library'));
+    await waitFor(() => { expect(screen.getByText(/All installed mods/i)).toBeInTheDocument(); });
+    const chip = document.querySelector('button.gf-prof') as HTMLButtonElement | null;
+    expect(chip).toBeTruthy();
+    await user.click(chip!);
+    const addBtn = await screen.findByRole('button', { name: /Add modpack/i });
+    await user.click(addBtn);
+    // The focus is applied inside `requestAnimationFrame` (Profiles.tsx
+    // useEffect), so use waitFor to give the rAF callback time to fire.
+    const input = await screen.findByLabelText(/Add a modpack by code/i);
+    await waitFor(() => {
+      expect(document.activeElement).toBe(input);
+    });
+  });
+
   it('ProfileSwitcher "Manage all" routes to Profiles view', async () => {
     registerInvokeHandler('get_active_profile', () => 'MyPack');
     registerInvokeHandler('list_profiles_cmd', () => [

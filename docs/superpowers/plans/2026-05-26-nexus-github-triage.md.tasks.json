@@ -1,0 +1,88 @@
+{
+  "planPath": "docs/superpowers/plans/2026-05-26-nexus-github-triage.md",
+  "specPath": "docs/superpowers/specs/2026-05-26-nexus-github-triage-design.md",
+  "tasks": [
+    {
+      "id": 8,
+      "subject": "Task 1: Bootstrap test infrastructure",
+      "status": "pending",
+      "description": "**Goal:** Empty script skeleton + a single sanity test + CI step that runs `node --test scripts/nexus-triage.test.mjs` on every PR. Every subsequent task verifies its work by adding tests here.\n\n**Files:**\n- Create: `scripts/nexus-triage.mjs`\n- Create: `scripts/nexus-triage.test.mjs`\n- Modify: `.github/workflows/build.yml` — add one step to the existing `check` job\n\n**Acceptance Criteria:**\n- node --test scripts/nexus-triage.test.mjs exits 0\n- CI check job runs new step\n- Existing check steps unchanged\n\n**Verify:** `node --test scripts/nexus-triage.test.mjs` → 1 passing test, exit code 0\n\n```json:metadata\n{\"files\": [\"scripts/nexus-triage.mjs\", \"scripts/nexus-triage.test.mjs\", \".github/workflows/build.yml\"], \"verifyCommand\": \"node --test scripts/nexus-triage.test.mjs\", \"acceptanceCriteria\": [\"node --test scripts/nexus-triage.test.mjs exits 0\", \"CI check job runs new step\", \"Existing check steps unchanged\"]}\n```"
+    },
+    {
+      "id": 9,
+      "subject": "Task 2: State file load/save with strict failure modes",
+      "status": "pending",
+      "blockedBy": [8],
+      "description": "**Goal:** loadState/saveState with hard-fail messaging on missing file / malformed JSON / schema_version mismatch.\n\n**Files:**\n- Modify: scripts/nexus-triage.mjs\n- Modify: scripts/nexus-triage.test.mjs\n- Create: scripts/fixtures/state-populated.json\n\n**Verify:** `node --test scripts/nexus-triage.test.mjs`\n\n```json:metadata\n{\"files\": [\"scripts/nexus-triage.mjs\", \"scripts/nexus-triage.test.mjs\", \"scripts/fixtures/state-populated.json\"], \"verifyCommand\": \"node --test scripts/nexus-triage.test.mjs\", \"acceptanceCriteria\": [\"loadState missing file exits 2 with bootstrap message\", \"loadState malformed JSON exits 2 with path\", \"loadState schema_version mismatch exits 2\", \"saveState round-trip preserves data\", \"50+30+100 entry round-trip succeeds\"]}\n```"
+    },
+    {
+      "id": 10,
+      "subject": "Task 3: Title sanitizer",
+      "status": "pending",
+      "blockedBy": [9],
+      "description": "**Goal:** sanitizeTitle(body) strips backticks/HTML/@mentions, truncates at word boundary at 60 chars.\n\n**Files:**\n- Modify: scripts/nexus-triage.mjs\n- Modify: scripts/nexus-triage.test.mjs\n\n**Verify:** `node --test scripts/nexus-triage.test.mjs`\n\n```json:metadata\n{\"files\": [\"scripts/nexus-triage.mjs\", \"scripts/nexus-triage.test.mjs\"], \"verifyCommand\": \"node --test scripts/nexus-triage.test.mjs\", \"acceptanceCriteria\": [\"backticks stripped\", \"HTML tags stripped, content kept\", \"@mentions stripped\", \"60-char word-boundary truncation\", \"non-ASCII preserved\", \"empty/whitespace returns empty string\"]}\n```"
+    },
+    {
+      "id": 11,
+      "subject": "Task 4: Classifier with priority-ordered rules",
+      "status": "pending",
+      "blockedBy": [10],
+      "description": "**Goal:** classify(text, kind) returns {classification, confidence} with priority-ordered rule matching.\n\n**Files:**\n- Modify: scripts/nexus-triage.mjs\n- Modify: scripts/nexus-triage.test.mjs\n\n**Verify:** `node --test scripts/nexus-triage.test.mjs`\n\n```json:metadata\n{\"files\": [\"scripts/nexus-triage.mjs\", \"scripts/nexus-triage.test.mjs\"], \"verifyCommand\": \"node --test scripts/nexus-triage.test.mjs\", \"acceptanceCriteria\": [\"every bug_high term tested\", \"every bug_med term tested\", \"every feat_high term tested\", \"question matches ASCII and full-width\", \"kudos boundary at 79/80/81\", \"priority: bug wins over positive\", \"non-English defaults to needs-triage\"]}\n```"
+    },
+    {
+      "id": 12,
+      "subject": "Task 5: Issue body template + renderer",
+      "status": "pending",
+      "blockedBy": [11],
+      "description": "**Goal:** Static template at scripts/nexus-triage-prompt.md + renderIssueBody that fills placeholders and collapses optional metadata slots.\n\n**Files:**\n- Create: scripts/nexus-triage-prompt.md\n- Modify: scripts/nexus-triage.mjs\n- Modify: scripts/nexus-triage.test.mjs\n\n**Verify:** `node --test scripts/nexus-triage.test.mjs`\n\n```json:metadata\n{\"files\": [\"scripts/nexus-triage.mjs\", \"scripts/nexus-triage.test.mjs\", \"scripts/nexus-triage-prompt.md\"], \"verifyCommand\": \"node --test scripts/nexus-triage.test.mjs\", \"acceptanceCriteria\": [\"all placeholders substituted\", \"comment item omits orphan Title/GameVersion/Status lines\", \"bug item includes all metadata\", \"non-ASCII author preserved\", \"body rendered verbatim inside blockquote\", \"untrusted-content warning present\", \"triage-bot footer has correct nexus_id\"]}\n```"
+    },
+    {
+      "id": 13,
+      "subject": "Task 6: GraphQL client + introspection with two-tier drift policy",
+      "status": "pending",
+      "blockedBy": [12],
+      "description": "**Goal:** fetchModComments/fetchModBugReports/introspectSchema with hard-fail on missing comments, soft-degrade on missing bugReports.\n\n**Files:**\n- Modify: scripts/nexus-triage.mjs\n- Modify: scripts/nexus-triage.test.mjs\n- Create: scripts/fixtures/graphql-comments-mixed.json\n- Create: scripts/fixtures/graphql-bugs-mixed.json\n- Create: scripts/fixtures/graphql-schema-drift-bugreports.json\n- Create: scripts/fixtures/graphql-schema-drift-comments.json\n\n**Verify:** `node --test scripts/nexus-triage.test.mjs`\n\n```json:metadata\n{\"files\": [\"scripts/nexus-triage.mjs\", \"scripts/nexus-triage.test.mjs\", \"scripts/fixtures/graphql-comments-mixed.json\", \"scripts/fixtures/graphql-bugs-mixed.json\", \"scripts/fixtures/graphql-schema-drift-bugreports.json\", \"scripts/fixtures/graphql-schema-drift-comments.json\"], \"verifyCommand\": \"node --test scripts/nexus-triage.test.mjs\", \"acceptanceCriteria\": [\"fetchModComments POSTs with apikey header\", \"fetchModBugReports filters status:[open]\", \"introspectSchema returns correct flags\", \"missing mod.comments exits 2\", \"missing mod.bugReports soft flag no exit\", \"setHttpFetch indirection works\"]}\n```"
+    },
+    {
+      "id": 14,
+      "subject": "Task 7: Orchestrator with maintainer-exclude + per-run cap",
+      "status": "pending",
+      "blockedBy": [13],
+      "description": "**Goal:** main() pipeline: introspect, fetch, exclude maintainers FIRST, filter closed bugs, dedup, classify, cap 5, render, gh issue create, update state.\n\n**Files:**\n- Modify: scripts/nexus-triage.mjs\n- Modify: scripts/nexus-triage.test.mjs\n\n**Verify:** `node --test scripts/nexus-triage.test.mjs`\n\n```json:metadata\n{\"files\": [\"scripts/nexus-triage.mjs\", \"scripts/nexus-triage.test.mjs\"], \"verifyCommand\": \"node --test scripts/nexus-triage.test.mjs\", \"acceptanceCriteria\": [\"maintainer filter runs first\", \"case-insensitive maintainer match\", \"already-seen skipped silently\", \"closed bugs skipped on first sight\", \"per-run cap = 5 non-kudos\", \"kudos do not count toward cap\", \"oldest-first by createdAt\", \"dry-run makes zero gh calls and no state write\"]}\n```"
+    },
+    {
+      "id": 15,
+      "subject": "Task 8: CLI entry point — flags, bootstrap, killswitch",
+      "status": "pending",
+      "blockedBy": [14],
+      "description": "**Goal:** parseArgs / --bootstrap / --dry-run / --help / sentinel killswitch / module-import safety.\n\n**Files:**\n- Modify: scripts/nexus-triage.mjs\n- Modify: scripts/nexus-triage.test.mjs\n\n**Verify:** `node --test scripts/nexus-triage.test.mjs && node scripts/nexus-triage.mjs --help`\n\n```json:metadata\n{\"files\": [\"scripts/nexus-triage.mjs\", \"scripts/nexus-triage.test.mjs\"], \"verifyCommand\": \"node --test scripts/nexus-triage.test.mjs && node scripts/nexus-triage.mjs --help\", \"acceptanceCriteria\": [\"--help prints and exits 0\", \"--bootstrap seeds state with no issues filed\", \"--dry-run makes no gh calls or state write\", \"sentinel file exits 0\", \"missing env var exits 2 with name\", \"module importable without running main\"]}\n```"
+    },
+    {
+      "id": 16,
+      "subject": "Task 9: nexus-triage.yml hourly workflow",
+      "status": "pending",
+      "blockedBy": [15],
+      "description": "**Goal:** GH Actions workflow that runs the triage script hourly. Cron commented out by default; dispatch input dry_run.\n\n**Files:**\n- Create: .github/workflows/nexus-triage.yml\n\n**Verify:** `python -c \"import yaml; yaml.safe_load(open('.github/workflows/nexus-triage.yml')); print('OK')\"`\n\n```json:metadata\n{\"files\": [\".github/workflows/nexus-triage.yml\"], \"verifyCommand\": \"python -c \\\"import yaml; yaml.safe_load(open('.github/workflows/nexus-triage.yml')); print('OK')\\\"\", \"acceptanceCriteria\": [\"cron commented out by default\", \"workflow_dispatch with dry_run input\", \"concurrency nexus-triage cancel-in-progress false\", \"permissions contents and issues write\", \"state commit by github-actions[bot]\", \"YAML parses\"]}\n```"
+    },
+    {
+      "id": 17,
+      "subject": "Task 10: claude.yml reactive handler",
+      "status": "pending",
+      "description": "**Goal:** Standard anthropics/claude-code-action@v1 reactive setup with CLAUDE_CODE_OAUTH_TOKEN.\n\n**Files:**\n- Create: .github/workflows/claude.yml\n\n**Verify:** `python -c \"import yaml; yaml.safe_load(open('.github/workflows/claude.yml')); print('OK')\"`\n\n```json:metadata\n{\"files\": [\".github/workflows/claude.yml\"], \"verifyCommand\": \"python -c \\\"import yaml; yaml.safe_load(open('.github/workflows/claude.yml')); print('OK')\\\"\", \"acceptanceCriteria\": [\"triggers issues issue_comment PR review comment\", \"conditional contains @claude\", \"permissions contents read issues write\", \"uses CLAUDE_CODE_OAUTH_TOKEN not api key\", \"YAML parses\"]}\n```"
+    },
+    {
+      "id": 18,
+      "subject": "Task 11: Watchdog workflows (ping + check)",
+      "status": "pending",
+      "description": "**Goal:** Weekly @claude liveness probe. Mon 09:00 UTC opens ping issue; Mon 11:00 UTC checks for PING-OK reply and files ops:token-renewal if missing.\n\n**Files:**\n- Create: .github/workflows/nexus-watchdog.yml\n- Create: .github/workflows/nexus-watchdog-check.yml\n\n**Verify:** `python -c \"import yaml; [yaml.safe_load(open(f)) for f in ['.github/workflows/nexus-watchdog.yml', '.github/workflows/nexus-watchdog-check.yml']]; print('OK')\"`\n\n```json:metadata\n{\"files\": [\".github/workflows/nexus-watchdog.yml\", \".github/workflows/nexus-watchdog-check.yml\"], \"verifyCommand\": \"python -c \\\"import yaml; [yaml.safe_load(open(f)) for f in ['.github/workflows/nexus-watchdog.yml', '.github/workflows/nexus-watchdog-check.yml']]; print('OK')\\\"\", \"acceptanceCriteria\": [\"ping Mon 09:00 UTC opens labeled issue\", \"check Mon 11:00 UTC verifies PING-OK\", \"missing reply files ops:token-renewal assigned to MohamedSerhan\", \"ping closed regardless\", \"both YAMLs parse\"]}\n```"
+    },
+    {
+      "id": 19,
+      "subject": "Task 12: Operator runbook in RELEASING.md",
+      "status": "pending",
+      "blockedBy": [16, 17, 18],
+      "description": "**Goal:** Append `## Operator runbook — Nexus triage` section to RELEASING.md covering Day 0 setup, annual renewal, killswitches, and ops:* response playbooks.\n\n**Files:**\n- Modify: RELEASING.md\n\n**Verify:** `grep -c \"## Operator runbook — Nexus triage\" RELEASING.md` → 1\n\n```json:metadata\n{\"files\": [\"RELEASING.md\"], \"verifyCommand\": \"grep -c '## Operator runbook — Nexus triage' RELEASING.md\", \"acceptanceCriteria\": [\"section heading appears exactly once\", \"Day 0 setup checklist included\", \"annual renewal procedure included\", \"killswitches documented\", \"watchdog-fired playbook included\", \"schema-gap-fired playbook included\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-05-26T00:00:00Z"
+}

@@ -2,12 +2,21 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::io::Write;
 use std::path::Component;
+use std::time::Duration;
 use walkdir::WalkDir;
 
 use crate::error::{AppError, Result};
 use crate::mods::{merge_active_disabled_mods, scan_disabled_mods, scan_mods, ModInfo};
 use crate::profiles::{Profile, ProfileMod};
 use crate::state::AppState;
+
+/// Total request timeout for sharing HTTP clients. Long enough for a
+/// large release-asset download on a slow link, short enough that a
+/// stalled connection can't pin the share/publish worker forever.
+const HTTP_TOTAL_TIMEOUT: Duration = Duration::from_secs(60);
+/// Connect timeout for sharing HTTP clients. A connect that's still
+/// pending after 10s is almost certainly a routing/DNS issue.
+const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// One mod skipped during a modpack install because it declared a
 /// `min_game_version` higher than the user's STS2 build. Surfaced in
@@ -310,6 +319,8 @@ pub(crate) fn build_client(token: &str) -> reqwest::Client {
     }
     reqwest::Client::builder()
         .default_headers(headers)
+        .timeout(HTTP_TOTAL_TIMEOUT)
+        .connect_timeout(HTTP_CONNECT_TIMEOUT)
         .build()
         .unwrap_or_default()
 }
@@ -1305,6 +1316,8 @@ fn decode_asset_name(name: &str) -> String {
 pub async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::Path) -> Result<()> {
     let client = reqwest::Client::builder()
         .user_agent(concat!("sts2-mod-manager/", env!("CARGO_PKG_VERSION")))
+        .timeout(HTTP_TOTAL_TIMEOUT)
+        .connect_timeout(HTTP_CONNECT_TIMEOUT)
         .build()
         .unwrap_or_default();
 
@@ -1498,6 +1511,8 @@ pub async fn fetch_shared_profile(
 ) -> Result<Profile> {
     let client = reqwest::Client::builder()
         .user_agent(concat!("sts2-mod-manager/", env!("CARGO_PKG_VERSION")))
+        .timeout(HTTP_TOTAL_TIMEOUT)
+        .connect_timeout(HTTP_CONNECT_TIMEOUT)
         .build()
         .unwrap_or_default();
 

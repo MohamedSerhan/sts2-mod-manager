@@ -78,6 +78,20 @@
     "share": "Share modpack",
     "reshare": "Re-share modpack",
     "delete": "Delete modpack",
+    "shared": "Shared",
+    "advanced": "Advanced",
+    "backToList": "Back to modpacks",
+    "openDetailAria": "Open {{name}} modpack",
+    "modCount_one": "{{count}} mod",
+    "modCount_other": "{{count}} mods",
+    "auditSummary": {
+      "updates_one": "{{count}} update available",
+      "updates_other": "{{count}} updates available",
+      "missing_one": "{{count}} mod missing source",
+      "missing_other": "{{count}} mods missing source",
+      "blocked_one": "{{count}} mod blocked by game version",
+      "blocked_other": "{{count}} mods blocked by game version"
+    },
     "membership": {
       "in": "In this modpack",
       "notIn": "Not in this modpack",
@@ -88,6 +102,12 @@
       "stored": "Stored",
       "storedHint": "Installed on disk but not in the game folder"
     }
+  },
+  "libraryTable": {
+    "membershipCheckbox": "Toggle {{mod}} in {{modpack}}",
+    "inPack": "In {{modpack}}",
+    "notInPack": "Not in {{modpack}}",
+    "modpackMissing": "This modpack doesn't exist any more — try refreshing the list."
   },
   "createModpack": {
     "title": "Create modpack",
@@ -309,6 +329,7 @@
       "showMore": "Show {{count}} more",
       "sort": {
         "label": "Sort",
+        "inPackFirst": "In this modpack first",
         "nameAsc": "Name A-Z",
         "nameDesc": "Name Z-A",
         "activeFirst": "Active first",

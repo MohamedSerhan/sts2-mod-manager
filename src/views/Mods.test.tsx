@@ -18,7 +18,7 @@ import type { ModInfo } from '../types';
 
 function Wrap(props: {
   advancedMode?: boolean;
-  onOpenModLibrary?: () => void;
+  onManageActiveModpack?: () => void;
   onGoToSettings?: () => void;
   initialTab?: 'installed' | 'browse';
 } = {}) {
@@ -26,7 +26,7 @@ function Wrap(props: {
     <AllProviders>
       <ModsView
         advancedMode={props.advancedMode}
-        onOpenModLibrary={props.onOpenModLibrary}
+        onManageActiveModpack={props.onManageActiveModpack}
         onGoToSettings={props.onGoToSettings}
         initialTab={props.initialTab}
       />
@@ -126,9 +126,9 @@ describe('<ModsView>', () => {
 
   it('offers a Mod Library bridge so users can assign installed mods to profiles from Mods', async () => {
     seedMods([baseMod({ name: 'BaseLib', folder_name: 'BaseLib' })]);
-    const onOpenModLibrary = vi.fn();
+    const onManageActiveModpack = vi.fn();
     const user = userEvent.setup();
-    render(<Wrap onOpenModLibrary={onOpenModLibrary} />);
+    render(<Wrap onManageActiveModpack={onManageActiveModpack} />);
 
     await waitFor(() => {
       expect(screen.getByText('BaseLib')).toBeInTheDocument();
@@ -141,7 +141,7 @@ describe('<ModsView>', () => {
     );
 
     await user.click(bridge);
-    expect(onOpenModLibrary).toHaveBeenCalledTimes(1);
+    expect(onManageActiveModpack).toHaveBeenCalledTimes(1);
   });
 
   it('search filter narrows the visible rows', async () => {
@@ -3043,11 +3043,11 @@ describe('<ModsView>', () => {
       expect(screen.getByText(/every mod installed on your computer/i)).toBeInTheDocument();
     });
 
-    it('Manage active modpack link calls onOpenModLibrary', async () => {
+    it('Manage active modpack link calls onManageActiveModpack', async () => {
       const onOpen = vi.fn();
       seedMods([baseMod({ name: 'BaseLib', folder_name: 'BaseLib' })]);
       const user = userEvent.setup();
-      render(<Wrap onOpenModLibrary={onOpen} />);
+      render(<Wrap onManageActiveModpack={onOpen} />);
       const link = await screen.findByRole('button', { name: /manage active modpack/i });
       await user.click(link);
       expect(onOpen).toHaveBeenCalledTimes(1);

@@ -137,7 +137,10 @@ describe('<App>', () => {
     });
   });
 
-  it('Mods tab Mod Library bridge opens the profile assignment workspace', async () => {
+  it('Mods tab Mod Library bridge opens the active modpack detail view', async () => {
+    // T16 — the "Mod Library" bridge in the Mods view now routes
+    // to the active modpack's detail view (where its mod editor
+    // lives) instead of a standalone Mod Library workspace.
     registerInvokeHandler('get_installed_mods', () => [{
       name: 'BaseLib',
       version: '1.0.0',
@@ -159,6 +162,7 @@ describe('<App>', () => {
       display_name: null,
       display_description: null,
     }]);
+    registerInvokeHandler('get_active_profile', () => 'Stable');
     registerInvokeHandler('list_profiles_cmd', () => [{
       name: 'Stable',
       mods: [],
@@ -186,12 +190,24 @@ describe('<App>', () => {
     await user.click(getNavButton('Library'));
     await waitFor(() => { expect(screen.getByText(/All installed mods/i)).toBeInTheDocument(); });
 
-    await user.click(screen.getByRole('button', { name: /Mod Library/i }));
+    // The toolbar "Mod Library" button (in the Library/Mods view) is
+    // the one we want — the link button has a different label
+    // ("Manage active modpack →"). Use a more specific name to dodge
+    // any ambiguity if the link starts matching /Mod Library/i.
+    const bridge = screen.getAllByRole('button').find(
+      (b) => b.textContent?.trim().startsWith('Mod Library'),
+    );
+    expect(bridge).toBeDefined();
+    await user.click(bridge!);
 
-    expect(await screen.findByRole('heading', { name: /Mod Library/i })).toBeInTheDocument();
+    // Land directly on the active modpack's detail view: H2 with the
+    // modpack name + Back-to-list button + LibraryTable rendering.
+    expect(
+      await screen.findByRole('heading', { level: 2, name: 'Stable' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Back to modpacks/i })).toBeInTheDocument();
     expect((await screen.findAllByText('BaseLib')).length).toBeGreaterThan(0);
-    expect(screen.getByRole('checkbox', { name: 'Stable' })).not.toBeChecked();
-  });
+  }, 10000);
 
   it('clicking Settings nav swaps to the Settings view', async () => {
     const user = userEvent.setup();
@@ -1614,6 +1630,12 @@ describe('<App>', () => {
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     await user.click(getNavButton('Modpacks'));
     await waitFor(() => { expect(screen.getByText('MyPack')).toBeInTheDocument(); });
+    // T16 — Share button lives in the modpack's detail view header now.
+    // Click the card first to open detail, then click Share.
+    await user.click(screen.getByRole('button', { name: /Open MyPack modpack/i }));
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { level: 2, name: 'MyPack' })).toBeInTheDocument();
+    });
     const shareBtn = screen.getAllByRole('button').find(
       (b) => /^Share$/.test(b.textContent?.trim() ?? ''),
     ) as HTMLButtonElement | undefined;

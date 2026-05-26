@@ -292,6 +292,196 @@ body {
   margin-top: -4px;
 }
 
+/* 1.7.0 T16 — modpack list as clickable cards. Replaces the legacy
+   row layout where each modpack had inline kebab + Share + Switch
+   buttons. Now clicking a card opens its detail view (Paradox-style
+   drilldown). Card buttons are <button type="button"> with no extra
+   styling so screen readers + keyboard navigation just work. */
+.gf-modpack-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+  padding: 0;
+}
+.gf-modpack-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  background: var(--indigo-panel);
+  border: 1px solid var(--indigo-line);
+  border-radius: 8px;
+  padding: 14px 16px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--ink);
+  font: inherit;
+  transition: border-color 0.15s, background 0.15s, transform 0.12s;
+}
+.gf-modpack-card:hover {
+  border-color: var(--accent, var(--ok));
+  transform: translateY(-1px);
+}
+.gf-modpack-card:focus-visible {
+  outline: 2px solid var(--accent, var(--ok));
+  outline-offset: 2px;
+}
+.gf-modpack-card.is-active {
+  border-left: 4px solid var(--ok);
+}
+.gf-modpack-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.gf-modpack-card-name {
+  font-weight: 600;
+  font-size: 14.5px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gf-modpack-card-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--ink-mute);
+}
+.gf-modpack-card-badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-height: 18px;
+}
+.gf-modpack-card-drift {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--warn, #f59e0b);
+}
+
+/* 1.7.0 T16 — modpack detail (inline drilldown) */
+.gf-modpack-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.gf-modpack-detail-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--indigo-line);
+}
+.gf-modpack-detail-back {
+  flex: 0 0 auto;
+}
+.gf-modpack-detail-title-row {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.gf-modpack-detail-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gf-modpack-detail-head-actions {
+  display: inline-flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.gf-modpack-detail-audit {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.gf-modpack-detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gf-modpack-detail-advanced {
+  border-top: 1px solid var(--indigo-line);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gf-modpack-detail-advanced-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 0;
+  color: var(--ink-mute);
+  cursor: pointer;
+  font: inherit;
+  padding: 4px 0;
+}
+.gf-modpack-detail-advanced-toggle:hover,
+.gf-modpack-detail-advanced-toggle:focus-visible {
+  color: var(--ink);
+  outline: none;
+}
+.gf-modpack-detail-advanced-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-left: 18px;
+}
+
+/* Generic chip-style audit summary indicators */
+.gf-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  letter-spacing: 0.02em;
+}
+.gf-chip-update {
+  background: oklch(0.30 0.06 240 / 0.30);
+  color: oklch(0.85 0.10 240);
+  border-color: oklch(0.55 0.10 240 / 0.40);
+}
+.gf-chip-warn {
+  background: oklch(0.30 0.06 70 / 0.30);
+  color: oklch(0.85 0.10 70);
+  border-color: oklch(0.55 0.10 70 / 0.40);
+}
+.gf-chip-danger {
+  background: oklch(0.30 0.10 25 / 0.30);
+  color: oklch(0.80 0.13 25);
+  border-color: oklch(0.55 0.13 25 / 0.40);
+}
+
+/* Inline load-order rank inside LibraryTable rows. */
+.gf-load-order-rank-inline {
+  font-variant-numeric: tabular-nums;
+  color: var(--ok);
+  font-weight: 600;
+}
+.gf-profile-library-row.in-pack {
+  border-left: 3px solid var(--ok);
+}
+.gf-profile-library-row.drag-over {
+  background: oklch(0.22 0.06 250);
+}
+
 .gf-profile-special-actions {
   display: flex;
   margin: -2px 0 14px;

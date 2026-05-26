@@ -164,7 +164,12 @@ function gameVersionSatisfies(current: string | null | undefined, required: stri
 
 interface ModsViewProps {
   advancedMode?: boolean;
-  onOpenModLibrary?: () => void;
+  /** 1.7.0 T16 — handler for the "Manage active modpack →" bridge
+   *  links. Routes the user to the Modpacks view with the active
+   *  modpack's detail view auto-opened. Replaces the legacy
+   *  onOpenModLibrary which routed to a now-removed standalone
+   *  workspace. */
+  onManageActiveModpack?: () => void;
   /** Forwarded to BrowseView's "Nexus key missing → open Settings"
    *  banner. Only consumed when the Browse tab is active. */
   onGoToSettings?: () => void;
@@ -175,7 +180,7 @@ interface ModsViewProps {
   initialTab?: 'installed' | 'browse';
 }
 
-export function ModsView({ advancedMode: advancedModeProp, onOpenModLibrary, onGoToSettings, initialTab = 'installed' }: ModsViewProps = {}) {
+export function ModsView({ advancedMode: advancedModeProp, onManageActiveModpack, onGoToSettings, initialTab = 'installed' }: ModsViewProps = {}) {
   // 1.7.0 outer Installed/Browse tabs. 'installed' is the existing
   // Mods view content; 'browse' renders the public mod browser
   // (formerly its own sidebar entry).
@@ -603,11 +608,11 @@ export function ModsView({ advancedMode: advancedModeProp, onOpenModLibrary, onG
             )}
           </p>
           <p className="gf-page-sub">{t('mods.allInstalledSubtitle')}</p>
-          {onOpenModLibrary && (
+          {onManageActiveModpack && (
             <button
               type="button"
               className="gf-link-button"
-              onClick={onOpenModLibrary}
+              onClick={onManageActiveModpack}
             >
               {t('mods.manageActiveModpackLink')}
             </button>
@@ -724,11 +729,11 @@ export function ModsView({ advancedMode: advancedModeProp, onOpenModLibrary, onG
             <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
             {refreshing ? t('common.refreshing') : t('common.refresh')}
           </Button>
-          {onOpenModLibrary && (
+          {onManageActiveModpack && (
             <Button
               variant="secondary"
               size="sm"
-              onClick={onOpenModLibrary}
+              onClick={onManageActiveModpack}
               title={t('mods.openModLibraryTitle')}
             >
               <ListChecks size={14} />

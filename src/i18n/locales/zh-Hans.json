@@ -78,6 +78,20 @@
     "share": "分享模组包",
     "reshare": "重新分享模组包",
     "delete": "删除模组包",
+    "shared": "已分享",
+    "advanced": "高级",
+    "backToList": "返回模组包列表",
+    "openDetailAria": "打开模组包 {{name}}",
+    "modCount_one": "{{count}} 个模组",
+    "modCount_other": "{{count}} 个模组",
+    "auditSummary": {
+      "updates_one": "有 {{count}} 个更新可用",
+      "updates_other": "有 {{count}} 个更新可用",
+      "missing_one": "{{count}} 个模组缺少来源",
+      "missing_other": "{{count}} 个模组缺少来源",
+      "blocked_one": "{{count}} 个模组因游戏版本被阻止",
+      "blocked_other": "{{count}} 个模组因游戏版本被阻止"
+    },
     "membership": {
       "in": "已加入此模组包",
       "notIn": "未加入此模组包",
@@ -88,6 +102,12 @@
       "stored": "已存储",
       "storedHint": "已安装到本地但未放入游戏文件夹"
     }
+  },
+  "libraryTable": {
+    "membershipCheckbox": "切换 {{mod}} 在 {{modpack}} 中的状态",
+    "inPack": "已在 {{modpack}} 中",
+    "notInPack": "未在 {{modpack}} 中",
+    "modpackMissing": "此模组包已不存在 — 请尝试刷新列表。"
   },
   "createModpack": {
     "title": "创建模组包",
@@ -399,6 +419,7 @@
       "showMore": "再显示 {{count}} 个",
       "sort": {
         "label": "排序",
+        "inPackFirst": "此模组包内优先",
         "nameAsc": "名称 A-Z",
         "nameDesc": "名称 Z-A",
         "activeFirst": "活跃优先",

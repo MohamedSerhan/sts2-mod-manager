@@ -100,7 +100,12 @@ function AppInner() {
   const [appVersion, setAppVersion] = useState('');
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showProfileSwitcher, setShowProfileSwitcher] = useState(false);
-  const [openModLibrarySignal, setOpenModLibrarySignal] = useState(0);
+  // 1.7.0 T16 — bumped by sibling surfaces (Mods view "Manage active
+  // modpack →" link) when they want Modpacks to open the active
+  // modpack's detail view on entry. Replaces the legacy
+  // openModLibrarySignal which targeted the removed standalone Mod
+  // Library workspace.
+  const [openActiveModpackSignal, setOpenActiveModpackSignal] = useState(0);
   const [showHelpDrawer, setShowHelpDrawer] = useState(false);
   // Bumped whenever a sibling view (ProfileSwitcher's "Add pack",
   // onboarding's paste-code action) wants the Modpacks toolbar's
@@ -828,7 +833,7 @@ function AppInner() {
             {(activeView === 'profiles' || activeView === 'browse-modpacks') && (
               <ProfilesView
                 onGoToSettings={() => setActiveView('settings')}
-                openModLibrarySignal={openModLibrarySignal}
+                openActiveModpackSignal={openActiveModpackSignal}
                 initialTab={activeView === 'browse-modpacks' ? 'browse' : 'yours'}
                 focusQuickAddSignal={focusModpacksCodeBarSignal}
               />
@@ -838,8 +843,12 @@ function AppInner() {
                 Nexus "open settings" handler etc. keep working. */}
             {(activeView === 'mods' || activeView === 'browse-mods') && (
               <ModsView
-                onOpenModLibrary={() => {
-                  setOpenModLibrarySignal((signal) => signal + 1);
+                onManageActiveModpack={() => {
+                  // T16 — bumps the Modpacks "open active modpack
+                  // detail view" signal and routes the user there.
+                  // ProfilesView observes the bump and opens
+                  // selectedModpack = activeProfile on next render.
+                  setOpenActiveModpackSignal((signal) => signal + 1);
                   setActiveView('profiles');
                 }}
                 onGoToSettings={() => setActiveView('settings')}

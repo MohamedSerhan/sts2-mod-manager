@@ -18,16 +18,14 @@
  * State is owned by the parent (ProfilesView). The detail view is a
  * controlled component — every action calls a handler prop, so the
  * parent stays the source of truth for the profile list, drift map,
- * share map, etc. The only local state here is the Advanced
- * disclosure toggle.
+ * share map, etc. The only local state is owned by AdvancedSection,
+ * which persists its open/closed flag to localStorage so users who
+ * open the disclosure once don't have to re-open it every session.
  */
-import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ArrowLeft,
   Camera,
-  ChevronDown,
-  ChevronRight,
   Copy,
   Download,
   Files,
@@ -37,6 +35,7 @@ import {
   Share2,
   Trash2,
 } from 'lucide-react';
+import { AdvancedSection } from './AdvancedSection';
 import { Badge } from './Badge';
 import { Button } from './Button';
 import { LibraryTable } from './LibraryTable';
@@ -121,7 +120,6 @@ export function ModpackDetail({
 }: ModpackDetailProps) {
   const { t } = useTranslation();
   const { activeProfile, auditResults } = useApp();
-  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const isActive = activeProfile === profile.name;
   const isShared = !!shareInfo;
@@ -244,94 +242,81 @@ export function ModpackDetail({
         />
       </div>
 
-      <div className="gf-modpack-detail-advanced">
-        <button
-          type="button"
-          className="gf-modpack-detail-advanced-toggle"
-          onClick={() => setAdvancedOpen((open) => !open)}
-          aria-expanded={advancedOpen}
-          aria-controls="modpack-detail-advanced-panel"
+      <AdvancedSection
+        localStorageKey="modpack-detail-advanced"
+        title={t('modpack.advanced')}
+      >
+        <div
+          id="modpack-detail-advanced-panel"
+          className="gf-modpack-detail-advanced-panel"
+          data-testid="modpack-detail-advanced-panel"
         >
-          {advancedOpen ? (
-            <ChevronDown size={14} />
-          ) : (
-            <ChevronRight size={14} />
+          {onOpenLoadOrder && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => onOpenLoadOrder(profile)}
+              disabled={profile.mods.length === 0}
+              title={t('profiles.loadOrder.buttonTitle', {
+                name: profile.name,
+              })}
+            >
+              <ListOrdered size={14} />
+              {t('profiles.loadOrder.button')}
+            </Button>
           )}
-          {t('modpack.advanced')}
-        </button>
-        {advancedOpen && (
-          <div
-            id="modpack-detail-advanced-panel"
-            className="gf-modpack-detail-advanced-panel"
-            data-testid="modpack-detail-advanced-panel"
-          >
-            {onOpenLoadOrder && (
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => onOpenLoadOrder(profile)}
-                disabled={profile.mods.length === 0}
-                title={t('profiles.loadOrder.buttonTitle', {
-                  name: profile.name,
-                })}
-              >
-                <ListOrdered size={14} />
-                {t('profiles.loadOrder.button')}
-              </Button>
-            )}
-            {onSnapshot && (
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => onSnapshot(profile.name)}
-              >
-                <Camera size={14} />
-                {t('profiles.kebab.snapshotFromCurrent')}
-              </Button>
-            )}
-            {onDuplicate && (
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => onDuplicate(profile.name)}
-              >
-                <Files size={14} />
-                {t('profiles.kebab.duplicate')}
-              </Button>
-            )}
-            {onExportJson && (
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => onExportJson(profile.name)}
-              >
-                <Copy size={14} />
-                {t('profiles.kebab.exportJson')}
-              </Button>
-            )}
-            {onRepairDrift && hasDrift && (
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => onRepairDrift(profile.name)}
-              >
-                <Download size={14} />
-                {t('profiles.drift.repair')}
-              </Button>
-            )}
-            {onDelete && (
-              <Button
-                variant="danger"
-                size="sm"
-                onClick={() => onDelete(profile.name)}
-              >
-                <Trash2 size={14} />
-                {t('profiles.kebab.deleteProfile')}
-              </Button>
-            )}
-          </div>
-        )}
-      </div>
+          {onSnapshot && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => onSnapshot(profile.name)}
+            >
+              <Camera size={14} />
+              {t('profiles.kebab.snapshotFromCurrent')}
+            </Button>
+          )}
+          {onDuplicate && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => onDuplicate(profile.name)}
+            >
+              <Files size={14} />
+              {t('profiles.kebab.duplicate')}
+            </Button>
+          )}
+          {onExportJson && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => onExportJson(profile.name)}
+            >
+              <Copy size={14} />
+              {t('profiles.kebab.exportJson')}
+            </Button>
+          )}
+          {onRepairDrift && hasDrift && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => onRepairDrift(profile.name)}
+            >
+              <Download size={14} />
+              {t('profiles.drift.repair')}
+            </Button>
+          )}
+          {onDelete && (
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => onDelete(profile.name)}
+            >
+              <Trash2 size={14} />
+              {t('profiles.kebab.deleteProfile')}
+            </Button>
+          )}
+        </div>
+      </AdvancedSection>
     </div>
   );
 }

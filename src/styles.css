@@ -475,6 +475,44 @@ body {
   padding-left: 18px;
 }
 
+/* Shared AdvancedSection — disclosure for power-user actions. */
+.gf-advanced {
+  border-top: 1px solid var(--indigo-line);
+  margin-top: 12px;
+}
+.gf-advanced-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 14px;
+  background: none;
+  border: none;
+  color: var(--ink-mute);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+}
+.gf-advanced-header:hover,
+.gf-advanced-header:focus-visible {
+  color: var(--ink);
+  outline: none;
+}
+.gf-advanced-caret {
+  transition: transform 0.15s;
+}
+.gf-advanced-caret.open {
+  transform: rotate(90deg);
+}
+.gf-advanced-body {
+  padding: 0 14px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 /* Generic chip-style audit summary indicators */
 .gf-chip {
   display: inline-flex;

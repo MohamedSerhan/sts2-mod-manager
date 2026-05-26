@@ -50,6 +50,9 @@
     "notifications": "Notifications",
     "beta": "Beta",
     "refreshing": "Refreshing...",
+    "advanced": "Advanced",
+    "showAdvanced": "Show advanced",
+    "hideAdvanced": "Hide advanced",
     "parts": {
       "downloaded": "{{count}} downloaded",
       "failed": "{{count}} failed",

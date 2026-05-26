@@ -50,6 +50,9 @@
     "notifications": "通知",
     "beta": "测试版",
     "refreshing": "正在刷新…",
+    "advanced": "高级",
+    "showAdvanced": "显示高级",
+    "hideAdvanced": "隐藏高级",
     "parts": {
       "downloaded": "已下载 {{count}} 个",
       "failed": "{{count}} 个失败",

@@ -33,13 +33,16 @@ export function canonicalShareCode(input: string): string | null {
   let s = input.trim();
 
   // Deep-link form: sts2mm://import/<owner>/<code> — strip the protocol +
-  // any leading path segment that names the action.
+  // the action path segment.
   if (s.toLowerCase().startsWith('sts2mm://')) {
     s = s.slice('sts2mm://'.length);
-    // Optional action path segment (`import/`, `install/`, etc.). Tolerant
-    // because the friend who shares the URL might paste a slightly different
-    // shape than what we documented; the code+owner is the part that matters.
-    s = s.replace(/^[a-z]+\//i, '');
+    // Whitelist the known action verbs (`import`, `install`, `load`)
+    // rather than the previous `^[a-z]+\//i` which would silently
+    // rewrite ANY alphabetic prefix into a share code attempt. A
+    // crafted `sts2mm://foo/<arbitrary>` no longer looks like a valid
+    // share to the importer — it falls through to canonicalShareCode
+    // returning `null` and the user sees the "didn't recognize" path.
+    s = s.replace(/^(import|install|load)\//i, '');
   }
 
   // Strip a trailing query string or fragment — share URLs in the wild

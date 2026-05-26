@@ -425,6 +425,97 @@ describe('<DiagnosticBundle>', () => {
     expect(getGenerateButton()).not.toBeDisabled();
   });
 
+  it('redacts classic GitHub PATs (ghp_…) in log content', async () => {
+    // A 40-char ghp_ token — common length, well above the 36-char floor.
+    const token = 'ghp_abcdefghijklmnopqrstuvwxyz0123456789AB';
+    registerInvokeHandler('read_log_tail', () => `Authorization: Bearer ${token}\nother line`);
+    registerInvokeHandler('get_log_path', () => '/x.log');
+
+    render(<Wrap />);
+    fireEvent.click(getGenerateButton());
+    const ta = await screen.findByDisplayValue(/Support Bundle/) as HTMLTextAreaElement;
+    expect(ta.value).not.toContain(token);
+    expect(ta.value).toContain('[REDACTED_GITHUB_TOKEN]');
+    // The non-token line should still be intact.
+    expect(ta.value).toContain('other line');
+  });
+
+  it('redacts gho_/ghu_/ghs_/ghr_ tokens too', async () => {
+    const ghoToken = 'gho_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const ghuToken = 'ghu_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    registerInvokeHandler('read_log_tail', () => `a=${ghoToken} b=${ghuToken}`);
+    registerInvokeHandler('get_log_path', () => '/x.log');
+
+    render(<Wrap />);
+    fireEvent.click(getGenerateButton());
+    const ta = await screen.findByDisplayValue(/Support Bundle/) as HTMLTextAreaElement;
+    expect(ta.value).not.toContain(ghoToken);
+    expect(ta.value).not.toContain(ghuToken);
+    // Both occurrences are replaced (count matches).
+    const matches = ta.value.match(/\[REDACTED_GITHUB_TOKEN\]/g) ?? [];
+    expect(matches.length).toBe(2);
+  });
+
+  it('redacts fine-grained PATs (github_pat_…)', async () => {
+    // Fine-grained PATs are `github_pat_` + 82 chars.
+    const pat = 'github_pat_' + 'A'.repeat(82);
+    registerInvokeHandler('read_log_tail', () => `secret=${pat}`);
+    registerInvokeHandler('get_log_path', () => '/x.log');
+
+    render(<Wrap />);
+    fireEvent.click(getGenerateButton());
+    const ta = await screen.findByDisplayValue(/Support Bundle/) as HTMLTextAreaElement;
+    expect(ta.value).not.toContain(pat);
+    expect(ta.value).toContain('[REDACTED_GITHUB_PAT]');
+  });
+
+  it('redacts query-string secret values but keeps the key name visible', async () => {
+    registerInvokeHandler(
+      'read_log_tail',
+      () => 'GET https://api.example.com/items?api_key=abc123xyz&page=2\n' +
+            'GET https://api.example.com/?token=secrettoken&user=alice\n' +
+            'GET https://x.test/?ACCESS_TOKEN=BIGSECRET&z=1',
+    );
+    registerInvokeHandler('get_log_path', () => '/x.log');
+
+    render(<Wrap />);
+    fireEvent.click(getGenerateButton());
+    const ta = await screen.findByDisplayValue(/Support Bundle/) as HTMLTextAreaElement;
+    // Values stripped.
+    expect(ta.value).not.toContain('abc123xyz');
+    expect(ta.value).not.toContain('secrettoken');
+    expect(ta.value).not.toContain('BIGSECRET');
+    // Keys + non-secret params survive.
+    expect(ta.value).toContain('api_key=[REDACTED]');
+    expect(ta.value).toContain('token=[REDACTED]');
+    expect(ta.value).toMatch(/ACCESS_TOKEN=\[REDACTED\]/i);
+    expect(ta.value).toContain('page=2');
+    expect(ta.value).toContain('user=alice');
+    expect(ta.value).toContain('z=1');
+  });
+
+  it('token redaction runs even when redactPaths is OFF', async () => {
+    const token = 'ghp_zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz';
+    registerInvokeHandler('read_log_tail', () => `Bearer ${token}`);
+    registerInvokeHandler('get_log_path', () => 'C:\\Users\\alice\\app.log');
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+
+    const checkbox = screen.getByRole('checkbox', { name: /Redact home-folder/i }) as HTMLInputElement;
+    await user.click(checkbox);
+    expect(checkbox.checked).toBe(false);
+
+    await user.click(getGenerateButton());
+    const ta = await screen.findByDisplayValue(/Support Bundle/) as HTMLTextAreaElement;
+    // Token redaction is a security concern — runs regardless of the
+    // privacy checkbox.
+    expect(ta.value).not.toContain(token);
+    expect(ta.value).toContain('[REDACTED_GITHUB_TOKEN]');
+    // Path redaction off — username survives.
+    expect(ta.value).toContain('C:\\Users\\alice');
+  });
+
   it('disables the generate button while a generate is already in flight (re-entrancy UX guard)', async () => {
     // The defensive `if (busy) return;` inside generate() is marked
     // /* v8 ignore */ because it is unreachable via the UI — the

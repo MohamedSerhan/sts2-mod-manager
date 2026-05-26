@@ -27,12 +27,38 @@ export function DiagnosticBundle({ open, onClose }: Props) {
   if (!open) return null;
 
   function redact(s: string): string {
-    if (!redactPaths) return s;
+    // Token/secret redaction is ALWAYS on, regardless of the
+    // `redactPaths` checkbox. The checkbox controls whether the
+    // user's home directory name leaks (a privacy concern); tokens
+    // and API keys are an authentication concern — if they make it
+    // into a bundle headed for a public bug tracker, treat them as
+    // compromised. Strip first so the path-redaction step below
+    // never sees a token even if one happened to live inside a
+    // file path.
+    let out = s
+      // Classic GitHub PAT formats: `ghp_…`, `gho_…`, `ghu_…`,
+      // `ghs_…`, `ghr_…`. The 36+ length floor matches GitHub's
+      // documented token shape; longer suffixes (re-issued tokens
+      // sometimes drift) are also caught.
+      .replace(/gh[pousr]_[A-Za-z0-9]{36,}/g, '[REDACTED_GITHUB_TOKEN]')
+      // Fine-grained PATs (`github_pat_…`) — fixed 82-char suffix.
+      .replace(/github_pat_[A-Za-z0-9_]{82}/g, '[REDACTED_GITHUB_PAT]')
+      // Query-string secrets — replace the VALUE only, leaving
+      // the key visible so the reader can see "an API key was
+      // here" without the bytes themselves. Stops at `&` (next
+      // param) or any whitespace (end of URL on its own line).
+      .replace(
+        /([?&])(api[_-]?key|key|token|access_token)=([^&\s]+)/gi,
+        '$1$2=[REDACTED]',
+      );
+
+    if (!redactPaths) return out;
     // Replace any C:\Users\<name>\… with C:\Users\<redacted>\…
-    return s
+    out = out
       .replace(/([A-Za-z]:\\Users\\)([^\\\s]+)/g, '$1<redacted>')
       .replace(/(\/Users\/)([^/\s]+)/g, '$1<redacted>')
       .replace(/(\/home\/)([^/\s]+)/g, '$1<redacted>');
+    return out;
   }
 
   async function generate() {

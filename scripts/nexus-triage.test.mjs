@@ -111,3 +111,45 @@ test('saveState handles 50 comments + 30 bugs + 100 kudos', () => {
     assert.equal(loaded.kudos_seen.length, 100);
   });
 });
+
+import { sanitizeTitle } from './nexus-triage.mjs';
+
+test('sanitizeTitle strips backticks', () => {
+  assert.equal(sanitizeTitle('use `foo` not `bar`'), 'use foo not bar');
+});
+
+test('sanitizeTitle strips HTML tags but keeps content', () => {
+  assert.equal(sanitizeTitle('<script>alert("x")</script>hello'), 'alert("x")hello');
+  assert.equal(sanitizeTitle('<b>bold</b> text'), 'bold text');
+});
+
+test('sanitizeTitle strips @mentions', () => {
+  assert.equal(sanitizeTitle('@everyone please check this'), 'please check this');
+  assert.equal(sanitizeTitle('hey @MohamedSerhan and @ghost'), 'hey and');
+});
+
+test('sanitizeTitle collapses whitespace', () => {
+  assert.equal(sanitizeTitle('a   b\n\nc\td'), 'a b c d');
+});
+
+test('sanitizeTitle truncates at word boundary at 60 chars', () => {
+  const long = 'word '.repeat(30); // 150 chars
+  const result = sanitizeTitle(long);
+  assert.ok(result.length <= 60, `result length ${result.length} > 60: ${result}`);
+  assert.ok(!result.endsWith(' '), `result ends with space: '${result}'`);
+  assert.ok(/^(\w+(\s\w+)*)?$/.test(result), `result should be clean word boundary: '${result}'`);
+});
+
+test('sanitizeTitle of empty input returns empty string', () => {
+  assert.equal(sanitizeTitle(''), '');
+  assert.equal(sanitizeTitle('   '), '');
+});
+
+test('sanitizeTitle of all-punctuation returns input unchanged', () => {
+  assert.equal(sanitizeTitle('!!!???...'), '!!!???...');  // punctuation preserved
+  assert.equal(sanitizeTitle('@@@@'), '');  // all mentions stripped → empty
+});
+
+test('sanitizeTitle preserves non-ASCII content', () => {
+  assert.equal(sanitizeTitle('崩溃 crash 启动'), '崩溃 crash 启动');
+});

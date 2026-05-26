@@ -54,3 +54,23 @@ export function saveState(path, state) {
   const out = JSON.stringify(state, null, 2) + '\n';
   writeFileSync(path, out, 'utf-8');
 }
+
+const MAX_TITLE_CHARS = 60;
+
+export function sanitizeTitle(body) {
+  if (!body) return '';
+  let s = String(body);
+  // Strip HTML tags but keep their text content
+  s = s.replace(/<[^>]*>/g, '');
+  // Strip backticks
+  s = s.replace(/`/g, '');
+  // Strip @mentions (@ followed by word chars, including multiple @ symbols)
+  s = s.replace(/@+\w+|@+/g, '');
+  // Collapse whitespace
+  s = s.replace(/\s+/g, ' ').trim();
+  if (s.length <= MAX_TITLE_CHARS) return s;
+  // Truncate at last word boundary at or before MAX_TITLE_CHARS
+  const cutoff = s.lastIndexOf(' ', MAX_TITLE_CHARS);
+  if (cutoff < 0) return s.slice(0, MAX_TITLE_CHARS); // no space found, hard-cut
+  return s.slice(0, cutoff);
+}

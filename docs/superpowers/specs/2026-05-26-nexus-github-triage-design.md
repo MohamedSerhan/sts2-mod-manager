@@ -95,6 +95,10 @@ Three workflows + a Node.js script + a committed state file. All operator toolin
      - Run schema introspection on first request of the run; fail loud (exit 2) if expected fields missing.
 
 3. Filter:
+     - author in MAINTAINER_HANDLES (config constant: ["xxskullmikexx", "Sky2Fly"]) → SKIP, do not record
+       Comments and bugs authored by the maintainer or co-maintainers are part of the
+       maintenance dialog, not external reports. Skip silently — no state, no issue,
+       no kudos accounting.
      - id in state.comments / state.bugs                → SKIP (already filed)
      - id in state.kudos_seen                           → SKIP (already evaluated)
      - Nexus bug status in [closed, duplicate, not-a-bug] on first sight → SKIP, do not record
@@ -305,6 +309,18 @@ The coverage gate in `vitest.config.ts` is scoped to `src/**/*.{ts,tsx}` and doe
 **Killswitches:**
 1. Actions UI → workflow → Disable. Stops cleanly, state frozen.
 2. `scripts/nexus-triage.disabled` sentinel file. Script exits 0 if present. One-character UI commit from a phone disables it.
+
+## Maintainer-handle exclude-list
+
+Defined as a constant near the top of `scripts/nexus-triage.mjs`:
+
+```js
+const MAINTAINER_HANDLES = ['xxskullmikexx', 'Sky2Fly'];
+```
+
+Matched case-insensitively against the `creator.name` (comments) and `reporter.name` (bugs) fields returned by GraphQL. Adding a new collaborator is a one-line PR.
+
+This is the first filter in the pipeline — before dedup, before classification, before per-run cap counting — so a flood of maintainer chatter can't displace real user reports from the 5/run budget.
 
 ## Open questions deferred to implementation
 

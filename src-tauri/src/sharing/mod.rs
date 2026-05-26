@@ -1,22 +1,47 @@
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use std::io::Write;
-use std::path::Component;
-use std::time::Duration;
-use walkdir::WalkDir;
 
 use crate::error::{AppError, Result};
 use crate::mods::{merge_active_disabled_mods, scan_disabled_mods, scan_mods, ModInfo};
 use crate::profiles::{Profile, ProfileMod};
 use crate::state::AppState;
 
-/// Total request timeout for sharing HTTP clients. Long enough for a
-/// large release-asset download on a slow link, short enough that a
-/// stalled connection can't pin the share/publish worker forever.
-const HTTP_TOTAL_TIMEOUT: Duration = Duration::from_secs(60);
-/// Connect timeout for sharing HTTP clients. A connect that's still
-/// pending after 10s is almost certainly a routing/DNS issue.
-const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+// ── Submodules ─────────────────────────────────────────────────────────────
+//
+// `sharing` was a 4.6k-line single file. Pure helpers (share-code
+// shape rules, asset-filename construction, identity-key building)
+// have been peeled out into focused sub-modules so the orchestration
+// in this file is easier to follow. Re-exports below preserve the
+// `crate::sharing::function_name` import surface the rest of the
+// codebase + integration tests rely on.
+mod code;
+mod github;
+mod upload;
+
+// Re-export of the pure helpers so existing call sites
+// (`crate::sharing::download_bundle`, the `use super::*` test
+// modules below, and `crate::modpack_browser::build_client`)
+// don't change.
+use code::{code_to_filename, decode_asset_name, format_code, generate_code, parse_share_code, release_asset_name};
+// Low-level GitHub plumbing — types and primitive HTTP helpers. The
+// release-asset upload retry/recovery layer + the orchestration that
+// stitches them together stay below in this file because the
+// `release_upload_tests` + `share_via_releases_e2e_tests` modules
+// rely on `super::*` reaching them all.
+pub(crate) use github::{build_client, github_api_base};
+use github::{
+    ensure_profiles_repo as github_ensure_profiles_repo,
+    get_github_username, upsert_file as github_upsert_file, ReleaseAsset, ReleaseResponse,
+    HTTP_CONNECT_TIMEOUT, HTTP_TOTAL_TIMEOUT,
+};
+// Asset-bundling helpers — sync filesystem walk + zip encoding +
+// pre-publish validation. `zip_mod_files` is not imported here
+// directly — orchestration always goes through `zip_profile_mod_files`
+// (which has the enabled-vs-disabled-path fallback baked in), so the
+// raw `zip_mod_files` lives in `upload.rs` as an implementation detail.
+use upload::{
+    ensure_profile_publish_complete, restore_profile_after_failed_publish, zip_entry_outpath,
+    zip_profile_mod_files,
+};
 
 /// One mod skipped during a modpack install because it declared a
 /// `min_game_version` higher than the user's STS2 build. Surfaced in
@@ -129,37 +154,6 @@ struct ShareInfo {
     file_sha: Option<String>,
 }
 
-/// GitHub Contents API response — we only need the SHA for upsert ops.
-/// serde drops unknown fields by default, so the rest of the payload
-/// (content, html_url, etc.) is ignored without us having to declare them.
-#[derive(Debug, Deserialize)]
-struct ContentsResponse {
-    sha: Option<String>,
-}
-
-/// GitHub user response
-#[derive(Debug, Deserialize)]
-struct UserResponse {
-    login: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct ReleaseResponse {
-    id: u64,
-    /// Template like `https://uploads.github.com/repos/<o>/<r>/releases/<id>/assets{?name,label}`.
-    /// We strip the `{?name,label}` suffix and append `?name=<filename>` ourselves.
-    upload_url: String,
-    #[serde(default)]
-    assets: Vec<ReleaseAsset>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct ReleaseAsset {
-    id: u64,
-    name: String,
-    browser_download_url: String,
-}
-
 const BUNDLES_RELEASE_TAG: &str = "bundles";
 
 /// Per-step status emitted to the frontend while a share / re-share is
@@ -227,177 +221,17 @@ fn build_repo_url(owner: &str) -> String {
     format!("https://github.com/{}/{}", owner, profiles_repo())
 }
 
-// ── Profile Code Encoding ──────────────────────────────────────────────────
-
-/// Generate a deterministic short code from profile content.
-/// Uses SHA-256 hash of the profile name + timestamp to get a unique code.
-fn generate_code(profile: &Profile) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(profile.name.as_bytes());
-    hasher.update(chrono::Utc::now().timestamp().to_le_bytes());
-    let hash = hasher.finalize();
-    let hex: String = hash.iter().take(6).map(|b| format!("{:02X}", b)).collect();
-    // Format as XXXX-XXXX-XXXX
-    let chars: Vec<char> = hex.chars().collect();
-    format!(
-        "{}-{}-{}",
-        chars[0..4].iter().collect::<String>(),
-        chars[4..8].iter().collect::<String>(),
-        chars[8..12].iter().collect::<String>()
-    )
-}
-
-/// Code to filename: "AA5A-315D-61AE" -> "aa5a315d61ae.json"
-fn code_to_filename(code: &str) -> String {
-    format!("{}.json", code.replace('-', "").to_lowercase())
-}
-
-/// Normalize user input: accept code, filename, or full URL
-fn normalize_code_input(input: &str) -> String {
-    let trimmed = input.trim();
-
-    // If it's a GitHub URL, extract the filename
-    if trimmed.contains("github.com") || trimmed.contains("raw.githubusercontent.com") {
-        if let Some(name) = trimmed.rsplit('/').next() {
-            let name = name.trim_end_matches(".json");
-            return name.replace('-', "").to_uppercase();
-        }
-    }
-
-    // Strip dashes and normalize
-    trimmed.replace('-', "").to_uppercase()
-}
-
-/// Format a raw code string back to XXXX-XXXX-XXXX
-fn format_code(raw: &str) -> String {
-    let upper: String = raw
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric())
-        .take(12)
-        .collect();
-    if upper.len() >= 12 {
-        format!("{}-{}-{}", &upper[0..4], &upper[4..8], &upper[8..12])
-    } else {
-        upper
-    }
-}
-
 // ── GitHub API Helpers ─────────────────────────────────────────────────────
 
-/// Base URL for GitHub's REST API. Tests override via the
-/// `STS2_GITHUB_API_BASE` env var so wiremock can intercept; production
-/// always reads the literal default (the env var is only set by tests).
-///
-/// Pulled out instead of threading a `base_url: &str` parameter through
-/// every upload helper because (a) the prod code never varies it and (b)
-/// the helpers already form URLs by `format!`, so a single base swap is
-/// the minimum surface change for testability.
-pub(crate) fn github_api_base() -> String {
-    std::env::var("STS2_GITHUB_API_BASE").unwrap_or_else(|_| "https://api.github.com".to_string())
-}
-
-pub(crate) fn build_client(token: &str) -> reqwest::Client {
-    let mut headers = reqwest::header::HeaderMap::new();
-    headers.insert(
-        reqwest::header::ACCEPT,
-        "application/vnd.github+json".parse().unwrap(),
-    );
-    // GitHub keys abuse signals off User-Agent — pinning a literal "0.1"
-    // forever means every request from every installed version looks
-    // identical, which dilutes the signal both for us and for them.
-    // Stamping the actual crate version (set by Cargo at compile time)
-    // lets GitHub correlate issues to specific releases and lets us
-    // grep server logs by version when something starts misbehaving.
-    headers.insert(
-        reqwest::header::USER_AGENT,
-        concat!("sts2-mod-manager/", env!("CARGO_PKG_VERSION"))
-            .parse()
-            .unwrap(),
-    );
-    if let Ok(val) = format!("Bearer {}", token).parse() {
-        headers.insert(reqwest::header::AUTHORIZATION, val);
-    }
-    reqwest::Client::builder()
-        .default_headers(headers)
-        .timeout(HTTP_TOTAL_TIMEOUT)
-        .connect_timeout(HTTP_CONNECT_TIMEOUT)
-        .build()
-        .unwrap_or_default()
-}
-
-/// Get the authenticated user's GitHub username.
-async fn get_github_username(token: &str) -> Result<String> {
-    let client = build_client(token);
-    let resp = client
-        .get(&format!("{}/user", github_api_base()))
-        .send()
-        .await?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-        return Err(AppError::Other(format!(
-            "GitHub authentication failed ({}). Check your token in Settings. Error: {}",
-            status, text
-        )));
-    }
-
-    let user: UserResponse = resp.json().await?;
-    Ok(user.login)
-}
-
-/// Ensure the sts2mm-profiles repo exists. Creates it if not.
+/// Thin wrapper that calls the github module's `ensure_profiles_repo`
+/// with the test-configurable repo name. Kept as a wrapper so the
+/// callers below don't need to import `profiles_repo` directly.
 async fn ensure_profiles_repo(token: &str, username: &str) -> Result<()> {
-    let client = build_client(token);
-    let repo = profiles_repo();
-
-    // Check if repo exists
-    let resp = client
-        .get(&format!(
-            "{}/repos/{}/{}",
-            github_api_base(),
-            username,
-            repo
-        ))
-        .send()
-        .await?;
-
-    if resp.status().is_success() {
-        return Ok(());
-    }
-
-    // Create the repo
-    let body = serde_json::json!({
-        "name": repo,
-        "description": "Shared mod profiles for STS2 Mod Manager",
-        "public": true,
-        "auto_init": true  // Creates with a README so we have a branch to push to
-    });
-
-    let resp = client
-        .post(&format!("{}/user/repos", github_api_base()))
-        .json(&body)
-        .send()
-        .await?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-
-        if status.as_u16() == 422 && text.contains("already exists") {
-            return Ok(()); // Race condition, it exists
-        }
-
-        return Err(AppError::Other(format!(
-            "Could not create '{}' repository ({}). You can create it manually on GitHub: go to github.com/new, name it '{}', make it public. Error: {}",
-            repo, status, repo, text
-        )));
-    }
-
-    Ok(())
+    github_ensure_profiles_repo(token, username, &profiles_repo()).await
 }
 
-/// Create or update a file in the profiles repo.
+/// Thin wrapper that calls the github module's `upsert_file` with the
+/// test-configurable repo name.
 async fn upsert_file(
     token: &str,
     username: &str,
@@ -406,226 +240,11 @@ async fn upsert_file(
     existing_sha: Option<&str>,
     message: &str,
 ) -> Result<(String, String)> {
-    let client = build_client(token);
-    let repo = profiles_repo();
-    let url = format!(
-        "{}/repos/{}/{}/contents/{}",
-        github_api_base(),
-        username,
-        repo,
-        filename
-    );
-
-    // If we don't have the SHA, try to get it (needed for updates)
-    let sha = if let Some(s) = existing_sha {
-        Some(s.to_string())
-    } else {
-        let resp = client.get(&url).send().await;
-        if let Ok(resp) = resp {
-            if resp.status().is_success() {
-                let info: ContentsResponse =
-                    resp.json().await.unwrap_or(ContentsResponse { sha: None });
-                info.sha
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    };
-
-    let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, content);
-    let mut body = serde_json::json!({
-        "message": message,
-        "content": encoded,
-    });
-
-    if let Some(sha) = &sha {
-        body["sha"] = serde_json::json!(sha);
-    }
-
-    let resp = client.put(&url).json(&body).send().await?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-        return Err(AppError::Other(format!(
-            "Failed to upload profile ({}): {}",
-            status, text
-        )));
-    }
-
-    let data: serde_json::Value = resp.json().await?;
-    let file_sha = data["content"]["sha"].as_str().unwrap_or("").to_string();
-    let html_url = data["content"]["html_url"]
-        .as_str()
-        .unwrap_or("")
-        .to_string();
-
-    Ok((file_sha, html_url))
+    github_upsert_file(token, username, &profiles_repo(), filename, content, existing_sha, message)
+        .await
 }
 
 /// Zip a mod's files into an in-memory buffer.
-fn zip_mod_files(mod_name: &str, files: &[String], mods_path: &std::path::Path) -> Result<Vec<u8>> {
-    let buf = std::io::Cursor::new(Vec::new());
-    let mut zip_writer = zip::ZipWriter::new(buf);
-    let mut written_files = 0usize;
-
-    let options = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
-
-    for file_rel in files {
-        let normalized = file_rel.replace('\\', "/");
-        if std::path::Path::new(&normalized)
-            .components()
-            .any(|component| {
-                matches!(
-                    component,
-                    Component::ParentDir | Component::Prefix(_) | Component::RootDir
-                )
-            })
-        {
-            return Err(AppError::Other(format!(
-                "Mod '{}' has unsafe declared file '{}'",
-                mod_name, normalized
-            )));
-        }
-        let file_path = mods_path.join(&normalized);
-
-        if file_path.is_file() {
-            zip_writer
-                .start_file(&normalized, options)
-                .map_err(|e| AppError::Other(format!("Zip error for '{}': {}", mod_name, e)))?;
-            let data = std::fs::read(&file_path).map_err(|e| {
-                AppError::Other(format!("Read error for '{}': {}", file_path.display(), e))
-            })?;
-            zip_writer
-                .write_all(&data)
-                .map_err(|e| AppError::Other(format!("Zip write error: {}", e)))?;
-            written_files += 1;
-        } else if file_path.is_dir() {
-            for entry in WalkDir::new(&file_path).into_iter().flatten() {
-                if !entry.file_type().is_file() {
-                    continue;
-                }
-                let rel = entry.path().strip_prefix(mods_path).map_err(|e| {
-                    AppError::Other(format!(
-                        "Could not make '{}' relative to '{}': {}",
-                        entry.path().display(),
-                        mods_path.display(),
-                        e
-                    ))
-                })?;
-                let entry_rel = rel.to_string_lossy().replace('\\', "/");
-                zip_writer
-                    .start_file(&entry_rel, options)
-                    .map_err(|e| AppError::Other(format!("Zip error: {}", e)))?;
-                let data = std::fs::read(entry.path())
-                    .map_err(|e| AppError::Other(format!("Read error: {}", e)))?;
-                zip_writer
-                    .write_all(&data)
-                    .map_err(|e| AppError::Other(format!("Zip write error: {}", e)))?;
-                written_files += 1;
-            }
-        } else {
-            return Err(AppError::Other(format!(
-                "Mod '{}' is missing declared file '{}'",
-                mod_name, normalized
-            )));
-        }
-    }
-
-    if written_files == 0 {
-        return Err(AppError::Other(format!(
-            "Mod '{}' produced an empty bundle; no declared files were readable",
-            mod_name
-        )));
-    }
-
-    let cursor = zip_writer
-        .finish()
-        .map_err(|e| AppError::Other(format!("Zip finalize error: {}", e)))?;
-    Ok(cursor.into_inner())
-}
-
-fn zip_entry_outpath(mods_path: &std::path::Path, entry_name: &str) -> Option<std::path::PathBuf> {
-    let normalized = entry_name.replace('\\', "/");
-    let rel = std::path::Path::new(&normalized);
-    if normalized.trim_matches('/').is_empty()
-        || rel.components().any(|component| {
-            matches!(
-                component,
-                Component::ParentDir | Component::Prefix(_) | Component::RootDir
-            )
-        })
-    {
-        return None;
-    }
-    Some(mods_path.join(rel))
-}
-
-fn zip_profile_mod_files(
-    pm: &crate::profiles::ProfileMod,
-    mods_path: &std::path::Path,
-    disabled_path: &std::path::Path,
-) -> Result<Vec<u8>> {
-    let base = if pm.enabled { mods_path } else { disabled_path };
-    match zip_mod_files(&pm.name, &pm.files, base) {
-        Ok(zip) => Ok(zip),
-        Err(first_err) => {
-            let fallback = if pm.enabled { disabled_path } else { mods_path };
-            zip_mod_files(&pm.name, &pm.files, fallback).map_err(|_| first_err)
-        }
-    }
-}
-
-fn ensure_profile_publish_complete(profile: &Profile, failed_uploads: &[String]) -> Result<()> {
-    let mut missing: Vec<String> = Vec::new();
-
-    for name in failed_uploads {
-        if !missing.contains(name) {
-            missing.push(name.clone());
-        }
-    }
-
-    for pm in &profile.mods {
-        if pm.bundle_url.is_none() && !missing.contains(&pm.name) {
-            missing.push(pm.name.clone());
-        }
-    }
-
-    if !missing.is_empty() {
-        return Err(AppError::Other(format!(
-            "Could not publish profile '{}': missing bundles for {} mod(s): {}. Restore or reinstall these mods, then share again so the manifest can repair them later.",
-            profile.name,
-            missing.len(),
-            missing.join(", ")
-        )));
-    }
-
-    Ok(())
-}
-
-fn restore_profile_after_failed_publish(
-    old_profile: Option<&Profile>,
-    profiles_path: &std::path::Path,
-) {
-    if let Some(profile) = old_profile {
-        if let Err(e) = crate::profiles::save_profile(profile, profiles_path) {
-            log::error!(
-                "Failed to restore previous local profile '{}' after publish failure: {}",
-                profile.name,
-                e
-            );
-        } else {
-            log::info!(
-                "Restored previous local profile '{}' after publish failure",
-                profile.name
-            );
-        }
-    }
-}
-
 fn publish_identity_keys(
     name: &str,
     folder_name: Option<&str>,
@@ -1269,48 +888,6 @@ pub(crate) async fn cleanup_orphan_bundle_assets(token: &str, owner: &str) -> Re
 /// The trailing `_<sha8>` suffix is the first 8 hex chars of the
 /// bundle's SHA-256 — it makes the filename content-addressed so two
 /// uploads with different bytes can never collide on GitHub's dedup
-/// index. Caller passes the full hex digest; we slice the prefix here so
-/// the asset name stays short enough to be readable.
-fn release_asset_name(mod_name: &str, version: &str, sha256_hex: &str) -> String {
-    let safe_name = sanitize_asset_component(mod_name, false);
-    let safe_ver = sanitize_asset_component(version.trim_start_matches('v'), true);
-    let sha8 = sha256_hex.get(..8).unwrap_or(sha256_hex);
-    format!("{}_v{}_{}.zip", safe_name, safe_ver, sha8)
-}
-
-fn sanitize_asset_component(input: &str, allow_dot: bool) -> String {
-    input
-        .chars()
-        .map(|c| {
-            // Replace control chars, whitespace, and characters that are
-            // unsafe in filenames or URL paths. Anything else — including
-            // Unicode letters and digits — passes through unchanged.
-            let unsafe_char = c.is_control()
-                || c.is_whitespace()
-                || matches!(
-                    c,
-                    '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '#' | '%' | '&' | '+'
-                );
-            if unsafe_char {
-                '_'
-            } else if !allow_dot && c == '.' {
-                '_'
-            } else {
-                c
-            }
-        })
-        .collect()
-}
-
-/// Best-effort percent-decode so equality checks survive whatever encoding
-/// GitHub chooses to put in the asset-list response. Falls back to the
-/// raw input on a decode error rather than panicking.
-fn decode_asset_name(name: &str) -> String {
-    urlencoding::decode(name)
-        .map(|cow| cow.into_owned())
-        .unwrap_or_else(|_| name.to_string())
-}
-
 /// Download a bundled mod zip from a URL and extract into mods_path.
 /// Uses the GitHub API (not raw.githubusercontent.com) to avoid CDN caching issues.
 pub async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::Path) -> Result<()> {
@@ -2549,68 +2126,6 @@ pub async fn install_shared_profile(
     Ok(profile)
 }
 
-/// True iff `s` matches GitHub's username rules: 1-39 chars, alphanumeric
-/// or single hyphens, can't start or end with a hyphen, no consecutive
-/// hyphens. We use this as a hard gate before interpolating `owner` into
-/// any URL — otherwise a malicious share code containing `..`, `/`, `?`,
-/// `#`, `@`, etc. could redirect us to the wrong repo or API endpoint
-/// when `format!`-built into a `https://api.github.com/repos/{owner}/...`
-/// path. `format!` does NOT URL-encode.
-fn is_valid_github_username(s: &str) -> bool {
-    let bytes = s.as_bytes();
-    if bytes.is_empty() || bytes.len() > 39 {
-        return false;
-    }
-    if bytes[0] == b'-' || bytes[bytes.len() - 1] == b'-' {
-        return false;
-    }
-    let mut prev_hyphen = false;
-    for &b in bytes {
-        let is_alnum = b.is_ascii_alphanumeric();
-        let is_hyphen = b == b'-';
-        if !is_alnum && !is_hyphen {
-            return false;
-        }
-        if is_hyphen && prev_hyphen {
-            return false;
-        }
-        prev_hyphen = is_hyphen;
-    }
-    true
-}
-
-/// Parse a share code like "username/AA5A-315D-61AE" into (owner, code).
-///
-/// `owner` is validated against GitHub's username rules before return so
-/// it's safe to interpolate into API URLs. `code_raw` is normalized to
-/// lowercase hex by `normalize_code_input` so it can't carry path-special
-/// characters either.
-fn parse_share_code(input: &str) -> Result<(String, String)> {
-    let trimmed = input.trim();
-
-    // Format: "username/AA5A-315D-61AE"
-    if let Some(idx) = trimmed.find('/') {
-        let owner = trimmed[..idx].to_string();
-        let code_raw = normalize_code_input(&trimmed[idx + 1..]);
-        if owner.is_empty() || code_raw.is_empty() {
-            return Err(AppError::Other(
-                "Invalid share code format. Expected: username/XXXX-XXXX-XXXX".to_string(),
-            ));
-        }
-        if !is_valid_github_username(&owner) {
-            return Err(AppError::Other(format!(
-                "Invalid GitHub username '{}' in share code. Usernames are 1-39 chars, alphanumeric and single hyphens only.",
-                owner
-            )));
-        }
-        return Ok((owner, code_raw));
-    }
-
-    Err(AppError::Other(
-        "Invalid share code format. Expected: username/XXXX-XXXX-XXXX (the curator shares this code with you)".to_string(),
-    ))
-}
-
 /// Flip an already-shared profile's `public` flag and re-upload the
 /// manifest only (no mod re-bundling). Used by the post-share toggle
 /// in PublishModal and by any future manual override surface.
@@ -2671,106 +2186,6 @@ pub async fn set_modpack_listing(
 }
 
 #[cfg(test)]
-mod parse_share_code_tests {
-    use super::is_valid_github_username;
-
-    #[test]
-    fn accepts_normal_usernames() {
-        assert!(is_valid_github_username("MohamedSerhan"));
-        assert!(is_valid_github_username("octocat"));
-        assert!(is_valid_github_username("a-b-c"));
-        assert!(is_valid_github_username("123"));
-    }
-
-    #[test]
-    fn rejects_traversal_and_separators() {
-        assert!(!is_valid_github_username(".."));
-        assert!(!is_valid_github_username("a/b"));
-        assert!(!is_valid_github_username("a..b"));
-        assert!(!is_valid_github_username("foo?bar"));
-        assert!(!is_valid_github_username("foo#bar"));
-        assert!(!is_valid_github_username("foo@bar"));
-        assert!(!is_valid_github_username(""));
-    }
-
-    #[test]
-    fn rejects_invalid_hyphens() {
-        assert!(!is_valid_github_username("-foo"));
-        assert!(!is_valid_github_username("foo-"));
-        assert!(!is_valid_github_username("foo--bar"));
-    }
-
-    #[test]
-    fn rejects_too_long() {
-        assert!(!is_valid_github_username(&"a".repeat(40)));
-    }
-}
-
-#[cfg(test)]
-mod release_asset_name_tests {
-    use super::{decode_asset_name, release_asset_name, sanitize_asset_component};
-
-    /// SHA-256 of an empty byte slice — used as a stable test fixture.
-    const SHA_EMPTY: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-
-    #[test]
-    fn preserves_unicode_in_mod_names() {
-        // Issue #44: Chinese ideographs used to collapse to `___`.
-        assert_eq!(
-            release_asset_name("皮皮统计", "1.0.0", SHA_EMPTY),
-            "皮皮统计_v1.0.0_e3b0c442.zip",
-        );
-    }
-
-    #[test]
-    fn replaces_only_path_unsafe_chars() {
-        assert_eq!(
-            sanitize_asset_component("Skada/Recount: helper*", false),
-            "Skada_Recount__helper_",
-        );
-    }
-
-    #[test]
-    fn keeps_ascii_alphanumerics_and_separators() {
-        assert_eq!(
-            release_asset_name("My-Mod_42", "v2.3.4", SHA_EMPTY),
-            "My-Mod_42_v2.3.4_e3b0c442.zip",
-        );
-    }
-
-    #[test]
-    fn includes_short_sha_so_content_changes_produce_distinct_names() {
-        // Same name + version with different content hashes must produce
-        // distinct asset filenames — that's the property that eliminates
-        // the GitHub already_exists / orphan-name failure mode.
-        let a = release_asset_name("ModX", "1.0.0", "aaaaaaaa00000000");
-        let b = release_asset_name("ModX", "1.0.0", "bbbbbbbb00000000");
-        assert_ne!(a, b);
-        assert_eq!(a, "ModX_v1.0.0_aaaaaaaa.zip");
-        assert_eq!(b, "ModX_v1.0.0_bbbbbbbb.zip");
-    }
-
-    #[test]
-    fn short_sha_does_not_panic_on_truncated_input() {
-        // Defensive — sha8 prefix slice was the obvious panic site if a
-        // caller ever passes a hex string under 8 chars.
-        assert!(release_asset_name("ModX", "1.0.0", "abc").ends_with("_abc.zip"));
-    }
-
-    #[test]
-    fn decode_asset_name_handles_raw_and_encoded() {
-        assert_eq!(decode_asset_name("皮皮.zip"), "皮皮.zip");
-        assert_eq!(decode_asset_name("%E7%9A%AE%E7%9A%AE.zip"), "皮皮.zip");
-    }
-
-    #[test]
-    fn decode_asset_name_falls_back_on_bad_encoding() {
-        // Lone % is not valid percent-encoding; should not panic.
-        assert_eq!(decode_asset_name("abc%zz.zip"), "abc%zz.zip");
-    }
-}
-
-#[cfg(test)]
 mod listing_tests {
     use super::*;
     use chrono::Utc;
@@ -2816,6 +2231,11 @@ mod listing_tests {
 #[cfg(test)]
 mod publish_bundle_contract_tests {
     use super::*;
+    // `zip_mod_files` is the raw bundling primitive — orchestration in
+    // mod.rs always reaches it through `zip_profile_mod_files`, but the
+    // contract tests below exercise its safety rails directly (rejected
+    // unsafe paths, missing-file errors), so we import it explicitly.
+    use super::upload::zip_mod_files;
 
     fn profile_with_mod(pm: crate::profiles::ProfileMod) -> Profile {
         Profile {
@@ -4227,6 +3647,7 @@ mod share_via_releases_e2e_tests {
 mod github_api_stress_tests {
     use super::*;
     use crate::profiles::ProfileMod;
+    use sha2::{Digest, Sha256};
     use std::io::Write;
 
     const STRESS_SIZE_PLAN_MIB: [u64; 40] = [
@@ -4602,6 +4023,7 @@ mod github_api_stress_tests {
 #[cfg(test)]
 mod download_bundle_url_routing_tests {
     use super::*;
+    use std::io::Write;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 

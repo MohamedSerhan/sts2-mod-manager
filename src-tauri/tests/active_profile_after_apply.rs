@@ -18,8 +18,8 @@
 
 use std::path::PathBuf;
 
-fn read_source(file: &str) -> String {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src").join(file);
+fn read_source(rel_path: &str) -> String {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src").join(rel_path);
     std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("read {}: {}", path.display(), e))
 }
@@ -51,7 +51,7 @@ fn function_body<'a>(source: &'a str, signature: &str) -> &'a str {
 
 #[test]
 fn install_shared_profile_claims_active_profile_slot() {
-    let source = read_source("sharing.rs");
+    let source = read_source("sharing/mod.rs");
     let body = function_body(&source, "pub async fn install_shared_profile(");
     assert!(
         body.contains("s.active_profile = Some(profile.name.clone())"),

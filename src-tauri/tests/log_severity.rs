@@ -11,6 +11,50 @@ fn src_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src")
 }
 
+/// Read a source file by path relative to `src/`. If the bare `<name>.rs`
+/// file no longer exists (the module was split into a directory of
+/// the same stem), concatenate the contents of every `*.rs` under that
+/// directory so the phrase scan still finds messages that have moved
+/// between the new sub-files.
+///
+/// Why: the historic single-file modules `sharing.rs`, `mods.rs`
+/// became directories during the 1.7.0 re-architecture. The test cases
+/// below still spell the original filename (intentional — that's the
+/// stable identity callers know), so the loader picks up whichever
+/// shape exists on disk.
+fn read_module_source(rel_path: &str) -> String {
+    let direct = src_root().join(rel_path);
+    if direct.exists() {
+        return std::fs::read_to_string(&direct)
+            .unwrap_or_else(|e| panic!("read {}: {}", direct.display(), e));
+    }
+    // Strip the `.rs` so `sharing.rs` becomes the `sharing/` directory.
+    let stem = rel_path.trim_end_matches(".rs");
+    let dir = src_root().join(stem);
+    if !dir.is_dir() {
+        panic!(
+            "neither {} nor a corresponding directory exist; \
+             update the log-severity test to track the new layout",
+            direct.display()
+        );
+    }
+    let mut combined = String::new();
+    for entry in std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("read_dir {}: {}", dir.display(), e))
+    {
+        let entry = entry.expect("dir entry");
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) == Some("rs") {
+            combined.push_str(
+                &std::fs::read_to_string(&path)
+                    .unwrap_or_else(|e| panic!("read {}: {}", path.display(), e)),
+            );
+            combined.push('\n');
+        }
+    }
+    combined
+}
+
 #[test]
 fn terminal_failure_messages_are_not_warn_level() {
     let cases = [
@@ -52,9 +96,7 @@ fn terminal_failure_messages_are_not_warn_level() {
     ];
 
     for (file, phrase) in cases {
-        let path = src_root().join(file);
-        let source = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("read {}: {}", path.display(), e));
+        let source = read_module_source(file);
         let pattern = format!(r#"(?s)log::warn!\s*\(\s*"[^"]*{}"#, regex::escape(phrase));
         let re = regex::Regex::new(&pattern).unwrap();
         assert!(

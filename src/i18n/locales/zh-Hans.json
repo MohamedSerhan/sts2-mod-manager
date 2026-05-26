@@ -1052,7 +1052,19 @@
     "failedUploadsSummary_other": "{{count}} 个模组上传失败：",
     "failedUploadsMore_one": "，另有 {{count}} 个",
     "failedUploadsMore_other": "，另有 {{count}} 个",
-    "failedUploadsHelp": "朋友安装此代码时会看到这些模组缺失；请重新发布以重试。"
+    "failedUploadsHelp": "朋友安装此代码时会看到这些模组缺失；请重新发布以重试。",
+    "missingBundles": {
+      "title": "部分模组在分享前需要修复",
+      "body": "这些模组没有可用的安装包。修复一次后，你的模组包就能成功分享。",
+      "repairBtn": "修复这些模组",
+      "repairing": "修复中…",
+      "openFolder": "打开模组文件夹",
+      "openFolderTitle": "打开 Mods 文件夹，以便手动替换损坏的文件",
+      "statusPending": "待修复",
+      "statusRepairing": "修复中…",
+      "statusSuccess": "已修复",
+      "statusFailed": "失败"
+    }
   },
   "shareImport": {
     "shareMessageJoinPack": "加入我的杀戮尖塔2模组包 \"{{packName}}\"：",

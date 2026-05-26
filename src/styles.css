@@ -3016,3 +3016,92 @@ body {
   flex: 1;
   overflow-y: auto;
 }
+
+/* ── Missing-bundles publish recovery panel ───────────────────────────
+ * Rendered inline inside PublishModal when share/reshare rejects with
+ * "missing bundles for N mod(s): …". Replaces the raw error toast with
+ * a recovery surface: per-mod status, repair button, auto-retry on
+ * full success, Open-folder fallback for failed repairs. */
+.gf-missing-bundles {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.gf-missing-bundles-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  background: oklch(0.55 0.13 25 / 0.10);
+  border: 1px solid oklch(0.55 0.13 25 / 0.35);
+  border-radius: 7px;
+}
+.gf-missing-bundles-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: oklch(0.78 0.13 25);
+}
+.gf-missing-bundles-title {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.gf-missing-bundles-body {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--ink-mute);
+  line-height: 1.45;
+}
+.gf-missing-bundles-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.gf-missing-bundles-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: oklch(0.20 0.025 270 / 0.5);
+  border: 1px solid var(--indigo-line);
+  border-radius: 6px;
+  font-size: 12.5px;
+}
+.gf-missing-bundles-item.status-success { border-color: oklch(0.74 0.11 165 / 0.4); }
+.gf-missing-bundles-item.status-failed  { border-color: oklch(0.55 0.16 25 / 0.45); }
+.gf-missing-bundles-name {
+  flex: 1;
+  min-width: 0;
+  color: var(--ink);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gf-missing-bundles-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--ink-mute);
+  font-variant-numeric: tabular-nums;
+}
+.gf-missing-bundles-status.status-pending { color: var(--ink-dim); }
+.gf-missing-bundles-status.status-repairing { color: var(--gf); }
+.gf-missing-bundles-status.status-success { color: var(--ok); }
+.gf-missing-bundles-status.status-failed { color: oklch(0.75 0.13 25); }
+.gf-missing-bundles-status-icon { flex-shrink: 0; }
+.gf-missing-bundles-folder {
+  padding: 4px 8px;
+  font-size: 11px;
+}
+.gf-missing-bundles-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 4px;
+}

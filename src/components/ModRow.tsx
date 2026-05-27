@@ -63,6 +63,15 @@ export interface ModRowProps {
   /** Membership in the active modpack. Null when no active modpack OR
    *  this row isn't present in the membership grid yet. */
   membership: 'in' | 'includedOff' | 'notIn' | null;
+  /** Active modpack name (used by the inline "Add to / Remove from
+   *  <pack>" affordance). Null when no modpack is active — in that
+   *  case no membership controls render. */
+  activeProfile: string | null;
+  /** Toggle this mod's membership in the active modpack. Called when
+   *  the user clicks the membership chip or the kebab item. */
+  onToggleMembership: () => void;
+  /** True when the membership mutation is in flight (per-row spinner). */
+  isMembershipSaving: boolean;
   /** Current game running state — used to disable destructive actions. */
   gameRunning: boolean;
   /** Current STS2 game version, drives the min_game_version warning. */
@@ -148,6 +157,9 @@ export function ModRow(props: ModRowProps) {
     disambiguator,
     audit,
     membership,
+    activeProfile,
+    onToggleMembership,
+    isMembershipSaving,
     gameRunning,
     gameVersion,
     isUpdating,
@@ -248,24 +260,43 @@ export function ModRow(props: ModRowProps) {
               >
                 {mod.enabled ? t('modpack.storage.active') : t('modpack.storage.stored')}
               </Badge>
-              {membership && (
-                <Badge
-                  variant={
-                    membership === 'in'
-                      ? 'ok'
-                      : membership === 'includedOff'
-                        ? 'update'
-                        : 'github'
+              {membership && activeProfile && (
+                <button
+                  type="button"
+                  className="gf-membership-chip"
+                  onClick={(e) => {
+                    // Don't expand the row when toggling membership.
+                    e.stopPropagation();
+                    onToggleMembership();
+                  }}
+                  disabled={isMembershipSaving}
+                  title={
+                    membership === 'notIn'
+                      ? t('mods.membership.addTo', { pack: activeProfile })
+                      : t('mods.membership.removeFrom', { pack: activeProfile })
                   }
                 >
-                  {t(
-                    membership === 'in'
-                      ? 'modpack.membership.in'
-                      : membership === 'includedOff'
-                        ? 'modpack.membership.includedOff'
-                        : 'modpack.membership.notIn',
-                  )}
-                </Badge>
+                  <Badge
+                    variant={
+                      membership === 'in'
+                        ? 'ok'
+                        : membership === 'includedOff'
+                          ? 'update'
+                          : 'github'
+                    }
+                  >
+                    {isMembershipSaving ? (
+                      <RefreshCw size={10} className="animate-spin" />
+                    ) : null}
+                    {t(
+                      membership === 'in'
+                        ? 'modpack.membership.in'
+                        : membership === 'includedOff'
+                          ? 'modpack.membership.includedOff'
+                          : 'modpack.membership.notIn',
+                    )}
+                  </Badge>
+                </button>
               )}
             </div>
           </div>
@@ -273,6 +304,28 @@ export function ModRow(props: ModRowProps) {
         <div className="gf-modrow-kebab" onClick={(e) => e.stopPropagation()}>
           <KebabMenu title={t('mods.modActions')}>
             <KebabSection>
+              {activeProfile && membership && (
+                <KebabItem
+                  icon={
+                    membership === 'notIn' ? (
+                      <ToggleRight size={12} />
+                    ) : (
+                      <ToggleLeft size={12} />
+                    )
+                  }
+                  onClick={onToggleMembership}
+                  disabled={isMembershipSaving}
+                  description={
+                    membership === 'notIn'
+                      ? t('mods.kebab.addToModpackDesc', { pack: activeProfile })
+                      : t('mods.kebab.removeFromModpackDesc', { pack: activeProfile })
+                  }
+                >
+                  {membership === 'notIn'
+                    ? t('mods.kebab.addToModpack', { pack: activeProfile })
+                    : t('mods.kebab.removeFromModpack', { pack: activeProfile })}
+                </KebabItem>
+              )}
               <KebabItem
                 icon={mod.enabled ? <ToggleLeft size={12} /> : <ToggleRight size={12} />}
                 onClick={onToggleStorage}

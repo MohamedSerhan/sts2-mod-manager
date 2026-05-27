@@ -583,7 +583,13 @@ export function LibraryTable({
                 event.dataTransfer.setData('text/plain', String(index));
               }}
               onDragOver={(event, index) => {
+                // Only intercept events that look like an in-app reorder
+                // (we're hovering an in-pack row + load order isn't saving).
+                // Anything else — including the user dragging a .zip from
+                // the OS — falls through to the document-level handler in
+                // App.tsx so the file-install dropzone overlay shows.
                 if (!inPack || loadOrderSaving || index < 0) return;
+                if (!event.dataTransfer.types.includes('text/plain')) return;
                 event.preventDefault();
                 event.dataTransfer.dropEffect = 'move';
                 setDragOverIndex(index);
@@ -592,8 +598,13 @@ export function LibraryTable({
                 if (dragOverIndex === index) setDragOverIndex(null);
               }}
               onDrop={(event, index) => {
-                event.preventDefault();
+                // Same rule as onDragOver — only handle the in-app reorder
+                // case. Returning BEFORE preventDefault lets file drops
+                // (the user dragging a mod archive from File Explorer)
+                // bubble up to App.tsx's installModFromFile handler.
                 if (!inPack || loadOrderSaving) return;
+                if (!event.dataTransfer.types.includes('text/plain')) return;
+                event.preventDefault();
                 const from
                   = draggedIndex
                     ?? Number.parseInt(

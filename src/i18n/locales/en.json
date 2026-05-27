@@ -505,7 +505,7 @@
   "nav": {
     "home": "Home",
     "profiles": "Modpacks",
-    "mods": "Library",
+    "mods": "All Mods",
     "settings": "Settings"
   },
   "topbar": {
@@ -1237,6 +1237,9 @@
     "toast": {
       "updated": "Updated '{{name}}' to v{{version}}",
       "updateFailed": "Update failed for '{{name}}': {{error}}",
+      "addedToModpack": "Added '{{mod}}' to {{pack}}",
+      "removedFromModpack": "Removed '{{mod}}' from {{pack}}",
+      "membershipFailed": "Couldn't update modpack membership: {{error}}",
       "enabled": "{{name}} enabled",
       "disabled": "{{name}} disabled",
       "toggleFailed": "Failed to toggle {{name}}: {{error}}",
@@ -1320,7 +1323,15 @@
       "disable": "Disable in game",
       "disableDesc": "Move this mod's files out of the game folder. The mod stays installed but won't load until you activate it again.",
       "skipUpdate": "Skip this update",
-      "unsnooze": "Show update again"
+      "unsnooze": "Show update again",
+      "addToModpack": "Add to \"{{pack}}\"",
+      "addToModpackDesc": "Include this mod the next time you switch to {{pack}}.",
+      "removeFromModpack": "Remove from \"{{pack}}\"",
+      "removeFromModpackDesc": "Drop this mod from {{pack}}'s manifest. The files stay installed."
+    },
+    "membership": {
+      "addTo": "Click to add to \"{{pack}}\"",
+      "removeFrom": "Click to remove from \"{{pack}}\""
     }
   }
 }

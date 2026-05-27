@@ -980,6 +980,44 @@ body {
 }
 
 /* ── Body & main ──────────────────────────────────────────────────── */
+/* Home page footer — sits below the hero so the launcher doesn't feel
+   empty. Pushes itself to the bottom of the flex column and dims the
+   AboutCard a touch so it reads as quiet attribution, not a primary CTA. */
+.gf-home-footer {
+  margin-top: auto;
+  padding-top: 32px;
+  opacity: 0.92;
+}
+.gf-home-footer .gf-card {
+  background: transparent;
+  border: 1px solid var(--indigo-line);
+}
+
+/* Library row's membership chip — wraps the existing Badge in a clickable
+   button so users can add/remove from the active modpack without opening
+   the kebab. Click bubbles a stopPropagation so it doesn't also expand
+   the row drawer. */
+.gf-membership-chip {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+.gf-membership-chip:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+.gf-membership-chip:hover:not(:disabled) {
+  opacity: 0.85;
+}
+.gf-membership-chip:focus-visible {
+  outline: 2px solid var(--accent, #7aa2f7);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 .gf-body {
   /* min-height: 100% so the body always fills the visible area of <main>
      even when its content is short. Without this, gf-body sizes to its

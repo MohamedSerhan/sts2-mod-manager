@@ -53,6 +53,7 @@ function callbacks() {
     onDelete: vi.fn(),
     onUpdate: vi.fn(),
     onOpenExternalUrl: vi.fn(),
+    onToggleMembership: vi.fn(),
   };
 }
 
@@ -62,6 +63,8 @@ function makeProps(overrides: Partial<ModRowProps> = {}): ModRowProps {
     disambiguator: null,
     audit: undefined,
     membership: null,
+    activeProfile: null,
+    isMembershipSaving: false,
     gameRunning: false,
     gameVersion: '0.105.0',
     isUpdating: false,
@@ -99,7 +102,7 @@ describe('<ModRow>', () => {
   });
 
   it('renders the membership chip when membership is provided', () => {
-    render(<Wrap {...makeProps({ membership: 'in' })} />);
+    render(<Wrap {...makeProps({ membership: 'in', activeProfile: 'TestPack' })} />);
     expect(screen.getByText('In this modpack')).toBeInTheDocument();
   });
 
@@ -110,13 +113,29 @@ describe('<ModRow>', () => {
   });
 
   it('renders "Included, off in this modpack" for membership=includedOff', () => {
-    render(<Wrap {...makeProps({ membership: 'includedOff' })} />);
+    render(<Wrap {...makeProps({ membership: 'includedOff', activeProfile: 'TestPack' })} />);
     expect(screen.getByText('Included, off in this modpack')).toBeInTheDocument();
   });
 
   it('renders "Not in this modpack" for membership=notIn', () => {
-    render(<Wrap {...makeProps({ membership: 'notIn' })} />);
+    render(<Wrap {...makeProps({ membership: 'notIn', activeProfile: 'TestPack' })} />);
     expect(screen.getByText('Not in this modpack')).toBeInTheDocument();
+  });
+
+  it('clicking the membership chip toggles via onToggleMembership', () => {
+    const cb = callbacks();
+    render(<Wrap {...makeProps({ membership: 'notIn', activeProfile: 'TestPack' })} {...cb} />);
+    // The chip is a <button title="Click to add to TestPack"> wrapping
+    // the Not-in-this-modpack badge. Title lookup is unambiguous.
+    fireEvent.click(screen.getByTitle(/Click to add to "TestPack"/));
+    expect(cb.onToggleMembership).toHaveBeenCalledTimes(1);
+  });
+
+  it('membership chip click does not also expand the row drawer', () => {
+    const cb = callbacks();
+    render(<Wrap {...makeProps({ membership: 'notIn', activeProfile: 'TestPack' })} {...cb} />);
+    fireEvent.click(screen.getByTitle(/Click to add to "TestPack"/));
+    expect(cb.onToggleExpand).not.toHaveBeenCalled();
   });
 
   it('renders the disambiguator label when two mods share a display name', () => {

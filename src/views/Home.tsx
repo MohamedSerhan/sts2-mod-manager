@@ -15,9 +15,9 @@ import {
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { useClipboard } from '../hooks/useClipboard';
-import { useConfirm } from '../components/ConfirmDialog';
 import { SubUpdateDetail } from '../components/SubUpdateDetail';
 import { WhatsNewCard } from '../components/WhatsNewCard';
+import { AboutCard } from '../components/AboutCard';
 import {
   checkSubscriptionUpdates,
   applySubscriptionUpdate,
@@ -153,7 +153,6 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
   const { t } = useTranslation();
   const { gameInfo, mods, refreshAll, activeProfile, refreshSubUpdates } = useApp();
   const toast = useToast();
-  const confirm = useConfirm();
   const [subUpdates, setSubUpdates] = useState<SubscriptionUpdate[]>([]);
   const [applyingSub, setApplyingSub] = useState<string | null>(null);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
@@ -408,6 +407,13 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
           Modpacks page (Activity feed in the Yours tab). The active
           modpack's pending update is the "Sync available" pill +
           secondary buttons in the hero above. */}
+
+      {/* Footer with attribution + version + diagnostic-bundle access.
+          Sits below the hero so the launcher feels finished, not blank,
+          and still keeps the play loop above-the-fold. */}
+      <div className="gf-home-footer">
+        <AboutCard />
+      </div>
 
       <SubUpdateDetail
         open={!!updateDetail}

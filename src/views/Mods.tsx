@@ -46,6 +46,7 @@ import {
   setModTags,
   findGithubFromNexus,
   getProfileMemberships,
+  setProfileModMembership,
   pinMod,
   unpinMod,
   repairMod,
@@ -240,6 +241,65 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
     }
     return m;
   }, [activeProfile, memberships]);
+
+  // Per-row membership-mutation in-flight tracker so the chip can spin
+  // without blocking other rows. Cleared on success/failure.
+  const [membershipSavingKey, setMembershipSavingKey] = useState<string | null>(null);
+
+  /** Toggle a mod's membership in the active modpack. Called from both
+   *  the row's clickable chip and the kebab "Add to / Remove from" item. */
+  async function handleToggleMembership(
+    rowKey: string,
+    modName: string,
+    folderName: string | null | undefined,
+    currentMembership: 'in' | 'includedOff' | 'notIn',
+  ) {
+    if (!activeProfile || membershipSavingKey) return;
+    const nextIncluded = currentMembership === 'notIn';
+    setMembershipSavingKey(rowKey);
+    try {
+      await setProfileModMembership(
+        activeProfile,
+        modName,
+        folderName ?? null,
+        null,
+        nextIncluded,
+      );
+      // Optimistic local update so the chip flips immediately. Then
+      // refetch to align with whatever the backend ended up with
+      // (e.g. mod_id resolution).
+      setMemberships((prev) => {
+        if (!prev) return prev;
+        const next = { ...prev, mods: prev.mods.map((row) => ({ ...row })) };
+        for (const row of next.mods) {
+          const key = row.folder_name ?? row.name;
+          if (key === rowKey) {
+            row.profiles = row.profiles.map((p) =>
+              p.profile_name === activeProfile
+                ? { ...p, included: nextIncluded, enabled: nextIncluded }
+                : p,
+            );
+          }
+        }
+        return next;
+      });
+      toast.success(
+        nextIncluded
+          ? t('mods.toast.addedToModpack', { mod: modName, pack: activeProfile })
+          : t('mods.toast.removedFromModpack', { mod: modName, pack: activeProfile }),
+      );
+      // Background refresh — keeps the grid honest if the backend chose
+      // a different key (mod_id vs folder_name).
+      getProfileMemberships()
+        .then((grid) => setMemberships(grid))
+        .catch(() => { /* keep optimistic state */ });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(t('mods.toast.membershipFailed', { error: msg }));
+    } finally {
+      setMembershipSavingKey(null);
+    }
+  }
 
   async function handleCheckUpdates() {
     await runAudit();
@@ -866,6 +926,12 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
                 disambiguator={disambiguator}
                 audit={auditRow}
                 membership={membership}
+                activeProfile={activeProfile}
+                isMembershipSaving={membershipSavingKey === rowKey}
+                onToggleMembership={() => {
+                  if (!membership) return;
+                  handleToggleMembership(rowKey, mod.name, mod.folder_name, membership);
+                }}
                 gameRunning={gameRunning}
                 gameVersion={gameInfo?.game_version}
                 isUpdating={updatingKey === rowKey}

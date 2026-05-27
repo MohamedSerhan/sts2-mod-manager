@@ -59,19 +59,6 @@ beforeEach(() => {
   installClipboard(async () => {});
 });
 
-/** Resolve the confirm modal's foot (the bottom row with Cancel / Confirm
- *  buttons), scoped to dodge the X icon-button in the head (which also
- *  reports title="Cancel") and the Home hero's "Repair" CTA. Returns a
- *  `within(...)` query object. */
-async function confirmModal() {
-  const foot = await waitFor(() => {
-    const f = document.querySelector('.gf-modal-back .gf-modal .gf-modal-foot');
-    if (!f) throw new Error('confirm modal foot not mounted');
-    return f as HTMLElement;
-  });
-  return within(foot);
-}
-
 function Wrap(props: Partial<React.ComponentProps<typeof HomeView>> = {}) {
   return (
     <AllProviders>
@@ -163,13 +150,22 @@ describe('<HomeView> single-block launcher shape (v7)', () => {
     expect(screen.queryByText(/AlicePack/)).toBeNull();
   });
 
-  it('does NOT render the About card on Home (relocated to Settings → General)', async () => {
+  it('renders the About card in the home footer (author attribution + version)', async () => {
+    // User feedback after the v7 strip: the launcher felt empty without
+    // the author attribution. AboutCard moved back to a quiet footer at
+    // the bottom of Home (below the hero) and stayed in Settings →
+    // General as well — two surfaces, two intents (Home = launcher
+    // attribution / Settings = where you go to find About info).
     render(<Wrap />);
     await waitFor(() => {
       expect(document.querySelector('.gf-hero')).toBeInTheDocument();
     });
-    // AboutCard's signature copy is the author's name.
-    expect(screen.queryByText('Mohamed Serhan')).toBeNull();
+    // AboutCard's signature copy is the author's name; the footer
+    // wrapper class scopes the assertion so a future addition of an
+    // About link elsewhere wouldn't ghost-pass this test.
+    const footer = document.querySelector('.gf-home-footer');
+    expect(footer).not.toBeNull();
+    expect(within(footer as HTMLElement).getByText('Mohamed Serhan')).toBeInTheDocument();
   });
 
   it('Home is a single column with the hero as the only main block (besides utility banners)', async () => {

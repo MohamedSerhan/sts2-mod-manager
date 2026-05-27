@@ -320,6 +320,11 @@ describe('<LibraryTable>', () => {
       getData(type: string) { return this.data.get(type) ?? ''; },
       effectAllowed: '',
       dropEffect: '',
+      // The 1.7.0 cleanup gated the in-app reorder handlers on
+      // `dataTransfer.types.includes('text/plain')` so OS file drags
+      // (Files type) bubble up to App.tsx for installModFromFile. The
+      // test's dragStart writes 'text/plain', so types must report it.
+      get types() { return Array.from(this.data.keys()); },
     };
     fireEvent.dragStart(secondRow, { dataTransfer });
     fireEvent.dragOver(firstRow, { dataTransfer });

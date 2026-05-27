@@ -505,7 +505,7 @@
   "nav": {
     "home": "首页",
     "profiles": "模组包",
-    "mods": "模组库",
+    "mods": "全部模组",
     "settings": "设置"
   },
   "topbar": {
@@ -1237,6 +1237,9 @@
     "toast": {
       "updated": "已更新 '{{name}}' 至 v{{version}}",
       "updateFailed": "更新 '{{name}}' 失败：{{error}}",
+      "addedToModpack": "已将「{{mod}}」添加到 {{pack}}",
+      "removedFromModpack": "已从 {{pack}} 中移除「{{mod}}」",
+      "membershipFailed": "更新模组包成员关系失败：{{error}}",
       "enabled": "{{name}} 已启用",
       "disabled": "{{name}} 已禁用",
       "toggleFailed": "切换 {{name}} 失败：{{error}}",
@@ -1320,7 +1323,15 @@
       "disable": "在游戏中停用",
       "disableDesc": "将此模组的文件移出游戏文件夹。模组保持已安装状态，但需要重新激活后才会加载。",
       "skipUpdate": "跳过此更新",
-      "unsnooze": "重新显示更新"
+      "unsnooze": "重新显示更新",
+      "addToModpack": "添加到「{{pack}}」",
+      "addToModpackDesc": "下次切换到 {{pack}} 时将包含此模组。",
+      "removeFromModpack": "从「{{pack}}」中移除",
+      "removeFromModpackDesc": "从 {{pack}} 的清单中移除此模组。文件仍保留在本地。"
+    },
+    "membership": {
+      "addTo": "点击添加到「{{pack}}」",
+      "removeFrom": "点击从「{{pack}}」中移除"
     }
   }
 }

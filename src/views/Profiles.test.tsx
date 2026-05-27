@@ -664,6 +664,28 @@ describe('<ProfilesView>', () => {
     });
   });
 
+  it('drift banner Save changes failure surfaces a Failed-to-save toast (handleSaveDrift catch)', async () => {
+    // snapshot_profile rejects → handleSaveDrift catch fires the
+    // profiles.toast.saveFailed string with the underlying error.
+    seedProfiles([baseProfile({ name: 'DriftedPack' })]);
+    registerInvokeHandler('get_active_profile', () => 'DriftedPack');
+    registerInvokeHandler('get_profile_drift', () => ({
+      added: ['NewMod'],
+      removed: [],
+      toggled: [],
+      version_changed: [],
+      has_drift: true,
+    }));
+    registerInvokeHandler('snapshot_profile', () => { throw new Error('readonly fs'); });
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('DriftedPack')).toBeInTheDocument(); });
+    await user.click(await screen.findByRole('button', { name: /Save changes/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/Failed to save changes.*readonly fs/)).toBeInTheDocument();
+    });
+  });
+
   it('drift banner Save changes snapshots the active profile without repairing disk', async () => {
     seedProfiles([baseProfile({ name: 'DriftedPack' })]);
     registerInvokeHandler('get_active_profile', () => 'DriftedPack');
@@ -2652,6 +2674,394 @@ describe('<ProfilesView> toolbar Quick-Add (relocated from Home v7)', () => {
     await waitFor(() => {
       expect(screen.getByText(/Failed to import: manifest not found/)).toBeInTheDocument();
     });
+  });
+});
+
+// ── 1.7.0 T8 — CreateModpackWizard onCreated integration ────────────
+//
+// The wizard itself is tested in CreateModpackWizard.test.tsx — these
+// integration tests pin Profiles.tsx's `onCreated` handler:
+//   - Closes the wizard.
+//   - Toasts the success message with the created name.
+//   - Reloads the profile list so the new modpack shows up immediately.
+//   - When sharedNow=true, also fetches the fresh list and opens the
+//     PublishModal targeted at the newly created profile.
+describe('<ProfilesView> CreateModpackWizard onCreated handler', () => {
+  // Drives the wizard from open → name input → click create. Returns
+  // when the create button has been clicked; callers wait for the
+  // expected post-condition.
+  async function completeWizard(
+    user: ReturnType<typeof userEvent.setup>,
+    name: string,
+    shareNow: boolean,
+  ): Promise<void> {
+    // Step 1.
+    await user.click(await screen.findByRole('button', { name: /start from my active mods/i }));
+    // Step 2 — Next.
+    await user.click(await screen.findByRole('button', { name: /^next$/i }));
+    // Step 3 — Continue anyway (skips the health audit).
+    await user.click(await screen.findByRole('button', { name: /continue anyway/i }));
+    // Step 4 — name + click the appropriate create button. Scope the
+    // button lookup to the wizard dialog because the toolbar's Create
+    // modpack button is also on the page.
+    const nameInput = await screen.findByLabelText(/modpack name/i);
+    fireEvent.change(nameInput, { target: { value: name } });
+    const dialog = await screen.findByRole('dialog', { name: 'Create modpack' });
+    if (shareNow) {
+      await user.click(within(dialog).getByRole('button', { name: /create and share now/i }));
+    } else {
+      await user.click(within(dialog).getByRole('button', { name: /^create modpack$/i }));
+    }
+  }
+
+  it('sharedNow=false → toasts success, closes wizard, reloads list with new pack visible', async () => {
+    // The list-profiles mock returns "Existing" until create_profile
+    // fires, after which the next read includes the newly created
+    // "Brand New" pack. Drives the loadProfiles() reload that Profiles
+    // fires inside onCreated.
+    let createdName: string | null = null;
+    registerInvokeHandler('list_profiles_cmd', () => {
+      const base: Profile[] = [baseProfile({ name: 'Existing' })];
+      return createdName ? [...base, baseProfile({ name: createdName })] : base;
+    });
+    registerInvokeHandler('create_profile', (args) => {
+      createdName = String(args?.name);
+      return baseProfile({ name: createdName });
+    });
+    registerInvokeHandler('set_profile_mod_membership', (args) =>
+      baseProfile({ name: String(args?.profileName ?? '') }),
+    );
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Existing')).toBeInTheDocument(); });
+
+    // Open the wizard via the toolbar Create modpack button.
+    await user.click(screen.getByRole('button', { name: /Create modpack/i }));
+    await completeWizard(user, 'Brand New', /* shareNow */ false);
+
+    // The onCreated handler fired the success toast with the trimmed name.
+    await waitFor(() => {
+      expect(screen.getByText(/Modpack "Brand New" created/)).toBeInTheDocument();
+    });
+    // The reload picked up the new pack — its card appears in the list.
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: /Open Brand New modpack/i }),
+      ).toBeInTheDocument();
+    });
+    // The wizard itself is gone (step-1 trigger no longer present).
+    expect(
+      screen.queryByRole('button', { name: /start from my active mods/i }),
+    ).toBeNull();
+    // PublishModal did NOT open — sharedNow was false.
+    expect(screen.queryByRole('button', { name: /^Publish$/ })).toBeNull();
+  });
+
+  it('sharedNow=true → fetches fresh list, opens PublishModal for the new pack', async () => {
+    // Same setup, but the user clicks "Create and share now". The
+    // Profiles onCreated handler must:
+    //   - Close the wizard.
+    //   - Reload profiles.
+    //   - Pull the fresh list a SECOND time via listProfiles and find
+    //     the new pack.
+    //   - Open the PublishModal targeted at that profile.
+    let createdName: string | null = null;
+    registerInvokeHandler('list_profiles_cmd', () => {
+      const base: Profile[] = [baseProfile({ name: 'Existing' })];
+      return createdName ? [...base, baseProfile({ name: createdName })] : base;
+    });
+    registerInvokeHandler('create_profile', (args) => {
+      createdName = String(args?.name);
+      return baseProfile({ name: createdName });
+    });
+    registerInvokeHandler('set_profile_mod_membership', (args) =>
+      baseProfile({ name: String(args?.profileName ?? '') }),
+    );
+    registerInvokeHandler('get_api_key_status', () => ({
+      nexus_api_key_set: false, github_token_set: true,
+    }));
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Existing')).toBeInTheDocument(); });
+
+    await user.click(screen.getByRole('button', { name: /Create modpack/i }));
+    await completeWizard(user, 'Sharable Pack', /* shareNow */ true);
+
+    // Wizard closes and the success toast fires.
+    await waitFor(() => {
+      expect(screen.getByText(/Modpack "Sharable Pack" created/)).toBeInTheDocument();
+    });
+    // PublishModal opens because sharedNow=true — its Publish button is
+    // a unique fingerprint not present anywhere else on the page.
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^Publish$/ })).toBeInTheDocument();
+    });
+  });
+
+  it('wizard Cancel closes the wizard via the onClose handler (Profiles → setShowCreateWizard(false))', async () => {
+    seedProfiles([baseProfile({ name: 'Existing' })]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Existing')).toBeInTheDocument(); });
+    // Open the wizard.
+    await user.click(screen.getByRole('button', { name: /Create modpack/i }));
+    const dialog = await screen.findByRole('dialog', { name: 'Create modpack' });
+    // Click the wizard's Cancel button — fires the onClose prop, which
+    // is Profiles.tsx's `() => setShowCreateWizard(false)`.
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    // Dialog drops out of the DOM.
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('dialog', { name: 'Create modpack' }),
+      ).toBeNull();
+    });
+  });
+
+  it('sharedNow=true but the fresh list does NOT contain the name → no PublishModal opens', async () => {
+    // Edge case in the onCreated handler: if the second listProfiles
+    // call doesn't find the profile (race condition, backend race), we
+    // must NOT open PublishModal with a null profile. The conditional
+    // `if (profile)` guards that path — exercise it.
+    let secondCall = false;
+    registerInvokeHandler('list_profiles_cmd', () => {
+      // First read for loadProfiles → empty list.
+      // Second read inside onCreated → ALSO empty (race).
+      if (secondCall) return [];
+      secondCall = true;
+      return [];
+    });
+    registerInvokeHandler('create_profile', (args) =>
+      baseProfile({ name: String(args?.name) }),
+    );
+    registerInvokeHandler('set_profile_mod_membership', (args) =>
+      baseProfile({ name: String(args?.profileName ?? '') }),
+    );
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    // Wait for the empty-state header to confirm initial loadProfiles.
+    await waitFor(() => {
+      expect(screen.getByText(/No modpacks yet/i)).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: /Create modpack/i }));
+    await completeWizard(user, 'Ghost Pack', /* shareNow */ true);
+
+    // Toast still fires.
+    await waitFor(() => {
+      expect(screen.getByText(/Modpack "Ghost Pack" created/)).toBeInTheDocument();
+    });
+    // PublishModal is NOT opened — the fresh list didn't have the pack.
+    expect(screen.queryByRole('button', { name: /^Publish$/ })).toBeNull();
+  });
+});
+
+// ── Profile-list orphan guard + selectedModpack reset ──────────────
+//
+// Pins the effect at Profiles.tsx ~280: if the open detail view's
+// modpack disappears from the loaded list (deleted while detail is
+// open, or pumped open before the list resolves), the effect must
+// bounce back to the list. That branch covers `setSelectedModpack(null)`
+// which is otherwise only reachable via the explicit Back button.
+describe('<ProfilesView> orphan-modpack guard', () => {
+  it('signal-driven selection of an active profile that is not in the list bounces back to the list', async () => {
+    // Race condition: openActiveModpackSignal fires while activeProfile
+    // is "Ghost" but the loaded profiles list is just [Alpha]. The
+    // signal effect sets selectedModpack='Ghost'; the orphan guard
+    // effect notices Ghost isn't in profiles and resets it.
+    seedProfiles([baseProfile({ name: 'Alpha' })]);
+    registerInvokeHandler('get_active_profile', () => 'Ghost');
+    render(<Wrap openActiveModpackSignal={1} />);
+    // The list view header is the proof — its "modpack-grid" cards
+    // appear when selectedModpack is null. The Ghost detail header
+    // never settles because the orphan guard ejects us out.
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: /Open Alpha modpack/i }),
+      ).toBeInTheDocument();
+    });
+    // No detail-view header for Ghost — guard kicked in.
+    expect(screen.queryByRole('heading', { level: 2, name: 'Ghost' })).toBeNull();
+  });
+
+  it('bouncing back to the list when the selected modpack disappears', async () => {
+    // Start with two packs, open Alpha's detail, then delete it. The
+    // effect notices Alpha is gone from `profiles` and resets
+    // selectedModpack → list re-renders without the detail header.
+    const initialProfiles = [baseProfile({ name: 'Alpha' }), baseProfile({ name: 'Beta' })];
+    let live = [...initialProfiles];
+    registerInvokeHandler('list_profiles_cmd', () => live);
+    registerInvokeHandler('delete_profile', (args) => {
+      live = live.filter((p) => p.name !== String(args?.name));
+      return true;
+    });
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    // Open Alpha detail.
+    await openDetailFor(user, 'Alpha');
+    // Inside the detail view, expand Advanced and click Delete. The
+    // detail's own onDelete handler also calls setSelectedModpack(null)
+    // when it sees the deleted name matches the open one — to isolate
+    // the guard effect, we just rely on this happy path which fires
+    // the same setSelectedModpack and proves the bounce works.
+    await user.click(screen.getByRole('button', { name: /Advanced/i }));
+    // The Advanced action button label is "Delete modpack..." (with the
+    // trailing ellipsis denoting a confirmation step).
+    await user.click(screen.getByRole('button', { name: /Delete modpack\.\.\./i }));
+    // Confirm the destructive prompt — its confirm button is just
+    // "Delete modpack" (no ellipsis).
+    const foot = await waitFor(() => {
+      const f = document.querySelector('.gf-modal-back .gf-modal .gf-modal-foot');
+      if (!f) throw new Error('confirm modal foot not mounted');
+      return f as HTMLElement;
+    });
+    await user.click(within(foot).getByRole('button', { name: /^Delete modpack$/i }));
+    // After delete, the list view re-renders without Alpha and without
+    // the detail-view heading. Beta is still in the list.
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { level: 2, name: 'Alpha' })).toBeNull();
+    });
+    expect(screen.getByText('Beta')).toBeInTheDocument();
+  });
+});
+
+// ── Load-order modal close path ────────────────────────────────────
+//
+// closeLoadOrderEditor (Profiles.tsx ~312) resets the draft + clears
+// the modal when not saving. The save path is already covered by the
+// existing modal tests; this fills in the explicit Cancel branch.
+// ── Card keyboard navigation + chip wrapper stopPropagation ──────────
+describe('<ProfilesView> card keyboard + chip wrapper', () => {
+  it('pressing Enter on a modpack card opens its detail view (covers onKeyDown handler)', async () => {
+    seedProfiles([baseProfile({ name: 'KeyboardPack' })]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: /Open KeyboardPack modpack/i }),
+      ).toBeInTheDocument();
+    });
+    // Tab into the card, then press Enter — should fire the keyDown
+    // handler's preventDefault + setSelectedModpack branch.
+    const card = screen.getByRole('button', { name: /Open KeyboardPack modpack/i });
+    card.focus();
+    await user.keyboard('{Enter}');
+    await waitFor(() => {
+      expect(
+        screen.getByRole('heading', { level: 2, name: 'KeyboardPack' }),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it('pressing Space on a modpack card opens its detail view (Space branch of onKeyDown)', async () => {
+    seedProfiles([baseProfile({ name: 'SpacePack' })]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: /Open SpacePack modpack/i }),
+      ).toBeInTheDocument();
+    });
+    const card = screen.getByRole('button', { name: /Open SpacePack modpack/i });
+    card.focus();
+    await user.keyboard(' ');
+    await waitFor(() => {
+      expect(
+        screen.getByRole('heading', { level: 2, name: 'SpacePack' }),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it('clicking the bare chip-wrapper area does NOT navigate (covers wrapper stopPropagation)', async () => {
+    // The chip wrapper div has an onClick={stopPropagation} that fires
+    // when the user clicks the spacing between chips. Without it, the
+    // card's outer onClick would still navigate. Click the wrapper
+    // directly to exercise the handler.
+    seedProfiles([baseProfile({ name: 'Published' })]);
+    registerInvokeHandler('get_share_info', () => ({
+      owner: 'alice',
+      code: 'AA5A-315D-61AE',
+      url: '',
+      remote_path: 'Published.json',
+    }));
+    const user = setupUserWithClipboard();
+    render(<Wrap />);
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: /Open Published modpack/i }),
+      ).toBeInTheDocument();
+    });
+    // Wait for the share-chip row to mount (it only renders after
+    // shareInfoMap has the entry).
+    const wrapper = await waitFor(() => {
+      const w = document.querySelector('.gf-modpack-card-copy-chips');
+      if (!w) throw new Error('chip wrapper not mounted');
+      return w as HTMLElement;
+    });
+    await user.click(wrapper);
+    // The card's outer button stays on the list view — no detail-view
+    // heading appears.
+    expect(
+      screen.queryByRole('heading', { level: 2, name: 'Published' }),
+    ).toBeNull();
+  });
+});
+
+describe('<ProfilesView> load-order editor close', () => {
+  it('Cancel button closes the load-order modal (covers closeLoadOrderEditor)', async () => {
+    // The Modpack detail view exposes "Edit load order" inside its
+    // Advanced section. Click it, then click Cancel — the dialog
+    // closes and the user returns to the detail view.
+    seedProfiles([
+      baseProfile({
+        name: 'OrderPack',
+        mods: [profileMod({ name: 'Mod1', folder_name: 'Mod1' })],
+      }),
+    ]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await openDetailFor(user, 'OrderPack');
+    await user.click(screen.getByRole('button', { name: /Advanced/i }));
+    await user.click(await screen.findByRole('button', { name: /^Load order$/i }));
+    // Modal mounted — find the modal's Cancel button.
+    const dialog = await screen.findByRole('dialog', { name: /Load order for OrderPack/i });
+    expect(dialog).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: /^Cancel$/i }));
+    // Modal closes — the dialog drops out of the DOM.
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('dialog', { name: /Load order for OrderPack/i }),
+      ).toBeNull();
+    });
+  });
+
+  it('moveLoadOrderItem swap reorders the draft (covers moveLoadOrderItem path used by ▲/▼ buttons)', async () => {
+    seedProfiles([
+      baseProfile({
+        name: 'OrderPack',
+        mods: [
+          profileMod({ name: 'First', folder_name: 'First' }),
+          profileMod({ name: 'Second', folder_name: 'Second' }),
+        ],
+      }),
+    ]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await openDetailFor(user, 'OrderPack');
+    await user.click(screen.getByRole('button', { name: /Advanced/i }));
+    await user.click(await screen.findByRole('button', { name: /^Load order$/i }));
+    // The list renders with rank 1 = First, rank 2 = Second. Click the
+    // Down arrow on First to move it to position 2.
+    const moveDown = await screen.findByRole('button', { name: /Move First down/i });
+    await user.click(moveDown);
+    // After the swap, the rank-1 row's name should now be Second.
+    const dialog = screen.getByRole('dialog', { name: /Load order for OrderPack/i });
+    const rows = within(dialog).getAllByRole('listitem');
+    expect(rows[0]).toHaveTextContent('Second');
+    expect(rows[1]).toHaveTextContent('First');
   });
 });
 

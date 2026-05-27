@@ -461,5 +461,125 @@ describe('<CreateModpackWizard>', () => {
       expect(screen.getByLabelText(/alpha power/i)).toBeInTheDocument();
       expect(screen.queryByLabelText(/beta tools/i)).toBeNull();
     });
+
+    it('sort by Size orders larger mods first (covers sort==="size" branch)', async () => {
+      // Two mods with different size_bytes — sort should put the bigger
+      // one first regardless of name. We pin the visible order by
+      // reading the rendered checkbox labels in document order.
+      seed({
+        mods: [
+          baseMod({ name: 'SmallMod', enabled: false, folder_name: 's', size_bytes: 1024 }),
+          baseMod({ name: 'BigMod', enabled: false, folder_name: 'b', size_bytes: 9_000_000 }),
+        ],
+      });
+      render(<Wrap />);
+      fireEvent.click(await screen.findByRole('button', { name: /start empty/i }));
+      const sortSelect = await screen.findByLabelText(/sort/i) as HTMLSelectElement;
+      fireEvent.change(sortSelect, { target: { value: 'size' } });
+      // Find the labels in document order — the bigger mod should appear first.
+      const labels = await screen.findAllByText(/^(SmallMod|BigMod)$/);
+      expect(labels[0]).toHaveTextContent('BigMod');
+      expect(labels[1]).toHaveTextContent('SmallMod');
+    });
+
+    it('sort by Enabled orders enabled mods first (covers sort==="enabled" branch)', async () => {
+      seed({
+        mods: [
+          baseMod({ name: 'Disabled', enabled: false, folder_name: 'd' }),
+          baseMod({ name: 'Enabled', enabled: true, folder_name: 'e' }),
+        ],
+      });
+      render(<Wrap />);
+      fireEvent.click(await screen.findByRole('button', { name: /start empty/i }));
+      const sortSelect = await screen.findByLabelText(/sort/i) as HTMLSelectElement;
+      fireEvent.change(sortSelect, { target: { value: 'enabled' } });
+      const labels = await screen.findAllByText(/^(Disabled|Enabled)$/);
+      expect(labels[0]).toHaveTextContent('Enabled');
+      expect(labels[1]).toHaveTextContent('Disabled');
+    });
+  });
+
+  // ── Clone strategy ───────────────────────────────────────────────
+  // The clone strategy seeds selectedMods from an existing profile's
+  // mod list. Unlike "from active" / "empty", clone needs a follow-up
+  // dropdown to pick which existing modpack to clone from. Without
+  // these tests, the clone-strategy branch in applyStrategyAndAdvance
+  // (lines 110-112) sits uncovered.
+  describe('clone strategy', () => {
+    it('clicking the Clone tile then picking a profile + Next seeds selection from that profile', async () => {
+      seed({
+        mods: [
+          baseMod({ name: 'PackedMod', enabled: false, folder_name: 'pm' }),
+          baseMod({ name: 'OtherMod', enabled: false, folder_name: 'om' }),
+        ],
+        profiles: [
+          {
+            ...baseProfile({ name: 'Source Pack' }),
+            mods: [{
+              name: 'PackedMod', version: '1.0', source: null, hash: null,
+              files: [], enabled: true, bundle_url: null,
+              folder_name: 'pm', mod_id: 'PackedMod',
+            }],
+          },
+        ],
+      });
+      render(<Wrap />);
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /clone an existing modpack/i })).toBeInTheDocument();
+      });
+      // 1. Click the Clone tile — sets strategy='clone' but does NOT advance.
+      fireEvent.click(screen.getByRole('button', { name: /clone an existing modpack/i }));
+      // 2. The clone-pick dropdown appears.
+      const pick = await screen.findByLabelText(/pick a modpack to clone/i);
+      // 3. Choose the existing pack.
+      fireEvent.change(pick, { target: { value: 'Source Pack' } });
+      // 4. Click the dedicated Next button below the dropdown.
+      const allNexts = screen.getAllByRole('button', { name: /^next$/i });
+      // The dropdown's Next button is the one inside the clone-pick div.
+      const pickContainer = pick.closest('.gf-create-wizard-clone-pick');
+      const cloneNext = allNexts.find((b) => pickContainer?.contains(b));
+      expect(cloneNext).toBeDefined();
+      fireEvent.click(cloneNext!);
+      // 5. The wizard advances to step 2 with PackedMod selected (1 mod).
+      await waitFor(() => {
+        expect(screen.getByText(/1 selected/i)).toBeInTheDocument();
+      });
+    });
+  });
+
+  // ── Error paths: audit catch + create catch ───────────────────────
+  describe('error paths', () => {
+    it('audit failure leaves the health summary at zeros (covers goToHealth catch)', async () => {
+      seed({
+        mods: [baseMod({ name: 'A', enabled: true })],
+      });
+      registerInvokeHandler('audit_mod_versions', () => { throw new Error('rate-limited'); });
+      render(<Wrap />);
+      await chooseFromActive();
+      await clickNext();
+      // Step 3 with zeros + Continue anyway button present.
+      await screen.findByRole('button', { name: /continue anyway/i });
+      // Linked count is 0 (the catch sets health to all zeros).
+      expect(screen.getByText(/0 mods have linked sources/i)).toBeInTheDocument();
+    });
+
+    it('create_profile failure surfaces an inline error (covers handleCreate catch)', async () => {
+      seed({
+        mods: [baseMod({ name: 'A', enabled: true })],
+      });
+      registerInvokeHandler('create_profile', () => { throw new Error('disk full'); });
+      render(<Wrap />);
+      await chooseFromActive();
+      await clickNext();
+      await clickContinueAnyway();
+      const nameInput = await screen.findByLabelText(/modpack name/i);
+      fireEvent.change(nameInput, { target: { value: 'FailPack' } });
+      fireEvent.click(screen.getByRole('button', { name: /^create modpack$/i }));
+      // The error string appears in the wizard body (handleCreate catch
+      // sets createError → displayed near the Create button).
+      await waitFor(() => {
+        expect(screen.getByText(/disk full/i)).toBeInTheDocument();
+      });
+    });
   });
 });

@@ -2331,4 +2331,53 @@ describe('<SettingsView>', () => {
     // ghost variant maps to gf-btn-3 in Button.tsx
     expect(reAuditBtn.className).toMatch(/gf-btn-3/);
   });
+
+  // ── Error-path coverage for handler catch blocks ────────────────────
+  // These exercise the `catch (e) { toast.error(...) }` arms on a few
+  // settings handlers that were only happy-path tested. Each test
+  // forces the underlying invoke to reject so the catch handler runs.
+  it('Accounts → Create scoped token surfaces a toast when the opener fails (handleOpenGithubTokenTemplate catch)', async () => {
+    // Force open_external_url to reject so the catch branch in
+    // handleOpenGithubTokenTemplate fires and toasts the error.
+    registerInvokeHandler('open_external_url', () => { throw new Error('no browser'); });
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: /Accounts/ }));
+    const tokenBtn = await screen.findByRole('button', { name: /Create scoped token/i });
+    await user.click(tokenBtn);
+    await waitFor(() => {
+      // i18n key: settings.accounts.openGithubTokenPageFailed.
+      // English copy includes the underlying error string.
+      expect(screen.getByText(/no browser/i)).toBeInTheDocument();
+    });
+  });
+
+  it('Audit Skip-this-update failure surfaces a toast (handleAuditSnooze catch)', async () => {
+    // Audit a single GitHub-linked mod with an update available, then
+    // click Skip this update. set_mod_snooze rejects → handleAuditSnooze
+    // catch runs and toasts the error string.
+    registerInvokeHandler('audit_mod_versions', () => [{
+      mod_name: 'BoomMod', folder_name: 'BoomMod', installed_version: '1.0',
+      latest_release_with_assets_tag: 'v2.0',
+      needs_update: true, pinned: false, asset_names: [],
+      releases_scanned: 1, latest_has_assets: true,
+      github_auto_detected: false, nexus_update_available: false,
+      github_repo: 'foo/boom', update_source: 'github',
+      snoozed: false,
+    }]);
+    registerInvokeHandler('set_mod_snooze', () => { throw new Error('disk locked'); });
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: /Audit/ }));
+    const runBtns = await screen.findAllByRole('button', { name: /Run audit/i });
+    await user.click(runBtns[0]);
+    await user.click(await screen.findByRole('button', { name: /Skip this update/i }));
+    await waitFor(() => {
+      // The handler uses err.message directly without an i18n prefix,
+      // so we look for the raw string the catch passed through.
+      expect(screen.getByText(/disk locked/i)).toBeInTheDocument();
+    });
+  });
 });

@@ -135,4 +135,27 @@ describe('<HelpHint>', () => {
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
     expect(btn).toHaveAttribute('aria-expanded', 'false');
   });
+
+  it('clicking inside the popover does NOT dismiss it (covers the ref.contains() guard)', () => {
+    // The mousedown listener early-returns when the click is inside the
+    // hint's own ref subtree. Without that guard, every click on the
+    // open popover would dismiss it. Click the tooltip's interior and
+    // assert it stays open.
+    mount('modpackWhat');
+    fireEvent.click(screen.getByRole('button', { name: /what does this mean/i }));
+    const tip = screen.getByRole('tooltip');
+    fireEvent.mouseDown(tip);
+    expect(screen.getByRole('tooltip')).toBeInTheDocument();
+  });
+
+  it('non-Escape keydown does NOT dismiss the popover (covers the e.key === "Escape" guard)', () => {
+    // The keydown handler is registered globally — any key fires it.
+    // Only Escape should close; the guard ensures arrow keys, Enter,
+    // typing into a textbox elsewhere, etc., don't trigger a dismiss.
+    mount('modpackWhat');
+    fireEvent.click(screen.getByRole('button', { name: /what does this mean/i }));
+    expect(screen.getByRole('tooltip')).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'a' });
+    expect(screen.getByRole('tooltip')).toBeInTheDocument();
+  });
 });

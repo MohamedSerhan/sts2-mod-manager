@@ -3172,5 +3172,198 @@ describe('<ModsView>', () => {
       expect(within(row).queryByText(/in this modpack/i)).toBeNull();
       expect(within(row).queryByText(/not in this modpack/i)).toBeNull();
     });
+
+    it('handles get_profile_memberships rejection — chip simply absent (covers .catch path)', async () => {
+      // The memberships effect catches a reject and falls back to
+      // `setMemberships(null)`, so the row renders without a
+      // membership chip rather than crashing. We use an active profile
+      // to force the effect to run.
+      seedMods([baseMod({ name: 'NoMembers', folder_name: 'NoMembers', enabled: true })]);
+      registerInvokeHandler('get_active_profile', () => 'TestPack');
+      registerInvokeHandler('get_profile_memberships', () => {
+        throw new Error('membership-grid offline');
+      });
+      render(<Wrap />);
+      const row = await getModRow('NoMembers');
+      // Storage chip still shows.
+      expect(within(row).getByText(/active in game/i)).toBeInTheDocument();
+      // Membership chip never lands.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(within(row).queryByText(/in this modpack/i)).toBeNull();
+      expect(within(row).queryByText(/not in this modpack/i)).toBeNull();
+    });
+  });
+});
+
+// ── Drawer collapse + source editor coupling ────────────────────────
+//
+// Pins toggleExpand's collapse branch (Mods.tsx ~272) — when the user
+// re-clicks the drawer toggle, the row drawer closes AND any open
+// source editor inside that drawer is reset to null. Without the
+// coupling, the editor's state would survive past the row closing and
+// surprise the user when they re-expand.
+describe('<ModsView> drawer collapse closes source editor', () => {
+  it('re-toggling the drawer closes both the drawer AND any open source editor', async () => {
+    seedMods([baseMod({ name: 'EditableMod', folder_name: 'EditableMod' })]);
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await waitFor(() => { expect(screen.getByText('EditableMod')).toBeInTheDocument(); });
+    // Open the source editor from the kebab — this opens the drawer
+    // AND sets sourceEditorRowKey to the row.
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    const items = screen.getAllByRole('menuitem', { name: /Edit sources/ });
+    await user.click(items[0]);
+    // Source editor heading is visible inside the drawer.
+    await waitFor(() => {
+      expect(screen.getByText('Sources for EditableMod')).toBeInTheDocument();
+    });
+    // Click the drawer toggle to collapse. The toggle's aria-label
+    // flips to "Hide details for EditableMod" once expanded; we look
+    // up the row's expand/collapse button by either form.
+    const toggleBtn = screen.getByRole('button', { name: /hide details for EditableMod|show details for EditableMod/i });
+    await user.click(toggleBtn);
+    // The drawer + the source editor heading both leave the DOM.
+    await waitFor(() => {
+      expect(screen.queryByText('Sources for EditableMod')).toBeNull();
+    });
+  });
+});
+
+// ── Tag filter substring branch ─────────────────────────────────────
+// The filter row matches by tag substring (Mods.tsx ~531). Without a
+// tag-search test, the `tags.some((tag) => tag.toLowerCase().includes(...))`
+// arm sits uncovered.
+describe('<ModsView> filter by tag substring', () => {
+  it('typing a tag substring narrows the visible mods to ones with that tag', async () => {
+    seedMods([
+      baseMod({
+        name: 'TaggedMod', folder_name: 'TaggedMod',
+        tags: ['Combat', 'QoL'],
+      }),
+      baseMod({
+        name: 'OtherMod', folder_name: 'OtherMod',
+        tags: ['Cosmetic'],
+      }),
+    ]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('TaggedMod')).toBeInTheDocument(); });
+    expect(screen.getByText('OtherMod')).toBeInTheDocument();
+    // Type the tag substring "comb" — only TaggedMod's "Combat" tag
+    // matches. OtherMod drops out.
+    await user.type(screen.getByPlaceholderText(/Search 2 mods/), 'comb');
+    await waitFor(() => {
+      expect(screen.queryByText('OtherMod')).toBeNull();
+    });
+    expect(screen.getByText('TaggedMod')).toBeInTheDocument();
+  });
+});
+
+// ── SourceEditor onSave: note + custom_url branch (setModExtras) ─────
+// Mods.tsx ~985 — the `setModExtras` call only fires when the user
+// actually edited the note or custom_url. Existing onSave tests change
+// the github/nexus URLs only, so the extras branch sat uncovered.
+describe('<ModsView> SourceEditor saves note + custom URL via setModExtras', () => {
+  it('changing the note triggers set_mod_extras with the trimmed values', async () => {
+    seedMods([baseMod({
+      name: 'NoteMod', folder_name: 'NoteMod',
+      // Pre-existing github_url so the github-field write doesn't fire
+      // when we save (we only want to assert set_mod_extras).
+      github_url: 'https://github.com/x/y',
+      note: null,
+      custom_url: null,
+    })]);
+    registerInvokeHandler('set_mod_extras', () => null);
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await waitFor(() => { expect(screen.getByText('NoteMod')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    const items = screen.getAllByRole('menuitem', { name: /Edit sources/ });
+    await user.click(items[0]);
+    await waitFor(() => {
+      expect(screen.getByText('Sources for NoteMod')).toBeInTheDocument();
+    });
+    // Find the Note textarea by its placeholder.
+    const noteInput = await screen.findByPlaceholderText(/downloaded from Patreon/i);
+    await user.type(noteInput, 'My personal note');
+    await user.click(screen.getByRole('button', { name: /Save sources/ }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some(
+        (c) => c.cmd === 'set_mod_extras'
+          && c.args?.modName === 'NoteMod'
+          && c.args?.note === 'My personal note',
+      )).toBe(true);
+    });
+  });
+});
+
+// ── Inline snooze + unsnooze failure toasts (ModRow onSnooze/onUnsnooze) ─
+// Mods.tsx ~914 and ~923 — the ModRow's onSnooze/onUnsnooze callbacks
+// each have a catch arm that surfaces mods.toast.allFailed. The audit
+// kebab Snooze tests in Settings cover the same handler via the
+// audit-tab UI, but the ModRow path (used inside the drawer kebab on
+// Mods view) was uncovered.
+describe('<ModsView> ModRow snooze failure paths', () => {
+  it('drawer kebab → Skip this update with set_mod_snooze failure toasts the error', async () => {
+    seedMods([baseMod({
+      name: 'SnoozeFail', folder_name: 'SnoozeFail',
+      github_url: 'https://github.com/x/y',
+    })]);
+    registerInvokeHandler('audit_mod_versions', () => [{
+      mod_name: 'SnoozeFail', folder_name: 'SnoozeFail',
+      installed_version: '3.1.2',
+      latest_release_with_assets_tag: 'v3.2.0',
+      latest_has_assets: true, needs_update: true,
+      asset_names: [], releases_scanned: 1,
+      github_auto_detected: false, github_repo: 'x/y',
+      pinned: false, nexus_update_available: false,
+      update_source: 'github', snoozed: false,
+    }]);
+    registerInvokeHandler('set_mod_snooze', () => { throw new Error('lock contention'); });
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('SnoozeFail')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Audit mods' }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'audit_mod_versions')).toBe(true);
+    });
+    // Kebab → Skip this update.
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    const labels = await screen.findAllByText(/^Skip this update$/);
+    const labelEl = labels.find((el) => el.className.includes('gf-kebab-label'));
+    expect(labelEl).toBeDefined();
+    await user.click(labelEl!.closest('button')!);
+    // mods.toast.allFailed format: "Failed: {{error}}".
+    await waitFor(() => {
+      expect(screen.getByText(/Failed.*lock contention/)).toBeInTheDocument();
+    });
+  });
+
+  it('drawer kebab → Show update again with set_mod_snooze failure toasts the error', async () => {
+    seedMods([baseMod({
+      name: 'UnsnoozeFail', folder_name: 'UnsnoozeFail',
+      github_url: 'https://github.com/x/y',
+    })]);
+    registerInvokeHandler('audit_mod_versions', () => [{
+      mod_name: 'UnsnoozeFail', folder_name: 'UnsnoozeFail',
+      installed_version: '3.1.2',
+      latest_release_with_assets_tag: 'v3.2.0',
+      latest_has_assets: true, needs_update: true,
+      asset_names: [], releases_scanned: 1,
+      github_auto_detected: false, github_repo: 'x/y',
+      pinned: false, nexus_update_available: false,
+      update_source: 'github', snoozed: true,
+      snoozed_until_tag: 'v3.2.0',
+    }]);
+    registerInvokeHandler('set_mod_snooze', () => { throw new Error('write blocked'); });
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('UnsnoozeFail')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Audit mods' }));
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    await user.click(screen.getByRole('menuitem', { name: /Show update again/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/Failed.*write blocked/)).toBeInTheDocument();
+    });
   });
 });

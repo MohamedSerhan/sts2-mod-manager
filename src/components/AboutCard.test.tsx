@@ -87,6 +87,32 @@ describe('<AboutCard>', () => {
     });
   });
 
+  it('Diagnostic modal Close button closes the modal (covers onClose wiring)', async () => {
+    // Exercises the inline onClose callback passed to DiagnosticBundle —
+    // line 78 of AboutCard.tsx — by opening the modal and then clicking
+    // its dedicated Close button. After close, the modal back-drop and
+    // its descriptive copy must drop out of the DOM.
+    const user = userEvent.setup();
+    render(<Wrapped />);
+    await user.click(screen.getByRole('button', { name: 'Generate support bundle' }));
+    // Wait for the modal to mount.
+    await waitFor(() => {
+      expect(document.querySelector('.gf-modal-back')).not.toBeNull();
+    });
+    // The DiagnosticBundle modal has a dedicated Close button inside
+    // its modal foot. Click it.
+    const modal = document.querySelector('.gf-modal-back .gf-modal') as HTMLElement;
+    expect(modal).not.toBeNull();
+    const closeBtn = Array.from(modal.querySelectorAll('button')).find(
+      (b) => b.textContent?.trim() === 'Close',
+    );
+    expect(closeBtn).toBeDefined();
+    await user.click(closeBtn!);
+    await waitFor(() => {
+      expect(document.querySelector('.gf-modal-back')).toBeNull();
+    });
+  });
+
   it('falls back to "v—" when getVersion rejects', async () => {
     const app = await import('@tauri-apps/api/app');
     (app.getVersion as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('boom'));

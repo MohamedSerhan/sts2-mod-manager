@@ -77,6 +77,13 @@ describe('<HelpDrawer>', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('non-Escape keydown does NOT close (covers the e.key === "Escape" guard)', () => {
+    const onClose = vi.fn();
+    renderDrawer(onClose);
+    fireEvent.keyDown(document, { key: 'a' });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it('Escape listener is removed when the drawer closes', () => {
     // Re-render with open=false and confirm a stray Escape doesn't
     // fire onClose. (Catches a regression where the cleanup function

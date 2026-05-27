@@ -26,7 +26,7 @@
  *    against `useEffect` cleanup, which is fragile and low-value.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import App from './App';
@@ -435,6 +435,26 @@ describe('<App>', () => {
     });
   });
 
+  it('HelpDrawer close button closes the drawer (covers App.tsx onClose wiring)', async () => {
+    // After opening the drawer via the topbar `?` icon, the close
+    // button inside the drawer must fire setShowHelpDrawer(false) — the
+    // arrow declared inline at App.tsx:912.
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: /^Help$/i }));
+    const drawer = await screen.findByRole('dialog', { name: /^Help$/i });
+    expect(drawer).toBeInTheDocument();
+    // The HelpDrawer's close button has aria-label "Close" (lives
+    // inside the drawer head). Click it.
+    const closeBtn = within(drawer).getByRole('button', { name: /^Close$/i });
+    await user.click(closeBtn);
+    // Drawer leaves the DOM.
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /^Help$/i })).toBeNull();
+    });
+  });
+
   it('topbar ? icon opens the HelpDrawer (1.7.0: Help left the sidebar)', async () => {
     // 1.7.0 — Help is no longer a sidebar entry. Clicking the topbar
     // `?` icon opens a slide-out drawer that renders the same
@@ -729,6 +749,74 @@ describe('<App>', () => {
     await waitFor(() => {
       expect(screen.getByText(/Skipped 2 mods.*A.*B/)).toBeInTheDocument();
     });
+  });
+
+  it('mod-auto-installed event with preserved_configs fires the preserved-configs toast inline', async () => {
+    // The watcher path inlines the preserved-configs list onto the
+    // auto-installed event so it doesn't need a separate event round-
+    // trip. Three files exercises the "shown list + and N more" path
+    // when count > 3, but here we use 2 to exercise the
+    // formatPreservedConfigsMessage `n <= 3` branch (no tail).
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    await fireTauriEvent('mod-auto-installed', {
+      mod_name: 'ConfigKeeper',
+      file_name: 'ck.zip',
+      replaced: null,
+      preserved_configs: ['settings.json', 'keymap.json'],
+    });
+    await waitFor(() => {
+      // Two i18n keys: app.toast.autoInstalled + app.toast.preservedConfigs.
+      // The second emits a separate toast with the mod name + file list.
+      expect(screen.getByText(/Preserved.*settings\.json.*keymap\.json/i)).toBeInTheDocument();
+    });
+  });
+
+  it('mod-auto-installed event with 5 preserved_configs shows the "and N more" tail', async () => {
+    // Exercises formatPreservedConfigsMessage when n > 3 — the file
+    // list shows the first three names and appends a tail with the
+    // remaining count.
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    await fireTauriEvent('mod-auto-installed', {
+      mod_name: 'BigConfig',
+      file_name: 'big.zip',
+      replaced: null,
+      preserved_configs: ['a.json', 'b.json', 'c.json', 'd.json', 'e.json'],
+    });
+    await waitFor(() => {
+      // Tail formats as "(and 2 more)" or similar i18n string.
+      expect(screen.getByText(/and 2 more/i)).toBeInTheDocument();
+    });
+  });
+
+  it('mod-configs-preserved event fires the preserved-configs toast', async () => {
+    // Standalone event for update_mod / repair_mod paths — separate
+    // from the watcher's inlined preserved_configs field.
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    await fireTauriEvent('mod-configs-preserved', {
+      mod_name: 'UpdatedMod',
+      files: ['settings.json'],
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/Preserved.*settings\.json/i)).toBeInTheDocument();
+    });
+  });
+
+  it('mod-configs-preserved with empty files array fires no toast (early return)', async () => {
+    // Defensive early return in the handler — files.length === 0 means
+    // there's nothing to surface. Exercise the guard so the early-exit
+    // branch is covered.
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    await fireTauriEvent('mod-configs-preserved', {
+      mod_name: 'NoConfigsMod',
+      files: [],
+    });
+    // No "Preserved" toast for this mod.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByText(/Preserved.*NoConfigsMod/i)).toBeNull();
   });
 
   // ── Top-bar profile chip / ProfileSwitcher ────────────────────────
@@ -1048,6 +1136,34 @@ describe('<App>', () => {
     const close = screen.getByTitle('Close');
     await user.click(close);
     expect(close).toBeInTheDocument();
+  });
+
+  it('Minimize button logs capability errors without crashing (handleTitlebarMin catch)', async () => {
+    const user = userEvent.setup();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockWindow.minimize.mockRejectedValueOnce(new Error('no capability'));
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    const min = screen.getByTitle('Minimize');
+    await user.click(min);
+    await waitFor(() => {
+      expect(warnSpy).toHaveBeenCalledWith('minimize failed:', expect.any(Error));
+    });
+    warnSpy.mockRestore();
+  });
+
+  it('Close button logs capability errors without crashing (handleTitlebarClose catch)', async () => {
+    const user = userEvent.setup();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockWindow.close.mockRejectedValueOnce(new Error('no capability'));
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    const close = screen.getByTitle('Close');
+    await user.click(close);
+    await waitFor(() => {
+      expect(warnSpy).toHaveBeenCalledWith('close failed:', expect.any(Error));
+    });
+    warnSpy.mockRestore();
   });
 
   it('Minimize button click is handled without crashing', async () => {
@@ -1391,6 +1507,43 @@ describe('<App>', () => {
     await user.click(openSettings);
     await waitFor(() => {
       expect(screen.getByText('Game Path')).toBeInTheDocument();
+    });
+  });
+
+  it('Onboarding player-path "Got it" CTA routes to Home (covers App.tsx onGoToHome arrow)', async () => {
+    // The player-path branch ends on a "Got it" CTA which calls
+    // finishPlayer → onGoToHome. App.tsx wires that to dismissOnboarding
+    // + setActiveView('home') so the user lands on the Play surface.
+    registerInvokeHandler('detect_game_path', () => ({
+      game_path: 'C:/STS2',
+      mods_path: null,
+      disabled_mods_path: null,
+      mods_count: 0,
+      disabled_count: 0,
+      valid: true,
+      game_version: '0.105.0',
+    }));
+    localStorage.removeItem('sts2mm-onboarded');
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /Skip setup/i })).toBeInTheDocument();
+    });
+    // Step 1 — detect game.
+    await user.click(await screen.findByRole('button', { name: /Try again/i }));
+    const continueBtn = await screen.findByRole('button', { name: /^Continue$/i });
+    await waitFor(() => expect(continueBtn).not.toBeDisabled());
+    await user.click(continueBtn);
+    // Audience step — pick the player path.
+    await user.click(await screen.findByRole('button', { name: /Play modpacks others made/i }));
+    // Player card 1 → Next → player card 2.
+    await user.click(await screen.findByRole('button', { name: /^Next$/i }));
+    // Final CTA — "Got it" fires finishPlayer → onGoToHome.
+    await user.click(await screen.findByRole('button', { name: /^Got it$/i }));
+    // Overlay drops out and the Home view is active (its Launch button
+    // is unique to Home).
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /Skip setup/i })).toBeNull();
     });
   });
 

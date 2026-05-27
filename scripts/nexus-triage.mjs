@@ -379,11 +379,13 @@ export function parseCommentsFromHtml(html, { postsUrl = POSTS_URL } = {}) {
 
 export async function fetchCommentsHtml({ page = 1, pageSize = PAGE_SIZE, threadId = POSTS_THREAD_ID } = {}) {
   const url = buildWidgetUrl({ page, pageSize, threadId });
+  // Do NOT pass User-Agent — curl-impersonate sets a Chrome UA + matching
+  // Sec-CH-UA/Accept-Language headers that Cloudflare validates against the
+  // TLS fingerprint. Overriding User-Agent breaks the impersonation.
   const html = await htmlFetcher(url, {
     headers: {
       'Referer': POSTS_URL,
       'X-Requested-With': 'XMLHttpRequest',
-      'User-Agent': 'sts2-mod-manager nexus-triage automation',
     },
   });
   if (isCloudflareChallenge(html)) {
@@ -424,11 +426,8 @@ export async function fetchAllComments({ threadId = POSTS_THREAD_ID } = {}) {
 // ---------------------------------------------------------------------------
 
 export async function discoverThreadId({ postsUrl = POSTS_URL } = {}) {
-  const html = await htmlFetcher(postsUrl, {
-    headers: {
-      'User-Agent': 'sts2-mod-manager nexus-triage automation',
-    },
-  });
+  // Do NOT pass User-Agent — see fetchCommentsHtml comment.
+  const html = await htmlFetcher(postsUrl, { headers: {} });
   if (isCloudflareChallenge(html)) {
     throw new Error('Cloudflare blocked thread_id discovery — curl-impersonate may need updating');
   }

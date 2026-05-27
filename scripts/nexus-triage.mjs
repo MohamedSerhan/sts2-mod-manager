@@ -329,7 +329,9 @@ function unixToIso(unixStr) {
 
 export function parseCommentsFromHtml(html, { postsUrl = POSTS_URL } = {}) {
   if (isCloudflareChallenge(html)) {
-    throw new Error('Cloudflare blocked the request — curl-impersonate may need updating');
+    const err = new Error('Cloudflare blocked the request — curl-impersonate may need updating');
+    err.code = 'CLOUDFLARE_BLOCKED';
+    throw err;
   }
 
   const comments = [];
@@ -413,7 +415,9 @@ export async function fetchCommentsHtml({ page = 1, pageSize = PAGE_SIZE, thread
     },
   });
   if (isCloudflareChallenge(html)) {
-    throw new Error('Cloudflare blocked the request — curl-impersonate may need updating');
+    const err = new Error('Cloudflare blocked the request — curl-impersonate may need updating');
+    err.code = 'CLOUDFLARE_BLOCKED';
+    throw err;
   }
   return html;
 }
@@ -456,7 +460,9 @@ export async function discoverThreadId({ postsUrl = POSTS_URL } = {}) {
     },
   });
   if (isCloudflareChallenge(html)) {
-    throw new Error('Cloudflare blocked thread_id discovery — curl-impersonate may need updating');
+    const err = new Error('Cloudflare blocked thread_id discovery — curl-impersonate may need updating');
+    err.code = 'CLOUDFLARE_BLOCKED';
+    throw err;
   }
   // Look for patterns like: "thread_id":"16873160" or thread_id=16873160 in embedded JS
   const patterns = [
@@ -701,6 +707,11 @@ export async function runFromCli(argv = process.argv.slice(2)) {
 const isMainModule = fileURLToPath(import.meta.url) === process.argv[1];
 if (isMainModule) {
   runFromCli().catch((err) => {
+    if (err.code === 'CLOUDFLARE_BLOCKED') {
+      console.error(`nexus-triage: Cloudflare blocked all retries this run. Will try again on next cron.`);
+      console.error(`Details: ${err.message}`);
+      process.exit(0);
+    }
     console.error(`nexus-triage: fatal: ${err.stack || err.message}`);
     process.exit(1);
   });

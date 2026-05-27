@@ -219,14 +219,25 @@ export async function fetchModBugReports({ apiKey, first = 100 }) {
 
 export async function introspectSchema({ apiKey }) {
   const data = await graphqlPost({ apiKey, query: INTROSPECT_QUERY, variables: {} });
-  const fields = data?.__type?.fields ?? [];
+  if (!data?.__type) {
+    console.error(
+      `nexus-triage: introspection found no type named 'Mod' in the Nexus GraphQL schema. ` +
+      `The type may be renamed or removed. Run an explicit __schema { types { name } } ` +
+      `query to find the correct type, then update INTROSPECT_QUERY in scripts/nexus-triage.mjs.`
+    );
+    process.exit(2);
+  }
+  const fields = data.__type.fields ?? [];
   const fieldNames = new Set(fields.map((f) => f.name));
   const hasComments = fieldNames.has('comments');
   const hasBugReports = fieldNames.has('bugReports');
   if (!hasComments) {
+    const available = [...fieldNames].sort().join(', ') || '<none>';
     console.error(
       `nexus-triage: introspection shows Mod.comments is missing. ` +
-      `This is a hard schema drift. Update the query in scripts/nexus-triage.mjs.`
+      `This is a hard schema drift.\n` +
+      `  Available fields on Mod: ${available}\n` +
+      `Update COMMENTS_QUERY in scripts/nexus-triage.mjs to use the correct field name.`
     );
     process.exit(2);
   }

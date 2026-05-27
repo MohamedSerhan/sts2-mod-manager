@@ -1,20 +1,24 @@
 //! Path-sanitization + file-move helpers shared by the enable/disable
-//! pipeline, the install path, and the local-cache layer.
+//! pipeline, the install path, and the local-cache layer — AND the
+//! enable/disable/delete workflows themselves.
 //!
 //! Split out of the historic `mods.rs` mega-file so the path-safety
-//! primitives (which are easy to test in isolation and have no
-//! `ModInfo`/`RawManifest` dependency) live separately from the
-//! orchestration that calls into them. The enable/disable + delete
-//! workflows (`enable_mod`, `disable_mod`, `move_mod_by_info`,
-//! `delete_mod_files_by_info`) stay in `mod.rs` because they're
-//! co-located with the test modules that exercise them via
-//! `super::*`.
+//! primitives and the workflows that compose them onto `ModInfo` live
+//! next to each other.
 //!
-//! See `mods/mod.rs` for the orchestration that wraps these helpers.
+//! See `mods/mod.rs` for the Tauri-command orchestrators
+//! (`toggle_mod`, `delete_mod_cmd`, `enable_all_mods`, etc.) that wrap
+//! these helpers.
 
+use std::collections::HashSet;
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
+
+use crate::error::{AppError, Result};
+
+use super::scan::normalize_name;
+use super::ModInfo;
 
 /// Sanitize a string for use in filenames.
 ///
@@ -117,4 +121,291 @@ pub fn move_directory(src: &Path, dest: &Path) -> io::Result<()> {
     // Remove the now-empty source directory
     let _ = fs::remove_dir(src);
     Ok(())
+}
+
+// ── Enable / Disable / Delete Workflows ────────────────────────────────────
+
+/// Enable a mod by moving its files from disabled to active.
+pub fn enable_mod(mod_name: &str, mods_path: &Path, disabled_path: &Path) -> Result<()> {
+    move_mod_files(mod_name, disabled_path, mods_path)
+}
+
+/// Disable a mod by moving its files from active to disabled.
+pub fn disable_mod(mod_name: &str, mods_path: &Path, disabled_path: &Path) -> Result<()> {
+    move_mod_files(mod_name, mods_path, disabled_path)
+}
+
+/// Move mod files using the actual file list from ModInfo.
+/// Handles destination conflicts by removing existing files before moving.
+pub fn move_mod_by_info(mod_info: &ModInfo, src: &Path, dest: &Path) -> Result<()> {
+    let _ = fs::create_dir_all(dest);
+
+    let mut moved_any = false;
+
+    for file_rel in &mod_info.files {
+        let Some(rel_path) = safe_mod_relative_path(file_rel) else {
+            log::warn!(
+                "Skipping unsafe path '{}' while moving mod '{}'",
+                file_rel,
+                mod_info.name
+            );
+            continue;
+        };
+        let src_file = src.join(&rel_path);
+        let dest_file = dest.join(&rel_path);
+
+        if !src_file.exists() {
+            // If the file is already at the destination, count it as moved
+            if dest_file.exists() {
+                moved_any = true;
+            }
+            continue;
+        }
+
+        // Ensure parent directories exist for subdirectory mods
+        if let Some(parent) = dest_file.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+
+        // Remove destination file if it already exists (handles partial previous moves)
+        if dest_file.exists() {
+            if dest_file.is_dir() {
+                let _ = fs::remove_dir_all(&dest_file);
+            } else {
+                let _ = fs::remove_file(&dest_file);
+            }
+        }
+
+        fs::rename(&src_file, &dest_file).or_else(|_| {
+            fs::copy(&src_file, &dest_file).and_then(|_| fs::remove_file(&src_file))
+        })?;
+        moved_any = true;
+    }
+
+    cleanup_empty_parent_dirs(src, &mod_info.files);
+
+    if !moved_any {
+        return Err(AppError::ModNotFound(format!(
+            "No files found for mod '{}' in {}",
+            mod_info.name,
+            src.display()
+        )));
+    }
+
+    Ok(())
+}
+
+fn cleanup_empty_parent_dirs(base: &Path, file_rels: &[String]) {
+    let mut parent_dirs = HashSet::new();
+
+    for file_rel in file_rels {
+        let Some(rel_path) = safe_mod_relative_path(file_rel) else {
+            log::warn!(
+                "Skipping unsafe path '{}' during parent-dir cleanup",
+                file_rel
+            );
+            continue;
+        };
+        let mut parent = rel_path.parent();
+        while let Some(parent_rel) = parent {
+            if parent_rel.as_os_str().is_empty() {
+                break;
+            }
+            parent_dirs.insert(base.join(parent_rel));
+            parent = parent_rel.parent();
+        }
+    }
+
+    let mut parent_dirs: Vec<PathBuf> = parent_dirs.into_iter().collect();
+    parent_dirs.sort_by_key(|path| std::cmp::Reverse(path.components().count()));
+    for dir in parent_dirs {
+        if dir.is_dir()
+            && fs::read_dir(&dir)
+                .map(|mut d| d.next().is_none())
+                .unwrap_or(false)
+        {
+            let _ = fs::remove_dir(&dir);
+        }
+    }
+}
+
+pub(super) fn safe_mod_relative_path(file_rel: &str) -> Option<PathBuf> {
+    let normalized = file_rel.replace('\\', "/");
+    let rel = Path::new(&normalized);
+    let mut cleaned = PathBuf::new();
+
+    for component in rel.components() {
+        match component {
+            Component::Normal(part) => cleaned.push(part),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+
+    if cleaned.as_os_str().is_empty() {
+        None
+    } else {
+        Some(cleaned)
+    }
+}
+
+/// Move all files associated with a mod between two directories.
+/// Uses name matching with fallback to fuzzy (case-insensitive, no-spaces) comparison.
+pub(super) fn move_mod_files(mod_name: &str, src: &Path, dest: &Path) -> Result<()> {
+    let _ = fs::create_dir_all(dest);
+
+    let mut found = false;
+    let normalized_mod = normalize_name(mod_name);
+
+    // Move files matching the mod name (same stem) - exact or fuzzy
+    if let Ok(entries) = fs::read_dir(src) {
+        for entry in entries.flatten() {
+            let fname = entry.file_name().to_string_lossy().to_string();
+            let fstem = Path::new(&fname)
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            // Exact match or normalized (case-insensitive, no spaces) match
+            if fstem == mod_name || normalize_name(&fstem) == normalized_mod {
+                let dest_file = dest.join(&fname);
+                // Remove destination if it already exists (handles stale/partial state)
+                if dest_file.exists() {
+                    if dest_file.is_dir() {
+                        let _ = fs::remove_dir_all(&dest_file);
+                    } else {
+                        let _ = fs::remove_file(&dest_file);
+                    }
+                }
+                fs::rename(entry.path(), &dest_file)?;
+                found = true;
+            }
+        }
+    }
+
+    // Also check for a subdirectory with the mod name (exact or normalized)
+    let sub_dir = src.join(mod_name);
+    if sub_dir.is_dir() {
+        let dest_dir = dest.join(mod_name);
+        move_directory(&sub_dir, &dest_dir)?;
+        let _ = fs::remove_dir_all(&sub_dir);
+        found = true;
+    } else if !found {
+        // Try finding a subdirectory by normalized name
+        if let Ok(entries) = fs::read_dir(src) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    let dir_name = entry.file_name().to_string_lossy().to_string();
+                    if normalize_name(&dir_name) == normalized_mod {
+                        let dest_dir = dest.join(&dir_name);
+                        move_directory(&path, &dest_dir)?;
+                        let _ = fs::remove_dir_all(&path);
+                        found = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    if !found {
+        return Err(AppError::ModNotFound(format!(
+            "No files found for mod '{}' in {}",
+            mod_name,
+            src.display()
+        )));
+    }
+
+    Ok(())
+}
+
+/// Delete a mod's files from disk using its scanned file list.
+/// Used during profile switching to remove version-mismatched mods before reinstalling.
+pub fn delete_mod_files_by_info(mod_info: &ModInfo, base_path: &Path) {
+    for file_rel in &mod_info.files {
+        let Some(rel_path) = safe_mod_relative_path(file_rel) else {
+            log::warn!(
+                "Skipping unsafe path '{}' while deleting mod '{}'",
+                file_rel,
+                mod_info.name
+            );
+            continue;
+        };
+        let file_path = base_path.join(&rel_path);
+        if file_path.is_dir() {
+            let _ = fs::remove_dir_all(&file_path);
+        } else if file_path.exists() {
+            let _ = fs::remove_file(&file_path);
+        }
+    }
+
+    cleanup_empty_parent_dirs(base_path, &mod_info.files);
+
+    log::info!(
+        "Deleted {} files for mod '{}' from {}",
+        mod_info.files.len(),
+        mod_info.name,
+        base_path.display()
+    );
+}
+
+#[cfg(test)]
+mod path_safety_tests {
+    use super::{path_is_inside, sanitize_path_segment};
+    use std::path::Path;
+
+    #[test]
+    fn sanitize_strips_separators() {
+        assert_eq!(sanitize_path_segment("foo/bar"), "foo_bar");
+        assert_eq!(sanitize_path_segment("foo\\bar"), "foo_bar");
+        assert_eq!(sanitize_path_segment("C:foo"), "C_foo");
+    }
+
+    #[test]
+    fn sanitize_neutralizes_dotdot() {
+        // ".." → "_" → all-underscore → fallback "mod"
+        assert_eq!(sanitize_path_segment(".."), "mod");
+        // "..foo" → "_foo" — safe (the "_" can't escape a parent dir)
+        assert_eq!(sanitize_path_segment("..foo"), "_foo");
+        // "foo.." → "foo_" — safe
+        assert_eq!(sanitize_path_segment("foo.."), "foo_");
+        // "a..b" → "a_b"
+        assert_eq!(sanitize_path_segment("a..b"), "a_b");
+    }
+
+    #[test]
+    fn sanitize_handles_empty_and_dots() {
+        assert_eq!(sanitize_path_segment(""), "mod");
+        assert_eq!(sanitize_path_segment("..."), "mod");
+        assert_eq!(sanitize_path_segment("   "), "mod");
+    }
+
+    #[test]
+    fn sanitize_preserves_normal_names() {
+        assert_eq!(sanitize_path_segment("RitsuLib"), "RitsuLib");
+        assert_eq!(sanitize_path_segment("My-Mod_v1.2"), "My-Mod_v1.2");
+    }
+
+    #[test]
+    fn path_inside_accepts_subpath() {
+        let root = Path::new("/tmp/mods");
+        assert!(path_is_inside(&root.join("foo"), root));
+        assert!(path_is_inside(&root.join("foo/bar.dll"), root));
+    }
+
+    #[test]
+    fn path_inside_rejects_traversal() {
+        let root = Path::new("/tmp/mods");
+        assert!(!path_is_inside(&root.join("../escaped"), root));
+        assert!(!path_is_inside(&root.join("../../etc/passwd"), root));
+        assert!(!path_is_inside(&root.join("foo/../../escaped"), root));
+    }
+
+    #[test]
+    fn path_inside_handles_curdir() {
+        let root = Path::new("/tmp/mods");
+        assert!(path_is_inside(&root.join("./foo"), root));
+        assert!(path_is_inside(&root.join("foo/./bar"), root));
+    }
 }

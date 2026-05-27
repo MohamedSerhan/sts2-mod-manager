@@ -10,7 +10,6 @@ import {
   Upload,
   Layers,
   RefreshCw,
-  Key,
   AlertTriangle,
   Save,
   ArrowUp,
@@ -126,7 +125,6 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
   const [showCreateWizard, setShowCreateWizard] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [importJson, setImportJson] = useState('');
-  const [showImportCode, setShowImportCode] = useState(false);
   const [importCode, setImportCode] = useState('');
   const [importingCode, setImportingCode] = useState(false);
   // 1.7.0 v7 — always-visible Quick-Add row above the tabs. Same import
@@ -259,7 +257,6 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     if (openActiveModpackSignal > 0 && activeProfile) {
       setSelectedModpack(activeProfile);
       setShowImport(false);
-      setShowImportCode(false);
     }
   }, [openActiveModpackSignal, activeProfile]);
 
@@ -272,7 +269,6 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     if (!openCreateWizardSignal) return;
     setOuterTab('yours');
     setShowImport(false);
-    setShowImportCode(false);
     setShowCreateWizard(true);
   }, [openCreateWizardSignal]);
 
@@ -632,7 +628,6 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       if (outcome.kind === 'cancelled') return;
 
       setImportCode('');
-      setShowImportCode(false);
       await refreshAll();
       refreshSubUpdates();
 
@@ -813,19 +808,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
             variant="secondary"
             size="sm"
             onClick={() => {
-              setShowImportCode(!showImportCode);
-              setShowImport(false);
-            }}
-          >
-            <Key size={14} />
-            {t('profiles.actions.addByCode')}
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => {
               setShowImport(!showImport);
-              setShowImportCode(false);
             }}
           >
             <Upload size={14} />
@@ -841,7 +824,6 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
             // modal.
             setShowCreateWizard(true);
             setShowImport(false);
-            setShowImportCode(false);
           }}>
             <Plus size={14} />
             {t('profiles.actions.newProfile')}
@@ -1065,45 +1047,6 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
             {t('profiles.drift.repair')}
           </Button>
         </div>
-      )}
-
-      {/* Import Code Form */}
-      {showImportCode && (
-        <Card className="flex gap-2 items-end">
-          <div className="flex-1">
-            <label className="text-xs text-text-muted block mb-1">
-              {t('profiles.form.codeLabel')}
-            </label>
-            <input
-              type="text"
-              value={importCode}
-              onChange={(e) => setImportCode(e.target.value)}
-              placeholder={t('profiles.form.codePlaceholder')}
-              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-text font-mono tracking-wider placeholder:text-text-dim focus:outline-none focus:ring-2 focus:ring-primary/50"
-              onKeyDown={(e) => e.key === 'Enter' && handleImportFromCode()}
-              disabled={importingCode}
-            />
-          </div>
-          <Button
-            size="sm"
-            onClick={handleImportFromCode}
-            disabled={importingCode}
-          >
-            {importingCode ? (
-              <RefreshCw size={14} className="animate-spin" />
-            ) : (
-              <Download size={14} />
-            )}
-            {importingCode ? t('common.importing') : t('common.import')}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowImportCode(false)}
-          >
-            {t('common.cancel')}
-          </Button>
-        </Card>
       )}
 
       {/* Import Profile JSON Form */}

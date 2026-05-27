@@ -534,12 +534,8 @@
     "minimize": "Minimize",
     "maximize": "Maximize",
     "close": "Close",
-    "brandName": "Slay the Spire 2",
-    "brandTagline": "Mod Manager",
     "packUpdateTooltip_one": "{{badge}} pack has an update available",
     "packUpdateTooltip_other": "{{badge}} packs have an update available",
-    "sts2Detected": "STS2 detected",
-    "gameNotFound": "Game not found",
     "modCount": "{{enabled}} active / {{total}} mods",
     "switchActivePack": "Switch modpack",
     "activeProfile": "Active modpack",
@@ -991,8 +987,7 @@
       "accounts": "Accounts",
       "backups": "Backups",
       "audit": "Audit",
-      "advanced": "Advanced",
-      "help": "Help"
+      "advanced": "Advanced"
     },
     "general": {
       "gamePath": "Game Path",

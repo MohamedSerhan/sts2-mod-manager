@@ -347,12 +347,14 @@ describe('<App>', () => {
     expect(screen.queryByTitle('Maximize')).toBeTruthy();
   });
 
-  it('renders the brand title in the sidebar', async () => {
+  it('renders the app title in the custom titlebar', async () => {
+    // The brand mark + name lives in the titlebar (the standard window
+    // chrome location). The 1.7.0 cleanup removed the duplicate
+    // "Slay the Spire 2 / MOD MANAGER" sidebar block.
     render(<App />);
     await waitFor(() => {
-      expect(screen.getByText('Slay the Spire 2')).toBeInTheDocument();
+      expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument();
     });
-    expect(screen.getAllByText(/Mod Manager/).length).toBeGreaterThan(0);
   });
 
   it('drag-over → drag-leave does not show dropzone after leave', async () => {
@@ -2037,8 +2039,12 @@ describe('<App>', () => {
     expect(profilesNav!.querySelector('.gf-nav-badge')).toBeNull();
   });
 
-  it('gameInfo.valid=true renders "STS2 detected" label + mods count line', async () => {
-    // App.tsx:536/539 — `gameInfo?.valid` true branches.
+  it('gameInfo.valid=true renders the mod-count line in the topbar profile chip', async () => {
+    // Mod count surfaces in the topbar profile chip; that's the
+    // canonical place (it changes live with mod state). The 1.7.0
+    // cleanup removed the duplicate "STS2 detected / N active / N mods"
+    // sidebar status block — game-path detection state lives in
+    // Settings → General now, not in two places at once.
     registerInvokeHandler('get_game_info', () => ({
       game_path: 'C:/Games/STS2',
       mods_path: 'C:/Games/STS2/Mods',
@@ -2051,11 +2057,8 @@ describe('<App>', () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     await waitFor(() => {
-      expect(screen.getByText('STS2 detected')).toBeInTheDocument();
+      expect(screen.getByText(/0 active \/ 0 mods/)).toBeInTheDocument();
     });
-    // Mods count line ("0 active / 0 mods") appears in two places when
-    // valid; we just need at least one to confirm the branch fired.
-    expect(screen.queryAllByText(/0 active \/ 0 mods/).length).toBeGreaterThan(0);
   });
 
   it('profileInitials fallback ("VA") renders when activeProfile yields empty initials', async () => {

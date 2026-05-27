@@ -429,25 +429,15 @@ describe('<ProfilesView>', () => {
     expect(screen.getByText(/1 still missing: Missing1/)).toBeInTheDocument();
   });
 
-  it('Import-by-code button opens the input form', async () => {
+  it('Quick-Add code input is always visible on the Yours tab', async () => {
+    // 1.7.0 cleanup: the "Add modpack code" toolbar button + its
+    // toggled inline form were duplicates of this always-visible row.
+    // The redundant button was removed; the row stays as the single
+    // canonical place to paste a share code.
     seedProfiles([baseProfile({ name: 'X' })]);
-    const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Add modpack code/i }));
-    expect(screen.getByPlaceholderText(/username\/XXXX/)).toBeInTheDocument();
-  });
-
-  it('Import-by-code Cancel hides the form', async () => {
-    seedProfiles([baseProfile({ name: 'X' })]);
-    const user = userEvent.setup();
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Add modpack code/i }));
-    expect(screen.getByPlaceholderText(/username\/XXXX/)).toBeInTheDocument();
-    // The form's Cancel button (there's also one in the create form, but it's hidden).
-    await user.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(screen.queryByPlaceholderText(/username\/XXXX/)).toBeNull();
+    expect(screen.getByLabelText(/Add a modpack by code/i)).toBeInTheDocument();
   });
 
   it('Import from JSON form opens and submits to import_profile_cmd', async () => {
@@ -1512,10 +1502,9 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Add modpack code/i }));
-    const input = await screen.findByPlaceholderText(/username\/XXXX/);
+    const input = screen.getByLabelText(/Add a modpack by code/i);
     await user.type(input, 'alice/AA5A-315D-61AE');
-    await user.click(screen.getByRole('button', { name: /^Import$/ }));
+    await user.click(screen.getByRole('button', { name: /^Add$/ }));
     // Confirm dialog ("Install this modpack?") renders. Accept it.
     const installConfirm = await screen.findByRole('button', { name: /Install \d+ mod/i });
     await user.click(installConfirm);
@@ -1536,8 +1525,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Add modpack code/i }));
-    const input = await screen.findByPlaceholderText(/username\/XXXX/);
+    const input = screen.getByLabelText(/Add a modpack by code/i);
     await user.type(input, 'alice/AA5A-315D-61AE{Enter}');
     // Confirm dialog appears.
     await waitFor(() => {
@@ -1545,13 +1533,15 @@ describe('<ProfilesView>', () => {
     });
   });
 
-  it('Import-by-code empty trim skips work', async () => {
+  it('Quick-Add Add button is disabled with empty input', async () => {
     seedProfiles([baseProfile({ name: 'X' })]);
-    const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Add modpack code/i }));
-    await user.click(screen.getByRole('button', { name: /^Import$/ }));
+    // Always-visible Quick-Add row: the Add button is disabled until
+    // the user types a non-whitespace code. Empty/whitespace input
+    // never reaches the fetcher.
+    const addBtn = screen.getByRole('button', { name: /^Add$/ });
+    expect(addBtn).toBeDisabled();
     expect(getInvokeCalls().some((c) => c.cmd === 'fetch_shared_profile_cmd')).toBe(false);
   });
 
@@ -1564,10 +1554,9 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Add modpack code/i }));
-    const input = await screen.findByPlaceholderText(/username\/XXXX/);
+    const input = screen.getByLabelText(/Add a modpack by code/i);
     await user.type(input, 'alice/AA5A-315D-61AE');
-    await user.click(screen.getByRole('button', { name: /^Import$/ }));
+    await user.click(screen.getByRole('button', { name: /^Add$/ }));
     // Cancel the confirm modal — scope to its foot to dodge the
     // Add-by-code form Cancel button below.
     const modal = await confirmModal();
@@ -1585,10 +1574,9 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Add modpack code/i }));
-    const input = await screen.findByPlaceholderText(/username\/XXXX/);
+    const input = screen.getByLabelText(/Add a modpack by code/i);
     await user.type(input, 'alice/AA5A-315D-61AE');
-    await user.click(screen.getByRole('button', { name: /^Import$/ }));
+    await user.click(screen.getByRole('button', { name: /^Add$/ }));
     await waitFor(() => {
       expect(screen.getByText(/Failed to import.*not found/)).toBeInTheDocument();
     });
@@ -1609,10 +1597,9 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('Match')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Add modpack code/i }));
-    const input = await screen.findByPlaceholderText(/username\/XXXX/);
+    const input = screen.getByLabelText(/Add a modpack by code/i);
     await user.type(input, 'alice/AA5A-315D-61AE');
-    await user.click(screen.getByRole('button', { name: /^Import$/ }));
+    await user.click(screen.getByRole('button', { name: /^Add$/ }));
     await waitFor(() => {
       expect(screen.getByText(/Re-applied "Match"\./)).toBeInTheDocument();
     });
@@ -1634,10 +1621,9 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('OtherInstalled')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Add modpack code/i }));
-    const input = await screen.findByPlaceholderText(/username\/XXXX/);
+    const input = screen.getByLabelText(/Add a modpack by code/i);
     await user.type(input, 'alice/AA5A-315D-61AE');
-    await user.click(screen.getByRole('button', { name: /^Import$/ }));
+    await user.click(screen.getByRole('button', { name: /^Add$/ }));
     // Smart router pops a "Switch to OtherInstalled?" confirm. Scope the
     // Activate button query to the modal foot to dodge the row's
     // "Switch to" button (which also matches /Activate/ via its title).
@@ -1677,10 +1663,9 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getAllByText('MyPack').length).toBeGreaterThan(0); });
-    await user.click(screen.getByRole('button', { name: /Add modpack code/i }));
-    const input = await screen.findByPlaceholderText(/username\/XXXX/);
+    const input = screen.getByLabelText(/Add a modpack by code/i);
     await user.type(input, 'alice/AA5A-315D-61AE');
-    await user.click(screen.getByRole('button', { name: /^Import$/ }));
+    await user.click(screen.getByRole('button', { name: /^Add$/ }));
     // Confirm modal opens with "Apply pending update?" title — click its Apply.
     const modal = await confirmModal();
     await user.click(modal.getByRole('button', { name: /Apply update/i }));
@@ -1730,30 +1715,19 @@ describe('<ProfilesView>', () => {
     expect(screen.getByRole('button', { name: /Snapshot active modpack/ })).toBeInTheDocument();
   });
 
-  it('header toolbar toggles: Add modpack code closes Import modpack JSON + Create forms', async () => {
+  it('header toolbar: Create modpack opens the guided wizard while the Quick-Add row stays put', async () => {
+    // 1.7.0 cleanup: the toggle-able "Add modpack code" inline form
+    // was removed (duplicate of the always-visible Quick-Add row).
+    // The Create button still closes any OTHER inline form (Import
+    // JSON) and opens the wizard; the Quick-Add row is permanent so
+    // there's no "form to collapse" anymore.
     seedProfiles([baseProfile({ name: 'X' })]);
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    // Open Import modpack JSON first.
-    await user.click(screen.getByRole('button', { name: /Import modpack JSON/ }));
-    expect(screen.getByPlaceholderText(/"name":/)).toBeInTheDocument();
-    // Then click Add modpack code — it should hide Import modpack JSON.
-    await user.click(screen.getByRole('button', { name: /Add modpack code/i }));
-    expect(screen.queryByPlaceholderText(/"name":/)).toBeNull();
-    expect(screen.getByPlaceholderText(/username\/XXXX/)).toBeInTheDocument();
-  });
-
-  it('header toolbar: Create modpack closes the Add modpack code inline form', async () => {
-    seedProfiles([baseProfile({ name: 'X' })]);
-    const user = userEvent.setup();
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Add modpack code/i }));
-    expect(screen.getByPlaceholderText(/username\/XXXX/)).toBeInTheDocument();
+    // Quick-Add row visible up front.
+    expect(screen.getByLabelText(/Add a modpack by code/i)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Create modpack/i }));
-    // Inline "Add modpack code" panel collapses, and the guided wizard mounts.
-    expect(screen.queryByPlaceholderText(/username\/XXXX/)).toBeNull();
     expect(
       await screen.findByRole('button', { name: /start from my active mods/i }),
     ).toBeInTheDocument();

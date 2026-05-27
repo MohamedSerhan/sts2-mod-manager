@@ -148,38 +148,6 @@ body {
   display: flex; flex-direction: column;
   padding: 14px 10px;
 }
-.gf-brand {
-  display: flex; align-items: center; gap: 9px;
-  padding: 6px 10px 16px;
-  letter-spacing: -0.005em;
-  color: var(--ink);
-}
-.gf-brand-mark {
-  width: 26px; height: 26px;
-  border-radius: 6px;
-  background: var(--gf); color: var(--gf-ink);
-  display: grid; place-items: center;
-  font-size: 13px; font-weight: 800;
-  flex-shrink: 0;
-}
-.gf-brand-title {
-  display: flex; flex-direction: column;
-  line-height: 1.15;
-  min-width: 0;
-}
-.gf-brand-game {
-  font-weight: 700; font-size: 13.5px;
-  color: var(--ink);
-  white-space: nowrap;
-}
-.gf-brand-tag {
-  font-weight: 500; font-size: 10.5px;
-  color: var(--ink-mute);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  margin-top: 1px;
-}
 .gf-nav {
   position: relative;
   display: flex; align-items: center; gap: 10px;
@@ -862,32 +830,6 @@ body {
   .gf-profile-library-sort { align-self: flex-start; }
 }
 .gf-side-foot { margin-top: auto; padding-top: 12px; display: flex; flex-direction: column; gap: 1px; }
-
-/* Sidebar status block */
-.gf-side-status {
-  margin-top: 10px;
-  padding: 10px 12px;
-  border-top: 1px solid var(--indigo-line);
-  background: oklch(0.20 0.025 270 / 0.5);
-  box-sizing: border-box;
-}
-.gf-side-stat-row { display: flex; align-items: center; gap: 8px; }
-.gf-side-stat-dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: var(--ok);
-  box-shadow: 0 0 6px var(--ok);
-}
-.gf-side-stat-dot.err { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
-.gf-side-stat-label { font-size: 11.5px; color: var(--ink-mute); font-weight: 500; }
-.gf-side-stat-meta { font-size: 11px; color: var(--ink-dim); margin-top: 4px; padding-left: 16px; }
-.gf-side-version {
-  font-size: 10.5px;
-  color: var(--ink-dim);
-  margin-top: 8px;
-  padding-left: 16px;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.3px;
-}
 
 /* ── Top bar ─────────────────────────────────────────────────────── */
 .gf-top {

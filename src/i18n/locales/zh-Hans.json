@@ -534,12 +534,8 @@
     "minimize": "最小化",
     "maximize": "最大化",
     "close": "关闭",
-    "brandName": "杀戮尖塔 2",
-    "brandTagline": "模组管理器",
     "packUpdateTooltip_one": "{{badge}} 个方案有可用更新",
     "packUpdateTooltip_other": "{{badge}} 个方案有可用更新",
-    "sts2Detected": "已检测到 STS2",
-    "gameNotFound": "未找到游戏",
     "modCount": "{{enabled}} 激活 / {{total}} 模组",
     "switchActivePack": "切换模组包",
     "activeProfile": "当前模组包",
@@ -991,8 +987,7 @@
       "accounts": "账号",
       "backups": "备份",
       "audit": "审计",
-      "advanced": "高级",
-      "help": "帮助"
+      "advanced": "高级"
     },
     "general": {
       "gamePath": "游戏路径",

@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { getVersion } from '@tauri-apps/api/app';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -97,7 +96,6 @@ function AppInner() {
   const [appUpdate, setAppUpdate] = useState<Update | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
   const [updateInstalling, setUpdateInstalling] = useState(false);
-  const [appVersion, setAppVersion] = useState('');
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showProfileSwitcher, setShowProfileSwitcher] = useState(false);
   // 1.7.0 T16 — bumped by sibling surfaces (Mods view "Manage active
@@ -119,8 +117,6 @@ function AppInner() {
   // the focus pump above.
   const [openCreateWizardSignal, setOpenCreateWizardSignal] = useState(0);
   const [launching, setLaunching] = useState<null | 'modded' | 'vanilla'>(null);
-
-  useEffect(() => { getVersion().then(setAppVersion).catch(() => {}); }, []);
 
   // First-launch onboarding wizard (v5 batch 4). Shown once unless dismissed.
   useEffect(() => {
@@ -597,16 +593,11 @@ function AppInner() {
           </div>
         )}
 
-        {/* Sidebar — 3 main nav (Home/Modpacks/Library), foot has Settings, status block, version */}
+        {/* Sidebar — Home / Modpacks / Library nav with Settings in the foot.
+            The brand mark + app name lives in the custom titlebar; the
+            mod-count / game-detected state lives in the topbar profile
+            chip + Settings → General. No need to repeat them here. */}
         <nav className="gf-sidebar">
-          <div className="gf-brand">
-            <div className="gf-brand-mark">✦</div>
-            <span className="gf-brand-title">
-              <span className="gf-brand-game">{t('app.brandName')}</span>
-              <span className="gf-brand-tag">{t('app.brandTagline')}</span>
-            </span>
-          </div>
-
           {NAV.map(({ id, icon: Icon }) => {
             // Profiles gets a count badge when followed packs have
             // pending updates — same data the Home view's "update
@@ -658,22 +649,6 @@ function AppInner() {
                 </button>
               );
             })}
-
-            {/* Status block */}
-            <div className="gf-side-status">
-              <div className="gf-side-stat-row">
-                <span className={cn('gf-side-stat-dot', !gameInfo?.valid && 'err')} />
-                <span className="gf-side-stat-label">
-                  {gameInfo?.valid ? t('app.sts2Detected') : t('app.gameNotFound')}
-                </span>
-              </div>
-              {gameInfo?.valid && (
-                <div className="gf-side-stat-meta">
-                  {t('app.modCount', { enabled: enabledCount, total: totalCount })}
-                </div>
-              )}
-              {appVersion && <div className="gf-side-version">v{appVersion}</div>}
-            </div>
           </div>
         </nav>
 

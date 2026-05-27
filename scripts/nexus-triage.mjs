@@ -183,12 +183,33 @@ export function renderIssueBody(item, template, { classification, confidence }) 
 
 let htmlFetcher = async (url, opts = {}) => {
   const bin = CURL_IMPERSONATE_BIN;
-  const args = ['-sS', '--fail-with-body', url];
+  // Don't use --fail-with-body — we want the body even on HTTP errors so the
+  // caller (or isCloudflareChallenge) can inspect what Cloudflare actually
+  // served. -w prints HTTP status code to stderr so the script can see it.
+  const args = ['-sS', '-w', '%{http_code}\\n', '-o', '-', url];
   for (const [k, v] of Object.entries(opts.headers || {})) {
     args.push('-H', `${k}: ${v}`);
   }
-  const { stdout } = await execFileP(bin, args);
-  return stdout;
+  const { stdout, stderr } = await execFileP(bin, args);
+  // stdout contains: <body>\n<http_code>\n (because -w writes after -o body)
+  // Split last line as the status code.
+  const lines = stdout.split('\n');
+  const statusLine = lines.pop(); // last non-newline chunk
+  // Find the actual status code by walking backwards for a 3-digit code
+  let httpCode = '';
+  for (let i = lines.length; i > 0 && !httpCode; i--) {
+    const candidate = (i === lines.length ? statusLine : lines[i - 1]).trim();
+    if (/^\d{3}$/.test(candidate)) httpCode = candidate;
+  }
+  const body = lines.join('\n');
+  if (httpCode && httpCode.startsWith('4') && !body.includes('<')) {
+    // 4xx without HTML body means hard block (not a challenge page)
+    throw new Error(`curl-impersonate got HTTP ${httpCode} with no body for ${url}. stderr: ${stderr}`);
+  }
+  if (httpCode && httpCode.startsWith('4')) {
+    console.error(`curl-impersonate: HTTP ${httpCode} for ${url} — first 500 chars of body:\n${body.slice(0, 500)}`);
+  }
+  return body;
 };
 
 export function setHtmlFetcher(fn) { htmlFetcher = fn; }

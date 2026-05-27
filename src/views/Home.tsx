@@ -23,13 +23,13 @@ import {
   checkSubscriptionUpdates,
   applySubscriptionUpdate,
   getSubscriptions,
-  switchProfile,
   repairProfile,
   getProfileDrift,
   createBackup,
+  getShareInfo,
+  listProfiles,
 } from '../hooks/useTauri';
 import { buildShareMessage, buildShareLink } from '../lib/shareImport';
-import { getShareInfo, listProfiles } from '../hooks/useTauri';
 import type { ShareResult, Profile } from '../types';
 import { PublishModal } from '../components/PublishModal';
 import type { SubscriptionUpdate, Subscription } from '../types';
@@ -314,11 +314,6 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
       toast.error(t('home.toast.couldntLoadProfile', { error: errMsg }));
     }
   }
-
-  // Silence the unused-var warning for `switchProfile`: kept available
-  // for future hero secondary actions (still imported because we may
-  // wire a "switch via hero shortcut" in a later iteration).
-  void switchProfile;
 
   const enabledMods = mods.filter((m) => m.enabled);
   const activeSub = subscriptions.find((s) => s.profile_name === activeProfile);

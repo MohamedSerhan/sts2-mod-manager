@@ -56,11 +56,6 @@ interface OnboardingProps {
    *  where the Play button lives. Optional for the same reason as
    *  onCreateModpack. */
   onGoToHome?: () => void;
-  /** Optional escape hatch for the creator path's first card if the
-   *  app wants users to land on the Modpacks list rather than auto-
-   *  open the wizard. Currently unused but kept in the prop interface
-   *  so future variants don't need a signature change. */
-  onGoToModpacks?: () => void;
   /** Re-fetch the AppContext gameInfo after a successful detect /
    *  browse so the sidebar status pill flips green immediately
    *  (instead of waiting for a manual refresh elsewhere). */

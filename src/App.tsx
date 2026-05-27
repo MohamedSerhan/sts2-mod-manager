@@ -35,15 +35,15 @@ import { HomeView } from './views/Home';
 import { ModsView } from './views/Mods';
 import { ProfilesView } from './views/Profiles';
 import { SettingsView } from './views/Settings';
-import { HelpView } from './views/Help';
 import { launchGame, launchVanilla, installModFromFile, openExternalUrl } from './hooks/useTauri';
 
-// View IDs include legacy ones ('browse-mods', 'browse-modpacks',
-// 'tutorial') so internal handlers + deep-links that pre-date the
-// 1.7.0 IA collapse still resolve to a sensible surface — the view
-// router below maps them onto the new Library/Modpacks tabs or the
-// Help view. The sidebar itself only exposes the four canonical ids.
-type View = 'home' | 'profiles' | 'mods' | 'browse-mods' | 'browse-modpacks' | 'tutorial' | 'settings';
+// View IDs include legacy ones ('browse-mods', 'browse-modpacks')
+// so internal handlers + deep-links that pre-date the 1.7.0 IA
+// collapse still resolve to a sensible surface — the view router
+// below maps them onto the new Library/Modpacks tabs. The sidebar
+// itself only exposes the four canonical ids. Help moved entirely
+// to the topbar drawer + Settings tab.
+type View = 'home' | 'profiles' | 'mods' | 'browse-mods' | 'browse-modpacks' | 'settings';
 type ResizeDirection = 'East' | 'North' | 'NorthEast' | 'NorthWest' | 'South' | 'SouthEast' | 'SouthWest' | 'West';
 
 // 1.7.0 IA — sidebar collapsed from 7 items to 4 total: Home /
@@ -861,11 +861,6 @@ function AppInner() {
                 initialTab={activeView === 'browse-mods' ? 'browse' : 'installed'}
               />
             )}
-            {/* Backward compat: the 'tutorial' view-id (used by
-                onboarding callbacks etc.) still renders the standalone
-                Help page. New surfaces use HelpDrawer (topbar `?`) or
-                the Settings → Help tab instead. */}
-            {activeView === 'tutorial' && <HelpView onGoToSettings={() => setActiveView('settings')} />}
             {activeView === 'settings' && <SettingsView />}
 
             {/* 1.7.0 T8 — branched first-launch onboarding. The flow
@@ -887,10 +882,6 @@ function AppInner() {
                   dismissOnboarding();
                   setActiveView('profiles');
                   setOpenCreateWizardSignal((n) => n + 1);
-                }}
-                onGoToModpacks={() => {
-                  dismissOnboarding();
-                  setActiveView('profiles');
                 }}
                 onGoToHome={() => {
                   dismissOnboarding();

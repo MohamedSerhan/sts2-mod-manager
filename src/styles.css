@@ -561,10 +561,6 @@ body {
   background: oklch(0.22 0.06 250);
 }
 
-.gf-profile-special-actions {
-  display: flex;
-  margin: -2px 0 14px;
-}
 .gf-profile-library-launch {
   display: flex;
   align-items: center;

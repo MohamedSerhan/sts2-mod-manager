@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
 
@@ -20,15 +20,20 @@ interface Props {
  */
 export function HelpDrawer({ open, onClose }: Props) {
   const { t } = useTranslation();
+  // Stable handler ref so the Escape listener only re-binds when
+  // `open` flips, not on every parent re-render that ships a fresh
+  // inline `onClose` closure.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
 
   useEffect(() => {
     if (!open) return;
     function handleEsc(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') onCloseRef.current();
     }
     document.addEventListener('keydown', handleEsc);
     return () => document.removeEventListener('keydown', handleEsc);
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 

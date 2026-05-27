@@ -59,7 +59,24 @@ pub fn sanitize_path_segment(s: &str) -> String {
     // was 100% path-special characters (e.g. "..", "...", "/", "\\:")
     // and the result would be a useless folder name like "_".
     if trimmed.is_empty() || trimmed.chars().all(|c| c == '_') {
-        "mod".to_string()
+        return "mod".to_string();
+    }
+    // Windows reserved device names: CON, PRN, AUX, NUL, COM1-9, LPT1-9.
+    // A bare reserved name (case-insensitive) OR one with an extension
+    // (`con.txt`) cannot become a real file on Windows — the OS rejects it
+    // before our code even runs. Prefix with `_` so the folder is creatable
+    // everywhere without changing user-visible naming much.
+    let stem = trimmed.split('.').next().unwrap_or(trimmed).to_ascii_uppercase();
+    let reserved = matches!(
+        stem.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL"
+            | "COM1" | "COM2" | "COM3" | "COM4" | "COM5"
+            | "COM6" | "COM7" | "COM8" | "COM9"
+            | "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5"
+            | "LPT6" | "LPT7" | "LPT8" | "LPT9"
+    );
+    if reserved {
+        format!("_{trimmed}")
     } else {
         trimmed.to_string()
     }
@@ -385,6 +402,28 @@ mod path_safety_tests {
     fn sanitize_preserves_normal_names() {
         assert_eq!(sanitize_path_segment("RitsuLib"), "RitsuLib");
         assert_eq!(sanitize_path_segment("My-Mod_v1.2"), "My-Mod_v1.2");
+    }
+
+    #[test]
+    fn sanitize_prefixes_windows_reserved_names() {
+        // Bare reserved names get `_` prefixed so they're creatable on Windows.
+        assert_eq!(sanitize_path_segment("CON"), "_CON");
+        assert_eq!(sanitize_path_segment("nul"), "_nul");
+        assert_eq!(sanitize_path_segment("Aux"), "_Aux");
+        assert_eq!(sanitize_path_segment("PRN"), "_PRN");
+        // COM1-9 + LPT1-9 are the device-port reservations.
+        assert_eq!(sanitize_path_segment("COM1"), "_COM1");
+        assert_eq!(sanitize_path_segment("lpt9"), "_lpt9");
+        // Reserved name + extension still triggers — Windows treats the stem.
+        assert_eq!(sanitize_path_segment("con.txt"), "_con.txt");
+        assert_eq!(sanitize_path_segment("COM3.dll"), "_COM3.dll");
+        // Names that merely START with a reserved word but have more letters
+        // before the dot are safe — e.g. "CONFIG" is not the reserved "CON".
+        assert_eq!(sanitize_path_segment("CONFIG"), "CONFIG");
+        assert_eq!(sanitize_path_segment("auxiliary"), "auxiliary");
+        // COM10+ and LPT10+ are NOT reserved.
+        assert_eq!(sanitize_path_segment("COM10"), "COM10");
+        assert_eq!(sanitize_path_segment("LPT0"), "LPT0");
     }
 
     #[test]

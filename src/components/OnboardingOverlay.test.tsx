@@ -45,7 +45,6 @@ function setup(gameInfo: GameInfoLike | null = null) {
   const onComplete = vi.fn();
   const onCreateModpack = vi.fn();
   const onGoToHome = vi.fn();
-  const onGoToModpacks = vi.fn();
   const refreshGame = vi.fn(async () => {});
   render(
     <OnboardingOverlay
@@ -54,11 +53,10 @@ function setup(gameInfo: GameInfoLike | null = null) {
       onComplete={onComplete}
       onCreateModpack={onCreateModpack}
       onGoToHome={onGoToHome}
-      onGoToModpacks={onGoToModpacks}
       refreshGame={refreshGame}
     />,
   );
-  return { onSkip, onComplete, onCreateModpack, onGoToHome, onGoToModpacks, refreshGame };
+  return { onSkip, onComplete, onCreateModpack, onGoToHome, refreshGame };
 }
 
 /** Walk from a freshly mounted overlay (with a valid game seeded so the

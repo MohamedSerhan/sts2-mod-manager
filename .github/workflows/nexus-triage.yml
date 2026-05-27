@@ -42,18 +42,29 @@ jobs:
 
       - name: Install curl-impersonate-chrome
         # curl-impersonate lets us bypass Cloudflare TLS fingerprinting on Nexus.
-        # Pinned to v0.6.1 (latest stable as of 2026-05-27); update by bumping the
-        # version in the URL and sha256sum below when a newer release is needed.
-        # sha256: verify with `sha256sum curl-impersonate-v0.6.1.x86_64-linux-gnu.tar.gz`
-        # after downloading from https://github.com/lwthiker/curl-impersonate/releases
+        # Pinned to v0.6.1 (latest stable as of 2026-05-27); the latest chrome
+        # version available in this release is curl_chrome116.
+        # See https://github.com/lwthiker/curl-impersonate/releases
+        #
+        # The tarball ships two real binaries (curl-impersonate-chrome,
+        # curl-impersonate-ff) and a set of shell wrappers (curl_chrome116,
+        # curl_chrome110, etc.) that invoke them with the right TLS args.
+        # We need to install BOTH the binaries and the wrappers.
         run: |
           CURL_IMP_VERSION="0.6.1"
           CURL_IMP_ARCHIVE="curl-impersonate-v${CURL_IMP_VERSION}.x86_64-linux-gnu.tar.gz"
           CURL_IMP_URL="https://github.com/lwthiker/curl-impersonate/releases/download/v${CURL_IMP_VERSION}/${CURL_IMP_ARCHIVE}"
-          wget -q "${CURL_IMP_URL}" -O "${CURL_IMP_ARCHIVE}"
-          tar -xf "${CURL_IMP_ARCHIVE}"
-          sudo mv curl_chrome116 /usr/local/bin/curl_chrome116
-          sudo chmod +x /usr/local/bin/curl_chrome116
+          STAGE=$(mktemp -d)
+          wget -q "${CURL_IMP_URL}" -O "${STAGE}/${CURL_IMP_ARCHIVE}"
+          tar -xf "${STAGE}/${CURL_IMP_ARCHIVE}" -C "${STAGE}"
+          # Install every binary and wrapper from the extracted archive.
+          sudo install -m 0755 "${STAGE}"/curl-impersonate-chrome /usr/local/bin/
+          sudo install -m 0755 "${STAGE}"/curl-impersonate-ff /usr/local/bin/
+          sudo install -m 0755 "${STAGE}"/curl_chrome* /usr/local/bin/
+          sudo install -m 0755 "${STAGE}"/curl_ff* /usr/local/bin/
+          sudo install -m 0755 "${STAGE}"/curl_edge* /usr/local/bin/ 2>/dev/null || true
+          sudo install -m 0755 "${STAGE}"/curl_safari* /usr/local/bin/ 2>/dev/null || true
+          rm -rf "${STAGE}"
           curl_chrome116 --version
 
       - name: Run triage script

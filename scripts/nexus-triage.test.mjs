@@ -318,3 +318,92 @@ test('renderIssueBody: snapshot timestamp is ISO 8601 UTC with Z suffix', () => 
   assert.match(match[1], /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/, `ISO 8601 format: got ${match[1]}`);
   assert.ok(match[1].endsWith('Z'), `UTC Z suffix: got ${match[1]}`);
 });
+
+import {
+  fetchModComments,
+  fetchModBugReports,
+  introspectSchema,
+  setHttpFetch,
+} from './nexus-triage.mjs';
+
+const FIXTURE_COMMENTS = JSON.parse(readFileSync('scripts/fixtures/graphql-comments-mixed.json', 'utf-8'));
+const FIXTURE_BUGS = JSON.parse(readFileSync('scripts/fixtures/graphql-bugs-mixed.json', 'utf-8'));
+const FIXTURE_DRIFT_BUGREPORTS = JSON.parse(readFileSync('scripts/fixtures/graphql-schema-drift-bugreports.json', 'utf-8'));
+const FIXTURE_DRIFT_COMMENTS = JSON.parse(readFileSync('scripts/fixtures/graphql-schema-drift-comments.json', 'utf-8'));
+
+test('fetchModComments POSTs with apikey header and returns nodes', async () => {
+  let captured;
+  setHttpFetch(async (url, opts) => {
+    captured = { url, opts };
+    return { ok: true, status: 200, json: async () => FIXTURE_COMMENTS };
+  });
+  try {
+    const nodes = await fetchModComments({ apiKey: 'test-key' });
+    assert.equal(captured.url, 'https://api.nexusmods.com/v2/graphql');
+    assert.equal(captured.opts.method, 'POST');
+    assert.equal(captured.opts.headers.apikey, 'test-key');
+    assert.equal(captured.opts.headers['Content-Type'], 'application/json');
+    assert.equal(nodes.length, 5);
+    assert.equal(nodes[0].id, '300001');
+  } finally {
+    setHttpFetch(globalThis.fetch);
+  }
+});
+
+test('fetchModBugReports filters by status [open]', async () => {
+  let body;
+  setHttpFetch(async (_url, opts) => {
+    body = JSON.parse(opts.body);
+    return { ok: true, status: 200, json: async () => FIXTURE_BUGS };
+  });
+  try {
+    await fetchModBugReports({ apiKey: 'test-key' });
+    assert.deepEqual(body.variables.statusIn, ['open']);
+  } finally {
+    setHttpFetch(globalThis.fetch);
+  }
+});
+
+test('introspectSchema: both fields present returns hasComments + hasBugReports true', async () => {
+  setHttpFetch(async () => ({
+    ok: true, status: 200,
+    json: async () => ({ data: { __type: { name: 'Mod', fields: [
+      { name: 'comments', type: { name: 'CommentConnection' }},
+      { name: 'bugReports', type: { name: 'BugReportConnection' }},
+    ]}}}),
+  }));
+  try {
+    const result = await introspectSchema({ apiKey: 'test-key' });
+    assert.deepEqual(result, { hasComments: true, hasBugReports: true });
+  } finally {
+    setHttpFetch(globalThis.fetch);
+  }
+});
+
+test('introspectSchema: bugReports missing soft-fails (returns hasBugReports: false)', async (t) => {
+  setHttpFetch(async () => ({ ok: true, status: 200, json: async () => FIXTURE_DRIFT_BUGREPORTS }));
+  const exitCalls = [];
+  t.mock.method(process, 'exit', (code) => { exitCalls.push(code); throw new Error('exit'); });
+  try {
+    const result = await introspectSchema({ apiKey: 'test-key' });
+    assert.deepEqual(result, { hasComments: true, hasBugReports: false });
+    assert.deepEqual(exitCalls, [], 'should NOT exit on bugReports drift');
+  } finally {
+    setHttpFetch(globalThis.fetch);
+  }
+});
+
+test('introspectSchema: comments missing hard-fails (exit 2)', async (t) => {
+  setHttpFetch(async () => ({ ok: true, status: 200, json: async () => FIXTURE_DRIFT_COMMENTS }));
+  const exitCalls = [];
+  const errs = [];
+  t.mock.method(process, 'exit', (code) => { exitCalls.push(code); throw new Error('exit'); });
+  t.mock.method(console, 'error', (m) => { errs.push(String(m)); });
+  try {
+    await assert.rejects(() => introspectSchema({ apiKey: 'test-key' }), /exit/);
+    assert.deepEqual(exitCalls, [2]);
+    assert.ok(errs.some((m) => m.includes('comments')), 'error must name the missing field');
+  } finally {
+    setHttpFetch(globalThis.fetch);
+  }
+});

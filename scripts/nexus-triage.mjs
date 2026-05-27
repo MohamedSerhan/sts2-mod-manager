@@ -128,3 +128,104 @@ export function renderIssueBody(item, template, { classification, confidence }) 
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// GraphQL client
+// ---------------------------------------------------------------------------
+
+// Single indirection point for HTTP calls so tests can stub without
+// monkey-patching globalThis.fetch (which leaks across tests).
+let httpFetch = globalThis.fetch;
+export function setHttpFetch(fn) { httpFetch = fn; }
+
+const COMMENTS_QUERY = `
+  query ModComments($gameDomain: String!, $modId: Int!, $first: Int!) {
+    mod(domain: $gameDomain, modId: $modId) {
+      comments(first: $first, sortBy: createdAt, direction: DESC) {
+        nodes {
+          id
+          body
+          createdAt
+          creator { name memberId }
+        }
+      }
+    }
+  }
+`.trim();
+
+const BUGS_QUERY = `
+  query ModBugReports($gameDomain: String!, $modId: Int!, $first: Int!, $statusIn: [BugReportStatus!]) {
+    mod(domain: $gameDomain, modId: $modId) {
+      bugReports(first: $first, sortBy: createdAt, direction: DESC, statusIn: $statusIn) {
+        nodes {
+          id
+          title
+          description
+          status
+          priority
+          createdAt
+          gameVersion
+          reporter { name memberId }
+        }
+      }
+    }
+  }
+`.trim();
+
+const INTROSPECT_QUERY = `
+  query IntrospectMod {
+    __type(name: "Mod") { name fields { name type { name } } }
+  }
+`.trim();
+
+async function graphqlPost({ apiKey, query, variables }) {
+  const res = await httpFetch(NEXUS_GRAPHQL_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: apiKey },
+    body: JSON.stringify({ query, variables }),
+  });
+  if (!res.ok) {
+    console.error(`nexus-triage: GraphQL POST failed with status ${res.status}`);
+    process.exit(1);
+  }
+  const json = await res.json();
+  if (json.errors?.length) {
+    console.error(`nexus-triage: GraphQL returned errors: ${JSON.stringify(json.errors)}`);
+    process.exit(1);
+  }
+  return json.data;
+}
+
+export async function fetchModComments({ apiKey, first = 100 }) {
+  const data = await graphqlPost({
+    apiKey,
+    query: COMMENTS_QUERY,
+    variables: { gameDomain: GAME_DOMAIN, modId: MOD_ID, first },
+  });
+  return data?.mod?.comments?.nodes ?? [];
+}
+
+export async function fetchModBugReports({ apiKey, first = 100 }) {
+  const data = await graphqlPost({
+    apiKey,
+    query: BUGS_QUERY,
+    variables: { gameDomain: GAME_DOMAIN, modId: MOD_ID, first, statusIn: ['open'] },
+  });
+  return data?.mod?.bugReports?.nodes ?? [];
+}
+
+export async function introspectSchema({ apiKey }) {
+  const data = await graphqlPost({ apiKey, query: INTROSPECT_QUERY, variables: {} });
+  const fields = data?.__type?.fields ?? [];
+  const fieldNames = new Set(fields.map((f) => f.name));
+  const hasComments = fieldNames.has('comments');
+  const hasBugReports = fieldNames.has('bugReports');
+  if (!hasComments) {
+    console.error(
+      `nexus-triage: introspection shows Mod.comments is missing. ` +
+      `This is a hard schema drift. Update the query in scripts/nexus-triage.mjs.`
+    );
+    process.exit(2);
+  }
+  return { hasComments, hasBugReports };
+}

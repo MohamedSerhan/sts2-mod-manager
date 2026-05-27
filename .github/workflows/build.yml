@@ -69,6 +69,23 @@ jobs:
         working-directory: src-tauri
         run: cargo check
 
+      # Coverage gate — runs vitest with the thresholds declared in
+      # vitest.config.ts (lines/funcs/stmts 96, branches 90). A drop
+      # below those numbers fails the job and blocks the PR, so a
+      # missing-test regression can no longer ship past the release
+      # script's local-only check (which was the v1.5.0 foot-gun).
+      - name: Frontend coverage
+        run: npm run qa:coverage
+
+      # i18n parity — every en.json key has a zh-Hans counterpart and
+      # the zh values differ from English (with a small allowlist for
+      # technical terms). Catches an i18n drift before it ships.
+      - name: i18n parity
+        run: npm run qa:i18n
+
+      - name: Rust tests
+        run: npm run qa:rust
+
   build:
     if: ${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}
     # Job-level permissions are also declared here in addition to the

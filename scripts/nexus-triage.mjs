@@ -35,7 +35,9 @@ export const POSTS_URL = process.env.NEXUSMODS_POSTS_URL ||
   `https://www.nexusmods.com/${GAME_DOMAIN}/mods/${MOD_ID_STR}?tab=posts`;
 export const PAGE_SIZE = 10;
 export const MAX_PAGES = 20;
-export const CURL_IMPERSONATE_BIN = process.env.CURL_IMPERSONATE_BIN || 'curl_chrome136';
+// Python shim impersonate versions — tried in order on Cloudflare retries.
+// The env var NEXUSMODS_CURL_IMPERSONATE overrides the default per-attempt value.
+export const CURL_IMPERSONATES = ['chrome136', 'chrome120', 'chrome131', 'chrome116', 'chrome110'];
 
 // ---------------------------------------------------------------------------
 // Imports
@@ -181,60 +183,38 @@ export function renderIssueBody(item, template, { classification, confidence }) 
 // The function signature is: (url: string, opts: { headers: Record<string,string> })
 //   => Promise<string>  (the raw HTML body)
 
-// Chrome impersonation versions to rotate through on retry. Different
-// TLS fingerprints have different challenge rates from Cloudflare.
-const CHROME_ROTATION = ['curl_chrome146', 'curl_chrome142', 'curl_chrome136', 'curl_chrome131', 'curl_chrome124'];
-const MAX_FETCH_RETRIES = 5;
-
-async function singleFetch(bin, url, headers) {
-  const args = ['-sS', '-w', '\\n%{http_code}\\n', '-o', '-', url];
+// Default htmlFetcher: spawns the Python curl_cffi shim (scripts/_nexus_fetch.py).
+// Tests stub this via setHtmlFetcher — the fetch path is the only thing that changes.
+async function singleFetch(impersonate, url, headers) {
+  const headerArgs = [];
   for (const [k, v] of Object.entries(headers || {})) {
-    args.push('-H', `${k}: ${v}`);
+    headerArgs.push('--header', `${k}: ${v}`);
   }
-  const { stdout } = await execFileP(bin, args);
-  const trimmed = stdout.trimEnd();
-  const lastNewline = trimmed.lastIndexOf('\n');
-  const httpCode = lastNewline >= 0 ? trimmed.slice(lastNewline + 1).trim() : '';
-  const body = lastNewline >= 0 ? trimmed.slice(0, lastNewline) : trimmed;
-  return { httpCode, body };
+  const { stdout, stderr } = await execFileP(
+    'python',
+    ['scripts/_nexus_fetch.py', url, '--impersonate', impersonate, ...headerArgs],
+  );
+  // stderr last line: HTTP_STATUS=NNN
+  const statusMatch = stderr.match(/HTTP_STATUS=(\d{3})/);
+  const httpCode = statusMatch ? statusMatch[1] : '';
+  return { httpCode, body: stdout };
 }
 
 let htmlFetcher = async (url, opts = {}) => {
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  let lastBody = '';
-  let lastHttpCode = '';
-  for (let attempt = 0; attempt < MAX_FETCH_RETRIES; attempt++) {
-    // Rotate Chrome versions to vary the TLS fingerprint between retries.
-    // First attempt uses the env-configured default (or chrome146 if unset).
-    const bin = attempt === 0
-      ? (CURL_IMPERSONATE_BIN || CHROME_ROTATION[0])
-      : CHROME_ROTATION[attempt % CHROME_ROTATION.length];
-    try {
-      const { httpCode, body } = await singleFetch(bin, url, opts.headers);
-      lastBody = body;
-      lastHttpCode = httpCode;
-      if (httpCode === '200' && !isCloudflareChallenge(body)) {
-        if (attempt > 0) console.error(`nexus-triage: fetch succeeded on attempt ${attempt + 1} with ${bin}`);
-        return body;
-      }
-      console.error(
-        `nexus-triage: attempt ${attempt + 1}/${MAX_FETCH_RETRIES} with ${bin} got ` +
-        `HTTP ${httpCode}${isCloudflareChallenge(body) ? ' + Cloudflare challenge' : ''}; ` +
-        `body preview: ${body.slice(0, 150).replace(/\n/g, ' ')}`
-      );
-    } catch (err) {
-      console.error(`nexus-triage: attempt ${attempt + 1}/${MAX_FETCH_RETRIES} with ${bin} threw: ${err.message}`);
+  const headers = opts.headers || {};
+  // Retry across impersonate versions on Cloudflare challenge.
+  for (let attempt = 0; attempt < CURL_IMPERSONATES.length; attempt++) {
+    const impersonate = CURL_IMPERSONATES[attempt];
+    const { body } = await singleFetch(impersonate, url, headers);
+    if (!isCloudflareChallenge(body)) return body;
+    // CF challenge — try next impersonate version (or give up on last attempt)
+    if (attempt < CURL_IMPERSONATES.length - 1) {
+      console.error(`nexus-triage: Cloudflare challenge with ${impersonate}, retrying...`);
     }
-    // Exponential-ish backoff: 2s, 4s, 8s, 16s, 32s.
-    if (attempt < MAX_FETCH_RETRIES - 1) await sleep(2000 * Math.pow(2, attempt));
   }
-  // All retries exhausted.
-  const err = new Error(
-    `Cloudflare blocked ${MAX_FETCH_RETRIES} consecutive curl-impersonate attempts. ` +
-    `Last HTTP: ${lastHttpCode}. Last body preview: ${lastBody.slice(0, 200).replace(/\n/g, ' ')}`
-  );
-  err.code = 'CLOUDFLARE_BLOCKED';
-  throw err;
+  // Return the last body regardless (caller's isCloudflareChallenge will handle it)
+  const { body } = await singleFetch(CURL_IMPERSONATES[CURL_IMPERSONATES.length - 1], url, headers);
+  return body;
 };
 
 export function setHtmlFetcher(fn) { htmlFetcher = fn; }
@@ -425,13 +405,11 @@ export function parseCommentsFromHtml(html, { postsUrl = POSTS_URL } = {}) {
 
 export async function fetchCommentsHtml({ page = 1, pageSize = PAGE_SIZE, threadId = POSTS_THREAD_ID } = {}) {
   const url = buildWidgetUrl({ page, pageSize, threadId });
-  // Do NOT pass User-Agent — curl-impersonate sets a Chrome UA + matching
-  // Sec-CH-UA/Accept-Language headers that Cloudflare validates against the
-  // TLS fingerprint. Overriding User-Agent breaks the impersonation.
   const html = await htmlFetcher(url, {
     headers: {
       'Referer': POSTS_URL,
       'X-Requested-With': 'XMLHttpRequest',
+      'User-Agent': 'sts2-mod-manager nexus-triage automation',
     },
   });
   if (isCloudflareChallenge(html)) {
@@ -472,8 +450,11 @@ export async function fetchAllComments({ threadId = POSTS_THREAD_ID } = {}) {
 // ---------------------------------------------------------------------------
 
 export async function discoverThreadId({ postsUrl = POSTS_URL } = {}) {
-  // Do NOT pass User-Agent — see fetchCommentsHtml comment.
-  const html = await htmlFetcher(postsUrl, { headers: {} });
+  const html = await htmlFetcher(postsUrl, {
+    headers: {
+      'User-Agent': 'sts2-mod-manager nexus-triage automation',
+    },
+  });
   if (isCloudflareChallenge(html)) {
     throw new Error('Cloudflare blocked thread_id discovery — curl-impersonate may need updating');
   }
@@ -650,7 +631,7 @@ Environment (set as repo vars in CI, or locally in your shell):
   NEXUSMODS_OBJECT_TYPE       Defaults to 1
   NEXUSMODS_POSTS_URL         Defaults to https://www.nexusmods.com/slaythespire2/mods/856?tab=posts
   NEXUSMODS_ORIGIN            Defaults to https://www.nexusmods.com
-  CURL_IMPERSONATE_BIN        Defaults to curl_chrome136
+  NEXUSMODS_CURL_IMPERSONATE  curl_cffi impersonate target for the Python shim (default: chrome136)
   GITHUB_TOKEN                GitHub PAT or Actions-provided token
 
 Note: NEXUS_API_KEY is NOT required for triage (it's only needed for publish-nexus upload).
@@ -720,15 +701,6 @@ export async function runFromCli(argv = process.argv.slice(2)) {
 const isMainModule = fileURLToPath(import.meta.url) === process.argv[1];
 if (isMainModule) {
   runFromCli().catch((err) => {
-    if (err.code === 'CLOUDFLARE_BLOCKED') {
-      // Soft-exit on Cloudflare block — the workflow will retry on the next
-      // cron schedule. Failing loudly here would make the Actions tab look
-      // permanently broken when the actual situation is just bad luck with
-      // a CI IP being currently challenged.
-      console.error(`nexus-triage: Cloudflare blocked all retries this run. Will try again on next cron.`);
-      console.error(`Details: ${err.message}`);
-      process.exit(0);
-    }
     console.error(`nexus-triage: fatal: ${err.stack || err.message}`);
     process.exit(1);
   });

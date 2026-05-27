@@ -336,3 +336,80 @@ This is the first filter in the pipeline — before dedup, before classification
 - [Nexus GraphQL API docs](https://graphql.nexusmods.com/)
 - [Claude Code unattended token expiry tracking issue](https://github.com/anthropics/claude-code/issues/38813) — context for the watchdog choice.
 - The "no silent-skip patterns" rule under Testing requirements mirrors the maintainer's standing rule for the Vitest suite. Applies equally to `node --test` tests.
+
+---
+
+## Addendum 2026-05-27: GraphQL pivot to HTML widget scraping
+
+**The GraphQL design above does not work in practice.** First-run schema introspection against `api.nexusmods.com/v2/graphql` revealed that the `Mod` type has 38 fields covering metadata (downloads, endorsements, author, tags, etc.) but **no `comments` field, no `bugReports` field**. Nexus's v2 GraphQL does not expose mod-page comments or bug reports at all — they appear to be available only on collections, not on individual mods.
+
+This was caught by the design's own schema-drift detection in 9 seconds on the first dry-run, with no bad data filed. The investment in the two-tier drift policy paid off: the failure was loud, specific, and recoverable.
+
+### The actual working approach (community-proven)
+
+[jadistanbelly/sts2-multiplayer-save-slots](https://github.com/jadistanbelly/sts2-multiplayer-save-slots) — another active STS2 mod — implements Nexus-posts-to-GitHub-issue sync via HTML scraping of Nexus's internal AJAX widget endpoint:
+
+```
+GET https://www.nexusmods.com/Core/Libs/Common/Widgets/CommentContainer
+  ?tabbed=1
+  &object_id={mod_id}
+  &game_id={game_id}              # 8916 for STS2 (same across all STS2 mods)
+  &object_type=1
+  &thread_id={posts_thread_id}    # per-mod; discoverable from the live posts page HTML
+  &skip_opening_post=0
+  &user_is_blocked=
+  &searchable=true
+  &page_size=10
+  &page=N
+
+Headers:
+  Referer: https://www.nexusmods.com/slaythespire2/mods/{mod_id}?tab=posts
+  X-Requested-With: XMLHttpRequest
+  User-Agent: <custom>
+```
+
+The response is HTML containing `<li id="comment-N" class="comment">` blocks. Each comment has `<span class="comment-name">{author}</span>`, `<div id="comment-content-N">{body}</div>`, and `<time data-date="{unix-ts}">`. Replies threaded via `parent_id`.
+
+### Critical constraints
+
+1. **Cloudflare requires TLS-fingerprint impersonation.** Plain `fetch`/`node:https` returns 403 (or a Cloudflare challenge page). The reference uses Python `curl_cffi` with `chrome136` impersonation. Our Node port will need to shell out to a `curl-impersonate-chrome` binary via `node:child_process`, or use the npm `curl-impersonate` wrapper. The CI runner (`ubuntu-latest`) supports installing the binary via apt or via the upstream releases.
+
+2. **No `NEXUS_API_KEY` required for this endpoint.** Configuration moves from secrets to repo `vars` for: `NEXUSMODS_POSTS_URL`, `NEXUSMODS_GAME_ID`, `NEXUSMODS_MOD_ID`, `NEXUSMODS_POSTS_THREAD_ID`. `NEXUS_API_KEY` remains in secrets for the existing `publish-nexus` upload job — unchanged.
+
+3. **Per-mod `thread_id` discovery.** Each mod's posts tab is a Nexus forum thread with its own ID. The reference uses `16873160` for their mod 887; we need to find ours for mod 856. Discoverable by fetching the regular posts page HTML and regex-extracting the thread ID from the embedded JavaScript. Our port will include a `--discover-thread-id` mode that prints the value once, which the operator stores as a repo var.
+
+4. **Bugs are out of scope for this iteration.** The widget endpoint serves only the posts tab. The Nexus bugs tab uses a different (presumably similar) endpoint with different params. Out of scope until posts ingestion is verified working. The bugs path can be added as a sibling fetcher later.
+
+### What changes in our codebase
+
+**Replace** (entirely):
+- `INTROSPECT_QUERY`, `COMMENTS_QUERY`, `BUGS_QUERY` constants
+- `graphqlPost`, `fetchModComments`, `fetchModBugReports`, `introspectSchema` functions
+- All 4 `scripts/fixtures/graphql-*.json` fixtures (replace with HTML fixtures)
+- The GraphQL-specific tests (the 5 in Task 6)
+- `NEXUS_GRAPHQL_URL` constant
+
+**Add:**
+- `WIDGET_BASE_URL` constant and `NEXUSMODS_*` env-var/vars-driven config
+- `fetchCommentsHtml({...})` — pagination loop, curl-impersonate execFile
+- `parseComments(html)` — HTML parser using a small custom walker or a node-html-parser-style dep
+- `discoverThreadId({modId, gameDomain})` — one-shot helper invoked by `--discover-thread-id`
+- HTML fixtures for tests
+
+**Keep unchanged:**
+- `loadState`/`saveState` and the state file format
+- `sanitizeTitle`
+- `classify` (heuristic classifier with priority-ordered rules)
+- `renderIssueBody` and `nexus-triage-prompt.md`
+- The `main` orchestrator's filter/cap/render pipeline (downstream of fetch)
+- `setHttpFetch` (still useful as a generic indirection)
+- `setGhInvoker` and `ensureSchemaGapIssue` (the schema-gap concept stays — fires when curl-impersonate fails repeatedly OR when the HTML parse fails, indicating Nexus changed their markup)
+- The reactive `claude.yml` workflow
+- The watchdog workflows
+
+**Workflow changes:**
+- `nexus-triage.yml`: add an `apt-get install -y curl-impersonate` step (or equivalent), drop `NEXUS_API_KEY` env, add `NEXUSMODS_*` vars references
+
+### Credit
+
+This pivot is informed by [jadistanbelly](https://github.com/jadistanbelly)'s [sts2-multiplayer-save-slots](https://github.com/jadistanbelly/sts2-multiplayer-save-slots) — specifically `scripts/sync_nexus_posts_to_github.py` (MIT-licensed). Our Node port is independent code but adopts their endpoint URL pattern, query params, HTML selectors, and the curl-impersonate-for-Cloudflare insight.

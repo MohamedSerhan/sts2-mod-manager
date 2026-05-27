@@ -35,7 +35,7 @@ export const POSTS_URL = process.env.NEXUSMODS_POSTS_URL ||
   `https://www.nexusmods.com/${GAME_DOMAIN}/mods/${MOD_ID_STR}?tab=posts`;
 export const PAGE_SIZE = 10;
 export const MAX_PAGES = 20;
-export const CURL_IMPERSONATE_BIN = process.env.CURL_IMPERSONATE_BIN || 'curl_chrome136';
+export const CURL_IMPERSONATE_BIN = process.env.CURL_IMPERSONATE_BIN || 'curl_chrome116';
 
 // ---------------------------------------------------------------------------
 // Imports
@@ -605,7 +605,7 @@ Environment (set as repo vars in CI, or locally in your shell):
   NEXUSMODS_OBJECT_TYPE       Defaults to 1
   NEXUSMODS_POSTS_URL         Defaults to https://www.nexusmods.com/slaythespire2/mods/856?tab=posts
   NEXUSMODS_ORIGIN            Defaults to https://www.nexusmods.com
-  CURL_IMPERSONATE_BIN        Defaults to curl_chrome136
+  CURL_IMPERSONATE_BIN        Defaults to curl_chrome116
   GITHUB_TOKEN                GitHub PAT or Actions-provided token
 
 Note: NEXUS_API_KEY is NOT required for triage (it's only needed for publish-nexus upload).

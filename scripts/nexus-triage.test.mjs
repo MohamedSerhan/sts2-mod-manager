@@ -407,3 +407,135 @@ test('introspectSchema: comments missing hard-fails (exit 2)', async (t) => {
     setHttpFetch(globalThis.fetch);
   }
 });
+
+import { main, setGhInvoker } from './nexus-triage.mjs';
+
+const MAINTAINER_FIXTURE_COMMENTS = [
+  // From maintainer — must be skipped
+  { id: '500001', body: 'reply from maintainer about something', createdAt: '2026-05-25T08:00:00Z', creator: { name: 'xxskullmikexx', memberId: '1' }},
+  { id: '500002', body: 'co-maintainer note', createdAt: '2026-05-25T09:00:00Z', creator: { name: 'Sky2Fly', memberId: '2' }},
+  // Maintainer with different casing — must still be skipped
+  { id: '500003', body: 'another maintainer comment', createdAt: '2026-05-25T09:30:00Z', creator: { name: 'XXSkullMikeXX', memberId: '1' }},
+];
+
+test('main: maintainer comments are skipped before classification', async (t) => {
+  const fixture = { data: { mod: { comments: { nodes: MAINTAINER_FIXTURE_COMMENTS }, bugReports: { nodes: [] }}}};
+  setHttpFetch(async (_url, opts) => {
+    const body = JSON.parse(opts.body);
+    if (body.query.includes('__type')) {
+      return { ok: true, status: 200, json: async () => ({ data: { __type: { name: 'Mod', fields: [
+        { name: 'comments', type: { name: 'CommentConnection' }},
+        { name: 'bugReports', type: { name: 'BugReportConnection' }},
+      ]}}})};
+    }
+    return { ok: true, status: 200, json: async () => fixture };
+  });
+  const ghCalls = [];
+  setGhInvoker(async (args) => { ghCalls.push(args); return { number: ghCalls.length + 100, url: `https://github.com/x/y/issues/${ghCalls.length + 100}` }; });
+  try {
+    const result = await main({ dryRun: true, apiKey: 'k', ghToken: 't', state: { schema_version: 1, last_run_at: '', comments: {}, bugs: {}, kudos_seen: [] }});
+    assert.equal(ghCalls.length, 0, 'no issues filed in dry-run');
+    assert.equal(result.filed.length, 0, 'no filed in result');
+    assert.equal(result.maintainerSkipped, 3, 'all three maintainer comments skipped');
+  } finally {
+    setHttpFetch(globalThis.fetch);
+  }
+});
+
+test('main: per-run cap caps non-kudos at 5, kudos do not count', async () => {
+  const items = Array.from({ length: 10 }, (_, i) => ({
+    id: String(600000 + i),
+    body: `crash issue number ${i}`,
+    createdAt: `2026-05-25T0${i}:00:00Z`,
+    creator: { name: `User${i}`, memberId: String(700000 + i) },
+  }));
+  const kudosItems = Array.from({ length: 3 }, (_, i) => ({
+    id: String(800000 + i),
+    body: 'thanks great mod love it',
+    createdAt: `2026-05-25T1${i}:00:00Z`,
+    creator: { name: `KudosUser${i}`, memberId: String(900000 + i) },
+  }));
+  const fixture = { data: { mod: { comments: { nodes: [...items, ...kudosItems] }, bugReports: { nodes: [] }}}};
+  setHttpFetch(async (_url, opts) => {
+    const body = JSON.parse(opts.body);
+    if (body.query.includes('__type')) {
+      return { ok: true, status: 200, json: async () => ({ data: { __type: { name: 'Mod', fields: [
+        { name: 'comments', type: { name: 'CommentConnection' }},
+        { name: 'bugReports', type: { name: 'BugReportConnection' }},
+      ]}}})};
+    }
+    return { ok: true, status: 200, json: async () => fixture };
+  });
+  const ghCalls = [];
+  setGhInvoker(async (args) => { ghCalls.push(args); return { number: ghCalls.length + 100, url: `https://github.com/x/y/issues/${ghCalls.length + 100}` }; });
+  try {
+    const result = await main({ dryRun: false, apiKey: 'k', ghToken: 't', state: { schema_version: 1, last_run_at: '', comments: {}, bugs: {}, kudos_seen: [] }});
+    assert.equal(ghCalls.length, 5, `cap should be 5, got ${ghCalls.length}`);
+    assert.equal(result.kudosSkipped, 3, 'all 3 kudos accounted');
+    // Oldest 5 (i=0..4) should file
+    const filedIds = result.filed.map((f) => f.nexus_id).sort();
+    assert.deepEqual(filedIds, ['600000', '600001', '600002', '600003', '600004']);
+  } finally {
+    setHttpFetch(globalThis.fetch);
+  }
+});
+
+test('main: already-seen items are skipped silently', async () => {
+  const items = [
+    { id: '700001', body: 'crash issue old', createdAt: '2026-05-25T08:00:00Z', creator: { name: 'OldUser', memberId: '10' }},
+    { id: '700002', body: 'crash issue new', createdAt: '2026-05-25T09:00:00Z', creator: { name: 'NewUser', memberId: '11' }},
+  ];
+  setHttpFetch(async (_url, opts) => {
+    const body = JSON.parse(opts.body);
+    if (body.query.includes('__type')) {
+      return { ok: true, status: 200, json: async () => ({ data: { __type: { name: 'Mod', fields: [
+        { name: 'comments', type: { name: 'CommentConnection' }},
+        { name: 'bugReports', type: { name: 'BugReportConnection' }},
+      ]}}})};
+    }
+    return { ok: true, status: 200, json: async () => ({ data: { mod: { comments: { nodes: items }, bugReports: { nodes: [] }}}})};
+  });
+  const ghCalls = [];
+  setGhInvoker(async (args) => { ghCalls.push(args); return { number: 999, url: 'https://github.com/x/y/issues/999' }; });
+  try {
+    const state = {
+      schema_version: 1, last_run_at: '',
+      comments: { '700001': { gh_issue_url: 'https://github.com/x/y/issues/45', classification: 'bug', filed_at: '2026-05-24T00:00:00Z' }},
+      bugs: {}, kudos_seen: [],
+    };
+    const result = await main({ dryRun: false, apiKey: 'k', ghToken: 't', state });
+    assert.equal(ghCalls.length, 1, `only the new item files, got ${ghCalls.length}`);
+    assert.equal(result.filed[0].nexus_id, '700002');
+  } finally {
+    setHttpFetch(globalThis.fetch);
+  }
+});
+
+test('main: Nexus bug with status=closed is skipped silently on first sight', async () => {
+  const bugs = [
+    { id: '900001', title: 'open bug', description: 'open', status: 'open', priority: 'high', createdAt: '2026-05-25T08:00:00Z', gameVersion: '1.0.5', reporter: { name: 'BugUser', memberId: '20' }},
+    { id: '900002', title: 'closed bug', description: 'closed', status: 'closed', priority: 'low', createdAt: '2026-05-25T09:00:00Z', gameVersion: '1.0.5', reporter: { name: 'BugUser2', memberId: '21' }},
+  ];
+  setHttpFetch(async (_url, opts) => {
+    const body = JSON.parse(opts.body);
+    if (body.query.includes('__type')) {
+      return { ok: true, status: 200, json: async () => ({ data: { __type: { name: 'Mod', fields: [
+        { name: 'comments', type: { name: 'CommentConnection' }},
+        { name: 'bugReports', type: { name: 'BugReportConnection' }},
+      ]}}})};
+    }
+    if (body.query.includes('ModBugReports')) {
+      return { ok: true, status: 200, json: async () => ({ data: { mod: { bugReports: { nodes: bugs }}}})};
+    }
+    return { ok: true, status: 200, json: async () => ({ data: { mod: { comments: { nodes: [] }}}})};
+  });
+  const ghCalls = [];
+  setGhInvoker(async (args) => { ghCalls.push(args); return { number: 999, url: 'https://github.com/x/y/issues/999' }; });
+  try {
+    const result = await main({ dryRun: false, apiKey: 'k', ghToken: 't', state: { schema_version: 1, last_run_at: '', comments: {}, bugs: {}, kudos_seen: [] }});
+    assert.equal(ghCalls.length, 1, 'only the open bug files');
+    assert.equal(result.filed[0].nexus_id, '900001');
+  } finally {
+    setHttpFetch(globalThis.fetch);
+  }
+});

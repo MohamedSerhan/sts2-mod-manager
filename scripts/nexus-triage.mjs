@@ -17,6 +17,9 @@ export const SENTINEL_PATH = 'scripts/nexus-triage.disabled';
 export const STATE_SCHEMA_VERSION = 1;
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+const execFileP = promisify(execFile);
 
 export function loadState(path) {
   if (!existsSync(path)) {
@@ -228,4 +231,177 @@ export async function introspectSchema({ apiKey }) {
     process.exit(2);
   }
   return { hasComments, hasBugReports };
+}
+
+// ---------------------------------------------------------------------------
+// gh CLI indirection
+// ---------------------------------------------------------------------------
+
+// Like setHttpFetch — lets tests stub without spawning a real gh process.
+let ghInvoker = async (args) => {
+  const { stdout } = await execFileP('gh', args);
+  // gh issue create outputs the URL of the created issue on stdout.
+  const urlMatch = stdout.match(/https:\/\/[^\s]+\/issues\/(\d+)/);
+  if (urlMatch) return { number: parseInt(urlMatch[1], 10), url: urlMatch[0] };
+  // Fallback: return raw stdout if it doesn't look like a URL
+  return { number: -1, url: stdout.trim() };
+};
+export function setGhInvoker(fn) { ghInvoker = fn; }
+
+// ---------------------------------------------------------------------------
+// URL helpers
+// ---------------------------------------------------------------------------
+
+const NEXUS_COMMENT_URL = (id) =>
+  `https://www.nexusmods.com/${GAME_DOMAIN}/mods/${MOD_ID}?tab=posts&postid=${id}`;
+const NEXUS_BUG_URL = (id) =>
+  `https://www.nexusmods.com/${GAME_DOMAIN}/mods/${MOD_ID}?tab=bugs&bugid=${id}`;
+
+const SKIP_BUG_STATUSES = new Set(['closed', 'duplicate', 'not-a-bug']);
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+function isMaintainer(name) {
+  if (!name) return false;
+  const lower = name.toLowerCase();
+  return MAINTAINER_HANDLES.some((h) => h.toLowerCase() === lower);
+}
+
+function commentToItem(c) {
+  return {
+    kind: 'comment',
+    id: String(c.id),
+    body: c.body ?? '',
+    createdAt: c.createdAt,
+    author: c.creator?.name ?? '<unknown>',
+    authorId: c.creator?.memberId ?? '',
+    nexus_url: NEXUS_COMMENT_URL(c.id),
+  };
+}
+
+function bugToItem(b) {
+  return {
+    kind: 'bug',
+    id: String(b.id),
+    title: b.title,
+    body: b.description ?? '',
+    status: b.status,
+    gameVersion: b.gameVersion,
+    createdAt: b.createdAt,
+    author: b.reporter?.name ?? '<unknown>',
+    authorId: b.reporter?.memberId ?? '',
+    nexus_url: NEXUS_BUG_URL(b.id),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// main orchestrator
+// ---------------------------------------------------------------------------
+
+export async function main({ dryRun, apiKey, ghToken, state, templatePath = TEMPLATE_PATH }) {
+  const result = {
+    maintainerSkipped: 0,
+    alreadySeen: 0,
+    closedBugSkipped: 0,
+    kudosSkipped: 0,
+    filed: [],
+    pendingNextRun: 0,
+  };
+
+  const schema = await introspectSchema({ apiKey });
+
+  const commentNodes = schema.hasComments ? await fetchModComments({ apiKey }) : [];
+  const bugNodes = schema.hasBugReports ? await fetchModBugReports({ apiKey }) : [];
+
+  if (!schema.hasBugReports) {
+    // Caller is responsible for filing the one-time ops:nexus-schema-gap issue.
+    result.bugReportsUnavailable = true;
+  }
+
+  const comments = commentNodes.map(commentToItem);
+  const bugs = bugNodes.map(bugToItem);
+
+  // 1. Maintainer filter — case-insensitive — FIRST
+  const nonMaintainerComments = comments.filter((c) => {
+    if (isMaintainer(c.author)) { result.maintainerSkipped++; return false; }
+    return true;
+  });
+  const nonMaintainerBugs = bugs.filter((b) => {
+    if (isMaintainer(b.author)) { result.maintainerSkipped++; return false; }
+    return true;
+  });
+
+  // 2. Closed-bug filter (only on first sight; if it's in state already, dedup catches it)
+  const openBugs = nonMaintainerBugs.filter((b) => {
+    if (state.bugs[b.id]) return true; // already filed; let dedup handle
+    if (SKIP_BUG_STATUSES.has(b.status)) { result.closedBugSkipped++; return false; }
+    return true;
+  });
+
+  // 3. Dedup against state
+  const unseenComments = nonMaintainerComments.filter((c) => {
+    if (state.comments[c.id]) { result.alreadySeen++; return false; }
+    if (state.kudos_seen.includes(c.id)) { result.alreadySeen++; return false; }
+    return true;
+  });
+  const unseenBugs = openBugs.filter((b) => {
+    if (state.bugs[b.id]) { result.alreadySeen++; return false; }
+    return true;
+  });
+
+  // 4. Classify all unseen items, sorted oldest-first by createdAt
+  const items = [...unseenComments, ...unseenBugs].sort(
+    (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
+  );
+
+  let filedThisRun = 0;
+  const newKudos = [];
+  const template = readFileSync(templatePath, 'utf-8');
+  for (const item of items) {
+    const cls = classify(item.body, item.kind);
+    if (cls.classification === 'kudos') {
+      result.kudosSkipped++;
+      newKudos.push(item.id);
+      continue;
+    }
+    if (filedThisRun >= PER_RUN_CAP) {
+      result.pendingNextRun++;
+      continue;
+    }
+    const body = renderIssueBody(item, template, cls);
+    const title = `[Nexus] ${sanitizeTitle(item.body || item.title || '')}`;
+    const label = `nexus-triage,${cls.classification}`;
+    let filedIssue = { number: -1, url: '<dry-run>' };
+    if (!dryRun) {
+      filedIssue = await ghInvoker(['issue', 'create', '--title', title, '--label', label, '--body', body]);
+    } else {
+      console.log(`[dry-run] Would file: ${title}`);
+      console.log(`[dry-run] Labels:    ${label}`);
+      console.log(`[dry-run] Body excerpt: ${body.slice(0, 200)}...`);
+    }
+    result.filed.push({
+      kind: item.kind, nexus_id: item.id,
+      gh_issue_url: filedIssue.url,
+      classification: cls.classification,
+    });
+    filedThisRun++;
+  }
+
+  // 5. Update state (in memory; caller persists)
+  if (!dryRun) {
+    for (const f of result.filed) {
+      const bucket = f.kind === 'bug' ? state.bugs : state.comments;
+      bucket[f.nexus_id] = {
+        gh_issue_url: f.gh_issue_url,
+        classification: f.classification,
+        filed_at: new Date().toISOString(),
+      };
+    }
+    for (const id of newKudos) state.kudos_seen.push(id);
+    state.last_run_at = new Date().toISOString();
+  }
+
+  return result;
 }

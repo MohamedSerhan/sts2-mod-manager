@@ -77,29 +77,50 @@ This section covers the hourly Nexus → GitHub triage automation introduced in 
 
    Paste the token when prompted.
 
-3. **Verify `NEXUS_API_KEY` is still set** (re-used from the publish-nexus job):
+3. **Confirm `NEXUS_API_KEY` is still set** (only needed for the `publish-nexus` upload job — NOT for triage):
 
        gh secret list --repo MohamedSerhan/sts2-mod-manager | grep NEXUS_API_KEY
 
-4. **Bootstrap the state file** locally so the first triage run doesn't refile months-old comments:
+   Triage no longer uses `NEXUS_API_KEY`. It reads from the Nexus HTML widget endpoint using curl-impersonate.
 
-       NEXUS_API_KEY=<your-key> node scripts/nexus-triage.mjs --bootstrap
+4. **Discover and set the Nexus posts thread ID** (one-time, needed before any triage run):
+
+   Install curl-impersonate locally (or run in a temporary workflow job) and run:
+
+       node scripts/nexus-triage.mjs --discover-thread-id
+
+   This prints the `thread_id` for mod 856's posts tab. Store it as a repo variable:
+
+       gh variable set NEXUSMODS_POSTS_THREAD_ID --body <value> --repo MohamedSerhan/sts2-mod-manager
+
+5. **Set the remaining NEXUSMODS_* repo variables** (defaults are fine if you haven't changed them, but
+   setting them explicitly makes the CI configuration self-documenting):
+
+       gh variable set NEXUSMODS_GAME_ID     --body "8916"    --repo MohamedSerhan/sts2-mod-manager
+       gh variable set NEXUSMODS_MOD_ID      --body "856"     --repo MohamedSerhan/sts2-mod-manager
+       gh variable set NEXUSMODS_OBJECT_TYPE --body "1"       --repo MohamedSerhan/sts2-mod-manager
+       gh variable set NEXUSMODS_POSTS_URL   --body "https://www.nexusmods.com/slaythespire2/mods/856?tab=posts" \
+         --repo MohamedSerhan/sts2-mod-manager
+
+6. **Bootstrap the state file** locally so the first triage run doesn't refile months-old comments:
+
+       NEXUSMODS_POSTS_THREAD_ID=<thread_id> node scripts/nexus-triage.mjs --bootstrap
        git add scripts/nexus-triage-state.json
        git commit -m "chore(triage): bootstrap Nexus triage state"
        git push
 
-5. **Run a dry-run from Actions UI** to verify the live classifier output:
+7. **Run a dry-run from Actions UI** to verify the live classifier output:
 
    - Actions → `Nexus triage` → "Run workflow" with `dry_run: true`
    - Read the run logs. If the classifications look right on real comments, proceed.
    - If something looks wrong, open a follow-up PR with classifier tweaks and re-test before enabling cron.
 
-6. **Enable the hourly cron** by uncommenting the `schedule:` block in `.github/workflows/nexus-triage.yml`:
+8. **Enable the hourly cron** by uncommenting the `schedule:` block in `.github/workflows/nexus-triage.yml`:
 
        schedule:
          - cron: "0 * * * *"
 
-7. **Trigger the watchdog ping** manually once to confirm `@claude` is online:
+9. **Trigger the watchdog ping** manually once to confirm `@claude` is online:
 
    - Actions → `Nexus watchdog — ping` → "Run workflow"
    - Wait a few minutes for @claude to reply with PING-OK
@@ -130,25 +151,30 @@ To renew:
 
 The token expired. Follow the "Annual token renewal" steps above. The renewal issue includes the procedure inline.
 
-### When triage files an `ops:nexus-schema-gap` issue
+### When triage fails with "Cloudflare blocked the request"
 
-Nexus's GraphQL schema changed. Most likely `mod.bugReports` was removed or renamed (it was an in-progress field as of 2026-05). The triage workflow continues with comments-only triage until you act.
+The triage script bypasses Cloudflare TLS fingerprinting using `curl-impersonate-chrome`. Nexus
+periodically updates its Cloudflare configuration, which can break the impersonation.
 
 To fix:
 
-1. Re-read the design's "GraphQL queries" section for the expected schema
-2. Run an introspection query manually to see what the schema looks like today:
+1. Check if a newer `curl-impersonate` release is available at
+   <https://github.com/lwthiker/curl-impersonate/releases>
+2. Update the version in `.github/workflows/nexus-triage.yml` under "Install curl-impersonate-chrome"
+3. If the release uses a different binary name (e.g., `curl_chrome137` for a newer Chrome version),
+   also update `CURL_IMPERSONATE_BIN` in the workflow env and the default in `scripts/nexus-triage.mjs`
+4. Test with `--dry-run` before re-enabling the cron
 
-       gh secret list --repo MohamedSerhan/sts2-mod-manager  # confirm NEXUS_API_KEY exists
-       curl -sS -X POST https://api.nexusmods.com/v2/graphql \
-         -H "Content-Type: application/json" \
-         -H "apikey: $NEXUS_API_KEY" \
-         -d '{"query":"query{ __type(name:\"Mod\"){ fields{ name type{ name }}}}"}' | jq
+### When triage fails with "could not find thread_id"
 
-3. Update the relevant query in `scripts/nexus-triage.mjs` to match
-4. Update the introspection check in `introspectSchema` to allow the new field name
-5. Add a test fixture covering the new shape
-6. PR + merge; close the `ops:nexus-schema-gap` issue
+Nexus changed the HTML structure of the posts tab. Re-discover the thread ID:
+
+1. Install `curl-impersonate` locally (or run a temporary workflow)
+2. `node scripts/nexus-triage.mjs --discover-thread-id`
+3. If that also fails, inspect the live page source manually:
+   `curl_chrome136 https://www.nexusmods.com/slaythespire2/mods/856?tab=posts | grep -i thread_id`
+4. Update `NEXUSMODS_POSTS_THREAD_ID` repo variable with the new value, or update the
+   `discoverThreadId` regex patterns in `scripts/nexus-triage.mjs` if the embedded JS format changed
 
 ### When triage fails for a different reason
 

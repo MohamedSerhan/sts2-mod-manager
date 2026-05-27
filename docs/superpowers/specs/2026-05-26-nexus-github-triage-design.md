@@ -380,35 +380,56 @@ The response is HTML containing `<li id="comment-N" class="comment">` blocks. Ea
 
 4. **Bugs are out of scope for this iteration.** The widget endpoint serves only the posts tab. The Nexus bugs tab uses a different (presumably similar) endpoint with different params. Out of scope until posts ingestion is verified working. The bugs path can be added as a sibling fetcher later.
 
-### What changes in our codebase
+### What changed in our codebase (implemented 2026-05-27)
 
-**Replace** (entirely):
+**Removed:**
 - `INTROSPECT_QUERY`, `COMMENTS_QUERY`, `BUGS_QUERY` constants
 - `graphqlPost`, `fetchModComments`, `fetchModBugReports`, `introspectSchema` functions
-- All 4 `scripts/fixtures/graphql-*.json` fixtures (replace with HTML fixtures)
-- The GraphQL-specific tests (the 5 in Task 6)
-- `NEXUS_GRAPHQL_URL` constant
+- `ensureSchemaGapIssue` (the schema-gap concept is irrelevant for HTML scraping; replaced with
+  "Cloudflare blocked" and "could not find thread_id" failure paths — see RELEASING.md runbook)
+- `NEXUS_GRAPHQL_URL`, `GAME_DOMAIN` constants
+- All 4 `scripts/fixtures/graphql-*.json` fixtures (kept on disk as historical reference;
+  they are no longer imported by the test suite)
+- The 5 GraphQL introspection tests + 3 `ensureSchemaGapIssue` tests
 
-**Add:**
-- `WIDGET_BASE_URL` constant and `NEXUSMODS_*` env-var/vars-driven config
-- `fetchCommentsHtml({...})` — pagination loop, curl-impersonate execFile
-- `parseComments(html)` — HTML parser using a small custom walker or a node-html-parser-style dep
-- `discoverThreadId({modId, gameDomain})` — one-shot helper invoked by `--discover-thread-id`
-- HTML fixtures for tests
+**Added:**
+- `WIDGET_BASE_URL`, `GAME_ID`, `MOD_ID_STR`, `OBJECT_TYPE`, `POSTS_THREAD_ID`, `POSTS_URL`,
+  `PAGE_SIZE`, `MAX_PAGES`, `CURL_IMPERSONATE_BIN` constants (env-var driven)
+- `setHtmlFetcher` indirection — default spawns `curl_chrome136` via `execFile`; tests stub to return canned HTML
+- `buildWidgetUrl({page, pageSize, threadId})` — constructs the Nexus CommentContainer URL
+- `buildNexusPostUrl(postsUrl, commentId)` — builds direct post link with `comment_id=` param
+- `fetchCommentsHtml({page, pageSize, threadId})` — single page fetch with Cloudflare detection
+- `fetchAllComments({threadId})` — pagination loop (stops on no new IDs or `MAX_PAGES`)
+- `parseCommentsFromHtml(html, {postsUrl})` — regex-based parser (no new deps); extracts
+  `{id, author, body, createdAt, parentId, nexus_url}` from `<li id="comment-N" class="... comment ...">` blocks
+- `discoverThreadId({postsUrl})` — fetches posts page, regex-extracts `thread_id` from embedded JS;
+  invoked by `--discover-thread-id` CLI flag
+- `isCloudflareChallenge(html)` — detects `<title>Just a moment...</title>` or `cf-chl`
+- HTML fixtures `scripts/fixtures/nexus-comments-mixed.html` (5 comments, all classifications)
+  and `scripts/fixtures/nexus-comments-empty.html`
+- 21 new tests (parser, pagination, discoverThreadId, Cloudflare, integration)
 
-**Keep unchanged:**
+**Kept unchanged:**
 - `loadState`/`saveState` and the state file format
 - `sanitizeTitle`
 - `classify` (heuristic classifier with priority-ordered rules)
 - `renderIssueBody` and `nexus-triage-prompt.md`
-- The `main` orchestrator's filter/cap/render pipeline (downstream of fetch)
-- `setHttpFetch` (still useful as a generic indirection)
-- `setGhInvoker` and `ensureSchemaGapIssue` (the schema-gap concept stays — fires when curl-impersonate fails repeatedly OR when the HTML parse fails, indicating Nexus changed their markup)
+- The `main` orchestrator's filter/cap/render pipeline (downstream of fetch) — bugs path removed
+  since HTML widget serves only the posts tab; bugs out of scope for this iteration
+- `setHttpFetch` (retained for generic indirection)
+- `setGhInvoker` (unchanged)
 - The reactive `claude.yml` workflow
 - The watchdog workflows
 
+**Implementation notes:**
+- HTML parser uses two regex patterns for both `id`-before-`class` and `class`-before-`id` attribute orderings to handle either HTML attribute order in `<li>` tags.
+- `authorId` is always `''` — the Nexus widget HTML does not expose `memberId` in a stable way for the posts tab.
+- `POSTS_THREAD_ID` is module-level (evaluated at import). The `runFromCli` guard checks the constant, not the env at call time. Tests that need to verify the guard must be run without `NEXUSMODS_POSTS_THREAD_ID` set in the environment at Node startup.
+- GraphQL fixture files (`scripts/fixtures/graphql-*.json`) are retained on disk as historical documentation but are no longer imported or referenced.
+
 **Workflow changes:**
-- `nexus-triage.yml`: add an `apt-get install -y curl-impersonate` step (or equivalent), drop `NEXUS_API_KEY` env, add `NEXUSMODS_*` vars references
+- `nexus-triage.yml`: added `curl-impersonate-chrome` install step (pinned to v0.6.1 from
+  `lwthiker/curl-impersonate` releases); dropped `NEXUS_API_KEY` env; added `NEXUSMODS_*` vars references
 
 ### Credit
 

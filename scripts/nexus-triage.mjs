@@ -181,35 +181,60 @@ export function renderIssueBody(item, template, { classification, confidence }) 
 // The function signature is: (url: string, opts: { headers: Record<string,string> })
 //   => Promise<string>  (the raw HTML body)
 
-let htmlFetcher = async (url, opts = {}) => {
-  const bin = CURL_IMPERSONATE_BIN;
-  // Don't use --fail-with-body — we want the body even on HTTP errors so the
-  // caller (or isCloudflareChallenge) can inspect what Cloudflare actually
-  // served. -w prints HTTP status code to stderr so the script can see it.
-  const args = ['-sS', '-w', '%{http_code}\\n', '-o', '-', url];
-  for (const [k, v] of Object.entries(opts.headers || {})) {
+// Chrome impersonation versions to rotate through on retry. Different
+// TLS fingerprints have different challenge rates from Cloudflare.
+const CHROME_ROTATION = ['curl_chrome146', 'curl_chrome142', 'curl_chrome136', 'curl_chrome131', 'curl_chrome124'];
+const MAX_FETCH_RETRIES = 5;
+
+async function singleFetch(bin, url, headers) {
+  const args = ['-sS', '-w', '\\n%{http_code}\\n', '-o', '-', url];
+  for (const [k, v] of Object.entries(headers || {})) {
     args.push('-H', `${k}: ${v}`);
   }
-  const { stdout, stderr } = await execFileP(bin, args);
-  // stdout contains: <body>\n<http_code>\n (because -w writes after -o body)
-  // Split last line as the status code.
-  const lines = stdout.split('\n');
-  const statusLine = lines.pop(); // last non-newline chunk
-  // Find the actual status code by walking backwards for a 3-digit code
-  let httpCode = '';
-  for (let i = lines.length; i > 0 && !httpCode; i--) {
-    const candidate = (i === lines.length ? statusLine : lines[i - 1]).trim();
-    if (/^\d{3}$/.test(candidate)) httpCode = candidate;
+  const { stdout } = await execFileP(bin, args);
+  const trimmed = stdout.trimEnd();
+  const lastNewline = trimmed.lastIndexOf('\n');
+  const httpCode = lastNewline >= 0 ? trimmed.slice(lastNewline + 1).trim() : '';
+  const body = lastNewline >= 0 ? trimmed.slice(0, lastNewline) : trimmed;
+  return { httpCode, body };
+}
+
+let htmlFetcher = async (url, opts = {}) => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  let lastBody = '';
+  let lastHttpCode = '';
+  for (let attempt = 0; attempt < MAX_FETCH_RETRIES; attempt++) {
+    // Rotate Chrome versions to vary the TLS fingerprint between retries.
+    // First attempt uses the env-configured default (or chrome146 if unset).
+    const bin = attempt === 0
+      ? (CURL_IMPERSONATE_BIN || CHROME_ROTATION[0])
+      : CHROME_ROTATION[attempt % CHROME_ROTATION.length];
+    try {
+      const { httpCode, body } = await singleFetch(bin, url, opts.headers);
+      lastBody = body;
+      lastHttpCode = httpCode;
+      if (httpCode === '200' && !isCloudflareChallenge(body)) {
+        if (attempt > 0) console.error(`nexus-triage: fetch succeeded on attempt ${attempt + 1} with ${bin}`);
+        return body;
+      }
+      console.error(
+        `nexus-triage: attempt ${attempt + 1}/${MAX_FETCH_RETRIES} with ${bin} got ` +
+        `HTTP ${httpCode}${isCloudflareChallenge(body) ? ' + Cloudflare challenge' : ''}; ` +
+        `body preview: ${body.slice(0, 150).replace(/\n/g, ' ')}`
+      );
+    } catch (err) {
+      console.error(`nexus-triage: attempt ${attempt + 1}/${MAX_FETCH_RETRIES} with ${bin} threw: ${err.message}`);
+    }
+    // Exponential-ish backoff: 2s, 4s, 8s, 16s, 32s.
+    if (attempt < MAX_FETCH_RETRIES - 1) await sleep(2000 * Math.pow(2, attempt));
   }
-  const body = lines.join('\n');
-  if (httpCode && httpCode.startsWith('4') && !body.includes('<')) {
-    // 4xx without HTML body means hard block (not a challenge page)
-    throw new Error(`curl-impersonate got HTTP ${httpCode} with no body for ${url}. stderr: ${stderr}`);
-  }
-  if (httpCode && httpCode.startsWith('4')) {
-    console.error(`curl-impersonate: HTTP ${httpCode} for ${url} — first 500 chars of body:\n${body.slice(0, 500)}`);
-  }
-  return body;
+  // All retries exhausted.
+  const err = new Error(
+    `Cloudflare blocked ${MAX_FETCH_RETRIES} consecutive curl-impersonate attempts. ` +
+    `Last HTTP: ${lastHttpCode}. Last body preview: ${lastBody.slice(0, 200).replace(/\n/g, ' ')}`
+  );
+  err.code = 'CLOUDFLARE_BLOCKED';
+  throw err;
 };
 
 export function setHtmlFetcher(fn) { htmlFetcher = fn; }
@@ -695,6 +720,15 @@ export async function runFromCli(argv = process.argv.slice(2)) {
 const isMainModule = fileURLToPath(import.meta.url) === process.argv[1];
 if (isMainModule) {
   runFromCli().catch((err) => {
+    if (err.code === 'CLOUDFLARE_BLOCKED') {
+      // Soft-exit on Cloudflare block — the workflow will retry on the next
+      // cron schedule. Failing loudly here would make the Actions tab look
+      // permanently broken when the actual situation is just bad luck with
+      // a CI IP being currently challenged.
+      console.error(`nexus-triage: Cloudflare blocked all retries this run. Will try again on next cron.`);
+      console.error(`Details: ${err.message}`);
+      process.exit(0);
+    }
     console.error(`nexus-triage: fatal: ${err.stack || err.message}`);
     process.exit(1);
   });

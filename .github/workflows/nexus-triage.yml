@@ -11,6 +11,11 @@ on:
         required: false
         default: "true"
         type: boolean
+      discover_thread_id:
+        description: "Discovery mode: print the posts thread_id and exit (use once to populate NEXUSMODS_POSTS_THREAD_ID)"
+        required: false
+        default: "false"
+        type: boolean
 
 concurrency:
   group: nexus-triage
@@ -61,14 +66,16 @@ jobs:
           CURL_IMPERSONATE_BIN:       curl_chrome136
           GITHUB_TOKEN:               ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
+          if [ "${{ inputs.discover_thread_id }}" = "true" ]; then
+            node scripts/nexus-triage.mjs --discover-thread-id
+          elif [ "${{ inputs.dry_run }}" = "true" ]; then
             node scripts/nexus-triage.mjs --dry-run
           else
             node scripts/nexus-triage.mjs
           fi
 
       - name: Commit updated state (if changed)
-        if: ${{ inputs.dry_run != 'true' }}
+        if: ${{ inputs.dry_run != 'true' && inputs.discover_thread_id != 'true' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

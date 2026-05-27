@@ -76,7 +76,7 @@ jobs:
           NEXUSMODS_OBJECT_TYPE:      ${{ vars.NEXUSMODS_OBJECT_TYPE }}
           NEXUSMODS_POSTS_THREAD_ID:  ${{ vars.NEXUSMODS_POSTS_THREAD_ID }}
           NEXUSMODS_POSTS_URL:        ${{ vars.NEXUSMODS_POSTS_URL }}
-          CURL_IMPERSONATE_BIN:       curl_chrome136
+          CURL_IMPERSONATE_BIN:       curl_chrome146
           GITHUB_TOKEN:               ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ "${{ inputs.discover_thread_id }}" = "true" ]; then

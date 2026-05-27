@@ -242,11 +242,58 @@ let ghInvoker = async (args) => {
   const { stdout } = await execFileP('gh', args);
   // gh issue create outputs the URL of the created issue on stdout.
   const urlMatch = stdout.match(/https:\/\/[^\s]+\/issues\/(\d+)/);
-  if (urlMatch) return { number: parseInt(urlMatch[1], 10), url: urlMatch[0] };
+  if (urlMatch) return { number: parseInt(urlMatch[1], 10), url: urlMatch[0], stdout };
   // Fallback: return raw stdout if it doesn't look like a URL
-  return { number: -1, url: stdout.trim() };
+  return { number: -1, url: stdout.trim(), stdout };
 };
 export function setGhInvoker(fn) { ghInvoker = fn; }
+
+// ---------------------------------------------------------------------------
+// Schema-gap operator notification
+// ---------------------------------------------------------------------------
+
+// Files a one-time ops:nexus-schema-gap issue when mod.bugReports is absent.
+// Idempotent: checks for an existing open issue first to avoid duplicates.
+// Both the list and create calls route through ghInvoker so tests can stub them.
+export async function ensureSchemaGapIssue() {
+  // 1. Check for an existing open issue with the label.
+  const listResult = await ghInvoker([
+    'issue', 'list',
+    '--label', 'ops:nexus-schema-gap',
+    '--state', 'open',
+    '--limit', '1',
+    '--json', 'number',
+    '--jq', '.[0].number // empty',
+  ]);
+  const existingNumber = (listResult.stdout ?? '').trim();
+  if (existingNumber) {
+    console.warn(`nexus-triage: ops:nexus-schema-gap issue #${existingNumber} already open — skipping duplicate.`);
+    return;
+  }
+
+  // 2. No existing issue — file one.
+  const body = [
+    '## Nexus GraphQL schema gap: `mod.bugReports` field unavailable',
+    '',
+    'During schema introspection, `mod.bugReports` was not found in the Nexus GraphQL `Mod` type.',
+    'Triage is continuing with **comments-only** processing until the field returns.',
+    '',
+    '### References',
+    '- Spec: `docs/superpowers/specs/2026-05-26-nexus-github-triage-design.md`',
+    '- Schema-gap runbook: see `RELEASING.md` → *Nexus schema-gap runbook* section',
+    '',
+    '> This issue was filed automatically by the nexus-triage bot and will not re-file',
+    '> while an open issue with the `ops:nexus-schema-gap` label exists.',
+  ].join('\n');
+
+  console.warn('nexus-triage: mod.bugReports unavailable — filing ops:nexus-schema-gap issue.');
+  await ghInvoker([
+    'issue', 'create',
+    '--title', '[ops] Nexus GraphQL schema gap: mod.bugReports unavailable',
+    '--label', 'ops:nexus-schema-gap',
+    '--body', body,
+  ]);
+}
 
 // ---------------------------------------------------------------------------
 // URL helpers
@@ -491,6 +538,12 @@ export async function runFromCli(argv = process.argv.slice(2)) {
 
   const state = loadState(STATE_PATH);
   const result = await main({ dryRun: opts.dryRun, apiKey, ghToken, state });
+
+  // Schema soft-degradation: file ops:nexus-schema-gap issue once (idempotent).
+  if (result.bugReportsUnavailable) {
+    await ensureSchemaGapIssue();
+  }
+
   if (!opts.dryRun) saveState(STATE_PATH, state);
   console.log(JSON.stringify(result, null, 2));
   return 0;

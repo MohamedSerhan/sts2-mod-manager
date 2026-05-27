@@ -408,7 +408,7 @@ test('introspectSchema: comments missing hard-fails (exit 2)', async (t) => {
   }
 });
 
-import { main, setGhInvoker } from './nexus-triage.mjs';
+import { main, setGhInvoker, ensureSchemaGapIssue } from './nexus-triage.mjs';
 
 const MAINTAINER_FIXTURE_COMMENTS = [
   // From maintainer — must be skipped
@@ -431,7 +431,7 @@ test('main: maintainer comments are skipped before classification', async (t) =>
     return { ok: true, status: 200, json: async () => fixture };
   });
   const ghCalls = [];
-  setGhInvoker(async (args) => { ghCalls.push(args); return { number: ghCalls.length + 100, url: `https://github.com/x/y/issues/${ghCalls.length + 100}` }; });
+  setGhInvoker(async (args) => { ghCalls.push(args); return { number: ghCalls.length + 100, url: `https://github.com/x/y/issues/${ghCalls.length + 100}`, stdout: '' }; });
   try {
     const result = await main({ dryRun: true, apiKey: 'k', ghToken: 't', state: { schema_version: 1, last_run_at: '', comments: {}, bugs: {}, kudos_seen: [] }});
     assert.equal(ghCalls.length, 0, 'no issues filed in dry-run');
@@ -439,6 +439,7 @@ test('main: maintainer comments are skipped before classification', async (t) =>
     assert.equal(result.maintainerSkipped, 3, 'all three maintainer comments skipped');
   } finally {
     setHttpFetch(globalThis.fetch);
+    setGhInvoker(async () => { throw new Error('gh not stubbed; tests must call setGhInvoker'); });
   }
 });
 
@@ -467,7 +468,7 @@ test('main: per-run cap caps non-kudos at 5, kudos do not count', async () => {
     return { ok: true, status: 200, json: async () => fixture };
   });
   const ghCalls = [];
-  setGhInvoker(async (args) => { ghCalls.push(args); return { number: ghCalls.length + 100, url: `https://github.com/x/y/issues/${ghCalls.length + 100}` }; });
+  setGhInvoker(async (args) => { ghCalls.push(args); return { number: ghCalls.length + 100, url: `https://github.com/x/y/issues/${ghCalls.length + 100}`, stdout: '' }; });
   try {
     const result = await main({ dryRun: false, apiKey: 'k', ghToken: 't', state: { schema_version: 1, last_run_at: '', comments: {}, bugs: {}, kudos_seen: [] }});
     assert.equal(ghCalls.length, 5, `cap should be 5, got ${ghCalls.length}`);
@@ -477,6 +478,7 @@ test('main: per-run cap caps non-kudos at 5, kudos do not count', async () => {
     assert.deepEqual(filedIds, ['600000', '600001', '600002', '600003', '600004']);
   } finally {
     setHttpFetch(globalThis.fetch);
+    setGhInvoker(async () => { throw new Error('gh not stubbed; tests must call setGhInvoker'); });
   }
 });
 
@@ -496,7 +498,7 @@ test('main: already-seen items are skipped silently', async () => {
     return { ok: true, status: 200, json: async () => ({ data: { mod: { comments: { nodes: items }, bugReports: { nodes: [] }}}})};
   });
   const ghCalls = [];
-  setGhInvoker(async (args) => { ghCalls.push(args); return { number: 999, url: 'https://github.com/x/y/issues/999' }; });
+  setGhInvoker(async (args) => { ghCalls.push(args); return { number: 999, url: 'https://github.com/x/y/issues/999', stdout: '' }; });
   try {
     const state = {
       schema_version: 1, last_run_at: '',
@@ -508,6 +510,7 @@ test('main: already-seen items are skipped silently', async () => {
     assert.equal(result.filed[0].nexus_id, '700002');
   } finally {
     setHttpFetch(globalThis.fetch);
+    setGhInvoker(async () => { throw new Error('gh not stubbed; tests must call setGhInvoker'); });
   }
 });
 
@@ -530,13 +533,14 @@ test('main: Nexus bug with status=closed is skipped silently on first sight', as
     return { ok: true, status: 200, json: async () => ({ data: { mod: { comments: { nodes: [] }}}})};
   });
   const ghCalls = [];
-  setGhInvoker(async (args) => { ghCalls.push(args); return { number: 999, url: 'https://github.com/x/y/issues/999' }; });
+  setGhInvoker(async (args) => { ghCalls.push(args); return { number: 999, url: 'https://github.com/x/y/issues/999', stdout: '' }; });
   try {
-    const result = await main({ dryRun: false, apiKey: 'k', ghToken: 't', state: { schema_version: 1, last_run_at: '', comments: {}, bugs: {}, kudos_seen: [] }});
+    const result = await main({ dryRun: false, apiKey: 'k', ghToken: 't', state: { schema_version: 1, last_run_at: '', comments: {}, kudos_seen: [], bugs: {} }});
     assert.equal(ghCalls.length, 1, 'only the open bug files');
     assert.equal(result.filed[0].nexus_id, '900001');
   } finally {
     setHttpFetch(globalThis.fetch);
+    setGhInvoker(async () => { throw new Error('gh not stubbed; tests must call setGhInvoker'); });
   }
 });
 
@@ -579,4 +583,101 @@ test('isDisabled: returns true when sentinel exists', () => {
 
 test('isDisabled: returns false when sentinel absent', () => {
   assert.equal(isDisabled('scripts/does-not-exist.disabled'), false);
+});
+
+// ---------------------------------------------------------------------------
+// ensureSchemaGapIssue + runFromCli schema-gap integration tests
+// ---------------------------------------------------------------------------
+
+import { STATE_PATH, STATE_SCHEMA_VERSION as _SSV } from './nexus-triage.mjs';
+
+// Shared introspection fixture: bugReports field absent (soft drift).
+function makeDriftHttpFetch() {
+  return async (_url, opts) => {
+    const body = JSON.parse(opts.body);
+    if (body.query.includes('__type')) {
+      // bugReports absent from schema
+      return { ok: true, status: 200, json: async () => ({ data: { __type: { name: 'Mod', fields: [
+        { name: 'comments', type: { name: 'CommentConnection' }},
+      ]}}})};
+    }
+    // Comments fetch: return empty list
+    return { ok: true, status: 200, json: async () => ({ data: { mod: { comments: { nodes: [] }}}})};
+  };
+}
+
+function makeValidState() {
+  return JSON.stringify({
+    schema_version: 1,
+    last_run_at: '2026-05-26T00:00:00.000Z',
+    comments: {}, bugs: {}, kudos_seen: [],
+  }) + '\n';
+}
+
+test('runFromCli files ops:nexus-schema-gap when bugReports drift detected and no existing issue', async () => {
+  writeFileSync(STATE_PATH, makeValidState(), 'utf-8');
+  const origApiKey = process.env.NEXUS_API_KEY;
+  const origGhToken = process.env.GITHUB_TOKEN;
+  process.env.NEXUS_API_KEY = 'test-key';
+  process.env.GITHUB_TOKEN = 'test-token';
+
+  setHttpFetch(makeDriftHttpFetch());
+  const ghCalls = [];
+  // First call: issue list (no existing issue → empty stdout)
+  // Second call: issue create
+  setGhInvoker(async (args) => {
+    ghCalls.push(args);
+    if (args.includes('list')) return { number: -1, url: '', stdout: '' };
+    return { number: 42, url: 'https://github.com/x/y/issues/42', stdout: 'https://github.com/x/y/issues/42\n' };
+  });
+
+  try {
+    await runFromCli(['--dry-run']);
+
+    // Should have made exactly 2 gh calls: list + create
+    assert.equal(ghCalls.length, 2, `expected 2 gh calls (list + create), got ${ghCalls.length}: ${JSON.stringify(ghCalls)}`);
+    assert.ok(ghCalls[0].includes('list'), `first call should be issue list, got: ${ghCalls[0]}`);
+    assert.ok(ghCalls[0].includes('ops:nexus-schema-gap'), 'list call uses the correct label');
+    assert.ok(ghCalls[1].includes('create'), `second call should be issue create, got: ${ghCalls[1]}`);
+    assert.ok(ghCalls[1].includes('[ops] Nexus GraphQL schema gap: mod.bugReports unavailable'),
+      'create call uses the correct title');
+    assert.ok(ghCalls[1].includes('ops:nexus-schema-gap'), 'create call uses the correct label');
+  } finally {
+    setHttpFetch(globalThis.fetch);
+    setGhInvoker(async () => { throw new Error('gh not stubbed; tests must call setGhInvoker'); });
+    process.env.NEXUS_API_KEY = origApiKey;
+    process.env.GITHUB_TOKEN = origGhToken;
+    try { unlinkSync(STATE_PATH); } catch { /* already gone */ }
+  }
+});
+
+test('runFromCli does NOT file duplicate ops:nexus-schema-gap when one already exists', async () => {
+  writeFileSync(STATE_PATH, makeValidState(), 'utf-8');
+  const origApiKey = process.env.NEXUS_API_KEY;
+  const origGhToken = process.env.GITHUB_TOKEN;
+  process.env.NEXUS_API_KEY = 'test-key';
+  process.env.GITHUB_TOKEN = 'test-token';
+
+  setHttpFetch(makeDriftHttpFetch());
+  const ghCalls = [];
+  // Issue list returns existing open issue #99 → no create should follow
+  setGhInvoker(async (args) => {
+    ghCalls.push(args);
+    if (args.includes('list')) return { number: 99, url: 'https://github.com/x/y/issues/99', stdout: '99\n' };
+    return { number: -1, url: '', stdout: '' };
+  });
+
+  try {
+    await runFromCli(['--dry-run']);
+
+    // Only the list call — no create
+    assert.equal(ghCalls.length, 1, `expected 1 gh call (list only), got ${ghCalls.length}: ${JSON.stringify(ghCalls)}`);
+    assert.ok(ghCalls[0].includes('list'), `only call should be issue list, got: ${ghCalls[0]}`);
+  } finally {
+    setHttpFetch(globalThis.fetch);
+    setGhInvoker(async () => { throw new Error('gh not stubbed; tests must call setGhInvoker'); });
+    process.env.NEXUS_API_KEY = origApiKey;
+    process.env.GITHUB_TOKEN = origGhToken;
+    try { unlinkSync(STATE_PATH); } catch { /* already gone */ }
+  }
 });

@@ -5,7 +5,7 @@
  * + per-row store/activate + drag-reorder the in-pack subset.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { LibraryTable } from './LibraryTable';
@@ -296,13 +296,24 @@ describe('<LibraryTable>', () => {
     }));
 
     const { container } = render(<Wrap modpackName="Stable" />);
-    await screen.findAllByText('First');
+    // Wait for the load-order draft to populate. The rank chip ("#1",
+    // "#2") only renders once `inPackIndex >= 0`, which is the same
+    // condition gating the drag handlers' state mutations. Without
+    // this gate, a drag fired before the effect commits sees
+    // `inPackIndex === -1` and the drop is a no-op — the original
+    // source of the flake in full-suite runs.
+    await screen.findByText('#1');
+    await screen.findByText('#2');
     // Both rows are "in-pack" so both are draggable.
     const rows = container.querySelectorAll('.gf-profile-library-row');
     expect(rows.length).toBe(2);
     const [firstRow, secondRow] = Array.from(rows) as HTMLElement[];
-    // Build a minimal DataTransfer mock that satisfies the React drag
-    // handlers — they read/write text/plain.
+    // A single DataTransfer mock threads through the whole sequence
+    // (dragStart writes via setData, drop reads via getData). The
+    // production handler's primary path is the React state
+    // `draggedIndex`, but it falls back to the dataTransfer payload
+    // if state hasn't propagated — keeping the mock consistent makes
+    // both paths work.
     const dataTransfer = {
       data: new Map<string, string>(),
       setData(type: string, value: string) { this.data.set(type, value); },
@@ -310,16 +321,27 @@ describe('<LibraryTable>', () => {
       effectAllowed: '',
       dropEffect: '',
     };
-    const { fireEvent } = await import('@testing-library/react');
     fireEvent.dragStart(secondRow, { dataTransfer });
     fireEvent.dragOver(firstRow, { dataTransfer });
     fireEvent.drop(firstRow, { dataTransfer });
+    // dragEnd is a no-op for the assertion but matches a real browser
+    // sequence and clears the optimistic indices.
+    fireEvent.dragEnd(secondRow, { dataTransfer });
 
     await waitFor(() => {
       expect(
         getInvokeCalls().some((c) => c.cmd === 'set_profile_load_order'),
       ).toBe(true);
     });
+    // And the payload reflects the swap — Second now precedes First.
+    const loadOrderCalls = getInvokeCalls().filter(
+      (c) => c.cmd === 'set_profile_load_order',
+    );
+    const lastCall = loadOrderCalls[loadOrderCalls.length - 1];
+    const orderedMods = lastCall?.args?.orderedMods as
+      | Array<{ name: string }>
+      | undefined;
+    expect(orderedMods?.map((m) => m.name)).toEqual(['Second', 'First']);
   });
 
   // ── T16 review fix — migrated from .skip'd Profiles.test.tsx ──────

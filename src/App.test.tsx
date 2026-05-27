@@ -1469,9 +1469,11 @@ describe('<App>', () => {
   // "Mods" nav covers `setActiveView('mods')` already, and that wiring
   // is exercised by every test below that calls getNavButton('Mods').)
 
-  it("Home's hero 'Switch modpack' button opens the ProfileSwitcher", async () => {
-    // 1.7: the hero "Switch modpack" button only exists when an active
-    // modpack is present. Seed one so the active-state hero renders.
+  it("Topbar profile chip opens the ProfileSwitcher", async () => {
+    // 1.7.0 cleanup: the Home hero's "Switch modpack" button was a
+    // duplicate of the always-visible topbar profile chip. Both
+    // opened the same ProfileSwitcher popover; the chip is the
+    // canonical place because it's visible from every view.
     registerInvokeHandler('get_active_profile', () => 'CurrentPack');
     registerInvokeHandler('list_profiles_cmd', () => [
       { name: 'CurrentPack', mods: [], created_at: '2026-01-01' },
@@ -1479,9 +1481,8 @@ describe('<App>', () => {
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    // Title-attribute lookup stays the same (t('home.switchPackTitle')).
-    const switchPack = await screen.findByTitle(/Switch to a different pack/i);
-    await user.click(switchPack);
+    const profileChip = await screen.findByTitle(/Switch modpack/i);
+    await user.click(profileChip);
     // ProfileSwitcher's "Add modpack" foot button is the unambiguous
     // signal the popover mounted.
     await screen.findByRole('button', { name: /Add modpack/i });

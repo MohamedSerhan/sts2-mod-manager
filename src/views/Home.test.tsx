@@ -80,7 +80,6 @@ function Wrap(props: Partial<React.ComponentProps<typeof HomeView>> = {}) {
         onGoToMods={props.onGoToMods ?? (() => {})}
         onGoToProfiles={props.onGoToProfiles ?? (() => {})}
         onGoToBrowseModpacks={props.onGoToBrowseModpacks ?? (() => {})}
-        onSwitchPack={props.onSwitchPack ?? (() => {})}
         onLaunch={props.onLaunch ?? (() => {})}
       />
     </AllProviders>
@@ -252,17 +251,6 @@ describe('<HomeView> active hero', () => {
     expect(screen.getByText(/Tip: press/)).toBeInTheDocument();
   });
 
-  it('"Switch modpack" button calls onSwitchPack', async () => {
-    withActive('MyPack');
-    const onSwitchPack = vi.fn();
-    const user = userEvent.setup();
-    render(<Wrap onSwitchPack={onSwitchPack} />);
-    await waitFor(() => { expect(screen.getByText('MyPack')).toBeInTheDocument(); });
-    const switchBtn = screen.getByRole('button', { name: /Switch modpack/i });
-    await user.click(switchBtn);
-    expect(onSwitchPack).toHaveBeenCalled();
-  });
-
   it('shows the "Sync available" pill when subUpdates lists the active modpack', async () => {
     withActive('Daily Pack', {
       subs: [
@@ -322,14 +310,6 @@ describe('<HomeView> active hero', () => {
     expect(screen.queryByText(/Not yet shared/i)).toBeNull();
   });
 
-  it('Repair button appears for active profile', async () => {
-    withActive('MyPack');
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('MyPack')).toBeInTheDocument(); });
-    const buttons = screen.getAllByRole('button');
-    const repair = buttons.find((b) => /^Repair$/.test(b.textContent?.trim() ?? ''));
-    expect(repair).toBeDefined();
-  });
 });
 
 describe('<HomeView> game-not-detected banner', () => {
@@ -592,209 +572,6 @@ describe('<HomeView> ShareCodeChip copy actions', () => {
     await waitFor(() => {
       expect(screen.getByText(/Couldn't copy to clipboard/)).toBeInTheDocument();
     });
-  });
-});
-
-describe('<HomeView> drift overlay & active-profile Repair', () => {
-  it('Repair confirm + repair_profile success shows summary toast (orphans + downloads + missing)', async () => {
-    registerInvokeHandler('get_active_profile', () => 'MyPack');
-    registerInvokeHandler('list_profiles_cmd', () => [
-      { name: 'MyPack', mods: [{ name: 'A', enabled: true }], created_at: '2026-01-01' },
-    ]);
-    registerInvokeHandler('get_profile_drift', () => ({
-      added: ['orphan1.dll', 'orphan2.dll'],
-      removed: [],
-      modified: [],
-    }));
-    registerInvokeHandler('repair_profile', () => ({
-      deleted_orphans: ['orphan1.dll', 'orphan2.dll'],
-      downloaded: 3,
-      failed_downloads: ['bad.zip'],
-      missing_mods: ['stillgone'],
-    }));
-    registerInvokeHandler('create_backup_cmd', () => ({ path: 'X.zip' }));
-    const user = userEvent.setup();
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('MyPack')).toBeInTheDocument(); });
-    const repair = screen.getAllByRole('button').find((b) => /^Repair$/.test(b.textContent?.trim() ?? ''));
-    expect(repair).toBeDefined();
-    await user.click(repair!);
-    await waitFor(() => {
-      expect(screen.getByText(/Re-applies the manifest and deletes 2 mod file/)).toBeInTheDocument();
-    });
-    const modal = await confirmModal();
-    await user.click(modal.getByRole('button', { name: /^Repair$/ }));
-    await waitFor(() => {
-      expect(getInvokeCalls().some((c) => c.cmd === 'create_backup_cmd')).toBe(true);
-    });
-    await waitFor(() => {
-      expect(getInvokeCalls().some((c) => c.cmd === 'repair_profile')).toBe(true);
-    });
-    await waitFor(() => {
-      expect(screen.getByText(/Repaired "MyPack" — removed 2 orphan mods, downloaded 3, 1 download failed, 1 still missing/)).toBeInTheDocument();
-    });
-  });
-
-  it('Repair with no drift (0 orphans) uses the simpler confirm copy + no-summary success toast', async () => {
-    registerInvokeHandler('get_active_profile', () => 'MyPack');
-    registerInvokeHandler('list_profiles_cmd', () => [
-      { name: 'MyPack', mods: [], created_at: '2026-01-01' },
-    ]);
-    registerInvokeHandler('get_profile_drift', () => ({ added: [], removed: [], modified: [] }));
-    registerInvokeHandler('repair_profile', () => ({
-      deleted_orphans: [],
-      downloaded: 0,
-      failed_downloads: [],
-      missing_mods: [],
-    }));
-    const user = userEvent.setup();
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('MyPack')).toBeInTheDocument(); });
-    const repair = screen.getAllByRole('button').find((b) => /^Repair$/.test(b.textContent?.trim() ?? ''));
-    await user.click(repair!);
-    await waitFor(() => {
-      expect(screen.getByText(/Re-applies the manifest exactly/)).toBeInTheDocument();
-    });
-    const modal = await confirmModal();
-    await user.click(modal.getByRole('button', { name: /^Repair$/ }));
-    await waitFor(() => {
-      expect(getInvokeCalls().some((c) => c.cmd === 'repair_profile')).toBe(true);
-    });
-    await waitFor(() => {
-      expect(screen.getByText(/^Repaired "MyPack"$/)).toBeInTheDocument();
-    });
-  });
-
-  it('Repair with one orphan/download (singular grammar) — exercises "1 orphan mod" branch', async () => {
-    registerInvokeHandler('get_active_profile', () => 'MyPack');
-    registerInvokeHandler('list_profiles_cmd', () => [
-      { name: 'MyPack', mods: [], created_at: '2026-01-01' },
-    ]);
-    registerInvokeHandler('get_profile_drift', () => ({ added: ['one.dll'], removed: [], modified: [] }));
-    registerInvokeHandler('repair_profile', () => ({
-      deleted_orphans: ['one.dll'],
-      downloaded: 0,
-      failed_downloads: [],
-      missing_mods: [],
-    }));
-    registerInvokeHandler('create_backup_cmd', () => { throw new Error('out of disk'); });
-    const user = userEvent.setup();
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('MyPack')).toBeInTheDocument(); });
-    await user.click(screen.getAllByRole('button').find((b) => /^Repair$/.test(b.textContent?.trim() ?? ''))!);
-    const modal = await confirmModal();
-    await user.click(modal.getByRole('button', { name: /^Repair$/ }));
-    await waitFor(() => {
-      expect(screen.getByText(/Backup failed: out of disk/)).toBeInTheDocument();
-    });
-    await waitFor(() => {
-      expect(screen.getByText(/removed 1 orphan mod$/)).toBeInTheDocument();
-    });
-  });
-
-  it('Repair drift fetch failure falls through and uses the no-orphans confirm copy', async () => {
-    registerInvokeHandler('get_active_profile', () => 'MyPack');
-    registerInvokeHandler('list_profiles_cmd', () => [
-      { name: 'MyPack', mods: [], created_at: '2026-01-01' },
-    ]);
-    registerInvokeHandler('get_profile_drift', () => { throw new Error('drift failed'); });
-    registerInvokeHandler('repair_profile', () => ({
-      deleted_orphans: [], downloaded: 0, failed_downloads: [], missing_mods: [],
-    }));
-    const user = userEvent.setup();
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('MyPack')).toBeInTheDocument(); });
-    await user.click(screen.getAllByRole('button').find((b) => /^Repair$/.test(b.textContent?.trim() ?? ''))!);
-    await waitFor(() => {
-      expect(screen.getByText(/Re-applies the manifest exactly/)).toBeInTheDocument();
-    });
-  });
-
-  it('Repair cancelled at the confirm — no repair_profile call', async () => {
-    registerInvokeHandler('get_active_profile', () => 'MyPack');
-    registerInvokeHandler('list_profiles_cmd', () => [
-      { name: 'MyPack', mods: [], created_at: '2026-01-01' },
-    ]);
-    registerInvokeHandler('get_profile_drift', () => ({ added: [], removed: [], modified: [] }));
-    const user = userEvent.setup();
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('MyPack')).toBeInTheDocument(); });
-    await user.click(screen.getAllByRole('button').find((b) => /^Repair$/.test(b.textContent?.trim() ?? ''))!);
-    const modal = await confirmModal();
-    await user.click(modal.getByRole('button', { name: /^Cancel$/ }));
-    expect(getInvokeCalls().some((c) => c.cmd === 'repair_profile')).toBe(false);
-  });
-
-  it('Repair failure surfaces "Repair failed" toast', async () => {
-    registerInvokeHandler('get_active_profile', () => 'MyPack');
-    registerInvokeHandler('list_profiles_cmd', () => [
-      { name: 'MyPack', mods: [], created_at: '2026-01-01' },
-    ]);
-    registerInvokeHandler('get_profile_drift', () => ({ added: [], removed: [], modified: [] }));
-    registerInvokeHandler('repair_profile', () => { throw new Error('repair boom'); });
-    const user = userEvent.setup();
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('MyPack')).toBeInTheDocument(); });
-    await user.click(screen.getAllByRole('button').find((b) => /^Repair$/.test(b.textContent?.trim() ?? ''))!);
-    const modal = await confirmModal();
-    await user.click(modal.getByRole('button', { name: /^Repair$/ }));
-    await waitFor(() => {
-      expect(screen.getByText(/Repair failed: repair boom/)).toBeInTheDocument();
-    });
-  });
-
-  it('Repair with many orphans (>8) shows the "…N more" truncation copy', async () => {
-    const orphans = Array.from({ length: 12 }, (_, i) => `orphan${i + 1}.dll`);
-    registerInvokeHandler('get_active_profile', () => 'MyPack');
-    registerInvokeHandler('list_profiles_cmd', () => [
-      { name: 'MyPack', mods: [], created_at: '2026-01-01' },
-    ]);
-    registerInvokeHandler('get_profile_drift', () => ({ added: orphans, removed: [], modified: [] }));
-    const user = userEvent.setup();
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('MyPack')).toBeInTheDocument(); });
-    await user.click(screen.getAllByRole('button').find((b) => /^Repair$/.test(b.textContent?.trim() ?? ''))!);
-    await waitFor(() => {
-      expect(screen.getByText(/…4 more/)).toBeInTheDocument();
-    });
-  });
-
-  it('handleRepair non-Error throw → String(e) toast text', async () => {
-    registerInvokeHandler('get_active_profile', () => 'MyPack');
-    registerInvokeHandler('list_profiles_cmd', () => [
-      { name: 'MyPack', mods: [], created_at: '2026-01-01' },
-    ]);
-    registerInvokeHandler('get_profile_drift', () => ({ added: [], removed: [], modified: [] }));
-    registerInvokeHandler('repair_profile', () => { throw 'repair-fail-str'; });
-    const user = userEvent.setup();
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('MyPack')).toBeInTheDocument(); });
-    await user.click(screen.getAllByRole('button').find((b) => /^Repair$/.test(b.textContent?.trim() ?? ''))!);
-    const modal = await confirmModal();
-    await user.click(modal.getByRole('button', { name: /^Repair$/ }));
-    await waitFor(() => {
-      expect(screen.getByText(/Repair failed: repair-fail-str/)).toBeInTheDocument();
-    });
-  });
-
-  it('active-profile Repair button enters Repairing… state while the in-flight repair pends', async () => {
-    registerInvokeHandler('get_active_profile', () => 'MyPack');
-    registerInvokeHandler('list_profiles_cmd', () => [
-      { name: 'MyPack', mods: [], created_at: '2026-01-01' },
-    ]);
-    registerInvokeHandler('get_profile_drift', () => ({ added: [], removed: [], modified: [] }));
-    let resolveRepair: ((value: unknown) => void) | undefined;
-    registerInvokeHandler('repair_profile', () => new Promise<unknown>((r) => { resolveRepair = r; }));
-    const user = userEvent.setup();
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('MyPack')).toBeInTheDocument(); });
-    await user.click(screen.getAllByRole('button').find((b) => /^Repair$/.test(b.textContent?.trim() ?? ''))!);
-    const modal = await confirmModal();
-    await user.click(modal.getByRole('button', { name: /^Repair$/ }));
-    await waitFor(() => {
-      expect(screen.getByText(/Repairing…/)).toBeInTheDocument();
-    });
-    resolveRepair?.({ deleted_orphans: [], downloaded: 0, failed_downloads: [], missing_mods: [] });
   });
 });
 

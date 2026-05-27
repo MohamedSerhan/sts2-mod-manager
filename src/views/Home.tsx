@@ -6,7 +6,6 @@ import {
   Gamepad2,
   Settings,
   Play,
-  Wrench,
   Share2,
   Copy,
   Check,
@@ -23,9 +22,6 @@ import {
   checkSubscriptionUpdates,
   applySubscriptionUpdate,
   getSubscriptions,
-  repairProfile,
-  getProfileDrift,
-  createBackup,
   getShareInfo,
   listProfiles,
 } from '../hooks/useTauri';
@@ -151,10 +147,9 @@ interface HomeProps {
    *  Browse tab. Kept in the type for backward-compatible call sites
    *  (App.tsx still passes it). */
   onGoToBrowseModpacks?: () => void;
-  onSwitchPack?: () => void;
   onLaunch?: () => void;
 }
-export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfiles, onGoToBrowseModpacks: _onGoToBrowseModpacks, onSwitchPack, onLaunch }: HomeProps) {
+export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfiles, onGoToBrowseModpacks: _onGoToBrowseModpacks, onLaunch }: HomeProps) {
   const { t } = useTranslation();
   const { gameInfo, mods, refreshAll, activeProfile, refreshSubUpdates } = useApp();
   const toast = useToast();
@@ -164,7 +159,6 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [, setChecking] = useState(false);
   const [updateDetail, setUpdateDetail] = useState<SubscriptionUpdate | null>(null);
-  const [repairing, setRepairing] = useState(false);
   // Share info for the curator's OWN active profile (separate from
   // `activeSub` which only covers profiles received from someone else).
   // Without this, a curator looking at their own published pack on Home
@@ -241,60 +235,6 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
       toast.error(t('profiles.toast.syncFailed', { error: errMsg }));
     } finally {
       setApplyingSub(null);
-    }
-  }
-
-  /** Repair the active profile from Home — same flow as the Profiles drift
-   *  banner: confirm with orphan list, optional pre-backup, then call
-   *  repair_profile (apply + delete orphans). */
-  async function handleRepair(name: string) {
-    let drift: Awaited<ReturnType<typeof getProfileDrift>> | null = null;
-    try { drift = await getProfileDrift(name); } catch { /* fall through with no-orphans */ }
-    const orphanCount = drift?.added.length ?? 0;
-    const orphans = drift?.added ?? [];
-    const orphanList = orphans.length > 8
-      ? `${orphans.slice(0, 8).join(', ')}, …${orphans.length - 8} more`
-      : orphans.join(', ');
-
-    const ok = await confirm({
-      title: t('home.repairOrphanTitle', { name }),
-      body: orphanCount > 0
-        ? t('home.repairOrphanBody', { count: orphanCount, list: orphanList })
-        : t('home.repairOrphanBodyNoOrphans'),
-      warning: orphanCount > 0
-        ? t('home.repairOrphanWarning')
-        : undefined,
-      confirmLabel: t('home.repair'),
-      destructive: orphanCount > 0,
-      checkbox: orphanCount > 0
-        ? { label: t('home.repairPackBackupLabel'), defaultChecked: true }
-        : undefined,
-    });
-    if (!ok) return;
-
-    setRepairing(true);
-    try {
-      if (ok.checked) {
-        try { await createBackup(); }
-        catch (e) { const errMsg = e instanceof Error ? e.message : String(e); toast.error(t('profiles.toast.backupFailed', { error: errMsg })); }
-      }
-      const result = await repairProfile(name);
-      await refreshAll();
-      const summary: string[] = [];
-      if (result.deleted_orphans.length > 0) {
-        summary.push(t('common.parts.removedOrphans', { count: result.deleted_orphans.length }));
-      }
-      if (result.downloaded > 0) summary.push(t('common.parts.downloadedNum', { count: result.downloaded }));
-      if (result.failed_downloads.length > 0) summary.push(t('common.parts.downloadsFailed', { count: result.failed_downloads.length }));
-      if (result.missing_mods.length > 0) summary.push(t('common.parts.stillMissing', { count: result.missing_mods.length }));
-      toast.success(summary.length
-        ? t('profiles.toast.repairedWithDetails', { name, details: summary.join(', ') })
-        : t('profiles.toast.repaired', { name }));
-    } catch (e) {
-      const errMsg = e instanceof Error ? e.message : String(e);
-      toast.error(t('profiles.toast.repairFailed', { error: errMsg }));
-    } finally {
-      setRepairing(false);
     }
   }
 
@@ -402,14 +342,14 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
 
           {heroCode && <ShareCodeChip code={heroCode} packName={heroName} />}
 
+          {/* Hero actions — kept tight on the launcher. "Switch modpack"
+              lives in the topbar profile chip (universal); "Repair"
+              lives in Modpacks → modpack detail → Advanced (the
+              canonical place for power actions). What stays here is
+              what's contextual to the active modpack right now:
+              Sync if it has an update, Share if the user just created
+              it and hasn't published yet. */}
           <div className="gf-hero-actions">
-            <button
-              className="gf-btn-2"
-              onClick={onSwitchPack}
-              title={t('home.switchPackTitle')}
-            >
-              {t('app.switchActivePack')}
-            </button>
             {activeUpdate && (
               <button
                 className="gf-btn-2"
@@ -434,26 +374,6 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
                 {t('home.viewChanges')}
               </button>
             )}
-            {/* Repair only as a quiet secondary action — kept so users
-                with drift can still recover from Home without bouncing
-                to Profiles. */}
-            <button
-              className="gf-btn-3"
-              onClick={() => handleRepair(activeProfile)}
-              disabled={repairing}
-              title={t('home.reapplyTitle')}
-            >
-              {repairing ? (
-                <RefreshCw size={11} className="animate-spin" />
-              ) : (
-                <Wrench size={11} />
-              )}
-              {repairing ? t('home.repairing') : t('home.repair')}
-            </button>
-            {/* Share-this-pack CTA — only renders when the active modpack
-                is the user's own and hasn't been published yet. After
-                publishing, the ShareCodeChip above takes over and this
-                button collapses. */}
             {canShareActive && (
               <button
                 className="gf-btn-2"

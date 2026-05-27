@@ -803,7 +803,6 @@ function AppInner() {
                 onGoToMods={() => setActiveView('mods')}
                 onGoToProfiles={() => setActiveView('profiles')}
                 onGoToBrowseModpacks={() => setActiveView('browse-modpacks')}
-                onSwitchPack={() => setShowProfileSwitcher(true)}
                 onLaunch={handleLaunchGame}
               />
             )}

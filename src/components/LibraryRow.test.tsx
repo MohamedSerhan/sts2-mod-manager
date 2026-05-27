@@ -15,7 +15,12 @@ import userEvent from '@testing-library/user-event';
 
 import { LibraryRow, type LibraryRowProps } from './LibraryRow';
 import { AllProviders } from '../__test__/providers';
-import type { ProfileMembershipMod, ProfileMembershipState } from '../types';
+import type {
+  ModAuditEntry,
+  ModInfo,
+  ProfileMembershipMod,
+  ProfileMembershipState,
+} from '../types';
 
 const baseMod = (overrides: Partial<ProfileMembershipMod> = {}): ProfileMembershipMod => ({
   name: 'BaseLib',
@@ -237,5 +242,387 @@ describe('<LibraryRow>', () => {
     });
     // The Refresh icon (animate-spin) appears in the storage button.
     expect(container.querySelector('.gf-profile-library-storage-actions .animate-spin')).not.toBeNull();
+  });
+});
+
+// ── ModRow-style action surface (post-1.7.0 T18 unification) ────────────
+//
+// LibraryRow absorbed the per-mod kebab + inline audit pill that the
+// (now-deleted) ModRow used to expose. These tests cover the new prop
+// surface: the kebab items, the update / blocked / frozen / snoozed
+// pills, the source-pill row beside the storage button, and the
+// HelpHint on the storage chip.
+
+const baseModInfo = (overrides: Partial<ModInfo> = {}): ModInfo => ({
+  name: 'BaseLib',
+  version: '3.1.2',
+  description: 'Base library',
+  enabled: true,
+  files: ['BaseLib.dll'],
+  source: null,
+  hash: null,
+  dependencies: [],
+  size_bytes: 1024,
+  folder_name: 'BaseLib',
+  mod_id: 'baselib',
+  github_url: null,
+  nexus_url: null,
+  pinned: false,
+  min_game_version: null,
+  author: 'Alchyr',
+  tags: [],
+  display_name: null,
+  display_description: null,
+  ...overrides,
+});
+
+const baseAudit = (overrides: Partial<ModAuditEntry> = {}): ModAuditEntry => ({
+  mod_name: 'BaseLib',
+  folder_name: 'BaseLib',
+  installed_version: '3.1.2',
+  latest_release_with_assets_tag: 'v3.2.0',
+  latest_compatible_tag: 'v3.2.0',
+  latest_has_assets: true,
+  needs_update: true,
+  asset_names: [],
+  releases_scanned: 1,
+  github_auto_detected: false,
+  pinned: false,
+  github_repo: 'x/y',
+  latest_release_tag: 'v3.2.0',
+  error: null,
+  nexus_url: null,
+  nexus_version: null,
+  nexus_update_available: false,
+  update_source: 'github',
+  ...overrides,
+});
+
+describe('<LibraryRow> kebab + audit pills', () => {
+  it('renders the kebab trigger when a mod prop is supplied', () => {
+    renderRow({ mod: baseModInfo() });
+    expect(screen.getByRole('button', { name: /mod actions/i })).toBeInTheDocument();
+  });
+
+  it('does not render the kebab when mod is omitted (presentation-only mode)', () => {
+    renderRow({ mod: undefined });
+    expect(screen.queryByRole('button', { name: /mod actions/i })).toBeNull();
+  });
+
+  it('kebab → Activate fires onToggleStorage when the mod is stored', async () => {
+    const onToggleStorage = vi.fn();
+    const user = userEvent.setup();
+    renderRow({
+      mod: baseModInfo({ enabled: false }),
+      row: baseMod({ installed_enabled: false }),
+      onToggleStorage,
+    });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    const labels = screen.getAllByText('Activate in game');
+    const itemLabel = labels.find((el) => el.className.includes('gf-kebab-label'));
+    expect(itemLabel).toBeDefined();
+    await user.click(itemLabel!.closest('button')!);
+    expect(onToggleStorage).toHaveBeenCalledTimes(1);
+  });
+
+  it('kebab → Freeze fires onTogglePin', async () => {
+    const onTogglePin = vi.fn();
+    const user = userEvent.setup();
+    renderRow({ mod: baseModInfo(), onTogglePin });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /freeze this mod/i }));
+    expect(onTogglePin).toHaveBeenCalledTimes(1);
+  });
+
+  it('kebab → Unfreeze fires onTogglePin when pinned', async () => {
+    const onTogglePin = vi.fn();
+    const user = userEvent.setup();
+    renderRow({ mod: baseModInfo({ pinned: true }), onTogglePin });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /unfreeze this mod/i }));
+    expect(onTogglePin).toHaveBeenCalledTimes(1);
+  });
+
+  it('kebab → Copy version fires onCopyVersion', async () => {
+    const onCopyVersion = vi.fn();
+    const user = userEvent.setup();
+    renderRow({ mod: baseModInfo(), onCopyVersion });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /copy version/i }));
+    expect(onCopyVersion).toHaveBeenCalledTimes(1);
+  });
+
+  it('kebab → Open mods folder fires onOpenModsFolder', async () => {
+    const onOpenModsFolder = vi.fn();
+    const user = userEvent.setup();
+    renderRow({ mod: baseModInfo(), onOpenModsFolder });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /open mods folder/i }));
+    expect(onOpenModsFolder).toHaveBeenCalledTimes(1);
+  });
+
+  it('kebab → Edit sources fires onEditSources', async () => {
+    const onEditSources = vi.fn();
+    const user = userEvent.setup();
+    renderRow({ mod: baseModInfo(), onEditSources });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    const labels = screen.getAllByText(/^Edit sources/);
+    const itemLabel = labels.find((el) => el.className.includes('gf-kebab-label'));
+    expect(itemLabel).toBeDefined();
+    await user.click(itemLabel!.closest('button')!);
+    expect(onEditSources).toHaveBeenCalledTimes(1);
+  });
+
+  it('kebab → View on GitHub opens the github_url', async () => {
+    const onOpenExternalUrl = vi.fn();
+    const user = userEvent.setup();
+    renderRow({
+      mod: baseModInfo({ github_url: 'https://github.com/x/y' }),
+      onOpenExternalUrl,
+    });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /^view on github$/i }));
+    expect(onOpenExternalUrl).toHaveBeenCalledWith('https://github.com/x/y');
+  });
+
+  it('kebab → View on Nexus opens the nexus_url', async () => {
+    const onOpenExternalUrl = vi.fn();
+    const user = userEvent.setup();
+    renderRow({
+      mod: baseModInfo({ nexus_url: 'https://www.nexusmods.com/sts2/mods/42' }),
+      onOpenExternalUrl,
+    });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /^view on nexus$/i }));
+    expect(onOpenExternalUrl).toHaveBeenCalledWith(
+      'https://www.nexusmods.com/sts2/mods/42',
+    );
+  });
+
+  it('kebab → Find GitHub from Nexus is only shown when nexus is linked + github is not', async () => {
+    const onFindGithubFromNexus = vi.fn();
+    const user = userEvent.setup();
+    renderRow({
+      mod: baseModInfo({
+        github_url: null,
+        nexus_url: 'https://www.nexusmods.com/sts2/mods/9',
+      }),
+      onFindGithubFromNexus,
+    });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /find github from nexus/i }));
+    expect(onFindGithubFromNexus).toHaveBeenCalledTimes(1);
+  });
+
+  it('kebab → Repair fires onRepair when github_url is linked', async () => {
+    const onRepair = vi.fn();
+    const user = userEvent.setup();
+    renderRow({
+      mod: baseModInfo({ github_url: 'https://github.com/x/y' }),
+      onRepair,
+    });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /repair this mod/i }));
+    expect(onRepair).toHaveBeenCalledTimes(1);
+  });
+
+  it('kebab → Repair is disabled when github_url is missing', async () => {
+    const user = userEvent.setup();
+    renderRow({ mod: baseModInfo({ github_url: null }) });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    const repair = await screen.findByRole('menuitem', { name: /repair this mod/i });
+    expect(repair).toBeDisabled();
+  });
+
+  it('kebab → Rollback fires onRollback when github_url is linked', async () => {
+    const onRollback = vi.fn();
+    const user = userEvent.setup();
+    renderRow({
+      mod: baseModInfo({ github_url: 'https://github.com/x/y' }),
+      onRollback,
+    });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /roll back one version/i }));
+    expect(onRollback).toHaveBeenCalledTimes(1);
+  });
+
+  it('kebab → Delete fires onDelete', async () => {
+    const onDelete = vi.fn();
+    const user = userEvent.setup();
+    renderRow({ mod: baseModInfo(), onDelete });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /remove mod/i }));
+    expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+
+  it('kebab → Add to "modpack" / Remove from "modpack" reflects the membership chip and fires onToggleMembership', async () => {
+    const onToggleMembership = vi.fn();
+    const user = userEvent.setup();
+    renderRow({
+      mod: baseModInfo(),
+      modpackName: 'TestPack',
+      state: baseState({ included: false, enabled: false }),
+      onToggleMembership,
+    });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    await user.click(
+      screen.getByRole('menuitem', { name: /add to "testpack"/i }),
+    );
+    expect(onToggleMembership).toHaveBeenCalledTimes(1);
+  });
+
+  it('kebab Skip update is shown only when an audit update is pending', async () => {
+    const onSnooze = vi.fn();
+    const user = userEvent.setup();
+    renderRow({
+      mod: baseModInfo({ github_url: 'https://github.com/x/y' }),
+      audit: baseAudit(),
+      onSnooze,
+    });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    const labels = await screen.findAllByText(/^Skip this update$/);
+    const labelEl = labels.find((el) => el.className.includes('gf-kebab-label'));
+    expect(labelEl).toBeDefined();
+    await user.click(labelEl!.closest('button')!);
+    expect(onSnooze).toHaveBeenCalledTimes(1);
+  });
+
+  it('kebab Show update again is shown only when the audit row is snoozed', async () => {
+    const onUnsnooze = vi.fn();
+    const user = userEvent.setup();
+    renderRow({
+      mod: baseModInfo({ github_url: 'https://github.com/x/y' }),
+      audit: baseAudit({ snoozed: true }),
+      onUnsnooze,
+    });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /show update again/i }));
+    expect(onUnsnooze).toHaveBeenCalledTimes(1);
+  });
+
+  it('audit pill — Update available pill renders when audit reports a pending update', () => {
+    renderRow({
+      mod: baseModInfo({ github_url: 'https://github.com/x/y' }),
+      audit: baseAudit(),
+    });
+    expect(screen.getByText(/Update available → v3\.2\.0/)).toBeInTheDocument();
+  });
+
+  it('audit pill — clicking the Update pill fires onUpdate', async () => {
+    const onUpdate = vi.fn();
+    const user = userEvent.setup();
+    renderRow({
+      mod: baseModInfo({ github_url: 'https://github.com/x/y' }),
+      audit: baseAudit(),
+      onUpdate,
+    });
+    await user.click(screen.getByRole('button', { name: /Update available → v3\.2\.0/i }));
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('audit pill — Update blocked pill renders when blocked by game version', () => {
+    renderRow({
+      mod: baseModInfo({ github_url: 'https://github.com/x/y' }),
+      audit: baseAudit({
+        latest_release_blocked_by_game_version: true,
+      }),
+    });
+    expect(screen.getByText(/Update blocked by game version/i)).toBeInTheDocument();
+  });
+
+  it('audit pill — Frozen pill renders when mod.pinned is true', () => {
+    renderRow({
+      mod: baseModInfo({ pinned: true }),
+    });
+    expect(screen.getByText('Frozen')).toBeInTheDocument();
+  });
+
+  it('audit pill — Skipped pill renders when audit row is snoozed', () => {
+    renderRow({
+      mod: baseModInfo({ github_url: 'https://github.com/x/y' }),
+      audit: baseAudit({ snoozed: true }),
+    });
+    expect(screen.getByText(/Skipped/)).toBeInTheDocument();
+  });
+
+  it('audit pill — Audit error pill renders when audit row carries an error', () => {
+    renderRow({
+      mod: baseModInfo({ github_url: 'https://github.com/x/y' }),
+      audit: baseAudit({ error: 'GitHub 404' }),
+    });
+    expect(screen.getByText(/Audit error/i)).toBeInTheDocument();
+  });
+
+  it('min-game-version warning surfaces when gameVersion < mod.min_game_version', () => {
+    renderRow({
+      mod: baseModInfo({ min_game_version: '0.110.0' }),
+      gameVersion: '0.100.0',
+    });
+    expect(screen.getByText(/needs game ≥ v0\.110\.0/i)).toBeInTheDocument();
+  });
+
+  it('HelpHint on the storage chip is rendered (Stored meaning explainer)', () => {
+    const { container } = renderRow({ mod: baseModInfo() });
+    // The HelpHint renders a button with aria-label "What's this?".
+    // Inside the meta row, alongside the storage chip.
+    expect(container.querySelector('.gf-help-hint')).not.toBeNull();
+  });
+
+  it('GitHub + Nexus source pills render alongside the storage button when URLs are set', () => {
+    renderRow({
+      mod: baseModInfo({
+        github_url: 'https://github.com/foo/bar',
+        nexus_url: 'https://www.nexusmods.com/sts2/mods/12',
+      }),
+    });
+    expect(screen.getByText('GitHub')).toBeInTheDocument();
+    expect(screen.getByText('Nexus')).toBeInTheDocument();
+  });
+
+  it('sourceEditorSlot renders inside the row when provided', () => {
+    renderRow({
+      mod: baseModInfo(),
+      sourceEditorSlot: <div data-testid="src-editor">EDITOR</div>,
+    });
+    expect(screen.getByTestId('src-editor')).toBeInTheDocument();
+  });
+});
+
+// ── modpackName=null mode (Library view; no per-modpack focus) ──────────
+
+describe('<LibraryRow> modpackName=null mode', () => {
+  it('does not render the per-modpack checkbox', () => {
+    renderRow({ modpackName: null, state: undefined, inPack: false, inPackIndex: -1 });
+    expect(screen.queryByRole('checkbox')).toBeNull();
+  });
+
+  it('does not render the drag handle when not in a focused pack', () => {
+    const { container } = renderRow({
+      modpackName: null,
+      state: undefined,
+      inPack: false,
+      inPackIndex: -1,
+    });
+    expect(container.querySelector('.gf-load-order-drag')).toBeNull();
+  });
+
+  it('still renders the storage chip + storage button', () => {
+    renderRow({ modpackName: null, state: undefined, inPack: false, inPackIndex: -1 });
+    expect(screen.getByText(/Active in game/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Store BaseLib/i })).toBeInTheDocument();
+  });
+
+  it('kebab does not render the modpack membership item when modpackName is null', async () => {
+    const user = userEvent.setup();
+    renderRow({
+      modpackName: null,
+      state: undefined,
+      inPack: false,
+      inPackIndex: -1,
+      mod: baseModInfo(),
+    });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    expect(screen.queryByRole('menuitem', { name: /add to/i })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: /remove from/i })).toBeNull();
   });
 });

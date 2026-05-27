@@ -11,9 +11,8 @@
 //!
 //! Everything here is sync — no async, no reqwest. The async upload
 //! retry/recovery layer (`upload_release_asset_recovering`,
-//! `replace_release_asset_via_delete_post`) stays in `mod.rs` because
-//! those helpers are exercised by the `release_upload_tests` +
-//! `share_via_releases_e2e_tests` modules through `super::*`.
+//! `replace_release_asset_via_delete_post`) lives in `sharing/github.rs`
+//! alongside the HTTP plumbing it composes.
 
 use std::io::Write;
 use std::path::Component;
@@ -30,7 +29,7 @@ use crate::profiles::Profile;
 /// `mods_path` or the publish aborts. Returns the finished archive
 /// bytes so the caller (`upload_release_asset`) can hand them straight
 /// to reqwest without a temp file.
-pub(super) fn zip_mod_files(
+pub(crate) fn zip_mod_files(
     mod_name: &str,
     files: &[String],
     mods_path: &std::path::Path,
@@ -222,5 +221,114 @@ pub(super) fn restore_profile_after_failed_publish(
                 profile.name
             );
         }
+    }
+}
+
+// ── Tests ──────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod publish_bundle_contract_tests {
+    use super::*;
+    // `zip_mod_files` is the raw bundling primitive — orchestration
+    // always reaches it through `zip_profile_mod_files`, but the
+    // contract tests below exercise its safety rails directly
+    // (rejected unsafe paths, missing-file errors).
+
+    fn profile_with_mod(pm: crate::profiles::ProfileMod) -> Profile {
+        Profile {
+            name: "contract".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![pm],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+        }
+    }
+
+    fn profile_mod(enabled: bool) -> crate::profiles::ProfileMod {
+        crate::profiles::ProfileMod {
+            name: "ContractMod".into(),
+            version: "1.0.0".into(),
+            source: None,
+            hash: None,
+            files: vec!["ContractMod/ContractMod.json".into()],
+            folder_name: Some("ContractMod".into()),
+            mod_id: Some("ContractMod".into()),
+            enabled,
+            bundle_url: None,
+            bundle_sha256: None,
+        }
+    }
+
+    #[test]
+    fn zip_mod_files_errors_when_declared_file_is_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let err = zip_mod_files(
+            "ContractMod",
+            &["ContractMod/ContractMod.json".into()],
+            tmp.path(),
+        )
+        .expect_err("missing profile files must fail publish instead of creating an empty bundle");
+
+        assert!(
+            err.to_string().contains("missing declared file"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn zip_mod_files_rejects_declared_paths_outside_mods_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let err = zip_mod_files("ContractMod", &["../secrets.txt".into()], tmp.path())
+            .expect_err("publish must not read files outside the mods folder");
+
+        assert!(
+            err.to_string().contains("unsafe declared file"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn zip_profile_mod_files_reads_disabled_mods_from_disabled_base() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mods_path = tmp.path().join("mods");
+        let disabled_path = tmp.path().join("mods_disabled");
+        let disabled_mod = disabled_path.join("ContractMod");
+        std::fs::create_dir_all(&disabled_mod).unwrap();
+        std::fs::write(disabled_mod.join("ContractMod.json"), b"{}").unwrap();
+
+        let zip_data =
+            zip_profile_mod_files(&profile_mod(false), &mods_path, &disabled_path).unwrap();
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip_data)).unwrap();
+        assert!(
+            archive.by_name("ContractMod/ContractMod.json").is_ok(),
+            "disabled profile mods must be bundled from mods_disabled"
+        );
+    }
+
+    #[test]
+    fn publish_completion_rejects_any_mod_without_bundle_url() {
+        let profile = profile_with_mod(profile_mod(true));
+        let err = ensure_profile_publish_complete(&profile, &[])
+            .expect_err("publishing a partially restorable manifest must be blocked");
+
+        assert!(
+            err.to_string().contains("missing bundles"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn share_owner_replaces_app_default_attribution() {
+        let mut profile = profile_with_mod(profile_mod(true));
+        profile.created_by = Some("sts2-mod-manager".into());
+
+        let attributed = super::super::attribute_profile_to_owner(profile, "alice");
+
+        assert_eq!(attributed.created_by.as_deref(), Some("alice"));
     }
 }

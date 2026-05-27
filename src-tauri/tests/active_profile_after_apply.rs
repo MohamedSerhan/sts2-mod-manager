@@ -51,7 +51,7 @@ fn function_body<'a>(source: &'a str, signature: &str) -> &'a str {
 
 #[test]
 fn install_shared_profile_claims_active_profile_slot() {
-    let source = read_source("sharing/mod.rs");
+    let source = read_source("sharing/install.rs");
     let body = function_body(&source, "pub async fn install_shared_profile(");
     assert!(
         body.contains("s.active_profile = Some(profile.name.clone())"),

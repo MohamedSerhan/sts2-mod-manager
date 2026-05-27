@@ -1,26 +1,30 @@
 //! Low-level GitHub HTTP plumbing: the reqwest client builder,
-//! the `STS2_GITHUB_API_BASE` env-var indirection, and the basic
-//! request/response shapes the sharing orchestration in `mod.rs`
-//! wraps in higher-level workflows.
+//! the `STS2_GITHUB_API_BASE` env-var indirection, basic
+//! request/response shapes, AND the release-asset upload/delete/
+//! replace orchestration the rest of the sharing layer composes
+//! into higher-level workflows.
 //!
 //! Split out of the historic `sharing.rs` mega-file so the testable
 //! "talks to GitHub" surface (Contents/User/Releases API shapes,
-//! Bearer-auth header wiring) lives separately from the upload
-//! retry/recovery + zip-bundling layered on top. The release-asset
-//! upload helpers (`ensure_bundles_release`, `upload_release_asset`,
-//! `delete_release_asset`, `replace_release_asset_via_delete_post`)
-//! stay in `mod.rs` for now — they're so tightly bound to the test
-//! modules that use `super::*` that splitting them risks breaking
-//! more invariants than the win justifies.
+//! Bearer-auth header wiring, release-asset CRUD, paginated asset
+//! listing, GC sweep, anonymous + authenticated profile fetches,
+//! and bundle download) lives separately from the orchestration
+//! that stitches share/publish workflows together (`sharing/mod.rs`)
+//! and the zip-bundling layer (`sharing/upload.rs`).
 //!
-//! See `sharing/mod.rs` for the orchestration that calls into these
-//! helpers, and `sharing/code.rs` for the pure-helper layer.
+//! See `sharing/mod.rs` for the Tauri-command orchestrators that
+//! call into these helpers, and `sharing/code.rs` for the pure
+//! share-code parsing/validation layer.
 
 use std::time::Duration;
 
 use serde::Deserialize;
 
 use crate::error::{AppError, Result};
+use crate::profiles::Profile;
+
+use super::code::{decode_asset_name, release_asset_name};
+use super::upload::zip_entry_outpath;
 
 /// Total request timeout for sharing HTTP clients. Long enough for a
 /// large release-asset download on a slow link, short enough that a
@@ -29,6 +33,12 @@ pub(super) const HTTP_TOTAL_TIMEOUT: Duration = Duration::from_secs(60);
 /// Connect timeout for sharing HTTP clients. A connect that's still
 /// pending after 10s is almost certainly a routing/DNS issue.
 pub(super) const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Tag used for the rolling "bundles" release on every curator's
+/// `sts2mm-profiles` repo. One release = one stable tag = one stable
+/// URL prefix for every shared bundle. Asset names carry the version
+/// (`<mod>_v<ver>_<sha8>.zip`), so versioning happens at the asset layer.
+pub(super) const BUNDLES_RELEASE_TAG: &str = "bundles";
 
 // ── GitHub API Response Shapes ─────────────────────────────────────────────
 
@@ -61,6 +71,18 @@ pub(super) struct ReleaseAsset {
     pub id: u64,
     pub name: String,
     pub browser_download_url: String,
+}
+
+/// Minimal shape of a directory-listing entry returned by
+/// `GET /repos/{o}/{r}/contents/` — only the fields we read for the
+/// bundle-asset GC sweep. (For files in a directory listing, GitHub
+/// populates `download_url` with a `raw.githubusercontent.com` URL.)
+#[derive(Debug, Deserialize)]
+struct RepoContentEntry {
+    name: String,
+    #[serde(rename = "type")]
+    entry_type: String,
+    download_url: Option<String>,
 }
 
 // ── HTTP Client ────────────────────────────────────────────────────────────
@@ -253,4 +275,2152 @@ pub(super) async fn upsert_file(
         .to_string();
 
     Ok((file_sha, html_url))
+}
+
+// ── Release-Asset Helpers ──────────────────────────────────────────────────
+
+/// Ensure the rolling `bundles` release exists on the profiles repo,
+/// creating it on first share. Returns the release as it exists after
+/// this call — assets included so the caller can dedupe without a
+/// second round-trip.
+///
+/// Why a single rolling release instead of one per share: asset names
+/// carry the version (`<mod>_v<ver>.zip`), so versioning happens at the
+/// asset layer. One release = one stable tag (`bundles`) = one stable
+/// URL prefix for every shared bundle.
+pub(super) async fn ensure_bundles_release(
+    client: &reqwest::Client,
+    owner: &str,
+    repo: &str,
+) -> Result<ReleaseResponse> {
+    let base = github_api_base();
+    let tag_url = format!(
+        "{}/repos/{}/{}/releases/tags/{}",
+        base, owner, repo, BUNDLES_RELEASE_TAG
+    );
+
+    let mut release: ReleaseResponse = {
+        let resp = client.get(&tag_url).send().await?;
+        if resp.status().is_success() {
+            resp.json::<ReleaseResponse>().await?
+        } else if resp.status().as_u16() == 404 {
+            let create_url = format!("{}/repos/{}/{}/releases", base, owner, repo);
+            let body = serde_json::json!({
+                "tag_name": BUNDLES_RELEASE_TAG,
+                "name": "Mod bundles",
+                "body": "Auto-managed by STS2 Mod Manager. Holds binary mod bundles attached to shared profiles.",
+                "draft": false,
+                "prerelease": false,
+            });
+            let create_resp = client.post(&create_url).json(&body).send().await?;
+            if !create_resp.status().is_success() {
+                let status = create_resp.status();
+                let text = create_resp.text().await.unwrap_or_default();
+                return Err(AppError::Other(format!(
+                    "Could not create bundles release on {}/{} ({}): {}",
+                    owner, repo, status, text
+                )));
+            }
+            create_resp.json::<ReleaseResponse>().await?
+        } else {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(AppError::Other(format!(
+                "Could not check for bundles release on {}/{} ({}): {}",
+                owner, repo, status, text
+            )));
+        }
+    };
+
+    // The inline `assets` field on a release JSON is capped at ~30 entries
+    // by GitHub. Curators with >30 bundled mods (or even fewer, after a few
+    // reshares that left `.stale` assets behind) would silently miss
+    // existing assets and fall through to a POST → 422 already_exists.
+    //
+    // Paginate /releases/{id}/assets explicitly and replace the inline
+    // list before returning. per_page=100 is the GitHub max; we walk
+    // pages until a page returns fewer than 100 entries (or zero).
+    let assets_url = format!(
+        "{}/repos/{}/{}/releases/{}/assets",
+        base, owner, repo, release.id
+    );
+    let mut all_assets: Vec<ReleaseAsset> = Vec::new();
+    let mut page: u32 = 1;
+    loop {
+        let page_resp = client
+            .get(&assets_url)
+            .query(&[("per_page", "100"), ("page", &page.to_string()[..])])
+            .send()
+            .await?;
+        if !page_resp.status().is_success() {
+            let status = page_resp.status();
+            let text = page_resp.text().await.unwrap_or_default();
+            return Err(AppError::Other(format!(
+                "Could not list assets for release {} on {}/{} ({}): {}",
+                release.id, owner, repo, status, text
+            )));
+        }
+        let batch: Vec<ReleaseAsset> = page_resp.json().await?;
+        let batch_len = batch.len();
+        all_assets.extend(batch);
+        if batch_len < 100 {
+            break;
+        }
+        page += 1;
+    }
+    release.assets = all_assets;
+    Ok(release)
+}
+
+/// Upload a single binary asset to a release. `upload_url_template` is
+/// the `upload_url` field returned by the GitHub release endpoint —
+/// a URI Template like `https://uploads.github.com/.../assets{?name,label}`.
+/// We strip the `{?name,label}` suffix and append `?name=<filename>`.
+///
+/// Returns the freshly-created `ReleaseAsset` (caller wants `.browser_download_url`
+/// for the manifest, but also `.id` and `.name` for any subsequent
+/// rename/replace flow — see `upload_mod_bundle_via_release` below).
+///
+/// Unlike the Contents API, this endpoint takes raw bytes (no base64).
+/// That's what removes the ~50 MiB Contents-API ceiling: the asset
+/// endpoint accepts up to 2 GB per file.
+pub(super) async fn upload_release_asset(
+    client: &reqwest::Client,
+    upload_url_template: &str,
+    filename: &str,
+    label: Option<&str>,
+    data: &[u8],
+) -> Result<ReleaseAsset> {
+    let base = upload_url_template
+        .split_once('{')
+        .map(|(b, _)| b)
+        .unwrap_or(upload_url_template);
+    let encoded_name = urlencoding::encode(filename);
+    let url = match label {
+        // GitHub silently strips non-ASCII chars from the asset filename
+        // (Chinese ideographs, emoji, etc.) — documented behavior we can't
+        // disable. The separate `label` param ("alternate short
+        // description of the asset, used in place of the filename") is
+        // shown on the release page UI INSTEAD of the mangled filename,
+        // so we pass the original human-readable name through there.
+        Some(l) => format!(
+            "{}?name={}&label={}",
+            base,
+            encoded_name,
+            urlencoding::encode(l)
+        ),
+        None => format!("{}?name={}", base, encoded_name),
+    };
+
+    let resp = client
+        .post(&url)
+        .header(reqwest::header::CONTENT_TYPE, "application/zip")
+        .body(data.to_vec())
+        .send()
+        .await?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(AppError::Other(format!(
+            "Failed to upload release asset '{}' ({}): {}",
+            filename, status, text
+        )));
+    }
+    Ok(resp.json::<ReleaseAsset>().await?)
+}
+
+/// Upload helper that recovers from GitHub's `422 already_exists`. The
+/// in-memory release listing we built ahead of time can lie — GitHub's
+/// per-release `assets` array sometimes round-trips non-ASCII names
+/// differently from what our `?name=<encoded>` POST produces, so our
+/// lookup may legitimately miss an asset that GitHub then refuses to
+/// re-create. When that happens we refetch the live asset listing, find
+/// the conflicting asset by canonical-decoded name, DELETE it, and POST
+/// once more. One retry only — any further conflict bubbles up.
+pub(super) async fn upload_release_asset_recovering(
+    client: &reqwest::Client,
+    owner: &str,
+    repo: &str,
+    upload_url_template: &str,
+    filename: &str,
+    label: Option<&str>,
+    data: &[u8],
+) -> Result<ReleaseAsset> {
+    match upload_release_asset(client, upload_url_template, filename, label, data).await {
+        Ok(asset) => Ok(asset),
+        Err(AppError::Other(msg)) if msg.contains("already_exists") => {
+            log::warn!(
+                "Asset '{}' returned 422 already_exists — refetching release listing and replacing via DELETE-then-POST",
+                filename
+            );
+            let fresh = ensure_bundles_release(client, owner, repo).await?;
+            let canonical = decode_asset_name(filename);
+            let existing = fresh
+                .assets
+                .iter()
+                .find(|a| decode_asset_name(&a.name) == canonical);
+            match existing {
+                Some(asset) => {
+                    delete_release_asset(client, owner, repo, asset.id).await?;
+                    upload_release_asset(client, &fresh.upload_url, filename, label, data).await
+                }
+                None => Err(AppError::Other(format!(
+                    "Upload of '{}' failed with 422 already_exists but the asset is not visible in the release listing — \
+                     retry the share or delete the asset manually from GitHub.",
+                    filename
+                ))),
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// DELETE a release asset. Used by the replace flow to free the canonical
+/// name before re-POSTing fresh bytes under the same name.
+pub(super) async fn delete_release_asset(
+    client: &reqwest::Client,
+    owner: &str,
+    repo: &str,
+    asset_id: u64,
+) -> Result<()> {
+    let url = format!(
+        "{}/repos/{}/{}/releases/assets/{}",
+        github_api_base(),
+        owner,
+        repo,
+        asset_id
+    );
+    let resp = client.delete(&url).send().await?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(AppError::Other(format!(
+            "Failed to delete release asset {}: {} {}",
+            asset_id, status, text
+        )));
+    }
+    Ok(())
+}
+
+/// Replace a release asset by DELETEing the old one and POSTing fresh
+/// bytes under the canonical name. Used only when a mod author iterates
+/// locally without bumping `version` (the hash differs but the asset
+/// name is still occupied).
+///
+/// Earlier iterations used a POST-then-rename dance to avoid a brief
+/// window where the canonical URL 404s on a crashed upload. That left
+/// `<canonical>.stale` orphans on the release, which collided on every
+/// subsequent replace (PATCH old → `.stale` returned 422 already_exists
+/// because the previous replace's `.stale` was still there).
+///
+/// The atomicity window with DELETE-then-POST is bounded by upload
+/// duration and only hit on the rare edit-without-version-bump path,
+/// so trade complexity for correctness.
+pub(super) async fn replace_release_asset_via_delete_post(
+    client: &reqwest::Client,
+    owner: &str,
+    repo: &str,
+    upload_url_template: &str,
+    canonical_name: &str,
+    label: Option<&str>,
+    old_asset_id: u64,
+    data: &[u8],
+) -> Result<String> {
+    delete_release_asset(client, owner, repo, old_asset_id).await?;
+    let asset =
+        upload_release_asset(client, upload_url_template, canonical_name, label, data).await?;
+    Ok(asset.browser_download_url)
+}
+
+/// Upload a mod's zip bundle as a release asset on the curator's
+/// `sts2mm-profiles` repo. Returns (download_url, sha256_hex) so the
+/// caller can persist the hash to the profile manifest for next-share
+/// content-addressing.
+///
+/// Skip semantics:
+///   - If `prior_sha256` is Some AND matches the freshly-computed local
+///     hash AND the canonical asset name is present in the release →
+///     skip the upload entirely, return the existing browser_download_url.
+///   - If the name collides but the hash differs (or no prior hash to
+///     compare to) → replace via DELETE-then-POST.
+///   - If the name doesn't exist on the release → POST under canonical name.
+pub(super) async fn upload_mod_bundle_via_release(
+    token: &str,
+    username: &str,
+    mod_name: &str,
+    version: &str,
+    zip_data: &[u8],
+    prior_sha256: Option<&str>,
+    repo: &str,
+) -> Result<(String, String)> {
+    use sha2::{Digest, Sha256};
+
+    let client = build_client(token);
+
+    // Hash first so the asset filename can carry the content prefix.
+    // Content-addressed names mean: identical bytes → identical filename
+    // (skippable via the prior_sha256 short-circuit below) and different
+    // bytes → different filename (no GitHub-side dedup collision, ever).
+    // Pre-fix, two re-shares with the same logical version but different
+    // bytes would race on the same asset name and trip 422 already_exists
+    // even when our lookup correctly identified the conflict — and worse,
+    // some past-version uploads left orphan names in GitHub's dedup index
+    // that the listing API doesn't surface, so even a fresh POST 422'd.
+    let mut hasher = Sha256::new();
+    hasher.update(zip_data);
+    let local_hash = format!("{:x}", hasher.finalize());
+
+    let asset_name = release_asset_name(mod_name, version, &local_hash);
+    // GitHub strips non-ASCII chars from the asset filename it stores
+    // (Chinese ideographs, emoji, etc.) — undocumented but consistent
+    // behavior, see https://docs.github.com/en/rest/releases/assets.
+    // The `label` query param is described as "an alternate short
+    // description of the asset, used in place of the filename" — it's
+    // shown on the release-page UI instead of the mangled stored name,
+    // so we put the human-readable "<mod> v<version>" form there.
+    let asset_label = format!("{} v{}", mod_name, version);
+
+    let release = ensure_bundles_release(&client, username, repo).await?;
+
+    // Lookup compares percent-decoded names on both sides so the same
+    // logical filename matches whether GitHub returns the raw UTF-8 form
+    // (`皮皮.zip`) or an already-encoded one (`%E7%9A%AE.zip`). Without
+    // this, mods with non-ASCII names round-tripped to a POST → 422
+    // already_exists loop, which is what motivated the old ASCII-only
+    // sanitiser. We can now keep the Unicode in filenames (issue #44).
+    let canonical = decode_asset_name(&asset_name);
+    if let Some(existing) = release
+        .assets
+        .iter()
+        .find(|a| decode_asset_name(&a.name) == canonical)
+    {
+        let hash_matches = prior_sha256
+            .map(|p| p == local_hash.as_str())
+            .unwrap_or(false);
+        if hash_matches {
+            log::info!(
+                "Bundle for '{}' v{} unchanged (sha256 match) — reusing existing release asset",
+                mod_name,
+                version
+            );
+            return Ok((existing.browser_download_url.clone(), local_hash));
+        }
+        // Name collision but content differs (or we can't prove it doesn't).
+        // Replace via DELETE-then-POST. Brief atomicity gap on the canonical
+        // URL during upload, but it never strands `.stale` orphans that
+        // break subsequent replaces (see replace_release_asset_via_delete_post).
+        log::info!(
+            "Bundle for '{}' v{} content changed since last share — replacing release asset",
+            mod_name,
+            version
+        );
+        let url = replace_release_asset_via_delete_post(
+            &client,
+            username,
+            repo,
+            &release.upload_url,
+            &asset_name,
+            Some(&asset_label),
+            existing.id,
+            zip_data,
+        )
+        .await?;
+        return Ok((url, local_hash));
+    }
+
+    // Net-new upload, with 422 already_exists recovery — see
+    // upload_release_asset_recovering for the rationale.
+    let asset = upload_release_asset_recovering(
+        &client,
+        username,
+        repo,
+        &release.upload_url,
+        &asset_name,
+        Some(&asset_label),
+        zip_data,
+    )
+    .await?;
+    Ok((asset.browser_download_url, local_hash))
+}
+
+/// Delete every asset on the curator's `bundles` release that no profile
+/// manifest in the same `sts2mm-profiles` repo references. Called after
+/// each share/re-share completes, so leftover bundles from prior renames,
+/// repaired-with-different-content uploads, or the v1.4.x ASCII-only
+/// asset names (`___SpeedX_v0.11.7.zip` before issue #44 was fixed) get
+/// reclaimed automatically.
+///
+/// Best-effort: every step that can fail logs and continues. We never
+/// fail the surrounding share over a cleanup error — orphan assets are a
+/// disk-space concern, not a correctness one, and the next share will
+/// retry the sweep anyway.
+pub(super) async fn cleanup_orphan_bundle_assets(
+    token: &str,
+    owner: &str,
+    repo: &str,
+) -> Result<usize> {
+    let client = build_client(token);
+    let base = github_api_base();
+
+    // 1. List `.json` profile manifests at the repo root.
+    let listing_url = format!("{}/repos/{}/{}/contents", base, owner, repo);
+    let listing_resp = match client.get(&listing_url).send().await {
+        Ok(r) => r,
+        Err(e) => {
+            log::warn!(
+                "GC: skipping cleanup — could not list contents of {}/{}: {}",
+                owner,
+                repo,
+                e
+            );
+            return Ok(0);
+        }
+    };
+    if !listing_resp.status().is_success() {
+        log::warn!(
+            "GC: skipping cleanup — contents listing for {}/{} returned {}",
+            owner,
+            repo,
+            listing_resp.status()
+        );
+        return Ok(0);
+    }
+    let entries: Vec<RepoContentEntry> = match listing_resp.json().await {
+        Ok(v) => v,
+        Err(e) => {
+            log::warn!(
+                "GC: skipping cleanup — could not parse contents listing for {}/{}: {}",
+                owner,
+                repo,
+                e
+            );
+            return Ok(0);
+        }
+    };
+
+    // 2. For each `.json` manifest, collect referenced bundle URLs.
+    let mut referenced: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for entry in entries
+        .iter()
+        .filter(|e| e.entry_type == "file" && e.name.ends_with(".json"))
+    {
+        let download_url = match entry.download_url.as_deref() {
+            Some(u) => u,
+            None => continue,
+        };
+        let resp = match client.get(download_url).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                log::warn!("GC: could not fetch manifest {}: {}", entry.name, e);
+                continue;
+            }
+        };
+        if !resp.status().is_success() {
+            log::warn!("GC: manifest {} returned {}", entry.name, resp.status());
+            continue;
+        }
+        let profile: Profile = match resp.json().await {
+            Ok(p) => p,
+            Err(e) => {
+                log::warn!("GC: could not parse manifest {}: {}", entry.name, e);
+                continue;
+            }
+        };
+        for pm in profile.mods {
+            if let Some(url) = pm.bundle_url {
+                referenced.insert(url);
+            }
+        }
+    }
+
+    // 3. List every asset currently on the `bundles` release.
+    let release = match ensure_bundles_release(&client, owner, repo).await {
+        Ok(r) => r,
+        Err(e) => {
+            log::warn!(
+                "GC: could not fetch bundles release for {}/{}: {}",
+                owner,
+                repo,
+                e
+            );
+            return Ok(0);
+        }
+    };
+
+    // 4. Delete orphans. If `referenced` is empty AND there are assets, we
+    // could be looking at a torn repo state (manifest listing failed mid-
+    // sweep) — refuse to delete anything in that case so we don't nuke a
+    // healthy release.
+    if referenced.is_empty() && !release.assets.is_empty() {
+        log::warn!(
+            "GC: aborting — referenced URL set is empty but release has {} assets. \
+             Refusing to delete anything in case the manifest listing was incomplete.",
+            release.assets.len()
+        );
+        return Ok(0);
+    }
+
+    let mut deleted = 0usize;
+    for asset in &release.assets {
+        if referenced.contains(&asset.browser_download_url) {
+            continue;
+        }
+        match delete_release_asset(&client, owner, repo, asset.id).await {
+            Ok(()) => {
+                log::info!("GC: deleted orphan bundle asset '{}'", asset.name);
+                deleted += 1;
+            }
+            Err(e) => {
+                log::warn!("GC: failed to delete orphan asset '{}': {}", asset.name, e);
+            }
+        }
+    }
+    Ok(deleted)
+}
+
+// ── Bundle Download + Profile Fetch ────────────────────────────────────────
+
+/// Download a bundled mod zip from a URL and extract into mods_path.
+/// Uses the GitHub API (not raw.githubusercontent.com) to avoid CDN caching issues.
+pub async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::Path) -> Result<()> {
+    let client = reqwest::Client::builder()
+        .user_agent(concat!("sts2-mod-manager/", env!("CARGO_PKG_VERSION")))
+        .timeout(HTTP_TOTAL_TIMEOUT)
+        .connect_timeout(HTTP_CONNECT_TIMEOUT)
+        .build()
+        .unwrap_or_default();
+
+    // QA-cassette interception for release-asset downloads. The cassette
+    // layer is GET-only and gated on `cfg!(feature = "qa-cassette")`, so
+    // `intercept_get` collapses to a no-op `None` in shipped builds and
+    // the compiler drops this entire block. The `github-releases` bucket
+    // mirrors github.com's URL path under $STS2_CASSETTE_DIR — see
+    // qa_cassette::url_to_path. Handled here ahead of the type-unified
+    // `let bytes = ...` block below because the cached value is a
+    // `Vec<u8>` and the network branches all return `reqwest::Bytes`;
+    // pulling cassette out keeps the type-unification clean and avoids
+    // pulling `bytes` in as a direct crate dep.
+    if url.starts_with("https://github.com/") && url.contains("/releases/download/") {
+        if let Some(cached) = crate::qa_cassette::intercept_get(url) {
+            log::info!(
+                "[cassette] serving release bundle '{}' from disk ({} bytes)",
+                mod_name,
+                cached.len()
+            );
+            let cursor = std::io::Cursor::new(cached);
+            let mut archive = zip::ZipArchive::new(cursor).map_err(|e| {
+                AppError::Other(format!("Invalid bundle zip for '{}': {}", mod_name, e))
+            })?;
+            for i in 0..archive.len() {
+                let mut file = archive
+                    .by_index(i)
+                    .map_err(|e| AppError::Other(e.to_string()))?;
+                let Some(outpath) = zip_entry_outpath(mods_path, file.name()) else {
+                    continue;
+                };
+                if file.name().ends_with('/') {
+                    std::fs::create_dir_all(&outpath)?;
+                } else {
+                    if let Some(parent) = outpath.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    let mut outfile = std::fs::File::create(&outpath)?;
+                    std::io::copy(&mut file, &mut outfile)?;
+                }
+            }
+            return Ok(());
+        }
+    }
+
+    // Parse the raw.githubusercontent.com URL to extract owner/repo/path
+    // Format: https://raw.githubusercontent.com/OWNER/REPO/main/PATH
+    let bytes = if url.starts_with("https://github.com/") && url.contains("/releases/download/") {
+        // Release-asset download. github.com 302-redirects to
+        // objects.githubusercontent.com; reqwest follows redirects by
+        // default. No API auth needed — release assets in a public repo
+        // are public.
+        //
+        // For test interception we honor STS2_GITHUB_RELEASES_BASE — if set,
+        // we replace the `https://github.com` prefix with it so wiremock
+        // can answer. Production never sets this var.
+        let effective = if let Ok(base) = std::env::var("STS2_GITHUB_RELEASES_BASE") {
+            url.replacen("https://github.com", &base, 1)
+        } else {
+            url.to_string()
+        };
+        log::info!(
+            "Downloading release bundle '{}' from {}",
+            mod_name,
+            effective
+        );
+        let resp = client.get(&effective).send().await?;
+        if !resp.status().is_success() {
+            return Err(AppError::Other(format!(
+                "Failed to download release bundle for '{}': {}",
+                mod_name,
+                resp.status()
+            )));
+        }
+        resp.bytes().await?
+    } else if url.contains("raw.githubusercontent.com") {
+        // Use GitHub API to avoid CDN caching issues
+        let parts: Vec<&str> = url
+            .trim_start_matches("https://raw.githubusercontent.com/")
+            .splitn(4, '/')
+            .collect();
+        if parts.len() >= 4 {
+            let (owner, repo, _branch, path) = (parts[0], parts[1], parts[2], parts[3]);
+            let api_url = format!(
+                "{}/repos/{}/{}/contents/{}",
+                github_api_base(),
+                owner,
+                repo,
+                path
+            );
+            log::info!(
+                "Downloading bundle '{}' via GitHub API: {}",
+                mod_name,
+                api_url
+            );
+
+            let resp = client
+                .get(&api_url)
+                .header("Accept", "application/vnd.github.raw+json")
+                .send()
+                .await?;
+
+            if !resp.status().is_success() {
+                // Fallback to direct URL if API fails
+                log::warn!(
+                    "GitHub API download failed for '{}' ({}), falling back to direct URL",
+                    mod_name,
+                    resp.status()
+                );
+                let resp2 = client.get(url).send().await?;
+                if !resp2.status().is_success() {
+                    return Err(AppError::Other(format!(
+                        "Failed to download bundle for '{}': {}",
+                        mod_name,
+                        resp2.status()
+                    )));
+                }
+                resp2.bytes().await?
+            } else {
+                resp.bytes().await?
+            }
+        } else {
+            // Can't parse URL, use direct download
+            let resp = client.get(url).send().await?;
+            if !resp.status().is_success() {
+                return Err(AppError::Other(format!(
+                    "Failed to download bundle for '{}': {}",
+                    mod_name,
+                    resp.status()
+                )));
+            }
+            resp.bytes().await?
+        }
+    } else {
+        // Non-GitHub URL, use direct download
+        let resp = client.get(url).send().await?;
+        if !resp.status().is_success() {
+            return Err(AppError::Other(format!(
+                "Failed to download bundle for '{}': {}",
+                mod_name,
+                resp.status()
+            )));
+        }
+        resp.bytes().await?
+    };
+
+    log::info!(
+        "Downloaded bundle for '{}': {} bytes",
+        mod_name,
+        bytes.len()
+    );
+    let cursor = std::io::Cursor::new(bytes);
+    let mut archive = zip::ZipArchive::new(cursor)
+        .map_err(|e| AppError::Other(format!("Invalid bundle zip for '{}': {}", mod_name, e)))?;
+
+    for i in 0..archive.len() {
+        let mut file = archive
+            .by_index(i)
+            .map_err(|e| AppError::Other(e.to_string()))?;
+        let Some(outpath) = zip_entry_outpath(mods_path, file.name()) else {
+            continue;
+        };
+        if file.name().ends_with('/') {
+            std::fs::create_dir_all(&outpath)?;
+        } else {
+            if let Some(parent) = outpath.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let mut outfile = std::fs::File::create(&outpath)?;
+            std::io::copy(&mut file, &mut outfile)?;
+        }
+    }
+    Ok(())
+}
+
+/// Fetch a profile from any user's profiles repo.
+///
+/// Uses the GitHub Contents API to avoid CDN caching issues with
+/// raw.githubusercontent.com — recently re-shared profiles need to be
+/// fetched immediately.
+///
+/// When `token` is `Some`, the request is authenticated and gets the
+/// 5000-req/hour rate limit. When `None`, the request is anonymous and
+/// shares the per-IP 60-req/hour pool. The subscription poll passes the
+/// user's PAT here so a follower with several subscriptions doesn't keep
+/// hitting 429s.
+pub async fn fetch_shared_profile(
+    owner: &str,
+    filename: &str,
+    token: Option<&str>,
+    repo: &str,
+) -> Result<Profile> {
+    let client = reqwest::Client::builder()
+        .user_agent(concat!("sts2-mod-manager/", env!("CARGO_PKG_VERSION")))
+        .timeout(HTTP_TOTAL_TIMEOUT)
+        .connect_timeout(HTTP_CONNECT_TIMEOUT)
+        .build()
+        .unwrap_or_default();
+
+    // Primary: use GitHub Contents API with raw accept header to bypass CDN cache.
+    let api_url = format!(
+        "{}/repos/{}/{}/contents/{}",
+        github_api_base(),
+        owner,
+        repo,
+        filename
+    );
+    log::info!(
+        "Fetching shared profile via GitHub API ({}): {}",
+        if token.is_some() { "authed" } else { "anon" },
+        api_url
+    );
+
+    let mut req = client
+        .get(&api_url)
+        .header("Accept", "application/vnd.github.raw+json");
+    if let Some(t) = token {
+        req = req.bearer_auth(t);
+    }
+    let api_resp = req.send().await;
+
+    let text = match api_resp {
+        Ok(resp) if resp.status().is_success() => resp.text().await?,
+        Ok(resp) => {
+            let status = resp.status();
+            log::warn!(
+                "GitHub API fetch failed for profile ({}) -- falling back to raw URL",
+                status
+            );
+            // Fallback: raw.githubusercontent.com (may be cached but better than nothing)
+            let raw_url = format!(
+                "https://raw.githubusercontent.com/{}/{}/main/{}",
+                owner, repo, filename
+            );
+            let fallback_resp = client.get(&raw_url).send().await?;
+            if !fallback_resp.status().is_success() {
+                return Err(AppError::Other(format!(
+                    "Profile not found ({}). Check the code and try again.",
+                    fallback_resp.status()
+                )));
+            }
+            fallback_resp.text().await?
+        }
+        Err(e) => {
+            log::warn!(
+                "GitHub API request failed for profile: {} -- falling back to raw URL",
+                e
+            );
+            let raw_url = format!(
+                "https://raw.githubusercontent.com/{}/{}/main/{}",
+                owner, repo, filename
+            );
+            let fallback_resp = client.get(&raw_url).send().await?;
+            if !fallback_resp.status().is_success() {
+                return Err(AppError::Other(format!(
+                    "Profile not found ({}). Check the code and try again.",
+                    fallback_resp.status()
+                )));
+            }
+            fallback_resp.text().await?
+        }
+    };
+
+    let profile: Profile = serde_json::from_str(&text)
+        .map_err(|e| AppError::Other(format!("Invalid profile data: {}", e)))?;
+
+    Ok(super::attribute_profile_to_owner(profile, owner))
+}
+
+// ── Tests ──────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+pub(super) mod release_upload_tests {
+    use super::*;
+    use tokio::sync::{Mutex, MutexGuard};
+    use wiremock::matchers::{header, method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// `STS2_GITHUB_API_BASE` is process-global. `cargo test` runs `#[tokio::test]`
+    /// tests in parallel by default, so without serialization two tests can race
+    /// and send requests to each other's mock server. Each test takes this lock
+    /// at the top of its body and holds it for the test's lifetime — cheap, and
+    /// avoids forcing callers to pass `--test-threads=1`. We use `tokio::sync::Mutex`
+    /// rather than `std::sync::Mutex` so the guard is `Send` and can live across
+    /// `.await` points on the multi-thread runtime that `#[tokio::test]` uses.
+    pub(crate) static ENV_LOCK: Mutex<()> = Mutex::const_new(());
+
+    /// Helper: spin up a mock GitHub API and point sharing.rs at it via env.
+    /// Caller must hold `ENV_LOCK` for the duration of the test (the env var
+    /// is process-global). Each test still gets its own MockServer on a
+    /// random port, so they're isolated once the lock orders them.
+    async fn mock_github() -> (MockServer, MutexGuard<'static, ()>) {
+        let guard = ENV_LOCK.lock().await;
+        let server = MockServer::start().await;
+        std::env::set_var("STS2_GITHUB_API_BASE", server.uri());
+        (server, guard)
+    }
+
+    /// Compute the SHA256 hex digest the same way the uploader does.
+    /// Test helper so each test can assert on the returned hash.
+    fn sha256_hex(bytes: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        h.update(bytes);
+        format!("{:x}", h.finalize())
+    }
+
+    #[tokio::test]
+    async fn ensure_bundles_release_creates_release_when_404() {
+        let (server, _env_guard) = mock_github().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": 42,
+                "upload_url": format!("{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}", server.uri()),
+                "assets": []
+            })))
+            .mount(&server)
+            .await;
+
+        // Newly-created release has no assets — pagination loop returns an
+        // empty page on the first try and stops (len < 100).
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&server)
+            .await;
+
+        let client = build_client("test-token");
+        let release = ensure_bundles_release(&client, "octo", "sts2mm-profiles")
+            .await
+            .expect("should create release");
+        assert_eq!(release.id, 42);
+        assert!(release.assets.is_empty());
+    }
+
+    #[tokio::test]
+    async fn ensure_bundles_release_reuses_when_200() {
+        let (server, _env_guard) = mock_github().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 7,
+                "upload_url": format!("{}/repos/octo/sts2mm-profiles/releases/7/assets{{?name,label}}", server.uri()),
+                "assets": [{
+                    "id": 100,
+                    "name": "OldMod_v0.1.zip",
+                    "browser_download_url": "https://example/old"
+                }]
+            })))
+            .mount(&server)
+            .await;
+
+        // Pagination replaces the inline `assets` field with the result of
+        // GET /releases/{id}/assets. The inline value is ignored — what
+        // the test asserts on is the paginated list.
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/7/assets"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                    "id": 100,
+                    "name": "OldMod_v0.1.zip",
+                    "browser_download_url": "https://example/old"
+                }])),
+            )
+            .mount(&server)
+            .await;
+
+        let client = build_client("test-token");
+        let release = ensure_bundles_release(&client, "octo", "sts2mm-profiles")
+            .await
+            .expect("should reuse release");
+        assert_eq!(release.id, 7);
+        assert_eq!(release.assets.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn ensure_bundles_release_paginates_assets_across_pages() {
+        // Regression for Bug A: curators with >30 bundles miss existing
+        // assets because the inline `assets` field is capped at ~30.
+        // We must paginate /releases/{id}/assets explicitly.
+        let (server, _env_guard) = mock_github().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 42,
+                "upload_url": format!("{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}", server.uri()),
+                "assets": []
+            })))
+            .mount(&server).await;
+
+        let page1: Vec<serde_json::Value> = (0..100)
+            .map(|i| {
+                serde_json::json!({
+                    "id": 1000 + i,
+                    "name": format!("Page1Mod{:03}_v1.0.0.zip", i),
+                    "browser_download_url": format!("https://example/p1-{}", i)
+                })
+            })
+            .collect();
+        let page2: Vec<serde_json::Value> = (0..5)
+            .map(|i| {
+                serde_json::json!({
+                    "id": 2000 + i,
+                    "name": format!("Page2Mod{:03}_v1.0.0.zip", i),
+                    "browser_download_url": format!("https://example/p2-{}", i)
+                })
+            })
+            .collect();
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("page", "1"))
+            .and(query_param("per_page", "100"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(page1))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("page", "2"))
+            .and(query_param("per_page", "100"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(page2))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = build_client("test-token");
+        let release = ensure_bundles_release(&client, "octo", "sts2mm-profiles")
+            .await
+            .expect("paginated list should succeed");
+        assert_eq!(
+            release.assets.len(),
+            105,
+            "expected 100+5 assets across pages"
+        );
+        assert!(
+            release
+                .assets
+                .iter()
+                .any(|a| a.name == "Page1Mod000_v1.0.0.zip"),
+            "first page name must be present"
+        );
+        assert!(
+            release
+                .assets
+                .iter()
+                .any(|a| a.name == "Page2Mod004_v1.0.0.zip"),
+            "second page name must be present"
+        );
+    }
+
+    #[tokio::test]
+    async fn ensure_bundles_release_stops_when_page_is_empty() {
+        // Edge case: page 1 returns exactly 100 (the page-size threshold for
+        // "maybe more"), page 2 returns 0. We must NOT fetch page 3.
+        let (server, _env_guard) = mock_github().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 42,
+                "upload_url": format!("{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}", server.uri()),
+                "assets": []
+            })))
+            .mount(&server).await;
+
+        let page1: Vec<serde_json::Value> = (0..100)
+            .map(|i| {
+                serde_json::json!({
+                    "id": 1000 + i,
+                    "name": format!("Mod{:03}_v1.0.0.zip", i),
+                    "browser_download_url": format!("https://example/{}", i)
+                })
+            })
+            .collect();
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("page", "1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(page1))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("page", "2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        // If the loop runs away to page 3, wiremock will count this expect(0)
+        // mock as having received a request and fail the test on drop.
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("page", "3"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let client = build_client("test-token");
+        let release = ensure_bundles_release(&client, "octo", "sts2mm-profiles")
+            .await
+            .expect("paginated list should stop on empty page");
+        assert_eq!(release.assets.len(), 100);
+    }
+
+    #[tokio::test]
+    async fn upload_release_asset_posts_raw_bytes_with_filename_query() {
+        let (server, _env_guard) = mock_github().await;
+
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("name", "TheCursedMod_v0.2.7.zip"))
+            .and(header("content-type", "application/zip"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": 999,
+                "name": "TheCursedMod_v0.2.7.zip",
+                "browser_download_url": "https://github.com/octo/sts2mm-profiles/releases/download/bundles/TheCursedMod_v0.2.7.zip"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let upload_url_template = format!(
+            "{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}",
+            server.uri()
+        );
+        let client = build_client("test-token");
+        let asset = upload_release_asset(
+            &client,
+            &upload_url_template,
+            "TheCursedMod_v0.2.7.zip",
+            None,
+            b"PK\x03\x04...fake-zip-bytes",
+        )
+        .await
+        .expect("upload should succeed");
+        assert_eq!(
+            asset.browser_download_url,
+            "https://github.com/octo/sts2mm-profiles/releases/download/bundles/TheCursedMod_v0.2.7.zip"
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_release_asset_calls_correct_endpoint() {
+        let (server, _env_guard) = mock_github().await;
+        Mock::given(method("DELETE"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/assets/555"))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = build_client("test-token");
+        delete_release_asset(&client, "octo", "sts2mm-profiles", 555)
+            .await
+            .expect("delete should succeed");
+    }
+
+    #[tokio::test]
+    async fn replace_release_asset_via_delete_post_swaps() {
+        let (server, _env_guard) = mock_github().await;
+        let upload_url_template = format!(
+            "{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}",
+            server.uri()
+        );
+
+        Mock::given(method("DELETE"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/assets/555"))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("name", "TheCursed_v0.2.7.zip"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": 1001,
+                "name": "TheCursed_v0.2.7.zip",
+                "browser_download_url": "https://github.com/octo/sts2mm-profiles/releases/download/bundles/TheCursed_v0.2.7.zip"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = build_client("test-token");
+        let url = replace_release_asset_via_delete_post(
+            &client,
+            "octo",
+            "sts2mm-profiles",
+            &upload_url_template,
+            "TheCursed_v0.2.7.zip",
+            None,
+            555,
+            b"new-bytes",
+        )
+        .await
+        .expect("delete-then-post should succeed");
+        assert!(url.contains("releases/download/bundles/TheCursed_v0.2.7.zip"));
+    }
+
+    /// Helper: compute the asset filename the orchestrator will produce
+    /// for these exact bytes. Asset names are content-addressed
+    /// (`<mod>_v<ver>_<sha8>.zip`) so tests can't hardcode them — the
+    /// SHA prefix shifts whenever the test fixture bytes change.
+    fn expected_asset_name(mod_name: &str, version: &str, data: &[u8]) -> String {
+        release_asset_name(mod_name, version, &sha256_hex(data))
+    }
+
+    fn expected_download_url(mod_name: &str, version: &str, data: &[u8]) -> String {
+        format!(
+            "https://github.com/octo/sts2mm-profiles/releases/download/bundles/{}",
+            expected_asset_name(mod_name, version, data)
+        )
+    }
+
+    #[tokio::test]
+    async fn upload_mod_bundle_via_release_first_upload_records_hash() {
+        let (server, _env_guard) = mock_github().await;
+        let bytes = b"fake-zip-bytes";
+        let name = expected_asset_name("TheCursedMod", "0.2.7", bytes);
+        let download_url = expected_download_url("TheCursedMod", "0.2.7", bytes);
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 42,
+                "upload_url": format!("{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}", server.uri()),
+                "assets": []
+            })))
+            .mount(&server).await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("page", "1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("name", &name))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": 100,
+                "name": name,
+                "browser_download_url": download_url,
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let (url, hash) = upload_mod_bundle_via_release(
+            "test-token",
+            "octo",
+            "TheCursedMod",
+            "0.2.7",
+            bytes,
+            None,
+            "sts2mm-profiles",
+        )
+        .await
+        .expect("first upload should succeed");
+        assert_eq!(url, download_url);
+        assert_eq!(hash, sha256_hex(bytes));
+    }
+
+    #[tokio::test]
+    async fn upload_mod_bundle_via_release_skips_when_hash_matches() {
+        let (server, _env_guard) = mock_github().await;
+        let bytes = b"fake-zip-bytes";
+        let prior_hash = sha256_hex(bytes);
+        let name = expected_asset_name("TheCursedMod", "0.2.7", bytes);
+        let download_url = expected_download_url("TheCursedMod", "0.2.7", bytes);
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 42,
+                "upload_url": format!("{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}", server.uri()),
+                "assets": []
+            })))
+            .mount(&server).await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("page", "1"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                    "id": 555,
+                    "name": name,
+                    "browser_download_url": download_url,
+                }])),
+            )
+            .mount(&server)
+            .await;
+
+        // CRITICAL: any POST/DELETE means we regressed. wiremock fails on
+        // unstubbed requests, so if the orchestrator tries to upload we'll
+        // see it fail.
+
+        let (url, hash) = upload_mod_bundle_via_release(
+            "test-token",
+            "octo",
+            "TheCursedMod",
+            "0.2.7",
+            bytes,
+            Some(&prior_hash),
+            "sts2mm-profiles",
+        )
+        .await
+        .expect("skip should succeed");
+        assert_eq!(url, download_url);
+        assert_eq!(
+            hash, prior_hash,
+            "hash returned to caller must match what was on disk"
+        );
+    }
+
+    #[tokio::test]
+    async fn upload_mod_bundle_via_release_replaces_when_hash_differs_but_name_matches() {
+        // The mod-author case: edited locally without bumping version.
+        // Both old + new bytes hash differently, so under the content-
+        // addressed naming the new bytes produce a brand-new asset name.
+        // The orchestrator no longer needs the DELETE-then-POST replace
+        // path here — it falls into the net-new POST path because the
+        // looked-up canonical (new bytes) name doesn't collide.
+        let (server, _env_guard) = mock_github().await;
+        let bytes = b"fresh-bytes-after-edit";
+        let stale_prior_hash = sha256_hex(b"original-bytes");
+        let new_name = expected_asset_name("TheCursedMod", "0.2.7", bytes);
+        let new_url = expected_download_url("TheCursedMod", "0.2.7", bytes);
+        let stale_name = expected_asset_name("TheCursedMod", "0.2.7", b"original-bytes");
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 42,
+                "upload_url": format!("{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}", server.uri()),
+                "assets": []
+            })))
+            .mount(&server).await;
+
+        // Stale asset under the OLD hash's name is still on the release
+        // (the GC sweep will reap it on a later share). Orchestrator
+        // doesn't touch it — its canonical name is the new-hash one.
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("page", "1"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                    "id": 555,
+                    "name": stale_name,
+                    "browser_download_url": "https://example/old"
+                }])),
+            )
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("name", &new_name))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": 1001,
+                "name": new_name,
+                "browser_download_url": new_url,
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let (url, hash) = upload_mod_bundle_via_release(
+            "test-token",
+            "octo",
+            "TheCursedMod",
+            "0.2.7",
+            bytes,
+            Some(&stale_prior_hash),
+            "sts2mm-profiles",
+        )
+        .await
+        .expect("net-new upload under fresh content-addressed name should succeed");
+        assert_eq!(url, new_url);
+        assert_eq!(hash, sha256_hex(bytes));
+    }
+
+    #[tokio::test]
+    async fn upload_mod_bundle_via_release_replaces_when_same_bytes_same_name_no_prior_hash() {
+        // Edge case: fresh install (no prior hash in profile JSON) but
+        // the canonical content-addressed name happens to be on the
+        // release already (curator re-installed app and lost local
+        // manifest). Orchestrator looks the asset up, can't compare
+        // hashes (no prior), and takes the DELETE-then-POST replace path
+        // to be safe.
+        let (server, _env_guard) = mock_github().await;
+        let bytes = b"data";
+        let name = expected_asset_name("TheCursedMod", "0.2.7", bytes);
+        let download_url = expected_download_url("TheCursedMod", "0.2.7", bytes);
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 42,
+                "upload_url": format!("{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}", server.uri()),
+                "assets": []
+            })))
+            .mount(&server).await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("page", "1"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                    "id": 555,
+                    "name": name,
+                    "browser_download_url": "https://example/whatever"
+                }])),
+            )
+            .mount(&server)
+            .await;
+
+        Mock::given(method("DELETE"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/assets/555"))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("name", &name))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": 1001, "name": name,
+                "browser_download_url": download_url,
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let (_, _) = upload_mod_bundle_via_release(
+            "test-token",
+            "octo",
+            "TheCursedMod",
+            "0.2.7",
+            bytes,
+            None,
+            "sts2mm-profiles",
+        )
+        .await
+        .expect("no-prior-hash + name-collision must replace");
+    }
+
+    #[tokio::test]
+    async fn upload_mod_bundle_via_release_sanitizes_filename() {
+        let (server, _env_guard) = mock_github().await;
+        let bytes = b"data";
+        let name = expected_asset_name("My Cool/Mod", "v1.2.3", bytes);
+        let download_url = expected_download_url("My Cool/Mod", "v1.2.3", bytes);
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 42,
+                "upload_url": format!("{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}", server.uri()),
+                "assets": []
+            })))
+            .mount(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("page", "1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("name", &name))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": 999, "name": name,
+                "browser_download_url": download_url,
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let _ = upload_mod_bundle_via_release(
+            "test-token",
+            "octo",
+            "My Cool/Mod",
+            "v1.2.3",
+            bytes,
+            None,
+            "sts2mm-profiles",
+        )
+        .await
+        .expect("ok");
+        // Sanitised stem still appears in the filename; SHA prefix follows.
+        assert!(name.starts_with("My_Cool_Mod_v1.2.3_"));
+    }
+
+    /// Regression for issue #44: mod names with non-ASCII characters
+    /// (Chinese ideographs, emoji, accented chars) must PRESERVE those
+    /// characters in the uploaded asset filename — pre-fix the asset
+    /// name collapsed to `___SpeedX_v0.11.7.zip` because the sanitiser
+    /// stripped everything outside the ASCII alphanumeric set.
+    ///
+    /// The orchestrator's old "ASCII-only for round-trip stability"
+    /// concern is now handled by `decode_asset_name` on both sides of
+    /// the lookup comparison instead of by mangling the filename.
+    #[tokio::test]
+    async fn upload_mod_bundle_via_release_preserves_unicode_in_asset_name() {
+        let (server, _env_guard) = mock_github().await;
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 42,
+                "upload_url": format!("{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}", server.uri()),
+                "assets": []
+            })))
+            .mount(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&server)
+            .await;
+
+        // "皮皮极速: SpeedX" — colon and space become `_`, but the four
+        // ideographs are kept verbatim. With content-addressing the
+        // filename has a SHA8 suffix appended: `皮皮极速__SpeedX_v0.11.7_<sha8>.zip`.
+        let bytes = b"data";
+        let expected_name = expected_asset_name("皮皮极速: SpeedX", "0.11.7", bytes);
+        let download_url = expected_download_url("皮皮极速: SpeedX", "0.11.7", bytes);
+        assert!(
+            expected_name.starts_with("皮皮极速__SpeedX_v0.11.7_"),
+            "ideographs must be preserved in the asset name",
+        );
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("name", &expected_name))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": 100,
+                "name": expected_name,
+                "browser_download_url": download_url,
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let _ = upload_mod_bundle_via_release(
+            "test-token",
+            "octo",
+            "皮皮极速: SpeedX",
+            "0.11.7",
+            bytes,
+            None,
+            "sts2mm-profiles",
+        )
+        .await
+        .expect("non-ascii mod names must round-trip into the asset filename");
+    }
+
+    /// Regression for Bug A through the orchestrator: an asset on page 2
+    /// of the paginated list must still be discovered. Pre-fix, the
+    /// orchestrator only saw the inline `assets` (capped at ~30) and
+    /// missed anything past page 1, falling through to POST → 422.
+    #[tokio::test]
+    async fn upload_mod_bundle_via_release_finds_asset_on_second_page() {
+        let (server, _env_guard) = mock_github().await;
+        let bytes = b"unchanged-bytes";
+        let prior_hash = sha256_hex(bytes);
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 42,
+                "upload_url": format!("{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}", server.uri()),
+                "assets": []
+            })))
+            .mount(&server).await;
+
+        // Page 1: 100 unrelated assets — the canonical name we care about
+        // is NOT on this page, simulating the real bug.
+        let page1: Vec<serde_json::Value> = (0..100)
+            .map(|i| {
+                serde_json::json!({
+                    "id": 1000 + i,
+                    "name": format!("OtherMod{:03}_v1.0.0.zip", i),
+                    "browser_download_url": format!("https://example/other-{}", i)
+                })
+            })
+            .collect();
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("page", "1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(page1))
+            .mount(&server)
+            .await;
+
+        // Page 2: the canonical asset (content-addressed name).
+        let name = expected_asset_name("TheCursedMod", "0.2.7", bytes);
+        let download_url = expected_download_url("TheCursedMod", "0.2.7", bytes);
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("page", "2"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                    "id": 9999,
+                    "name": name,
+                    "browser_download_url": download_url,
+                }])),
+            )
+            .mount(&server)
+            .await;
+
+        // Hash matches → must SKIP. Any DELETE or POST means the
+        // orchestrator failed to find the asset and went to upload-new,
+        // which is the bug we're guarding against.
+        let (url, hash) = upload_mod_bundle_via_release(
+            "test-token",
+            "octo",
+            "TheCursedMod",
+            "0.2.7",
+            bytes,
+            Some(&prior_hash),
+            "sts2mm-profiles",
+        )
+        .await
+        .expect("skip via page-2 lookup must succeed");
+        assert_eq!(url, download_url);
+        assert_eq!(hash, prior_hash);
+    }
+
+    /// Two consecutive re-shares against the same release. Under
+    /// content-addressed naming each cycle produces a DIFFERENT asset
+    /// filename (`<mod>_v<ver>_<sha8>.zip` differs whenever bytes
+    /// differ), so each cycle hits the net-new POST path rather than
+    /// the DELETE-then-POST replace path. The pre-fix `.stale`-orphan
+    /// failure mode (Bug B) is now impossible — the second upload's
+    /// name doesn't collide with the first's.
+    #[tokio::test]
+    async fn upload_mod_bundle_via_release_two_consecutive_shares_both_succeed() {
+        let (server, _env_guard) = mock_github().await;
+        let first_bytes = b"v1-bytes";
+        let second_bytes = b"v2-bytes";
+        let hash_before_first = sha256_hex(b"original-bytes");
+        let hash_after_first = sha256_hex(first_bytes);
+        let first_name = expected_asset_name("TheCursedMod", "0.2.7", first_bytes);
+        let first_url = expected_download_url("TheCursedMod", "0.2.7", first_bytes);
+        let second_name = expected_asset_name("TheCursedMod", "0.2.7", second_bytes);
+        let second_url = expected_download_url("TheCursedMod", "0.2.7", second_bytes);
+
+        // ── First cycle ────────────────────────────────────────────────
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 42,
+                "upload_url": format!("{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}", server.uri()),
+                "assets": []
+            })))
+            .mount(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("page", "1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("name", &first_name))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": 1001,
+                "name": first_name,
+                "browser_download_url": first_url,
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let (url1, hash1) = upload_mod_bundle_via_release(
+            "test-token",
+            "octo",
+            "TheCursedMod",
+            "0.2.7",
+            first_bytes,
+            Some(&hash_before_first),
+            "sts2mm-profiles",
+        )
+        .await
+        .expect("first share must succeed");
+        assert_eq!(url1, first_url);
+        assert_eq!(hash1, sha256_hex(first_bytes));
+
+        // Reset mocks so cycle 2's listing doesn't shadow cycle 1's.
+        server.reset().await;
+
+        // ── Second cycle ───────────────────────────────────────────────
+        // Old asset still sits on the release (GC sweep will reap it).
+        // Orchestrator looks up by the NEW canonical name, doesn't find
+        // it, and POSTs net-new under the new SHA-suffixed name.
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 42,
+                "upload_url": format!("{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}", server.uri()),
+                "assets": []
+            })))
+            .mount(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("page", "1"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                    "id": 1001,
+                    "name": first_name,
+                    "browser_download_url": first_url,
+                }])),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("name", &second_name))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": 2002,
+                "name": second_name,
+                "browser_download_url": second_url,
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let (url2, hash2) = upload_mod_bundle_via_release(
+            "test-token",
+            "octo",
+            "TheCursedMod",
+            "0.2.7",
+            second_bytes,
+            Some(&hash_after_first),
+            "sts2mm-profiles",
+        )
+        .await
+        .expect("second share must succeed");
+        assert_eq!(url2, second_url);
+        assert_eq!(hash2, sha256_hex(second_bytes));
+        assert_ne!(
+            first_name, second_name,
+            "different bytes must produce different content-addressed names"
+        );
+    }
+}
+
+#[cfg(test)]
+mod download_bundle_url_routing_tests {
+    use super::*;
+    use std::io::Write;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn make_tiny_zip(inner_name: &str) -> Vec<u8> {
+        let buf = std::io::Cursor::new(Vec::new());
+        let mut zw = zip::ZipWriter::new(buf);
+        zw.start_file(inner_name, zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zw.write_all(b"hello").unwrap();
+        zw.finish().unwrap().into_inner()
+    }
+
+    #[tokio::test]
+    async fn download_bundle_handles_raw_githubusercontent_url() {
+        // Sets STS2_GITHUB_API_BASE — share the env-var lock with the other suites.
+        let _env_guard = super::release_upload_tests::ENV_LOCK.lock().await;
+        let server = MockServer::start().await;
+        std::env::set_var("STS2_GITHUB_API_BASE", server.uri());
+
+        let zip_bytes = make_tiny_zip("OldMod.json");
+        Mock::given(method("GET"))
+            .and(path(
+                "/repos/owner/sts2mm-profiles/contents/mods/OldMod_v1.zip",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(zip_bytes))
+            .mount(&server)
+            .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        download_bundle(
+            "https://raw.githubusercontent.com/owner/sts2mm-profiles/main/mods/OldMod_v1.zip",
+            "OldMod",
+            tmp.path(),
+        )
+        .await
+        .expect("legacy URL must still work");
+
+        assert!(tmp.path().join("OldMod.json").exists());
+    }
+
+    #[tokio::test]
+    async fn download_bundle_handles_release_download_url() {
+        // Sets STS2_GITHUB_RELEASES_BASE — process-global env var, same lock.
+        let _env_guard = super::release_upload_tests::ENV_LOCK.lock().await;
+        let server = MockServer::start().await;
+        std::env::set_var("STS2_GITHUB_RELEASES_BASE", server.uri());
+
+        let zip_bytes = make_tiny_zip("NewMod.json");
+        Mock::given(method("GET"))
+            .and(path(
+                "/owner/sts2mm-profiles/releases/download/bundles/NewMod_v1.zip",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(zip_bytes))
+            .mount(&server)
+            .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        download_bundle(
+            "https://github.com/owner/sts2mm-profiles/releases/download/bundles/NewMod_v1.zip",
+            "NewMod",
+            tmp.path(),
+        )
+        .await
+        .expect("release URL must work");
+
+        assert!(tmp.path().join("NewMod.json").exists());
+    }
+
+    #[tokio::test]
+    async fn download_bundle_handles_arbitrary_https_url() {
+        // No env-var mutation here — direct URL into the mock server, so no lock needed.
+        let server = MockServer::start().await;
+        let zip_bytes = make_tiny_zip("ExternalMod.json");
+        Mock::given(method("GET"))
+            .and(path("/some/path/ExternalMod.zip"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(zip_bytes))
+            .mount(&server)
+            .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        download_bundle(
+            &format!("{}/some/path/ExternalMod.zip", server.uri()),
+            "ExternalMod",
+            tmp.path(),
+        )
+        .await
+        .expect("non-github URL must work");
+
+        assert!(tmp.path().join("ExternalMod.json").exists());
+    }
+}
+
+#[cfg(test)]
+mod github_api_stress_tests {
+    use super::*;
+    use crate::profiles::ProfileMod;
+    use sha2::{Digest, Sha256};
+    use std::io::Write;
+
+    const STRESS_SIZE_PLAN_MIB: [u64; 40] = [
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 8, 8, 8, 8, 16, 16, 16, 32, 32,
+        48, 64, 80, 96, 128, 160, 192, 224, 256, 288, 300,
+    ];
+
+    #[test]
+    fn github_stress_size_plan_has_40_mods_and_reaches_300_mib() {
+        assert_eq!(STRESS_SIZE_PLAN_MIB.len(), 40);
+        assert_eq!(STRESS_SIZE_PLAN_MIB.iter().max().copied(), Some(300));
+        assert!(STRESS_SIZE_PLAN_MIB.windows(2).all(|w| w[0] <= w[1]));
+    }
+
+    #[tokio::test]
+    #[ignore = "live GitHub API stress test; run npm run qa:github-stress"]
+    async fn github_api_stress_40_mods_various_sizes() {
+        if std::env::var("STS2_GITHUB_STRESS").ok().as_deref() != Some("1") {
+            eprintln!("Skipping: set STS2_GITHUB_STRESS=1 or run npm run qa:github-stress");
+            return;
+        }
+
+        let token =
+            match std::env::var("STS2_GITHUB_TOKEN").or_else(|_| std::env::var("GITHUB_TOKEN")) {
+                Ok(token) if !token.trim().is_empty() => token,
+                _ => {
+                    eprintln!("Skipping: set STS2_GITHUB_TOKEN or GITHUB_TOKEN");
+                    return;
+                }
+            };
+
+        let repo = std::env::var("STS2_GITHUB_STRESS_REPO")
+            .unwrap_or_else(|_| "sts2mm-profiles-test".to_string());
+        let _repo_guard = EnvVarGuard::set("STS2_PROFILES_REPO", &repo);
+        let _api_guard = EnvVarGuard::unset("STS2_GITHUB_API_BASE");
+
+        let client = build_client(&token);
+        let username = get_github_username(&token)
+            .await
+            .expect("GitHub token must authenticate");
+        ensure_profiles_repo(&token, &username, &repo)
+            .await
+            .expect("stress repo must exist or be creatable");
+
+        let run_id = chrono::Utc::now().format("%Y%m%d%H%M%S").to_string();
+        let asset_prefix = format!("Stress{}_", run_id);
+        let profile_name = format!("GitHub API Stress {}", run_id);
+        let work = tempfile::tempdir().expect("create stress tempdir");
+        let mods_path = work.path().join("mods");
+        let disabled_path = work.path().join("mods_disabled");
+        let profiles_path = work.path().join("profiles");
+        std::fs::create_dir_all(&mods_path).unwrap();
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        std::fs::create_dir_all(&profiles_path).unwrap();
+
+        let profile = build_stress_profile(&profile_name, &asset_prefix, &mods_path)
+            .expect("build stress fixture profile");
+        let result = run_stress_share_and_verify(
+            profile,
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            &token,
+            &username,
+            &repo,
+            &client,
+        )
+        .await;
+
+        let cleanup =
+            cleanup_stress_artifacts(&client, &username, &repo, &asset_prefix, None).await;
+        if let Err(e) = cleanup {
+            eprintln!("Stress cleanup warning: {}", e);
+        }
+
+        result
+            .expect("GitHub API stress test must upload, fetch, download, and verify all bundles");
+    }
+
+    async fn run_stress_share_and_verify(
+        profile: Profile,
+        mods_path: &std::path::Path,
+        disabled_path: &std::path::Path,
+        profiles_path: &std::path::Path,
+        token: &str,
+        username: &str,
+        repo: &str,
+        client: &reqwest::Client,
+    ) -> Result<()> {
+        let result = super::super::share_profile_impl(
+            profile,
+            mods_path,
+            disabled_path,
+            profiles_path,
+            token,
+            None,
+        )
+        .await?;
+
+        let verify_result: Result<()> = async {
+            let fetched = fetch_shared_profile(username, &result.file_path, Some(token), repo).await?;
+            if fetched.mods.len() != STRESS_SIZE_PLAN_MIB.len() {
+                return Err(AppError::Other(format!(
+                    "Fetched profile had {} mods, expected {}",
+                    fetched.mods.len(),
+                    STRESS_SIZE_PLAN_MIB.len()
+                )));
+            }
+
+            // Asset names are content-addressed (`<mod>_v<ver>_<sha8>.zip`)
+            // so we can't predict them ahead of time. Verify via each
+            // mod's bundle_url instead — the manifest is the source of
+            // truth for which asset URL the manager will actually fetch.
+            let release = ensure_bundles_release(client, username, repo).await?;
+            for pm in fetched.mods.iter() {
+                let Some(expected_hash) = pm.bundle_sha256.as_deref() else {
+                    return Err(AppError::Other(format!(
+                        "{} missing bundle_sha256",
+                        pm.name
+                    )));
+                };
+                let Some(bundle_url) = pm.bundle_url.as_deref() else {
+                    return Err(AppError::Other(format!("{} missing bundle_url", pm.name)));
+                };
+                let asset = release
+                    .assets
+                    .iter()
+                    .find(|asset| asset.browser_download_url == bundle_url)
+                    .ok_or_else(|| {
+                        AppError::Other(format!(
+                            "Manifest URL {} not present on release",
+                            bundle_url
+                        ))
+                    })?;
+                let bytes =
+                    download_release_asset_via_api(client, username, repo, asset.id).await?;
+                let actual_hash = sha256_hex(&bytes);
+                if actual_hash != expected_hash {
+                    return Err(AppError::Other(format!(
+                        "Hash mismatch for {}: downloaded {}, manifest {}",
+                        pm.name, actual_hash, expected_hash
+                    )));
+                }
+            }
+
+            Ok(())
+        }
+        .await;
+
+        if let Err(e) =
+            delete_contents_file_if_exists(client, username, repo, &result.file_path).await
+        {
+            eprintln!("Stress manifest cleanup warning: {}", e);
+        }
+
+        verify_result
+    }
+
+    fn build_stress_profile(
+        profile_name: &str,
+        asset_prefix: &str,
+        mods_path: &std::path::Path,
+    ) -> std::io::Result<Profile> {
+        let now = chrono::Utc::now();
+        let mut mods = Vec::with_capacity(STRESS_SIZE_PLAN_MIB.len());
+        for (idx, size_mib) in STRESS_SIZE_PLAN_MIB.iter().enumerate() {
+            let folder = format!("{}Mod{:02}", asset_prefix, idx + 1);
+            let version = format!("1.0.{}", idx + 1);
+            let dir = mods_path.join(&folder);
+            std::fs::create_dir_all(&dir)?;
+            let manifest_name = format!("{}.json", folder);
+            let dll_name = format!("{}.dll", folder);
+            std::fs::write(
+                dir.join(&manifest_name),
+                format!(
+                    r#"{{"id":"{folder}","name":"{folder}","version":"{version}","author":"stress"}}"#
+                ),
+            )?;
+            write_pseudorandom_file(
+                &dir.join(&dll_name),
+                size_mib * 1024 * 1024,
+                0x5354_5332 ^ idx as u64,
+            )?;
+            mods.push(ProfileMod {
+                name: folder.clone(),
+                version,
+                source: None,
+                hash: None,
+                files: vec![
+                    format!("{}/{}", folder, manifest_name),
+                    format!("{}/{}", folder, dll_name),
+                ],
+                folder_name: Some(folder.clone()),
+                mod_id: Some(folder),
+                enabled: true,
+                bundle_url: None,
+                bundle_sha256: None,
+            });
+        }
+
+        Ok(Profile {
+            name: profile_name.to_string(),
+            game_version: Some("0.105.0".to_string()),
+            created_by: Some("stress".to_string()),
+            mods,
+            created_at: now,
+            updated_at: now,
+            public: Some(false),
+        })
+    }
+
+    fn write_pseudorandom_file(
+        path: &std::path::Path,
+        bytes: u64,
+        seed: u64,
+    ) -> std::io::Result<()> {
+        let mut file = std::fs::File::create(path)?;
+        let mut remaining = bytes;
+        let mut state = seed.max(1);
+        let mut buf = vec![0u8; 1024 * 1024];
+        while remaining > 0 {
+            let n = remaining.min(buf.len() as u64) as usize;
+            fill_pseudorandom(&mut buf[..n], &mut state);
+            file.write_all(&buf[..n])?;
+            remaining -= n as u64;
+        }
+        Ok(())
+    }
+
+    fn fill_pseudorandom(buf: &mut [u8], state: &mut u64) {
+        for byte in buf {
+            let mut x = *state;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            *state = x;
+            *byte = (x & 0xff) as u8;
+        }
+    }
+
+    async fn download_release_asset_via_api(
+        client: &reqwest::Client,
+        owner: &str,
+        repo: &str,
+        asset_id: u64,
+    ) -> Result<Vec<u8>> {
+        let url = format!(
+            "{}/repos/{}/{}/releases/assets/{}",
+            github_api_base(),
+            owner,
+            repo,
+            asset_id
+        );
+        let resp = client
+            .get(&url)
+            .header(reqwest::header::ACCEPT, "application/octet-stream")
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(AppError::Other(format!(
+                "Failed to download release asset {} ({}): {}",
+                asset_id, status, text
+            )));
+        }
+        Ok(resp.bytes().await?.to_vec())
+    }
+
+    async fn cleanup_stress_artifacts(
+        client: &reqwest::Client,
+        owner: &str,
+        repo: &str,
+        asset_prefix: &str,
+        manifest_filename: Option<&str>,
+    ) -> Result<()> {
+        if let Ok(release) = ensure_bundles_release(client, owner, repo).await {
+            for asset in release
+                .assets
+                .iter()
+                .filter(|asset| asset.name.starts_with(asset_prefix))
+            {
+                delete_release_asset(client, owner, repo, asset.id).await?;
+            }
+        }
+        if let Some(filename) = manifest_filename {
+            delete_contents_file_if_exists(client, owner, repo, filename).await?;
+        }
+        Ok(())
+    }
+
+    async fn delete_contents_file_if_exists(
+        client: &reqwest::Client,
+        owner: &str,
+        repo: &str,
+        filename: &str,
+    ) -> Result<()> {
+        let url = format!(
+            "{}/repos/{}/{}/contents/{}",
+            github_api_base(),
+            owner,
+            repo,
+            filename
+        );
+        let resp = client.get(&url).send().await?;
+        if resp.status().as_u16() == 404 {
+            return Ok(());
+        }
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(AppError::Other(format!(
+                "Failed to fetch manifest for cleanup {} ({}): {}",
+                filename, status, text
+            )));
+        }
+        let value: serde_json::Value = resp.json().await?;
+        let sha = value.get("sha").and_then(|v| v.as_str()).ok_or_else(|| {
+            AppError::Other(format!("Cleanup response for {} had no sha", filename))
+        })?;
+        let body = serde_json::json!({
+            "message": format!("Delete stress manifest {}", filename),
+            "sha": sha,
+        });
+        let resp = client.delete(&url).json(&body).send().await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(AppError::Other(format!(
+                "Failed to delete stress manifest {} ({}): {}",
+                filename, status, text
+            )));
+        }
+        Ok(())
+    }
+
+    fn sha256_hex(bytes: &[u8]) -> String {
+        let mut h = Sha256::new();
+        h.update(bytes);
+        format!("{:x}", h.finalize())
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        old: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let old = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, old }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let old = std::env::var(key).ok();
+            std::env::remove_var(key);
+            Self { key, old }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(value) = &self.old {
+                std::env::set_var(self.key, value);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
 }

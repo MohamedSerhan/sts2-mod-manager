@@ -85,7 +85,7 @@ This section covers the hourly Nexus → GitHub triage automation introduced in 
 
 4. **Discover and set the Nexus posts thread ID** (one-time, needed before any triage run):
 
-   Install curl-impersonate locally (or run in a temporary workflow job) and run:
+   Install `curl_cffi` locally (`pip install curl_cffi`) and run:
 
        node scripts/nexus-triage.mjs --discover-thread-id
 
@@ -151,28 +151,47 @@ To renew:
 
 The token expired. Follow the "Annual token renewal" steps above. The renewal issue includes the procedure inline.
 
+### Expected flake — Cloudflare challenges from CI
+
+The triage script fetches Nexus HTML via a Python `curl_cffi` shim
+(`scripts/_nexus_fetch.py`). We use `curl_cffi` — **not** the Node
+`curl-impersonate` binary — because the latter is 100% Cloudflare-blocked
+from GitHub Actions IP ranges. `curl_cffi` uses the same TLS fingerprinting
+approach as the reference mod
+[jadistanbelly/sts2-multiplayer-save-slots](https://github.com/jadistanbelly/sts2-multiplayer-save-slots),
+which demonstrates roughly a 50% pass rate from CI. This is the best available
+option until Nexus provides a documented API.
+
+When a run is blocked (exit 1 with "Cloudflare blocked"), re-run the failed
+workflow from the Actions UI. Multiple consecutive failures suggest Nexus
+tightened its bot detection — see steps below.
+
 ### When triage fails with "Cloudflare blocked the request"
 
-The triage script bypasses Cloudflare TLS fingerprinting using `curl-impersonate-chrome`. Nexus
-periodically updates its Cloudflare configuration, which can break the impersonation.
+The triage script bypasses Cloudflare TLS fingerprinting using Python's
+`curl_cffi` library (installed as a pip dependency in CI). The shim rotates
+through several Chrome impersonation targets automatically (`chrome136`,
+`chrome120`, `chrome131`, `chrome116`, `chrome110`).
 
-To fix:
+To fix persistent failures:
 
-1. Check if a newer `curl-impersonate` release is available at
-   <https://github.com/lwthiker/curl-impersonate/releases>
-2. Update the version in `.github/workflows/nexus-triage.yml` under "Install curl-impersonate-chrome"
-3. If the release uses a different binary name (e.g., `curl_chrome137` for a newer Chrome version),
-   also update `CURL_IMPERSONATE_BIN` in the workflow env and the default in `scripts/nexus-triage.mjs`
-4. Test with `--dry-run` before re-enabling the cron
+1. Check if a newer `curl_cffi` version is available: `pip index versions curl_cffi`
+2. Update the pip install line in `.github/workflows/nexus-triage.yml`
+   (`python -m pip install curl_cffi==<new_version>`)
+3. Add a newer Chrome target to `CURL_IMPERSONATES` in `scripts/nexus-triage.mjs`
+   (e.g., `'chrome137'`) as the first entry
+4. Override the default per-run with the repo variable `NEXUSMODS_CURL_IMPERSONATE`
+   (no workflow file change required)
+5. Test with `--dry-run` before re-enabling the cron
 
 ### When triage fails with "could not find thread_id"
 
 Nexus changed the HTML structure of the posts tab. Re-discover the thread ID:
 
-1. Install `curl-impersonate` locally (or run a temporary workflow)
+1. Install `curl_cffi` locally (`pip install curl_cffi`)
 2. `node scripts/nexus-triage.mjs --discover-thread-id`
 3. If that also fails, inspect the live page source manually:
-   `curl_chrome136 https://www.nexusmods.com/slaythespire2/mods/856?tab=posts | grep -i thread_id`
+   `python scripts/_nexus_fetch.py "https://www.nexusmods.com/slaythespire2/mods/856?tab=posts" | grep -i thread_id`
 4. Update `NEXUSMODS_POSTS_THREAD_ID` repo variable with the new value, or update the
    `discoverThreadId` regex patterns in `scripts/nexus-triage.mjs` if the embedded JS format changed
 

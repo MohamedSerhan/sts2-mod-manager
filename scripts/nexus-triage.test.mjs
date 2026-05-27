@@ -319,184 +319,326 @@ test('renderIssueBody: snapshot timestamp is ISO 8601 UTC with Z suffix', () => 
   assert.ok(match[1].endsWith('Z'), `UTC Z suffix: got ${match[1]}`);
 });
 
+// ---------------------------------------------------------------------------
+// parseCommentsFromHtml tests
+// ---------------------------------------------------------------------------
+
 import {
-  fetchModComments,
-  fetchModBugReports,
-  introspectSchema,
-  setHttpFetch,
+  parseCommentsFromHtml,
+  isCloudflareChallenge,
 } from './nexus-triage.mjs';
 
-const FIXTURE_COMMENTS = JSON.parse(readFileSync('scripts/fixtures/graphql-comments-mixed.json', 'utf-8'));
-const FIXTURE_BUGS = JSON.parse(readFileSync('scripts/fixtures/graphql-bugs-mixed.json', 'utf-8'));
-const FIXTURE_DRIFT_BUGREPORTS = JSON.parse(readFileSync('scripts/fixtures/graphql-schema-drift-bugreports.json', 'utf-8'));
-const FIXTURE_DRIFT_COMMENTS = JSON.parse(readFileSync('scripts/fixtures/graphql-schema-drift-comments.json', 'utf-8'));
+const FIXTURE_COMMENTS_MIXED = readFileSync('scripts/fixtures/nexus-comments-mixed.html', 'utf-8');
+const FIXTURE_COMMENTS_EMPTY = readFileSync('scripts/fixtures/nexus-comments-empty.html', 'utf-8');
 
-test('fetchModComments POSTs with apikey header and returns nodes', async () => {
-  let captured;
-  setHttpFetch(async (url, opts) => {
-    captured = { url, opts };
-    return { ok: true, status: 200, json: async () => FIXTURE_COMMENTS };
+test('parseCommentsFromHtml: extracts 5 comments from mixed fixture', () => {
+  const comments = parseCommentsFromHtml(FIXTURE_COMMENTS_MIXED);
+  assert.equal(comments.length, 5, `expected 5, got ${comments.length}`);
+  // All have required fields
+  for (const c of comments) {
+    assert.ok(c.id, `comment missing id: ${JSON.stringify(c)}`);
+    assert.ok(c.author, `comment missing author: ${JSON.stringify(c)}`);
+    assert.ok(c.body, `comment missing body: ${JSON.stringify(c)}`);
+    assert.ok(c.createdAt, `comment missing createdAt: ${JSON.stringify(c)}`);
+  }
+});
+
+test('parseCommentsFromHtml: correct ids extracted from mixed fixture', () => {
+  const comments = parseCommentsFromHtml(FIXTURE_COMMENTS_MIXED);
+  const ids = comments.map((c) => c.id).sort();
+  assert.deepEqual(ids, ['100001', '100002', '100003', '100004', '100005']);
+});
+
+test('parseCommentsFromHtml: correct authors extracted', () => {
+  const comments = parseCommentsFromHtml(FIXTURE_COMMENTS_MIXED);
+  const byId = Object.fromEntries(comments.map((c) => [c.id, c]));
+  assert.equal(byId['100001'].author, 'KudosUser');
+  assert.equal(byId['100002'].author, 'BugReporter');
+  assert.equal(byId['100003'].author, 'FeatureWanter');
+  assert.equal(byId['100004'].author, 'QuestionAsker');
+  assert.equal(byId['100005'].author, 'TriageUser');
+});
+
+test('parseCommentsFromHtml: createdAt is ISO 8601 UTC with Z suffix', () => {
+  const comments = parseCommentsFromHtml(FIXTURE_COMMENTS_MIXED);
+  for (const c of comments) {
+    assert.match(c.createdAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/,
+      `createdAt not ISO 8601: ${c.createdAt} for id ${c.id}`);
+  }
+});
+
+test('parseCommentsFromHtml: empty page returns empty array', () => {
+  const comments = parseCommentsFromHtml(FIXTURE_COMMENTS_EMPTY);
+  assert.equal(comments.length, 0);
+});
+
+test('parseCommentsFromHtml: Cloudflare challenge HTML throws', () => {
+  const cfHtml = '<html><head><title>Just a moment...</title></head><body>cf-challenge</body></html>';
+  assert.throws(
+    () => parseCommentsFromHtml(cfHtml),
+    /Cloudflare blocked/,
+    'should throw on Cloudflare challenge'
+  );
+});
+
+test('parseCommentsFromHtml: comment missing body div is skipped, others extracted', () => {
+  // Malformed: comment 999 has no comment-content div; 100001 is fine
+  const malformed = `
+    <ul>
+      <li id="comment-999" class="comment">
+        <span class="comment-name">BadUser</span>
+        <time data-date="1748217600"></time>
+      </li>
+      <li id="comment-100001" class="comment">
+        <span class="comment-name">GoodUser</span>
+        <div id="comment-content-100001">This is a valid comment body.</div>
+        <time data-date="1748217600"></time>
+      </li>
+    </ul>
+  `;
+  const comments = parseCommentsFromHtml(malformed);
+  assert.equal(comments.length, 1, `expected 1 comment, got ${comments.length}`);
+  assert.equal(comments[0].id, '100001');
+  assert.equal(comments[0].author, 'GoodUser');
+});
+
+test('isCloudflareChallenge: detects cf-chl marker', () => {
+  assert.equal(isCloudflareChallenge('<html>some cf-chl content</html>'), true);
+});
+
+test('isCloudflareChallenge: detects "Just a moment" title', () => {
+  assert.equal(isCloudflareChallenge('<title>Just a moment...</title>'), true);
+});
+
+test('isCloudflareChallenge: returns false for normal HTML', () => {
+  assert.equal(isCloudflareChallenge('<html><title>Nexus Mods</title></html>'), false);
+});
+
+// ---------------------------------------------------------------------------
+// fetchAllComments pagination tests
+// ---------------------------------------------------------------------------
+
+import {
+  fetchAllComments,
+  setHtmlFetcher,
+  PAGE_SIZE,
+  MAX_PAGES,
+} from './nexus-triage.mjs';
+
+// Helper: make n-comment HTML with the given ids
+function makePageHtml(ids) {
+  return ids.map((id, i) => `
+    <li id="comment-${id}" class="comment">
+      <span class="comment-name">User${id}</span>
+      <div id="comment-content-${id}">Comment body for ${id}</div>
+      <time data-date="${1748217600 + i}"></time>
+    </li>
+  `).join('');
+}
+
+test('fetchAllComments: stops when no new IDs appear on next page', async () => {
+  // Page 1: 10 comments; Page 2: same 10 comments (no new) → stop
+  const page1Html = makePageHtml(Array.from({ length: 10 }, (_, i) => 200000 + i));
+  const page2Html = makePageHtml(Array.from({ length: 10 }, (_, i) => 200000 + i)); // same ids
+
+  let callCount = 0;
+  setHtmlFetcher(async (_url) => {
+    callCount++;
+    if (callCount === 1) return page1Html;
+    return page2Html; // same ids — should terminate
   });
+
   try {
-    const nodes = await fetchModComments({ apiKey: 'test-key' });
-    assert.equal(captured.url, 'https://api.nexusmods.com/v2/graphql');
-    assert.equal(captured.opts.method, 'POST');
-    assert.equal(captured.opts.headers.apikey, 'test-key');
-    assert.equal(captured.opts.headers['Content-Type'], 'application/json');
-    assert.equal(nodes.length, 5);
-    assert.equal(nodes[0].id, '300001');
+    const comments = await fetchAllComments({ threadId: 'test-thread' });
+    assert.equal(callCount, 2, `expected 2 fetches (page1 + page2 with no-new), got ${callCount}`);
+    assert.equal(comments.length, 10, `expected 10 unique comments, got ${comments.length}`);
   } finally {
-    setHttpFetch(globalThis.fetch);
+    setHtmlFetcher(null); // reset
   }
 });
 
-test('fetchModBugReports filters by status [open]', async () => {
-  let body;
-  setHttpFetch(async (_url, opts) => {
-    body = JSON.parse(opts.body);
-    return { ok: true, status: 200, json: async () => FIXTURE_BUGS };
+test('fetchAllComments: stops at MAX_PAGES even if new IDs keep appearing', async () => {
+  let callCount = 0;
+  setHtmlFetcher(async (_url) => {
+    callCount++;
+    // Each page has fresh IDs so pagination would continue forever without the cap
+    return makePageHtml(Array.from({ length: PAGE_SIZE }, (_, i) => 300000 + (callCount - 1) * PAGE_SIZE + i));
   });
+
   try {
-    await fetchModBugReports({ apiKey: 'test-key' });
-    assert.deepEqual(body.variables.statusIn, ['open']);
+    const comments = await fetchAllComments({ threadId: 'test-thread' });
+    assert.equal(callCount, MAX_PAGES, `expected ${MAX_PAGES} fetches (cap), got ${callCount}`);
+    assert.equal(comments.length, PAGE_SIZE * MAX_PAGES);
   } finally {
-    setHttpFetch(globalThis.fetch);
+    setHtmlFetcher(null);
   }
 });
 
-test('introspectSchema: both fields present returns hasComments + hasBugReports true', async () => {
-  setHttpFetch(async () => ({
-    ok: true, status: 200,
-    json: async () => ({ data: { __type: { name: 'Mod', fields: [
-      { name: 'comments', type: { name: 'CommentConnection' }},
-      { name: 'bugReports', type: { name: 'BugReportConnection' }},
-    ]}}}),
-  }));
-  try {
-    const result = await introspectSchema({ apiKey: 'test-key' });
-    assert.deepEqual(result, { hasComments: true, hasBugReports: true });
-  } finally {
-    setHttpFetch(globalThis.fetch);
-  }
-});
+test('fetchAllComments: concatenates comments from multiple pages correctly', async () => {
+  // PAGE_SIZE is 10. Page 1 has 10 items (full page → continue), page 2 has 5 (< PAGE_SIZE → stop).
+  const page1Ids = Array.from({ length: PAGE_SIZE }, (_, i) => 400000 + i); // 400000..400009
+  const page2Ids = [400010, 400011, 400012, 400013, 400014];                // 400010..400014
 
-test('introspectSchema: bugReports missing soft-fails (returns hasBugReports: false)', async (t) => {
-  setHttpFetch(async () => ({ ok: true, status: 200, json: async () => FIXTURE_DRIFT_BUGREPORTS }));
-  const exitCalls = [];
-  t.mock.method(process, 'exit', (code) => { exitCalls.push(code); throw new Error('exit'); });
-  try {
-    const result = await introspectSchema({ apiKey: 'test-key' });
-    assert.deepEqual(result, { hasComments: true, hasBugReports: false });
-    assert.deepEqual(exitCalls, [], 'should NOT exit on bugReports drift');
-  } finally {
-    setHttpFetch(globalThis.fetch);
-  }
-});
+  const page1Html = makePageHtml(page1Ids);
+  const page2Html = makePageHtml(page2Ids);
 
-test('introspectSchema: comments missing hard-fails (exit 2)', async (t) => {
-  setHttpFetch(async () => ({ ok: true, status: 200, json: async () => FIXTURE_DRIFT_COMMENTS }));
-  const exitCalls = [];
-  const errs = [];
-  t.mock.method(process, 'exit', (code) => { exitCalls.push(code); throw new Error('exit'); });
-  t.mock.method(console, 'error', (m) => { errs.push(String(m)); });
-  try {
-    await assert.rejects(() => introspectSchema({ apiKey: 'test-key' }), /exit/);
-    assert.deepEqual(exitCalls, [2]);
-    assert.ok(errs.some((m) => m.includes('comments')), 'error must name the missing field');
-  } finally {
-    setHttpFetch(globalThis.fetch);
-  }
-});
-
-import { main, setGhInvoker, ensureSchemaGapIssue } from './nexus-triage.mjs';
-
-const MAINTAINER_FIXTURE_COMMENTS = [
-  // From maintainer — must be skipped
-  { id: '500001', body: 'reply from maintainer about something', createdAt: '2026-05-25T08:00:00Z', creator: { name: 'xxskullmikexx', memberId: '1' }},
-  { id: '500002', body: 'co-maintainer note', createdAt: '2026-05-25T09:00:00Z', creator: { name: 'Sky2Fly', memberId: '2' }},
-  // Maintainer with different casing — must still be skipped
-  { id: '500003', body: 'another maintainer comment', createdAt: '2026-05-25T09:30:00Z', creator: { name: 'XXSkullMikeXX', memberId: '1' }},
-];
-
-test('main: maintainer comments are skipped before classification', async (t) => {
-  const fixture = { data: { mod: { comments: { nodes: MAINTAINER_FIXTURE_COMMENTS }, bugReports: { nodes: [] }}}};
-  setHttpFetch(async (_url, opts) => {
-    const body = JSON.parse(opts.body);
-    if (body.query.includes('__type')) {
-      return { ok: true, status: 200, json: async () => ({ data: { __type: { name: 'Mod', fields: [
-        { name: 'comments', type: { name: 'CommentConnection' }},
-        { name: 'bugReports', type: { name: 'BugReportConnection' }},
-      ]}}})};
-    }
-    return { ok: true, status: 200, json: async () => fixture };
+  let callCount = 0;
+  setHtmlFetcher(async (_url) => {
+    callCount++;
+    if (callCount === 1) return page1Html;
+    return page2Html;
   });
+
+  try {
+    const comments = await fetchAllComments({ threadId: 'test-thread' });
+    // page2 has only 5 comments < PAGE_SIZE, so terminates after page2
+    assert.equal(callCount, 2, `expected 2 fetch calls, got ${callCount}`);
+    assert.equal(comments.length, 15, `expected 15 comments, got ${comments.length}`);
+    const expectedIds = [...page1Ids, ...page2Ids].map(String).sort();
+    const actualIds = comments.map((c) => c.id).sort();
+    assert.deepEqual(actualIds, expectedIds);
+  } finally {
+    setHtmlFetcher(null);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// discoverThreadId tests
+// ---------------------------------------------------------------------------
+
+import { discoverThreadId } from './nexus-triage.mjs';
+
+test('discoverThreadId: extracts thread_id from JSON-like embedded script', async () => {
+  const html = `
+    <html><body>
+    <script>var config = {"thread_id":"16873160","mod_id":"856"};</script>
+    </body></html>
+  `;
+  setHtmlFetcher(async () => html);
+  try {
+    const threadId = await discoverThreadId();
+    assert.equal(threadId, '16873160');
+  } finally {
+    setHtmlFetcher(null);
+  }
+});
+
+test('discoverThreadId: extracts thread_id from numeric JSON form', async () => {
+  const html = `<script>nexus.config = {"thread_id":99887766,"game_id":8916};</script>`;
+  setHtmlFetcher(async () => html);
+  try {
+    const threadId = await discoverThreadId();
+    assert.equal(threadId, '99887766');
+  } finally {
+    setHtmlFetcher(null);
+  }
+});
+
+test('discoverThreadId: throws if no thread_id found', async () => {
+  const html = `<html><body><p>No thread id here</p></body></html>`;
+  setHtmlFetcher(async () => html);
+  try {
+    await assert.rejects(
+      () => discoverThreadId(),
+      /could not find thread_id/,
+      'should throw when thread_id not present'
+    );
+  } finally {
+    setHtmlFetcher(null);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Orchestrator integration tests (use setHtmlFetcher for Nexus, setGhInvoker for GitHub)
+// ---------------------------------------------------------------------------
+
+import { main, setGhInvoker } from './nexus-triage.mjs';
+
+// Helper: reset fetchers after each test
+function resetFetchers() {
+  setHtmlFetcher(null);
+  setGhInvoker(async () => { throw new Error('gh not stubbed; tests must call setGhInvoker'); });
+}
+
+// Build HTML with specific authors for the maintainer test
+function makeMaintainerHtml() {
+  return `
+    <li id="comment-500001" class="comment">
+      <span class="comment-name">xxskullmikexx</span>
+      <div id="comment-content-500001">reply from maintainer about something</div>
+      <time data-date="1748217600"></time>
+    </li>
+    <li id="comment-500002" class="comment">
+      <span class="comment-name">Sky2Fly</span>
+      <div id="comment-content-500002">co-maintainer note</div>
+      <time data-date="1748217601"></time>
+    </li>
+    <li id="comment-500003" class="comment">
+      <span class="comment-name">XXSkullMikeXX</span>
+      <div id="comment-content-500003">another maintainer comment</div>
+      <time data-date="1748217602"></time>
+    </li>
+  `;
+}
+
+test('main: maintainer comments are skipped before classification', async () => {
+  setHtmlFetcher(async () => makeMaintainerHtml());
   const ghCalls = [];
   setGhInvoker(async (args) => { ghCalls.push(args); return { number: ghCalls.length + 100, url: `https://github.com/x/y/issues/${ghCalls.length + 100}`, stdout: '' }; });
   try {
-    const result = await main({ dryRun: true, apiKey: 'k', ghToken: 't', state: { schema_version: 1, last_run_at: '', comments: {}, bugs: {}, kudos_seen: [] }});
+    const result = await main({ dryRun: true, ghToken: 't', state: { schema_version: 1, last_run_at: '', comments: {}, bugs: {}, kudos_seen: [] }});
     assert.equal(ghCalls.length, 0, 'no issues filed in dry-run');
     assert.equal(result.filed.length, 0, 'no filed in result');
     assert.equal(result.maintainerSkipped, 3, 'all three maintainer comments skipped');
   } finally {
-    setHttpFetch(globalThis.fetch);
-    setGhInvoker(async () => { throw new Error('gh not stubbed; tests must call setGhInvoker'); });
+    resetFetchers();
   }
 });
 
 test('main: per-run cap caps non-kudos at 5, kudos do not count', async () => {
-  const items = Array.from({ length: 10 }, (_, i) => ({
-    id: String(600000 + i),
-    body: `crash issue number ${i}`,
-    createdAt: `2026-05-25T0${i}:00:00Z`,
-    creator: { name: `User${i}`, memberId: String(700000 + i) },
-  }));
-  const kudosItems = Array.from({ length: 3 }, (_, i) => ({
-    id: String(800000 + i),
-    body: 'thanks great mod love it',
-    createdAt: `2026-05-25T1${i}:00:00Z`,
-    creator: { name: `KudosUser${i}`, memberId: String(900000 + i) },
-  }));
-  const fixture = { data: { mod: { comments: { nodes: [...items, ...kudosItems] }, bugReports: { nodes: [] }}}};
-  setHttpFetch(async (_url, opts) => {
-    const body = JSON.parse(opts.body);
-    if (body.query.includes('__type')) {
-      return { ok: true, status: 200, json: async () => ({ data: { __type: { name: 'Mod', fields: [
-        { name: 'comments', type: { name: 'CommentConnection' }},
-        { name: 'bugReports', type: { name: 'BugReportConnection' }},
-      ]}}})};
-    }
-    return { ok: true, status: 200, json: async () => fixture };
-  });
+  const bugHtml = Array.from({ length: 10 }, (_, i) => `
+    <li id="comment-${600000 + i}" class="comment">
+      <span class="comment-name">User${i}</span>
+      <div id="comment-content-${600000 + i}">crash issue number ${i}</div>
+      <time data-date="${1748217600 + i}"></time>
+    </li>
+  `).join('') + Array.from({ length: 3 }, (_, i) => `
+    <li id="comment-${800000 + i}" class="comment">
+      <span class="comment-name">KudosUser${i}</span>
+      <div id="comment-content-${800000 + i}">thanks great mod love it</div>
+      <time data-date="${1748221200 + i}"></time>
+    </li>
+  `).join('');
+
+  setHtmlFetcher(async () => bugHtml);
   const ghCalls = [];
   setGhInvoker(async (args) => { ghCalls.push(args); return { number: ghCalls.length + 100, url: `https://github.com/x/y/issues/${ghCalls.length + 100}`, stdout: '' }; });
   try {
-    const result = await main({ dryRun: false, apiKey: 'k', ghToken: 't', state: { schema_version: 1, last_run_at: '', comments: {}, bugs: {}, kudos_seen: [] }});
+    const result = await main({ dryRun: false, ghToken: 't', state: { schema_version: 1, last_run_at: '', comments: {}, bugs: {}, kudos_seen: [] }});
     assert.equal(ghCalls.length, 5, `cap should be 5, got ${ghCalls.length}`);
     assert.equal(result.kudosSkipped, 3, 'all 3 kudos accounted');
-    // Oldest 5 (i=0..4) should file
+    // Oldest 5 (600000..600004) should file
     const filedIds = result.filed.map((f) => f.nexus_id).sort();
     assert.deepEqual(filedIds, ['600000', '600001', '600002', '600003', '600004']);
   } finally {
-    setHttpFetch(globalThis.fetch);
-    setGhInvoker(async () => { throw new Error('gh not stubbed; tests must call setGhInvoker'); });
+    resetFetchers();
   }
 });
 
 test('main: already-seen items are skipped silently', async () => {
-  const items = [
-    { id: '700001', body: 'crash issue old', createdAt: '2026-05-25T08:00:00Z', creator: { name: 'OldUser', memberId: '10' }},
-    { id: '700002', body: 'crash issue new', createdAt: '2026-05-25T09:00:00Z', creator: { name: 'NewUser', memberId: '11' }},
-  ];
-  setHttpFetch(async (_url, opts) => {
-    const body = JSON.parse(opts.body);
-    if (body.query.includes('__type')) {
-      return { ok: true, status: 200, json: async () => ({ data: { __type: { name: 'Mod', fields: [
-        { name: 'comments', type: { name: 'CommentConnection' }},
-        { name: 'bugReports', type: { name: 'BugReportConnection' }},
-      ]}}})};
-    }
-    return { ok: true, status: 200, json: async () => ({ data: { mod: { comments: { nodes: items }, bugReports: { nodes: [] }}}})};
-  });
+  const html = `
+    <li id="comment-700001" class="comment">
+      <span class="comment-name">OldUser</span>
+      <div id="comment-content-700001">crash issue old</div>
+      <time data-date="1748217600"></time>
+    </li>
+    <li id="comment-700002" class="comment">
+      <span class="comment-name">NewUser</span>
+      <div id="comment-content-700002">crash issue new</div>
+      <time data-date="1748217660"></time>
+    </li>
+  `;
+  setHtmlFetcher(async () => html);
   const ghCalls = [];
   setGhInvoker(async (args) => { ghCalls.push(args); return { number: 999, url: 'https://github.com/x/y/issues/999', stdout: '' }; });
   try {
@@ -505,62 +647,40 @@ test('main: already-seen items are skipped silently', async () => {
       comments: { '700001': { gh_issue_url: 'https://github.com/x/y/issues/45', classification: 'bug', filed_at: '2026-05-24T00:00:00Z' }},
       bugs: {}, kudos_seen: [],
     };
-    const result = await main({ dryRun: false, apiKey: 'k', ghToken: 't', state });
+    const result = await main({ dryRun: false, ghToken: 't', state });
     assert.equal(ghCalls.length, 1, `only the new item files, got ${ghCalls.length}`);
     assert.equal(result.filed[0].nexus_id, '700002');
   } finally {
-    setHttpFetch(globalThis.fetch);
-    setGhInvoker(async () => { throw new Error('gh not stubbed; tests must call setGhInvoker'); });
+    resetFetchers();
   }
 });
 
-test('main: Nexus bug with status=closed is skipped silently on first sight', async () => {
-  const bugs = [
-    { id: '900001', title: 'open bug', description: 'open', status: 'open', priority: 'high', createdAt: '2026-05-25T08:00:00Z', gameVersion: '1.0.5', reporter: { name: 'BugUser', memberId: '20' }},
-    { id: '900002', title: 'closed bug', description: 'closed', status: 'closed', priority: 'low', createdAt: '2026-05-25T09:00:00Z', gameVersion: '1.0.5', reporter: { name: 'BugUser2', memberId: '21' }},
-  ];
-  setHttpFetch(async (_url, opts) => {
-    const body = JSON.parse(opts.body);
-    if (body.query.includes('__type')) {
-      return { ok: true, status: 200, json: async () => ({ data: { __type: { name: 'Mod', fields: [
-        { name: 'comments', type: { name: 'CommentConnection' }},
-        { name: 'bugReports', type: { name: 'BugReportConnection' }},
-      ]}}})};
-    }
-    if (body.query.includes('ModBugReports')) {
-      return { ok: true, status: 200, json: async () => ({ data: { mod: { bugReports: { nodes: bugs }}}})};
-    }
-    return { ok: true, status: 200, json: async () => ({ data: { mod: { comments: { nodes: [] }}}})};
-  });
-  const ghCalls = [];
-  setGhInvoker(async (args) => { ghCalls.push(args); return { number: 999, url: 'https://github.com/x/y/issues/999', stdout: '' }; });
-  try {
-    const result = await main({ dryRun: false, apiKey: 'k', ghToken: 't', state: { schema_version: 1, last_run_at: '', comments: {}, kudos_seen: [], bugs: {} }});
-    assert.equal(ghCalls.length, 1, 'only the open bug files');
-    assert.equal(result.filed[0].nexus_id, '900001');
-  } finally {
-    setHttpFetch(globalThis.fetch);
-    setGhInvoker(async () => { throw new Error('gh not stubbed; tests must call setGhInvoker'); });
-  }
-});
+// ---------------------------------------------------------------------------
+// parseArgs / isDisabled / runFromCli tests
+// ---------------------------------------------------------------------------
 
 import { parseArgs, isDisabled, runFromCli } from './nexus-triage.mjs';
 import { unlinkSync } from 'node:fs';
+import { STATE_PATH, POSTS_THREAD_ID } from './nexus-triage.mjs';
 
 test('parseArgs: defaults', () => {
-  assert.deepEqual(parseArgs([]), { dryRun: false, bootstrap: false, help: false });
+  assert.deepEqual(parseArgs([]), { dryRun: false, bootstrap: false, discoverThreadId: false, help: false });
 });
 
 test('parseArgs: --dry-run', () => {
-  assert.deepEqual(parseArgs(['--dry-run']), { dryRun: true, bootstrap: false, help: false });
+  assert.deepEqual(parseArgs(['--dry-run']), { dryRun: true, bootstrap: false, discoverThreadId: false, help: false });
 });
 
 test('parseArgs: --bootstrap', () => {
-  assert.deepEqual(parseArgs(['--bootstrap']), { dryRun: false, bootstrap: true, help: false });
+  assert.deepEqual(parseArgs(['--bootstrap']), { dryRun: false, bootstrap: true, discoverThreadId: false, help: false });
+});
+
+test('parseArgs: --discover-thread-id', () => {
+  assert.deepEqual(parseArgs(['--discover-thread-id']), { dryRun: false, bootstrap: false, discoverThreadId: true, help: false });
 });
 
 test('parseArgs: --help', () => {
-  assert.deepEqual(parseArgs(['--help']), { dryRun: false, bootstrap: false, help: true });
+  assert.deepEqual(parseArgs(['--help']), { dryRun: false, bootstrap: false, discoverThreadId: false, help: true });
 });
 
 test('parseArgs: unknown flag exits 2', (t) => {
@@ -585,139 +705,49 @@ test('isDisabled: returns false when sentinel absent', () => {
   assert.equal(isDisabled('scripts/does-not-exist.disabled'), false);
 });
 
-// ---------------------------------------------------------------------------
-// ensureSchemaGapIssue + runFromCli schema-gap integration tests
-// ---------------------------------------------------------------------------
+// runFromCli: missing GITHUB_TOKEN exits 2
+test('runFromCli: missing GITHUB_TOKEN exits 2 with message', async (t) => {
+  const origGhToken = process.env.GITHUB_TOKEN;
+  delete process.env.GITHUB_TOKEN;
+  const exitCalls = [];
+  const consoleErrs = [];
+  t.mock.method(process, 'exit', (code) => { exitCalls.push(code); throw new Error('exit'); });
+  t.mock.method(console, 'error', (m) => { consoleErrs.push(String(m)); });
+  try {
+    await assert.rejects(() => runFromCli([]), /exit/);
+    assert.deepEqual(exitCalls, [2]);
+    assert.ok(consoleErrs.some((m) => /GITHUB_TOKEN/i.test(m)), 'should mention GITHUB_TOKEN');
+  } finally {
+    if (origGhToken !== undefined) process.env.GITHUB_TOKEN = origGhToken;
+    else delete process.env.GITHUB_TOKEN;
+  }
+});
 
-import { STATE_PATH, STATE_SCHEMA_VERSION as _SSV } from './nexus-triage.mjs';
-
-// Shared introspection fixture: bugReports field absent (soft drift).
-function makeDriftHttpFetch() {
-  return async (_url, opts) => {
-    const body = JSON.parse(opts.body);
-    if (body.query.includes('__type')) {
-      // bugReports absent from schema
-      return { ok: true, status: 200, json: async () => ({ data: { __type: { name: 'Mod', fields: [
-        { name: 'comments', type: { name: 'CommentConnection' }},
-      ]}}})};
+// runFromCli: missing POSTS_THREAD_ID exits 2 for normal run (when env not set at module load)
+test('runFromCli: missing NEXUSMODS_POSTS_THREAD_ID exits 2 for normal run', async (t) => {
+  // POSTS_THREAD_ID is a module-level constant evaluated at import time.
+  // This test only verifies the guard when it's '' (no env set at module load).
+  if (!POSTS_THREAD_ID) {
+    const origGhToken = process.env.GITHUB_TOKEN;
+    process.env.GITHUB_TOKEN = 'test-token';
+    const exitCalls = [];
+    const consoleErrs = [];
+    t.mock.method(process, 'exit', (code) => { exitCalls.push(code); throw new Error('exit'); });
+    t.mock.method(console, 'error', (m) => { consoleErrs.push(String(m)); });
+    try {
+      await assert.rejects(() => runFromCli([]), /exit/);
+      assert.deepEqual(exitCalls, [2]);
+      assert.ok(
+        consoleErrs.some((m) => /NEXUSMODS_POSTS_THREAD_ID/i.test(m)),
+        `expected error mentioning NEXUSMODS_POSTS_THREAD_ID, got: ${consoleErrs.join(' | ')}`
+      );
+    } finally {
+      if (origGhToken !== undefined) process.env.GITHUB_TOKEN = origGhToken;
+      else delete process.env.GITHUB_TOKEN;
     }
-    // Comments fetch: return empty list
-    return { ok: true, status: 200, json: async () => ({ data: { mod: { comments: { nodes: [] }}}})};
-  };
-}
-
-function makeValidState() {
-  return JSON.stringify({
-    schema_version: 1,
-    last_run_at: '2026-05-26T00:00:00.000Z',
-    comments: {}, bugs: {}, kudos_seen: [],
-  }) + '\n';
-}
-
-test('runFromCli files ops:nexus-schema-gap when bugReports drift detected and no existing issue', async () => {
-  writeFileSync(STATE_PATH, makeValidState(), 'utf-8');
-  const origApiKey = process.env.NEXUS_API_KEY;
-  const origGhToken = process.env.GITHUB_TOKEN;
-  process.env.NEXUS_API_KEY = 'test-key';
-  process.env.GITHUB_TOKEN = 'test-token';
-
-  setHttpFetch(makeDriftHttpFetch());
-  const ghCalls = [];
-  // First call: issue list (no existing issue → empty stdout)
-  // Second call: issue create
-  setGhInvoker(async (args) => {
-    ghCalls.push(args);
-    if (args.includes('list')) return { number: -1, url: '', stdout: '' };
-    return { number: 42, url: 'https://github.com/x/y/issues/42', stdout: 'https://github.com/x/y/issues/42\n' };
-  });
-
-  try {
-    await runFromCli([]);
-
-    // Should have made exactly 2 gh calls: list + create
-    assert.equal(ghCalls.length, 2, `expected 2 gh calls (list + create), got ${ghCalls.length}: ${JSON.stringify(ghCalls)}`);
-    assert.ok(ghCalls[0].includes('list'), `first call should be issue list, got: ${ghCalls[0]}`);
-    assert.ok(ghCalls[0].includes('ops:nexus-schema-gap'), 'list call uses the correct label');
-    assert.ok(ghCalls[1].includes('create'), `second call should be issue create, got: ${ghCalls[1]}`);
-    assert.ok(ghCalls[1].includes('[ops] Nexus GraphQL schema gap: mod.bugReports unavailable'),
-      'create call uses the correct title');
-    assert.ok(ghCalls[1].includes('ops:nexus-schema-gap'), 'create call uses the correct label');
-  } finally {
-    setHttpFetch(globalThis.fetch);
-    setGhInvoker(async () => { throw new Error('gh not stubbed; tests must call setGhInvoker'); });
-    process.env.NEXUS_API_KEY = origApiKey;
-    process.env.GITHUB_TOKEN = origGhToken;
-    try { unlinkSync(STATE_PATH); } catch { /* already gone */ }
-  }
-});
-
-test('runFromCli does NOT file duplicate ops:nexus-schema-gap when one already exists', async () => {
-  writeFileSync(STATE_PATH, makeValidState(), 'utf-8');
-  const origApiKey = process.env.NEXUS_API_KEY;
-  const origGhToken = process.env.GITHUB_TOKEN;
-  process.env.NEXUS_API_KEY = 'test-key';
-  process.env.GITHUB_TOKEN = 'test-token';
-
-  setHttpFetch(makeDriftHttpFetch());
-  const ghCalls = [];
-  // Issue list returns existing open issue #99 → no create should follow
-  setGhInvoker(async (args) => {
-    ghCalls.push(args);
-    if (args.includes('list')) return { number: 99, url: 'https://github.com/x/y/issues/99', stdout: '99\n' };
-    return { number: -1, url: '', stdout: '' };
-  });
-
-  try {
-    await runFromCli([]);
-
-    // Only the list call — no create
-    assert.equal(ghCalls.length, 1, `expected 1 gh call (list only), got ${ghCalls.length}: ${JSON.stringify(ghCalls)}`);
-    assert.ok(ghCalls[0].includes('list'), `only call should be issue list, got: ${ghCalls[0]}`);
-  } finally {
-    setHttpFetch(globalThis.fetch);
-    setGhInvoker(async () => { throw new Error('gh not stubbed; tests must call setGhInvoker'); });
-    process.env.NEXUS_API_KEY = origApiKey;
-    process.env.GITHUB_TOKEN = origGhToken;
-    try { unlinkSync(STATE_PATH); } catch { /* already gone */ }
-  }
-});
-
-test('runFromCli does NOT call gh for schema-gap when dry-run (even if bugReportsUnavailable)', async () => {
-  writeFileSync(STATE_PATH, makeValidState(), 'utf-8');
-  const origApiKey = process.env.NEXUS_API_KEY;
-  const origGhToken = process.env.GITHUB_TOKEN;
-  process.env.NEXUS_API_KEY = 'test-key';
-  process.env.GITHUB_TOKEN = 'test-token';
-
-  setHttpFetch(makeDriftHttpFetch());
-  const ghCalls = [];
-  // Should never be called in dry-run mode
-  setGhInvoker(async (args) => {
-    ghCalls.push(args);
-    return { number: -1, url: '', stdout: '' };
-  });
-
-  const consoleLogCalls = [];
-  const origLog = console.log;
-  console.log = (msg) => { consoleLogCalls.push(String(msg)); };
-
-  try {
-    await runFromCli(['--dry-run']);
-
-    // Zero gh calls — not even the list call
-    assert.equal(ghCalls.length, 0, `expected 0 gh calls in dry-run, got ${ghCalls.length}: ${JSON.stringify(ghCalls)}`);
-
-    // Should have logged the dry-run message
-    assert.ok(
-      consoleLogCalls.some((msg) => msg.includes('Would file ops:nexus-schema-gap')),
-      `expected dry-run message about schema-gap, got: ${consoleLogCalls.join(' | ')}`
-    );
-  } finally {
-    setHttpFetch(globalThis.fetch);
-    setGhInvoker(async () => { throw new Error('gh not stubbed; tests must call setGhInvoker'); });
-    console.log = origLog;
-    process.env.NEXUS_API_KEY = origApiKey;
-    process.env.GITHUB_TOKEN = origGhToken;
-    try { unlinkSync(STATE_PATH); } catch { /* already gone */ }
+  } else {
+    // POSTS_THREAD_ID was set at module load time — the guard cannot be tested
+    // without re-importing the module with a different env. Skip gracefully.
+    console.warn('Skipping POSTS_THREAD_ID guard test: NEXUSMODS_POSTS_THREAD_ID was set at module load');
   }
 });

@@ -1,13 +1,21 @@
 // scripts/nexus-triage.mjs
 // Nexus -> GitHub triage orchestrator. Hourly cron in CI fetches new Nexus
-// comments + open bugs on mod 856, classifies each, files GitHub issues with
-// an @claude investigation prompt for non-kudos items.
+// comments on mod 856, classifies each, files GitHub issues with an @claude
+// investigation prompt for non-kudos items.
 //
 // Spec: docs/superpowers/specs/2026-05-26-nexus-github-triage-design.md
+// Addendum 2026-05-27: pivoted from GraphQL to HTML widget scraping.
+//
+// Credit: HTML scraping approach adapted from jadistanbelly/sts2-multiplayer-save-slots
+// (MIT-licensed). Our Node port is independent code but adopts their endpoint
+// URL pattern, query params, HTML selectors, and curl-impersonate insight.
 
-export const NEXUS_GRAPHQL_URL = 'https://api.nexusmods.com/v2/graphql';
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
 export const GAME_DOMAIN = 'slaythespire2';
-export const MOD_ID = 856;
+export const MOD_ID = 856; // numeric, for URL helpers
 export const MAINTAINER_HANDLES = ['xxskullmikexx', 'Sky2Fly'];
 export const PER_RUN_CAP = 5;
 export const KUDOS_MAX_CHARS = 80;
@@ -16,10 +24,31 @@ export const TEMPLATE_PATH = 'scripts/nexus-triage-prompt.md';
 export const SENTINEL_PATH = 'scripts/nexus-triage.disabled';
 export const STATE_SCHEMA_VERSION = 1;
 
+// HTML widget scraping config — populated from repo vars at CI time.
+// All have sensible defaults so local testing works without env setup.
+export const WIDGET_BASE_URL = process.env.NEXUSMODS_ORIGIN || 'https://www.nexusmods.com';
+export const GAME_ID = process.env.NEXUSMODS_GAME_ID || '8916';       // STS2 internal game id
+export const MOD_ID_STR = process.env.NEXUSMODS_MOD_ID || '856';      // string form for query params
+export const OBJECT_TYPE = process.env.NEXUSMODS_OBJECT_TYPE || '1';
+export const POSTS_THREAD_ID = process.env.NEXUSMODS_POSTS_THREAD_ID || ''; // '' = must be discovered
+export const POSTS_URL = process.env.NEXUSMODS_POSTS_URL ||
+  `https://www.nexusmods.com/${GAME_DOMAIN}/mods/${MOD_ID_STR}?tab=posts`;
+export const PAGE_SIZE = 10;
+export const MAX_PAGES = 20;
+export const CURL_IMPERSONATE_BIN = process.env.CURL_IMPERSONATE_BIN || 'curl_chrome136';
+
+// ---------------------------------------------------------------------------
+// Imports
+// ---------------------------------------------------------------------------
+
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileP = promisify(execFile);
+
+// ---------------------------------------------------------------------------
+// State management
+// ---------------------------------------------------------------------------
 
 export function loadState(path) {
   if (!existsSync(path)) {
@@ -58,6 +87,10 @@ export function saveState(path, state) {
   writeFileSync(path, out, 'utf-8');
 }
 
+// ---------------------------------------------------------------------------
+// Title sanitizer
+// ---------------------------------------------------------------------------
+
 const MAX_TITLE_CHARS = 60;
 
 export function sanitizeTitle(body) {
@@ -77,6 +110,10 @@ export function sanitizeTitle(body) {
   if (cutoff < 0) return s.slice(0, MAX_TITLE_CHARS); // no space found, hard-cut
   return s.slice(0, cutoff);
 }
+
+// ---------------------------------------------------------------------------
+// Classifier
+// ---------------------------------------------------------------------------
 
 const BUG_HIGH_RE = /\b(crash(es|ed|ing)?|error|exception|broken|fails?|won['']?t (start|launch|open|install))\b/i;
 const BUG_MED_RE = /\b(bug|doesn['']?t work|not working|glitch)\b/i;
@@ -104,6 +141,10 @@ export function classify(text, _kind) {
 
   return { classification: 'needs-triage', confidence: 'low' };
 }
+
+// ---------------------------------------------------------------------------
+// Issue body renderer
+// ---------------------------------------------------------------------------
 
 export function renderIssueBody(item, template, { classification, confidence }) {
   const titleLine = item.title ? `**Title:** ${item.title}\n` : '';
@@ -133,122 +174,37 @@ export function renderIssueBody(item, template, { classification, confidence }) 
 }
 
 // ---------------------------------------------------------------------------
-// GraphQL client
+// HTML fetcher indirection (replaces httpFetch for the Nexus side)
+// ---------------------------------------------------------------------------
+// Tests stub htmlFetcher to return canned HTML strings.
+// Production default spawns curl-impersonate via execFile.
+// The function signature is: (url: string, opts: { headers: Record<string,string> })
+//   => Promise<string>  (the raw HTML body)
+
+let htmlFetcher = async (url, opts = {}) => {
+  const bin = CURL_IMPERSONATE_BIN;
+  const args = ['-sS', '--fail-with-body', url];
+  for (const [k, v] of Object.entries(opts.headers || {})) {
+    args.push('-H', `${k}: ${v}`);
+  }
+  const { stdout } = await execFileP(bin, args);
+  return stdout;
+};
+
+export function setHtmlFetcher(fn) { htmlFetcher = fn; }
+
+// ---------------------------------------------------------------------------
+// HTTP fetch indirection (retained for generic use / test compat)
 // ---------------------------------------------------------------------------
 
-// Single indirection point for HTTP calls so tests can stub without
-// monkey-patching globalThis.fetch (which leaks across tests).
 let httpFetch = globalThis.fetch;
 export function setHttpFetch(fn) { httpFetch = fn; }
-
-const COMMENTS_QUERY = `
-  query ModComments($gameDomain: String!, $modId: Int!, $first: Int!) {
-    mod(domain: $gameDomain, modId: $modId) {
-      comments(first: $first, sortBy: createdAt, direction: DESC) {
-        nodes {
-          id
-          body
-          createdAt
-          creator { name memberId }
-        }
-      }
-    }
-  }
-`.trim();
-
-const BUGS_QUERY = `
-  query ModBugReports($gameDomain: String!, $modId: Int!, $first: Int!, $statusIn: [BugReportStatus!]) {
-    mod(domain: $gameDomain, modId: $modId) {
-      bugReports(first: $first, sortBy: createdAt, direction: DESC, statusIn: $statusIn) {
-        nodes {
-          id
-          title
-          description
-          status
-          priority
-          createdAt
-          gameVersion
-          reporter { name memberId }
-        }
-      }
-    }
-  }
-`.trim();
-
-const INTROSPECT_QUERY = `
-  query IntrospectMod {
-    __type(name: "Mod") { name fields { name type { name } } }
-  }
-`.trim();
-
-async function graphqlPost({ apiKey, query, variables }) {
-  const res = await httpFetch(NEXUS_GRAPHQL_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', apikey: apiKey },
-    body: JSON.stringify({ query, variables }),
-  });
-  if (!res.ok) {
-    console.error(`nexus-triage: GraphQL POST failed with status ${res.status}`);
-    process.exit(1);
-  }
-  const json = await res.json();
-  if (json.errors?.length) {
-    console.error(`nexus-triage: GraphQL returned errors: ${JSON.stringify(json.errors)}`);
-    process.exit(1);
-  }
-  return json.data;
-}
-
-export async function fetchModComments({ apiKey, first = 100 }) {
-  const data = await graphqlPost({
-    apiKey,
-    query: COMMENTS_QUERY,
-    variables: { gameDomain: GAME_DOMAIN, modId: MOD_ID, first },
-  });
-  return data?.mod?.comments?.nodes ?? [];
-}
-
-export async function fetchModBugReports({ apiKey, first = 100 }) {
-  const data = await graphqlPost({
-    apiKey,
-    query: BUGS_QUERY,
-    variables: { gameDomain: GAME_DOMAIN, modId: MOD_ID, first, statusIn: ['open'] },
-  });
-  return data?.mod?.bugReports?.nodes ?? [];
-}
-
-export async function introspectSchema({ apiKey }) {
-  const data = await graphqlPost({ apiKey, query: INTROSPECT_QUERY, variables: {} });
-  if (!data?.__type) {
-    console.error(
-      `nexus-triage: introspection found no type named 'Mod' in the Nexus GraphQL schema. ` +
-      `The type may be renamed or removed. Run an explicit __schema { types { name } } ` +
-      `query to find the correct type, then update INTROSPECT_QUERY in scripts/nexus-triage.mjs.`
-    );
-    process.exit(2);
-  }
-  const fields = data.__type.fields ?? [];
-  const fieldNames = new Set(fields.map((f) => f.name));
-  const hasComments = fieldNames.has('comments');
-  const hasBugReports = fieldNames.has('bugReports');
-  if (!hasComments) {
-    const available = [...fieldNames].sort().join(', ') || '<none>';
-    console.error(
-      `nexus-triage: introspection shows Mod.comments is missing. ` +
-      `This is a hard schema drift.\n` +
-      `  Available fields on Mod: ${available}\n` +
-      `Update COMMENTS_QUERY in scripts/nexus-triage.mjs to use the correct field name.`
-    );
-    process.exit(2);
-  }
-  return { hasComments, hasBugReports };
-}
 
 // ---------------------------------------------------------------------------
 // gh CLI indirection
 // ---------------------------------------------------------------------------
 
-// Like setHttpFetch — lets tests stub without spawning a real gh process.
+// Like setHtmlFetcher — lets tests stub without spawning a real gh process.
 let ghInvoker = async (args) => {
   const { stdout } = await execFileP('gh', args);
   // gh issue create outputs the URL of the created issue on stdout.
@@ -260,50 +216,237 @@ let ghInvoker = async (args) => {
 export function setGhInvoker(fn) { ghInvoker = fn; }
 
 // ---------------------------------------------------------------------------
-// Schema-gap operator notification
+// Cloudflare challenge detection
 // ---------------------------------------------------------------------------
 
-// Files a one-time ops:nexus-schema-gap issue when mod.bugReports is absent.
-// Idempotent: checks for an existing open issue first to avoid duplicates.
-// Both the list and create calls route through ghInvoker so tests can stub them.
-export async function ensureSchemaGapIssue() {
-  // 1. Check for an existing open issue with the label.
-  const listResult = await ghInvoker([
-    'issue', 'list',
-    '--label', 'ops:nexus-schema-gap',
-    '--state', 'open',
-    '--limit', '1',
-    '--json', 'number',
-    '--jq', '.[0].number // empty',
-  ]);
-  const existingNumber = (listResult.stdout ?? '').trim();
-  if (existingNumber) {
-    console.warn(`nexus-triage: ops:nexus-schema-gap issue #${existingNumber} already open — skipping duplicate.`);
-    return;
+export function isCloudflareChallenge(html) {
+  return html.includes('<title>Just a moment...</title>') || html.includes('cf-chl');
+}
+
+// ---------------------------------------------------------------------------
+// HTML widget URL builder
+// ---------------------------------------------------------------------------
+
+export function buildWidgetUrl({ page = 1, pageSize = PAGE_SIZE, threadId = POSTS_THREAD_ID } = {}) {
+  const params = new URLSearchParams({
+    tabbed: '1',
+    object_id: MOD_ID_STR,
+    game_id: GAME_ID,
+    object_type: OBJECT_TYPE,
+    thread_id: threadId,
+    skip_opening_post: '0',
+    user_is_blocked: '',
+    searchable: 'true',
+    page_size: String(pageSize),
+    page: String(page),
+  });
+  return `${WIDGET_BASE_URL}/Core/Libs/Common/Widgets/CommentContainer?${params}`;
+}
+
+// ---------------------------------------------------------------------------
+// Nexus post URL builder
+// ---------------------------------------------------------------------------
+
+export function buildNexusPostUrl(postsUrl, commentId) {
+  // E.g. https://www.nexusmods.com/slaythespire2/mods/856?tab=posts&comment_id=12345
+  // Strip any existing comment_id param and add our own.
+  const u = new URL(postsUrl);
+  u.searchParams.set('tab', u.searchParams.get('tab') || 'posts');
+  u.searchParams.set('comment_id', String(commentId));
+  return u.toString();
+}
+
+// ---------------------------------------------------------------------------
+// parseCommentsFromHtml — regex-based parser (no extra deps)
+// ---------------------------------------------------------------------------
+// Regex patterns targeting Nexus CommentContainer widget HTML structure.
+// Markup version observed 2026-05-27. Update patterns here if Nexus changes.
+//
+// Key patterns:
+//   Comment root:  <li id="comment-{id}" class="... comment ...">
+//   Author:        <span class="comment-name">{author}</span>
+//   Body:          <div id="comment-content-{id}">{body}</div>
+//   Timestamp:     <time data-date="{unix-seconds}">
+//
+// We parse the full HTML string, not line by line, because HTML attributes
+// may span multiple lines. The s (dotAll) flag is used where needed.
+
+// Matches a single comment <li> block.
+// Captured groups: [1] id, [2] everything inside the <li>
+const LI_COMMENT_RE = /<li\s[^>]*\bid="comment-(\d+)"[^>]*\bclass="[^"]*\bcomment\b[^"]*"[^>]*>([\s\S]*?)<\/li>/gi;
+
+// Alternatively id before class order
+const LI_COMMENT_RE2 = /<li\s[^>]*\bclass="[^"]*\bcomment\b[^"]*"[^>]*\bid="comment-(\d+)"[^>]*>([\s\S]*?)<\/li>/gi;
+
+// Author: <span class="comment-name">...</span>  (first match in the li body)
+const AUTHOR_RE = /<span\s[^>]*\bclass="[^"]*\bcomment-name\b[^"]*"[^>]*>([\s\S]*?)<\/span>/i;
+
+// Body: <div id="comment-content-{id}">...</div>
+// We build this per-comment using the known id.
+function buildBodyRe(id) {
+  return new RegExp(`<div[^>]*\\bid="comment-content-${id}"[^>]*>([\\s\\S]*?)</div>`, 'i');
+}
+
+// Timestamp: <time data-date="{unix-seconds}"> (first match in the li body)
+const TIME_RE = /<time\s[^>]*\bdata-date="(\d+)"[^>]*>/i;
+
+// Strip HTML tags for text extraction
+function stripTags(s) {
+  return s.replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ');
+}
+
+function unixToIso(unixStr) {
+  return new Date(parseInt(unixStr, 10) * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
+export function parseCommentsFromHtml(html, { postsUrl = POSTS_URL } = {}) {
+  if (isCloudflareChallenge(html)) {
+    throw new Error('Cloudflare blocked the request — curl-impersonate may need updating');
   }
 
-  // 2. No existing issue — file one.
-  const body = [
-    '## Nexus GraphQL schema gap: `mod.bugReports` field unavailable',
-    '',
-    'During schema introspection, `mod.bugReports` was not found in the Nexus GraphQL `Mod` type.',
-    'Triage is continuing with **comments-only** processing until the field returns.',
-    '',
-    '### References',
-    '- Spec: `docs/superpowers/specs/2026-05-26-nexus-github-triage-design.md`',
-    '- Schema-gap runbook: see `RELEASING.md` → *Nexus schema-gap runbook* section',
-    '',
-    '> This issue was filed automatically by the nexus-triage bot and will not re-file',
-    '> while an open issue with the `ops:nexus-schema-gap` label exists.',
-  ].join('\n');
+  const comments = [];
 
-  console.warn('nexus-triage: mod.bugReports unavailable — filing ops:nexus-schema-gap issue.');
-  await ghInvoker([
-    'issue', 'create',
-    '--title', '[ops] Nexus GraphQL schema gap: mod.bugReports unavailable',
-    '--label', 'ops:nexus-schema-gap',
-    '--body', body,
-  ]);
+  // Try both attribute orderings (id-first or class-first)
+  function runRe(re) {
+    let m;
+    while ((m = re.exec(html)) !== null) {
+      const id = m[1];
+      const liBody = m[2];
+
+      // Extract author
+      const authorM = AUTHOR_RE.exec(liBody);
+      const author = authorM ? stripTags(authorM[1]).trim() : '<unknown>';
+
+      // Extract body
+      const bodyM = buildBodyRe(id).exec(liBody);
+      if (!bodyM) {
+        // Body div missing — skip this comment per spec (malformed)
+        continue;
+      }
+      const body = stripTags(bodyM[1]).replace(/\s+/g, ' ').trim();
+      if (!body) continue; // skip empty bodies
+
+      // Extract timestamp
+      const timeM = TIME_RE.exec(liBody);
+      const createdAt = timeM ? unixToIso(timeM[1]) : '';
+
+      comments.push({
+        id,
+        author,
+        body,
+        createdAt,
+        parentId: null, // parent tracking not critical for first pass
+        nexus_url: buildNexusPostUrl(postsUrl, id),
+      });
+    }
+  }
+
+  runRe(LI_COMMENT_RE);
+  // If the class comes before id in the HTML, we need the second pattern.
+  // Collect ids already found to avoid duplicates.
+  const foundIds = new Set(comments.map((c) => c.id));
+
+  let m2;
+  while ((m2 = LI_COMMENT_RE2.exec(html)) !== null) {
+    if (foundIds.has(m2[1])) continue;
+    const id = m2[1];
+    const liBody = m2[2];
+
+    const authorM = AUTHOR_RE.exec(liBody);
+    const author = authorM ? stripTags(authorM[1]).trim() : '<unknown>';
+
+    const bodyM = buildBodyRe(id).exec(liBody);
+    if (!bodyM) continue;
+    const body = stripTags(bodyM[1]).replace(/\s+/g, ' ').trim();
+    if (!body) continue;
+
+    const timeM = TIME_RE.exec(liBody);
+    const createdAt = timeM ? unixToIso(timeM[1]) : '';
+
+    comments.push({ id, author, body, createdAt, parentId: null,
+      nexus_url: buildNexusPostUrl(postsUrl, id) });
+    foundIds.add(id);
+  }
+
+  return comments;
+}
+
+// ---------------------------------------------------------------------------
+// fetchCommentsHtml — single page fetch via htmlFetcher
+// ---------------------------------------------------------------------------
+
+export async function fetchCommentsHtml({ page = 1, pageSize = PAGE_SIZE, threadId = POSTS_THREAD_ID } = {}) {
+  const url = buildWidgetUrl({ page, pageSize, threadId });
+  const html = await htmlFetcher(url, {
+    headers: {
+      'Referer': POSTS_URL,
+      'X-Requested-With': 'XMLHttpRequest',
+      'User-Agent': 'sts2-mod-manager nexus-triage automation',
+    },
+  });
+  if (isCloudflareChallenge(html)) {
+    throw new Error('Cloudflare blocked the request — curl-impersonate may need updating');
+  }
+  return html;
+}
+
+// ---------------------------------------------------------------------------
+// fetchAllComments — pagination loop
+// ---------------------------------------------------------------------------
+
+export async function fetchAllComments({ threadId = POSTS_THREAD_ID } = {}) {
+  const seenIds = new Set();
+  const allComments = [];
+
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const html = await fetchCommentsHtml({ page, pageSize: PAGE_SIZE, threadId });
+    const pageComments = parseCommentsFromHtml(html);
+    const newComments = pageComments.filter((c) => !seenIds.has(c.id));
+
+    if (newComments.length === 0) break; // no new IDs — stop pagination
+
+    for (const c of newComments) {
+      seenIds.add(c.id);
+      allComments.push(c);
+    }
+
+    // If this page had fewer results than page size, we're on the last page
+    if (pageComments.length < PAGE_SIZE) break;
+  }
+
+  return allComments;
+}
+
+// ---------------------------------------------------------------------------
+// discoverThreadId — extracts thread_id from mod posts page HTML
+// ---------------------------------------------------------------------------
+
+export async function discoverThreadId({ postsUrl = POSTS_URL } = {}) {
+  const html = await htmlFetcher(postsUrl, {
+    headers: {
+      'User-Agent': 'sts2-mod-manager nexus-triage automation',
+    },
+  });
+  if (isCloudflareChallenge(html)) {
+    throw new Error('Cloudflare blocked thread_id discovery — curl-impersonate may need updating');
+  }
+  // Look for patterns like: "thread_id":"16873160" or thread_id=16873160 in embedded JS
+  const patterns = [
+    /"thread_id"\s*:\s*"(\d+)"/,
+    /"thread_id"\s*:\s*(\d+)/,
+    /thread_id=(\d+)/,
+    /\bthread_id\b['":\s]+(\d+)/,
+  ];
+  for (const re of patterns) {
+    const m = re.exec(html);
+    if (m) return m[1];
+  }
+  throw new Error(
+    `nexus-triage: could not find thread_id in posts page HTML (${postsUrl}). ` +
+    `Check the page source manually and update NEXUSMODS_POSTS_THREAD_ID.`
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -311,9 +454,7 @@ export async function ensureSchemaGapIssue() {
 // ---------------------------------------------------------------------------
 
 const NEXUS_COMMENT_URL = (id) =>
-  `https://www.nexusmods.com/${GAME_DOMAIN}/mods/${MOD_ID}?tab=posts&postid=${id}`;
-const NEXUS_BUG_URL = (id) =>
-  `https://www.nexusmods.com/${GAME_DOMAIN}/mods/${MOD_ID}?tab=bugs&bugid=${id}`;
+  buildNexusPostUrl(POSTS_URL, id);
 
 const SKIP_BUG_STATUSES = new Set(['closed', 'duplicate', 'not-a-bug']);
 
@@ -333,24 +474,9 @@ function commentToItem(c) {
     id: String(c.id),
     body: c.body ?? '',
     createdAt: c.createdAt,
-    author: c.creator?.name ?? '<unknown>',
-    authorId: c.creator?.memberId ?? '',
-    nexus_url: NEXUS_COMMENT_URL(c.id),
-  };
-}
-
-function bugToItem(b) {
-  return {
-    kind: 'bug',
-    id: String(b.id),
-    title: b.title,
-    body: b.description ?? '',
-    status: b.status,
-    gameVersion: b.gameVersion,
-    createdAt: b.createdAt,
-    author: b.reporter?.name ?? '<unknown>',
-    authorId: b.reporter?.memberId ?? '',
-    nexus_url: NEXUS_BUG_URL(b.id),
+    author: c.author ?? '<unknown>',
+    authorId: '', // Nexus widget HTML does not expose memberId in a stable way
+    nexus_url: c.nexus_url || NEXUS_COMMENT_URL(c.id),
   };
 }
 
@@ -358,59 +484,33 @@ function bugToItem(b) {
 // main orchestrator
 // ---------------------------------------------------------------------------
 
-export async function main({ dryRun, apiKey, ghToken, state, templatePath = TEMPLATE_PATH }) {
+export async function main({ dryRun, ghToken, state, templatePath = TEMPLATE_PATH }) {
   const result = {
     maintainerSkipped: 0,
     alreadySeen: 0,
-    closedBugSkipped: 0,
     kudosSkipped: 0,
     filed: [],
     pendingNextRun: 0,
   };
 
-  const schema = await introspectSchema({ apiKey });
-
-  const commentNodes = schema.hasComments ? await fetchModComments({ apiKey }) : [];
-  const bugNodes = schema.hasBugReports ? await fetchModBugReports({ apiKey }) : [];
-
-  if (!schema.hasBugReports) {
-    // Caller is responsible for filing the one-time ops:nexus-schema-gap issue.
-    result.bugReportsUnavailable = true;
-  }
-
+  const commentNodes = await fetchAllComments();
   const comments = commentNodes.map(commentToItem);
-  const bugs = bugNodes.map(bugToItem);
 
   // 1. Maintainer filter — case-insensitive — FIRST
   const nonMaintainerComments = comments.filter((c) => {
     if (isMaintainer(c.author)) { result.maintainerSkipped++; return false; }
     return true;
   });
-  const nonMaintainerBugs = bugs.filter((b) => {
-    if (isMaintainer(b.author)) { result.maintainerSkipped++; return false; }
-    return true;
-  });
 
-  // 2. Closed-bug filter (only on first sight; if it's in state already, dedup catches it)
-  const openBugs = nonMaintainerBugs.filter((b) => {
-    if (state.bugs[b.id]) return true; // already filed; let dedup handle
-    if (SKIP_BUG_STATUSES.has(b.status)) { result.closedBugSkipped++; return false; }
-    return true;
-  });
-
-  // 3. Dedup against state
+  // 2. Dedup against state
   const unseenComments = nonMaintainerComments.filter((c) => {
     if (state.comments[c.id]) { result.alreadySeen++; return false; }
     if (state.kudos_seen.includes(c.id)) { result.alreadySeen++; return false; }
     return true;
   });
-  const unseenBugs = openBugs.filter((b) => {
-    if (state.bugs[b.id]) { result.alreadySeen++; return false; }
-    return true;
-  });
 
-  // 4. Classify all unseen items, sorted oldest-first by createdAt
-  const items = [...unseenComments, ...unseenBugs].sort(
+  // 3. Classify all unseen items, sorted oldest-first by createdAt
+  const items = unseenComments.slice().sort(
     (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
   );
 
@@ -447,11 +547,10 @@ export async function main({ dryRun, apiKey, ghToken, state, templatePath = TEMP
     filedThisRun++;
   }
 
-  // 5. Update state (in memory; caller persists)
+  // 4. Update state (in memory; caller persists)
   if (!dryRun) {
     for (const f of result.filed) {
-      const bucket = f.kind === 'bug' ? state.bugs : state.comments;
-      bucket[f.nexus_id] = {
+      state.comments[f.nexus_id] = {
         gh_issue_url: f.gh_issue_url,
         classification: f.classification,
         filed_at: new Date().toISOString(),
@@ -471,10 +570,11 @@ export async function main({ dryRun, apiKey, ghToken, state, templatePath = TEMP
 import { fileURLToPath } from 'node:url';
 
 export function parseArgs(argv) {
-  const opts = { dryRun: false, bootstrap: false, help: false };
+  const opts = { dryRun: false, bootstrap: false, discoverThreadId: false, help: false };
   for (const a of argv) {
     if (a === '--dry-run') opts.dryRun = true;
     else if (a === '--bootstrap') opts.bootstrap = true;
+    else if (a === '--discover-thread-id') opts.discoverThreadId = true;
     else if (a === '--help' || a === '-h') opts.help = true;
     else {
       console.error(`nexus-triage: unknown argument '${a}'. Use --help for usage.`);
@@ -492,17 +592,26 @@ const HELP_TEXT = `
 nexus-triage — Nexus -> GitHub issue triage
 
 Usage:
-  node scripts/nexus-triage.mjs              # normal run (requires NEXUS_API_KEY + GITHUB_TOKEN)
-  node scripts/nexus-triage.mjs --dry-run    # print what would file, no gh calls, no state write
-  node scripts/nexus-triage.mjs --bootstrap  # mark all current Nexus items as seen, do not file
-  node scripts/nexus-triage.mjs --help       # this message
+  node scripts/nexus-triage.mjs                    # normal run (requires GITHUB_TOKEN + NEXUSMODS_* vars)
+  node scripts/nexus-triage.mjs --dry-run          # print what would file, no gh calls, no state write
+  node scripts/nexus-triage.mjs --bootstrap        # mark all current Nexus comments as seen, do not file
+  node scripts/nexus-triage.mjs --discover-thread-id  # print the posts thread_id and exit
+  node scripts/nexus-triage.mjs --help             # this message
 
-Environment:
-  NEXUS_API_KEY    Nexus v1 API key (for v2 GraphQL too)
-  GITHUB_TOKEN     GitHub PAT or Actions-provided token
+Environment (set as repo vars in CI, or locally in your shell):
+  NEXUSMODS_POSTS_THREAD_ID   Required for normal runs. Discover with --discover-thread-id.
+  NEXUSMODS_GAME_ID           Defaults to 8916 (STS2)
+  NEXUSMODS_MOD_ID            Defaults to 856
+  NEXUSMODS_OBJECT_TYPE       Defaults to 1
+  NEXUSMODS_POSTS_URL         Defaults to https://www.nexusmods.com/slaythespire2/mods/856?tab=posts
+  NEXUSMODS_ORIGIN            Defaults to https://www.nexusmods.com
+  CURL_IMPERSONATE_BIN        Defaults to curl_chrome136
+  GITHUB_TOKEN                GitHub PAT or Actions-provided token
+
+Note: NEXUS_API_KEY is NOT required for triage (it's only needed for publish-nexus upload).
 
 Killswitch:
-  touch scripts/nexus-triage.disabled        # next run exits 0 with no work
+  touch scripts/nexus-triage.disabled             # next run exits 0 with no work
 `.trim();
 
 export async function runFromCli(argv = process.argv.slice(2)) {
@@ -515,49 +624,46 @@ export async function runFromCli(argv = process.argv.slice(2)) {
     console.log('nexus-triage: scripts/nexus-triage.disabled sentinel present; exiting 0.');
     return 0;
   }
-  const apiKey = process.env.NEXUS_API_KEY;
-  if (!apiKey) {
-    console.error('nexus-triage: NEXUS_API_KEY is not set.');
-    process.exit(2);
-  }
+
   const ghToken = process.env.GITHUB_TOKEN;
   if (!ghToken) {
     console.error('nexus-triage: GITHUB_TOKEN is not set.');
     process.exit(2);
   }
+
+  // --discover-thread-id mode: fetch the posts page, print the thread_id, exit.
+  if (opts.discoverThreadId) {
+    const threadId = await discoverThreadId();
+    console.log(threadId);
+    console.log(`\nTo store it:\n  gh variable set NEXUSMODS_POSTS_THREAD_ID --body ${threadId}`);
+    return 0;
+  }
+
+  // For normal runs, POSTS_THREAD_ID must be set.
+  if (!POSTS_THREAD_ID) {
+    console.error(
+      'nexus-triage: NEXUSMODS_POSTS_THREAD_ID is not set.\n' +
+      'Run `node scripts/nexus-triage.mjs --discover-thread-id` locally to find it, ' +
+      'then set it as a repo var:\n' +
+      '  gh variable set NEXUSMODS_POSTS_THREAD_ID --body <value>'
+    );
+    process.exit(2);
+  }
+
   if (opts.bootstrap) {
     const fresh = { schema_version: STATE_SCHEMA_VERSION, last_run_at: new Date().toISOString(),
                     comments: {}, bugs: {}, kudos_seen: [] };
-    const schema = await introspectSchema({ apiKey });
-    const commentNodes = schema.hasComments ? await fetchModComments({ apiKey }) : [];
-    const bugNodes = schema.hasBugReports ? await fetchModBugReports({ apiKey }) : [];
+    const commentNodes = await fetchAllComments();
     for (const c of commentNodes) {
       fresh.kudos_seen.push(String(c.id));
     }
-    // Bug nodes get seeded as bugs with a bootstrap-seed marker so we don't refile them.
-    for (const b of bugNodes) {
-      fresh.bugs[String(b.id)] = {
-        gh_issue_url: '<bootstrap-seed>',
-        classification: 'bootstrap-seed',
-        filed_at: new Date().toISOString(),
-      };
-    }
     saveState(STATE_PATH, fresh);
-    console.log(`nexus-triage: bootstrap complete. Marked ${commentNodes.length} comments + ${bugNodes.length} bugs as seen.`);
+    console.log(`nexus-triage: bootstrap complete. Marked ${commentNodes.length} comments as seen.`);
     return 0;
   }
 
   const state = loadState(STATE_PATH);
-  const result = await main({ dryRun: opts.dryRun, apiKey, ghToken, state });
-
-  // Schema soft-degradation: file ops:nexus-schema-gap issue once (idempotent).
-  if (result.bugReportsUnavailable) {
-    if (!opts.dryRun) {
-      await ensureSchemaGapIssue();
-    } else {
-      console.log('[dry-run] Would file ops:nexus-schema-gap issue (skipped in dry-run)');
-    }
-  }
+  const result = await main({ dryRun: opts.dryRun, ghToken, state });
 
   if (!opts.dryRun) saveState(STATE_PATH, state);
   console.log(JSON.stringify(result, null, 2));

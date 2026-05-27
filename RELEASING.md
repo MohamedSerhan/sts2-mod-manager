@@ -56,3 +56,103 @@ After the first release that ships the portable zip:
 2. Extract it.
 3. Run `STS2 Mod Manager.exe` and confirm the UI loads.
 4. If WebView2 is missing, the README in the zip points at the Evergreen Bootstrapper.
+
+---
+
+## Operator runbook — Nexus triage
+
+This section covers the hourly Nexus → GitHub triage automation introduced in `2026-05-26`. See [`docs/superpowers/specs/2026-05-26-nexus-github-triage-design.md`](docs/superpowers/specs/2026-05-26-nexus-github-triage-design.md) for the full design rationale.
+
+### Day 0 setup (one-time, after merging the triage PR)
+
+1. **Generate a Claude Code OAuth token** (1-year validity, designed for CI):
+
+       claude setup-token
+
+   Follow the browser prompt. The CLI prints a token to stdout.
+
+2. **Store the token as a repo secret:**
+
+       gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo MohamedSerhan/sts2-mod-manager
+
+   Paste the token when prompted.
+
+3. **Verify `NEXUS_API_KEY` is still set** (re-used from the publish-nexus job):
+
+       gh secret list --repo MohamedSerhan/sts2-mod-manager | grep NEXUS_API_KEY
+
+4. **Bootstrap the state file** locally so the first triage run doesn't refile months-old comments:
+
+       NEXUS_API_KEY=<your-key> node scripts/nexus-triage.mjs --bootstrap
+       git add scripts/nexus-triage-state.json
+       git commit -m "chore(triage): bootstrap Nexus triage state"
+       git push
+
+5. **Run a dry-run from Actions UI** to verify the live classifier output:
+
+   - Actions → `Nexus triage` → "Run workflow" with `dry_run: true`
+   - Read the run logs. If the classifications look right on real comments, proceed.
+   - If something looks wrong, open a follow-up PR with classifier tweaks and re-test before enabling cron.
+
+6. **Enable the hourly cron** by uncommenting the `schedule:` block in `.github/workflows/nexus-triage.yml`:
+
+       schedule:
+         - cron: "0 * * * *"
+
+7. **Trigger the watchdog ping** manually once to confirm `@claude` is online:
+
+   - Actions → `Nexus watchdog — ping` → "Run workflow"
+   - Wait a few minutes for @claude to reply with PING-OK
+   - If no reply within 30 min, the OAuth token is bad — return to step 1
+
+### Annual token renewal
+
+`CLAUDE_CODE_OAUTH_TOKEN` is valid for ~1 year. Either the watchdog catches expiry (files an `ops:token-renewal` issue automatically) or you renew on your own schedule.
+
+To renew:
+
+1. `claude setup-token` (~30 seconds, browser auth)
+2. `gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo MohamedSerhan/sts2-mod-manager` and paste the new token
+3. Actions → `Nexus watchdog — ping` → "Run workflow" — confirms the new token
+4. If a renewal issue was open, close it with `gh issue close <num>`
+
+### Killswitches
+
+**To pause triage cleanly:**
+
+- Actions → `Nexus triage` → menu → "Disable workflow". State file frozen at last successful run. Re-enable when ready.
+
+**To pause from a phone (no terminal):**
+
+- GitHub web UI → `scripts/` → "Add file" → name it `nexus-triage.disabled` (any content). The next cron run will exit 0 with no work. Delete the file to resume.
+
+### When the watchdog files an `ops:token-renewal` issue
+
+The token expired. Follow the "Annual token renewal" steps above. The renewal issue includes the procedure inline.
+
+### When triage files an `ops:nexus-schema-gap` issue
+
+Nexus's GraphQL schema changed. Most likely `mod.bugReports` was removed or renamed (it was an in-progress field as of 2026-05). The triage workflow continues with comments-only triage until you act.
+
+To fix:
+
+1. Re-read the design's "GraphQL queries" section for the expected schema
+2. Run an introspection query manually to see what the schema looks like today:
+
+       gh secret list --repo MohamedSerhan/sts2-mod-manager  # confirm NEXUS_API_KEY exists
+       curl -sS -X POST https://api.nexusmods.com/v2/graphql \
+         -H "Content-Type: application/json" \
+         -H "apikey: $NEXUS_API_KEY" \
+         -d '{"query":"query{ __type(name:\"Mod\"){ fields{ name type{ name }}}}"}' | jq
+
+3. Update the relevant query in `scripts/nexus-triage.mjs` to match
+4. Update the introspection check in `introspectSchema` to allow the new field name
+5. Add a test fixture covering the new shape
+6. PR + merge; close the `ops:nexus-schema-gap` issue
+
+### When triage fails for a different reason
+
+- Open the failed workflow run in Actions UI
+- The script exits with specific codes:
+  - exit 1: transient (network, GitHub API). Re-run the failed workflow.
+  - exit 2: configuration drift (missing secret, missing state file, malformed state, hard schema drift). Read the error message — it names the missing piece.

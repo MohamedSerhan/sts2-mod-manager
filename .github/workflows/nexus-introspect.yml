@@ -1,0 +1,55 @@
+name: Nexus GraphQL introspect (one-off diagnostic)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  introspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Introspect top-level Query type
+        env:
+          NEXUS_API_KEY: ${{ secrets.NEXUS_API_KEY }}
+        run: |
+          echo "=== All root Query fields (name + args) ==="
+          curl -sS -X POST https://api.nexusmods.com/v2/graphql \
+            -H "Content-Type: application/json" \
+            -H "apikey: $NEXUS_API_KEY" \
+            -d '{"query":"query { __type(name: \"Query\") { fields { name args { name type { name kind ofType { name } } } type { name kind ofType { name } } } } }"}' \
+            | python3 -c '
+          import json, sys
+          data = json.load(sys.stdin)
+          fields = data.get("data", {}).get("__type", {}).get("fields", []) or []
+          print(f"Total root Query fields: {len(fields)}")
+          print()
+          # Filter for anything plausibly related
+          interesting = [f for f in fields if any(kw in f["name"].lower() for kw in ["comment","post","bug","feedback","thread","forum","review","reply","message"])]
+          if interesting:
+            print(f"=== {len(interesting)} fields mentioning comment/post/bug/feedback/thread/forum/review/reply/message ===")
+            for f in interesting:
+              args = ", ".join(f"{a[\"name\"]}: {a[\"type\"].get(\"name\") or a[\"type\"].get(\"ofType\",{}).get(\"name\") or a[\"type\"].get(\"kind\")}" for a in (f.get("args") or []))
+              ret = f["type"].get("name") or f["type"].get("ofType",{}).get("name") or f["type"].get("kind")
+              print(f"  {f[\"name\"]}({args}) -> {ret}")
+          else:
+            print("No directly relevant fields. Listing all fields for review:")
+            for f in fields:
+              print(f"  {f[\"name\"]}")
+          '
+
+          echo
+          echo "=== Comment-related types in schema ==="
+          curl -sS -X POST https://api.nexusmods.com/v2/graphql \
+            -H "Content-Type: application/json" \
+            -H "apikey: $NEXUS_API_KEY" \
+            -d '{"query":"query { __schema { types { name kind } } }"}' \
+            | python3 -c '
+          import json, sys
+          data = json.load(sys.stdin)
+          types = data.get("data", {}).get("__schema", {}).get("types", []) or []
+          interesting = [t for t in types if any(kw in t["name"].lower() for kw in ["comment","post","bug","thread","forum","review","reply"])]
+          for t in interesting:
+            print(f"  {t[\"name\"]} ({t[\"kind\"]})")
+          '

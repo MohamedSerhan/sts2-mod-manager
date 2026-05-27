@@ -27,7 +27,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          # Need full history-of-this-branch for the state commit + rebase.
+          # Need full history for the state commit + rebase.
           fetch-depth: 0
 
       - name: Setup Node
@@ -35,10 +35,31 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Install curl-impersonate-chrome
+        # curl-impersonate lets us bypass Cloudflare TLS fingerprinting on Nexus.
+        # Pinned to v0.6.1 (latest stable as of 2026-05-27); update by bumping the
+        # version in the URL and sha256sum below when a newer release is needed.
+        # sha256: verify with `sha256sum curl-impersonate-v0.6.1.x86_64-linux-gnu.tar.gz`
+        # after downloading from https://github.com/lwthiker/curl-impersonate/releases
+        run: |
+          CURL_IMP_VERSION="0.6.1"
+          CURL_IMP_ARCHIVE="curl-impersonate-v${CURL_IMP_VERSION}.x86_64-linux-gnu.tar.gz"
+          CURL_IMP_URL="https://github.com/lwthiker/curl-impersonate/releases/download/v${CURL_IMP_VERSION}/${CURL_IMP_ARCHIVE}"
+          wget -q "${CURL_IMP_URL}" -O "${CURL_IMP_ARCHIVE}"
+          tar -xf "${CURL_IMP_ARCHIVE}"
+          sudo mv curl_chrome136 /usr/local/bin/curl_chrome136
+          sudo chmod +x /usr/local/bin/curl_chrome136
+          curl_chrome136 --version
+
       - name: Run triage script
         env:
-          NEXUS_API_KEY: ${{ secrets.NEXUS_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEXUSMODS_GAME_ID:          ${{ vars.NEXUSMODS_GAME_ID }}
+          NEXUSMODS_MOD_ID:           ${{ vars.NEXUSMODS_MOD_ID }}
+          NEXUSMODS_OBJECT_TYPE:      ${{ vars.NEXUSMODS_OBJECT_TYPE }}
+          NEXUSMODS_POSTS_THREAD_ID:  ${{ vars.NEXUSMODS_POSTS_THREAD_ID }}
+          NEXUSMODS_POSTS_URL:        ${{ vars.NEXUSMODS_POSTS_URL }}
+          CURL_IMPERSONATE_BIN:       curl_chrome136
+          GITHUB_TOKEN:               ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ "${{ inputs.dry_run }}" = "true" ]; then
             node scripts/nexus-triage.mjs --dry-run

@@ -25,13 +25,15 @@ use serde_json::json;
 use crate::error::{AppError, Result};
 use crate::mods::{merge_active_disabled_mods, scan_disabled_mods, scan_mods, ModInfo};
 
+use super::apply::disk_mod_matches_pin;
+use super::crud::{
+    hide_app_created_by, list_profiles, load_profile, mod_key, profile_has_json,
+    profile_mod_from_installed, profile_mod_matches_installed, profile_mod_matches_target,
+    installed_mod_matches_target, save_profile, subscribed_profile_names,
+};
 use super::{
-    disk_mod_matches_pin, hide_app_created_by, list_profiles, load_profile, mod_key,
-    profile_has_json, profile_mod_from_installed, profile_mod_matches_installed,
-    profile_mod_matches_target, installed_mod_matches_target, save_profile,
-    subscribed_profile_names, LoadOrderSettingsStatus, Profile, ProfileMembershipGrid,
-    ProfileMembershipMod, ProfileMembershipProfile, ProfileMembershipState, ProfileMod,
-    ProfileModOrderKey,
+    LoadOrderSettingsStatus, Profile, ProfileMembershipGrid, ProfileMembershipMod,
+    ProfileMembershipProfile, ProfileMembershipState, ProfileMod, ProfileModOrderKey,
 };
 
 pub(crate) fn profile_membership_matrix(

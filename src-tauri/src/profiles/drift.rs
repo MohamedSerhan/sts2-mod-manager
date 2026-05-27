@@ -17,10 +17,9 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use super::{
-    disk_mod_matches_pin, load_profile, mod_key, switch_profile_from_paths, version_is_wildcard,
-    Profile,
-};
+use super::apply::{disk_mod_matches_pin, switch_profile_from_paths};
+use super::crud::{load_profile, mod_key, version_is_wildcard};
+use super::Profile;
 
 /// A mod whose installed version differs from the profile's recorded version.
 #[derive(Debug, Clone, Serialize, Deserialize)]

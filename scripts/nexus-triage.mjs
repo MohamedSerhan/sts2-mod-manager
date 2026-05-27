@@ -407,11 +407,13 @@ export function parseCommentsFromHtml(html, { postsUrl = POSTS_URL } = {}) {
 
 export async function fetchCommentsHtml({ page = 1, pageSize = PAGE_SIZE, threadId = POSTS_THREAD_ID } = {}) {
   const url = buildWidgetUrl({ page, pageSize, threadId });
+  // Do NOT send User-Agent — curl_cffi's impersonate=chrome136 sets a
+  // native Chrome User-Agent that matches the TLS fingerprint. Overriding
+  // it with an "automation" UA causes Cloudflare to flag the mismatch.
   const html = await htmlFetcher(url, {
     headers: {
       'Referer': POSTS_URL,
       'X-Requested-With': 'XMLHttpRequest',
-      'User-Agent': 'sts2-mod-manager nexus-triage automation',
     },
   });
   if (isCloudflareChallenge(html)) {
@@ -454,11 +456,9 @@ export async function fetchAllComments({ threadId = POSTS_THREAD_ID } = {}) {
 // ---------------------------------------------------------------------------
 
 export async function discoverThreadId({ postsUrl = POSTS_URL } = {}) {
-  const html = await htmlFetcher(postsUrl, {
-    headers: {
-      'User-Agent': 'sts2-mod-manager nexus-triage automation',
-    },
-  });
+  // Pass an empty headers map so curl_cffi sends its native Chrome UA +
+  // header set. Overriding User-Agent breaks the TLS impersonation.
+  const html = await htmlFetcher(postsUrl, { headers: {} });
   if (isCloudflareChallenge(html)) {
     const err = new Error('Cloudflare blocked thread_id discovery — curl-impersonate may need updating');
     err.code = 'CLOUDFLARE_BLOCKED';

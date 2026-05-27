@@ -1,19 +1,15 @@
 name: Nexus triage
 
 on:
-  schedule:
-    - cron: "0 * * * *"  # every hour at :00
+  # Uncomment after Day 1 dry-run verification (see RELEASING.md "Operator runbook").
+  # schedule:
+  #   - cron: "0 * * * *"  # every hour at :00
   workflow_dispatch:
     inputs:
       dry_run:
         description: "Dry run: print what would file, do not create issues or commit state"
         required: false
         default: "true"
-        type: boolean
-      discover_thread_id:
-        description: "Discovery mode: print the posts thread_id and exit (use once to populate NEXUSMODS_POSTS_THREAD_ID)"
-        required: false
-        default: "false"
         type: boolean
 
 concurrency:
@@ -39,34 +35,16 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Install curl-impersonate (lexiforest fork)
-        # curl-impersonate lets us bypass Cloudflare TLS fingerprinting on Nexus.
-        # We use the lexiforest fork because it bundles modern Chrome versions
-        # (up to chrome146 as of v1.5.6); upstream lwthiker stopped at chrome116
-        # in v0.6.1 which Cloudflare now rejects.
-        #
-        # Pinned to v1.5.6 (2026-04 release). See
-        #   https://github.com/lexiforest/curl-impersonate/releases
-        # for newer versions when Chrome fingerprints need refreshing.
-        #
-        # The tarball ships one real binary (curl-impersonate) plus shell
-        # wrappers (curl_chrome*, curl_firefox*, curl_safari*, curl_edge*)
-        # that invoke it with the right TLS args. Install all of them so the
-        # wrapper's $0-relative call to curl-impersonate resolves.
-        run: |
-          CURL_IMP_VERSION="1.5.6"
-          CURL_IMP_ARCHIVE="curl-impersonate-v${CURL_IMP_VERSION}.x86_64-linux-gnu.tar.gz"
-          CURL_IMP_URL="https://github.com/lexiforest/curl-impersonate/releases/download/v${CURL_IMP_VERSION}/${CURL_IMP_ARCHIVE}"
-          STAGE=$(mktemp -d)
-          wget -q "${CURL_IMP_URL}" -O "${STAGE}/${CURL_IMP_ARCHIVE}"
-          tar -xf "${STAGE}/${CURL_IMP_ARCHIVE}" -C "${STAGE}"
-          sudo install -m 0755 "${STAGE}"/curl-impersonate /usr/local/bin/
-          sudo install -m 0755 "${STAGE}"/curl_chrome* /usr/local/bin/
-          sudo install -m 0755 "${STAGE}"/curl_firefox* /usr/local/bin/ 2>/dev/null || true
-          sudo install -m 0755 "${STAGE}"/curl_edge* /usr/local/bin/ 2>/dev/null || true
-          sudo install -m 0755 "${STAGE}"/curl_safari* /usr/local/bin/ 2>/dev/null || true
-          rm -rf "${STAGE}"
-          curl_chrome136 --version
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install curl_cffi (Python)
+        # curl_cffi matches the TLS fingerprint approach used by the reference mod
+        # (jadistanbelly/sts2-multiplayer-save-slots) and avoids the 100% CI block
+        # rate of the Node curl-impersonate binary on GitHub Actions IPs.
+        run: python -m pip install curl_cffi
 
       - name: Run triage script
         env:
@@ -75,19 +53,16 @@ jobs:
           NEXUSMODS_OBJECT_TYPE:      ${{ vars.NEXUSMODS_OBJECT_TYPE }}
           NEXUSMODS_POSTS_THREAD_ID:  ${{ vars.NEXUSMODS_POSTS_THREAD_ID }}
           NEXUSMODS_POSTS_URL:        ${{ vars.NEXUSMODS_POSTS_URL }}
-          CURL_IMPERSONATE_BIN:       curl_chrome146
           GITHUB_TOKEN:               ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ "${{ inputs.discover_thread_id }}" = "true" ]; then
-            node scripts/nexus-triage.mjs --discover-thread-id
-          elif [ "${{ inputs.dry_run }}" = "true" ]; then
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
             node scripts/nexus-triage.mjs --dry-run
           else
             node scripts/nexus-triage.mjs
           fi
 
       - name: Commit updated state (if changed)
-        if: ${{ inputs.dry_run != 'true' && inputs.discover_thread_id != 'true' }}
+        if: ${{ inputs.dry_run != 'true' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

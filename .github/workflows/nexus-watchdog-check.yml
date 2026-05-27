@@ -1,0 +1,51 @@
+name: Nexus watchdog — check
+
+on:
+  schedule:
+    - cron: "0 11 * * 1"  # Monday 11:00 UTC (2h after ping)
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Find latest watchdog-ping issue and verify reply
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          ISSUE_NUM=$(gh issue list --repo "$REPO" --label "watchdog-ping" --state open --limit 1 --json number --jq '.[0].number // empty')
+          if [ -z "$ISSUE_NUM" ]; then
+            echo "No open watchdog-ping issue found. The ping job may have failed; investigate."
+            exit 0
+          fi
+          echo "Checking issue #$ISSUE_NUM for PING-OK reply..."
+          COMMENTS=$(gh issue view "$ISSUE_NUM" --repo "$REPO" --json comments --jq '.comments[].body')
+          if echo "$COMMENTS" | grep -q "PING-OK"; then
+            echo "PING-OK found. Closing ping issue."
+            gh issue close "$ISSUE_NUM" --repo "$REPO" --reason completed --comment "Watchdog check passed: PING-OK found."
+            exit 0
+          fi
+          echo "PING-OK NOT found. Filing ops:token-renewal."
+          BODY=$(cat <<'EOF'
+          The watchdog did not see a `PING-OK` reply from `@claude` within 2 hours of the ping. The most likely cause is an expired `CLAUDE_CODE_OAUTH_TOKEN`.
+
+          ## How to renew
+
+          1. Locally: `claude setup-token` (browser auth, prints a new 1-year token).
+          2. `gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo MohamedSerhan/sts2-mod-manager` and paste the new token.
+          3. Manually trigger the `Nexus watchdog — ping` workflow from the Actions UI to verify the new token works.
+          4. Close this issue.
+
+          See `RELEASING.md` "Operator runbook" for screenshots.
+          EOF
+          )
+          gh issue create --repo "$REPO" \
+            --title "[ops] CLAUDE_CODE_OAUTH_TOKEN renewal needed" \
+            --label "ops:token-renewal" \
+            --assignee "MohamedSerhan" \
+            --body "$BODY"
+          gh issue close "$ISSUE_NUM" --repo "$REPO" --reason "not planned" --comment "Watchdog check failed; renewal issue filed."

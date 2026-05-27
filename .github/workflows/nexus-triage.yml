@@ -40,32 +40,34 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Install curl-impersonate-chrome
+      - name: Install curl-impersonate (lexiforest fork)
         # curl-impersonate lets us bypass Cloudflare TLS fingerprinting on Nexus.
-        # Pinned to v0.6.1 (latest stable as of 2026-05-27); the latest chrome
-        # version available in this release is curl_chrome116.
-        # See https://github.com/lwthiker/curl-impersonate/releases
+        # We use the lexiforest fork because it bundles modern Chrome versions
+        # (up to chrome146 as of v1.5.6); upstream lwthiker stopped at chrome116
+        # in v0.6.1 which Cloudflare now rejects.
         #
-        # The tarball ships two real binaries (curl-impersonate-chrome,
-        # curl-impersonate-ff) and a set of shell wrappers (curl_chrome116,
-        # curl_chrome110, etc.) that invoke them with the right TLS args.
-        # We need to install BOTH the binaries and the wrappers.
+        # Pinned to v1.5.6 (2026-04 release). See
+        #   https://github.com/lexiforest/curl-impersonate/releases
+        # for newer versions when Chrome fingerprints need refreshing.
+        #
+        # The tarball ships one real binary (curl-impersonate) plus shell
+        # wrappers (curl_chrome*, curl_firefox*, curl_safari*, curl_edge*)
+        # that invoke it with the right TLS args. Install all of them so the
+        # wrapper's $0-relative call to curl-impersonate resolves.
         run: |
-          CURL_IMP_VERSION="0.6.1"
+          CURL_IMP_VERSION="1.5.6"
           CURL_IMP_ARCHIVE="curl-impersonate-v${CURL_IMP_VERSION}.x86_64-linux-gnu.tar.gz"
-          CURL_IMP_URL="https://github.com/lwthiker/curl-impersonate/releases/download/v${CURL_IMP_VERSION}/${CURL_IMP_ARCHIVE}"
+          CURL_IMP_URL="https://github.com/lexiforest/curl-impersonate/releases/download/v${CURL_IMP_VERSION}/${CURL_IMP_ARCHIVE}"
           STAGE=$(mktemp -d)
           wget -q "${CURL_IMP_URL}" -O "${STAGE}/${CURL_IMP_ARCHIVE}"
           tar -xf "${STAGE}/${CURL_IMP_ARCHIVE}" -C "${STAGE}"
-          # Install every binary and wrapper from the extracted archive.
-          sudo install -m 0755 "${STAGE}"/curl-impersonate-chrome /usr/local/bin/
-          sudo install -m 0755 "${STAGE}"/curl-impersonate-ff /usr/local/bin/
+          sudo install -m 0755 "${STAGE}"/curl-impersonate /usr/local/bin/
           sudo install -m 0755 "${STAGE}"/curl_chrome* /usr/local/bin/
-          sudo install -m 0755 "${STAGE}"/curl_ff* /usr/local/bin/
+          sudo install -m 0755 "${STAGE}"/curl_firefox* /usr/local/bin/ 2>/dev/null || true
           sudo install -m 0755 "${STAGE}"/curl_edge* /usr/local/bin/ 2>/dev/null || true
           sudo install -m 0755 "${STAGE}"/curl_safari* /usr/local/bin/ 2>/dev/null || true
           rm -rf "${STAGE}"
-          curl_chrome116 --version
+          curl_chrome136 --version
 
       - name: Run triage script
         env:
@@ -74,7 +76,7 @@ jobs:
           NEXUSMODS_OBJECT_TYPE:      ${{ vars.NEXUSMODS_OBJECT_TYPE }}
           NEXUSMODS_POSTS_THREAD_ID:  ${{ vars.NEXUSMODS_POSTS_THREAD_ID }}
           NEXUSMODS_POSTS_URL:        ${{ vars.NEXUSMODS_POSTS_URL }}
-          CURL_IMPERSONATE_BIN:       curl_chrome116
+          CURL_IMPERSONATE_BIN:       curl_chrome136
           GITHUB_TOKEN:               ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ "${{ inputs.discover_thread_id }}" = "true" ]; then

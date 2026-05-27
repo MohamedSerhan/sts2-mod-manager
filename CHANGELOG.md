@@ -35,6 +35,45 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ---
 
+## [1.7.0] - 2026-05-25
+
+A UX simplification release. The app feels like a launcher first: pick a modpack, click Play. Power-user tools are still there, just behind progressive disclosure so they don't compete with the normal flow.
+
+### Added
+
+- A first-run welcome flow asks whether you want to play modpacks others made or make your own, then walks you through the relevant path.
+- A guided Create Modpack wizard takes you from picking mods to checking they're healthy to finishing — no GitHub knowledge required.
+- A Help button in the top bar opens a slide-out drawer with a player quick-start, a creator quick-start, and an FAQ covering frozen mods, skipped updates, Nexus manual downloads, and more.
+- Small "?" tooltips throughout the app explain confusing wording in place — what "Stored" means, why GitHub is needed for sharing, why an update is blocked, and more.
+- Each Modpack now opens to a detail page with its mod list, audit, and share button so you can manage one modpack at a time instead of flipping between workspaces.
+- Sharing a modpack now sets up GitHub inside the share flow with a plain-language explanation, instead of sending you to Settings first.
+- When a share fails because some mods can't be bundled, the app now offers to repair those mods inline and retry the share automatically.
+
+### Changed
+
+- "Profile" is now called "Modpack" everywhere a player sees it.
+- The sidebar shrinks from seven items to four: Home, Modpacks, Library, Settings.
+- Browse Modpacks and Browse Mods are now tabs inside Modpacks and Library, not separate sidebar items.
+- Home shows the active modpack and Play, and nothing else. Pasting a friend's code moves to the Modpacks page where modpack management already lives.
+- The Mods view is now called "All installed mods" with a clearer subtitle. Each row shows whether a mod is active in game or stored on disk, and whether it belongs to the current modpack.
+- Each mod row now opens an inline drawer when you click it, with sources, audit details, and per-mod actions all in one place. The kebab menu carries every per-mod action.
+- "Disable in game" wording is replaced with "Stored" (and "Active in game" for the other state), and the per-row storage toggle moves into the kebab where it doesn't compete with modpack switching.
+- Power-user actions (delete, rollback, repair, source editing, import/export JSON, snapshot, load order) group under an Advanced disclosure inside each modpack's detail.
+- Network requests now time out after sixty seconds with a ten-second connect timeout so a stalled GitHub or Nexus connection no longer hangs forever.
+
+### Fixed
+
+- Sharing a modpack with mods that are missing bundled copies now offers a one-click repair-and-retry instead of failing with a wall-of-text error.
+- Deep links that arrive with an unknown action prefix now show a friendly "didn't recognize" instead of being silently rewritten.
+- Diagnostic bundles now redact GitHub tokens and API keys in URLs before they're copied to the clipboard.
+
+### Security
+
+- GitHub personal access tokens and query-string API keys are stripped from diagnostic bundles automatically.
+- The share-link parser now accepts only `import`, `install`, and `load` action prefixes; unknown actions are rejected rather than silently coerced.
+
+---
+
 ## [1.6.1] - 2026-05-23
 
 ### Added

@@ -405,3 +405,103 @@ export async function main({ dryRun, apiKey, ghToken, state, templatePath = TEMP
 
   return result;
 }
+
+// ---------------------------------------------------------------------------
+// CLI entry point
+// ---------------------------------------------------------------------------
+
+import { fileURLToPath } from 'node:url';
+
+export function parseArgs(argv) {
+  const opts = { dryRun: false, bootstrap: false, help: false };
+  for (const a of argv) {
+    if (a === '--dry-run') opts.dryRun = true;
+    else if (a === '--bootstrap') opts.bootstrap = true;
+    else if (a === '--help' || a === '-h') opts.help = true;
+    else {
+      console.error(`nexus-triage: unknown argument '${a}'. Use --help for usage.`);
+      process.exit(2);
+    }
+  }
+  return opts;
+}
+
+export function isDisabled(path = SENTINEL_PATH) {
+  return existsSync(path);
+}
+
+const HELP_TEXT = `
+nexus-triage — Nexus -> GitHub issue triage
+
+Usage:
+  node scripts/nexus-triage.mjs              # normal run (requires NEXUS_API_KEY + GITHUB_TOKEN)
+  node scripts/nexus-triage.mjs --dry-run    # print what would file, no gh calls, no state write
+  node scripts/nexus-triage.mjs --bootstrap  # mark all current Nexus items as seen, do not file
+  node scripts/nexus-triage.mjs --help       # this message
+
+Environment:
+  NEXUS_API_KEY    Nexus v1 API key (for v2 GraphQL too)
+  GITHUB_TOKEN     GitHub PAT or Actions-provided token
+
+Killswitch:
+  touch scripts/nexus-triage.disabled        # next run exits 0 with no work
+`.trim();
+
+export async function runFromCli(argv = process.argv.slice(2)) {
+  const opts = parseArgs(argv);
+  if (opts.help) {
+    console.log(HELP_TEXT);
+    return 0;
+  }
+  if (isDisabled()) {
+    console.log('nexus-triage: scripts/nexus-triage.disabled sentinel present; exiting 0.');
+    return 0;
+  }
+  const apiKey = process.env.NEXUS_API_KEY;
+  if (!apiKey) {
+    console.error('nexus-triage: NEXUS_API_KEY is not set.');
+    process.exit(2);
+  }
+  const ghToken = process.env.GITHUB_TOKEN;
+  if (!ghToken) {
+    console.error('nexus-triage: GITHUB_TOKEN is not set.');
+    process.exit(2);
+  }
+  if (opts.bootstrap) {
+    const fresh = { schema_version: STATE_SCHEMA_VERSION, last_run_at: new Date().toISOString(),
+                    comments: {}, bugs: {}, kudos_seen: [] };
+    const schema = await introspectSchema({ apiKey });
+    const commentNodes = schema.hasComments ? await fetchModComments({ apiKey }) : [];
+    const bugNodes = schema.hasBugReports ? await fetchModBugReports({ apiKey }) : [];
+    for (const c of commentNodes) {
+      fresh.kudos_seen.push(String(c.id));
+    }
+    // Bug nodes get seeded as bugs with a bootstrap-seed marker so we don't refile them.
+    for (const b of bugNodes) {
+      fresh.bugs[String(b.id)] = {
+        gh_issue_url: '<bootstrap-seed>',
+        classification: 'bootstrap-seed',
+        filed_at: new Date().toISOString(),
+      };
+    }
+    saveState(STATE_PATH, fresh);
+    console.log(`nexus-triage: bootstrap complete. Marked ${commentNodes.length} comments + ${bugNodes.length} bugs as seen.`);
+    return 0;
+  }
+
+  const state = loadState(STATE_PATH);
+  const result = await main({ dryRun: opts.dryRun, apiKey, ghToken, state });
+  if (!opts.dryRun) saveState(STATE_PATH, state);
+  console.log(JSON.stringify(result, null, 2));
+  return 0;
+}
+
+// Only run main when invoked as `node scripts/nexus-triage.mjs ...`
+// (not when imported from tests).
+const isMainModule = fileURLToPath(import.meta.url) === process.argv[1];
+if (isMainModule) {
+  runFromCli().catch((err) => {
+    console.error(`nexus-triage: fatal: ${err.stack || err.message}`);
+    process.exit(1);
+  });
+}

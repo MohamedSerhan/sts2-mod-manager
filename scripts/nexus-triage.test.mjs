@@ -539,3 +539,44 @@ test('main: Nexus bug with status=closed is skipped silently on first sight', as
     setHttpFetch(globalThis.fetch);
   }
 });
+
+import { parseArgs, isDisabled, runFromCli } from './nexus-triage.mjs';
+import { unlinkSync } from 'node:fs';
+
+test('parseArgs: defaults', () => {
+  assert.deepEqual(parseArgs([]), { dryRun: false, bootstrap: false, help: false });
+});
+
+test('parseArgs: --dry-run', () => {
+  assert.deepEqual(parseArgs(['--dry-run']), { dryRun: true, bootstrap: false, help: false });
+});
+
+test('parseArgs: --bootstrap', () => {
+  assert.deepEqual(parseArgs(['--bootstrap']), { dryRun: false, bootstrap: true, help: false });
+});
+
+test('parseArgs: --help', () => {
+  assert.deepEqual(parseArgs(['--help']), { dryRun: false, bootstrap: false, help: true });
+});
+
+test('parseArgs: unknown flag exits 2', (t) => {
+  const exitCalls = [];
+  t.mock.method(process, 'exit', (code) => { exitCalls.push(code); throw new Error('exit'); });
+  t.mock.method(console, 'error', () => {});
+  assert.throws(() => parseArgs(['--unknown']), /exit/);
+  assert.deepEqual(exitCalls, [2]);
+});
+
+test('isDisabled: returns true when sentinel exists', () => {
+  const path = 'scripts/nexus-triage.disabled';
+  writeFileSync(path, 'disabled', 'utf-8');
+  try {
+    assert.equal(isDisabled(path), true);
+  } finally {
+    unlinkSync(path);
+  }
+});
+
+test('isDisabled: returns false when sentinel absent', () => {
+  assert.equal(isDisabled('scripts/does-not-exist.disabled'), false);
+});

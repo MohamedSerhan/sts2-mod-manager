@@ -541,7 +541,11 @@ export async function runFromCli(argv = process.argv.slice(2)) {
 
   // Schema soft-degradation: file ops:nexus-schema-gap issue once (idempotent).
   if (result.bugReportsUnavailable) {
-    await ensureSchemaGapIssue();
+    if (!opts.dryRun) {
+      await ensureSchemaGapIssue();
+    } else {
+      console.log('[dry-run] Would file ops:nexus-schema-gap issue (skipped in dry-run)');
+    }
   }
 
   if (!opts.dryRun) saveState(STATE_PATH, state);

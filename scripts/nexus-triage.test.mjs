@@ -632,7 +632,7 @@ test('runFromCli files ops:nexus-schema-gap when bugReports drift detected and n
   });
 
   try {
-    await runFromCli(['--dry-run']);
+    await runFromCli([]);
 
     // Should have made exactly 2 gh calls: list + create
     assert.equal(ghCalls.length, 2, `expected 2 gh calls (list + create), got ${ghCalls.length}: ${JSON.stringify(ghCalls)}`);
@@ -668,7 +668,7 @@ test('runFromCli does NOT file duplicate ops:nexus-schema-gap when one already e
   });
 
   try {
-    await runFromCli(['--dry-run']);
+    await runFromCli([]);
 
     // Only the list call — no create
     assert.equal(ghCalls.length, 1, `expected 1 gh call (list only), got ${ghCalls.length}: ${JSON.stringify(ghCalls)}`);
@@ -676,6 +676,46 @@ test('runFromCli does NOT file duplicate ops:nexus-schema-gap when one already e
   } finally {
     setHttpFetch(globalThis.fetch);
     setGhInvoker(async () => { throw new Error('gh not stubbed; tests must call setGhInvoker'); });
+    process.env.NEXUS_API_KEY = origApiKey;
+    process.env.GITHUB_TOKEN = origGhToken;
+    try { unlinkSync(STATE_PATH); } catch { /* already gone */ }
+  }
+});
+
+test('runFromCli does NOT call gh for schema-gap when dry-run (even if bugReportsUnavailable)', async () => {
+  writeFileSync(STATE_PATH, makeValidState(), 'utf-8');
+  const origApiKey = process.env.NEXUS_API_KEY;
+  const origGhToken = process.env.GITHUB_TOKEN;
+  process.env.NEXUS_API_KEY = 'test-key';
+  process.env.GITHUB_TOKEN = 'test-token';
+
+  setHttpFetch(makeDriftHttpFetch());
+  const ghCalls = [];
+  // Should never be called in dry-run mode
+  setGhInvoker(async (args) => {
+    ghCalls.push(args);
+    return { number: -1, url: '', stdout: '' };
+  });
+
+  const consoleLogCalls = [];
+  const origLog = console.log;
+  console.log = (msg) => { consoleLogCalls.push(String(msg)); };
+
+  try {
+    await runFromCli(['--dry-run']);
+
+    // Zero gh calls — not even the list call
+    assert.equal(ghCalls.length, 0, `expected 0 gh calls in dry-run, got ${ghCalls.length}: ${JSON.stringify(ghCalls)}`);
+
+    // Should have logged the dry-run message
+    assert.ok(
+      consoleLogCalls.some((msg) => msg.includes('Would file ops:nexus-schema-gap')),
+      `expected dry-run message about schema-gap, got: ${consoleLogCalls.join(' | ')}`
+    );
+  } finally {
+    setHttpFetch(globalThis.fetch);
+    setGhInvoker(async () => { throw new Error('gh not stubbed; tests must call setGhInvoker'); });
+    console.log = origLog;
     process.env.NEXUS_API_KEY = origApiKey;
     process.env.GITHUB_TOKEN = origGhToken;
     try { unlinkSync(STATE_PATH); } catch { /* already gone */ }

@@ -52,9 +52,9 @@ jobs:
           CURL_IMP_URL="https://github.com/lwthiker/curl-impersonate/releases/download/v${CURL_IMP_VERSION}/${CURL_IMP_ARCHIVE}"
           wget -q "${CURL_IMP_URL}" -O "${CURL_IMP_ARCHIVE}"
           tar -xf "${CURL_IMP_ARCHIVE}"
-          sudo mv curl_chrome136 /usr/local/bin/curl_chrome136
-          sudo chmod +x /usr/local/bin/curl_chrome136
-          curl_chrome136 --version
+          sudo mv curl_chrome116 /usr/local/bin/curl_chrome116
+          sudo chmod +x /usr/local/bin/curl_chrome116
+          curl_chrome116 --version
 
       - name: Run triage script
         env:
@@ -63,7 +63,7 @@ jobs:
           NEXUSMODS_OBJECT_TYPE:      ${{ vars.NEXUSMODS_OBJECT_TYPE }}
           NEXUSMODS_POSTS_THREAD_ID:  ${{ vars.NEXUSMODS_POSTS_THREAD_ID }}
           NEXUSMODS_POSTS_URL:        ${{ vars.NEXUSMODS_POSTS_URL }}
-          CURL_IMPERSONATE_BIN:       curl_chrome136
+          CURL_IMPERSONATE_BIN:       curl_chrome116
           GITHUB_TOKEN:               ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ "${{ inputs.discover_thread_id }}" = "true" ]; then

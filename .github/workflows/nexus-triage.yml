@@ -1,0 +1,61 @@
+name: Nexus triage
+
+on:
+  # Uncomment after Day 1 dry-run verification (see RELEASING.md "Operator runbook").
+  # schedule:
+  #   - cron: "0 * * * *"  # every hour at :00
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: print what would file, do not create issues or commit state"
+        required: false
+        default: "true"
+        type: boolean
+
+concurrency:
+  group: nexus-triage
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          # Need full history-of-this-branch for the state commit + rebase.
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Run triage script
+        env:
+          NEXUS_API_KEY: ${{ secrets.NEXUS_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            node scripts/nexus-triage.mjs --dry-run
+          else
+            node scripts/nexus-triage.mjs
+          fi
+
+      - name: Commit updated state (if changed)
+        if: ${{ inputs.dry_run != 'true' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet scripts/nexus-triage-state.json; then
+            echo "No state changes to commit."
+          else
+            git add scripts/nexus-triage-state.json
+            git pull --rebase
+            git commit -m "chore(triage): update Nexus triage state [skip ci]"
+            git push
+          fi

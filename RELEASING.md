@@ -182,3 +182,34 @@ Nexus changed the HTML structure of the posts tab. Re-discover the thread ID:
 - The script exits with specific codes:
   - exit 1: transient (network, GitHub API). Re-run the failed workflow.
   - exit 2: configuration drift (missing secret, missing state file, malformed state, hard schema drift). Read the error message — it names the missing piece.
+
+### Expected flake: Cloudflare blocking from CI
+
+Nexus is fronted by Cloudflare, and Cloudflare's bot protection challenges
+requests from GitHub Actions IP ranges very aggressively. As a result, the
+hourly triage poll often gets a "Just a moment..." JS challenge page that
+the script cannot solve, even with `curl-impersonate` and Chrome version
+rotation across 5 retries per fetch.
+
+**What's normal:** ~50-80% of cron runs will log "Cloudflare blocked all
+retries this run. Will try again on next cron." and exit 0 (green check
+in the Actions tab). The reference implementation
+([jadistanbelly/sts2-multiplayer-save-slots](https://github.com/jadistanbelly/sts2-multiplayer-save-slots))
+shows the same pattern — ~50% of their scheduled runs fail with the same
+challenge.
+
+**What's not normal:**
+- Cron runs failing with exit code other than 0 (real bug, investigate)
+- 7 consecutive days of every run blocked (Cloudflare may have tightened;
+  consider moving polling to a residential-IP host)
+
+**Why we accept the flake:** comments don't disappear — every successful
+run catches up on whatever was missed since the last successful run. With
+hourly cron, even at 30% success rate the system catches every comment
+within a few hours.
+
+**If you want 100% polling reliability:** move `node scripts/nexus-triage.mjs`
+to a Windows Task Scheduler entry on your machine (or a residential-IP VPS)
+that commits state changes back to the repo. The `@claude` reactive flow,
+the watchdog, and the state commit can all stay in CI; only the Nexus fetch
+needs the residential origin. Out of scope for the current iteration.

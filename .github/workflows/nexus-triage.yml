@@ -1,9 +1,8 @@
 name: Nexus triage
 
 on:
-  # Uncomment after Day 1 dry-run verification (see RELEASING.md "Operator runbook").
-  # schedule:
-  #   - cron: "0 * * * *"  # every hour at :00
+  schedule:
+    - cron: "0 * * * *"  # every hour at :00
   workflow_dispatch:
     inputs:
       dry_run:

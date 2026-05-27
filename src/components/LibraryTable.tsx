@@ -27,13 +27,17 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Download,
-  GripVertical,
-  Play,
   RefreshCw,
   Search,
 } from 'lucide-react';
 import { Card } from './Card';
 import { Button } from './Button';
+import {
+  LibraryRow,
+  libraryStorageKey,
+  membershipDisplayName,
+  membershipRowKey,
+} from './LibraryRow';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import {
@@ -71,18 +75,6 @@ export interface LibraryTableProps {
   initialSearch?: string;
   /** Page size for the "show more" pagination footer. Defaults to 100. */
   pageSize?: number;
-}
-
-function membershipRowKey(row: ProfileMembershipMod): string {
-  return row.folder_name ?? row.mod_id ?? row.name;
-}
-
-function membershipDisplayName(row: ProfileMembershipMod): string {
-  return row.display_name?.trim() || row.name;
-}
-
-function libraryStorageKey(row: ProfileMembershipMod): string {
-  return `storage::${membershipRowKey(row)}`;
 }
 
 function compareMembershipDisplayName(
@@ -572,48 +564,56 @@ export function LibraryTable({
               (m.folder_name ?? m.mod_id ?? m.name)
               === (row.folder_name ?? row.mod_id ?? row.name),
           );
-          const membershipKey = `${membershipRowKey(row)}::${modpackName}`;
-          const saving = membershipSaving === membershipKey;
           return (
-            <Card
+            <LibraryRow
               key={membershipRowKey(row)}
-              className={`gf-profile-library-row ${inPack ? 'in-pack' : ''} ${dragOverIndex === inPackIndex && inPack ? 'drag-over' : ''}`}
-              draggable={inPack && !loadOrderSaving && inPackIndex >= 0}
-              onDragStart={(event) => {
+              row={row}
+              modpackName={modpackName}
+              state={state}
+              inPack={inPack}
+              inPackIndex={inPackIndex}
+              isDragOver={dragOverIndex === inPackIndex && inPack}
+              loadOrderSaving={loadOrderSaving}
+              membershipSaving={membershipSaving}
+              storageSaving={storageSaving}
+              onDragStart={(event, index) => {
                 if (!inPack || loadOrderSaving) return;
-                setDraggedIndex(inPackIndex);
+                setDraggedIndex(index);
                 event.dataTransfer.effectAllowed = 'move';
-                event.dataTransfer.setData('text/plain', String(inPackIndex));
+                event.dataTransfer.setData('text/plain', String(index));
               }}
-              onDragOver={(event) => {
-                if (!inPack || loadOrderSaving || inPackIndex < 0) return;
+              onDragOver={(event, index) => {
+                if (!inPack || loadOrderSaving || index < 0) return;
                 event.preventDefault();
                 event.dataTransfer.dropEffect = 'move';
-                setDragOverIndex(inPackIndex);
+                setDragOverIndex(index);
               }}
-              onDragLeave={() => {
-                if (dragOverIndex === inPackIndex) setDragOverIndex(null);
+              onDragLeave={(index) => {
+                if (dragOverIndex === index) setDragOverIndex(null);
               }}
-              onDrop={(event) => {
+              onDrop={(event, index) => {
                 event.preventDefault();
                 if (!inPack || loadOrderSaving) return;
                 const from
                   = draggedIndex
-                    ?? Number.parseInt(event.dataTransfer.getData('text/plain'), 10);
-                if (Number.isFinite(from) && from !== inPackIndex) {
+                    ?? Number.parseInt(
+                      event.dataTransfer.getData('text/plain'),
+                      10,
+                    );
+                if (Number.isFinite(from) && from !== index) {
                   // Optimistic local reorder, then commit.
                   setLoadOrderDraft((prev) => {
                     if (
                       from < 0
                       || from >= prev.length
-                      || inPackIndex < 0
-                      || inPackIndex >= prev.length
+                      || index < 0
+                      || index >= prev.length
                     ) {
                       return prev;
                     }
                     const next = [...prev];
                     const [moved] = next.splice(from, 1);
-                    next.splice(inPackIndex, 0, moved);
+                    next.splice(index, 0, moved);
                     commitLoadOrder(next);
                     return next;
                   });
@@ -625,124 +625,9 @@ export function LibraryTable({
                 setDraggedIndex(null);
                 setDragOverIndex(null);
               }}
-            >
-              <div className="gf-profile-library-main">
-                {inPack && (
-                  <div
-                    className="gf-load-order-drag"
-                    title={t('profiles.loadOrder.dragHandle')}
-                    aria-label={t('profiles.loadOrder.dragHandle')}
-                  >
-                    <GripVertical size={14} />
-                  </div>
-                )}
-                <div className="min-w-0">
-                  <h3 className="gf-profile-library-title">
-                    {row.display_name?.trim() || row.name}
-                    {row.display_name && (
-                      <span className="ml-1.5 text-[10px] font-normal text-text-dim">
-                        {row.name}
-                      </span>
-                    )}
-                  </h3>
-                  <div className="gf-profile-library-meta">
-                    <span>{row.version}</span>
-                    {row.folder_name && <span>{row.folder_name}</span>}
-                    <span
-                      className={`gf-profile-library-storage ${row.installed_enabled ? 'active' : 'stored'}`}
-                    >
-                      {row.installed_enabled
-                        ? t('profiles.library.storageActive')
-                        : t('profiles.library.storageDisabled')}
-                    </span>
-                    {inPack && inPackIndex >= 0 && (
-                      <span className="gf-load-order-rank-inline">
-                        #{inPackIndex + 1}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div className="gf-profile-library-storage-actions">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => handleToggleStorage(row)}
-                    disabled={storageSaving !== null || membershipSaving !== null}
-                    aria-label={
-                      row.installed_enabled
-                        ? t('profiles.library.storeAria', {
-                            mod: membershipDisplayName(row),
-                          })
-                        : t('profiles.library.activateAria', {
-                            mod: membershipDisplayName(row),
-                          })
-                    }
-                    title={
-                      row.installed_enabled
-                        ? t('profiles.library.storeAria', {
-                            mod: membershipDisplayName(row),
-                          })
-                        : t('profiles.library.activateAria', {
-                            mod: membershipDisplayName(row),
-                          })
-                    }
-                  >
-                    {storageSaving === libraryStorageKey(row) ? (
-                      <RefreshCw size={13} className="animate-spin" />
-                    ) : row.installed_enabled ? (
-                      <Download size={13} />
-                    ) : (
-                      <Play size={13} />
-                    )}
-                    {row.installed_enabled
-                      ? t('profiles.library.storeAction')
-                      : t('profiles.library.activateAction')}
-                  </Button>
-                </div>
-              </div>
-              <div className="gf-profile-memberships">
-                {state ? (
-                  <label
-                    className={`gf-profile-membership ${state.included ? 'active' : ''}`}
-                    title={
-                      !state.editable
-                        ? t('profiles.library.readOnlyTitle')
-                        : undefined
-                    }
-                  >
-                    <input
-                      type="checkbox"
-                      checked={state.included}
-                      disabled={
-                        !state.editable
-                        || membershipSaving !== null
-                        || storageSaving !== null
-                      }
-                      onChange={() => handleToggleMembership(row)}
-                      aria-label={t('libraryTable.membershipCheckbox', {
-                        mod: membershipDisplayName(row),
-                        modpack: modpackName,
-                      })}
-                    />
-                    <span className="gf-profile-membership-name">
-                      {state.included
-                        ? t('libraryTable.inPack', { modpack: modpackName })
-                        : t('libraryTable.notInPack', { modpack: modpackName })}
-                    </span>
-                    {!state.editable && (
-                      <span className="gf-profile-membership-note">
-                        {t('profiles.library.readOnly')}
-                      </span>
-                    )}
-                    {saving && <RefreshCw size={12} className="animate-spin" />}
-                  </label>
-                ) : (
-                  <span className="gf-profile-library-muted">
-                    {t('libraryTable.modpackMissing')}
-                  </span>
-                )}
-              </div>
-            </Card>
+              onToggleMembership={handleToggleMembership}
+              onToggleStorage={handleToggleStorage}
+            />
           );
         })
       )}

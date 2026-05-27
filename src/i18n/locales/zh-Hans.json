@@ -8,7 +8,6 @@
     "confirm": "确认",
     "retry": "重试",
     "back": "返回",
-    "next": "下一步",
     "done": "完成",
     "yes": "是",
     "no": "否",
@@ -17,43 +16,23 @@
     "copyFailed": "无法复制到剪贴板：{{error}}",
     "install": "安装",
     "installing": "安装中...",
-    "update": "更新",
-    "updating": "更新中...",
     "refresh": "刷新",
-    "apply": "应用",
     "applying": "应用中...",
     "import": "导入",
     "importing": "导入中...",
-    "export": "导出",
-    "create": "创建",
-    "creating": "创建中...",
     "publish": "发布",
     "publishing": "发布中…",
-    "share": "分享",
-    "switch": "切换",
-    "switching": "切换中...",
     "activate": "激活",
-    "error": "错误",
-    "errorWithMessage": "错误：{{message}}",
-    "noData": "暂无数据",
     "search": "搜索",
     "searching": "搜索中...",
-    "all": "全部",
-    "enabled": "已启用",
-    "disabled": "已禁用",
     "vanilla": "原版",
     "active": "当前",
-    "outOfSync": "不同步",
-    "noDescription": "无描述",
-    "typeToConfirm": "输入以确认",
     "dismiss": "关闭",
     "moreActions": "更多操作",
     "notifications": "通知",
     "beta": "测试版",
     "refreshing": "正在刷新…",
     "advanced": "高级",
-    "showAdvanced": "显示高级",
-    "hideAdvanced": "隐藏高级",
     "whatsThis": "这是什么意思？",
     "parts": {
       "downloaded": "已下载 {{count}} 个",
@@ -75,14 +54,7 @@
     "typePhrase": "输入 <0>{{phrase}}</0> 以确认："
   },
   "modpack": {
-    "singular": "模组包",
-    "plural": "模组包",
-    "active": "当前模组包",
-    "create": "创建模组包",
-    "switch": "切换模组包",
     "share": "分享模组包",
-    "reshare": "重新分享模组包",
-    "delete": "删除模组包",
     "shared": "已分享",
     "advanced": "高级",
     "backToList": "返回模组包列表",
@@ -117,7 +89,6 @@
   },
   "createModpack": {
     "title": "创建模组包",
-    "step1Title": "起点",
     "step1Subtitle": "选择此模组包的起始方式。",
     "step1FromActive": "从当前激活的模组开始",
     "step1FromActiveDesc": "使用当前游戏文件夹中的模组作为起点。",
@@ -126,7 +97,6 @@
     "step1Clone": "克隆已有模组包",
     "step1CloneDesc": "从你已有的模组包中复制模组列表。",
     "step1CloneSelectLabel": "选择要克隆的模组包:",
-    "step2Title": "选择模组",
     "step2Subtitle": "勾选此模组包应包含的模组。",
     "step2SearchPlaceholder": "搜索已安装的模组...",
     "step2SortLabel": "排序:",
@@ -136,7 +106,6 @@
     "step2SelectedCount_one": "已选 {{count}} 个",
     "step2SelectedCount_other": "已选 {{count}} 个",
     "step2NoMods": "未找到匹配的已安装模组。",
-    "step3Title": "健康检查",
     "step3Subtitle": "快速浏览所选模组的状态。",
     "step3Checking": "正在检查所选模组...",
     "step3Linked_one": "{{count}} 个模组已链接更新来源",
@@ -148,7 +117,6 @@
     "step3Frozen_one": "{{count}} 个已冻结模组将保持当前版本",
     "step3Frozen_other": "{{count}} 个已冻结模组将保持当前版本",
     "step3ContinueAnyway": "仍然继续",
-    "step4Title": "完成",
     "step4Subtitle": "为模组包命名,然后创建它。",
     "step4NameLabel": "模组包名称",
     "step4NamePlaceholder": "例如:\"舒适流程\"",
@@ -255,13 +223,6 @@
       "following": "所有模组包",
       "publishedByYou": "你发布的"
     },
-    "assignments": {
-      "open": "模组库",
-      "title": "模组库",
-      "subtitle": "你已安装的所有模组。切换这些模组在每个模组包中的归属。",
-      "description": "你已安装的所有模组。切换这些模组在每个模组包中的归属。",
-      "back": "返回模组包"
-    },
     "activity": {
       "hasUpdates": "{{count}} 个模组包有更新",
       "haveUpdates": "{{count}} 个模组包有更新",
@@ -295,8 +256,6 @@
     "form": {
       "codeLabel": "模组包代码（来自好友）",
       "codePlaceholder": "username/XXXX-XXXX-XXXX",
-      "nameLabel": "模组包名称",
-      "namePlaceholder": "我的模组包",
       "jsonLabel": "粘贴模组包 JSON",
       "jsonPlaceholder": "{\"name\": \"...\", \"mods\": [...]}"
     },
@@ -313,25 +272,14 @@
     },
     "card": {
       "active": "当前",
-      "enabled": "{{count}} 个已启用",
-      "disabled": "{{count}} 个已禁用",
       "by": "来自 {{name}}",
       "outOfSync": "不同步",
-      "newMod": "{{count}} 个新模组",
-      "newMods": "{{count}} 个新模组",
-      "removed": "{{count}} 个已移除",
-      "toggled": "{{count}} 个已切换",
-      "versionChanged_one": "{{count}} 个版本变更",
-      "versionChanged_other": "{{count}} 个版本变更",
-      "reShareHint": "重新分享以更新订阅者",
       "switchTo": "切换到",
       "share": "分享",
       "reShare": "重新分享",
-      "restore": "重新应用此模组包以匹配清单",
       "activateProfile": "激活模组包（启用这些模组）",
       "shareTitle": "分享 — 好友粘贴代码即可安装",
-      "reShareTitle": "重新分享 — 相同代码，好友会看到更新",
-      "moreActions": "更多操作"
+      "reShareTitle": "重新分享 — 相同代码，好友会看到更新"
     },
     "kebab": {
       "snapshotFromCurrent": "从当前安装创建快照",
@@ -339,10 +287,8 @@
       "exportJson": "导出 JSON...",
       "copyShareCode": "复制分享码",
       "copyShareLink": "复制分享链接",
-      "copyShareMessage": "复制分享消息（可直接粘贴：介绍语 + 链接 + 分享码）",
       "copyShareMessageLabel": "复制分享消息",
-      "deleteProfile": "删除模组包...",
-      "copyInstallLinkTitle": "复制安装链接（可在 Discord / 聊天中点击）"
+      "deleteProfile": "删除模组包..."
     },
     "confirm": {
       "switch": {
@@ -369,7 +315,6 @@
       "synced": "已同步 \"{{name}}\" — 你已是最新版本。",
       "syncFailed": "同步失败：{{error}}",
       "created": "模组包 \"{{name}}\" 已创建",
-      "createFailed": "创建模组包失败：{{error}}",
       "snapshotCreated": "快照 \"{{name}}\" 已创建，包含 {{count}} 个模组",
       "snapshotFailed": "创建快照失败：{{error}}",
       "switched": "已切换到模组包 \"{{name}}\"",
@@ -416,11 +361,6 @@
       "bulkStoreUnused_one": "存储 {{count}} 个未使用的活跃模组",
       "bulkStoreUnused_other": "存储 {{count}} 个未使用的活跃模组",
       "bulkStoreNone": "没有未使用的活跃模组",
-      "inProfile": "已加入此模组包",
-      "notInProfile": "未加入此模组包",
-      "disabledInProfile": "已加入但在此模组包中已关闭",
-      "profileUseCount_one": "{{count}} 个模组包",
-      "profileUseCount_other": "{{count}} 个模组包",
       "showing": "正在显示 {{shown}} / {{total}}",
       "showMore": "再显示 {{count}} 个",
       "sort": {
@@ -429,12 +369,10 @@
         "nameAsc": "名称 A-Z",
         "nameDesc": "名称 Z-A",
         "activeFirst": "活跃优先",
-        "storedFirst": "已存储优先",
-        "profilesMost": "模组包最多"
+        "storedFirst": "已存储优先"
       },
       "readOnly": "只读",
       "readOnlyTitle": "关注的模组包为只读。复制该模组包后即可编辑。",
-      "noProfiles": "还没有模组包",
       "empty": {
         "title": "未安装任何模组",
         "hint": "先安装模组，然后使用模组库选择每个模组包包含哪些模组。"
@@ -537,8 +475,6 @@
     "fetchingManifest": "获取方案清单...",
     "applyingProfile": "应用方案...",
     "subscribing": "订阅更新...",
-    "downloading": "下载中",
-    "checking": "检查中",
     "downloadingMod": "下载模组 {{current}}/{{total}}：{{name}}",
     "checkingMod": "检查模组 {{current}}/{{total}}：{{name}}",
     "installingModpack": "安装整合包...",
@@ -570,9 +506,6 @@
     "home": "首页",
     "profiles": "模组包",
     "mods": "模组库",
-    "browseMods": "浏览模组",
-    "browseModpacks": "浏览模组包",
-    "tutorial": "帮助",
     "settings": "设置"
   },
   "topbar": {
@@ -597,7 +530,6 @@
       "vanilla": "原版 - 无模组",
       "modded": "启动"
     },
-    "dismiss": "忽略",
     "windowTitle": "STS2 模组管理器",
     "minimize": "最小化",
     "maximize": "最大化",
@@ -611,7 +543,6 @@
     "modCount": "{{enabled}} 激活 / {{total}} 模组",
     "switchActivePack": "切换模组包",
     "activeProfile": "当前模组包",
-    "manageAllModpacks": "管理全部模组包",
     "nexusPendingToast": "已在 Nexus 上打开 {{modName}}。点击 \"Slow Download\" / \"Manual\" — 当 zip 文件下载到你的 Downloads 文件夹时，应用会自动安装。",
     "auditFailed": "审计失败：{{error}}",
     "updateConfirmTitle_one": "更新 {{count}} 个模组？",
@@ -651,159 +582,6 @@
       "text": ".zip - 我们会自动检测来源"
     }
   },
-  "tutorial": {
-    "title": "教程",
-    "subtitle": "收藏此页面或把链接发给好友。",
-    "tabs": {
-      "player": "玩家教程",
-      "creator": "整合包创作者"
-    },
-    "player": {
-      "cheatSheet": "速查表",
-      "tip": "提示：",
-      "tipLaunch": "<0>Ctrl+L</0> 可在应用内任意位置启动当前启用的整合包。",
-      "fullReference": "完整参考",
-      "fullReferenceShow": " — 点击展开",
-      "fullReferenceHide": " — 点击收起",
-      "fullReferenceIntro": "适用场景：上述快速入门未能覆盖的情况。大多数玩家用不到这些。",
-      "quickStart": {
-        "eyebrow": "快速入门 · 90% 的玩家",
-        "title": "在一分钟内玩上好友的整合包",
-        "step1": {
-          "title": "点击链接，或粘贴代码",
-          "body": "你的好友会发送一个类似 <0>jess/AA5A-315D-61AE</0> 的代码或可点击的安装链接。<1>点击链接</1> — 它会打开一个小页面，弹出此应用并显示确认对话框，精确展示即将安装的内容。<3>或者粘贴代码</3> 到 <7>首页</7> 上的 <5>输入代码，点击添加</5> 框中。两种方式效果相同：来自 GitHub 和打包的模组会自动下载；仅存在于 Nexus 的模组会显示为待处理，让你知道需要手动获取哪些。"
-        },
-        "step2": {
-          "title": "点击启动",
-          "body": "窗口右上角，或按 <0>Ctrl/⌘ L</0>。游戏通过 Steam 启动，并启用你好友的模组。应用会在每次启动前自动备份，因此始终可逆。"
-        },
-        "step3": {
-          "title": "保持同步",
-          "body": "当你的好友更新整合包时，首页会显示 <0>更新可用</0> 卡片。点击即可拉取差异并重新应用其整合包（Nexus 的更改仍需手动从 Nexus 下载）。你的存档不受影响。"
-        }
-      },
-      "cheatItems": {
-        "switchActive": "切换当前整合包",
-        "switchActiveDesc": "顶栏方案标签 → 选择一个方案。",
-        "updateEverything": "更新全部",
-        "updateEverythingDesc": "方案页 → 在活跃方案上点击全部更新。",
-        "pinMod": "冻结模组",
-        "pinModDesc": "模组页 → 模组的菜单 → 冻结此模组。",
-        "rollBack": "回滚",
-        "rollBackDesc": "设置 → 备份 → 恢复。每次启动前自动保存。",
-        "auditMod": "审计模组",
-        "auditModDesc": "设置 → 审计 → 运行审计。一目了然地查看当前版本 vs 最新版本。",
-        "launchVanilla": "启动原版",
-        "launchVanillaDesc": "顶栏 原版 按钮 — 忽略当前方案。",
-        "addSingleMod": "添加单个模组",
-        "addSingleModDesc": "在首页快速添加 GitHub 或 Nexus URL。",
-        "findNewMods": "发现新模组",
-        "findNewModsDesc": "浏览标签 → 按名称搜索。",
-        "shareYourPack": "分享你的整合包",
-        "shareYourPackDesc": "首页主卡片 → 复制链接（或复制代码/复制消息）。发送到 Discord。",
-        "openFriendLink": "打开好友的链接",
-        "openFriendLinkDesc": "在聊天中点击其安装链接 — 管理器会弹出确认框。"
-      },
-      "step1": {
-        "title": "首次设置",
-        "p1": "首次启动时，应用会尝试从 Steam 安装中自动检测 Slay the Spire 2。如果左下角状态点显示 <0>已检测到游戏</0>，此步骤即完成。",
-        "p2_prefix": "如果没有，打开 ",
-        "p2_settingsLink": "设置",
-        "p2_gamePath": " → <0>游戏路径</0>，点击 <2>浏览…</2> 或粘贴游戏文件所在文件夹。应用检查的签名文件取决于操作系统：Windows 为 <4>SlayTheSpire2.exe</4>，macOS 为 <6>SlayTheSpire2.app</6>，Linux 为 <8>SlayTheSpire2.pck</8>。Windows 上的默认位置为 <10>C:\\Program Files (x86)\\Steam\\steamapps\\common\\Slay the Spire 2</10>。"
-      },
-      "step2": {
-        "title": "可选：API 密钥",
-        "p1": "你不需要这些密钥来玩好友的整合包 — 它们只在你自行寻找模组时有用。",
-        "nexusTitle": "Nexus API 密钥",
-        "nexusDesc": "在 nexusmods.com 免费注册 → 个人资料 → API Keys → \"Personal API key\"。粘贴到设置 → Nexus Mods API Key。允许你在应用内快速添加 Nexus 链接和浏览 Nexus 模组。",
-        "nexusNote": "仅限免费版。当你使用慢速/手动下载时，应用会捕获落入 Downloads 文件夹的 Nexus zip 文件。Nexus Premium 的即时下载 API 尚未接入，付费订阅者在此无法获得更快下载速度。",
-        "githubTitle": "GitHub Token",
-        "githubDesc": "仅在计划分享整合包时需要（参见上方整合包创作者标签）。否则可以跳过。"
-      },
-      "step3": {
-        "title": "分享与接收整合包 — 代码 vs 链接",
-        "p1": "应用中的每个分享界面都提供三种可互换的方式将整合包传递给好友，并列显示：<0>复制代码</0>、<1>复制链接</1> 和 <2>复制消息</2>。你可以在首页主卡片、每个「其他整合包」行、每个方案行（代码旁边）以及菜单中找到它们。",
-        "codeTitle": "代码",
-        "codeDesc": "类似 <0>jess/AA5A-315D-61AE</0>。原始形式。好友将其粘贴到管理器首页的「输入代码，点击添加」框中。",
-        "linkTitle": "链接",
-        "linkDesc": "类似 <0>https://mohamedserhan.github.io/sts2-mod-manager/i.html?c=jess/AA5A-315D-61AE</0>。Discord / Slack / iMessage 都因为它是纯 HTTPS 而将其转为可点击的 URL。好友点击 → 进入一个小型安装桥接页面 → 点击\"在 STS2 模组管理器中打开\" → 管理器弹出确认对话框。尚未安装管理器的朋友会在同一页面获得下载链接。",
-        "messageTitle": "消息",
-        "messageDesc": "一条粘贴即用的完整消息，包含链接和原始代码，以及一行介绍语（\"加入我的 Slay the Spire 2 整合包…\"）。在聊天中发送即可。",
-        "whyNotSts2mm": "<0>为什么不直接粘贴 <1>sts2mm://</1> URL？</0> Discord 和大多数聊天应用仅能自动识别 <2>http://</2> 和 <3>https://</3> — 自定义协议方案显示为无法点击的纯文本。HTTPS 桥接页面的存在正是为了让链接在任何地方都可点击。",
-        "smartRouting": "<0>接收端的智能路由。</0> 当好友粘贴代码或点击链接时，管理器会检查他们的状态并显示正确的对话框：全新整合包 → 确认并安装；已有但未激活 → \"切换到它？\"；有更新待处理 → \"应用更新？\"；已是最新 → 友好的\"已是最新版本\"提示。无需猜测哪种情况适用。"
-      },
-      "step4": {
-        "title": "添加单个模组",
-        "p1": "首页顶部有一个「快速添加」框。粘贴以下任一内容：",
-        "githubItem": "GitHub 仓库 URL（例如 <0>https://github.com/owner/repo</0>）— 应用自动安装最新版本。",
-        "nexusItem": "Nexus Mods URL（例如 <0>https://www.nexusmods.com/slaythespire2/mods/123</0>）— 应用在浏览器中打开模组的 <2>Files</2> 标签页。点击 Nexus 的 <4>Slow Download</4>（有时标记为 <6>Manual</6>），等待几秒，让浏览器将 zip 保存到 <8>~/Downloads</8>。应用的下载文件夹监控器会捕获并安装它。<10>不要点击 <12>Mod Manager Download</12></10> — 它使用 Nexus 的 <14>nxm://</14> 深度链接，该链接尚未接入安装流程，点击后不会有任何反应。",
-        "dragZip": "你也可以直接拖拽 <0>.zip</0> 文件到应用窗口中进行安装。"
-      },
-      "step5": {
-        "title": "启用/禁用模组",
-        "p1": "模组标签页。切换单个模组的开关。<0>禁用模组不会删除它</0> — 其文件会被移动到游戏文件夹中 <4>mods/</4> 旁边的 <2>mods_disabled/</2>。重新启用模组即时生效，无需重新下载。要永久删除模组，请使用菜单 → <6>删除模组…</6>。"
-      },
-      "step6": {
-        "title": "原版游玩",
-        "p1": "顶栏 <0>原版</0> 按钮。以临时禁用所有模组的方式启动游戏。应用会先创建自动备份，下次启动时一切恢复原样。"
-      },
-      "step7": {
-        "title": "备份与恢复",
-        "p1": "应用在每次游戏启动和原版模式前都会创建自动备份。设置 → 备份 以时间戳+大小列出它们。<0>恢复</0> 会将你的模组文件夹回滚到该快照。仅保留最近 5 个备份。"
-      },
-      "step8": {
-        "title": "报告问题",
-        "p1": "设置 → 滚动到 <0>应用内日志</0>。查看器有过滤标签（Info / Warn / Error / Debug）和一个 <2>发送给支持</2> 按钮，可打开预填了最近日志尾部的 GitHub issue。日志记录了每次下载、每次方案应用、每次错误。"
-      }
-    },
-    "creator": {
-      "intro": "面向整合包创作者。整合包是一个命名方案，记录了你安装中的每个模组（包括版本和来源）。好友粘贴你的分享码；他们的应用从相同来源下载相同的模组。你无需自行托管任何文件 — 分享数据存储在应用自动创建和更新的 GitHub 账号下的公共仓库（<0>sts2mm-profiles</0>）中。",
-      "step1": {
-        "title": "设置 GitHub Token",
-        "p1": "分享需要一个有权在你的账户上创建和更新仓库的 GitHub Token。",
-        "li1": "前往 GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens（或 \"Tokens (classic)\" — 两者均可）。",
-        "li2": "授予 <0>repo</0> 权限（classic）或 <1>Contents: Read and write</1> + <2>Administration: Read and write</2>（fine-grained — Administration 仅需用于一次性创建仓库，之后可以删除）。",
-        "li3_prefix": "将 Token 粘贴到 ",
-        "li3_settingsLink": "设置",
-        "li3_suffix": " → <0>GitHub Token</0> 并点击保存。Token 存储在操作系统密钥环中，而非磁盘上的明文。"
-      },
-      "step2": {
-        "title": "安装你想放入整合包的模组",
-        "p1": "使用快速添加 URL 添加 GitHub/Nexus 链接，拖放 <0>.zip</0> 文件，或使用浏览标签页。对于未能自动链接到来源的模组：打开模组视图 → 展开模组 → 点击 <2>自动检测来源</2> 或手动粘贴 GitHub 仓库地址。没有已知来源的模组仍然可以分享（应用会在分享仓库中打包副本），但链接来源更好 — 你的朋友会获得官方版本。"
-      },
-      "step3": {
-        "title": "从当前状态创建方案",
-        "p1": "打开 <0>方案</0> → <1>创建方案</1>。选择一个名称（例如「合作之夜」或「每日卡组」）。应用会捕获你当前的 mods 文件夹 — 包含每个已安装模组的名称、文件夹、版本和来源。"
-      },
-      "step4": {
-        "title": "分享 — 三种可互换的格式",
-        "p1": "在新方案对应的行上，点击 <0>分享</0>（纸飞机）图标。应用将清单上传到你的 <1>sts2mm-profiles</1> 仓库（首次使用自动创建，公开，在你的 GitHub 账号下），并返回分享码和一个包含三个复制按钮的成功弹窗。同样的三项在所有分享界面均可用（首页主卡片、方案行内标签、菜单、其他整合包行）：",
-        "codeItem": "<0>复制代码</0> — 原始 <1>you/AA5A-315D-61AE</1>。好友粘贴到首页的 <3>输入代码，点击添加</3> 框中。适合紧凑空间（Twitter、简短私信）。",
-        "linkItem": "<0>复制链接</0> — 一个指向 GitHub Pages 上管理器桥接页面的 HTTPS 安装 URL。Discord、Slack、iMessage、Reddit 等 <2>全部</2> 都因为它使用纯 HTTPS 而自动识别为链接。好友点击 → 桥接页面打开 → 桥接页面触发管理器的安装处理 → 确认对话框。尚未安装管理器的朋友在同一页面获得下载链接。",
-        "messageItem": "<0>复制消息</0> — 一条粘贴即用的完整消息，包含链接和原始代码，以及一行介绍语。发送到聊天即可。",
-        "whyNotSts2mm": "<0>为什么不直接提供 <1>sts2mm://</1> URL：</0> Discord 和大多数聊天应用仅能自动识别 <2>http://</2> 和 <3>https://</3>。原始的 <4>sts2mm://import/...</4> 显示为无法点击的纯文本，收件人需要选中、复制并粘贴到浏览器地址栏。HTTPS 桥接页面的存在正是为了让分享链接在好友可能粘贴的任何地方都可点击。",
-        "smartRouting": "接收端的智能路由器处理全新安装、已安装整合包的重新激活、待处理更新以及\"已在此方案上\"的无需操作 — 你的好友无需思考哪种情况适用。"
-      },
-      "step5": {
-        "title": "更新你的整合包",
-        "p1": "更改已安装的模组（安装、升级、移除）。然后在同一方案行上，点击 <0>重新分享</0>（刷新）图标。<2>相同代码，内容已更新。</2> 你好友的应用在下次打开时检测到更改，并在首页显示更新卡片。",
-        "p2": "如果需要单独版本（例如带有破坏性更改的 v2 整合包），<0>复制</0>方案，重命名，然后分享 — 它会获得自己的代码。"
-      },
-      "step6": {
-        "title": "分享的内容（和不分享的内容）",
-        "shared": "<0>分享的内容：</0> 方案名称、模组列表、每个模组的名称 + 文件夹名 + mod_id + 版本，以及每个模组的来源（GitHub 仓库，或 — 对于没有公开来源的模组 — 指向仓库中打包副本的直接下载 URL）。",
-        "notShared": "<0>不分享的内容：</0> 你的本地模组文件本身（除非需要打包）、你的存档数据、你的 API 密钥、方案清单以外的任何内容。",
-        "visibility": "<0>可见性：</0> <1>sts2mm-profiles</1> 仓库是公开的 — 任何拥有你分享码的人都可以读取，仓库本身可在 github.com 上你的账号下浏览。不要在方案名称或打包的模组文件中放置任何机密内容。"
-      },
-      "step7": {
-        "title": "维护者最佳实践",
-        "audit": "<0>分享前审计。</0> 设置 → 审计 → <1>运行审计</1> 标记没有已知来源的模组 — 先链接它们，否则它们会被打包到分享仓库中（占用更大、朋友下载更慢）。",
-        "pin": "<0>冻结版本。</0> 模组 → 展开模组 → <1>冻结</1> — 冻结可防止自动更新和方案变更，确保你的整合包可重现。",
-        "test": "<0>以好友身份测试。</0> 验证分享最快的方法是让朋友在干净安装中粘贴代码，确认看到相同的模组已启用。",
-        "sendLog": "<0>出问题时发送日志。</0> 设置 → 应用内日志。查看器的 <1>发送给支持</1> 按钮打开一个预填了最近日志尾部的 GitHub issue — 详细程度足以诊断大多数「我朋友那里不工作」的报告。"
-      }
-    }
-  },
   "autoDetect": {
     "title": "自动检测来源",
     "subtitle": "按名称扫描已安装模组与 GitHub 的匹配情况。应用前请检查匹配结果 — 高置信度匹配已预选。",
@@ -833,7 +611,6 @@
     "applyingMatches_other": "应用 {{count}} 个匹配"
   },
   "browseDetail": {
-    "close": "关闭",
     "github": "GitHub",
     "nexus": "Nexus",
     "by": "作者 {{name}}",
@@ -943,7 +720,6 @@
     "displayDescriptionHint": "可选，仅用于管理器，方便说明难懂或未翻译的模组。"
   },
   "onboarding": {
-    "title": "欢迎使用 STS2 模组管理器",
     "skip": "跳过设置",
     "next": "下一步",
     "eyebrow": {
@@ -1005,9 +781,6 @@
     "publishSubtitle": "将你的模组文件上传到你账户的 GitHub 仓库，好友即可安装。",
     "reshareSubtitle": "同一代码 — 关注者下次打开应用时将看到更新提示。",
     "sharedSubtitle": "任何知道代码的人都可以安装完全相同的模组组合。",
-    "tokenRequired": "需要 GitHub 令牌",
-    "tokenExplanation": "发布会将你的模组文件上传到你账户的 GitHub 仓库，因此管理器需要一个包含 <0>repo</0> 权限的个人访问令牌（或细粒度令牌的 <1>Contents: R/W</1> + <2>Administration: R/W</2>）。",
-    "openSettings": "打开设置 → 账号",
     "packName": "包名称",
     "whatsIncluded": "包含内容",
     "modsTotal": "个模组",
@@ -1037,8 +810,6 @@
     "copyMessageTitle": "复制可直接粘贴的分享消息 — 介绍语 + 安装链接 + 原始分享码，三合一",
     "reuseNote": "稍后重新分享时会重用同一代码 — 好友将看到更新而不是需要关注新代码。",
     "openRepo": "在 GitHub 上打开我的配置仓库",
-    "failedUploads_one": "{{count}} 个模组上传失败：{{list}}。安装此代码的好友将看到这些模组\"缺失\" — 重新发布以重试。",
-    "failedUploads_other": "{{count}} 个模组上传失败：{{list}}{{more}}。安装此代码的好友将看到这些模组\"缺失\" — 重新发布以重试。",
     "listedPublicly": "公开列出：",
     "updatePushedToast": "更新已推送给关注者",
     "profilePublishedToast": "模组包已发布",
@@ -1111,31 +882,16 @@
     "settingsEscape": "稍后在设置中配置"
   },
   "home": {
-    "unlinkTitle": "取消关联 \"{{name}}\"？",
-    "unlinkBody": "你将停止从作者接收更新。模组将保持已安装状态。",
-    "unlink": "取消关联",
-    "repairPackTitle": "修复此整合包？",
-    "repairPackBody": "修复将清空模组文件夹并重新安装清单中的每个条目。当安装出现偏差或怀疑损坏时使用。",
     "repairPackBackupLabel": "修复前先备份",
     "repair": "修复",
-    "switchAwayTitle": "切换离开 \"{{name}}\"？",
-    "switchAwayBody": "此配置在磁盘上有未保存的更改。切换将应用另一个清单，这些工作更改将不会保存到当前配置。",
-    "switchAwayWarning": "如果想保留它们，请先打开配置页使用保存更改。",
-    "switchAnyway": "仍要切换",
-    "stayHere": "留在此处",
     "copiedLink": "已复制链接",
     "copyLink": "复制链接",
     "copiedMessage": "已复制消息",
     "copyMessage": "复制消息",
-    "launchWithPack": "使用此包启动",
     "launchTitle": "使用此包启动 STS2",
     "noLaunchTitle": "使用顶部栏的启动按钮",
-    "manageMods": "管理模组",
-    "manageModsTitle": "查看和切换此配置中的模组",
-    "switchPack": "切换包",
     "switchPackTitle": "切换到其他包",
     "repairing": "修复中…",
-    "shareThisPack": "分享此包",
     "shareThisPackTitle": "将此包发布到您 GitHub 账户的仓库，以便朋友通过代码或链接安装",
     "clickToCopyShareCode": "点击复制分享码",
     "copyLinkTitle": "复制可点击的安装链接：{{link}}",
@@ -1145,44 +901,13 @@
     "repairOrphanBodyNoOrphans": "严格重新应用清单。开关状态、版本和加载顺序将从保存的快照中恢复。",
     "repairOrphanWarning": "孤立文件将被永久删除。如需撤销请从备份恢复。",
     "heroNameVanilla": "原版",
-    "heroMetaSubscribed": "{{count}} 个模组 · 同步于 {{date}}",
-    "heroMetaOwn": "{{count}} 个模组 · 由你发布",
-    "heroMetaLocalProfile": "本地方案",
-    "heroMetaBuiltinVanilla": "内置原版方案",
-    "heroMetaLocal": "{{count}} 个模组 · {{type}}",
-    "importingOverlayTitle": "正在下载模组并设置你的方案…",
-    "importingOverlaySubtext": "大型整合包可能需要几分钟时间。",
     "gameNotDetected": "未检测到游戏",
     "gameNotDetectedDesc": "未自动找到杀戮尖塔 2。请打开设置配置路径。",
     "continueWith": "继续使用",
-    "updateAvailableCount": "来自作者的 {{count}} 个更新",
     "viewChanges": "查看变更",
     "syncUpdates": "同步更新",
     "reapplyTitle": "重新应用清单并删除所有孤立模组文件",
     "shortcutTip": "提示：在任意位置按 {{shortcut}} 即可启动此方案。",
-    "quickAddHeading": "输入代码，点击添加",
-    "yourOtherPacks": "你的其他方案",
-    "viewAllInProfilesTitle": "打开方案页面管理所有方案",
-    "viewAllInProfiles": "在方案中查看全部",
-    "community": "社区",
-    "byCurator": "来自 {{curator}}",
-    "lastSynced": "上次同步 ",
-    "updatesPill": "{{count}} 个更新",
-    "copyShareCodeTitle": "复制分享码（{{code}}）",
-    "copyInstallLinkTitle": "复制安装链接 — 可在 Discord/聊天中点击，引导好友通过安装桥接页面",
-    "copyFullMessageTitle": "复制完整分享消息 — 包含介绍行 + 安装链接 + 原始代码",
-    "switchToPack": "切换到此方案",
-    "wipeAndReinstall": "清除并重新安装",
-    "unlinkFromPack": "取消关联此方案",
-    "pendingUpdates": "有可用更新",
-    "newLabel": " 新增 ",
-    "updatedLabel": " 更新 ",
-    "removedLabel": " 移除",
-    "review": "查看",
-    "sync": "同步",
-    "yourPacks": "你的方案",
-    "followFriendsPack": "关注好友的方案",
-    "pasteCodeAbove": "在上方粘贴他们的分享码。",
     "heroEmptyTitle": "挑选一个整合包游玩",
     "heroEmptyBody": "整合包是一组保存好的模组。可以从整合包页面中选择，浏览公开整合包，或者自己创建一个。",
     "heroEmptyCta": "打开整合包",
@@ -1195,28 +920,14 @@
       "allUpToDate": "所有整合包已是最新版本！",
       "checkFailed": "检查失败：{{error}}",
       "installedModpack": "已安装整合包 \"{{name}}\"，包含 {{count}} 个模组！",
-      "installedPartial": "已安装 {{installed}}/{{total}} 个模组。缺失：{{missing}}。这些需要手动安装。",
-      "unlinked": "已取消关联 \"{{name}}\"",
-      "failed": "失败：{{error}}",
-      "reinstalled": "整合包已重新安装",
-      "activated": "已激活 \"{{name}}\"",
-      "activatedWithDetails": "已激活 \"{{name}}\"。已下载 {{downloaded}} 个，仍有 {{missing}} 个缺失。",
       "profileNotFoundOnDisk": "在磁盘上找不到此方案。",
       "couldntLoadProfile": "无法加载方案：{{error}}",
-      "codeCopied": "已复制 {{code}}",
       "syncedModpack": "已同步整合包 \"{{name}}\" - 你已是最新版本！"
     },
     "hero": {
       "title": "分享码",
       "placeholder": "username/AA5A-315D-61AE"
-    },
-    "quickAdd": {
-      "add": "添加整合包"
-    },
-    "updateAvailableCount_one": "作者提供的 {{count}} 个更新",
-    "updateAvailableCount_other": "作者提供的 {{count}} 个更新",
-    "updatesPill_one": "{{count}} 个更新",
-    "updatesPill_other": "{{count}} 个更新"
+    }
   },
   "help": {
     "title": "帮助",
@@ -1467,8 +1178,6 @@
     "quickAddPlaceholder": "https://github.com/user/mod 或 nexus:slaythespire2/mods/123",
     "adding": "添加中...",
     "add": "添加",
-    "advanced": "高级",
-    "advancedTitle": "显示来源标签、冻结/删除、来源编辑器",
     "closeSts2First": "请先关闭 STS2",
     "enableAll": "全部启用",
     "disableAll": "全部禁用",
@@ -1495,12 +1204,8 @@
     "repairing": "修复中…",
     "repairDesc": "从 GitHub 强制重装。当版本显示\"未知\"、游戏拒绝加载此模组、或安装看起来有问题时使用。",
     "repairNeedSource": "请先通过\"编辑来源…\"链接 GitHub 源 — 修复从 GitHub 获取。",
-    "repairNoSource": "未链接 GitHub 源",
     "subtitle": "{{total}} 个已安装 · {{enabled}} 个已启用{{disabled}}",
-    "linkedCount": "{{count}} 个已关联自动更新",
     "openFolder": "打开文件夹",
-    "openModLibrary": "模组库",
-    "openModLibraryTitle": "选择哪些方案包含每个已安装模组，不会启用或禁用它。",
     "importMod": "导入模组",
     "quickAddUrl": "快速添加 URL",
     "checking": "正在逐个检查模组来源…",
@@ -1537,7 +1242,6 @@
     "snoozeDesc": "跳过此更新，直到上游出现新版本（当前为 v{{version}}）。当网站公布的版本与文件实际版本不匹配时使用此选项。",
     "snoozeUpdate": "跳过此更新",
     "sources": "来源",
-    "closeSourceEditor": "关闭来源编辑器",
     "editSources": "编辑来源…",
     "viewOnGitHubKebab": "在 GitHub 上查看",
     "viewOnNexusKebab": "在 Nexus 上查看",
@@ -1579,7 +1283,6 @@
       "rollbackFailed": "「{{name}}」回滚失败：{{error}}",
       "snoozed": "已跳过 {{name}} 的更新提示，直到下个版本"
     },
-    "title": "你的模组",
     "allInstalledTitle": "已安装的所有模组",
     "allInstalledSubtitle": "你已安装到本地的所有模组。当前的模组包决定哪些模组会被加载到游戏中。",
     "manageActiveModpackLink": "管理当前模组包 →",

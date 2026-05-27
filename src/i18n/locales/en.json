@@ -8,7 +8,6 @@
     "confirm": "Confirm",
     "retry": "Retry",
     "back": "Back",
-    "next": "Next",
     "done": "Done",
     "yes": "Yes",
     "no": "No",
@@ -17,43 +16,23 @@
     "copyFailed": "Couldn't copy to clipboard: {{error}}",
     "install": "Install",
     "installing": "Installing...",
-    "update": "Update",
-    "updating": "Updating...",
     "refresh": "Refresh",
-    "apply": "Apply",
     "applying": "Applying...",
     "import": "Import",
     "importing": "Importing...",
-    "export": "Export",
-    "create": "Create",
-    "creating": "Creating...",
     "publish": "Publish",
     "publishing": "Publishing…",
-    "share": "Share",
-    "switch": "Switch",
-    "switching": "Switching...",
     "activate": "Activate",
-    "error": "Error",
-    "errorWithMessage": "Error: {{message}}",
-    "noData": "No data",
     "search": "Search",
     "searching": "Searching...",
-    "all": "All",
-    "enabled": "Enabled",
-    "disabled": "Disabled",
     "vanilla": "Vanilla",
     "active": "Active",
-    "outOfSync": "Out of sync",
-    "noDescription": "No description",
-    "typeToConfirm": "Type to confirm",
     "dismiss": "Dismiss",
     "moreActions": "More actions",
     "notifications": "Notifications",
     "beta": "Beta",
     "refreshing": "Refreshing...",
     "advanced": "Advanced",
-    "showAdvanced": "Show advanced",
-    "hideAdvanced": "Hide advanced",
     "whatsThis": "What does this mean?",
     "parts": {
       "downloaded": "{{count}} downloaded",
@@ -75,14 +54,7 @@
     "typePhrase": "Type <0>{{phrase}}</0> to confirm:"
   },
   "modpack": {
-    "singular": "Modpack",
-    "plural": "Modpacks",
-    "active": "Active modpack",
-    "create": "Create modpack",
-    "switch": "Switch modpack",
     "share": "Share modpack",
-    "reshare": "Re-share modpack",
-    "delete": "Delete modpack",
     "shared": "Shared",
     "advanced": "Advanced",
     "backToList": "Back to modpacks",
@@ -117,7 +89,6 @@
   },
   "createModpack": {
     "title": "Create modpack",
-    "step1Title": "Start",
     "step1Subtitle": "Pick how this modpack should begin.",
     "step1FromActive": "Start from my active mods",
     "step1FromActiveDesc": "Use the mods currently in your game folder as a starting point.",
@@ -126,7 +97,6 @@
     "step1Clone": "Clone an existing modpack",
     "step1CloneDesc": "Copy the mod list from one of your existing modpacks.",
     "step1CloneSelectLabel": "Pick a modpack to clone:",
-    "step2Title": "Choose mods",
     "step2Subtitle": "Pick the mods this modpack should include.",
     "step2SearchPlaceholder": "Search installed mods...",
     "step2SortLabel": "Sort:",
@@ -136,7 +106,6 @@
     "step2SelectedCount_one": "{{count}} selected",
     "step2SelectedCount_other": "{{count}} selected",
     "step2NoMods": "No installed mods match your search.",
-    "step3Title": "Check health",
     "step3Subtitle": "A quick look at the mods you've chosen.",
     "step3Checking": "Checking selected mods...",
     "step3Linked_one": "{{count}} mod has a linked source for updates",
@@ -148,7 +117,6 @@
     "step3Frozen_one": "{{count}} frozen mod will stay at its current version",
     "step3Frozen_other": "{{count}} frozen mods will stay at their current version",
     "step3ContinueAnyway": "Continue anyway",
-    "step4Title": "Finish",
     "step4Subtitle": "Name your modpack, then create it.",
     "step4NameLabel": "Modpack name",
     "step4NamePlaceholder": "e.g. \"Comfy Run\"",
@@ -255,13 +223,6 @@
       "following": "All modpacks",
       "publishedByYou": "Published by you"
     },
-    "assignments": {
-      "open": "Mod library",
-      "title": "Mod library",
-      "subtitle": "Every mod you've installed. Toggle which modpacks each one belongs to.",
-      "description": "Every mod you've installed. Toggle which modpacks each one belongs to.",
-      "back": "Back to modpacks"
-    },
     "activity": {
       "hasUpdates": "{{count}} modpack has updates",
       "haveUpdates": "{{count}} modpacks have updates",
@@ -295,8 +256,6 @@
     "form": {
       "codeLabel": "Modpack code (from a friend)",
       "codePlaceholder": "username/XXXX-XXXX-XXXX",
-      "nameLabel": "Modpack name",
-      "namePlaceholder": "My modpack",
       "jsonLabel": "Paste modpack JSON",
       "jsonPlaceholder": "{\"name\": \"...\", \"mods\": [...]}"
     },
@@ -326,11 +285,6 @@
       "bulkStoreUnused_one": "Store {{count}} unused active mod",
       "bulkStoreUnused_other": "Store {{count}} unused active mods",
       "bulkStoreNone": "No unused active mods",
-      "inProfile": "In this modpack",
-      "notInProfile": "Not in this modpack",
-      "disabledInProfile": "Included, off in this modpack",
-      "profileUseCount_one": "{{count}} modpack",
-      "profileUseCount_other": "{{count}} modpacks",
       "showing": "Showing {{shown}} of {{total}}",
       "showMore": "Show {{count}} more",
       "sort": {
@@ -339,12 +293,10 @@
         "nameAsc": "Name A-Z",
         "nameDesc": "Name Z-A",
         "activeFirst": "Active first",
-        "storedFirst": "Stored first",
-        "profilesMost": "Most modpacks"
+        "storedFirst": "Stored first"
       },
       "readOnly": "Read-only",
       "readOnlyTitle": "Followed modpacks are read-only. Duplicate the modpack to edit it.",
-      "noProfiles": "No modpacks yet",
       "empty": {
         "title": "No installed mods",
         "hint": "Install mods first, then use the mod library to choose which modpacks include each one."
@@ -387,25 +339,14 @@
     },
     "card": {
       "active": "ACTIVE",
-      "enabled": "{{count}} enabled",
-      "disabled": "{{count}} disabled",
       "by": "by {{name}}",
       "outOfSync": "Out of sync",
-      "newMod": "{{count}} new mod",
-      "newMods": "{{count}} new mods",
-      "removed": "{{count}} removed",
-      "toggled": "{{count}} toggled",
-      "versionChanged_one": "{{count}} version changed",
-      "versionChanged_other": "{{count}} versions changed",
-      "reShareHint": "re-share to update subscribers",
       "switchTo": "Switch to",
       "share": "Share",
       "reShare": "Re-share",
-      "restore": "Re-apply this modpack to match the manifest",
       "activateProfile": "Activate modpack (enable these mods)",
       "shareTitle": "Share — friends paste the code to install",
-      "reShareTitle": "Re-share — same code, friends see an update",
-      "moreActions": "More actions"
+      "reShareTitle": "Re-share — same code, friends see an update"
     },
     "kebab": {
       "snapshotFromCurrent": "Snapshot from current install",
@@ -413,10 +354,8 @@
       "exportJson": "Export JSON...",
       "copyShareCode": "Copy share code",
       "copyShareLink": "Copy share link",
-      "copyShareMessage": "Copy share message (paste-ready: intro + link + code)",
       "copyShareMessageLabel": "Copy share message",
-      "deleteProfile": "Delete modpack...",
-      "copyInstallLinkTitle": "Copy install link (clickable in Discord / chat)"
+      "deleteProfile": "Delete modpack..."
     },
     "confirm": {
       "switch": {
@@ -443,7 +382,6 @@
       "synced": "Synced \"{{name}}\" — you're up to date.",
       "syncFailed": "Sync failed: {{error}}",
       "created": "Modpack \"{{name}}\" created",
-      "createFailed": "Failed to create modpack: {{error}}",
       "snapshotCreated": "Snapshot \"{{name}}\" created with {{count}} mods",
       "snapshotFailed": "Failed to snapshot: {{error}}",
       "switched": "Switched to modpack \"{{name}}\"",
@@ -537,8 +475,6 @@
     "fetchingManifest": "Fetching profile manifest...",
     "applyingProfile": "Applying profile...",
     "subscribing": "Subscribing for updates...",
-    "downloading": "Downloading",
-    "checking": "Checking",
     "downloadingMod": "Downloading mod {{current}} of {{total}}: {{name}}",
     "checkingMod": "Checking mod {{current}} of {{total}}: {{name}}",
     "installingModpack": "Installing modpack...",
@@ -570,9 +506,6 @@
     "home": "Home",
     "profiles": "Modpacks",
     "mods": "Library",
-    "browseMods": "Browse Mods",
-    "browseModpacks": "Browse Modpacks",
-    "tutorial": "Help",
     "settings": "Settings"
   },
   "topbar": {
@@ -597,7 +530,6 @@
       "vanilla": "Vanilla - no mods",
       "modded": "Launch"
     },
-    "dismiss": "Dismiss",
     "windowTitle": "STS2 Mod Manager",
     "minimize": "Minimize",
     "maximize": "Maximize",
@@ -611,7 +543,6 @@
     "modCount": "{{enabled}} active / {{total}} mods",
     "switchActivePack": "Switch modpack",
     "activeProfile": "Active modpack",
-    "manageAllModpacks": "Manage all modpacks",
     "nexusPendingToast": "Opened {{modName}} on Nexus. Click \"Slow Download\" / \"Manual\" — the app will auto-install when the zip lands in your Downloads folder.",
     "auditFailed": "Audit failed: {{error}}",
     "updateConfirmTitle_one": "Update {{count}} mod?",
@@ -651,159 +582,6 @@
       "text": ".zip - we'll detect the source for you"
     }
   },
-  "tutorial": {
-    "title": "Tutorial",
-    "subtitle": "Bookmark this page or send the link to a friend.",
-    "tabs": {
-      "player": "Player tutorial",
-      "creator": "Modpack creator"
-    },
-    "player": {
-      "cheatSheet": "Cheat sheet",
-      "tip": "Tip:",
-      "tipLaunch": "<0>Ctrl+L</0> launches the active modpack from anywhere in the app.",
-      "fullReference": "Full reference",
-      "fullReferenceShow": " — click to expand",
-      "fullReferenceHide": " — click to hide",
-      "fullReferenceIntro": "For when something doesn't fit the quick start above. Most players never need any of this.",
-      "quickStart": {
-        "eyebrow": "Quick start · 90% of players",
-        "title": "Play your friend's modpack in under a minute",
-        "step1": {
-          "title": "Click the link, or paste the code",
-          "body": "Your friend sends you a code like <0>jess/AA5A-315D-61AE</0> or a clickable install link. <1>Click the link</1> — it opens a small page that pops up this app with a confirm dialog showing exactly what's about to install. <3>Or paste the code</3> into the <5>Drop a code, hit Add</5> box on <7>Home</7>. Same result either way: GitHub-sourced and bundled mods download automatically; any Nexus-only mods show as pending so you know what to grab manually."
-        },
-        "step2": {
-          "title": "Hit Launch",
-          "body": "Top-right of the window, or press <0>Ctrl/⌘ L</0>. The game opens through Steam with your friend's exact mods enabled. The app auto-backs-up before every launch so it's always reversible."
-        },
-        "step3": {
-          "title": "Stay in sync",
-          "body": "When your friend updates their pack you'll see an <0>Update available</0> card on Home. One click pulls the diff and re-applies their pack (Nexus changes still need a manual download from Nexus). Your save is unaffected."
-        }
-      },
-      "cheatItems": {
-        "switchActive": "Switch active pack",
-        "switchActiveDesc": "Top-bar profile chip → pick a pack.",
-        "updateEverything": "Update everything",
-        "updateEverythingDesc": "Profiles → Update all on the active pack.",
-        "pinMod": "Freeze a mod",
-        "pinModDesc": "Mods → kebab on a mod → Freeze this mod.",
-        "rollBack": "Roll back",
-        "rollBackDesc": "Settings → Backups → Restore. Auto-saved before every launch.",
-        "auditMod": "Audit a mod",
-        "auditModDesc": "Settings → Audit → Run audit. See current vs latest at a glance.",
-        "launchVanilla": "Launch vanilla",
-        "launchVanillaDesc": "Top-bar Vanilla button — ignores your active profile.",
-        "addSingleMod": "Add a single mod",
-        "addSingleModDesc": "Quick-add a GitHub or Nexus URL on Home.",
-        "findNewMods": "Find new mods",
-        "findNewModsDesc": "Browse tab → search by name.",
-        "shareYourPack": "Share your pack",
-        "shareYourPackDesc": "Home hero → Copy link (or Copy code / Copy message). Drop in Discord.",
-        "openFriendLink": "Open a friend’s link",
-        "openFriendLinkDesc": "Click their install link in chat — the manager pops up with a confirm."
-      },
-      "step1": {
-        "title": "First-time setup",
-        "p1": "On first launch the app tries to auto-detect Slay the Spire 2 from your Steam install. If the status dot in the bottom-left says <0>Game detected</0>, you're done with this step.",
-        "p2_prefix": "If not, open ",
-        "p2_settingsLink": "Settings",
-        "p2_gamePath": " → <0>Game Path</0> and either click <2>Browse...</2> or paste the folder where the game files live. The signature file the app checks for depends on your OS: <4>SlayTheSpire2.exe</4> on Windows, <6>SlayTheSpire2.app</6> on macOS, <8>SlayTheSpire2.pck</8> on Linux. The default location on Windows is <10>C:\\Program Files (x86)\\Steam\\steamapps\\common\\Slay the Spire 2</10>."
-      },
-      "step2": {
-        "title": "Optional: API keys",
-        "p1": "You don't need either of these to play with a friend's modpack — they only help with mods you find yourself.",
-        "nexusTitle": "Nexus API key",
-        "nexusDesc": "sign up free at nexusmods.com → Profile → API Keys → \"Personal API key\". Paste into Settings → Nexus Mods API Key. Lets you Quick-Add Nexus links and browse Nexus mods inside the app.",
-        "nexusNote": "Free-tier only. The app catches Nexus zips that land in your Downloads folder when you use Slow / Manual downloads. Nexus Premium's instant-download API isn't wired in, so paid subscribers don't get faster downloads here.",
-        "githubTitle": "GitHub token",
-        "githubDesc": "only needed if you plan to share modpacks (see the Modpack Creator tab above). Otherwise skip."
-      },
-      "step3": {
-        "title": "Sharing & receiving packs — code vs. link",
-        "p1": "Every share surface in the app gives you three interchangeable ways to pass a pack to a friend, paired side-by-side: <0>Copy code</0>, <1>Copy link</1>, and <2>Copy message</2>. You'll find them on the Home hero, in each \"Your other packs\" row, on every Profiles row (inline next to the code), and in the kebab menu.",
-        "codeTitle": "Code",
-        "codeDesc": "like <0>jess/AA5A-315D-61AE</0>. The raw thing. Friend pastes it into the manager's \"Drop a code, hit Add\" box on Home.",
-        "linkTitle": "Link",
-        "linkDesc": "like <0>https://mohamedserhan.github.io/sts2-mod-manager/i.html?c=jess/AA5A-315D-61AE</0>. Discord / Slack / iMessage all turn this into a clickable URL because it's plain HTTPS. Friend clicks → lands on a tiny install-bridge page → clicks \"Open in STS2 Mod Manager\" → the manager pops up with the confirm dialog. Friends who don't have the manager yet get download links on the same page.",
-        "messageTitle": "Message",
-        "messageDesc": "a paste-ready one-block message containing both the link and the raw code, plus an intro line (\"Join my Slay the Spire 2 modpack…\"). Drop it in a chat and you're done.",
-        "whyNotSts2mm": "<0>Why not just paste <1>sts2mm://</1> URLs directly?</0> Discord and most chat apps only auto-linkify <2>http://</2> and <3>https://</3> — custom protocol schemes show as un-clickable text. The HTTPS bridge page exists exactly to make the link clickable everywhere.",
-        "smartRouting": "<0>Smart routing on the receiving end.</0> When a friend pastes a code or clicks a link, the manager checks what state they're in and shows the right dialog: brand-new pack → confirm + install; they already have it but it's not active → \"Switch to it?\"; an update is pending → \"Apply update?\"; already on the latest → friendly \"you're up to date\" toast. No guessing which case applies."
-      },
-      "step4": {
-        "title": "Adding individual mods",
-        "p1": "On Home there's a Quick Add box at the top. Paste any of these:",
-        "githubItem": "A GitHub repo URL (e.g. <0>https://github.com/owner/repo</0>) — the app installs the latest release automatically.",
-        "nexusItem": "A Nexus Mods URL (e.g. <0>https://www.nexusmods.com/slaythespire2/mods/123</0>) — the app opens the mod's <2>Files</2> tab in your browser. Click Nexus's <4>Slow Download</4> (sometimes labelled <6>Manual</6>), wait the few seconds, and let your browser save the zip to <8>~/Downloads</8>. The app's downloads-folder watcher picks it up and installs it for you. <10>Don't click <12>Mod Manager Download</12></10> — that uses Nexus's <14>nxm://</14> deep link, which isn't wired through to the install pipeline yet, so nothing happens when you click it.",
-        "dragZip": "You can also drag a <0>.zip</0> file straight into the app window to install it."
-      },
-      "step5": {
-        "title": "Turning mods on/off",
-        "p1": "Mods tab. Toggle individual mods on/off. <0>Disabling a mod doesn't delete it</0> — its files are moved to <2>mods_disabled/</2> alongside <4>mods/</4> in your game folder. Turning a mod back on is instant, no re-download. To permanently remove a mod, use the kebab menu → <6>Remove mod…</6>."
-      },
-      "step6": {
-        "title": "Vanilla play",
-        "p1": "Top-bar <0>Vanilla</0> button. Starts the game with all mods temporarily disabled. The app creates an auto-backup first so the next launch puts everything back exactly as it was."
-      },
-      "step7": {
-        "title": "Backups & recovery",
-        "p1": "The app creates an auto-backup before every game launch and before Vanilla Mode. Settings → Backups lists them with timestamp + size. <0>Restore</0> rolls your mods folder back to that snapshot. Only the newest 5 are kept."
-      },
-      "step8": {
-        "title": "Reporting bugs",
-        "p1": "Settings → scroll to <0>In-app logs</0>. The viewer has filter chips (Info / Warn / Error / Debug) and a <2>Send to support</2> button that opens a prefilled GitHub issue with the recent log tail. The log captures every download, every profile apply, every error."
-      }
-    },
-    "creator": {
-      "intro": "For modpack creators. A modpack is a named profile that captures every mod in your install (with its version + source). Friends paste your share code; their app downloads the same mods from the same sources. You don't host any files yourself — share data lives in a public repo (<0>sts2mm-profiles</0>) on your GitHub account that the app creates and updates for you.",
-      "step1": {
-        "title": "Set up a GitHub token",
-        "p1": "Sharing requires a GitHub token with permission to create + update a repo on your account.",
-        "li1": "Go to GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens (or \"Tokens (classic)\" — both work).",
-        "li2": "Give it <0>repo</0> access (classic) or <1>Contents: Read and write</1> + <2>Administration: Read and write</2> (fine-grained — Administration is only needed for the one-time repo create, you can drop it after).",
-        "li3_prefix": "Paste the token into ",
-        "li3_settingsLink": "Settings",
-        "li3_suffix": " → <0>GitHub Token</0> and hit Save. The token is stored in your OS keyring, not in plain text on disk."
-      },
-      "step2": {
-        "title": "Install the mods you want in your modpack",
-        "p1": "Use Quick Add for GitHub/Nexus links, drag-and-drop a <0>.zip</0>, or use the Browse tab. For mods that don't auto-link to a source: open Mods view → expand the mod → click <2>Auto-detect source</2> or paste the GitHub repo manually. Mods without a known source can still be shared (the app bundles a copy in your sharing repo) but linking the source is preferred — your friends get the canonical release."
-      },
-      "step3": {
-        "title": "Create a profile from your current state",
-        "p1": "Open <0>Profiles</0> → <1>Create Profile</1>. Pick a name (e.g. \"Co-op night\" or \"Daily-cheese-build\"). The app captures your current mods folder — everything currently installed, with each mod's name, folder, version, and source."
-      },
-      "step4": {
-        "title": "Share it — three interchangeable formats",
-        "p1": "On the Profiles row for your new profile, click the <0>Share</0> (paper plane) icon. The app uploads the manifest to your <1>sts2mm-profiles</1> repo (auto-creating the repo on first use, public, on your GitHub account) and gives you back a share code plus a success modal with three copy buttons. The same trio is available on every share surface (Home hero chip, Profiles inline chip, kebab menu, Other Packs row):",
-        "codeItem": "<0>Copy code</0> — the raw <1>you/AA5A-315D-61AE</1>. Friends paste it into the <3>Drop a code, hit Add</3> box on Home. Best for tight spaces (Twitter, terse DMs).",
-        "linkItem": "<0>Copy link</0> — an HTTPS install URL pointing at the manager's bridge page on GitHub Pages. Discord, Slack, iMessage, Reddit etc. <2>all</2> auto-linkify this because it's plain HTTPS. Friend clicks → bridge page opens → bridge page fires the install handler in the manager → confirm dialog. Friends without the manager get download links on the same page.",
-        "messageItem": "<0>Copy message</0> — a paste-ready one-block message containing both the link and the raw code, plus an intro line. Drop it in chat and you're done.",
-        "whyNotSts2mm": "<0>Why we don't just hand out <1>sts2mm://</1> URLs directly:</0> Discord and most chat apps only auto-linkify <2>http://</2> and <3>https://</3>. A raw <4>sts2mm://import/...</4> shows as un-clickable plain text the recipient has to select-copy and paste into a browser address bar. The HTTPS bridge page exists exactly to make the share link clickable everywhere a friend might paste it.",
-        "smartRouting": "The smart router on the receiving side handles brand-new installs, re-activations of an already-installed pack, pending updates, and \"you're already on this\" no-ops — your friend doesn't have to think about which case applies."
-      },
-      "step5": {
-        "title": "Updating your modpack",
-        "p1": "Change your installed mods (install, upgrade, remove). Then on the same Profiles row, click the <0>Re-share</0> (refresh) icon. <2>Same code, updated content.</2> Your friends' apps detect the change next time they open the app and show an Update card on Home.",
-        "p2": "If you want a separate version (e.g. v2 of your modpack with breaking changes), <0>Duplicate</0> the profile, rename, and Share that one — it gets its own code."
-      },
-      "step6": {
-        "title": "What gets shared (and what doesn't)",
-        "shared": "<0>Shared:</0> the profile name, the list of mods, each mod's name + folder name + mod_id + version, and a source per mod (a GitHub repo, or — for mods without a public source — a direct download URL pointing back to the bundled copy in your repo).",
-        "notShared": "<0>Not shared:</0> your local mod files themselves (unless they need to be bundled), your save data, your API keys, anything outside the profile manifest.",
-        "visibility": "<0>Visibility:</0> the <1>sts2mm-profiles</1> repo is public — anyone with your share code can read it, and the repo itself is browsable on github.com under your account. Don't put anything secret in a profile name or in the bundled mod files."
-      },
-      "step7": {
-        "title": "Curator best practices",
-        "audit": "<0>Audit before sharing.</0> Settings → Audit → <1>Run audit</1> flags mods without a known source — link them first, otherwise they get bundled into your sharing repo (bigger footprint, slower for friends to download).",
-        "pin": "<0>Freeze versions.</0> Mods → expand a mod → <1>Freeze</1> — freezing prevents auto-updates and profile changes so your modpack stays reproducible.",
-        "test": "<0>Test as a friend.</0> The fastest way to validate a share is to ask a friend to paste the code on a clean install and confirm they see the same mods enabled.",
-        "sendLog": "<0>Send your log if things break.</0> Settings → In-app logs. The viewer's <1>Send to support</1> button opens a GitHub issue prefilled with the recent log tail — detailed enough to diagnose most \"it didn't work for my friend\" reports."
-      }
-    }
-  },
   "autoDetect": {
     "title": "Auto-detect sources",
     "subtitle": "Scan installed mods against GitHub by name. Review matches before applying — high-confidence matches are pre-selected.",
@@ -833,7 +611,6 @@
     "applyingMatches_other": "Apply {{count}} matches"
   },
   "browseDetail": {
-    "close": "Close",
     "github": "GitHub",
     "nexus": "Nexus",
     "by": "by {{name}}",
@@ -943,7 +720,6 @@
     "findGitHub": "Find GitHub"
   },
   "onboarding": {
-    "title": "Welcome to STS2 Mod Manager",
     "skip": "Skip setup",
     "next": "Next",
     "eyebrow": {
@@ -1005,9 +781,6 @@
     "publishSubtitle": "Uploads your mod files to a GitHub repo on your account so friends can install them.",
     "reshareSubtitle": "Same code — followers will see an update prompt next time they open the app.",
     "sharedSubtitle": "Anyone with the code can install this exact set of mods.",
-    "tokenRequired": "GitHub token required",
-    "tokenExplanation": "Publishing uploads your mod files to a GitHub repo on your account, so the manager needs a personal access token with <0>repo</0> scope (or, for fine-grained tokens, <1>Contents: R/W</1> + <2>Administration: R/W</2>).",
-    "openSettings": "Open Settings → Accounts",
     "packName": "Pack name",
     "whatsIncluded": "What's included",
     "modsTotal": "mods total",
@@ -1037,8 +810,6 @@
     "copyMessageTitle": "Copy a paste-ready share message — intro line + install link + raw code in one block",
     "reuseNote": "This same code is reused if you re-share later — friends will see updates instead of having to follow a new code.",
     "openRepo": "Open my profiles repo on GitHub",
-    "failedUploads_one": "{{count}} mod failed to upload: {{list}}. Friends installing this code will see \"missing mod\" for these — re-publish to retry.",
-    "failedUploads_other": "{{count}} mods failed to upload: {{list}}{{more}}. Friends installing this code will see \"missing mod\" for these — re-publish to retry.",
     "listedPublicly": "Listed publicly:",
     "updatePushedToast": "Update pushed to followers",
     "profilePublishedToast": "Modpack published",
@@ -1111,31 +882,16 @@
     "settingsEscape": "Configure later in Settings"
   },
   "home": {
-    "unlinkTitle": "Unlink from \"{{name}}\"?",
-    "unlinkBody": "You'll stop receiving updates from the curator. The mods stay installed.",
-    "unlink": "Unlink",
-    "repairPackTitle": "Repair this pack?",
-    "repairPackBody": "Repair wipes the mods folder and reinstalls every entry from the manifest. Use when the install has drifted or you suspect corruption.",
     "repairPackBackupLabel": "Make a backup before repairing",
     "repair": "Repair",
-    "switchAwayTitle": "Switch away from \"{{name}}\"?",
-    "switchAwayBody": "This profile has unsaved changes on disk. Switching applies another manifest and those working changes will not be saved to the current profile.",
-    "switchAwayWarning": "Open Profiles and use Save changes first if you want to keep them.",
-    "switchAnyway": "Switch anyway",
-    "stayHere": "Stay here",
     "copiedLink": "Copied link",
     "copyLink": "Copy link",
     "copiedMessage": "Copied message",
     "copyMessage": "Copy message",
-    "launchWithPack": "Launch with this pack",
     "launchTitle": "Launch STS2 with this pack",
     "noLaunchTitle": "Use the Launch button in the top bar",
-    "manageMods": "Manage mods",
-    "manageModsTitle": "See and toggle the mods in this profile",
-    "switchPack": "Switch pack",
     "switchPackTitle": "Switch to a different pack",
     "repairing": "Repairing…",
-    "shareThisPack": "Share this pack",
     "shareThisPackTitle": "Publish this pack to a GitHub repo on your account so friends can install it with a code or link",
     "clickToCopyShareCode": "Click to copy the share code",
     "copyLinkTitle": "Copies the clickable install link: {{link}}",
@@ -1145,44 +901,13 @@
     "repairOrphanBodyNoOrphans": "Re-applies the manifest exactly. Toggles, versions, and load order are restored from the saved snapshot.",
     "repairOrphanWarning": "Orphan files will be permanently removed. Restore from a backup if you change your mind.",
     "heroNameVanilla": "Vanilla",
-    "heroMetaSubscribed": "{{count}} mods · synced {{date}}",
-    "heroMetaOwn": "{{count}} mods · published by you",
-    "heroMetaLocalProfile": "Local profile",
-    "heroMetaBuiltinVanilla": "Built-in vanilla profile",
-    "heroMetaLocal": "{{count}} mods · {{type}}",
-    "importingOverlayTitle": "Downloading mods and setting up your profile…",
-    "importingOverlaySubtext": "This may take a few minutes for large modpacks.",
     "gameNotDetected": "Game not detected",
     "gameNotDetectedDesc": "Slay the Spire 2 wasn't found automatically. Open Settings to set the path.",
     "continueWith": "Continue with",
-    "updateAvailableCount": "{{count}} update(s) from author",
     "viewChanges": "View changes",
     "syncUpdates": "Sync updates",
     "reapplyTitle": "Re-apply the manifest and delete any orphan mod files",
     "shortcutTip": "Tip: press {{shortcut}} from anywhere to launch this pack.",
-    "quickAddHeading": "Drop a code, hit Add",
-    "yourOtherPacks": "Your other packs",
-    "viewAllInProfilesTitle": "Open the Profiles page to manage every pack",
-    "viewAllInProfiles": "View all in Profiles",
-    "community": "community",
-    "byCurator": "by {{curator}}",
-    "lastSynced": "last synced ",
-    "updatesPill": "{{count}} updates",
-    "copyShareCodeTitle": "Copy share code ({{code}})",
-    "copyInstallLinkTitle": "Copy install link — clickable in Discord / chat, routes friends through the install bridge",
-    "copyFullMessageTitle": "Copy full share message — intro line + install link + raw code",
-    "switchToPack": "Switch to this pack",
-    "wipeAndReinstall": "Wipe and reinstall",
-    "unlinkFromPack": "Unlink from this pack",
-    "pendingUpdates": "Updates available",
-    "newLabel": " new ",
-    "updatedLabel": " updated ",
-    "removedLabel": " removed",
-    "review": "Review",
-    "sync": "Sync",
-    "yourPacks": "Your packs",
-    "followFriendsPack": "Follow a friend's pack",
-    "pasteCodeAbove": "Paste their share code in the box above.",
     "heroEmptyTitle": "Pick a modpack to play",
     "heroEmptyBody": "Modpacks are saved sets of mods. Choose one from your modpacks page, browse public ones, or create your own.",
     "heroEmptyCta": "Open Modpacks",
@@ -1195,28 +920,14 @@
       "allUpToDate": "All modpacks are up to date!",
       "checkFailed": "Check failed: {{error}}",
       "installedModpack": "Installed modpack \"{{name}}\" with {{count}} mods!",
-      "installedPartial": "Installed {{installed}}/{{total}} mods. Missing: {{missing}}. These need to be installed manually.",
-      "unlinked": "Unlinked from \"{{name}}\"",
-      "failed": "Failed: {{error}}",
-      "reinstalled": "Modpack reinstalled",
-      "activated": "Activated \"{{name}}\"",
-      "activatedWithDetails": "Activated \"{{name}}\". {{downloaded}} downloaded, {{missing}} still missing.",
       "profileNotFoundOnDisk": "Couldn't find this profile on disk.",
       "couldntLoadProfile": "Couldn't load profile: {{error}}",
-      "codeCopied": "Copied {{code}}",
       "syncedModpack": "Synced modpack \"{{name}}\" - you're up to date!"
     },
     "hero": {
       "title": "Share code",
       "placeholder": "username/AA5A-315D-61AE"
-    },
-    "quickAdd": {
-      "add": "Add Pack"
-    },
-    "updateAvailableCount_one": "{{count}} update from author",
-    "updateAvailableCount_other": "{{count}} updates from author",
-    "updatesPill_one": "{{count}} update",
-    "updatesPill_other": "{{count}} updates"
+    }
   },
   "help": {
     "title": "Help",
@@ -1467,8 +1178,6 @@
     "quickAddPlaceholder": "https://github.com/user/mod or nexus:slaythespire2/mods/123",
     "adding": "Adding...",
     "add": "Add",
-    "advanced": "Advanced",
-    "advancedTitle": "Show source pills, Freeze/Delete, source editor",
     "closeSts2First": "Close STS2 first",
     "enableAll": "Enable all",
     "disableAll": "Disable all",
@@ -1495,12 +1204,8 @@
     "repairing": "Repairing…",
     "repairDesc": "Force-reinstall from GitHub. Use when version reads \"unknown\", the game refuses to load this mod, or the install otherwise looks broken.",
     "repairNeedSource": "Link a GitHub source first via \"Edit sources…\" — repair fetches from GitHub.",
-    "repairNoSource": "No GitHub source linked",
     "subtitle": "{{total}} installed · {{enabled}} active{{disabled}}",
-    "linkedCount": "{{count}} linked for auto-updates",
     "openFolder": "Open folder",
-    "openModLibrary": "Mod Library",
-    "openModLibraryTitle": "Choose which profiles include each installed mod without enabling or disabling it.",
     "importMod": "Import mod",
     "quickAddUrl": "Quick add URL",
     "checking": "Checking each mod against its source…",
@@ -1537,7 +1242,6 @@
     "snoozeDesc": "Skip this update until a newer release appears upstream (currently v{{version}}). Use this when the website's announced version doesn't match the file's actual version.",
     "snoozeUpdate": "Skip this update",
     "sources": "Sources",
-    "closeSourceEditor": "Close source editor",
     "editSources": "Edit sources…",
     "viewOnGitHubKebab": "View on GitHub",
     "viewOnNexusKebab": "View on Nexus",
@@ -1579,7 +1283,6 @@
       "rolledBack": "Rolled back '{{name}}' to v{{version}}",
       "rollbackFailed": "Rollback failed for '{{name}}': {{error}}"
     },
-    "title": "Your mods",
     "allInstalledTitle": "All installed mods",
     "allInstalledSubtitle": "Every mod installed on your computer. Your active modpack decides which ones load in the game.",
     "manageActiveModpackLink": "Manage active modpack →",

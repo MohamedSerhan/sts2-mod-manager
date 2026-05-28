@@ -408,47 +408,105 @@ body {
   gap: 8px;
   flex-wrap: wrap;
 }
-.gf-modpack-detail-body {
+.gf-modpack-detail-search {
+  display: flex;
+}
+.gf-modpack-detail-search .gf-input {
+  width: 100%;
+}
+
+/* Two-section body: "In this modpack" + "Add from your library". */
+.gf-modpack-detail-section {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
-.gf-modpack-detail-library-heading {
+.gf-modpack-detail-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.gf-modpack-detail-section-title {
   font-size: 14px;
   font-weight: 600;
   color: var(--ink);
-  margin: 4px 0 0;
+  margin: 0;
   display: flex;
   align-items: center;
 }
-.gf-modpack-detail-advanced {
-  border-top: 1px solid var(--indigo-line);
-  padding-top: 8px;
+.gf-modpack-detail-rows {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
-.gf-modpack-detail-advanced-toggle {
-  display: inline-flex;
+.gf-modpack-detail-empty {
+  font-size: 12.5px;
+  color: var(--ink-mute);
+  margin: 0;
+  padding: 6px 2px;
+}
+
+/* Inline mod row — Card-ish but tightened to the Library density.
+   Name/version/source-badges on the left, a low-key action on the
+   right. No drag handle, no checkbox: reordering lives in the Load
+   Order modal and membership is the Add/Remove button. */
+.gf-modpack-mod-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+}
+.gf-modpack-mod-row-info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.gf-modpack-mod-row-name {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gf-modpack-mod-row-meta {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  background: transparent;
-  border: 0;
+  font-size: 11.5px;
   color: var(--ink-mute);
-  cursor: pointer;
-  font: inherit;
-  padding: 4px 0;
 }
-.gf-modpack-detail-advanced-toggle:hover,
-.gf-modpack-detail-advanced-toggle:focus-visible {
-  color: var(--ink);
-  outline: none;
+.gf-modpack-mod-row-remove,
+.gf-modpack-mod-row-add {
+  flex: 0 0 auto;
+}
+
+/* Advanced — a clearly-divided section, not a buried collapsible. */
+.gf-modpack-detail-advanced-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+  padding-top: 14px;
+  border-top: 1px solid var(--indigo-line);
+}
+.gf-modpack-detail-advanced-heading {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  margin: 0;
 }
 .gf-modpack-detail-advanced-panel {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  padding-left: 18px;
+  gap: 10px;
 }
 
 /* Shared AdvancedSection — disclosure for power-user actions. */

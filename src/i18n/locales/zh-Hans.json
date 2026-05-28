@@ -74,7 +74,22 @@
       "notIn": "未加入此模组包",
       "includedOff": "已加入但在此模组包中已关闭"
     },
-    "libraryHeading": "此模组包中的模组",
+    "detail": {
+      "inPackHeading": "此模组包中的模组",
+      "inPackCount": "此模组包中的模组（{{count}}）",
+      "availableHeading": "从模组库添加",
+      "availableCount": "从模组库添加（{{count}}）",
+      "search": "搜索模组…",
+      "remove": "移除",
+      "add": "添加",
+      "emptyInPack": "此模组包中还没有模组——可从下方的模组库添加。",
+      "allInPack": "所有已安装的模组都已加入此模组包。",
+      "added": "已将 {{mod}} 添加到 {{pack}}",
+      "removed": "已从 {{pack}} 移除 {{mod}}",
+      "addFailed": "无法添加 {{mod}}：{{error}}",
+      "removeFailed": "无法移除 {{mod}}：{{error}}",
+      "advanced": "高级"
+    },
     "storage": {
       "active": "已激活于游戏",
       "stored": "已存储",

@@ -74,7 +74,22 @@
       "notIn": "Not in this modpack",
       "includedOff": "Included, off in this modpack"
     },
-    "libraryHeading": "Mods in this modpack",
+    "detail": {
+      "inPackHeading": "In this modpack",
+      "inPackCount": "In this modpack ({{count}})",
+      "availableHeading": "Add from your library",
+      "availableCount": "Add from your library ({{count}})",
+      "search": "Search mods…",
+      "remove": "Remove",
+      "add": "Add",
+      "emptyInPack": "No mods in this modpack yet — add some from your library below.",
+      "allInPack": "Every installed mod is already in this modpack.",
+      "added": "Added {{mod}} to {{pack}}",
+      "removed": "Removed {{mod}} from {{pack}}",
+      "addFailed": "Couldn't add {{mod}}: {{error}}",
+      "removeFailed": "Couldn't remove {{mod}}: {{error}}",
+      "advanced": "Advanced"
+    },
     "storage": {
       "active": "Active in game",
       "stored": "Stored",

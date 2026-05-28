@@ -1,17 +1,17 @@
 /**
  * ModpackDetail tests — the inline detail view that replaces the
- * modpack list area when a card is clicked (1.7.0 T16). Focus on
- * the layout + handler wiring, not the LibraryTable internals (which
- * are tested in LibraryTable.test.tsx).
+ * modpack list area when a card is clicked (1.7.0 T16), reworked into a
+ * two-section layout (1.7.x): "In this modpack" + "Add from your
+ * library". Focus on the layout + membership/handler wiring.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { ModpackDetail } from './ModpackDetail';
 import { AllProviders } from '../__test__/providers';
-import { registerInvokeHandler } from '../__test__/setup';
-import type { Profile, ShareResult } from '../types';
+import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
+import type { ModInfo, Profile, ProfileMod, ShareResult } from '../types';
 import type { ProfileDrift } from '../hooks/useTauri';
 
 function Wrap(props: React.ComponentProps<typeof ModpackDetail>) {
@@ -21,6 +21,39 @@ function Wrap(props: React.ComponentProps<typeof ModpackDetail>) {
     </AllProviders>
   );
 }
+
+const profileMod = (overrides: Partial<ProfileMod> = {}): ProfileMod =>
+  ({
+    name: 'PackMod',
+    version: '1.0',
+    source: null,
+    hash: null,
+    files: [],
+    enabled: true,
+    bundle_url: null,
+    folder_name: 'PackMod',
+    mod_id: 'PackMod',
+    ...overrides,
+  });
+
+const modInfo = (overrides: Partial<ModInfo> = {}): ModInfo =>
+  ({
+    name: 'LibMod',
+    version: '2.0',
+    description: '',
+    enabled: false,
+    files: [],
+    source: null,
+    hash: null,
+    dependencies: [],
+    size_bytes: 0,
+    github_url: null,
+    nexus_url: null,
+    folder_name: 'LibMod',
+    mod_id: 'LibMod',
+    pinned: false,
+    ...overrides,
+  });
 
 const baseProfile = (overrides: Partial<Profile> = {}): Profile =>
   ({
@@ -37,12 +70,14 @@ const baseProps = () => ({
   onBack: vi.fn(),
 });
 
+/** Install the given mods into AppContext via get_installed_mods. */
+function installMods(mods: ModInfo[]) {
+  registerInvokeHandler('get_installed_mods', () => mods);
+}
+
 describe('<ModpackDetail>', () => {
+  // ── Header ────────────────────────────────────────────────────────
   it('renders the header row with name, Back button, and Switch button for inactive profile', async () => {
-    registerInvokeHandler('get_profile_memberships', () => ({
-      profiles: [{ name: 'Sample', editable: true }],
-      mods: [],
-    }));
     const onBack = vi.fn();
     const onSwitch = vi.fn();
     render(
@@ -61,10 +96,6 @@ describe('<ModpackDetail>', () => {
 
   it('omits the Switch button when the modpack is already active', async () => {
     registerInvokeHandler('get_active_profile', () => 'Sample');
-    registerInvokeHandler('get_profile_memberships', () => ({
-      profiles: [{ name: 'Sample', editable: true }],
-      mods: [],
-    }));
     render(
       <Wrap
         profile={baseProfile({ name: 'Sample' })}
@@ -73,35 +104,11 @@ describe('<ModpackDetail>', () => {
       />,
     );
     await screen.findByRole('heading', { level: 2, name: 'Sample' });
-    // Active modpack shows the ACTIVE pill instead of Switch.
-    expect(screen.getByText(/ACTIVE/i)).toBeInTheDocument();
+    expect(await screen.findByText(/ACTIVE/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Switch to/i })).toBeNull();
   });
 
-  it('renders LibraryTable inside the detail body', async () => {
-    registerInvokeHandler('get_profile_memberships', () => ({
-      profiles: [{ name: 'Sample', editable: true }],
-      mods: [
-        {
-          name: 'BaseLib',
-          version: '1.0',
-          folder_name: 'BaseLib',
-          mod_id: 'BaseLib',
-          installed_enabled: true,
-          profiles: [{ profile_name: 'Sample', included: true, enabled: true, editable: true }],
-        },
-      ],
-    }));
-    render(<Wrap {...baseProps()} />);
-    expect(await screen.findByTestId('library-table')).toBeInTheDocument();
-    expect(screen.getAllByText('BaseLib').length).toBeGreaterThan(0);
-  });
-
   it('clicking Back fires onBack', async () => {
-    registerInvokeHandler('get_profile_memberships', () => ({
-      profiles: [{ name: 'Sample', editable: true }],
-      mods: [],
-    }));
     const onBack = vi.fn();
     const user = userEvent.setup();
     render(<Wrap {...baseProps()} onBack={onBack} />);
@@ -110,40 +117,248 @@ describe('<ModpackDetail>', () => {
     expect(onBack).toHaveBeenCalledTimes(1);
   });
 
-  it('Advanced section is collapsed by default and toggles open via the disclosure button', async () => {
-    registerInvokeHandler('get_profile_memberships', () => ({
-      profiles: [{ name: 'Sample', editable: true }],
-      mods: [],
-    }));
-    const user = userEvent.setup();
+  it('renders Shared badge + Re-share in header when shareInfo is provided', async () => {
+    const shareInfo: ShareResult = {
+      owner: 'alice',
+      code: 'AA5A-315D-61AE',
+      url: 'https://github.com/alice/sts2mm-profiles',
+      file_path: 'Sample.json',
+      repo_url: 'https://github.com/alice/sts2mm-profiles',
+      failed_uploads: [],
+    };
+    render(<Wrap {...baseProps()} shareInfo={shareInfo} onShare={vi.fn()} />);
+    await screen.findByRole('heading', { level: 2, name: 'Sample' });
+    expect(screen.getByText(/Shared/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Re-share/i })).toBeInTheDocument();
+  });
+
+  // ── Two-section layout ────────────────────────────────────────────
+  it('Section 1 lists the pack mods and Section 2 lists installed mods not in the pack', async () => {
+    installMods([
+      modInfo({ name: 'PackMod', folder_name: 'PackMod' }),
+      modInfo({ name: 'LibMod', folder_name: 'LibMod' }),
+    ]);
     render(
       <Wrap
-        {...baseProps()}
-        onDelete={vi.fn()}
-        onDuplicate={vi.fn()}
-        onExportJson={vi.fn()}
-        onSnapshot={vi.fn()}
+        profile={baseProfile({ mods: [profileMod({ name: 'PackMod', folder_name: 'PackMod' })] })}
+        onBack={vi.fn()}
       />,
     );
     await screen.findByRole('heading', { level: 2, name: 'Sample' });
-    // Closed — advanced action buttons aren't rendered.
-    expect(screen.queryByTestId('modpack-detail-advanced-panel')).toBeNull();
-    await user.click(screen.getByRole('button', { name: /Advanced/i }));
-    expect(screen.getByTestId('modpack-detail-advanced-panel')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Delete modpack/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Duplicate/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Export JSON/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Snapshot/i })).toBeInTheDocument();
-    // Toggling again collapses.
-    await user.click(screen.getByRole('button', { name: /Advanced/i }));
-    expect(screen.queryByTestId('modpack-detail-advanced-panel')).toBeNull();
+
+    const inPack = await screen.findByTestId('modpack-detail-in-pack');
+    expect(within(inPack).getByText('PackMod')).toBeInTheDocument();
+    expect(within(inPack).queryByText('LibMod')).toBeNull();
+
+    const available = await screen.findByTestId('modpack-detail-available');
+    expect(within(available).getByText('LibMod')).toBeInTheDocument();
+    expect(within(available).queryByText('PackMod')).toBeNull();
   });
 
-  it('Advanced action buttons fire their prop handlers', async () => {
-    registerInvokeHandler('get_profile_memberships', () => ({
-      profiles: [{ name: 'Sample', editable: true }],
-      mods: [],
-    }));
+  it('shows the empty in-pack message when the pack has no mods', async () => {
+    render(<Wrap {...baseProps()} />);
+    await screen.findByRole('heading', { level: 2, name: 'Sample' });
+    expect(
+      await screen.findByText(/No mods in this modpack yet/i),
+    ).toBeInTheDocument();
+  });
+
+  it('hides Section 2 and shows the all-in-pack note when every installed mod is in the pack', async () => {
+    installMods([modInfo({ name: 'PackMod', folder_name: 'PackMod' })]);
+    render(
+      <Wrap
+        profile={baseProfile({ mods: [profileMod({ name: 'PackMod', folder_name: 'PackMod' })] })}
+        onBack={vi.fn()}
+      />,
+    );
+    await screen.findByRole('heading', { level: 2, name: 'Sample' });
+    await waitFor(() => {
+      expect(screen.queryByTestId('modpack-detail-available')).toBeNull();
+    });
+    expect(screen.getByTestId('modpack-detail-all-in-pack')).toBeInTheDocument();
+  });
+
+  it('renders no drag handle and no rank chip anywhere in the detail view', async () => {
+    installMods([
+      modInfo({ name: 'PackMod', folder_name: 'PackMod' }),
+      modInfo({ name: 'LibMod', folder_name: 'LibMod' }),
+    ]);
+    const { container } = render(
+      <Wrap
+        profile={baseProfile({ mods: [profileMod({ name: 'PackMod', folder_name: 'PackMod' })] })}
+        onBack={vi.fn()}
+      />,
+    );
+    await screen.findByTestId('modpack-detail-in-pack');
+    expect(container.querySelector('.gf-load-order-drag')).toBeNull();
+    expect(container.querySelector('.gf-load-order-rank-inline')).toBeNull();
+    // No membership checkbox either.
+    expect(container.querySelector('input[type="checkbox"]')).toBeNull();
+  });
+
+  it('source badges derive from the matching installed ModInfo', async () => {
+    installMods([
+      modInfo({ name: 'PackMod', folder_name: 'PackMod', github_url: 'https://github.com/x/y' }),
+      modInfo({ name: 'LibMod', folder_name: 'LibMod', nexus_url: 'https://nexusmods.com/z' }),
+    ]);
+    render(
+      <Wrap
+        profile={baseProfile({ mods: [profileMod({ name: 'PackMod', folder_name: 'PackMod' })] })}
+        onBack={vi.fn()}
+      />,
+    );
+    const inPack = await screen.findByTestId('modpack-detail-in-pack');
+    expect(within(inPack).getByText('GitHub')).toBeInTheDocument();
+    const available = await screen.findByTestId('modpack-detail-available');
+    expect(within(available).getByText('Nexus')).toBeInTheDocument();
+  });
+
+  // ── Membership: Remove ────────────────────────────────────────────
+  it('Remove on an in-pack row calls set_profile_mod_membership with included=false', async () => {
+    installMods([modInfo({ name: 'PackMod', folder_name: 'PackMod' })]);
+    registerInvokeHandler('set_profile_mod_membership', () => baseProfile());
+    const onLibraryChanged = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <Wrap
+        profile={baseProfile({ mods: [profileMod({ name: 'PackMod', folder_name: 'PackMod', mod_id: 'PackMod' })] })}
+        onBack={vi.fn()}
+        onLibraryChanged={onLibraryChanged}
+      />,
+    );
+    const inPack = await screen.findByTestId('modpack-detail-in-pack');
+    await user.click(within(inPack).getByRole('button', { name: /Remove/i }));
+
+    await waitFor(() => {
+      expect(
+        getInvokeCalls().some((c) => c.cmd === 'set_profile_mod_membership'),
+      ).toBe(true);
+    });
+    const call = getInvokeCalls().find((c) => c.cmd === 'set_profile_mod_membership');
+    expect(call?.args).toMatchObject({
+      profileName: 'Sample',
+      modName: 'PackMod',
+      folderName: 'PackMod',
+      modId: 'PackMod',
+      included: false,
+    });
+    await waitFor(() => expect(onLibraryChanged).toHaveBeenCalled());
+  });
+
+  // ── Membership: Add ───────────────────────────────────────────────
+  it('Add on an available row calls set_profile_mod_membership with included=true', async () => {
+    installMods([modInfo({ name: 'LibMod', folder_name: 'LibMod', mod_id: 'LibMod' })]);
+    registerInvokeHandler('set_profile_mod_membership', () => baseProfile());
+    const onLibraryChanged = vi.fn();
+    const user = userEvent.setup();
+    render(<Wrap {...baseProps()} onLibraryChanged={onLibraryChanged} />);
+    const available = await screen.findByTestId('modpack-detail-available');
+    await user.click(within(available).getByRole('button', { name: /Add/i }));
+
+    await waitFor(() => {
+      expect(
+        getInvokeCalls().some((c) => c.cmd === 'set_profile_mod_membership'),
+      ).toBe(true);
+    });
+    const call = getInvokeCalls().find((c) => c.cmd === 'set_profile_mod_membership');
+    expect(call?.args).toMatchObject({
+      profileName: 'Sample',
+      modName: 'LibMod',
+      folderName: 'LibMod',
+      modId: 'LibMod',
+      included: true,
+    });
+    await waitFor(() => expect(onLibraryChanged).toHaveBeenCalled());
+  });
+
+  // ── Active-pack toggle_mod side effect ────────────────────────────
+  it('Add on the ACTIVE pack also calls toggle_mod with enable=true', async () => {
+    registerInvokeHandler('get_active_profile', () => 'Sample');
+    installMods([modInfo({ name: 'LibMod', folder_name: 'LibMod' })]);
+    registerInvokeHandler('set_profile_mod_membership', () => baseProfile());
+    const user = userEvent.setup();
+    render(<Wrap {...baseProps()} />);
+    const available = await screen.findByTestId('modpack-detail-available');
+    await user.click(within(available).getByRole('button', { name: /Add/i }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'toggle_mod')).toBe(true);
+    });
+    const call = getInvokeCalls().find((c) => c.cmd === 'toggle_mod');
+    expect(call?.args).toMatchObject({
+      name: 'LibMod',
+      folderName: 'LibMod',
+      enable: true,
+    });
+  });
+
+  it('Remove on the ACTIVE pack also calls toggle_mod with enable=false', async () => {
+    registerInvokeHandler('get_active_profile', () => 'Sample');
+    installMods([modInfo({ name: 'PackMod', folder_name: 'PackMod' })]);
+    registerInvokeHandler('set_profile_mod_membership', () => baseProfile());
+    const user = userEvent.setup();
+    render(
+      <Wrap
+        profile={baseProfile({ mods: [profileMod({ name: 'PackMod', folder_name: 'PackMod' })] })}
+        onBack={vi.fn()}
+      />,
+    );
+    const inPack = await screen.findByTestId('modpack-detail-in-pack');
+    await user.click(within(inPack).getByRole('button', { name: /Remove/i }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'toggle_mod')).toBe(true);
+    });
+    const call = getInvokeCalls().find((c) => c.cmd === 'toggle_mod');
+    expect(call?.args).toMatchObject({
+      name: 'PackMod',
+      folderName: 'PackMod',
+      enable: false,
+    });
+  });
+
+  it('does NOT call toggle_mod when the pack is not active', async () => {
+    // active profile defaults to null (inactive Sample).
+    installMods([modInfo({ name: 'LibMod', folder_name: 'LibMod' })]);
+    registerInvokeHandler('set_profile_mod_membership', () => baseProfile());
+    const user = userEvent.setup();
+    render(<Wrap {...baseProps()} />);
+    const available = await screen.findByTestId('modpack-detail-available');
+    await user.click(within(available).getByRole('button', { name: /Add/i }));
+
+    await waitFor(() => {
+      expect(
+        getInvokeCalls().some((c) => c.cmd === 'set_profile_mod_membership'),
+      ).toBe(true);
+    });
+    expect(getInvokeCalls().some((c) => c.cmd === 'toggle_mod')).toBe(false);
+  });
+
+  // ── Load order ────────────────────────────────────────────────────
+  it('Load order button in Section 1 calls onOpenLoadOrder', async () => {
+    installMods([modInfo({ name: 'PackMod', folder_name: 'PackMod' })]);
+    const onOpenLoadOrder = vi.fn();
+    const user = userEvent.setup();
+    const profile = baseProfile({ mods: [profileMod({ name: 'PackMod', folder_name: 'PackMod' })] });
+    render(<Wrap profile={profile} onBack={vi.fn()} onOpenLoadOrder={onOpenLoadOrder} />);
+    const inPack = await screen.findByTestId('modpack-detail-in-pack');
+    await user.click(within(inPack).getByRole('button', { name: /Load order/i }));
+    expect(onOpenLoadOrder).toHaveBeenCalledWith(profile);
+  });
+
+  it('Load order button is disabled when the pack has no mods', async () => {
+    const user = userEvent.setup();
+    const onOpenLoadOrder = vi.fn();
+    render(<Wrap {...baseProps()} onOpenLoadOrder={onOpenLoadOrder} />);
+    const inPack = await screen.findByTestId('modpack-detail-in-pack');
+    const btn = within(inPack).getByRole('button', { name: /Load order/i });
+    expect(btn).toBeDisabled();
+    await user.click(btn);
+    expect(onOpenLoadOrder).not.toHaveBeenCalled();
+  });
+
+  // ── Advanced section ──────────────────────────────────────────────
+  it('Advanced section renders its actions inline (no disclosure) and fires handlers', async () => {
     const onDelete = vi.fn();
     const onDuplicate = vi.fn();
     const onExportJson = vi.fn();
@@ -159,41 +374,21 @@ describe('<ModpackDetail>', () => {
       />,
     );
     await screen.findByRole('heading', { level: 2, name: 'Sample' });
-    await user.click(screen.getByRole('button', { name: /Advanced/i }));
-    await user.click(screen.getByRole('button', { name: /Duplicate/i }));
+    const advanced = screen.getByTestId('modpack-detail-advanced-panel');
+    expect(advanced).toBeInTheDocument();
+    expect(within(advanced).getByRole('button', { name: /Delete modpack/i })).toBeInTheDocument();
+
+    await user.click(within(advanced).getByRole('button', { name: /Duplicate/i }));
     expect(onDuplicate).toHaveBeenCalledWith('Sample');
-    await user.click(screen.getByRole('button', { name: /Export JSON/i }));
+    await user.click(within(advanced).getByRole('button', { name: /Export JSON/i }));
     expect(onExportJson).toHaveBeenCalledWith('Sample');
-    await user.click(screen.getByRole('button', { name: /Snapshot/i }));
+    await user.click(within(advanced).getByRole('button', { name: /Snapshot/i }));
     expect(onSnapshot).toHaveBeenCalledWith('Sample');
-    await user.click(screen.getByRole('button', { name: /Delete modpack/i }));
+    await user.click(within(advanced).getByRole('button', { name: /Delete modpack/i }));
     expect(onDelete).toHaveBeenCalledWith('Sample');
   });
 
-  it('renders Shared badge in header when shareInfo is provided', async () => {
-    registerInvokeHandler('get_profile_memberships', () => ({
-      profiles: [{ name: 'Sample', editable: true }],
-      mods: [],
-    }));
-    const shareInfo: ShareResult = {
-      owner: 'alice',
-      code: 'AA5A-315D-61AE',
-      url: 'https://github.com/alice/sts2mm-profiles',
-      file_path: 'Sample.json',
-      repo_url: 'https://github.com/alice/sts2mm-profiles',
-      failed_uploads: [],
-    };
-    render(<Wrap {...baseProps()} shareInfo={shareInfo} onShare={vi.fn()} />);
-    await screen.findByRole('heading', { level: 2, name: 'Sample' });
-    expect(screen.getByText(/Shared/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Re-share/i })).toBeInTheDocument();
-  });
-
-  it('Repair drift button only shows in Advanced when drift has has_drift=true', async () => {
-    registerInvokeHandler('get_profile_memberships', () => ({
-      profiles: [{ name: 'Sample', editable: true }],
-      mods: [],
-    }));
+  it('Repair drift button shows in Advanced only when drift.has_drift is true and fires its handler', async () => {
     const onRepairDrift = vi.fn();
     const drift: ProfileDrift = {
       added: ['Orphan'],
@@ -203,136 +398,65 @@ describe('<ModpackDetail>', () => {
       has_drift: true,
     };
     const user = userEvent.setup();
-    render(
-      <Wrap
-        {...baseProps()}
-        drift={drift}
-        onRepairDrift={onRepairDrift}
-      />,
-    );
+    render(<Wrap {...baseProps()} drift={drift} onRepairDrift={onRepairDrift} />);
     await screen.findByRole('heading', { level: 2, name: 'Sample' });
-    await user.click(screen.getByRole('button', { name: /Advanced/i }));
-    expect(screen.getByRole('button', { name: /Repair/i })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /Repair/i }));
+    const advanced = screen.getByTestId('modpack-detail-advanced-panel');
+    await user.click(within(advanced).getByRole('button', { name: /Repair/i }));
     expect(onRepairDrift).toHaveBeenCalledWith('Sample');
   });
 
   it('Repair button is omitted when no drift is reported', async () => {
-    registerInvokeHandler('get_profile_memberships', () => ({
-      profiles: [{ name: 'Sample', editable: true }],
-      mods: [],
-    }));
-    const user = userEvent.setup();
     render(<Wrap {...baseProps()} onRepairDrift={vi.fn()} />);
     await screen.findByRole('heading', { level: 2, name: 'Sample' });
-    await user.click(screen.getByRole('button', { name: /Advanced/i }));
-    expect(screen.queryByRole('button', { name: /Repair/i })).toBeNull();
+    const advanced = screen.getByTestId('modpack-detail-advanced-panel');
+    expect(within(advanced).queryByRole('button', { name: /Repair/i })).toBeNull();
   });
 
-  it('audit summary chips render only when matching counts are non-zero', async () => {
-    registerInvokeHandler('get_profile_memberships', () => ({
-      profiles: [{ name: 'Sample', editable: true }],
-      mods: [],
-    }));
-    // No audit data → no chips.
+  // ── Search ────────────────────────────────────────────────────────
+  it('search filters both sections by name', async () => {
+    installMods([
+      modInfo({ name: 'AlphaPack', folder_name: 'AlphaPack' }),
+      modInfo({ name: 'BetaLib', folder_name: 'BetaLib' }),
+      modInfo({ name: 'GammaLib', folder_name: 'GammaLib' }),
+    ]);
+    const user = userEvent.setup();
+    render(
+      <Wrap
+        profile={baseProfile({ mods: [profileMod({ name: 'AlphaPack', folder_name: 'AlphaPack' })] })}
+        onBack={vi.fn()}
+      />,
+    );
+    const inPack = await screen.findByTestId('modpack-detail-in-pack');
+    const available = await screen.findByTestId('modpack-detail-available');
+    // Before filtering: AlphaPack in-pack, BetaLib + GammaLib available.
+    expect(within(inPack).getByText('AlphaPack')).toBeInTheDocument();
+    expect(within(available).getByText('BetaLib')).toBeInTheDocument();
+    expect(within(available).getByText('GammaLib')).toBeInTheDocument();
+
+    await user.type(screen.getByRole('searchbox'), 'beta');
+    // In-pack now hides AlphaPack (no match); available keeps only BetaLib.
+    await waitFor(() => {
+      expect(within(inPack).queryByText('AlphaPack')).toBeNull();
+    });
+    expect(within(available).getByText('BetaLib')).toBeInTheDocument();
+    expect(within(available).queryByText('GammaLib')).toBeNull();
+  });
+
+  // ── Audit summary chips (carried over) ────────────────────────────
+  it('audit summary chips are hidden when there is no audit data', async () => {
     render(<Wrap {...baseProps()} />);
     await screen.findByRole('heading', { level: 2, name: 'Sample' });
     expect(screen.queryByTestId('modpack-detail-audit')).toBeNull();
   });
 
-  it('audit summary chip shows updates count when auditResults reports needs_update for an in-pack mod', async () => {
-    registerInvokeHandler('get_profile_memberships', () => ({
-      profiles: [{ name: 'Sample', editable: true }],
-      mods: [],
-    }));
-    // Pre-populate the audit cache by stubbing run_audit synchronously.
-    registerInvokeHandler('run_mod_audit_cmd', () => [
-      {
-        mod_name: 'PinnedMod',
-        folder_name: 'PinnedMod',
-        github_repo: 'owner/PinnedMod',
-        installed_version: '1.0',
-        latest_release_tag: '2.0',
-        latest_release_with_assets_tag: '2.0',
-        latest_has_assets: true,
-        needs_update: true,
-        asset_names: ['x.dll'],
-        releases_scanned: 1,
-        error: null,
-        nexus_url: null,
-        nexus_version: null,
-        nexus_update_available: false,
-        update_source: 'github',
-        github_auto_detected: true,
-        pinned: false,
-        snoozed: false,
-      },
-    ]);
-    // The detail view reads auditResults via AppContext; the context's
-    // initial value is null unless something runs the audit. The
-    // chip is suppressed when audit is null — so this test focuses on
-    // the "no audit yet" branch (chip section is hidden).
-    render(
-      <Wrap
-        profile={baseProfile({
-          name: 'Sample',
-          mods: [
-            {
-              name: 'PinnedMod',
-              version: '1.0',
-              source: null,
-              hash: null,
-              files: [],
-              enabled: true,
-              bundle_url: null,
-              folder_name: 'PinnedMod',
-              mod_id: 'PinnedMod',
-            },
-          ],
-        })}
-        onBack={vi.fn()}
-      />,
-    );
-    await screen.findByRole('heading', { level: 2, name: 'Sample' });
-    // Without an explicit audit context push, the chip stays hidden —
-    // this is the safe default (we don't want a spurious chip flicker).
-    await waitFor(() => {
-      expect(screen.queryByTestId('audit-chip-updates')).toBeNull();
-    });
-  });
-
   it('missing-source audit chip shows count of mods with no source + no bundle', async () => {
-    registerInvokeHandler('get_profile_memberships', () => ({
-      profiles: [{ name: 'Sample', editable: true }],
-      mods: [],
-    }));
     render(
       <Wrap
         profile={baseProfile({
           name: 'Sample',
           mods: [
-            {
-              name: 'NoSource',
-              version: '1.0',
-              source: null,
-              hash: null,
-              files: [],
-              enabled: true,
-              bundle_url: null,
-              folder_name: 'NoSource',
-              mod_id: 'NoSource',
-            },
-            {
-              name: 'HasSource',
-              version: '1.0',
-              source: 'https://github.com/x/y',
-              hash: null,
-              files: [],
-              enabled: true,
-              bundle_url: null,
-              folder_name: 'HasSource',
-              mod_id: 'HasSource',
-            },
+            profileMod({ name: 'NoSource', folder_name: 'NoSource', source: null, bundle_url: null }),
+            profileMod({ name: 'HasSource', folder_name: 'HasSource', source: 'https://github.com/x/y' }),
           ],
         })}
         onBack={vi.fn()}
@@ -341,5 +465,56 @@ describe('<ModpackDetail>', () => {
     await screen.findByRole('heading', { level: 2, name: 'Sample' });
     expect(await screen.findByTestId('audit-chip-missing')).toBeInTheDocument();
     expect(screen.getByText(/1 mod missing source/i)).toBeInTheDocument();
+  });
+
+  // ── Row presentation edge cases ───────────────────────────────────
+  it('shows the Local badge for a mod with a source but no GitHub/Nexus link', async () => {
+    installMods([
+      modInfo({ name: 'SideloadMod', folder_name: 'SideloadMod', source: 'file:///x', github_url: null, nexus_url: null }),
+    ]);
+    render(<Wrap {...baseProps()} />);
+    const available = await screen.findByTestId('modpack-detail-available');
+    expect(within(available).getByText(/^Local$/i)).toBeInTheDocument();
+  });
+
+  it('prefers the installed ModInfo display_name over the manifest name', async () => {
+    installMods([
+      modInfo({ name: 'PackMod', folder_name: 'PackMod', display_name: 'Pretty Pack Name' }),
+    ]);
+    render(
+      <Wrap
+        profile={baseProfile({ mods: [profileMod({ name: 'PackMod', folder_name: 'PackMod' })] })}
+        onBack={vi.fn()}
+      />,
+    );
+    const inPack = await screen.findByTestId('modpack-detail-in-pack');
+    expect(within(inPack).getByText('Pretty Pack Name')).toBeInTheDocument();
+  });
+
+  it('surfaces an error toast when adding a mod fails', async () => {
+    installMods([modInfo({ name: 'LibMod', folder_name: 'LibMod' })]);
+    registerInvokeHandler('set_profile_mod_membership', () => {
+      throw new Error('disk full');
+    });
+    const user = userEvent.setup();
+    render(<Wrap {...baseProps()} />);
+    const available = await screen.findByTestId('modpack-detail-available');
+    await user.click(within(available).getByRole('button', { name: /Add/i }));
+    expect(await screen.findByText(/Couldn't add LibMod: disk full/i)).toBeInTheDocument();
+  });
+
+  it('surfaces a success toast when removing a mod', async () => {
+    installMods([modInfo({ name: 'PackMod', folder_name: 'PackMod' })]);
+    registerInvokeHandler('set_profile_mod_membership', () => baseProfile());
+    const user = userEvent.setup();
+    render(
+      <Wrap
+        profile={baseProfile({ mods: [profileMod({ name: 'PackMod', folder_name: 'PackMod' })] })}
+        onBack={vi.fn()}
+      />,
+    );
+    const inPack = await screen.findByTestId('modpack-detail-in-pack');
+    await user.click(within(inPack).getByRole('button', { name: /Remove/i }));
+    expect(await screen.findByText(/Removed PackMod from Sample/i)).toBeInTheDocument();
   });
 });

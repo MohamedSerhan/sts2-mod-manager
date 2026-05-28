@@ -312,39 +312,65 @@ fn filter_profile_for_publish_compatibility(
     disabled_path: &std::path::Path,
     game_version: Option<&str>,
 ) {
-    let Some(game_version) = game_version else {
-        return;
-    };
+    // We always need the installed scan so we can drop stored (disabled)
+    // members — that exclusion does not depend on the game version.
     let installed_mods =
         merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
     let profile_name = profile.name.clone();
-    let mut filtered = 0;
+    let mut filtered_incompatible = 0;
+    let mut filtered_stored = 0;
 
     profile.mods.retain(|pm| {
-        match installed_mods
+        let installed = installed_mods
             .iter()
-            .find(|installed| publish_profile_mod_matches_installed(pm, installed))
-        {
-            Some(installed) if crate::updater::install_is_incompatible(installed, Some(game_version)) => {
+            .find(|installed| publish_profile_mod_matches_installed(pm, installed));
+        match installed {
+            // A mod that is stored (disabled on disk, i.e. living in the
+            // mods_disabled folder) is never uploaded, even when it
+            // belongs to the modpack. Sharing publishes the active set the
+            // curator is actually running — this also fixes the
+            // disable-in-game-then-reshare leak where a stored mod was
+            // still bundled from the disabled folder.
+            Some(m) if !m.enabled => {
+                log::info!(
+                    "Publish '{}': excluding stored (disabled) mod '{}'",
+                    profile_name,
+                    pm.name,
+                );
+                filtered_stored += 1;
+                false
+            }
+            Some(m)
+                if game_version
+                    .map(|gv| crate::updater::install_is_incompatible(m, Some(gv)))
+                    .unwrap_or(false) =>
+            {
                 log::info!(
                     "Publish '{}': filtering saved profile mod '{}' -- needs game v{}, user has v{}",
                     profile_name,
                     pm.name,
-                    installed.min_game_version.as_deref().unwrap_or("?"),
-                    game_version,
+                    m.min_game_version.as_deref().unwrap_or("?"),
+                    game_version.unwrap_or("?"),
                 );
-                filtered += 1;
+                filtered_incompatible += 1;
                 false
             }
             _ => true,
         }
     });
 
-    if filtered > 0 {
+    if filtered_stored > 0 {
+        log::info!(
+            "Publish '{}': excluded {} stored (disabled) mod(s) from the upload",
+            profile_name,
+            filtered_stored,
+        );
+    }
+    if filtered_incompatible > 0 {
         log::info!(
             "Publish '{}': filtered {} game-version-incompatible saved profile mod(s)",
             profile_name,
-            filtered,
+            filtered_incompatible,
         );
     }
 }
@@ -1151,6 +1177,53 @@ mod share_orchestration_tests {
 
         assert_eq!(prepared.mods.len(), 1);
         assert_eq!(prepared.mods[0].name, "Stable Only");
+    }
+
+    #[test]
+    fn publish_preparation_excludes_stored_disabled_mods_even_when_pack_members() {
+        // 4.7 — a mod that lives in mods_disabled (stored / disabled on
+        // disk) must not be bundled for upload even though it's listed as
+        // a member of the modpack. This also covers the disable-in-game-
+        // then-reshare leak. Stored exclusion applies regardless of game
+        // version, so we pass None here.
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mods_path = tmpdir.path().join("mods");
+        let disabled_path = tmpdir.path().join("mods_disabled");
+        let profiles_path = tmpdir.path().join("profiles");
+        std::fs::create_dir_all(&mods_path).unwrap();
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        std::fs::create_dir_all(&profiles_path).unwrap();
+
+        write_mod(&mods_path, "ActiveMod", "Active Mod");
+        write_mod(&disabled_path, "StoredMod", "Stored Mod");
+
+        let profile = Profile {
+            name: "Stable".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![
+                profile_mod("Active Mod", "ActiveMod"),
+                profile_mod("Stored Mod", "StoredMod"),
+            ],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+        };
+        crate::profiles::save_profile(&profile, &profiles_path).unwrap();
+
+        let prepared = load_profile_for_publish_from_paths(
+            "Stable",
+            None,
+            &profiles_path,
+            &mods_path,
+            &disabled_path,
+            tmpdir.path(),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(prepared.mods.len(), 1);
+        assert_eq!(prepared.mods[0].name, "Active Mod");
     }
 
     /// Verifies: user lookup -> repo exists -> bundle uploaded via releases

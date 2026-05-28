@@ -1,0 +1,26 @@
+name: Dev build cleanup
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete the PR's dev prerelease + tag (if any)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          TAG="dev-pr${PR}"
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release delete "$TAG" --repo "$REPO" --cleanup-tag --yes
+            echo "Deleted dev prerelease $TAG"
+          else
+            echo "No dev prerelease $TAG — nothing to clean up."
+          fi

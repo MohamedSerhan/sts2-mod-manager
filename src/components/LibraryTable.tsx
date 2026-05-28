@@ -23,7 +23,7 @@
  * accept callbacks for parent refresh so ProfilesView can re-pull
  * after a mutation without leaking into LibraryTable state.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Download,
@@ -47,6 +47,8 @@ import {
   toggleMod,
 } from '../hooks/useTauri';
 import type {
+  ModAuditEntry,
+  ModInfo,
   Profile,
   ProfileMembershipGrid,
   ProfileMembershipMod,
@@ -65,16 +67,70 @@ export type LibrarySortMode =
 export interface LibraryTableProps {
   /** The modpack whose membership column we focus on. The table
    *  filters / highlights this profile's column from the
-   *  getProfileMemberships grid. */
-  modpackName: string;
+   *  getProfileMemberships grid.
+   *
+   *  When null, the table runs in *no-focus library mode*: rows render
+   *  without the per-modpack checkbox or drag handle, the default sort
+   *  becomes nameAsc, and the "in this modpack first" sort option is
+   *  hidden. This is what the Library view uses to render the same row
+   *  component as ModpackDetail without anchoring it to a specific
+   *  modpack. */
+  modpackName: string | null;
   /** Fired after a membership / storage / load-order mutation so the
    *  parent (ProfilesView) can re-pull share-info, drift, profile list. */
   onMembershipChanged?: () => void;
   onLoadOrderChanged?: () => void;
   /** Initial value of the search filter. Useful for tests + deep-links. */
   initialSearch?: string;
+  /** Initial sort mode. Defaults to 'inPackFirst' when modpackName is
+   *  set; 'nameAsc' when modpackName is null. */
+  initialSort?: LibrarySortMode;
   /** Page size for the "show more" pagination footer. Defaults to 100. */
   pageSize?: number;
+  /** Pre-filter the rows from the membership grid before sorting +
+   *  rendering. Used by the Library view to apply tag / extra filters
+   *  on top of the table's own search. */
+  filterRow?: (row: ProfileMembershipMod) => boolean;
+
+  // ─── ModRow-style per-row action surface (optional) ──────────────
+  // When supplied, these are forwarded to LibraryRow's kebab menu.
+
+  /** ModInfo lookup keyed by `folder_name ?? name`. Provides
+   *  github_url, tags, pinned, etc. — everything the row's kebab needs
+   *  beyond what ProfileMembershipMod carries. */
+  modInfoByKey?: Map<string, ModInfo>;
+  /** Audit lookup keyed by `folder_name ?? mod_name`. */
+  auditByKey?: Map<string, ModAuditEntry>;
+  gameRunning?: boolean;
+  gameVersion?: string | null;
+  /** Per-row in-flight tracker for inline Update. */
+  updatingKey?: string | null;
+  /** Per-row in-flight tracker for Repair. */
+  repairingKey?: string | null;
+  /** Per-row in-flight tracker for Rollback. */
+  rollingBackKey?: string | null;
+  /** True when ANY row is currently updating (disables this row's
+   *  update button to prevent two simultaneous installs). */
+  anyUpdating?: boolean;
+  /** True when ANY row is repairing or rolling back. */
+  anyRecoveryInFlight?: boolean;
+
+  onUpdate?: (mod: ModInfo) => void;
+  onTogglePin?: (mod: ModInfo) => void;
+  onSnooze?: (mod: ModInfo, audit: ModAuditEntry | undefined) => void;
+  onUnsnooze?: (mod: ModInfo) => void;
+  onRepair?: (mod: ModInfo) => void;
+  onRollback?: (mod: ModInfo) => void;
+  onDelete?: (mod: ModInfo) => void;
+  onCopyVersion?: (mod: ModInfo) => void;
+  onOpenModsFolder?: () => void;
+  onEditSources?: (mod: ModInfo) => void;
+  onFindGithubFromNexus?: (mod: ModInfo) => void;
+  onOpenExternalUrl?: (url: string, mod: ModInfo) => void;
+  /** Render-prop for the inline source editor: when a row's key
+   *  matches, the parent returns the editor JSX to slot inside the
+   *  row. Returns null otherwise. */
+  renderSourceEditor?: (mod: ModInfo) => ReactNode;
 }
 
 function compareMembershipDisplayName(
@@ -98,7 +154,31 @@ export function LibraryTable({
   onMembershipChanged,
   onLoadOrderChanged,
   initialSearch = '',
+  initialSort,
   pageSize = DEFAULT_PAGE_SIZE,
+  filterRow,
+  modInfoByKey,
+  auditByKey,
+  gameRunning,
+  gameVersion,
+  updatingKey,
+  repairingKey,
+  rollingBackKey,
+  anyUpdating,
+  anyRecoveryInFlight,
+  onUpdate,
+  onTogglePin,
+  onSnooze,
+  onUnsnooze,
+  onRepair,
+  onRollback,
+  onDelete,
+  onCopyVersion,
+  onOpenModsFolder,
+  onEditSources,
+  onFindGithubFromNexus,
+  onOpenExternalUrl,
+  renderSourceEditor,
 }: LibraryTableProps) {
   const { t } = useTranslation();
   const toastCtx = useToast();
@@ -108,7 +188,9 @@ export function LibraryTable({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState(initialSearch);
-  const [sort, setSort] = useState<LibrarySortMode>('inPackFirst');
+  const [sort, setSort] = useState<LibrarySortMode>(
+    initialSort ?? (modpackName ? 'inPackFirst' : 'nameAsc'),
+  );
   const [visibleLimit, setVisibleLimit] = useState(pageSize);
   const [membershipSaving, setMembershipSaving] = useState<string | null>(null);
   const [storageSaving, setStorageSaving] = useState<string | null>(null);
@@ -148,15 +230,18 @@ export function LibraryTable({
     setVisibleLimit(pageSize);
   }, [filter, sort, pageSize]);
 
-  /** Resolve the focused profile's state row for a given mod row. */
+  /** Resolve the focused profile's state row for a given mod row.
+   *  Returns undefined when modpackName is null (no-focus mode). */
   function focusedState(row: ProfileMembershipMod) {
+    if (modpackName == null) return undefined;
     return row.profiles.find((p) => p.profile_name === modpackName);
   }
 
   /** Rows that have this modpack in their `profiles` array (so the
-   *  table can show the in-pack subset for drag reorder + counts). */
+   *  table can show the in-pack subset for drag reorder + counts).
+   *  Empty when modpackName is null (no concept of "in pack"). */
   const inPackRowKeys = useMemo(() => {
-    if (!grid) return new Set<string>();
+    if (!grid || modpackName == null) return new Set<string>();
     const set = new Set<string>();
     for (const row of grid.mods) {
       const state = row.profiles.find((p) => p.profile_name === modpackName);
@@ -167,9 +252,10 @@ export function LibraryTable({
 
   // Build the load-order draft from the grid + modpackName whenever
   // the grid updates. The draft is what the drag handles reorder; on
-  // commit we send it to setProfileLoadOrder.
+  // commit we send it to setProfileLoadOrder. Skipped when there's no
+  // focused modpack (no-focus library mode has no drag-reorder).
   useEffect(() => {
-    if (!grid) {
+    if (!grid || modpackName == null) {
       setLoadOrderDraft([]);
       return;
     }
@@ -199,8 +285,12 @@ export function LibraryTable({
   const filteredRows = useMemo(() => {
     if (!grid) return [] as ProfileMembershipMod[];
     const query = filter.trim().toLowerCase();
+    // External pre-filter (e.g. Library view's tag filter) is applied
+    // first so the table's own search runs against an already-narrowed
+    // set.
+    const preFiltered = filterRow ? grid.mods.filter(filterRow) : grid.mods;
     const rows = query
-      ? grid.mods.filter((row) => {
+      ? preFiltered.filter((row) => {
           const haystack = [
             row.name,
             row.display_name ?? '',
@@ -212,7 +302,7 @@ export function LibraryTable({
             .toLowerCase();
           return haystack.includes(query);
         })
-      : grid.mods;
+      : preFiltered;
     const sorted = [...rows];
     sorted.sort((a, b) => {
       const aIn = inPackRowKeys.has(membershipRowKey(a));
@@ -237,7 +327,7 @@ export function LibraryTable({
       return compareMembershipDisplayName(a, b);
     });
     return sorted;
-  }, [grid, filter, sort, inPackRowKeys]);
+  }, [grid, filter, sort, inPackRowKeys, filterRow]);
 
   const visibleRows = filteredRows.slice(0, visibleLimit);
 
@@ -292,6 +382,7 @@ export function LibraryTable({
   }
 
   async function handleToggleMembership(row: ProfileMembershipMod) {
+    if (modpackName == null) return;
     const state = focusedState(row);
     if (!state || !state.editable || membershipSaving || storageSaving) return;
     const nextIncluded = !state.included;
@@ -414,7 +505,7 @@ export function LibraryTable({
   // on the modpack manifest + writes settings if the modpack is active.
 
   async function commitLoadOrder(nextDraft: Profile['mods']) {
-    if (loadOrderSaving) return;
+    if (loadOrderSaving || modpackName == null) return;
     try {
       setLoadOrderSaving(true);
       await setProfileLoadOrder(
@@ -528,9 +619,15 @@ export function LibraryTable({
               }
               aria-label={t('profiles.library.sort.label')}
             >
-              <option value="inPackFirst">
-                {t('profiles.library.sort.inPackFirst')}
-              </option>
+              {/* "In this modpack first" only makes sense when a modpack
+                  is focused. In the no-focus Library view, this option
+                  is hidden so the user doesn't see a sort option that
+                  has no effect. */}
+              {modpackName != null && (
+                <option value="inPackFirst">
+                  {t('profiles.library.sort.inPackFirst')}
+                </option>
+              )}
               <option value="nameAsc">{t('profiles.library.sort.nameAsc')}</option>
               <option value="nameDesc">{t('profiles.library.sort.nameDesc')}</option>
               <option value="activeFirst">
@@ -564,9 +661,17 @@ export function LibraryTable({
               (m.folder_name ?? m.mod_id ?? m.name)
               === (row.folder_name ?? row.mod_id ?? row.name),
           );
+          const rowKey = membershipRowKey(row);
+          const modInfo
+            = modInfoByKey?.get(rowKey) ?? modInfoByKey?.get(row.name);
+          const audit = auditByKey?.get(rowKey) ?? auditByKey?.get(row.name);
+          const sourceEditorSlot
+            = modInfo && renderSourceEditor
+              ? renderSourceEditor(modInfo)
+              : undefined;
           return (
             <LibraryRow
-              key={membershipRowKey(row)}
+              key={rowKey}
               row={row}
               modpackName={modpackName}
               state={state}
@@ -638,6 +743,28 @@ export function LibraryTable({
               }}
               onToggleMembership={handleToggleMembership}
               onToggleStorage={handleToggleStorage}
+              mod={modInfo}
+              audit={audit}
+              gameRunning={gameRunning}
+              gameVersion={gameVersion}
+              isUpdating={!!modInfo && updatingKey === rowKey}
+              isRepairing={!!modInfo && repairingKey === rowKey}
+              isRollingBack={!!modInfo && rollingBackKey === rowKey}
+              anyUpdating={anyUpdating}
+              anyRecoveryInFlight={anyRecoveryInFlight}
+              onUpdate={modInfo && onUpdate ? () => onUpdate(modInfo) : undefined}
+              onTogglePin={modInfo && onTogglePin ? () => onTogglePin(modInfo) : undefined}
+              onSnooze={modInfo && onSnooze ? () => onSnooze(modInfo, audit) : undefined}
+              onUnsnooze={modInfo && onUnsnooze ? () => onUnsnooze(modInfo) : undefined}
+              onRepair={modInfo && onRepair ? () => onRepair(modInfo) : undefined}
+              onRollback={modInfo && onRollback ? () => onRollback(modInfo) : undefined}
+              onDelete={modInfo && onDelete ? () => onDelete(modInfo) : undefined}
+              onCopyVersion={modInfo && onCopyVersion ? () => onCopyVersion(modInfo) : undefined}
+              onOpenModsFolder={onOpenModsFolder}
+              onEditSources={modInfo && onEditSources ? () => onEditSources(modInfo) : undefined}
+              onFindGithubFromNexus={modInfo && onFindGithubFromNexus ? () => onFindGithubFromNexus(modInfo) : undefined}
+              onOpenExternalUrl={modInfo && onOpenExternalUrl ? (url: string) => onOpenExternalUrl(url, modInfo) : undefined}
+              sourceEditorSlot={sourceEditorSlot}
             />
           );
         })

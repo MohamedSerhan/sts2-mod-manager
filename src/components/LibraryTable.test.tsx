@@ -632,3 +632,123 @@ describe('<LibraryTable>', () => {
     ).toBeInTheDocument();
   });
 });
+
+// ── modpackName=null mode (no-focus library view) ───────────────────────
+//
+// LibraryTable was originally always anchored to a specific modpack. The
+// Library view (Mods.tsx) re-uses LibraryTable with modpackName=null so
+// that the same row component renders for both surfaces.
+
+describe('<LibraryTable modpackName={null}>', () => {
+  it('does not render the per-row checkbox column', async () => {
+    registerInvokeHandler('list_profiles_cmd', () => [
+      baseProfile({ name: 'Stable' }),
+    ]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [
+        {
+          name: 'BaseLib',
+          version: '1.0.0',
+          folder_name: 'BaseLib',
+          mod_id: 'BaseLib',
+          installed_enabled: true,
+          profiles: [
+            { profile_name: 'Stable', included: true, enabled: true, editable: true },
+          ],
+        },
+      ],
+    }));
+
+    render(<Wrap modpackName={null} />);
+    await screen.findAllByText('BaseLib');
+    // No per-modpack membership checkbox in the row.
+    expect(screen.queryByRole('checkbox')).toBeNull();
+  });
+
+  it('does not render drag handles or in-pack rank chips', async () => {
+    registerInvokeHandler('list_profiles_cmd', () => [
+      baseProfile({ name: 'Stable' }),
+    ]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [
+        {
+          name: 'BaseLib',
+          version: '1.0.0',
+          folder_name: 'BaseLib',
+          mod_id: 'BaseLib',
+          installed_enabled: true,
+          profiles: [
+            { profile_name: 'Stable', included: true, enabled: true, editable: true },
+          ],
+        },
+      ],
+    }));
+
+    const { container } = render(<Wrap modpackName={null} />);
+    await screen.findAllByText('BaseLib');
+    // No drag handle.
+    expect(container.querySelector('.gf-load-order-drag')).toBeNull();
+    // No rank chip (#1, #2…).
+    expect(screen.queryByText(/^#\d+$/)).toBeNull();
+  });
+
+  it('hides the "In this modpack first" sort option', async () => {
+    registerInvokeHandler('list_profiles_cmd', () => [
+      baseProfile({ name: 'Stable' }),
+    ]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [
+        {
+          name: 'BaseLib',
+          version: '1.0.0',
+          folder_name: 'BaseLib',
+          mod_id: 'BaseLib',
+          installed_enabled: true,
+          profiles: [
+            { profile_name: 'Stable', included: true, enabled: true, editable: true },
+          ],
+        },
+      ],
+    }));
+
+    render(<Wrap modpackName={null} />);
+    await screen.findAllByText('BaseLib');
+    const sortSelect = screen.getByRole('combobox', { name: /Sort/i });
+    // Default sort flipped to nameAsc.
+    expect(sortSelect).toHaveValue('nameAsc');
+    expect(screen.queryByRole('option', { name: /In this modpack first/i })).toBeNull();
+  });
+
+  it('still renders the storage chip + storage button per row', async () => {
+    registerInvokeHandler('list_profiles_cmd', () => [
+      baseProfile({ name: 'Stable' }),
+    ]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [
+        {
+          name: 'BaseLib',
+          version: '1.0.0',
+          folder_name: 'BaseLib',
+          mod_id: 'BaseLib',
+          installed_enabled: true,
+          profiles: [
+            { profile_name: 'Stable', included: false, enabled: false, editable: true },
+          ],
+        },
+      ],
+    }));
+
+    const { container } = render(<Wrap modpackName={null} />);
+    await screen.findAllByText('BaseLib');
+    // Storage chip span (specific class) reads "Active in game".
+    const chip = container.querySelector('.gf-profile-library-storage.active');
+    expect(chip).not.toBeNull();
+    expect(chip?.textContent).toMatch(/Active in game/i);
+    // Storage action button is the per-row Store button.
+    expect(screen.getByRole('button', { name: /Store BaseLib/i })).toBeInTheDocument();
+  });
+});

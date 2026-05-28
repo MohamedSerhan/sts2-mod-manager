@@ -476,7 +476,85 @@ export async function discoverThreadId({ postsUrl = POSTS_URL } = {}) {
 const NEXUS_COMMENT_URL = (id) =>
   buildNexusPostUrl(POSTS_URL, id);
 
-const SKIP_BUG_STATUSES = new Set(['closed', 'duplicate', 'not-a-bug']);
+const NEXUS_BUG_URL = (id) =>
+  `${WIDGET_BASE_URL}/${GAME_DOMAIN}/mods/${MOD_ID_STR}?tab=bugs&issue_id=${id}`;
+
+// Nexus bug statuses that mean "already handled" — skip on first sight.
+// Matched case-insensitively as substrings against the row's status text.
+const SKIP_BUG_STATUS_SUBSTRINGS = ['not a bug', 'duplicate', 'fixed', 'closed', 'wont fix', "won't fix", 'wontfix'];
+
+// ---------------------------------------------------------------------------
+// Bugs tab — ModBugsTab widget (table layout, distinct from the comments widget)
+// ---------------------------------------------------------------------------
+
+export function buildBugsWidgetUrl() {
+  const params = new URLSearchParams({ id: MOD_ID_STR, game_id: GAME_ID }).toString();
+  return `${WIDGET_BASE_URL}/Core/Libs/Common/Widgets/ModBugsTab?${params}`;
+}
+
+// Each bug is a <tr ... data-issue-id="N" class="mod-issue-row"> ... </tr>.
+// Bug rows do NOT nest <tr>, so a non-greedy [\s\S]*?</tr> capture is safe.
+const BUG_ROW_RE = /<tr\s[^>]*\bdata-issue-id="(\d+)"[^>]*\bclass="[^"]*\bmod-issue-row\b[^"]*"[^>]*>([\s\S]*?)<\/tr>/gi;
+const BUG_TITLE_RE = /<a\s[^>]*\bclass="[^"]*\bissue-title\b[^"]*"[^>]*>([\s\S]*?)<\/a>/i;
+const BUG_STATUS_RE = /<span\s[^>]*\bclass="[^"]*\binline-status\b[^"]*"[^>]*>([\s\S]*?)<\/span>\s*<\/span>/i;
+const BUG_VERSION_RE = /Version:\s*<i>([\s\S]*?)<\/i>/i;
+
+export function parseBugsFromHtml(html) {
+  if (isCloudflareChallenge(html)) {
+    const err = new Error('Cloudflare blocked the bugs request — curl-impersonate may need updating');
+    err.code = 'CLOUDFLARE_BLOCKED';
+    throw err;
+  }
+  const bugs = [];
+  let m;
+  BUG_ROW_RE.lastIndex = 0;
+  while ((m = BUG_ROW_RE.exec(html)) !== null) {
+    const id = m[1];
+    const row = m[2];
+
+    const titleM = BUG_TITLE_RE.exec(row);
+    const title = titleM ? stripTags(titleM[1]).replace(/\s+/g, ' ').trim() : '';
+    if (!title) continue; // malformed row — skip
+
+    const statusM = BUG_STATUS_RE.exec(row);
+    const status = statusM ? stripTags(statusM[1]).replace(/\s+/g, ' ').trim() : '';
+
+    const versionM = BUG_VERSION_RE.exec(row);
+    const gameVersion = versionM ? stripTags(versionM[1]).replace(/\s+/g, ' ').trim() : '';
+
+    bugs.push({ id, title, status, gameVersion });
+  }
+  return bugs;
+}
+
+export async function fetchAllBugs() {
+  const url = buildBugsWidgetUrl();
+  const html = await htmlFetcher(url, {
+    headers: {
+      'Referer': `${WIDGET_BASE_URL}/${GAME_DOMAIN}/mods/${MOD_ID_STR}?tab=bugs`,
+      'X-Requested-With': 'XMLHttpRequest',
+    },
+  });
+  return parseBugsFromHtml(html);
+}
+
+function bugToItem(b) {
+  return {
+    kind: 'bug',
+    id: String(b.id),
+    title: b.title,
+    // The bug table doesn't expose the full description (it loads lazily via
+    // loadIssueReplies). The title is descriptive enough for triage; @claude
+    // investigates the codebase + the maintainer opens the Nexus link for detail.
+    body: b.title,
+    status: b.status,
+    gameVersion: b.gameVersion,
+    createdAt: '', // not reliably parseable from the row; bugs sort after comments
+    author: '<nexus-bug-reporter>',
+    authorId: '',
+    nexus_url: NEXUS_BUG_URL(b.id),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -513,32 +591,62 @@ export async function main({ dryRun, ghToken, state, templatePath = TEMPLATE_PAT
     pendingNextRun: 0,
   };
 
-  const commentNodes = await fetchAllComments();
-  const comments = commentNodes.map(commentToItem);
+  result.bugStatusSkipped = 0;
 
-  // 1. Maintainer filter — case-insensitive — FIRST
+  // ── Comments ──────────────────────────────────────────────────────────
+  const comments = (await fetchAllComments()).map(commentToItem);
+
+  // Maintainer filter — case-insensitive — FIRST (comments only; bug-tracker
+  // reports are inherently external so we don't maintainer-filter them).
   const nonMaintainerComments = comments.filter((c) => {
     if (isMaintainer(c.author)) { result.maintainerSkipped++; return false; }
     return true;
   });
 
-  // 2. Dedup against state
+  // Dedup against state
   const unseenComments = nonMaintainerComments.filter((c) => {
     if (state.comments[c.id]) { result.alreadySeen++; return false; }
     if (state.kudos_seen.includes(c.id)) { result.alreadySeen++; return false; }
     return true;
   });
 
-  // 3. Classify all unseen items, sorted oldest-first by createdAt
-  const items = unseenComments.slice().sort(
+  // ── Bugs ──────────────────────────────────────────────────────────────
+  let bugs = [];
+  try {
+    bugs = (await fetchAllBugs()).map(bugToItem);
+  } catch (err) {
+    if (err.code === 'CLOUDFLARE_BLOCKED') throw err;
+    // A bugs-tab parse failure shouldn't sink the whole run — comments still
+    // triage. Log + continue with zero bugs.
+    console.error(`nexus-triage: bug fetch/parse failed (continuing with comments only): ${err.message}`);
+  }
+
+  const unseenBugs = bugs.filter((b) => {
+    if (state.bugs[b.id]) { result.alreadySeen++; return false; }
+    const statusLower = (b.status || '').toLowerCase();
+    if (SKIP_BUG_STATUS_SUBSTRINGS.some((s) => statusLower.includes(s))) {
+      result.bugStatusSkipped++;
+      return false;
+    }
+    return true;
+  });
+
+  // ── Unified filing pipeline ─────────────────────────────────────────────
+  // Comments sort oldest-first by createdAt; bugs (no reliable createdAt)
+  // append after. Each item carries its own classification: comments run the
+  // heuristic classifier; bugs are bugs by definition.
+  const commentItems = unseenComments.slice().sort(
     (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
   );
+  const items = [...commentItems, ...unseenBugs];
 
   let filedThisRun = 0;
   const newKudos = [];
   const template = readFileSync(templatePath, 'utf-8');
   for (const item of items) {
-    const cls = classify(item.body, item.kind);
+    const cls = item.kind === 'bug'
+      ? { classification: 'bug', confidence: 'high' }
+      : classify(item.body, item.kind);
     if (cls.classification === 'kudos') {
       result.kudosSkipped++;
       newKudos.push(item.id);
@@ -549,15 +657,14 @@ export async function main({ dryRun, ghToken, state, templatePath = TEMPLATE_PAT
       continue;
     }
     const body = renderIssueBody(item, template, cls);
-    const title = `[Nexus] ${sanitizeTitle(item.body || item.title || '')}`;
+    const title = `[Nexus] ${sanitizeTitle(item.title || item.body || '')}`;
     const label = `nexus-triage,${cls.classification}`;
     let filedIssue = { number: -1, url: '<dry-run>' };
     if (!dryRun) {
       filedIssue = await ghInvoker(['issue', 'create', '--title', title, '--label', label, '--body', body]);
     } else {
-      console.log(`[dry-run] Would file: ${title}`);
+      console.log(`[dry-run] Would file (${item.kind}): ${title}`);
       console.log(`[dry-run] Labels:    ${label}`);
-      console.log(`[dry-run] Body excerpt: ${body.slice(0, 200)}...`);
     }
     result.filed.push({
       kind: item.kind, nexus_id: item.id,
@@ -567,10 +674,11 @@ export async function main({ dryRun, ghToken, state, templatePath = TEMPLATE_PAT
     filedThisRun++;
   }
 
-  // 4. Update state (in memory; caller persists)
+  // ── Persist state (in memory; caller writes to disk) ────────────────────
   if (!dryRun) {
     for (const f of result.filed) {
-      state.comments[f.nexus_id] = {
+      const bucket = f.kind === 'bug' ? state.bugs : state.comments;
+      bucket[f.nexus_id] = {
         gh_issue_url: f.gh_issue_url,
         classification: f.classification,
         filed_at: new Date().toISOString(),
@@ -671,14 +779,24 @@ export async function runFromCli(argv = process.argv.slice(2)) {
   }
 
   if (opts.bootstrap) {
-    const fresh = { schema_version: STATE_SCHEMA_VERSION, last_run_at: new Date().toISOString(),
+    const now = new Date().toISOString();
+    const fresh = { schema_version: STATE_SCHEMA_VERSION, last_run_at: now,
                     comments: {}, bugs: {}, kudos_seen: [] };
     const commentNodes = await fetchAllComments();
     for (const c of commentNodes) {
       fresh.kudos_seen.push(String(c.id));
     }
+    let bugNodes = [];
+    try {
+      bugNodes = await fetchAllBugs();
+    } catch (err) {
+      console.error(`nexus-triage: bug fetch during bootstrap failed (seeding comments only): ${err.message}`);
+    }
+    for (const b of bugNodes) {
+      fresh.bugs[String(b.id)] = { gh_issue_url: '<bootstrap-seed>', classification: 'bootstrap-seed', filed_at: now };
+    }
     saveState(STATE_PATH, fresh);
-    console.log(`nexus-triage: bootstrap complete. Marked ${commentNodes.length} comments as seen.`);
+    console.log(`nexus-triage: bootstrap complete. Marked ${commentNodes.length} comments + ${bugNodes.length} bugs as seen.`);
     return 0;
   }
 

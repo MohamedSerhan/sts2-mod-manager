@@ -518,6 +518,50 @@ test('fetchAllComments: concatenates comments from multiple pages correctly', as
 });
 
 // ---------------------------------------------------------------------------
+// Bug parser tests (ModBugsTab widget table)
+// ---------------------------------------------------------------------------
+
+import { parseBugsFromHtml, fetchAllBugs } from './nexus-triage.mjs';
+
+const BUGS_HTML = readFileSync('scripts/fixtures/nexus-bugs-mixed.html', 'utf-8');
+
+test('parseBugsFromHtml: extracts id, title, status, version from table rows', () => {
+  const bugs = parseBugsFromHtml(BUGS_HTML);
+  assert.equal(bugs.length, 3, `expected 3 bug rows, got ${bugs.length}`);
+  const first = bugs.find((b) => b.id === '1084178');
+  assert.ok(first, 'bug 1084178 present');
+  assert.equal(first.title, 'import does not sync mod source on UI');
+  assert.equal(first.status, 'Being looked at');
+  assert.match(first.gameVersion, /1\.6\.1/);
+});
+
+test('parseBugsFromHtml: malformed row without title is skipped', () => {
+  const html = '<table><tbody>' +
+    '<tr data-issue-id="1" class="mod-issue-row"><td class="table-bug-title"></td></tr>' +
+    '<tr data-issue-id="2" class="mod-issue-row"><td class="table-bug-title">' +
+    '<a class="issue-title" href="#">real bug</a></td></tr>' +
+    '</tbody></table>';
+  const bugs = parseBugsFromHtml(html);
+  assert.equal(bugs.length, 1);
+  assert.equal(bugs[0].id, '2');
+});
+
+test('parseBugsFromHtml: Cloudflare challenge throws CLOUDFLARE_BLOCKED', () => {
+  const cf = '<html><head><title>Just a moment...</title></head><body>cf-chl</body></html>';
+  assert.throws(() => parseBugsFromHtml(cf), (e) => e.code === 'CLOUDFLARE_BLOCKED');
+});
+
+test('fetchAllBugs: stubbed fetcher returns parsed bugs', async () => {
+  setHtmlFetcher(async () => BUGS_HTML);
+  try {
+    const bugs = await fetchAllBugs();
+    assert.equal(bugs.length, 3);
+  } finally {
+    setHtmlFetcher(null); // reset (matches the pattern used by comment-fetch tests)
+  }
+});
+
+// ---------------------------------------------------------------------------
 // discoverThreadId tests
 // ---------------------------------------------------------------------------
 

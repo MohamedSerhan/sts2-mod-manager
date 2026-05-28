@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "last_run_at": "2026-05-28T03:01:53.595Z",
+  "last_run_at": "2026-05-28T03:22:28.183Z",
   "comments": {
     "170022530": {
       "gh_issue_url": "https://github.com/MohamedSerhan/sts2-mod-manager/issues/55",
@@ -13,7 +13,13 @@
       "filed_at": "2026-05-28T03:01:53.595Z"
     }
   },
-  "bugs": {},
+  "bugs": {
+    "1084178": {
+      "gh_issue_url": "https://github.com/MohamedSerhan/sts2-mod-manager/issues/57",
+      "classification": "bug",
+      "filed_at": "2026-05-28T03:22:28.183Z"
+    }
+  },
   "kudos_seen": [
     "170136803",
     "170136776",

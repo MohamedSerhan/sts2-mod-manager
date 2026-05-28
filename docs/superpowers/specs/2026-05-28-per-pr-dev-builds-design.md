@@ -9,7 +9,7 @@ Sub-project **D** of the five-part roadmap (A=Nexus triage [shipped], **D=per-PR
 - **Opt-in dev builds per PR.** Adding a `dev-build` label to a PR builds all three platforms and publishes installable bundles; pushing more commits to a labeled PR rebuilds.
 - **Self-isolating dev data.** A dev build never reads or writes the release app's data dir. Its settings, modpacks, profiles, `mod_sources.json`, cache, and logs live under a separate `sts2-mod-manager-dev/` directory — automatically, regardless of how the build is launched.
 - **Persistent, easy-to-fetch delivery.** Builds land as a per-PR prerelease with public direct-download URLs (no auth, no unzip, no expiry) so the maintainer can grab them and a future E (build switcher) can list/download them trivially.
-- **Distinct identity.** Every dev build carries a version like `1.6.1-dev.pr42.ga1b2c3d` so it's never confused with release, and E can display/compare versions.
+- **Distinct identity.** Every dev build carries a version like `1.6.1-dev.pr42.ga1b2c3d` and a distinct install identity (`com.sts2mm.app.dev` / "STS2 Mod Manager (Dev)") so it's never confused with release, installs *alongside* release rather than over it, and E can display/compare versions.
 - **Release path untouched.** Tag builds and the existing release flow behave exactly as before; dev builds are purely additive.
 
 ## Out of scope
@@ -106,18 +106,26 @@ Then replace the three `.join("sts2-mod-manager")` sites with `.join(app_dir_nam
 - **Not isolated (intentional):** the game's `mods` / `disabled_mods` folders. A dev build starts with blank settings, auto-detects the same Steam game, and operates on the real mod folders. The maintainer accepts this (Steam file verification is the recovery path). The isolation guarantees the dev build won't *corrupt the release app's library/modpack records* — only the live game folders are shared.
 - **Shared (intentional):** keyring (GitHub + Nexus tokens).
 
-**Install isolation + the `nxm://` handler.** Dev builds keep the release bundle identifier (`com.sts2mm.app`) and product name — we deliberately do *not* stamp those. Two reasons: (1) a different identifier would make the dev build register as the system `nxm://` protocol handler, hijacking Nexus "Download with manager" links away from the release install; (2) it would fragment installer upgrade state. The consequence: the `.msi`/NSIS dev *installers* would upgrade-in-place over a release install, so they're not suitable for side-by-side use. **For side-by-side testing, use the portable Windows build** (run the `.exe` from any folder — no install, no registry, no conflict). This is also what E will manage. Data isolation via `app_dir_name()` keeps the portable dev build's app data separate regardless of where it runs from. The `.msi`/`.dmg`/`.deb` are still published for completeness (and for testing the installers themselves), with a note in the PR comment to prefer portable for side-by-side.
+**Install isolation — distinct dev identity.** Dev builds are stamped with a distinct bundle identifier (`com.sts2mm.app.dev`) and product name (`STS2 Mod Manager (Dev)`). This makes the `.msi`/NSIS dev installers install as a **separate app alongside** the release install — own Start-menu entry, own install dir — so installing a dev build never touches the release app. All dev builds share the *one* `.dev` identity (not per-PR), so installing dev-pr43 upgrades the dev-pr42 install in place: you get **release + one installed dev build** coexisting, and switching installed dev builds is a reinstall. For multiple dev builds available simultaneously, the portable `.exe` still works (run any number from folders). E can drive either path. Data isolation is independent of this — `app_dir_name()` (version-driven) gives every dev build the `sts2-mod-manager-dev` data dir regardless of identifier.
 
-## Version stamping
+**`nxm://` handler tradeoff.** Because the dev build is now a distinct installed app, while it's installed it may register as the system `nxm://` "Download with Manager" handler, taking it from the release install. This is non-destructive and self-correcting — relaunching (or reinstalling) the release app reclaims the handler. Accepted by the maintainer.
+
+**Self-updater nag (known, harmless).** The app runs `@tauri-apps/plugin-updater`'s `check()` on launch (frontend). A dev build's version (`1.6.1-dev.pr42.g…`) is a *pre-release* of `1.6.1`, so SemVer ranks it **below** the published `1.6.1` release — the updater will show an "update available" banner offering to "upgrade" the dev build to release. This is harmless: the offered artifact has the *release* identifier (`com.sts2mm.app`), so accepting it (re)installs release as its own separate app — it does not replace the dev build or touch the `sts2-mod-manager-dev` data. We document this as expected behavior. **Not** suppressing it in D, to avoid touching `src/App.tsx` (the redesign branch's most-edited file). If the banner proves annoying, a 2-line follow-up guard (skip `check()` when the running version contains `-dev`) is the fix — deferred.
+
+## Version + identity stamping
 
 `scripts/dev-build-stamp.mjs --stamp` (run per build leg, dev builds only):
 
 1. Read base version from `src-tauri/tauri.conf.json` (`"version"`).
 2. Compute `computeDevVersion(base, prNumber, shortSha)` → `${base}-dev.pr${pr}.g${sha}`.
    - The `g` prefix on the sha guarantees a valid SemVer pre-release identifier even when a short sha is all-digits with a leading zero (git-describe convention). Cargo + Tauri both reject invalid SemVer, so this matters.
-3. `stampFiles(version)` rewrites the version in `src-tauri/tauri.conf.json` (`"version": "…"`) and `src-tauri/Cargo.toml` (`version = "…"` under `[package]`). Runner-only; never committed (the runner's checkout is throwaway, and the build job doesn't push).
+3. `stampFiles(version)` rewrites, runner-only (never committed — the runner's checkout is throwaway and the build job doesn't push):
+   - `src-tauri/tauri.conf.json`: `"version"` → stamped version; `"identifier"` `com.sts2mm.app` → `com.sts2mm.app.dev`; `"productName"` `STS2 Mod Manager` → `STS2 Mod Manager (Dev)`.
+   - `src-tauri/Cargo.toml`: `version = "…"` under `[package]` → stamped version (drives `CARGO_PKG_VERSION`, which `app_dir_name()` reads for data isolation).
 
 Inputs come from the workflow: `${{ github.event.pull_request.number }}` and the short SHA of the PR head.
+
+The version stamp drives four things at once: the in-app version display, the artifact/installer filenames, the `-dev` data isolation (`app_dir_name()`), and the distinct install identity (`.dev` identifier + "(Dev)" name).
 
 ## Delivery
 
@@ -159,7 +167,7 @@ Non-negotiable (matches the project's test-everything culture):
    - `computeDevVersion('1.6.1', 42, 'a1b2c3d')` → `1.6.1-dev.pr42.ga1b2c3d`
    - All-digit short sha (`0123456`) still yields valid SemVer (`g0123456`)
    - `renderDevComment` includes every provided asset link, the version, the commit, the run URL, the hidden marker, and the isolation reminder; omits platforms with no asset
-   - `stampFiles` round-trip: rewrites both files' version, leaves other JSON/TOML keys intact (use temp copies of the real files)
+   - `stampFiles` round-trip: rewrites both files' version AND the tauri.conf.json `identifier` (→ `com.sts2mm.app.dev`) + `productName` (→ `STS2 Mod Manager (Dev)`), leaving every other JSON/TOML key byte-intact (use temp copies of the real files; assert untouched keys are unchanged)
 2. **Rust `#[test]` for `app_dir_name()`** — confirm a `-dev` version maps to `sts2-mod-manager-dev` and a clean version to `sts2-mod-manager`. (Testing the `env!` branch may require a small refactor to a pure `dir_name_for(version: &str)` that `app_dir_name()` calls — test the pure function with both inputs.)
 3. **YAML validity** — both `build.yml` and `dev-build-cleanup.yml` parse (Python `yaml.safe_load`).
 4. **`cargo check`** passes with the `state.rs` / `lib.rs` change (the existing `check` job covers this on the D PR itself).

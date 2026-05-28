@@ -30,6 +30,7 @@ test('stampFiles rewrites version + identity in conf, version in cargo, nothing 
       version: '1.6.1',
       identifier: 'com.sts2mm.app',
       app: { windows: [{ title: 'STS2 Mod Manager' }] },
+      bundle: { targets: 'all' },
     }, null, 2) + '\n', 'utf-8');
     writeFileSync(cargoPath,
       '[package]\nname = "sts2-mod-manager"\nversion = "1.6.1"\nedition = "2021"\n\n' +
@@ -43,6 +44,9 @@ test('stampFiles rewrites version + identity in conf, version in cargo, nothing 
     assert.equal(conf.productName, 'STS2 Mod Manager (Dev)');
     // Untouched nested key stays intact
     assert.equal(conf.app.windows[0].title, 'STS2 Mod Manager');
+    // Dev builds drop the Windows MSI target (WiX rejects the non-numeric
+    // "-dev" pre-release); everything else is preserved.
+    assert.deepEqual(conf.bundle.targets, ['nsis', 'app', 'dmg', 'deb', 'rpm', 'appimage'], 'msi dropped from dev targets');
 
     const cargo = readFileSync(cargoPath, 'utf-8');
     assert.match(cargo, /^version = "1\.6\.1-dev\.pr42\.ga1b2c3d"$/m, 'package version stamped');

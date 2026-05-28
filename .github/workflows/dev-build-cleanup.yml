@@ -11,6 +11,10 @@ jobs:
   cleanup:
     runs-on: ubuntu-latest
     steps:
+      # Known edge case: if the PR is closed while a build's publish-dev step is
+      # still running, that step may recreate the dev-pr<N> release just after
+      # this job deletes it (the two workflows aren't serialized). The orphaned
+      # prerelease is harmless and can be deleted manually.
       - name: Delete the PR's dev prerelease + tag (if any)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -22,5 +26,5 @@ jobs:
             gh release delete "$TAG" --repo "$REPO" --cleanup-tag --yes
             echo "Deleted dev prerelease $TAG"
           else
-            echo "No dev prerelease $TAG — nothing to clean up."
+            echo "No dev prerelease $TAG -- nothing to clean up."
           fi

@@ -95,7 +95,8 @@ function runStamp() {
   }
   const version = computeDevVersion(base, pr, sha);
   stampFiles(version);
-  // Workflow captures stdout as the stamped version.
+  // Printed for the Actions log only; publish-dev recomputes the version
+  // itself (via computeDevVersion) rather than reading this stdout.
   console.log(version);
 }
 

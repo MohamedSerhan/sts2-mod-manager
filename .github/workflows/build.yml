@@ -478,6 +478,7 @@ jobs:
 
       - name: Download all build artifacts
         uses: actions/download-artifact@v5
+        continue-on-error: true
         with:
           path: dev-artifacts
 
@@ -494,7 +495,7 @@ jobs:
           TAG="dev-pr${PR}"
 
           # Flatten downloaded artifacts into one dir of release-able files.
-          mkdir -p dist
+          mkdir -p dev-artifacts dist
           find dev-artifacts -type f \
             \( -name '*.exe' -o -name '*.msi' -o -name '*.dmg' -o -name '*.deb' \
                -o -name '*.rpm' -o -name '*.AppImage' -o -name '*_portable.zip' \) \

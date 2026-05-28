@@ -79,9 +79,14 @@ interface ProfilesViewProps {
    *  variant; the value itself is meaningless, only the change
    *  matters. */
   openCreateWizardSignal?: number;
+  /** Called once the create-wizard signal has been consumed so the App
+   *  can reset it to 0 — otherwise the monotonic counter stays >0 and the
+   *  wizard re-opens every time this view remounts (e.g. on every nav
+   *  back to the Modpacks tab). */
+  onCreateWizardConsumed?: () => void;
 }
 
-export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, initialTab = 'yours', focusQuickAddSignal, openCreateWizardSignal }: ProfilesViewProps = {}) {
+export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, initialTab = 'yours', focusQuickAddSignal, openCreateWizardSignal, onCreateWizardConsumed }: ProfilesViewProps = {}) {
   // 1.7.0 outer Yours/Browse tabs. 'yours' renders the user's
   // followed/published modpack list (the legacy Profiles content);
   // 'browse' renders the public modpack browser (formerly its own
@@ -275,7 +280,10 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     setOuterTab('yours');
     setShowImport(false);
     setShowCreateWizard(true);
-  }, [openCreateWizardSignal]);
+    // Reset the App-level signal so a later remount of this view (e.g.
+    // navigating away and back to Modpacks) doesn't re-open the wizard.
+    onCreateWizardConsumed?.();
+  }, [openCreateWizardSignal, onCreateWizardConsumed]);
 
   // T16 review fix — orphan-modpack guard. If the open detail view's
   // modpack disappears (deleted while detail is open, or signal bumped

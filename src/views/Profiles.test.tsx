@@ -2223,6 +2223,28 @@ describe('<ProfilesView> CreateModpackWizard onCreated handler', () => {
 // ── Profile-list orphan guard + selectedModpack reset ──────────────
 //
 // Pins the effect at Profiles.tsx ~280: if the open detail view's
+// ── Create-wizard signal (regression: must not re-open on remount) ──
+describe('<ProfilesView> create-wizard signal', () => {
+  it('opens the wizard when the signal is set and reports it consumed', async () => {
+    seedProfiles([]);
+    const onCreateWizardConsumed = vi.fn();
+    render(<Wrap openCreateWizardSignal={1} onCreateWizardConsumed={onCreateWizardConsumed} />);
+    expect(
+      await screen.findByRole('dialog', { name: /Create modpack/i }),
+    ).toBeInTheDocument();
+    // Reporting consumption lets the App reset the signal so a later
+    // remount (a plain nav back to Modpacks) doesn't re-open the wizard.
+    expect(onCreateWizardConsumed).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT open the wizard on mount when the signal is 0 (plain nav to Modpacks)', async () => {
+    seedProfiles([]);
+    render(<Wrap openCreateWizardSignal={0} />);
+    await screen.findByText(/No modpacks yet/i);
+    expect(screen.queryByRole('dialog', { name: /Create modpack/i })).toBeNull();
+  });
+});
+
 // modpack disappears from the loaded list (deleted while detail is
 // open, or pumped open before the list resolves), the effect must
 // bounce back to the list. That branch covers `setSelectedModpack(null)`

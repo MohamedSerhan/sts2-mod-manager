@@ -847,6 +847,7 @@ function AppInner() {
                 initialTab={activeView === 'browse-modpacks' ? 'browse' : 'yours'}
                 focusQuickAddSignal={focusModpacksCodeBarSignal}
                 openCreateWizardSignal={openCreateWizardSignal}
+                onCreateWizardConsumed={() => setOpenCreateWizardSignal(0)}
               />
             )}
             {/* Library view. The legacy 'browse-mods' view-id

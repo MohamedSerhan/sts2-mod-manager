@@ -10,6 +10,10 @@ on:
       - ".gitignore"
       - "LICENSE"
   pull_request:
+    # `labeled` is included so applying the `dev-build` label to an existing PR
+    # triggers a dev build. The build job further filters to that label, and the
+    # check job skips bare label events (see their `if:` conditions).
+    types: [opened, synchronize, reopened, labeled]
     branches: [main]
     paths-ignore:
       - "**/*.md"
@@ -26,10 +30,14 @@ permissions:
   contents: write
 
 jobs:
-  # Cheap pre-flight check: runs on every PR and push to main.
-  # The expensive 3-platform bundle build only runs on tag pushes (and manual dispatch).
+  # Cheap pre-flight check: runs on PRs and pushes to main (skipped on bare
+  # label events — see its `if:`). The expensive 3-platform bundle build runs on
+  # version tags, manual dispatch, and PRs labeled `dev-build`.
   check:
-    if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+    # Skip on bare label events: check already ran on the PR's commits and a
+    # label change can't change its result. Pushes to main and other PR actions
+    # still run it.
+    if: ${{ !startsWith(github.ref, 'refs/tags/v') && github.event.action != 'labeled' }}
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout repository
@@ -76,11 +84,17 @@ jobs:
         run: node --test scripts/dev-build-stamp.test.mjs
 
   build:
+    # Runs on version tags, manual dispatch, or a PR carrying the `dev-build`
+    # label. On `labeled` events we also require the just-added label to be
+    # `dev-build`, so adding an unrelated label to an already-labeled PR does
+    # not kick off a fresh (expensive) 3-platform build.
     if: >-
       ${{ startsWith(github.ref, 'refs/tags/v')
           || github.event_name == 'workflow_dispatch'
           || (github.event_name == 'pull_request'
-              && contains(github.event.pull_request.labels.*.name, 'dev-build')) }}
+              && contains(github.event.pull_request.labels.*.name, 'dev-build')
+              && (github.event.action != 'labeled'
+                  || github.event.label.name == 'dev-build')) }}
     # Job-level permissions are also declared here in addition to the
     # workflow-level block above. tauri-action's "Create a release" call has
     # been seen to fail with "Resource not accessible by integration" on tag
@@ -149,8 +163,7 @@ jobs:
           DEV_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           SHORT=$(printf '%s' "$DEV_HEAD_SHA" | cut -c1-7)
-          DEV_PR_NUMBER="$DEV_PR_NUMBER" DEV_SHORT_SHA="$SHORT" \
-            node scripts/dev-build-stamp.mjs --stamp
+          DEV_SHORT_SHA="$SHORT" node scripts/dev-build-stamp.mjs --stamp
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0

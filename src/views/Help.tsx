@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Play, Hammer, HelpCircle } from 'lucide-react';
 import { Card } from '../components/Card';
 
 interface HelpViewProps {
@@ -35,23 +35,55 @@ type FaqKey = (typeof FAQ_KEYS)[number];
  * NB: caller owns layout chrome (page header / drawer header). This
  * component renders cards only.
  */
+/** A Help section card with a color-coded header (icon chip + title +
+ *  divider). The `accent` drives the icon-chip tint and the step-number
+ *  badges inside, so the three sections read as visually distinct
+ *  groups instead of one flat wall of text. */
+function HelpSection({
+  accent,
+  icon,
+  title,
+  children,
+}: {
+  accent: 'player' | 'creator' | 'faq';
+  icon: ReactNode;
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <Card className={`gf-help-card gf-help-card-${accent}`}>
+      <div className="gf-help-section-head">
+        <span className="gf-help-section-icon">{icon}</span>
+        <h2>{title}</h2>
+      </div>
+      {children}
+    </Card>
+  );
+}
+
 export function HelpContent() {
   const { t } = useTranslation();
 
   return (
     <>
-      <Card>
-        <h2>{t('help.playerQuickStart.title')}</h2>
+      <HelpSection
+        accent="player"
+        icon={<Play size={15} fill="currentColor" />}
+        title={t('help.playerQuickStart.title')}
+      >
         <ol className="gf-help-steps">
           <li>{t('help.playerQuickStart.step1')}</li>
           <li>{t('help.playerQuickStart.step2')}</li>
           <li>{t('help.playerQuickStart.step3')}</li>
           <li>{t('help.playerQuickStart.step4')}</li>
         </ol>
-      </Card>
+      </HelpSection>
 
-      <Card>
-        <h2>{t('help.creatorQuickStart.title')}</h2>
+      <HelpSection
+        accent="creator"
+        icon={<Hammer size={15} />}
+        title={t('help.creatorQuickStart.title')}
+      >
         <ol className="gf-help-steps">
           <li>{t('help.creatorQuickStart.step1')}</li>
           <li>{t('help.creatorQuickStart.step2')}</li>
@@ -59,16 +91,19 @@ export function HelpContent() {
           <li>{t('help.creatorQuickStart.step4')}</li>
           <li>{t('help.creatorQuickStart.step5')}</li>
         </ol>
-      </Card>
+      </HelpSection>
 
-      <Card>
-        <h2>{t('help.faqHeading')}</h2>
+      <HelpSection
+        accent="faq"
+        icon={<HelpCircle size={15} />}
+        title={t('help.faqHeading')}
+      >
         <div className="gf-faq">
           {FAQ_KEYS.map((key) => (
             <FaqItem key={key} faqKey={key} />
           ))}
         </div>
-      </Card>
+      </HelpSection>
     </>
   );
 }

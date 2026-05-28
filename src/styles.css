@@ -2757,16 +2757,98 @@ body {
 }
 .gf-help-header h1 { margin: 0 0 4px 0; }
 .gf-help-subtitle { opacity: 0.7; margin: 0; color: var(--ink-mute); }
+
+/* ── Help section cards ───────────────────────────────────────────────
+ * Each section (Playing / Making / FAQ) is color-coded so the three
+ * groups read as distinct at a glance instead of one flat wall. The
+ * per-section accent is set on .gf-help-card-<accent> and consumed by
+ * the icon chip, the left border, and the step-number badges via the
+ * --help-accent / --help-accent-soft custom props. */
+.gf-help-card {
+  --help-accent: var(--gf);
+  --help-accent-soft: oklch(0.78 0.13 80 / 0.16);
+  border-left: 3px solid var(--help-accent);
+}
+.gf-help-card-player {
+  --help-accent: var(--gf);
+  --help-accent-soft: oklch(0.78 0.13 80 / 0.16);
+}
+.gf-help-card-creator {
+  --help-accent: var(--ok);
+  --help-accent-soft: oklch(0.74 0.11 165 / 0.16);
+}
+.gf-help-card-faq {
+  --help-accent: oklch(0.72 0.12 250);
+  --help-accent-soft: oklch(0.72 0.12 250 / 0.16);
+}
+
+.gf-help-section-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 12px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--indigo-line);
+}
+.gf-help-section-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.gf-help-section-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: var(--help-accent-soft);
+  color: var(--help-accent);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+/* Numbered step list — gold/green accent badges instead of raw <ol>
+   markers so the quick-starts feel like a checklist. */
 .gf-help-steps {
-  padding-left: 22px;
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+  counter-reset: gf-help-step;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 12px;
 }
+.gf-help-steps li {
+  counter-increment: gf-help-step;
+  position: relative;
+  padding-left: 34px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+}
+.gf-help-steps li::before {
+  content: counter(gf-help-step);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--help-accent-soft);
+  color: var(--help-accent);
+  display: grid;
+  place-items: center;
+  font-size: 11.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
 .gf-faq { display: flex; flex-direction: column; }
 .gf-faq-item {
   border-bottom: 1px solid var(--indigo-line);
-  padding: 10px 0;
+  padding: 2px 0;
 }
 .gf-faq-item:last-child { border-bottom: none; }
 .gf-faq-q {
@@ -2776,19 +2858,22 @@ body {
   gap: 8px;
   background: none;
   border: none;
-  color: inherit;
+  color: var(--ink);
   font: inherit;
+  font-weight: 550;
   cursor: pointer;
   text-align: left;
-  padding: 4px 0;
+  padding: 11px 0;
 }
-.gf-faq-q:hover { color: var(--gf); }
-.gf-faq-q svg { transition: transform 0.15s; flex-shrink: 0; }
+.gf-faq-q:hover { color: var(--help-accent); }
+.gf-faq-q svg { transition: transform 0.15s; flex-shrink: 0; color: var(--help-accent); }
 .gf-faq-q .rot-r { transform: rotate(-90deg); }
+.gf-faq-item.open .gf-faq-q { color: var(--help-accent); }
 .gf-faq-answer {
-  padding: 8px 0 4px 22px;
-  opacity: 0.85;
+  padding: 2px 0 12px 22px;
+  color: var(--ink-mute);
   font-size: 13px;
+  line-height: 1.55;
 }
 
 /* ── CreateModpackWizard ──────────────────────────────────────────────
@@ -2990,19 +3075,26 @@ body {
 }
 .gf-drawer-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 18px;
+  padding: 16px 18px;
   border-bottom: 1px solid var(--indigo-line);
+  background: var(--indigo-side);
 }
 .gf-drawer-header h2 {
   margin: 0;
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
   color: var(--ink);
 }
 .gf-drawer-body {
-  padding: 16px 18px;
+  padding: 16px;
   flex: 1;
   overflow-y: auto;
+  /* Stack the Help cards with breathing room so the three color-coded
+     sections read as distinct groups. */
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
 /* ── Missing-bundles publish recovery panel ───────────────────────────

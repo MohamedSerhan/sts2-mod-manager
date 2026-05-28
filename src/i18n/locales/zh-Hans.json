@@ -917,6 +917,14 @@
     "heroEmptyTitle": "挑选一个整合包游玩",
     "heroEmptyBody": "整合包是一组保存好的模组。可以从整合包页面中选择，浏览公开整合包，或者自己创建一个。",
     "heroEmptyCta": "打开整合包",
+    "ready": {
+      "gameDetected": "已检测到《杀戮尖塔 2》——可以启动了。"
+    },
+    "secondary": {
+      "switch": "切换模组包",
+      "create": "创建模组包",
+      "reviewUpdates": "查看更新（{{count}}）"
+    },
     "syncPillReady": "可同步",
     "sharePillReady": "尚未分享",
     "heroSyncBtn": "同步更新",

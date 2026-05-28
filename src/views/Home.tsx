@@ -11,6 +11,8 @@ import {
   Check,
   MessageSquare,
   Link as LinkIcon,
+  Layers,
+  Plus,
 } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
@@ -147,9 +149,11 @@ interface HomeProps {
    *  Browse tab. Kept in the type for backward-compatible call sites
    *  (App.tsx still passes it). */
   onGoToBrowseModpacks?: () => void;
+  /** Opens the Modpacks page and the guided Create-modpack wizard. */
+  onCreateModpack?: () => void;
   onLaunch?: () => void;
 }
-export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfiles, onGoToBrowseModpacks: _onGoToBrowseModpacks, onLaunch }: HomeProps) {
+export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfiles, onGoToBrowseModpacks: _onGoToBrowseModpacks, onCreateModpack, onLaunch }: HomeProps) {
   const { t } = useTranslation();
   const { gameInfo, mods, refreshAll, activeProfile, refreshSubUpdates } = useApp();
   const toast = useToast();
@@ -399,6 +403,44 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
             >
               {t('home.heroEmptyCta')}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Secondary surface between the hero and the footer (spec: Home
+          shows readiness + secondary actions, not just the play button).
+          Only for an active modpack — the empty-state hero already guides
+          a first-time user toward Modpacks. */}
+      {activeProfile && (
+        <div className="gf-home-secondary">
+          {gameInfo?.valid && (
+            <p className="gf-home-ready">{t('home.ready.gameDetected')}</p>
+          )}
+          <div className="gf-home-secondary-actions">
+            <button
+              type="button"
+              className="gf-btn-3"
+              onClick={() => onGoToProfiles?.()}
+            >
+              <Layers size={13} /> {t('home.secondary.switch')}
+            </button>
+            <button
+              type="button"
+              className="gf-btn-3"
+              onClick={() => onCreateModpack?.()}
+            >
+              <Plus size={13} /> {t('home.secondary.create')}
+            </button>
+            {subUpdates.length > 0 && (
+              <button
+                type="button"
+                className="gf-btn-3"
+                onClick={() => onGoToProfiles?.()}
+              >
+                <Download size={13} />{' '}
+                {t('home.secondary.reviewUpdates', { count: subUpdates.length })}
+              </button>
+            )}
           </div>
         </div>
       )}

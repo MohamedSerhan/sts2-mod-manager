@@ -1187,6 +1187,36 @@ body {
 /* Home page footer — sits below the hero so the launcher doesn't feel
    empty. Pushes itself to the bottom of the flex column and dims the
    AboutCard a touch so it reads as quiet attribution, not a primary CTA. */
+/* Home secondary surface — readiness line + secondary actions that fill
+   the space between the hero and the footer. */
+.gf-home-secondary {
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.gf-home-ready {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--ok);
+  margin: 0;
+}
+.gf-home-ready::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 6px var(--ok);
+  flex: 0 0 auto;
+}
+.gf-home-secondary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .gf-home-footer {
   margin-top: auto;
   padding-top: 32px;

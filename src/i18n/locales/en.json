@@ -917,6 +917,14 @@
     "heroEmptyTitle": "Pick a modpack to play",
     "heroEmptyBody": "Modpacks are saved sets of mods. Choose one from your modpacks page, browse public ones, or create your own.",
     "heroEmptyCta": "Open Modpacks",
+    "ready": {
+      "gameDetected": "Slay the Spire 2 detected — you're ready to launch."
+    },
+    "secondary": {
+      "switch": "Switch modpack",
+      "create": "Create modpack",
+      "reviewUpdates": "Review updates ({{count}})"
+    },
     "syncPillReady": "Sync available",
     "sharePillReady": "Not yet shared",
     "heroSyncBtn": "Sync updates",

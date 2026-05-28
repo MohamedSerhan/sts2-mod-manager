@@ -67,6 +67,7 @@ function Wrap(props: Partial<React.ComponentProps<typeof HomeView>> = {}) {
         onGoToMods={props.onGoToMods ?? (() => {})}
         onGoToProfiles={props.onGoToProfiles ?? (() => {})}
         onGoToBrowseModpacks={props.onGoToBrowseModpacks ?? (() => {})}
+        onCreateModpack={props.onCreateModpack ?? (() => {})}
         onLaunch={props.onLaunch ?? (() => {})}
       />
     </AllProviders>
@@ -343,6 +344,83 @@ describe('<HomeView> game-not-detected banner', () => {
     expect(settingsBtn).toBeDefined();
     await user.click(settingsBtn!);
     expect(onGoToSettings).toHaveBeenCalled();
+  });
+});
+
+describe('<HomeView> secondary surface (readiness + actions)', () => {
+  function withActive(
+    profile = 'Daily Pack',
+    opts: { detected?: boolean; updates?: unknown[] } = {},
+  ) {
+    registerInvokeHandler('get_active_profile', () => profile);
+    registerInvokeHandler('list_profiles_cmd', () => [
+      { name: profile, mods: [], created_at: '2026-01-01' },
+    ]);
+    registerInvokeHandler('get_installed_mods', () => [{ name: 'A', enabled: true }]);
+    registerInvokeHandler('get_subscriptions', () => []);
+    registerInvokeHandler('check_subscription_updates', () => opts.updates ?? []);
+    registerInvokeHandler('get_share_info', () => null);
+    if (opts.detected) {
+      registerInvokeHandler('get_game_info', () => ({
+        game_path: 'C:/Games/STS2',
+        mods_path: 'x',
+        disabled_mods_path: 'y',
+        mods_count: 1,
+        disabled_count: 0,
+        valid: true,
+        game_version: '0.103.2',
+      }));
+    }
+  }
+
+  it('Switch modpack routes to the Modpacks page', async () => {
+    withActive();
+    const onGoToProfiles = vi.fn();
+    const user = userEvent.setup();
+    render(<Wrap onGoToProfiles={onGoToProfiles} />);
+    await screen.findByText('Daily Pack');
+    await user.click(screen.getByRole('button', { name: /Switch modpack/i }));
+    expect(onGoToProfiles).toHaveBeenCalledTimes(1);
+  });
+
+  it('Create modpack fires onCreateModpack', async () => {
+    withActive();
+    const onCreateModpack = vi.fn();
+    const user = userEvent.setup();
+    render(<Wrap onCreateModpack={onCreateModpack} />);
+    await screen.findByText('Daily Pack');
+    await user.click(screen.getByRole('button', { name: /Create modpack/i }));
+    expect(onCreateModpack).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the "game detected" readiness line when the game is valid', async () => {
+    withActive('Daily Pack', { detected: true });
+    render(<Wrap />);
+    await waitFor(() => {
+      expect(screen.getByText(/ready to launch/i)).toBeInTheDocument();
+    });
+  });
+
+  it('Review updates appears when packs have pending updates and routes to Modpacks', async () => {
+    withActive('Daily Pack', {
+      updates: [
+        {
+          share_id: 'a/b',
+          profile_name: 'Other',
+          has_update: true,
+          added_mods: [],
+          updated_mods: [],
+          removed_mods: [],
+          remote_profile: null,
+        },
+      ],
+    });
+    const onGoToProfiles = vi.fn();
+    const user = userEvent.setup();
+    render(<Wrap onGoToProfiles={onGoToProfiles} />);
+    const btn = await screen.findByRole('button', { name: /Review updates \(1\)/i });
+    await user.click(btn);
+    expect(onGoToProfiles).toHaveBeenCalledTimes(1);
   });
 });
 

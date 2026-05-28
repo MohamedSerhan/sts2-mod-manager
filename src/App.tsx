@@ -827,6 +827,13 @@ function AppInner() {
                 onGoToMods={() => setActiveView('mods')}
                 onGoToProfiles={() => setActiveView('profiles')}
                 onGoToBrowseModpacks={() => setActiveView('browse-modpacks')}
+                onCreateModpack={() => {
+                  // Route to Modpacks + pump the Create-wizard signal so
+                  // ProfilesView opens the guided wizard on entry (same
+                  // one-shot pattern the creator-onboarding CTA uses).
+                  setActiveView('profiles');
+                  setOpenCreateWizardSignal((n) => n + 1);
+                }}
                 onLaunch={handleLaunchGame}
               />
             )}

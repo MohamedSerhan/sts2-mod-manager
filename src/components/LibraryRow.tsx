@@ -53,6 +53,7 @@ import {
   KebabMenu,
   KebabSection,
 } from './KebabMenu';
+import { isUpToDate } from '../lib/auditState';
 import type {
   ModAuditEntry,
   ModInfo,
@@ -279,7 +280,13 @@ export function LibraryRow({
           </h3>
           <div className="gf-profile-library-meta">
             <span>{row.version}</span>
-            {row.folder_name && <span>{row.folder_name}</span>}
+            {/* Show folder_name as a disambiguator only when it adds
+                signal — skip when it duplicates the title text (i.e.
+                folder_name === name AND no display_name override) so
+                rows don't render the same string twice. */}
+            {row.folder_name
+              && (row.folder_name !== row.name || !!row.display_name?.trim())
+              && <span>{row.folder_name}</span>}
             <span
               className={`gf-profile-library-storage ${row.installed_enabled ? 'active' : 'stored'}`}
             >
@@ -296,6 +303,11 @@ export function LibraryRow({
             {/* Audit pills — one at a time. The update pill fires
                 onUpdate (per-row install); blocked / frozen / snoozed
                 are informational. */}
+            {audit && isUpToDate(audit) && !showUpdatePill && !showBlockedPill && !showFrozenPill && !showSnoozedPill && (
+              <span className="gf-pill gf-pill-ok" title={t('mods.latestTitle')}>
+                <Check size={9} /> {t('mods.latest')}
+              </span>
+            )}
             {showUpdatePill && (
               <button
                 type="button"
@@ -430,7 +442,10 @@ export function LibraryRow({
               : t('profiles.library.activateAction')}
           </Button>
           {/* Source pills + tags inline alongside the storage button.
-              Only rendered when we have a ModInfo to read from. */}
+              Only rendered when we have a ModInfo to read from. When
+              the mod has no link at all, we surface an "Unlinked" /
+              "Local" badge so the user can tell the row apart from
+              linked mods (this matches the old ModRow drawer behavior). */}
           {mod && (
             <div className="gf-modrow-drawer-sources" style={{ marginLeft: 8 }}>
               {mod.github_url && (
@@ -474,6 +489,11 @@ export function LibraryRow({
                     {t('mods.link')}
                   </Badge>
                 </a>
+              )}
+              {!mod.github_url && !mod.nexus_url && !mod.custom_url && (
+                <Badge variant={mod.source ? 'local' : 'default'}>
+                  {mod.source ? t('mods.local') : t('mods.unlinked')}
+                </Badge>
               )}
             </div>
           )}

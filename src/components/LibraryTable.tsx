@@ -182,10 +182,10 @@ export function LibraryTable({
 }: LibraryTableProps) {
   const { t } = useTranslation();
   const toastCtx = useToast();
-  const { refreshAll } = useApp();
+  const { mods: appMods, refreshAll } = useApp();
 
   const [grid, setGrid] = useState<ProfileMembershipGrid | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(modpackName != null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState(initialSearch);
   const [sort, setSort] = useState<LibrarySortMode>(
@@ -207,6 +207,13 @@ export function LibraryTable({
   const [loadOrderDraft, setLoadOrderDraft] = useState<Profile['mods']>([]);
 
   const load = useCallback(async () => {
+    if (modpackName == null) {
+      // No-focus mode — rows are synthesized from the AppContext mods
+      // array (see the synthesizedGrid useMemo below). No need to round-
+      // trip through getProfileMemberships.
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       setError(null);
@@ -217,11 +224,34 @@ export function LibraryTable({
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [modpackName]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // No-focus mode: synthesize a membership grid from AppContext's
+  // `mods` array so we can share the same rendering pipeline as
+  // modpack-focused mode. Each synthesized row has an empty profiles
+  // array (LibraryRow renders no checkbox when modpackName is null,
+  // so the empty profiles list is invisible).
+  const synthesizedGrid = useMemo<ProfileMembershipGrid | null>(() => {
+    if (modpackName != null) return null;
+    return {
+      profiles: [],
+      mods: appMods.map((mod) => ({
+        name: mod.name,
+        version: mod.version,
+        folder_name: mod.folder_name,
+        mod_id: mod.mod_id,
+        display_name: mod.display_name,
+        installed_enabled: mod.enabled,
+        profiles: [],
+      })),
+    };
+  }, [modpackName, appMods]);
+
+  const effectiveGrid = modpackName == null ? synthesizedGrid : grid;
 
   // Reset pagination when the filter or sort changes, otherwise the
   // user can be looking at "showing 20 of 200" but the visible page
@@ -241,21 +271,21 @@ export function LibraryTable({
    *  table can show the in-pack subset for drag reorder + counts).
    *  Empty when modpackName is null (no concept of "in pack"). */
   const inPackRowKeys = useMemo(() => {
-    if (!grid || modpackName == null) return new Set<string>();
+    if (!effectiveGrid || modpackName == null) return new Set<string>();
     const set = new Set<string>();
-    for (const row of grid.mods) {
+    for (const row of effectiveGrid.mods) {
       const state = row.profiles.find((p) => p.profile_name === modpackName);
       if (state?.included) set.add(membershipRowKey(row));
     }
     return set;
-  }, [grid, modpackName]);
+  }, [effectiveGrid, modpackName]);
 
   // Build the load-order draft from the grid + modpackName whenever
   // the grid updates. The draft is what the drag handles reorder; on
   // commit we send it to setProfileLoadOrder. Skipped when there's no
   // focused modpack (no-focus library mode has no drag-reorder).
   useEffect(() => {
-    if (!grid || modpackName == null) {
+    if (!effectiveGrid || modpackName == null) {
       setLoadOrderDraft([]);
       return;
     }
@@ -263,7 +293,7 @@ export function LibraryTable({
     // backend already orders mods consistently). Falls back to grid
     // order if for some reason we can't find the profile in the user
     // grid.
-    const inPack = grid.mods.filter((row) =>
+    const inPack = effectiveGrid.mods.filter((row) =>
       row.profiles.find((p) => p.profile_name === modpackName)?.included,
     );
     setLoadOrderDraft(
@@ -279,16 +309,16 @@ export function LibraryTable({
         mod_id: row.mod_id,
       })),
     );
-  }, [grid, modpackName]);
+  }, [effectiveGrid, modpackName]);
 
   // Filtered + sorted rows for the table body.
   const filteredRows = useMemo(() => {
-    if (!grid) return [] as ProfileMembershipMod[];
+    if (!effectiveGrid) return [] as ProfileMembershipMod[];
     const query = filter.trim().toLowerCase();
     // External pre-filter (e.g. Library view's tag filter) is applied
     // first so the table's own search runs against an already-narrowed
     // set.
-    const preFiltered = filterRow ? grid.mods.filter(filterRow) : grid.mods;
+    const preFiltered = filterRow ? effectiveGrid.mods.filter(filterRow) : effectiveGrid.mods;
     const rows = query
       ? preFiltered.filter((row) => {
           const haystack = [
@@ -327,18 +357,18 @@ export function LibraryTable({
       return compareMembershipDisplayName(a, b);
     });
     return sorted;
-  }, [grid, filter, sort, inPackRowKeys, filterRow]);
+  }, [effectiveGrid, filter, sort, inPackRowKeys, filterRow]);
 
   const visibleRows = filteredRows.slice(0, visibleLimit);
 
   const unusedActiveRows = useMemo(() => {
-    if (!grid) return [] as ProfileMembershipMod[];
-    return grid.mods.filter(
+    if (!effectiveGrid) return [] as ProfileMembershipMod[];
+    return effectiveGrid.mods.filter(
       (row) =>
         row.installed_enabled
         && row.profiles.filter((p) => p.included).length === 0,
     );
-  }, [grid]);
+  }, [effectiveGrid]);
 
   function patchRowMembership(
     rowKey: string,
@@ -550,7 +580,7 @@ export function LibraryTable({
     );
   }
 
-  if (!grid) {
+  if (!effectiveGrid) {
     return (
       <div className="flex items-center justify-center py-16 text-text-dim">
         <p className="text-sm">{t('profiles.library.loading')}</p>
@@ -558,7 +588,7 @@ export function LibraryTable({
     );
   }
 
-  if (grid.mods.length === 0) {
+  if (effectiveGrid.mods.length === 0) {
     return (
       <div className="gf-empty">
         <div className="gf-empty-title">{t('profiles.library.empty.title')}</div>
@@ -576,7 +606,7 @@ export function LibraryTable({
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
             placeholder={t('profiles.library.searchPlaceholder', {
-              count: grid.mods.length,
+              count: effectiveGrid.mods.length,
             })}
             aria-label={t('profiles.library.searchLabel')}
           />

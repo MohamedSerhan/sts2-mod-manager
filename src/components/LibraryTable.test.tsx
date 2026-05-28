@@ -640,26 +640,38 @@ describe('<LibraryTable>', () => {
 // that the same row component renders for both surfaces.
 
 describe('<LibraryTable modpackName={null}>', () => {
-  it('does not render the per-row checkbox column', async () => {
-    registerInvokeHandler('list_profiles_cmd', () => [
-      baseProfile({ name: 'Stable' }),
+  // No-focus mode synthesizes rows from AppContext's `mods` (the
+  // installed-mods array), so the test fixture only needs to seed
+  // get_installed_mods — there's no per-modpack grid fetch in this
+  // mode.
+  function seedInstalledMods(): void {
+    registerInvokeHandler('get_installed_mods', () => [
+      {
+        name: 'BaseLib',
+        version: '1.0.0',
+        description: 'Base library',
+        enabled: true,
+        files: [],
+        source: null,
+        hash: null,
+        dependencies: [],
+        size_bytes: 0,
+        folder_name: 'BaseLib',
+        mod_id: 'BaseLib',
+        github_url: null,
+        nexus_url: null,
+        pinned: false,
+        min_game_version: null,
+        author: null,
+        tags: [],
+        display_name: null,
+        display_description: null,
+      },
     ]);
-    registerInvokeHandler('get_profile_memberships', () => ({
-      profiles: [{ name: 'Stable', editable: true }],
-      mods: [
-        {
-          name: 'BaseLib',
-          version: '1.0.0',
-          folder_name: 'BaseLib',
-          mod_id: 'BaseLib',
-          installed_enabled: true,
-          profiles: [
-            { profile_name: 'Stable', included: true, enabled: true, editable: true },
-          ],
-        },
-      ],
-    }));
+  }
 
+  it('does not render the per-row checkbox column', async () => {
+    seedInstalledMods();
     render(<Wrap modpackName={null} />);
     await screen.findAllByText('BaseLib');
     // No per-modpack membership checkbox in the row.
@@ -667,25 +679,7 @@ describe('<LibraryTable modpackName={null}>', () => {
   });
 
   it('does not render drag handles or in-pack rank chips', async () => {
-    registerInvokeHandler('list_profiles_cmd', () => [
-      baseProfile({ name: 'Stable' }),
-    ]);
-    registerInvokeHandler('get_profile_memberships', () => ({
-      profiles: [{ name: 'Stable', editable: true }],
-      mods: [
-        {
-          name: 'BaseLib',
-          version: '1.0.0',
-          folder_name: 'BaseLib',
-          mod_id: 'BaseLib',
-          installed_enabled: true,
-          profiles: [
-            { profile_name: 'Stable', included: true, enabled: true, editable: true },
-          ],
-        },
-      ],
-    }));
-
+    seedInstalledMods();
     const { container } = render(<Wrap modpackName={null} />);
     await screen.findAllByText('BaseLib');
     // No drag handle.
@@ -695,25 +689,7 @@ describe('<LibraryTable modpackName={null}>', () => {
   });
 
   it('hides the "In this modpack first" sort option', async () => {
-    registerInvokeHandler('list_profiles_cmd', () => [
-      baseProfile({ name: 'Stable' }),
-    ]);
-    registerInvokeHandler('get_profile_memberships', () => ({
-      profiles: [{ name: 'Stable', editable: true }],
-      mods: [
-        {
-          name: 'BaseLib',
-          version: '1.0.0',
-          folder_name: 'BaseLib',
-          mod_id: 'BaseLib',
-          installed_enabled: true,
-          profiles: [
-            { profile_name: 'Stable', included: true, enabled: true, editable: true },
-          ],
-        },
-      ],
-    }));
-
+    seedInstalledMods();
     render(<Wrap modpackName={null} />);
     await screen.findAllByText('BaseLib');
     const sortSelect = screen.getByRole('combobox', { name: /Sort/i });
@@ -723,25 +699,7 @@ describe('<LibraryTable modpackName={null}>', () => {
   });
 
   it('still renders the storage chip + storage button per row', async () => {
-    registerInvokeHandler('list_profiles_cmd', () => [
-      baseProfile({ name: 'Stable' }),
-    ]);
-    registerInvokeHandler('get_profile_memberships', () => ({
-      profiles: [{ name: 'Stable', editable: true }],
-      mods: [
-        {
-          name: 'BaseLib',
-          version: '1.0.0',
-          folder_name: 'BaseLib',
-          mod_id: 'BaseLib',
-          installed_enabled: true,
-          profiles: [
-            { profile_name: 'Stable', included: false, enabled: false, editable: true },
-          ],
-        },
-      ],
-    }));
-
+    seedInstalledMods();
     const { container } = render(<Wrap modpackName={null} />);
     await screen.findAllByText('BaseLib');
     // Storage chip span (specific class) reads "Active in game".

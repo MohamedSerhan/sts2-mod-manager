@@ -58,3 +58,7 @@ coverage/
 # Cygwin/MSYS bash crash dumps (left behind by some shells when a
 # command segfaults). Not shipped, not useful in history.
 *.stackdump
+
+# Local Nexus triage runner logs (written by scripts/run-nexus-triage-local.bat).
+# Per-day rolling logs; not meaningful in history.
+.nexus-triage-runs/

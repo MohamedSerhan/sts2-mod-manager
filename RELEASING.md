@@ -153,5 +153,38 @@ call — not a webpage — so Cloudflare's bot protection does not apply. Expect
 near-100% success rate from GitHub Actions runners, unlike the prior HTML scraping
 approach which was 100% Cloudflare-blocked from CI IP ranges.
 
-`NEXUS_API_KEY` is required. If the secret is missing or expired, the script exits 2
-with a clear message. Rotate the key at https://www.nexusmods.com/users/myaccount?tab=api.
+**Update 2026-05-27 — runtime moved to local Task Scheduler.** The "GraphQL is reliable" claim above was wrong: GraphQL's `commentThread` query covers collection comments only, not mod-page comments. Mod-page comments live behind the legacy `Core/Libs/Common/Widgets/CommentContainer` HTML widget endpoint, which Cloudflare challenges 100% of the time from GitHub Actions IPs. The triage script now runs from your residential IP via `scripts/run-nexus-triage-local.bat` + Windows Task Scheduler. See section below.
+
+### Local runtime via Task Scheduler
+
+`scripts/run-nexus-triage-local.bat` is the Windows runner:
+1. Sets the `NEXUSMODS_*` env vars (hard-coded for mod 856)
+2. Pulls `gh auth token` for `GITHUB_TOKEN`
+3. Honors the `scripts/nexus-triage.disabled` killswitch
+4. Updates the repo to `main` + pulls latest
+5. Runs `node scripts/nexus-triage.mjs`
+6. Commits and pushes the updated state file
+7. Logs each run to `.nexus-triage-runs/YYYY-MM-DD.log` (gitignored)
+
+#### One-time setup
+
+1. `python -m pip install --user curl_cffi` (the Python TLS-impersonate shim)
+2. `gh auth status` — make sure you're logged in
+3. **Task Scheduler → Create Task…**:
+   - Name: `Nexus triage`
+   - **Triggers:** Daily, repeat every **1 hour** for a duration of 1 day
+   - **Actions:** Start a program → `C:\Users\xxsku\repos\sts2-mod-manager\scripts\run-nexus-triage-local.bat`
+   - Start in: `C:\Users\xxsku\repos\sts2-mod-manager`
+4. Double-click the .bat once to test. Check `.nexus-triage-runs\<today>.log`.
+
+#### What still runs in CI
+
+- `claude.yml` — reactive `@claude` mention handler
+- `nexus-watchdog.yml` + `nexus-watchdog-check.yml` — weekly token-health probe
+- `nexus-triage.yml` — kept for `workflow_dispatch` diagnostics only; `schedule:` is commented out because CI runs always Cloudflare-block
+
+#### Killswitches
+
+- Create `scripts/nexus-triage.disabled` (any content) — the .bat exits 0 immediately
+- Disable the Task Scheduler entry from the Task Scheduler UI
+- Both leave the state file frozen at the last successful run

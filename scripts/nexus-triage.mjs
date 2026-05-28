@@ -1,11 +1,14 @@
 // scripts/nexus-triage.mjs
 // Nexus -> GitHub triage orchestrator. Hourly cron in CI fetches new Nexus
-// comments on mod 856 via GraphQL, classifies each, files GitHub issues with
-// an @claude investigation prompt for non-kudos items.
+// comments on mod 856, classifies each, files GitHub issues with an @claude
+// investigation prompt for non-kudos items.
 //
 // Spec: docs/superpowers/specs/2026-05-26-nexus-github-triage-design.md
-// Addendum 2026-05-27: pivoted from HTML widget scraping to GraphQL
-//   commentThread(commentThreadId) query on api.nexusmods.com/v2/graphql.
+// Addendum 2026-05-27: pivoted from GraphQL to HTML widget scraping.
+//
+// Credit: HTML scraping approach adapted from jadistanbelly/sts2-multiplayer-save-slots
+// (MIT-licensed). Our Node port is independent code but adopts their endpoint
+// URL pattern, query params, HTML selectors, and curl-impersonate insight.
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -21,13 +24,20 @@ export const TEMPLATE_PATH = 'scripts/nexus-triage-prompt.md';
 export const SENTINEL_PATH = 'scripts/nexus-triage.disabled';
 export const STATE_SCHEMA_VERSION = 1;
 
-// GraphQL config
-export const NEXUS_GRAPHQL_URL = 'https://api.nexusmods.com/v2/graphql';
-export const POSTS_THREAD_ID = process.env.NEXUSMODS_POSTS_THREAD_ID || '16866026';
-export const MOD_ID_STR = process.env.NEXUSMODS_MOD_ID || '856';
+// HTML widget scraping config — populated from repo vars at CI time.
+// All have sensible defaults so local testing works without env setup.
+export const WIDGET_BASE_URL = process.env.NEXUSMODS_ORIGIN || 'https://www.nexusmods.com';
+export const GAME_ID = process.env.NEXUSMODS_GAME_ID || '8916';       // STS2 internal game id
+export const MOD_ID_STR = process.env.NEXUSMODS_MOD_ID || '856';      // string form for query params
+export const OBJECT_TYPE = process.env.NEXUSMODS_OBJECT_TYPE || '1';
+export const POSTS_THREAD_ID = process.env.NEXUSMODS_POSTS_THREAD_ID || ''; // '' = must be discovered
 export const POSTS_URL = process.env.NEXUSMODS_POSTS_URL ||
   `https://www.nexusmods.com/${GAME_DOMAIN}/mods/${MOD_ID_STR}?tab=posts`;
+export const PAGE_SIZE = 10;
 export const MAX_PAGES = 20;
+// Python shim impersonate versions — tried in order on Cloudflare retries.
+// The env var NEXUSMODS_CURL_IMPERSONATE overrides the default per-attempt value.
+export const CURL_IMPERSONATES = ['chrome136', 'chrome120', 'chrome131', 'chrome116', 'chrome110'];
 
 // ---------------------------------------------------------------------------
 // Imports
@@ -166,7 +176,51 @@ export function renderIssueBody(item, template, { classification, confidence }) 
 }
 
 // ---------------------------------------------------------------------------
-// HTTP fetch indirection — tests stub via setHttpFetch
+// HTML fetcher indirection (replaces httpFetch for the Nexus side)
+// ---------------------------------------------------------------------------
+// Tests stub htmlFetcher to return canned HTML strings.
+// Production default spawns curl-impersonate via execFile.
+// The function signature is: (url: string, opts: { headers: Record<string,string> })
+//   => Promise<string>  (the raw HTML body)
+
+// Default htmlFetcher: spawns the Python curl_cffi shim (scripts/_nexus_fetch.py).
+// Tests stub this via setHtmlFetcher — the fetch path is the only thing that changes.
+async function singleFetch(impersonate, url, headers) {
+  const headerArgs = [];
+  for (const [k, v] of Object.entries(headers || {})) {
+    headerArgs.push('--header', `${k}: ${v}`);
+  }
+  const { stdout, stderr } = await execFileP(
+    'python',
+    ['scripts/_nexus_fetch.py', url, '--impersonate', impersonate, ...headerArgs],
+  );
+  // stderr last line: HTTP_STATUS=NNN
+  const statusMatch = stderr.match(/HTTP_STATUS=(\d{3})/);
+  const httpCode = statusMatch ? statusMatch[1] : '';
+  return { httpCode, body: stdout };
+}
+
+let htmlFetcher = async (url, opts = {}) => {
+  const headers = opts.headers || {};
+  // Retry across impersonate versions on Cloudflare challenge.
+  for (let attempt = 0; attempt < CURL_IMPERSONATES.length; attempt++) {
+    const impersonate = CURL_IMPERSONATES[attempt];
+    const { body } = await singleFetch(impersonate, url, headers);
+    if (!isCloudflareChallenge(body)) return body;
+    // CF challenge — try next impersonate version (or give up on last attempt)
+    if (attempt < CURL_IMPERSONATES.length - 1) {
+      console.error(`nexus-triage: Cloudflare challenge with ${impersonate}, retrying...`);
+    }
+  }
+  // Return the last body regardless (caller's isCloudflareChallenge will handle it)
+  const { body } = await singleFetch(CURL_IMPERSONATES[CURL_IMPERSONATES.length - 1], url, headers);
+  return body;
+};
+
+export function setHtmlFetcher(fn) { htmlFetcher = fn; }
+
+// ---------------------------------------------------------------------------
+// HTTP fetch indirection (retained for generic use / test compat)
 // ---------------------------------------------------------------------------
 
 let httpFetch = globalThis.fetch;
@@ -176,6 +230,7 @@ export function setHttpFetch(fn) { httpFetch = fn; }
 // gh CLI indirection
 // ---------------------------------------------------------------------------
 
+// Like setHtmlFetcher — lets tests stub without spawning a real gh process.
 let ghInvoker = async (args) => {
   const { stdout } = await execFileP('gh', args);
   // gh issue create outputs the URL of the created issue on stdout.
@@ -187,100 +242,253 @@ let ghInvoker = async (args) => {
 export function setGhInvoker(fn) { ghInvoker = fn; }
 
 // ---------------------------------------------------------------------------
-// GraphQL helpers
+// Cloudflare challenge detection
 // ---------------------------------------------------------------------------
 
-const MOD_COMMENTS_QUERY = `
-query ModComments($threadId: ID!, $first: Int!, $after: String) {
-  commentThread(commentThreadId: $threadId) {
-    id
-    comments(first: $first, after: $after, sortBy: "createdAt", sortDirection: "DESC") {
-      nodes {
-        id
-        body
-        createdAt
-        discardedAt
-        hiddenAt
-        creator { name memberId }
-      }
-      pageInfo { hasNextPage endCursor }
-      totalCount
-    }
-  }
+export function isCloudflareChallenge(html) {
+  return html.includes('<title>Just a moment...</title>') || html.includes('cf-chl');
 }
-`.trim();
 
-export async function graphqlPost({ apiKey, query, variables }) {
-  const res = await httpFetch(NEXUS_GRAPHQL_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'apikey': apiKey,
-    },
-    body: JSON.stringify({ query, variables }),
+// ---------------------------------------------------------------------------
+// HTML widget URL builder
+// ---------------------------------------------------------------------------
+
+export function buildWidgetUrl({ page = 1, pageSize = PAGE_SIZE, threadId = POSTS_THREAD_ID } = {}) {
+  const params = new URLSearchParams({
+    tabbed: '1',
+    object_id: MOD_ID_STR,
+    game_id: GAME_ID,
+    object_type: OBJECT_TYPE,
+    thread_id: threadId,
+    skip_opening_post: '0',
+    user_is_blocked: '',
+    searchable: 'true',
+    page_size: String(pageSize),
+    page: String(page),
   });
-
-  if (!res.ok) {
-    console.error(`nexus-triage: GraphQL HTTP error ${res.status} ${res.statusText}`);
-    process.exit(1);
-  }
-
-  const json = await res.json();
-  if (json.errors && json.errors.length > 0) {
-    // NOT_FOUND on commentThread means the thread ID is misconfigured — treat as
-    // a soft error (exit 0) so the cron doesn't go red while the ID is being fixed.
-    const notFound = json.errors.some(
-      (e) => e?.extensions?.code === 'NOT_FOUND' || /not found/i.test(e?.message || '')
-    );
-    if (notFound) {
-      const err = new Error(json.errors[0]?.message || 'NOT_FOUND');
-      err.code = 'THREAD_NOT_FOUND';
-      throw err;
-    }
-    console.error(`nexus-triage: GraphQL errors: ${JSON.stringify(json.errors)}`);
-    process.exit(1);
-  }
-
-  return json;
-}
-
-export async function fetchComments({ apiKey, threadId, first = 100, after }) {
-  const variables = { threadId, first, ...(after ? { after } : {}) };
-  const json = await graphqlPost({ apiKey, query: MOD_COMMENTS_QUERY, variables });
-  const comments = json.data?.commentThread?.comments;
-  if (!comments) {
-    console.error('nexus-triage: unexpected GraphQL response shape — commentThread.comments missing');
-    process.exit(1);
-  }
-  return comments; // { nodes, pageInfo, totalCount }
-}
-
-export async function fetchAllComments({ apiKey, threadId = POSTS_THREAD_ID }) {
-  const allNodes = [];
-  let after = undefined;
-
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const connection = await fetchComments({ apiKey, threadId, first: 100, after });
-    const { nodes, pageInfo } = connection;
-    allNodes.push(...(nodes || []));
-
-    if (!pageInfo.hasNextPage) break;
-    after = pageInfo.endCursor;
-  }
-
-  return allNodes;
+  return `${WIDGET_BASE_URL}/Core/Libs/Common/Widgets/CommentContainer?${params}`;
 }
 
 // ---------------------------------------------------------------------------
 // Nexus post URL builder
 // ---------------------------------------------------------------------------
 
-export function buildNexusCommentUrl(postsUrl, commentId) {
+export function buildNexusPostUrl(postsUrl, commentId) {
+  // E.g. https://www.nexusmods.com/slaythespire2/mods/856?tab=posts&comment_id=12345
+  // Strip any existing comment_id param and add our own.
   const u = new URL(postsUrl);
   u.searchParams.set('tab', u.searchParams.get('tab') || 'posts');
-  u.searchParams.set('commentid', String(commentId));
+  u.searchParams.set('comment_id', String(commentId));
   return u.toString();
 }
+
+// ---------------------------------------------------------------------------
+// parseCommentsFromHtml — regex-based parser (no extra deps)
+// ---------------------------------------------------------------------------
+// Regex patterns targeting Nexus CommentContainer widget HTML structure.
+// Markup version observed 2026-05-27. Update patterns here if Nexus changes.
+//
+// Key patterns:
+//   Comment root:  <li id="comment-{id}" class="... comment ...">
+//   Author:        <span class="comment-name">{author}</span>
+//   Body:          <div id="comment-content-{id}">{body}</div>
+//   Timestamp:     <time data-date="{unix-seconds}">
+//
+// We parse the full HTML string, not line by line, because HTML attributes
+// may span multiple lines. The s (dotAll) flag is used where needed.
+
+// Matches a single comment <li> block.
+// Captured groups: [1] id, [2] everything inside the <li>
+const LI_COMMENT_RE = /<li\s[^>]*\bid="comment-(\d+)"[^>]*\bclass="[^"]*\bcomment\b[^"]*"[^>]*>([\s\S]*?)<\/li>/gi;
+
+// Alternatively id before class order
+const LI_COMMENT_RE2 = /<li\s[^>]*\bclass="[^"]*\bcomment\b[^"]*"[^>]*\bid="comment-(\d+)"[^>]*>([\s\S]*?)<\/li>/gi;
+
+// Author: <span class="comment-name">...</span>  (first match in the li body)
+const AUTHOR_RE = /<span\s[^>]*\bclass="[^"]*\bcomment-name\b[^"]*"[^>]*>([\s\S]*?)<\/span>/i;
+
+// Body: <div id="comment-content-{id}">...</div>
+// We build this per-comment using the known id.
+function buildBodyRe(id) {
+  return new RegExp(`<div[^>]*\\bid="comment-content-${id}"[^>]*>([\\s\\S]*?)</div>`, 'i');
+}
+
+// Timestamp: <time data-date="{unix-seconds}"> (first match in the li body)
+const TIME_RE = /<time\s[^>]*\bdata-date="(\d+)"[^>]*>/i;
+
+// Strip HTML tags for text extraction
+function stripTags(s) {
+  return s.replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ');
+}
+
+function unixToIso(unixStr) {
+  return new Date(parseInt(unixStr, 10) * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
+export function parseCommentsFromHtml(html, { postsUrl = POSTS_URL } = {}) {
+  if (isCloudflareChallenge(html)) {
+    const err = new Error('Cloudflare blocked the request — curl-impersonate may need updating');
+    err.code = 'CLOUDFLARE_BLOCKED';
+    throw err;
+  }
+
+  const comments = [];
+
+  // Try both attribute orderings (id-first or class-first)
+  function runRe(re) {
+    let m;
+    while ((m = re.exec(html)) !== null) {
+      const id = m[1];
+      const liBody = m[2];
+
+      // Extract author
+      const authorM = AUTHOR_RE.exec(liBody);
+      const author = authorM ? stripTags(authorM[1]).trim() : '<unknown>';
+
+      // Extract body
+      const bodyM = buildBodyRe(id).exec(liBody);
+      if (!bodyM) {
+        // Body div missing — skip this comment per spec (malformed)
+        continue;
+      }
+      const body = stripTags(bodyM[1]).replace(/\s+/g, ' ').trim();
+      if (!body) continue; // skip empty bodies
+
+      // Extract timestamp
+      const timeM = TIME_RE.exec(liBody);
+      const createdAt = timeM ? unixToIso(timeM[1]) : '';
+
+      comments.push({
+        id,
+        author,
+        body,
+        createdAt,
+        parentId: null, // parent tracking not critical for first pass
+        nexus_url: buildNexusPostUrl(postsUrl, id),
+      });
+    }
+  }
+
+  runRe(LI_COMMENT_RE);
+  // If the class comes before id in the HTML, we need the second pattern.
+  // Collect ids already found to avoid duplicates.
+  const foundIds = new Set(comments.map((c) => c.id));
+
+  let m2;
+  while ((m2 = LI_COMMENT_RE2.exec(html)) !== null) {
+    if (foundIds.has(m2[1])) continue;
+    const id = m2[1];
+    const liBody = m2[2];
+
+    const authorM = AUTHOR_RE.exec(liBody);
+    const author = authorM ? stripTags(authorM[1]).trim() : '<unknown>';
+
+    const bodyM = buildBodyRe(id).exec(liBody);
+    if (!bodyM) continue;
+    const body = stripTags(bodyM[1]).replace(/\s+/g, ' ').trim();
+    if (!body) continue;
+
+    const timeM = TIME_RE.exec(liBody);
+    const createdAt = timeM ? unixToIso(timeM[1]) : '';
+
+    comments.push({ id, author, body, createdAt, parentId: null,
+      nexus_url: buildNexusPostUrl(postsUrl, id) });
+    foundIds.add(id);
+  }
+
+  return comments;
+}
+
+// ---------------------------------------------------------------------------
+// fetchCommentsHtml — single page fetch via htmlFetcher
+// ---------------------------------------------------------------------------
+
+export async function fetchCommentsHtml({ page = 1, pageSize = PAGE_SIZE, threadId = POSTS_THREAD_ID } = {}) {
+  const url = buildWidgetUrl({ page, pageSize, threadId });
+  // Do NOT send User-Agent — curl_cffi's impersonate=chrome136 sets a
+  // native Chrome User-Agent that matches the TLS fingerprint. Overriding
+  // it with an "automation" UA causes Cloudflare to flag the mismatch.
+  const html = await htmlFetcher(url, {
+    headers: {
+      'Referer': POSTS_URL,
+      'X-Requested-With': 'XMLHttpRequest',
+    },
+  });
+  if (isCloudflareChallenge(html)) {
+    const err = new Error('Cloudflare blocked the request — curl-impersonate may need updating');
+    err.code = 'CLOUDFLARE_BLOCKED';
+    throw err;
+  }
+  return html;
+}
+
+// ---------------------------------------------------------------------------
+// fetchAllComments — pagination loop
+// ---------------------------------------------------------------------------
+
+export async function fetchAllComments({ threadId = POSTS_THREAD_ID } = {}) {
+  const seenIds = new Set();
+  const allComments = [];
+
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const html = await fetchCommentsHtml({ page, pageSize: PAGE_SIZE, threadId });
+    const pageComments = parseCommentsFromHtml(html);
+    const newComments = pageComments.filter((c) => !seenIds.has(c.id));
+
+    if (newComments.length === 0) break; // no new IDs — stop pagination
+
+    for (const c of newComments) {
+      seenIds.add(c.id);
+      allComments.push(c);
+    }
+
+    // If this page had fewer results than page size, we're on the last page
+    if (pageComments.length < PAGE_SIZE) break;
+  }
+
+  return allComments;
+}
+
+// ---------------------------------------------------------------------------
+// discoverThreadId — extracts thread_id from mod posts page HTML
+// ---------------------------------------------------------------------------
+
+export async function discoverThreadId({ postsUrl = POSTS_URL } = {}) {
+  // Pass an empty headers map so curl_cffi sends its native Chrome UA +
+  // header set. Overriding User-Agent breaks the TLS impersonation.
+  const html = await htmlFetcher(postsUrl, { headers: {} });
+  if (isCloudflareChallenge(html)) {
+    const err = new Error('Cloudflare blocked thread_id discovery — curl-impersonate may need updating');
+    err.code = 'CLOUDFLARE_BLOCKED';
+    throw err;
+  }
+  // Look for patterns like: "thread_id":"16873160" or thread_id=16873160 in embedded JS
+  const patterns = [
+    /"thread_id"\s*:\s*"(\d+)"/,
+    /"thread_id"\s*:\s*(\d+)/,
+    /thread_id=(\d+)/,
+    /\bthread_id\b['":\s]+(\d+)/,
+  ];
+  for (const re of patterns) {
+    const m = re.exec(html);
+    if (m) return m[1];
+  }
+  throw new Error(
+    `nexus-triage: could not find thread_id in posts page HTML (${postsUrl}). ` +
+    `Check the page source manually and update NEXUSMODS_POSTS_THREAD_ID.`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// URL helpers
+// ---------------------------------------------------------------------------
+
+const NEXUS_COMMENT_URL = (id) =>
+  buildNexusPostUrl(POSTS_URL, id);
+
+const SKIP_BUG_STATUSES = new Set(['closed', 'duplicate', 'not-a-bug']);
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -298,9 +506,9 @@ function commentToItem(c) {
     id: String(c.id),
     body: c.body ?? '',
     createdAt: c.createdAt,
-    author: c.creator?.name ?? '<unknown>',
-    authorId: String(c.creator?.memberId ?? ''),
-    nexus_url: buildNexusCommentUrl(POSTS_URL, c.id),
+    author: c.author ?? '<unknown>',
+    authorId: '', // Nexus widget HTML does not expose memberId in a stable way
+    nexus_url: c.nexus_url || NEXUS_COMMENT_URL(c.id),
   };
 }
 
@@ -308,7 +516,7 @@ function commentToItem(c) {
 // main orchestrator
 // ---------------------------------------------------------------------------
 
-export async function main({ dryRun, apiKey, ghToken, state, templatePath = TEMPLATE_PATH }) {
+export async function main({ dryRun, ghToken, state, templatePath = TEMPLATE_PATH }) {
   const result = {
     maintainerSkipped: 0,
     alreadySeen: 0,
@@ -317,11 +525,8 @@ export async function main({ dryRun, apiKey, ghToken, state, templatePath = TEMP
     pendingNextRun: 0,
   };
 
-  const rawNodes = await fetchAllComments({ apiKey });
-
-  // Filter out deleted/hidden comments
-  const visibleNodes = rawNodes.filter((c) => !c.discardedAt && !c.hiddenAt);
-  const comments = visibleNodes.map(commentToItem);
+  const commentNodes = await fetchAllComments();
+  const comments = commentNodes.map(commentToItem);
 
   // 1. Maintainer filter — case-insensitive — FIRST
   const nonMaintainerComments = comments.filter((c) => {
@@ -397,10 +602,11 @@ export async function main({ dryRun, apiKey, ghToken, state, templatePath = TEMP
 import { fileURLToPath } from 'node:url';
 
 export function parseArgs(argv) {
-  const opts = { dryRun: false, bootstrap: false, help: false };
+  const opts = { dryRun: false, bootstrap: false, discoverThreadId: false, help: false };
   for (const a of argv) {
     if (a === '--dry-run') opts.dryRun = true;
     else if (a === '--bootstrap') opts.bootstrap = true;
+    else if (a === '--discover-thread-id') opts.discoverThreadId = true;
     else if (a === '--help' || a === '-h') opts.help = true;
     else {
       console.error(`nexus-triage: unknown argument '${a}'. Use --help for usage.`);
@@ -418,17 +624,23 @@ const HELP_TEXT = `
 nexus-triage — Nexus -> GitHub issue triage
 
 Usage:
-  node scripts/nexus-triage.mjs                    # normal run (requires GITHUB_TOKEN + NEXUS_API_KEY)
+  node scripts/nexus-triage.mjs                    # normal run (requires GITHUB_TOKEN + NEXUSMODS_* vars)
   node scripts/nexus-triage.mjs --dry-run          # print what would file, no gh calls, no state write
   node scripts/nexus-triage.mjs --bootstrap        # mark all current Nexus comments as seen, do not file
+  node scripts/nexus-triage.mjs --discover-thread-id  # print the posts thread_id and exit
   node scripts/nexus-triage.mjs --help             # this message
 
-Environment (set as secrets/vars in CI, or locally in your shell):
-  NEXUS_API_KEY               Required. Nexus personal API key (generate at nexusmods.com/users/myaccount).
-  NEXUSMODS_POSTS_THREAD_ID   Thread ID for the mod posts tab (default: 16866026 for mod 856).
+Environment (set as repo vars in CI, or locally in your shell):
+  NEXUSMODS_POSTS_THREAD_ID   Required for normal runs. Discover with --discover-thread-id.
+  NEXUSMODS_GAME_ID           Defaults to 8916 (STS2)
   NEXUSMODS_MOD_ID            Defaults to 856
+  NEXUSMODS_OBJECT_TYPE       Defaults to 1
   NEXUSMODS_POSTS_URL         Defaults to https://www.nexusmods.com/slaythespire2/mods/856?tab=posts
+  NEXUSMODS_ORIGIN            Defaults to https://www.nexusmods.com
+  NEXUSMODS_CURL_IMPERSONATE  curl_cffi impersonate target for the Python shim (default: chrome136)
   GITHUB_TOKEN                GitHub PAT or Actions-provided token
+
+Note: NEXUS_API_KEY is NOT required for triage (it's only needed for publish-nexus upload).
 
 Killswitch:
   touch scripts/nexus-triage.disabled             # next run exits 0 with no work
@@ -451,26 +663,39 @@ export async function runFromCli(argv = process.argv.slice(2)) {
     process.exit(2);
   }
 
-  const apiKey = process.env.NEXUS_API_KEY;
-  if (!apiKey) {
-    console.error('nexus-triage: NEXUS_API_KEY is not set.');
+  // --discover-thread-id mode: fetch the posts page, print the thread_id, exit.
+  if (opts.discoverThreadId) {
+    const threadId = await discoverThreadId();
+    console.log(threadId);
+    console.log(`\nTo store it:\n  gh variable set NEXUSMODS_POSTS_THREAD_ID --body ${threadId}`);
+    return 0;
+  }
+
+  // For normal runs, POSTS_THREAD_ID must be set.
+  if (!POSTS_THREAD_ID) {
+    console.error(
+      'nexus-triage: NEXUSMODS_POSTS_THREAD_ID is not set.\n' +
+      'Run `node scripts/nexus-triage.mjs --discover-thread-id` locally to find it, ' +
+      'then set it as a repo var:\n' +
+      '  gh variable set NEXUSMODS_POSTS_THREAD_ID --body <value>'
+    );
     process.exit(2);
   }
 
   if (opts.bootstrap) {
     const fresh = { schema_version: STATE_SCHEMA_VERSION, last_run_at: new Date().toISOString(),
                     comments: {}, bugs: {}, kudos_seen: [] };
-    const rawNodes = await fetchAllComments({ apiKey });
-    for (const c of rawNodes) {
+    const commentNodes = await fetchAllComments();
+    for (const c of commentNodes) {
       fresh.kudos_seen.push(String(c.id));
     }
     saveState(STATE_PATH, fresh);
-    console.log(`nexus-triage: bootstrap complete. Marked ${rawNodes.length} comments as seen.`);
+    console.log(`nexus-triage: bootstrap complete. Marked ${commentNodes.length} comments as seen.`);
     return 0;
   }
 
   const state = loadState(STATE_PATH);
-  const result = await main({ dryRun: opts.dryRun, apiKey, ghToken, state });
+  const result = await main({ dryRun: opts.dryRun, ghToken, state });
 
   if (!opts.dryRun) saveState(STATE_PATH, state);
   console.log(JSON.stringify(result, null, 2));
@@ -482,15 +707,10 @@ export async function runFromCli(argv = process.argv.slice(2)) {
 const isMainModule = fileURLToPath(import.meta.url) === process.argv[1];
 if (isMainModule) {
   runFromCli().catch((err) => {
-    if (err.code === 'THREAD_NOT_FOUND') {
-      console.error(
-        `nexus-triage: commentThread not found — NEXUSMODS_POSTS_THREAD_ID may be wrong.\n` +
-        `  Current value: ${POSTS_THREAD_ID}\n` +
-        `  Check the Nexus mod page source for the correct thread_id, then update the repo var:\n` +
-        `    gh variable set NEXUSMODS_POSTS_THREAD_ID --body <value> --repo MohamedSerhan/sts2-mod-manager\n` +
-        `  Details: ${err.message}`
-      );
-      process.exit(0); // soft failure — cron stays green while ID is investigated
+    if (err.code === 'CLOUDFLARE_BLOCKED') {
+      console.error(`nexus-triage: Cloudflare blocked all retries this run. Will try again on next cron.`);
+      console.error(`Details: ${err.message}`);
+      process.exit(0);
     }
     console.error(`nexus-triage: fatal: ${err.stack || err.message}`);
     process.exit(1);

@@ -32,6 +32,7 @@ export function stampFiles(version, {
   cargoPath = 'src-tauri/Cargo.toml',
 } = {}) {
   let conf = readFileSync(confPath, 'utf-8');
+  // Intentionally no 'g' flag: replaces only the first (top-level) "version" key.
   conf = conf.replace(/("version"\s*:\s*")[^"]*(")/, `$1${version}$2`);
   conf = conf.replace(
     new RegExp(`("identifier"\\s*:\\s*")${RELEASE_IDENTIFIER.replace(/\./g, '\\.')}(")`),
@@ -87,7 +88,12 @@ function runStamp() {
     process.exit(2);
   }
   const conf = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf-8'));
-  const version = computeDevVersion(conf.version, pr, sha);
+  const base = conf.version;
+  if (!base) {
+    console.error('dev-build-stamp: tauri.conf.json has no top-level "version" field');
+    process.exit(2);
+  }
+  const version = computeDevVersion(base, pr, sha);
   stampFiles(version);
   // Workflow captures stdout as the stamped version.
   console.log(version);

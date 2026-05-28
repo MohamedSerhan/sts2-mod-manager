@@ -70,12 +70,19 @@ test('renderDevComment includes marker, metadata, every asset, isolation note', 
   assert.match(out, /actions\/runs\/123/);
   assert.match(out, /STS2\.Mod\.Manager_dev_portable\.zip/);
   assert.match(out, /app\.dmg/);
+  assert.match(out, /\[STS2\.Mod\.Manager_dev_portable\.zip\]\(https:\/\/e\/p\.zip\)/);
   assert.match(out, /sts2-mod-manager-dev/);
   assert.match(out, /portable/i);
 });
 
 test('renderDevComment with no assets shows a no-artifacts line', () => {
   const out = renderDevComment({ pr: '7', version: 'x', sha: 'y', runUrl: 'z', assets: [] });
+  assert.match(out, /<!-- dev-build-comment -->/);
+  assert.match(out, /no build artifacts/i);
+});
+
+test('renderDevComment with null assets shows a no-artifacts line', () => {
+  const out = renderDevComment({ pr: '7', version: 'x', sha: 'y', runUrl: 'z', assets: null });
   assert.match(out, /<!-- dev-build-comment -->/);
   assert.match(out, /no build artifacts/i);
 });

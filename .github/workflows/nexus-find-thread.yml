@@ -1,0 +1,59 @@
+name: Nexus find thread ID (one-off diagnostic)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  find-thread:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query mod type for thread references
+        env:
+          NEXUS_API_KEY: ${{ secrets.NEXUS_API_KEY }}
+        run: |
+          echo "=== Mod type fields (looking for thread/comment refs) ==="
+          curl -sS -X POST https://api.nexusmods.com/v2/graphql \
+            -H "Content-Type: application/json" \
+            -H "apikey: $NEXUS_API_KEY" \
+            --data-raw '{"query":"query { __type(name: \"Mod\") { fields { name type { name kind ofType { name kind ofType { name } } } } } }"}' \
+            | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+fields = data.get('data', {}).get('__type', {}).get('fields', []) or []
+print(f'Total Mod fields: {len(fields)}')
+for f in fields:
+    n = f['name']
+    t = f['type']
+    tname = t.get('name') or (t.get('ofType') or {}).get('name') or ''
+    print(f'  {n}: {t.get(\"kind\")} {tname}')
+"
+
+          echo
+          echo "=== Query Mod 856 for all top-level scalar/id fields ==="
+          curl -sS -X POST https://api.nexusmods.com/v2/graphql \
+            -H "Content-Type: application/json" \
+            -H "apikey: $NEXUS_API_KEY" \
+            --data-raw '{"query":"query { mod(id: 856, gameId: 8916) { id name summary } }"}' \
+            | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+print(json.dumps(data, indent=2))
+"
+
+          echo
+          echo "=== commentThread fields ==="
+          curl -sS -X POST https://api.nexusmods.com/v2/graphql \
+            -H "Content-Type: application/json" \
+            -H "apikey: $NEXUS_API_KEY" \
+            --data-raw '{"query":"query { __type(name: \"CommentThread\") { fields { name type { name kind ofType { name } } } } }"}' \
+            | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+fields = data.get('data', {}).get('__type', {}).get('fields', []) or []
+print(f'CommentThread fields: {len(fields)}')
+for f in fields:
+    print(f'  {f[\"name\"]}')
+"

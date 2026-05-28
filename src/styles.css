@@ -580,7 +580,9 @@ body {
   color: var(--ok);
   font-weight: 600;
 }
-.gf-profile-library-row.in-pack {
+/* 4.1 — green left border reflects ACTIVE-in-game state, not membership.
+   Off (no accent) when the mod is stored. */
+.gf-profile-library-row.is-active {
   border-left: 3px solid var(--ok);
 }
 .gf-profile-library-row.drag-over {
@@ -644,14 +646,20 @@ body {
 }
 
 .gf-profile-library-row {
-  display: grid;
-  grid-template-columns: minmax(220px, 0.8fr) minmax(280px, 1.2fr);
-  gap: 16px;
-  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   /* Paradox-style density: tighter vertical rhythm than the default
      Card p-5 (20px). Overrides the utility padding so a long mod list
      scans as a compact list, not a stack of fat cards. */
   padding: 11px 14px;
+}
+/* 4.4 — the whole row is a click target that opens Edit sources. */
+.gf-profile-library-row.is-clickable { cursor: pointer; }
+.gf-profile-library-row.is-clickable:hover { background: oklch(0.22 0.05 280); }
+.gf-profile-library-row.is-clickable:focus-visible {
+  outline: 2px solid var(--gf);
+  outline-offset: -2px;
 }
 .gf-profile-library-main {
   min-width: 0;
@@ -660,25 +668,92 @@ body {
   justify-content: space-between;
   gap: 10px;
 }
-.gf-profile-library-storage-actions {
+.gf-profile-library-row-actions {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
-/* Active/stored switch sitting at the head of the row's action cluster.
-   The label flips between "Active in game" / "Stored" so the bare switch
-   never has to be decoded on its own. */
-.gf-storage-toggle {
+/* 4.1 — leftmost active/stored status cell: the switch over a tiny
+   caption that flips between "Active in game" / "Stored". */
+.gf-row-status {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  width: 58px;
+}
+.gf-row-status-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-dim);
+  text-align: center;
+  line-height: 1.15;
+}
+/* identity column grows to fill the space between the status cell and
+   the right-hand action cluster. */
+.gf-profile-library-identity {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.gf-profile-library-titlerow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.gf-profile-library-rawname {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--ink-dim);
+}
+/* 4.2 — tag chips to the right of the mod name. */
+.gf-row-tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.gf-row-tag {
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--ink-mute);
+  background: oklch(0.28 0.04 280);
+  border: 1px solid var(--indigo-line);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+/* 4.5 — on-disk folder name with a glyph so it reads distinctly from
+   the version string. */
+.gf-meta-folder {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 3px;
 }
-.gf-storage-toggle-label {
+/* 4.6 — static In-pack / Not-in-pack indicator (read-only status). */
+.gf-row-inpack {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--ink-mute);
+  padding: 4px 9px;
+  border-radius: 6px;
+  color: var(--ink-dim);
+  background: oklch(0.24 0.03 280);
+  border: 1px solid var(--indigo-line);
   white-space: nowrap;
+}
+.gf-row-inpack.is-in {
+  color: var(--ok);
+  background: oklch(0.74 0.11 165 / 0.12);
+  border-color: oklch(0.74 0.11 165 / 0.35);
 }
 .gf-profile-library-title {
   font-size: 13.5px;

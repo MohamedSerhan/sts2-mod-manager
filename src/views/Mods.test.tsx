@@ -3046,34 +3046,40 @@ describe('<ModsView>', () => {
     }
 
     // Wait for the membership column to settle. The row exposes
-    // membership through a checkbox whose accessible name carries the
-    // full "Toggle {mod} in {pack}" wording; the visible label is the
-    // short "In pack" / "Not in pack".
-    async function waitForMembershipCheckbox(row: HTMLElement, checked: boolean): Promise<HTMLElement> {
+    // membership through a read-only indicator: "In pack" (with a check
+    // glyph + the is-in class) when a member, "Not in pack" otherwise.
+    // Membership is changed from the kebab, not from this indicator.
+    async function waitForMembershipStatus(row: HTMLElement, included: boolean): Promise<HTMLElement> {
       await waitFor(() => {
-        const cb = within(row).getByRole('checkbox', { name: /Toggle TargetMod in TestPack/i });
-        if (checked) expect(cb).toBeChecked();
-        else expect(cb).not.toBeChecked();
+        const ind = row.querySelector('.gf-row-inpack');
+        expect(ind).not.toBeNull();
+        if (included) {
+          expect(ind!.className).toContain('is-in');
+          expect(ind!.textContent).toMatch(/In pack/i);
+        } else {
+          expect(ind!.className).not.toContain('is-in');
+          expect(ind!.textContent).toMatch(/Not in pack/i);
+        }
       });
-      return within(row).getByRole('checkbox', { name: /Toggle TargetMod in TestPack/i });
+      return row.querySelector('.gf-row-inpack') as HTMLElement;
     }
 
-    it('no active/stored chip in the row; checked checkbox + "In pack" label when a member', async () => {
+    it('no active/stored chip in the row; "In pack" indicator when a member', async () => {
       setupRow(true, 'in');
       render(<Wrap />);
       const row = await getModRow('TargetMod');
       // Storage chip removed from the row.
       expect(row.querySelector('.gf-profile-library-storage')).toBeNull();
-      await waitForMembershipCheckbox(row, true);
+      await waitForMembershipStatus(row, true);
       expect(within(row).getByText(/^In pack$/i)).toBeInTheDocument();
     });
 
-    it('unchecked checkbox + "Not in pack" label when not a member (storage chip still absent)', async () => {
+    it('"Not in pack" indicator when not a member (storage chip still absent)', async () => {
       setupRow(false, 'notIn');
       render(<Wrap />);
       const row = await getModRow('TargetMod');
       expect(row.querySelector('.gf-profile-library-storage')).toBeNull();
-      await waitForMembershipCheckbox(row, false);
+      await waitForMembershipStatus(row, false);
       expect(within(row).getByText(/^Not in pack$/i)).toBeInTheDocument();
     });
 
@@ -3081,18 +3087,18 @@ describe('<ModsView>', () => {
       setupRow(true, 'notIn');
       render(<Wrap />);
       const row = await getModRow('TargetMod');
-      await waitForMembershipCheckbox(row, false);
+      await waitForMembershipStatus(row, false);
       expect(within(row).getByText(/^Not in pack$/i)).toBeInTheDocument();
     });
 
     // Solo's confusion case — disabled on disk yet still a modpack
-    // member. The row no longer shows a "Stored" chip; the checkbox
-    // stays checked, which is the unambiguous membership signal.
-    it("disabled on disk yet still a member → checkbox stays checked (Solo's case)", async () => {
+    // member. The row no longer shows a "Stored" chip; the in-pack
+    // indicator stays on, which is the unambiguous membership signal.
+    it("disabled on disk yet still a member → still in pack (Solo's case)", async () => {
       setupRow(false, 'in');
       render(<Wrap />);
       const row = await getModRow('TargetMod');
-      await waitForMembershipCheckbox(row, true);
+      await waitForMembershipStatus(row, true);
       expect(within(row).getByText(/^In pack$/i)).toBeInTheDocument();
     });
 

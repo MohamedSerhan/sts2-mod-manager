@@ -101,6 +101,8 @@
     "membershipCheckbox": "Toggle {{mod}} in {{modpack}}",
     "inPack": "In pack",
     "notInPack": "Not in pack",
+    "inPackTitle": "In {{modpack}} — change membership from the ⋯ menu",
+    "notInPackTitle": "Not in {{modpack}} — add it from the ⋯ menu",
     "modpackMissing": "This modpack doesn't exist any more — try refreshing the list."
   },
   "createModpack": {
@@ -1257,6 +1259,10 @@
     "updateAllLabel_one": "Update {{count}} mod",
     "updateAllLabel_other": "Update {{count}} mods",
     "notePrefix": "📝",
+    "versionLabel": "Version",
+    "onDiskFolderTitle": "Folder on disk: {{folder}}",
+    "rowClickEditSources": "Click to edit sources, links, and tags",
+    "rowEditSourcesAria": "Edit sources for {{mod}}",
     "row": {
       "expand": "Show details for {{name}}",
       "collapse": "Hide details for {{name}}",

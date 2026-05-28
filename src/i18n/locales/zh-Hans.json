@@ -101,6 +101,8 @@
     "membershipCheckbox": "切换 {{mod}} 在 {{modpack}} 中的状态",
     "inPack": "已在包中",
     "notInPack": "不在包中",
+    "inPackTitle": "已在 {{modpack}} 中 — 在 ⋯ 菜单中更改归属",
+    "notInPackTitle": "不在 {{modpack}} 中 — 在 ⋯ 菜单中添加",
     "modpackMissing": "此模组包已不存在 — 请尝试刷新列表。"
   },
   "createModpack": {
@@ -1257,6 +1259,10 @@
     "updateAllLabel_one": "更新 {{count}} 个模组",
     "updateAllLabel_other": "更新 {{count}} 个模组",
     "notePrefix": "📝",
+    "versionLabel": "版本",
+    "onDiskFolderTitle": "磁盘上的文件夹：{{folder}}",
+    "rowClickEditSources": "点击编辑来源、链接和标签",
+    "rowEditSourcesAria": "编辑 {{mod}} 的来源",
     "row": {
       "expand": "展开「{{name}}」的详情",
       "collapse": "收起「{{name}}」的详情",

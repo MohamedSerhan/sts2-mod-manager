@@ -92,7 +92,7 @@ describe('<LibraryRow>', () => {
     });
     expect(screen.getByText('Readable Name')).toBeInTheDocument();
     expect(screen.getByText('raw-manifest-name')).toBeInTheDocument();
-    expect(screen.getByText('9.9.9')).toBeInTheDocument();
+    expect(screen.getByText('v9.9.9')).toBeInTheDocument();
     expect(screen.getByText('readable-folder')).toBeInTheDocument();
   });
 
@@ -154,18 +154,21 @@ describe('<LibraryRow>', () => {
     expect(card.getAttribute('draggable')).toBe('false');
   });
 
-  it('membership checkbox reflects state.included and is disabled when state.editable is false', () => {
-    const { unmount } = renderRow({ state: baseState({ included: true, editable: true }) });
-    const checked = screen.getByRole('checkbox', { name: /Toggle BaseLib in Stable/i });
-    expect(checked).toBeChecked();
-    expect(checked).not.toBeDisabled();
+  it('in-pack indicator reflects state.included (read-only status, not a checkbox)', () => {
+    const { container, unmount } = renderRow({ state: baseState({ included: true }) });
+    const inEl = container.querySelector('.gf-row-inpack');
+    expect(inEl).not.toBeNull();
+    expect(inEl!.className).toContain('is-in');
+    expect(inEl!.textContent).toMatch(/In pack/i);
+    // Membership is changed from the kebab now — no checkbox on the row.
+    expect(screen.queryByRole('checkbox')).toBeNull();
     unmount();
 
-    renderRow({ state: baseState({ included: false, editable: false }) });
-    const ro = screen.getByRole('checkbox', { name: /Toggle BaseLib in Stable/i });
-    expect(ro).not.toBeChecked();
-    expect(ro).toBeDisabled();
-    expect(screen.getByText(/Read-only/i)).toBeInTheDocument();
+    const { container: c2 } = renderRow({ state: baseState({ included: false }) });
+    const outEl = c2.querySelector('.gf-row-inpack');
+    expect(outEl).not.toBeNull();
+    expect(outEl!.className).not.toContain('is-in');
+    expect(outEl!.textContent).toMatch(/Not in pack/i);
   });
 
   it('renders the no-modpack-state muted message when state is undefined', () => {
@@ -173,17 +176,21 @@ describe('<LibraryRow>', () => {
     expect(screen.getByText(/This modpack doesn't exist any more/i)).toBeInTheDocument();
   });
 
-  it('clicking the membership checkbox calls onToggleMembership with the row', async () => {
-    const { callbacks } = renderRow();
-    const user = userEvent.setup();
-    await user.click(
-      screen.getByRole('checkbox', { name: /Toggle BaseLib in Stable/i }),
-    );
-    expect(callbacks.onToggleMembership).toHaveBeenCalledTimes(1);
-    expect(callbacks.onToggleMembership.mock.calls[0][0]).toMatchObject({
-      name: 'BaseLib',
-      folder_name: 'BaseLib',
+  it('membership is changed from the kebab; the indicator itself is static', async () => {
+    const { callbacks, container } = renderRow({
+      mod: baseModInfo(),
+      state: baseState({ included: true }),
     });
+    const user = userEvent.setup();
+    // Clicking the read-only indicator must NOT mutate membership.
+    const inEl = container.querySelector('.gf-row-inpack') as HTMLElement;
+    expect(inEl).not.toBeNull();
+    await user.click(inEl);
+    expect(callbacks.onToggleMembership).not.toHaveBeenCalled();
+    // The kebab drives membership instead.
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /remove from/i }));
+    expect(callbacks.onToggleMembership).toHaveBeenCalledTimes(1);
   });
 
   it('drag-start fires onDragStart with the row inPackIndex', () => {
@@ -249,17 +256,12 @@ describe('<LibraryRow>', () => {
     expect(card.className).toContain('drag-over');
   });
 
-  it('disables the membership checkbox while a storage mutation is in flight', () => {
-    // The Store/Activate button (and its spinner) left the primary row,
-    // but storageSaving still gates the membership checkbox so a user
-    // can't toggle membership mid-storage-flip.
-    renderRow({
+  it('shows a saving spinner on the in-pack indicator while membership is mutating', () => {
+    const { container } = renderRow({
       row: baseMod({ folder_name: 'BaseLib' }),
-      storageSaving: 'storage::BaseLib',
+      membershipSaving: 'BaseLib::Stable',
     });
-    expect(
-      screen.getByRole('checkbox', { name: /Toggle BaseLib in Stable/i }),
-    ).toBeDisabled();
+    expect(container.querySelector('.gf-row-inpack .animate-spin')).not.toBeNull();
   });
 });
 
@@ -621,7 +623,7 @@ describe('<LibraryRow> modpackName=null mode', () => {
     renderRow({ modpackName: null, state: undefined, inPack: false, inPackIndex: -1 });
     // Mod is still identifiable by name + version.
     expect(screen.getByText('BaseLib')).toBeInTheDocument();
-    expect(screen.getByText('1.2.3')).toBeInTheDocument();
+    expect(screen.getByText('v1.2.3')).toBeInTheDocument();
     // The active/stored chip + per-row Store/Activate button are gone.
     expect(document.querySelector('.gf-profile-library-storage')).toBeNull();
     expect(screen.queryByRole('button', { name: /Store BaseLib/i })).toBeNull();
@@ -736,6 +738,6 @@ describe('<LibraryRow> active/stored switch', () => {
       row: baseMod({ folder_name: 'BaseLib' }),
       storageSaving: 'storage::BaseLib',
     });
-    expect(container.querySelector('.gf-storage-toggle .animate-spin')).not.toBeNull();
+    expect(container.querySelector('.gf-row-status .animate-spin')).not.toBeNull();
   });
 });

@@ -7,13 +7,13 @@
  * context-driven explainer banner is covered here too.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { LibraryTable } from './LibraryTable';
 import { AllProviders } from '../__test__/providers';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
-import type { Profile } from '../types';
+import type { ModInfo, Profile } from '../types';
 
 function Wrap(props: React.ComponentProps<typeof LibraryTable>) {
   return (
@@ -57,6 +57,34 @@ const baseProfile = (overrides: Partial<Profile> = {}): Profile =>
     game_version: '0.105.0',
     ...overrides,
   } as Profile);
+
+// Membership is now changed from the per-row kebab, which only renders
+// when the row has a matching ModInfo (passed via modInfoByKey). This
+// factory builds that ModInfo so the kebab + its "Add/Remove from pack"
+// item are present in membership tests.
+const mkModInfo = (overrides: Partial<ModInfo> = {}): ModInfo =>
+  ({
+    name: 'Mod',
+    version: '1.0.0',
+    description: '',
+    enabled: true,
+    files: [],
+    source: null,
+    hash: null,
+    dependencies: [],
+    size_bytes: 0,
+    folder_name: 'Mod',
+    mod_id: 'Mod',
+    github_url: null,
+    nexus_url: null,
+    pinned: false,
+    min_game_version: null,
+    author: null,
+    tags: [],
+    display_name: null,
+    display_description: null,
+    ...overrides,
+  } as ModInfo);
 
 describe('<LibraryTable>', () => {
   it('renders all installed mods for the modpack as rows', async () => {
@@ -119,7 +147,7 @@ describe('<LibraryTable>', () => {
     expect(help?.textContent).toMatch(/Switching to this modpack/i);
   });
 
-  it('membership toggle calls set_profile_mod_membership for the focused modpack', async () => {
+  it('membership Add (kebab) calls set_profile_mod_membership for the focused modpack', async () => {
     registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
     registerInvokeHandler('get_profile_memberships', () => ({
       profiles: [{ name: 'Stable', editable: true }],
@@ -138,13 +166,20 @@ describe('<LibraryTable>', () => {
     }));
     registerInvokeHandler('set_profile_mod_membership', () => baseProfile({ name: 'Stable' }));
 
+    const modInfoByKey = new Map([
+      ['NewMod', mkModInfo({ name: 'NewMod', folder_name: 'NewMod', mod_id: 'NewMod' })],
+    ]);
     const user = userEvent.setup();
-    render(<Wrap modpackName="Stable" />);
+    render(<Wrap modpackName="Stable" modInfoByKey={modInfoByKey} />);
 
-    await screen.findAllByText('NewMod');
-    const checkbox = screen.getByRole('checkbox', { name: /Toggle NewMod in Stable/i });
-    expect(checkbox).not.toBeChecked();
-    await user.click(checkbox);
+    const row = (await screen.findByText('NewMod')).closest(
+      '[data-testid="library-row"]',
+    ) as HTMLElement;
+    // Read-only indicator starts at "Not in pack".
+    expect(row.querySelector('.gf-row-inpack')?.textContent).toMatch(/Not in pack/i);
+    // Membership is changed from the kebab.
+    await user.click(within(row).getByRole('button', { name: /mod actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /add to "stable"/i }));
 
     await waitFor(() => {
       expect(getInvokeCalls()).toContainEqual({
@@ -158,7 +193,10 @@ describe('<LibraryTable>', () => {
         },
       });
     });
-    expect(checkbox).toBeChecked();
+    // Optimistic patch flips the indicator to "In pack".
+    await waitFor(() => {
+      expect(row.querySelector('.gf-row-inpack')?.textContent).toMatch(/In pack/i);
+    });
   });
 
   it('search filters visible rows by name / folder', async () => {
@@ -408,10 +446,10 @@ describe('<LibraryTable>', () => {
   // tests went .skip during the row → card-list switch. These tests
   // pin those behaviors so the migration doesn't quietly drop them.
 
-  it('editable=false (followed modpack) disables the checkbox + shows the Read-only badge', async () => {
-    // Followed modpacks come back with `editable: false`. The checkbox
-    // must be disabled (no toggle attempt fired) and the row must
-    // explain why with a Read-only badge.
+  it('editable=false (followed modpack) → indicator shows status; kebab membership item is disabled', async () => {
+    // Followed modpacks come back with `editable: false`. The row shows
+    // the read-only "In pack" indicator, and the kebab's Remove-from-pack
+    // item is disabled so the user can't mutate a pack they don't own.
     registerInvokeHandler('list_profiles_cmd', () => [
       baseProfile({ name: 'Friend Pack', created_by: 'alice' }),
     ]);
@@ -431,12 +469,21 @@ describe('<LibraryTable>', () => {
       ],
     }));
 
-    render(<Wrap modpackName="Friend Pack" />);
+    const modInfoByKey = new Map([
+      ['BaseLib', mkModInfo({ name: 'BaseLib', folder_name: 'BaseLib', mod_id: 'BaseLib' })],
+    ]);
+    const user = userEvent.setup();
+    render(<Wrap modpackName="Friend Pack" modInfoByKey={modInfoByKey} />);
 
-    expect(
-      await screen.findByRole('checkbox', { name: /Toggle BaseLib in Friend Pack/i }),
-    ).toBeDisabled();
-    expect(screen.getByText(/Read-only/i)).toBeInTheDocument();
+    const row = (await screen.findByText('BaseLib')).closest(
+      '[data-testid="library-row"]',
+    ) as HTMLElement;
+    expect(row.querySelector('.gf-row-inpack')?.textContent).toMatch(/In pack/i);
+    await user.click(within(row).getByRole('button', { name: /mod actions/i }));
+    const removeItem = await screen.findByRole('menuitem', {
+      name: /remove from "friend pack"/i,
+    });
+    expect(removeItem).toBeDisabled();
   });
 
   it('get_profile_memberships failure → error UI + Retry button reloads', async () => {
@@ -461,10 +508,10 @@ describe('<LibraryTable>', () => {
     expect(attempts).toBe(2);
   });
 
-  it('membership update failure → toast fires + checkbox stays unchecked', async () => {
+  it('membership update failure (kebab) → toast fires + indicator stays "Not in pack"', async () => {
     // set_profile_mod_membership throws; the optimistic patch must NOT
-    // apply, the checkbox must stay in its pre-click state, and the
-    // failure toast surfaces the backend error.
+    // apply, the indicator must stay "Not in pack", and the failure
+    // toast surfaces the backend error.
     registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
     registerInvokeHandler('get_profile_memberships', () => ({
       profiles: [{ name: 'Stable', editable: true }],
@@ -485,15 +532,21 @@ describe('<LibraryTable>', () => {
       throw new Error('profile locked');
     });
 
+    const modInfoByKey = new Map([
+      ['LibraryOnly', mkModInfo({ name: 'Library Only', folder_name: 'LibraryOnly', mod_id: 'LibraryOnly' })],
+    ]);
     const user = userEvent.setup();
-    render(<Wrap modpackName="Stable" />);
-    const checkbox = await screen.findByRole('checkbox', { name: /Toggle Library Only in Stable/i });
-    await user.click(checkbox);
+    render(<Wrap modpackName="Stable" modInfoByKey={modInfoByKey} />);
+    const row = (await screen.findByText('Library Only')).closest(
+      '[data-testid="library-row"]',
+    ) as HTMLElement;
+    await user.click(within(row).getByRole('button', { name: /mod actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /add to "stable"/i }));
 
     expect(
       await screen.findByText(/Failed to update membership: profile locked/i),
     ).toBeInTheDocument();
-    expect(checkbox).not.toBeChecked();
+    expect(row.querySelector('.gf-row-inpack')?.textContent).toMatch(/Not in pack/i);
   });
 
   it('bulk-store unused active mods — happy path: stores only the unused-active ones + success toast', async () => {

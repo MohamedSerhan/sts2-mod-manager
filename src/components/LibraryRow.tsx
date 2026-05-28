@@ -39,6 +39,7 @@ import {
   ToggleRight,
   Trash2,
   Wrench,
+  X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
@@ -265,13 +266,34 @@ export function LibraryRow({
 
   return (
     <Card
-      className={`gf-profile-library-row ${inPack ? 'in-pack' : ''} ${isDragOver ? 'drag-over' : ''}${mod?.pinned ? ' gf-mod-pinned' : ''}`}
+      className={`gf-profile-library-row${row.installed_enabled ? ' is-active' : ''}${isDragOver ? ' drag-over' : ''}${mod?.pinned ? ' gf-mod-pinned' : ''}${mod ? ' is-clickable' : ''}`}
       draggable={reorderable && !loadOrderSaving}
       onDragStart={(event) => onDragStart(event, inPackIndex)}
       onDragOver={(event) => onDragOver(event, inPackIndex)}
       onDragLeave={() => onDragLeave(inPackIndex)}
       onDrop={(event) => onDrop(event, inPackIndex)}
       onDragEnd={onDragEnd}
+      // 4.4 — clicking the row opens its inline Edit-sources editor.
+      // Interactive children (toggle, kebab, source links) stop
+      // propagation so they don't also trigger this.
+      onClick={mod ? () => onEditSources() : undefined}
+      onKeyDown={
+        mod
+          ? (event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                onEditSources();
+              }
+            }
+          : undefined
+      }
+      role={mod ? 'button' : undefined}
+      tabIndex={mod ? 0 : undefined}
+      // Explicit accessible name so the row-button doesn't absorb its
+      // children's text (which would make every inner pill/badge match a
+      // getByRole('button', { name }) lookup for the row too).
+      aria-label={mod ? t('mods.rowEditSourcesAria', { mod: displayName }) : undefined}
+      title={mod ? t('mods.rowClickEditSources') : undefined}
       data-testid="library-row"
     >
       <div className="gf-profile-library-main">
@@ -284,24 +306,72 @@ export function LibraryRow({
             <GripVertical size={14} />
           </div>
         )}
-        <div className="min-w-0">
-          <h3 className="gf-profile-library-title">
-            {row.display_name?.trim() || row.name}
+        {/* 4.1 — active/stored switch, leftmost. The card's green left
+            border mirrors this (on = active in game, off = stored).
+            stopPropagation so flipping it doesn't open Edit-sources. */}
+        {mod && (
+          <div
+            className="gf-row-status"
+            role="presentation"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <Toggle
+              checked={row.installed_enabled}
+              onChange={() => onToggleStorage(row)}
+              disabled={gameRunning || storageSaving !== null}
+              ariaLabel={t('modpack.storage.toggleAria', { mod: displayName })}
+              title={
+                row.installed_enabled
+                  ? t('modpack.storage.active')
+                  : t('modpack.storage.storedHint')
+              }
+            />
+            <span className="gf-row-status-label">
+              {row.installed_enabled
+                ? t('modpack.storage.active')
+                : t('modpack.storage.stored')}
+            </span>
+            {storageBusy && (
+              <RefreshCw size={11} className="animate-spin" aria-hidden />
+            )}
+          </div>
+        )}
+        <div className="gf-profile-library-identity min-w-0">
+          <div className="gf-profile-library-titlerow">
+            <h3 className="gf-profile-library-title">
+              {row.display_name?.trim() || row.name}
+            </h3>
             {row.display_name && (
-              <span className="ml-1.5 text-[10px] font-normal text-text-dim">
-                {row.name}
+              <span className="gf-profile-library-rawname">{row.name}</span>
+            )}
+            {/* 4.2 — tags sit to the right of the mod name. */}
+            {mod?.tags && mod.tags.length > 0 && (
+              <span className="gf-row-tags">
+                {mod.tags.slice(0, 5).map((tag) => (
+                  <span key={tag} className="gf-row-tag">
+                    {tag}
+                  </span>
+                ))}
               </span>
             )}
-          </h3>
+          </div>
           <div className="gf-profile-library-meta">
-            <span>{row.version}</span>
-            {/* Show folder_name as a disambiguator only when it adds
-                signal — skip when it duplicates the title text (i.e.
-                folder_name === name AND no display_name override) so
-                rows don't render the same string twice. */}
+            {/* 4.5 — version is v-prefixed and the on-disk folder carries
+                a folder glyph + tooltip, so version / folder / description
+                read as distinct things instead of three grey lookalikes. */}
+            <span className="gf-meta-version" title={t('mods.versionLabel')}>
+              v{(row.version || '').replace(/^v/i, '')}
+            </span>
             {row.folder_name
               && (row.folder_name !== row.name || !!row.display_name?.trim())
-              && <span>{row.folder_name}</span>}
+              && (
+                <span
+                  className="gf-meta-folder"
+                  title={t('mods.onDiskFolderTitle', { folder: row.folder_name })}
+                >
+                  <FolderOpen size={10} /> {row.folder_name}
+                </span>
+              )}
             {reorderable && (
               <span className="gf-load-order-rank-inline">
                 #{inPackIndex + 1}
@@ -420,38 +490,7 @@ export function LibraryRow({
             </div>
           )}
         </div>
-        <div className="gf-profile-library-storage-actions">
-          {/* Active/stored switch. This is the primary per-mod control
-              in the Library view: ON = the mod sits in the game's mods
-              folder (active in game), OFF = it's kept on disk but moved
-              out (stored). Flipping it calls onToggleStorage, which
-              moves the files. Disabled while the game is running or any
-              storage flip is mid-flight. */}
-          {mod && (
-            <span
-              className="gf-storage-toggle"
-              title={
-                row.installed_enabled
-                  ? t('modpack.storage.active')
-                  : t('modpack.storage.storedHint')
-              }
-            >
-              <Toggle
-                checked={row.installed_enabled}
-                onChange={() => onToggleStorage(row)}
-                disabled={gameRunning || storageSaving !== null}
-                ariaLabel={t('modpack.storage.toggleAria', { mod: displayName })}
-              />
-              <span className="gf-storage-toggle-label">
-                {row.installed_enabled
-                  ? t('modpack.storage.active')
-                  : t('modpack.storage.stored')}
-              </span>
-              {storageBusy && (
-                <RefreshCw size={11} className="animate-spin" aria-hidden />
-              )}
-            </span>
-          )}
+        <div className="gf-profile-library-row-actions">
           {/* Source pills + tags. Only rendered when we have a ModInfo
               to read from. When the mod has no link at all, we surface
               an "Unlinked" / "Local" badge so the user can tell the row
@@ -508,6 +547,35 @@ export function LibraryRow({
               )}
             </div>
           )}
+          {/* 4.6 — static In-pack / Not-in-pack indicator. Membership is
+              changed from the kebab (Add to / Remove from modpack); this
+              is read-only status, not a control. */}
+          {modpackName != null && (
+            state ? (
+              <span
+                className={`gf-row-inpack${state.included ? ' is-in' : ''}`}
+                title={
+                  state.included
+                    ? t('libraryTable.inPackTitle', { modpack: modpackName })
+                    : t('libraryTable.notInPackTitle', { modpack: modpackName })
+                }
+              >
+                {state.included ? <Check size={12} /> : <X size={12} />}
+                <span className="gf-row-inpack-label">
+                  {state.included
+                    ? t('libraryTable.inPack')
+                    : t('libraryTable.notInPack')}
+                </span>
+                {saving && (
+                  <RefreshCw size={11} className="animate-spin" aria-hidden />
+                )}
+              </span>
+            ) : (
+              <span className="gf-profile-library-muted">
+                {t('libraryTable.modpackMissing')}
+              </span>
+            )
+          )}
           {mod && <LibraryRowKebab
             mod={mod}
             audit={audit}
@@ -534,58 +602,16 @@ export function LibraryRow({
           />}
         </div>
       </div>
-      {modpackName != null && (
-        <div className="gf-profile-memberships">
-          {state ? (
-            <label
-              className={`gf-profile-membership ${state.included ? 'active' : ''}`}
-              title={
-                !state.editable
-                  ? t('profiles.library.readOnlyTitle')
-                  : t('libraryTable.membershipCheckbox', {
-                      mod: displayName,
-                      modpack: modpackName,
-                    })
-              }
-            >
-              <input
-                type="checkbox"
-                checked={state.included}
-                disabled={
-                  !state.editable
-                  || membershipSaving !== null
-                  || storageSaving !== null
-                }
-                onChange={() => onToggleMembership(row)}
-                aria-label={t('libraryTable.membershipCheckbox', {
-                  mod: displayName,
-                  modpack: modpackName,
-                })}
-              />
-              {/* Short visible label — the full pack name lives in the
-                  aria-label + title so every row doesn't repeat the
-                  (often long) modpack name inline. */}
-              <span className="gf-profile-membership-name">
-                {state.included
-                  ? t('libraryTable.inPack')
-                  : t('libraryTable.notInPack')}
-              </span>
-              {!state.editable && (
-                <span className="gf-profile-membership-note">
-                  {t('profiles.library.readOnly')}
-                </span>
-              )}
-              {saving && <RefreshCw size={12} className="animate-spin" />}
-            </label>
-          ) : (
-            <span className="gf-profile-library-muted">
-              {t('libraryTable.modpackMissing')}
-            </span>
-          )}
-        </div>
-      )}
       {sourceEditorSlot && (
-        <div className="gf-profile-library-source-editor" data-testid="library-row-source-editor" style={{ gridColumn: '1 / -1' }}>
+        // The editor lives inside the clickable row — stop clicks/keys
+        // from bubbling to the row's onClick (which would re-open the
+        // editor the moment the user clicks Cancel/X inside it).
+        <div
+          className="gf-profile-library-source-editor"
+          data-testid="library-row-source-editor"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
           {sourceEditorSlot}
         </div>
       )}

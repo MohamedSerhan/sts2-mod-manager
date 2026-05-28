@@ -413,25 +413,18 @@ describe('<ModsView>', () => {
     expect(deleteAllBtn!).toBeDisabled();
   });
 
-  it('kebab → Disable in game invokes toggle_mod (T17 moved the toggle out of the row)', async () => {
-    // T17: Solo's complaint was that the row's most prominent affordance
-    // was the Active/Stored toggle switch, which led users to manage
-    // mods through the Library rather than through modpacks. The
-    // toggle now lives inside the kebab menu as a labeled item so the
-    // row's primary read (name + version + chips) stays clean.
+  it('row Active/stored switch invokes toggle_mod (storage control lives on the row)', async () => {
+    // 1.7.0: the verbose kebab "Disable in game" entry was retired in
+    // favour of a compact switch on the row itself — users kept asking
+    // "where did the enable/disable toggles go?". ON = active in the
+    // game folder; flipping OFF stores the mod (toggle_mod enable=false).
     seedMods([baseMod({ name: 'BaseLib', folder_name: 'BaseLib', enabled: true })]);
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
-    // No switch in the row's primary area now.
-    expect(screen.queryByRole('switch')).toBeNull();
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    // The kebab item's accessible name concatenates label + description,
-    // so scope to the .gf-kebab-label span to pick the right item.
-    const labels = screen.getAllByText('Disable in game');
-    const itemLabel = labels.find((el) => el.className.includes('gf-kebab-label'));
-    expect(itemLabel).toBeDefined();
-    await user.click(itemLabel!.closest('button')!);
+    const sw = screen.getByRole('switch', { name: /toggle whether BaseLib is active in game/i });
+    expect(sw).toHaveAttribute('aria-checked', 'true');
+    await user.click(sw);
     await waitFor(() => {
       expect(getInvokeCalls().some(
         (c) => c.cmd === 'toggle_mod' && c.args?.name === 'BaseLib' && c.args?.enable === false,
@@ -1589,21 +1582,18 @@ describe('<ModsView>', () => {
 
   // ── Error / failure paths ────────────────────────────────────────
 
-  it('toggle_mod failure surfaces a toast (kebab path post-T17)', async () => {
-    // Post-1.7.0 T18 unification: LibraryTable owns the toggle_mod
-    // call and its own toast wording ("Failed to move {{mod}}: …"
-    // rather than "Failed to toggle …"). The kebab item label / wiring
-    // is unchanged.
+  it('toggle_mod failure surfaces a toast (row switch path)', async () => {
+    // LibraryTable owns the toggle_mod call and its own toast wording
+    // ("Failed to move {{mod}}: …"). The control is the row's
+    // Active/stored switch (the kebab item was retired in 1.7.0).
     seedMods([baseMod({ enabled: true })]);
     registerInvokeHandler('toggle_mod', () => { throw new Error('disk full'); });
     const user = userEvent.setup();
     render(<Wrap />);
     await screen.findAllByText('BaseLib');
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    const labels = screen.getAllByText('Disable in game');
-    const itemLabel = labels.find((el) => el.className.includes('gf-kebab-label'));
-    expect(itemLabel).toBeDefined();
-    await user.click(itemLabel!.closest('button')!);
+    await user.click(
+      screen.getByRole('switch', { name: /toggle whether BaseLib is active in game/i }),
+    );
     await waitFor(() => {
       expect(screen.getByText(/Failed to move BaseLib.*disk full/)).toBeInTheDocument();
     });
@@ -2338,17 +2328,15 @@ describe('<ModsView>', () => {
 
   // ── Non-Error rejection branches (`String(e)` fallback) ──────────
 
-  it('toggle_mod failure with non-Error rejection still surfaces toast (kebab path post-T17)', async () => {
+  it('toggle_mod failure with non-Error rejection still surfaces toast (row switch path)', async () => {
     seedMods([baseMod()]);
     registerInvokeHandler('toggle_mod', () => { throw 'bare-string'; });
     const user = userEvent.setup();
     render(<Wrap />);
     await screen.findAllByText('BaseLib');
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    const labels = screen.getAllByText('Disable in game');
-    const itemLabel = labels.find((el) => el.className.includes('gf-kebab-label'));
-    expect(itemLabel).toBeDefined();
-    await user.click(itemLabel!.closest('button')!);
+    await user.click(
+      screen.getByRole('switch', { name: /toggle whether BaseLib is active in game/i }),
+    );
     await waitFor(() => {
       expect(screen.getByText(/Failed to move BaseLib.*bare-string/)).toBeInTheDocument();
     });

@@ -96,10 +96,10 @@ describe('<LibraryRow>', () => {
     expect(screen.getByText('readable-folder')).toBeInTheDocument();
   });
 
-  it('does not render the active/stored badge in the primary row (derived state moved to the kebab)', () => {
-    // The per-row "Active in game" / "Stored" chip was removed — it's
-    // derived from the active modpack, not a per-mod input. The
-    // capability lives in the kebab ("Activate / Disable in game").
+  it('does not render the legacy active/stored chip in the primary row (it is a switch now)', () => {
+    // The old "Active in game" / "Stored" text chip (.gf-profile-library-storage)
+    // was replaced by a dedicated <Toggle> switch. The switch only renders
+    // when a `mod` prop is present, so these mod-less renders show neither.
     const { unmount } = renderRow({ row: baseMod({ installed_enabled: true }) });
     expect(document.querySelector('.gf-profile-library-storage')).toBeNull();
     unmount();
@@ -108,7 +108,7 @@ describe('<LibraryRow>', () => {
     expect(document.querySelector('.gf-profile-library-storage')).toBeNull();
   });
 
-  it('does not render a primary-row Store / Activate button (moved to the kebab)', () => {
+  it('does not render the verbose Store / Activate button (replaced by a compact switch)', () => {
     const { unmount } = renderRow({ row: baseMod({ installed_enabled: true }) });
     expect(screen.queryByRole('button', { name: /Store BaseLib/i })).toBeNull();
     unmount();
@@ -327,20 +327,13 @@ describe('<LibraryRow> kebab + audit pills', () => {
     expect(screen.queryByRole('button', { name: /mod actions/i })).toBeNull();
   });
 
-  it('kebab → Activate fires onToggleStorage when the mod is stored', async () => {
-    const onToggleStorage = vi.fn();
+  it('kebab no longer carries an Activate / Disable in game item (it is a row switch now)', async () => {
     const user = userEvent.setup();
-    renderRow({
-      mod: baseModInfo({ enabled: false }),
-      row: baseMod({ installed_enabled: false }),
-      onToggleStorage,
-    });
+    renderRow({ mod: baseModInfo({ enabled: false }) });
     await user.click(screen.getByRole('button', { name: /mod actions/i }));
-    const labels = screen.getAllByText('Activate in game');
-    const itemLabel = labels.find((el) => el.className.includes('gf-kebab-label'));
-    expect(itemLabel).toBeDefined();
-    await user.click(itemLabel!.closest('button')!);
-    expect(onToggleStorage).toHaveBeenCalledTimes(1);
+    // The verbose "Activate / Disable in game" kebab entry was retired —
+    // the active/stored switch on the row replaces it.
+    expect(screen.queryByRole('menuitem', { name: /in game/i })).toBeNull();
   });
 
   it('kebab → Freeze fires onTogglePin', async () => {
@@ -635,7 +628,7 @@ describe('<LibraryRow> modpackName=null mode', () => {
     expect(screen.queryByRole('button', { name: /Activate BaseLib/i })).toBeNull();
   });
 
-  it('storage stays reachable via the kebab (Activate / Disable in game) in null mode', async () => {
+  it('active/stored switch stays present (and fires onToggleStorage) in null mode', async () => {
     const onToggleStorage = vi.fn();
     const user = userEvent.setup();
     renderRow({
@@ -647,12 +640,11 @@ describe('<LibraryRow> modpackName=null mode', () => {
       row: baseMod({ installed_enabled: false }),
       onToggleStorage,
     });
-    await user.click(screen.getByRole('button', { name: /mod actions/i }));
-    const labels = screen.getAllByText('Activate in game');
-    const itemLabel = labels.find((el) => el.className.includes('gf-kebab-label'));
-    expect(itemLabel).toBeDefined();
-    await user.click(itemLabel!.closest('button')!);
+    const sw = screen.getByRole('switch', { name: /toggle whether BaseLib is active in game/i });
+    expect(sw).toHaveAttribute('aria-checked', 'false');
+    await user.click(sw);
     expect(onToggleStorage).toHaveBeenCalledTimes(1);
+    expect(onToggleStorage.mock.calls[0][0]).toMatchObject({ name: 'BaseLib' });
   });
 
   it('kebab does not render the modpack membership item when modpackName is null', async () => {
@@ -667,5 +659,83 @@ describe('<LibraryRow> modpackName=null mode', () => {
     await user.click(screen.getByRole('button', { name: /mod actions/i }));
     expect(screen.queryByRole('menuitem', { name: /add to/i })).toBeNull();
     expect(screen.queryByRole('menuitem', { name: /remove from/i })).toBeNull();
+  });
+});
+
+// ── Active / stored switch (restored 1.7.0) ─────────────────────────────
+//
+// The verbose "Store / Activate" button and the buried kebab item were
+// both retired in favour of a single compact switch on the row. ON = the
+// mod is active in the game folder; OFF = it's stored on disk. The switch
+// only renders when a ModInfo (`mod`) is supplied.
+
+describe('<LibraryRow> active/stored switch', () => {
+  it('renders a switch reflecting installed_enabled and a flipping label', () => {
+    const { unmount } = renderRow({
+      mod: baseModInfo({ enabled: true }),
+      row: baseMod({ installed_enabled: true }),
+    });
+    const on = screen.getByRole('switch', {
+      name: /toggle whether BaseLib is active in game/i,
+    });
+    expect(on).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByText('Active in game')).toBeInTheDocument();
+    unmount();
+
+    renderRow({
+      mod: baseModInfo({ enabled: false }),
+      row: baseMod({ installed_enabled: false }),
+    });
+    const off = screen.getByRole('switch', {
+      name: /toggle whether BaseLib is active in game/i,
+    });
+    expect(off).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByText('Stored')).toBeInTheDocument();
+  });
+
+  it('does not render the switch when no mod prop is supplied', () => {
+    renderRow({ mod: undefined });
+    expect(screen.queryByRole('switch')).toBeNull();
+  });
+
+  it('clicking the switch fires onToggleStorage with the row', async () => {
+    const onToggleStorage = vi.fn();
+    const user = userEvent.setup();
+    renderRow({
+      mod: baseModInfo(),
+      row: baseMod({ name: 'BaseLib', folder_name: 'BaseLib' }),
+      onToggleStorage,
+    });
+    await user.click(
+      screen.getByRole('switch', { name: /toggle whether BaseLib is active in game/i }),
+    );
+    expect(onToggleStorage).toHaveBeenCalledTimes(1);
+    expect(onToggleStorage.mock.calls[0][0]).toMatchObject({
+      name: 'BaseLib',
+      folder_name: 'BaseLib',
+    });
+  });
+
+  it('disables the switch while the game is running', () => {
+    renderRow({ mod: baseModInfo(), gameRunning: true });
+    expect(
+      screen.getByRole('switch', { name: /toggle whether BaseLib is active in game/i }),
+    ).toBeDisabled();
+  });
+
+  it('disables the switch while any storage mutation is in flight', () => {
+    renderRow({ mod: baseModInfo(), storageSaving: 'storage::SomethingElse' });
+    expect(
+      screen.getByRole('switch', { name: /toggle whether BaseLib is active in game/i }),
+    ).toBeDisabled();
+  });
+
+  it('shows a spinner next to the switch while THIS row is flipping storage', () => {
+    const { container } = renderRow({
+      mod: baseModInfo(),
+      row: baseMod({ folder_name: 'BaseLib' }),
+      storageSaving: 'storage::BaseLib',
+    });
+    expect(container.querySelector('.gf-storage-toggle .animate-spin')).not.toBeNull();
   });
 });

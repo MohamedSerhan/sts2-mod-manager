@@ -93,7 +93,8 @@
     "storage": {
       "active": "Active in game",
       "stored": "Stored",
-      "storedHint": "Installed on disk but not in the game folder"
+      "storedHint": "Installed on disk but not in the game folder",
+      "toggleAria": "Toggle whether {{mod}} is active in game"
     }
   },
   "libraryTable": {
@@ -1260,10 +1261,6 @@
       "findGithub": "Find GitHub from Nexus"
     },
     "kebab": {
-      "activate": "Activate in game",
-      "activateDesc": "Move this mod's files back into the game folder so STS2 loads it.",
-      "disable": "Disable in game",
-      "disableDesc": "Move this mod's files out of the game folder. The mod stays installed but won't load until you activate it again.",
       "skipUpdate": "Skip this update",
       "unsnooze": "Show update again",
       "addToModpack": "Add to \"{{pack}}\"",

@@ -257,10 +257,10 @@ describe('<LibraryTable>', () => {
     expect(container.querySelectorAll('.gf-profile-library-row')).toHaveLength(100);
   });
 
-  it('kebab "Disable in game" calls toggle_mod (storage toggle moved off the primary row)', async () => {
-    // The per-row Store/Activate button was removed (active/stored is
-    // derived from the active modpack, not a per-mod input). The
-    // capability stays in the kebab — wiring modInfoByKey renders it.
+  it('row Active/stored switch calls toggle_mod (the verbose button + kebab item were retired)', async () => {
+    // 1.7.0: the per-mod active/stored control is a compact switch on the
+    // row. ON = active in the game folder; flipping OFF stores the mod
+    // (toggle_mod enable=false). Wiring modInfoByKey renders the switch.
     registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
     registerInvokeHandler('get_profile_memberships', () => ({
       profiles: [{ name: 'Stable', editable: true }],
@@ -304,10 +304,11 @@ describe('<LibraryTable>', () => {
     const user = userEvent.setup();
     render(<Wrap modpackName="Stable" modInfoByKey={modInfoByKey} />);
     await screen.findAllByText('Idle');
-    // No primary-row Store button.
+    // No verbose primary-row Store button — the control is a switch.
     expect(screen.queryByRole('button', { name: /Store Idle/i })).toBeNull();
-    await user.click(screen.getByRole('button', { name: /mod actions/i }));
-    await user.click(screen.getByRole('menuitem', { name: /disable in game/i }));
+    const sw = screen.getByRole('switch', { name: /toggle whether Idle is active in game/i });
+    expect(sw).toHaveAttribute('aria-checked', 'true');
+    await user.click(sw);
     await waitFor(() => {
       expect(getInvokeCalls()).toContainEqual({
         cmd: 'toggle_mod',

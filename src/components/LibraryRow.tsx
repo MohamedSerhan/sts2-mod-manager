@@ -50,6 +50,7 @@ import {
   KebabMenu,
   KebabSection,
 } from './KebabMenu';
+import { Toggle } from './Toggle';
 import { isUpToDate } from '../lib/auditState';
 import type {
   ModAuditEntry,
@@ -231,6 +232,10 @@ export function LibraryRow({
     : null;
   const saving = membershipKey != null && membershipSaving === membershipKey;
   const displayName = membershipDisplayName(row);
+  // Per-row storage (active/stored) mutation in flight. Drives the small
+  // spinner beside the active/stored toggle. `storageSaving` carries the
+  // libraryStorageKey of the row being flipped (or BULK_STORAGE_KEY).
+  const storageBusy = storageSaving === libraryStorageKey(row);
   // Drag-reorder is only meaningful in a load-order context
   // (ModpackDetail). The Library view passes enableReorder=false, so
   // the drag handle, the `draggable` attribute, and the rank chip stay
@@ -416,14 +421,42 @@ export function LibraryRow({
           )}
         </div>
         <div className="gf-profile-library-storage-actions">
+          {/* Active/stored switch. This is the primary per-mod control
+              in the Library view: ON = the mod sits in the game's mods
+              folder (active in game), OFF = it's kept on disk but moved
+              out (stored). Flipping it calls onToggleStorage, which
+              moves the files. Disabled while the game is running or any
+              storage flip is mid-flight. */}
+          {mod && (
+            <span
+              className="gf-storage-toggle"
+              title={
+                row.installed_enabled
+                  ? t('modpack.storage.active')
+                  : t('modpack.storage.storedHint')
+              }
+            >
+              <Toggle
+                checked={row.installed_enabled}
+                onChange={() => onToggleStorage(row)}
+                disabled={gameRunning || storageSaving !== null}
+                ariaLabel={t('modpack.storage.toggleAria', { mod: displayName })}
+              />
+              <span className="gf-storage-toggle-label">
+                {row.installed_enabled
+                  ? t('modpack.storage.active')
+                  : t('modpack.storage.stored')}
+              </span>
+              {storageBusy && (
+                <RefreshCw size={11} className="animate-spin" aria-hidden />
+              )}
+            </span>
+          )}
           {/* Source pills + tags. Only rendered when we have a ModInfo
               to read from. When the mod has no link at all, we surface
               an "Unlinked" / "Local" badge so the user can tell the row
               apart from linked mods (this matches the old ModRow drawer
-              behavior). Active/stored is no longer a per-row button —
-              it's derived from the active modpack and lives in the
-              kebab ("Activate in game" / "Disable in game") for power
-              users. */}
+              behavior). */}
           {mod && (
             <div className="gf-modrow-drawer-sources">
               {mod.github_url && (
@@ -487,7 +520,6 @@ export function LibraryRow({
             membershipSaving={!!membershipSaving}
             gameRunning={gameRunning}
             onToggleMembership={() => onToggleMembership(row)}
-            onToggleStorage={() => onToggleStorage(row)}
             onTogglePin={onTogglePin}
             onSnooze={onSnooze}
             onUnsnooze={onUnsnooze}
@@ -579,7 +611,6 @@ interface LibraryRowKebabProps {
   membershipSaving: boolean;
   gameRunning: boolean;
   onToggleMembership: () => void;
-  onToggleStorage: () => void;
   onTogglePin: () => void;
   onSnooze: () => void;
   onUnsnooze: () => void;
@@ -607,7 +638,6 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
     membershipSaving,
     gameRunning,
     onToggleMembership,
-    onToggleStorage,
     onTogglePin,
     onSnooze,
     onUnsnooze,
@@ -657,16 +687,10 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
                 : t('mods.kebab.removeFromModpack', { pack: modpackName })}
             </KebabItem>
           )}
-          <KebabItem
-            icon={mod.enabled ? <ToggleLeft size={12} /> : <ToggleRight size={12} />}
-            onClick={onToggleStorage}
-            disabled={gameRunning}
-            description={
-              mod.enabled ? t('mods.kebab.disableDesc') : t('mods.kebab.activateDesc')
-            }
-          >
-            {mod.enabled ? t('mods.kebab.disable') : t('mods.kebab.activate')}
-          </KebabItem>
+          {/* Active/stored is no longer a kebab item — it lives on the
+              row itself as a dedicated switch (see <Toggle> in the
+              storage-actions cluster). Keeping it out of the kebab
+              avoids two controls for the same action. */}
           <KebabItem
             icon={mod.pinned ? <Sun size={12} /> : <Snowflake size={12} />}
             onClick={onTogglePin}

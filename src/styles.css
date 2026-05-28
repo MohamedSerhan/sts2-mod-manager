@@ -666,6 +666,20 @@ body {
   align-items: center;
   gap: 8px;
 }
+/* Active/stored switch sitting at the head of the row's action cluster.
+   The label flips between "Active in game" / "Stored" so the bare switch
+   never has to be decoded on its own. */
+.gf-storage-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.gf-storage-toggle-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-mute);
+  white-space: nowrap;
+}
 .gf-profile-library-title {
   font-size: 13.5px;
   font-weight: 700;

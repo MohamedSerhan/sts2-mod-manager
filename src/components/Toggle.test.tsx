@@ -46,4 +46,17 @@ describe('<Toggle>', () => {
     await user.click(screen.getByRole('switch'));
     expect(onChange).not.toHaveBeenCalled();
   });
+
+  it('applies the optional accessible name and tooltip', () => {
+    render(
+      <Toggle
+        checked
+        onChange={() => {}}
+        ariaLabel="Toggle Foo active in game"
+        title="Active in game"
+      />,
+    );
+    const sw = screen.getByRole('switch', { name: 'Toggle Foo active in game' });
+    expect(sw).toHaveAttribute('title', 'Active in game');
+  });
 });

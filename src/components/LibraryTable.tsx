@@ -16,16 +16,16 @@
  *    workspace (we still need to handle 100+ mod libraries cleanly).
  *  - Membership toggle calls `setProfileModMembership` against the
  *    focused modpack.
- *  - Storage toggle (Activate / Disable in game) calls `toggleMod` —
- *    surfaced via the per-row kebab + the bulk "store unused" action,
- *    not a primary per-row button (active/stored is derived from the
- *    active modpack, not a per-mod input).
+ *  - Storage toggle (active in game ⇄ stored) calls `toggleMod` —
+ *    surfaced via the per-row Active/stored switch + the bulk "store
+ *    unused" action.
  *  - Drag-reorder of the in-pack mods calls `setProfileLoadOrder`,
  *    gated behind `enableReorder` (ModpackDetail only).
  *
- * Used inside `<ModpackDetail>`. Designed to be testable standalone —
- * accept callbacks for parent refresh so ProfilesView can re-pull
- * after a mutation without leaking into LibraryTable state.
+ * Used by the Library ("All Mods") view in `<Mods>`. Designed to be
+ * testable standalone — accepts callbacks for parent refresh so the
+ * view can re-pull after a mutation without leaking into LibraryTable
+ * state.
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';

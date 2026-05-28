@@ -1068,6 +1068,39 @@ describe('<ProfilesView>', () => {
     });
   });
 
+  it('load-order rows reorder via pointer drag on the handle', async () => {
+    // Exercises the pointer-event reorder path (pointerdown → move → up
+    // on the drag handle). jsdom returns zero-size rects, so the hit-test
+    // resolves to the last row — dragging the first item sends it to the
+    // bottom, which is enough to prove the handlers + reorder wire up.
+    seedProfiles([
+      baseProfile({
+        name: 'Stable',
+        mods: [
+          profileMod({ name: 'BaseLib', folder_name: 'BaseLib', mod_id: 'BaseLib' }),
+          profileMod({ name: 'Card Art Editor', folder_name: 'CardArtEditor', mod_id: 'CardArtEditor' }),
+        ],
+      }),
+    ]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await openDetailFor(user, 'Stable');
+    await user.click(screen.getByRole('button', { name: /Load order/i }));
+    const dialog = (await screen.findByRole('dialog', {
+      name: /Load order for Stable/i,
+    })) as HTMLElement;
+    const handle = dialog.querySelector('.gf-load-order-drag') as HTMLElement;
+    expect(handle).not.toBeNull();
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 0, clientY: 400 });
+    fireEvent.pointerUp(handle, { pointerId: 1, clientX: 0, clientY: 400 });
+    const names = [...dialog.querySelectorAll('.gf-load-order-name')].map(
+      (n) => n.textContent,
+    );
+    // BaseLib (was first) is dragged to the bottom.
+    expect(names[names.length - 1]).toBe('BaseLib');
+  });
+
   const loadOrderStatusCases: Array<[LoadOrderSettingsStatus, RegExp]> = [
     ['applied', /applied to settings\.save/i],
     ['skipped_missing', /settings\.save was not found/i],

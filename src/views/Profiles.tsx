@@ -723,7 +723,11 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
                         event.preventDefault();
                         setDraggedLoadOrderIndex(index);
                         setDragOverLoadOrderIndex(index);
-                        event.currentTarget.setPointerCapture(event.pointerId);
+                        try {
+                          event.currentTarget.setPointerCapture(event.pointerId);
+                        } catch {
+                          /* setPointerCapture unsupported (e.g. jsdom) — fine */
+                        }
                       }}
                       onPointerMove={(event) => {
                         if (draggedLoadOrderIndex === null) return;

@@ -741,3 +741,55 @@ describe('<LibraryRow> active/stored switch', () => {
     expect(container.querySelector('.gf-row-status .animate-spin')).not.toBeNull();
   });
 });
+
+// ── Row click → Edit sources (4.4) + source-badge isolation ─────────────
+
+describe('<LibraryRow> row click + source badges', () => {
+  it('clicking the row body fires onEditSources', async () => {
+    const onEditSources = vi.fn();
+    const user = userEvent.setup();
+    renderRow({ mod: baseModInfo(), onEditSources });
+    await user.click(screen.getByText('BaseLib'));
+    expect(onEditSources).toHaveBeenCalledTimes(1);
+  });
+
+  it('Enter and Space on the row fire onEditSources', () => {
+    const onEditSources = vi.fn();
+    renderRow({ mod: baseModInfo(), onEditSources });
+    const card = document.querySelector('[data-testid="library-row"]') as HTMLElement;
+    fireEvent.keyDown(card, { key: 'Enter' });
+    fireEvent.keyDown(card, { key: ' ' });
+    expect(onEditSources).toHaveBeenCalledTimes(2);
+  });
+
+  it('clicking a source-badge link does not bubble to the row (stopPropagation)', async () => {
+    const onEditSources = vi.fn();
+    const user = userEvent.setup();
+    renderRow({
+      mod: baseModInfo({ github_url: 'https://github.com/x/y' }),
+      onEditSources,
+    });
+    const ghLink = screen.getByText('GitHub').closest('a') as HTMLElement;
+    await user.click(ghLink);
+    expect(onEditSources).not.toHaveBeenCalled();
+  });
+
+  it('clicking the active/stored switch does not open Edit sources', async () => {
+    const onEditSources = vi.fn();
+    const onToggleStorage = vi.fn();
+    const user = userEvent.setup();
+    renderRow({ mod: baseModInfo(), onEditSources, onToggleStorage });
+    await user.click(
+      screen.getByRole('switch', { name: /toggle whether BaseLib is active in game/i }),
+    );
+    expect(onToggleStorage).toHaveBeenCalledTimes(1);
+    expect(onEditSources).not.toHaveBeenCalled();
+  });
+
+  it('renders a custom-link badge when only custom_url is set', () => {
+    renderRow({
+      mod: baseModInfo({ github_url: null, nexus_url: null, custom_url: 'https://example.com' }),
+    });
+    expect(screen.getByText(/^Link$/)).toBeInTheDocument();
+  });
+});

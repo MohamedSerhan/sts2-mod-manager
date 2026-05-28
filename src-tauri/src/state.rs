@@ -122,6 +122,41 @@ pub struct AppStateInner {
     pub modpack_browser_cache: std::collections::HashMap<u32, CachedBrowserPage>,
 }
 
+/// On-disk directory name for app data. Dev builds (version contains "-dev")
+/// use a separate dir so testing never touches the release app's settings,
+/// mod_sources.json, profiles/modpacks, cache, or logs. Release builds are
+/// byte-for-byte unaffected. The QA env overrides (STS2_CONFIG_DIR /
+/// STS2_CACHE_DIR) still take precedence at the call sites below.
+pub fn app_dir_name() -> &'static str {
+    dir_name_for(env!("CARGO_PKG_VERSION"))
+}
+
+/// Pure mapping from a version string to the data-dir name. Testable without a
+/// build. Any version containing "-dev" (e.g. "1.6.1-dev.pr42.ga1b2c3d") maps
+/// to the dev dir.
+pub fn dir_name_for(version: &str) -> &'static str {
+    if version.contains("-dev") {
+        "sts2-mod-manager-dev"
+    } else {
+        "sts2-mod-manager"
+    }
+}
+
+#[cfg(test)]
+mod app_dir_name_tests {
+    use super::dir_name_for;
+
+    #[test]
+    fn release_version_uses_base_dir() {
+        assert_eq!(dir_name_for("1.6.1"), "sts2-mod-manager");
+    }
+
+    #[test]
+    fn dev_version_uses_dev_dir() {
+        assert_eq!(dir_name_for("1.6.1-dev.pr42.ga1b2c3d"), "sts2-mod-manager-dev");
+    }
+}
+
 pub type AppState = Arc<Mutex<AppStateInner>>;
 
 impl AppStateInner {
@@ -139,7 +174,7 @@ impl AppStateInner {
             .unwrap_or_else(|| {
                 dirs::config_dir()
                     .unwrap_or_else(|| PathBuf::from("."))
-                    .join("sts2-mod-manager")
+                    .join(app_dir_name())
             });
 
         let cache_path = std::env::var("STS2_CACHE_DIR")
@@ -148,7 +183,7 @@ impl AppStateInner {
             .unwrap_or_else(|| {
                 dirs::cache_dir()
                     .unwrap_or_else(|| PathBuf::from(".cache"))
-                    .join("sts2-mod-manager")
+                    .join(app_dir_name())
             });
 
         let profiles_path = config_path.join("profiles");

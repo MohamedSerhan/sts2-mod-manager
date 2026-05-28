@@ -79,7 +79,7 @@ fn setup_logging(log_path: &std::path::Path) {
 pub fn run() {
     let config_dir = dirs::config_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("sts2-mod-manager");
+        .join(crate::state::app_dir_name());
     setup_logging(&config_dir.join("sts2mm.log"));
 
     // Startup banner -- makes it easy to find session boundaries when

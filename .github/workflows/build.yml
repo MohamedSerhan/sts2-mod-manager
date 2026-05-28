@@ -76,7 +76,11 @@ jobs:
         run: node --test scripts/dev-build-stamp.test.mjs
 
   build:
-    if: ${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}
+    if: >-
+      ${{ startsWith(github.ref, 'refs/tags/v')
+          || github.event_name == 'workflow_dispatch'
+          || (github.event_name == 'pull_request'
+              && contains(github.event.pull_request.labels.*.name, 'dev-build')) }}
     # Job-level permissions are also declared here in addition to the
     # workflow-level block above. tauri-action's "Create a release" call has
     # been seen to fail with "Resource not accessible by integration" on tag
@@ -137,6 +141,17 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Stamp dev version + identity (labeled-PR dev builds only)
+        if: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'dev-build') }}
+        shell: bash
+        env:
+          DEV_PR_NUMBER: ${{ github.event.pull_request.number }}
+          DEV_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          SHORT=$(printf '%s' "$DEV_HEAD_SHA" | cut -c1-7)
+          DEV_PR_NUMBER="$DEV_PR_NUMBER" DEV_SHORT_SHA="$SHORT" \
+            node scripts/dev-build-stamp.mjs --stamp
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -188,6 +203,36 @@ jobs:
 
           gh release upload "$env:TAG" $zip --clobber
 
+      - name: Package portable zip (dev builds, Windows only)
+        if: matrix.platform == 'windows-latest' && github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'dev-build')
+        shell: pwsh
+        run: |
+          # Read the (already dev-stamped) version from tauri.conf.json.
+          $conf = Get-Content 'src-tauri/tauri.conf.json' -Raw | ConvertFrom-Json
+          $version = $conf.version
+
+          $candidates = Get-ChildItem 'src-tauri/target/release/*.exe' |
+                        Where-Object {
+                          $_.Name -notlike '*-setup.exe' -and
+                          $_.Name -notlike '*build-script*' -and
+                          $_.Name -notlike '*.tmp.exe'
+                        }
+          if ($candidates.Count -ne 1) {
+            Write-Error "Expected exactly one app exe in target/release, found $($candidates.Count): $($candidates.Name -join ', ')"
+            exit 1
+          }
+          $exe = $candidates[0]
+
+          $staging = 'portable-staging'
+          New-Item -ItemType Directory -Path $staging -Force | Out-Null
+          Copy-Item $exe.FullName (Join-Path $staging 'STS2 Mod Manager (Dev).exe')
+          Copy-Item scripts/portable-README.txt (Join-Path $staging 'README.txt')
+
+          # Repo-root zip; the artifact-upload step captures it. No gh release
+          # upload here — publish-dev attaches it to the dev-pr<N> prerelease.
+          $zip = "STS2.Mod.Manager_${version}_x64_portable.zip"
+          Compress-Archive -Path "$staging/*" -DestinationPath $zip -Force
+
       - name: Patch AppImage AppRun (Arch/Wayland LD_PRELOAD fix)
         if: matrix.platform == 'ubuntu-22.04'
         env:
@@ -221,6 +266,7 @@ jobs:
             src-tauri/target/release/bundle/**/*.msi
             src-tauri/target/release/bundle/**/*.nsis
             src-tauri/target/universal-apple-darwin/release/bundle/**/*.dmg
+            STS2.Mod.Manager_*_x64_portable.zip
           if-no-files-found: warn
           retention-days: 7
 

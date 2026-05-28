@@ -31,7 +31,6 @@ import {
   GitBranch,
   GripVertical,
   Link as LinkIcon,
-  Play,
   RefreshCw,
   RotateCcw,
   Snowflake,
@@ -44,9 +43,7 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import { Badge } from './Badge';
-import { Button } from './Button';
 import { Card } from './Card';
-import { HelpHint } from './HelpHint';
 import {
   KebabDivider,
   KebabItem,
@@ -113,6 +110,12 @@ export interface LibraryRowProps {
   /** Index inside the load-order draft (-1 when not in the pack).
    *  Drives the drag handles + rank chip. */
   inPackIndex: number;
+  /** Whether this row lives in a load-order context (ModpackDetail).
+   *  Gates the drag handle, the `draggable` attribute, and the rank
+   *  chip. The Library view passes false (no order to set — there's
+   *  nothing to reorder across all-installed-mods), so the handle/chip
+   *  never render there even though rows can be "in pack". */
+  enableReorder?: boolean;
   /** Drag highlight target. */
   isDragOver: boolean;
   /** True while a setProfileLoadOrder commit is in flight. Disables
@@ -133,9 +136,10 @@ export interface LibraryRowProps {
   onToggleStorage: (row: ProfileMembershipMod) => void | Promise<void>;
 
   // ─── Optional ModRow-style action surface ────────────────────────
-  // All optional: LibraryTable in modpack-detail mode doesn't need
-  // these (the existing checkbox + Store button cover it). The Library
-  // view wires them all in so the kebab matches the old ModRow drawer.
+  // All optional: LibraryTable in modpack-detail mode doesn't strictly
+  // need these (the membership checkbox + kebab cover the core flow).
+  // The Library view wires them all in so the kebab matches the old
+  // ModRow drawer.
 
   /** Full ModInfo for this row (provides github_url, tags, pinned,
    *  size_bytes, etc.). When omitted, the kebab still renders core
@@ -186,6 +190,7 @@ export function LibraryRow({
   state,
   inPack,
   inPackIndex,
+  enableReorder = false,
   isDragOver,
   loadOrderSaving,
   membershipSaving,
@@ -226,6 +231,11 @@ export function LibraryRow({
     : null;
   const saving = membershipKey != null && membershipSaving === membershipKey;
   const displayName = membershipDisplayName(row);
+  // Drag-reorder is only meaningful in a load-order context
+  // (ModpackDetail). The Library view passes enableReorder=false, so
+  // the drag handle, the `draggable` attribute, and the rank chip stay
+  // hidden there even though rows can be "in pack".
+  const reorderable = enableReorder && inPack && inPackIndex >= 0;
   // Audit pill flags. We surface exactly one of: update / blocked /
   // frozen / snoozed at a time, mirroring ModRow's drawer logic, but in
   // an inline chip-row so the user doesn't have to expand anything.
@@ -251,7 +261,7 @@ export function LibraryRow({
   return (
     <Card
       className={`gf-profile-library-row ${inPack ? 'in-pack' : ''} ${isDragOver ? 'drag-over' : ''}${mod?.pinned ? ' gf-mod-pinned' : ''}`}
-      draggable={inPack && !loadOrderSaving && inPackIndex >= 0}
+      draggable={reorderable && !loadOrderSaving}
       onDragStart={(event) => onDragStart(event, inPackIndex)}
       onDragOver={(event) => onDragOver(event, inPackIndex)}
       onDragLeave={() => onDragLeave(inPackIndex)}
@@ -260,7 +270,7 @@ export function LibraryRow({
       data-testid="library-row"
     >
       <div className="gf-profile-library-main">
-        {inPack && (
+        {reorderable && (
           <div
             className="gf-load-order-drag"
             title={t('profiles.loadOrder.dragHandle')}
@@ -287,15 +297,7 @@ export function LibraryRow({
             {row.folder_name
               && (row.folder_name !== row.name || !!row.display_name?.trim())
               && <span>{row.folder_name}</span>}
-            <span
-              className={`gf-profile-library-storage ${row.installed_enabled ? 'active' : 'stored'}`}
-            >
-              {row.installed_enabled
-                ? t('profiles.library.storageActive')
-                : t('profiles.library.storageDisabled')}
-            </span>
-            <HelpHint helpKey="storedMeaning" />
-            {inPack && inPackIndex >= 0 && (
+            {reorderable && (
               <span className="gf-load-order-rank-inline">
                 #{inPackIndex + 1}
               </span>
@@ -414,40 +416,16 @@ export function LibraryRow({
           )}
         </div>
         <div className="gf-profile-library-storage-actions">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => onToggleStorage(row)}
-            disabled={storageSaving !== null || membershipSaving !== null || gameRunning}
-            aria-label={
-              row.installed_enabled
-                ? t('profiles.library.storeAria', { mod: displayName })
-                : t('profiles.library.activateAria', { mod: displayName })
-            }
-            title={
-              row.installed_enabled
-                ? t('profiles.library.storeAria', { mod: displayName })
-                : t('profiles.library.activateAria', { mod: displayName })
-            }
-          >
-            {storageSaving === libraryStorageKey(row) ? (
-              <RefreshCw size={13} className="animate-spin" />
-            ) : row.installed_enabled ? (
-              <Download size={13} />
-            ) : (
-              <Play size={13} />
-            )}
-            {row.installed_enabled
-              ? t('profiles.library.storeAction')
-              : t('profiles.library.activateAction')}
-          </Button>
-          {/* Source pills + tags inline alongside the storage button.
-              Only rendered when we have a ModInfo to read from. When
-              the mod has no link at all, we surface an "Unlinked" /
-              "Local" badge so the user can tell the row apart from
-              linked mods (this matches the old ModRow drawer behavior). */}
+          {/* Source pills + tags. Only rendered when we have a ModInfo
+              to read from. When the mod has no link at all, we surface
+              an "Unlinked" / "Local" badge so the user can tell the row
+              apart from linked mods (this matches the old ModRow drawer
+              behavior). Active/stored is no longer a per-row button —
+              it's derived from the active modpack and lives in the
+              kebab ("Activate in game" / "Disable in game") for power
+              users. */}
           {mod && (
-            <div className="gf-modrow-drawer-sources" style={{ marginLeft: 8 }}>
+            <div className="gf-modrow-drawer-sources">
               {mod.github_url && (
                 <a
                   href={mod.github_url}
@@ -532,7 +510,10 @@ export function LibraryRow({
               title={
                 !state.editable
                   ? t('profiles.library.readOnlyTitle')
-                  : undefined
+                  : t('libraryTable.membershipCheckbox', {
+                      mod: displayName,
+                      modpack: modpackName,
+                    })
               }
             >
               <input
@@ -549,10 +530,13 @@ export function LibraryRow({
                   modpack: modpackName,
                 })}
               />
+              {/* Short visible label — the full pack name lives in the
+                  aria-label + title so every row doesn't repeat the
+                  (often long) modpack name inline. */}
               <span className="gf-profile-membership-name">
                 {state.included
-                  ? t('libraryTable.inPack', { modpack: modpackName })
-                  : t('libraryTable.notInPack', { modpack: modpackName })}
+                  ? t('libraryTable.inPack')
+                  : t('libraryTable.notInPack')}
               </span>
               {!state.editable && (
                 <span className="gf-profile-membership-note">

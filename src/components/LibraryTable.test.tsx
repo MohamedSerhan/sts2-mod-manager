@@ -2,7 +2,9 @@
  * LibraryTable tests — extracted from Profiles.test.tsx after the
  * 1.7.0 T16 restructure. The component focuses on a single modpack's
  * mod editor: search + sort + bulk Store + per-row toggle membership
- * + per-row store/activate + drag-reorder the in-pack subset.
+ * + (kebab) storage toggle + drag-reorder the in-pack subset (gated on
+ * enableReorder). The per-row Store/Activate button was removed; the
+ * context-driven explainer banner is covered here too.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -93,6 +95,28 @@ describe('<LibraryTable>', () => {
     // span); use findAllByText to handle the duplication.
     expect((await screen.findAllByText('BaseLib')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('CardArtEditor').length).toBeGreaterThan(0);
+  });
+
+  it('shows the modpack explainer (drag + switching) when enableReorder is set', async () => {
+    registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [
+        {
+          name: 'BaseLib',
+          version: '1.0.0',
+          folder_name: 'BaseLib',
+          mod_id: 'BaseLib',
+          installed_enabled: true,
+          profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+        },
+      ],
+    }));
+    const { container } = render(<Wrap modpackName="Stable" enableReorder />);
+    await screen.findAllByText('BaseLib');
+    const help = container.querySelector('.gf-profile-library-help');
+    expect(help?.textContent).toMatch(/Drag the handle to set load order/i);
+    expect(help?.textContent).toMatch(/Switching to this modpack/i);
   });
 
   it('membership toggle calls set_profile_mod_membership for the focused modpack', async () => {
@@ -233,7 +257,10 @@ describe('<LibraryTable>', () => {
     expect(container.querySelectorAll('.gf-profile-library-row')).toHaveLength(100);
   });
 
-  it('store/activate button calls toggle_mod and updates the row label', async () => {
+  it('kebab "Disable in game" calls toggle_mod (storage toggle moved off the primary row)', async () => {
+    // The per-row Store/Activate button was removed (active/stored is
+    // derived from the active modpack, not a per-mod input). The
+    // capability stays in the kebab — wiring modInfoByKey renders it.
     registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
     registerInvokeHandler('get_profile_memberships', () => ({
       profiles: [{ name: 'Stable', editable: true }],
@@ -250,20 +277,43 @@ describe('<LibraryTable>', () => {
     }));
     registerInvokeHandler('toggle_mod', () => undefined);
 
+    const modInfoByKey = new Map([
+      ['Idle', {
+        name: 'Idle',
+        version: '1.0',
+        description: '',
+        enabled: true,
+        files: [],
+        source: null,
+        hash: null,
+        dependencies: [],
+        size_bytes: 0,
+        folder_name: 'Idle',
+        mod_id: 'Idle',
+        github_url: null,
+        nexus_url: null,
+        pinned: false,
+        min_game_version: null,
+        author: null,
+        tags: [],
+        display_name: null,
+        display_description: null,
+      }],
+    ]);
+
     const user = userEvent.setup();
-    render(<Wrap modpackName="Stable" />);
+    render(<Wrap modpackName="Stable" modInfoByKey={modInfoByKey} />);
     await screen.findAllByText('Idle');
-    await user.click(
-      await screen.findByRole('button', { name: /Store Idle/i }),
-    );
+    // No primary-row Store button.
+    expect(screen.queryByRole('button', { name: /Store Idle/i })).toBeNull();
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /disable in game/i }));
     await waitFor(() => {
       expect(getInvokeCalls()).toContainEqual({
         cmd: 'toggle_mod',
         args: { name: 'Idle', folderName: 'Idle', enable: false },
       });
     });
-    // After storage, row's storage chip flips to "Stored".
-    expect(await screen.findByText(/^Stored$/i)).toBeInTheDocument();
   });
 
   it('drag reordering an in-pack mod calls set_profile_load_order', async () => {
@@ -295,7 +345,9 @@ describe('<LibraryTable>', () => {
       settings_path: null,
     }));
 
-    const { container } = render(<Wrap modpackName="Stable" />);
+    // enableReorder is what gates the drag handlers + rank chip now;
+    // ModpackDetail passes it. Without it the drop is a no-op.
+    const { container } = render(<Wrap modpackName="Stable" enableReorder />);
     // Wait for the load-order draft to populate. The rank chip ("#1",
     // "#2") only renders once `inPackIndex >= 0`, which is the same
     // condition gating the drag handlers' state mutations. Without
@@ -555,19 +607,18 @@ describe('<LibraryTable>', () => {
     });
 
     const user = userEvent.setup();
-    const { container } = render(<Wrap modpackName="Stable" />);
+    render(<Wrap modpackName="Stable" />);
     await screen.findAllByText('Stores Cleanly');
     await user.click(screen.getByRole('button', { name: /Store 2 unused active mods/i }));
 
     await waitFor(() => {
       expect(getInvokeCalls().filter((c) => c.cmd === 'toggle_mod')).toHaveLength(2);
     });
-    // Success row flipped to Stored; failed row stayed Active in game.
-    const rows = Array.from(container.querySelectorAll('.gf-profile-library-row')) as HTMLElement[];
-    const storesRow = rows.find((r) => r.textContent?.includes('Stores Cleanly'));
-    const failsRow = rows.find((r) => r.textContent?.includes('Fails To Store'));
-    expect(storesRow?.textContent).toMatch(/Stored/);
-    expect(failsRow?.textContent).toMatch(/Active in game/);
+    // Both rows were attempted (one cleanly, one failed). The
+    // active/stored chip no longer renders in the row, so the
+    // observable outcome is the aggregate error toast naming the failed
+    // mod — the success row's flip is verified by the toggle call set
+    // above plus the toast's "1 of 2" count.
     expect(
       await screen.findByText(/Stored 1 of 2 unused active mods\. Failed: Fails To Store/i),
     ).toBeInTheDocument();
@@ -698,15 +749,23 @@ describe('<LibraryTable modpackName={null}>', () => {
     expect(screen.queryByRole('option', { name: /In this modpack first/i })).toBeNull();
   });
 
-  it('still renders the storage chip + storage button per row', async () => {
+  it('renders rows without the storage chip or per-row Store button', async () => {
     seedInstalledMods();
     const { container } = render(<Wrap modpackName={null} />);
     await screen.findAllByText('BaseLib');
-    // Storage chip span (specific class) reads "Active in game".
-    const chip = container.querySelector('.gf-profile-library-storage.active');
-    expect(chip).not.toBeNull();
-    expect(chip?.textContent).toMatch(/Active in game/i);
-    // Storage action button is the per-row Store button.
-    expect(screen.getByRole('button', { name: /Store BaseLib/i })).toBeInTheDocument();
+    // The active/stored chip + per-row Store/Activate button were
+    // removed from the primary row.
+    expect(container.querySelector('.gf-profile-library-storage')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Store BaseLib/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Activate BaseLib/i })).toBeNull();
+  });
+
+  it('shows the Library explainer (no reorder) and never the modpack explainer', async () => {
+    seedInstalledMods();
+    const { container } = render(<Wrap modpackName={null} />);
+    await screen.findAllByText('BaseLib');
+    const help = container.querySelector('.gf-profile-library-help');
+    expect(help?.textContent).toMatch(/Every mod installed on your computer/i);
+    expect(help?.textContent).not.toMatch(/Drag the handle to set load order/i);
   });
 });

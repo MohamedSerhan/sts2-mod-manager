@@ -590,6 +590,10 @@ body {
   grid-template-columns: minmax(220px, 0.8fr) minmax(280px, 1.2fr);
   gap: 16px;
   align-items: center;
+  /* Paradox-style density: tighter vertical rhythm than the default
+     Card p-5 (20px). Overrides the utility padding so a long mod list
+     scans as a compact list, not a stack of fat cards. */
+  padding: 11px 14px;
 }
 .gf-profile-library-main {
   min-width: 0;
@@ -601,6 +605,8 @@ body {
 .gf-profile-library-storage-actions {
   flex: 0 0 auto;
   display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 .gf-profile-library-title {
   font-size: 13.5px;
@@ -676,8 +682,6 @@ body {
   line-height: 1.45;
   padding: 8px 10px;
 }
-.gf-profile-library-storage.active { color: var(--ok); }
-.gf-profile-library-storage.stored { color: var(--ink-dim); }
 .gf-profile-library-footer {
   display: flex;
   align-items: center;

@@ -83,8 +83,8 @@
   },
   "libraryTable": {
     "membershipCheckbox": "切换 {{mod}} 在 {{modpack}} 中的状态",
-    "inPack": "已在 {{modpack}} 中",
-    "notInPack": "未在 {{modpack}} 中",
+    "inPack": "已在包中",
+    "notInPack": "不在包中",
     "modpackMissing": "此模组包已不存在 — 请尝试刷新列表。"
   },
   "createModpack": {
@@ -351,13 +351,8 @@
       "searchLabel": "搜索模组库",
       "searchPlaceholder_one": "搜索 {{count}} 个库中模组",
       "searchPlaceholder_other": "搜索 {{count}} 个库中模组",
-      "storageHelp": "模组库会显示所有已安装的模组。\"已激活于游戏\"表示文件在游戏文件夹中;\"已存储\"表示文件仍保留安装，但已移出游戏文件夹。模组包复选框决定哪些模组包包含该模组。",
-      "storageActive": "已激活于游戏",
-      "storageDisabled": "已存储",
-      "storeAction": "存储（保留安装但不激活）",
-      "activateAction": "在游戏中激活",
-      "storeAria": "存储 {{mod}}（保留安装但移出游戏文件夹）",
-      "activateAria": "将 {{mod}} 激活到游戏文件夹",
+      "explainerModpack": "勾选模组即可将其加入此模组包。拖动手柄可设置加载顺序。切换到此模组包时，将在游戏中精确激活这些模组。",
+      "explainerLibrary": "你电脑上已安装的所有模组。使用复选框可将模组加入当前活跃的模组包 — 切换模组包决定游戏中实际加载的内容。",
       "bulkStoreUnused_one": "存储 {{count}} 个未使用的活跃模组",
       "bulkStoreUnused_other": "存储 {{count}} 个未使用的活跃模组",
       "bulkStoreNone": "没有未使用的活跃模组",
@@ -487,7 +482,7 @@
   },
   "modpacks": {
     "tabs": {
-      "yours": "我的",
+      "yours": "已安装",
       "browse": "浏览"
     },
     "quickAdd": {

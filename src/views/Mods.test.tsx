@@ -2960,7 +2960,13 @@ describe('<ModsView>', () => {
       seedMods([baseMod({ name: 'BaseLib', folder_name: 'BaseLib' })]);
       render(<Wrap />);
       expect(await screen.findByRole('heading', { name: /all installed mods/i })).toBeInTheDocument();
-      expect(screen.getByText(/every mod installed on your computer/i)).toBeInTheDocument();
+      // Match the unique tail of the page subtitle. The LibraryTable
+      // explainer banner below also opens with "Every mod installed on
+      // your computer…", so a substring match on that opener would be
+      // ambiguous — anchor on the page-subtitle-only clause instead.
+      expect(
+        screen.getByText(/Your active modpack decides which ones load in the game/i),
+      ).toBeInTheDocument();
     });
 
     it('Manage active modpack link calls onManageActiveModpack', async () => {
@@ -2974,12 +2980,17 @@ describe('<ModsView>', () => {
     });
   });
 
-  // ── per-row storage + membership chips (1.7.0) ─────────────────────
-  // Solo's confusion case: a mod can be "disabled in game" (enabled=false
-  // on disk, lives in `disabled_mods/` or whichever shadow path the
-  // backend uses) while still being a member of the active modpack. Without
-  // separate chips for storage vs. membership, the row was unreadable.
-  describe('per-row state chips', () => {
+  // ── per-row membership column (1.7.0 → mod-list redesign) ──────────
+  // The redesign dropped the per-row "Active in game" / "Stored" chip
+  // (active/stored is derived from the active modpack, not a per-mod
+  // input — the capability lives in the kebab now). What the row still
+  // surfaces is the membership checkbox against the active modpack,
+  // with a short "In pack" / "Not in pack" label (the full pack name
+  // lives in the aria-label/title). Solo's old confusion case — a mod
+  // disabled on disk yet still a modpack member — is now expressed
+  // purely through the checkbox's checked state, independent of any
+  // storage chip.
+  describe('per-row membership column', () => {
     type Membership = 'in' | 'notIn' | 'includedOff' | 'noActive';
 
     function setupRow(active: boolean, membership: Membership): void {
@@ -3012,10 +3023,8 @@ describe('<ModsView>', () => {
 
     // Loud row lookup — `findByText` resolves once the mod name
     // appears in the DOM. The .closest() throw catches regressions in
-    // the row's outer markup (no `data-testid="mod-row"` wrapper).
+    // the row's outer markup (no `data-testid="library-row"` wrapper).
     async function getModRow(modName: string): Promise<HTMLElement> {
-      // Find the library-row whose title text matches the mod name.
-      // The display-name h3 always carries the mod's primary name.
       const candidates = await screen.findAllByText(modName);
       for (const node of candidates) {
         const row = node.closest('[data-testid="library-row"]');
@@ -3024,63 +3033,67 @@ describe('<ModsView>', () => {
       throw new Error(`No data-testid="library-row" wrapper around "${modName}"`);
     }
 
-    // Wait for the membership column to settle. Post-1.7.0 T18
-    // unification, the row exposes membership through a checkbox in
-    // the per-modpack column (label "In TestPack" / "Not in TestPack").
-    async function waitForMembershipLabel(row: HTMLElement, wording: RegExp): Promise<HTMLElement> {
+    // Wait for the membership column to settle. The row exposes
+    // membership through a checkbox whose accessible name carries the
+    // full "Toggle {mod} in {pack}" wording; the visible label is the
+    // short "In pack" / "Not in pack".
+    async function waitForMembershipCheckbox(row: HTMLElement, checked: boolean): Promise<HTMLElement> {
       await waitFor(() => {
-        expect(within(row).getByText(wording)).toBeInTheDocument();
+        const cb = within(row).getByRole('checkbox', { name: /Toggle TargetMod in TestPack/i });
+        if (checked) expect(cb).toBeChecked();
+        else expect(cb).not.toBeChecked();
       });
-      return within(row).getByText(wording);
+      return within(row).getByRole('checkbox', { name: /Toggle TargetMod in TestPack/i });
     }
 
-    it('shows Active in game + In modpack checkbox label when both true', async () => {
+    it('no active/stored chip in the row; checked checkbox + "In pack" label when a member', async () => {
       setupRow(true, 'in');
       render(<Wrap />);
       const row = await getModRow('TargetMod');
-      expect(within(row).getByText(/active in game/i)).toBeInTheDocument();
-      await waitForMembershipLabel(row, /^In TestPack$/i);
-      // Checkbox is checked.
-      const checkbox = within(row).getByRole('checkbox');
-      expect(checkbox).toBeChecked();
+      // Storage chip removed from the row.
+      expect(row.querySelector('.gf-profile-library-storage')).toBeNull();
+      await waitForMembershipCheckbox(row, true);
+      expect(within(row).getByText(/^In pack$/i)).toBeInTheDocument();
     });
 
-    it('shows Stored + Not in modpack checkbox label when neither', async () => {
+    it('unchecked checkbox + "Not in pack" label when not a member (storage chip still absent)', async () => {
       setupRow(false, 'notIn');
       render(<Wrap />);
       const row = await getModRow('TargetMod');
-      expect(within(row).getByText(/^stored$/i)).toBeInTheDocument();
-      await waitForMembershipLabel(row, /^Not in TestPack$/i);
-      const checkbox = within(row).getByRole('checkbox');
-      expect(checkbox).not.toBeChecked();
+      expect(row.querySelector('.gf-profile-library-storage')).toBeNull();
+      await waitForMembershipCheckbox(row, false);
+      expect(within(row).getByText(/^Not in pack$/i)).toBeInTheDocument();
     });
 
-    it('shows Active in game + Not in modpack', async () => {
+    it('active-on-disk but not a member → "Not in pack" (membership is independent of storage)', async () => {
       setupRow(true, 'notIn');
       render(<Wrap />);
       const row = await getModRow('TargetMod');
-      expect(within(row).getByText(/active in game/i)).toBeInTheDocument();
-      await waitForMembershipLabel(row, /^Not in TestPack$/i);
+      await waitForMembershipCheckbox(row, false);
+      expect(within(row).getByText(/^Not in pack$/i)).toBeInTheDocument();
     });
 
-    // Solo's confusion case — the row reads "Stored" but the checkbox
-    // is still checked because the mod is part of the active modpack.
-    it("shows Stored + In modpack (Solo's confusion case)", async () => {
+    // Solo's confusion case — disabled on disk yet still a modpack
+    // member. The row no longer shows a "Stored" chip; the checkbox
+    // stays checked, which is the unambiguous membership signal.
+    it("disabled on disk yet still a member → checkbox stays checked (Solo's case)", async () => {
       setupRow(false, 'in');
       render(<Wrap />);
       const row = await getModRow('TargetMod');
-      expect(within(row).getByText(/^stored$/i)).toBeInTheDocument();
-      await waitForMembershipLabel(row, /^In TestPack$/i);
+      await waitForMembershipCheckbox(row, true);
+      expect(within(row).getByText(/^In pack$/i)).toBeInTheDocument();
     });
 
     it('hides the membership column entirely when no active modpack', async () => {
       setupRow(true, 'noActive');
       render(<Wrap />);
       const row = await getModRow('TargetMod');
-      expect(within(row).getByText(/active in game/i)).toBeInTheDocument();
-      // No checkbox in the row when there's no focused modpack.
+      // Row still renders the mod, but with no membership checkbox and
+      // no storage chip.
+      expect(within(row).getByText('TargetMod')).toBeInTheDocument();
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(within(row).queryByRole('checkbox')).toBeNull();
+      expect(row.querySelector('.gf-profile-library-storage')).toBeNull();
     });
   });
 });

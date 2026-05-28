@@ -242,6 +242,7 @@ export function ModpackDetail({
         </h3>
         <LibraryTable
           modpackName={profile.name}
+          enableReorder
           onMembershipChanged={onLibraryChanged}
           onLoadOrderChanged={onLibraryChanged}
         />

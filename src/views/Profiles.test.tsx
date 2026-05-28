@@ -142,12 +142,13 @@ describe('<ProfilesView>', () => {
     });
   });
 
-  // ── 1.7.0 outer Yours/Browse tabs ─────────────────────────────────
-  it('outer tab strip: Yours is the default; switching to Browse renders BrowseModpacksView', async () => {
+  // ── 1.7.0 outer Installed/Browse tabs ─────────────────────────────
+  it('outer tab strip: Installed is the default; switching to Browse renders BrowseModpacksView', async () => {
     // The outer tabs absorb the formerly-standalone Browse Modpacks
-    // surface into Modpacks. Default tab is Yours (followed +
-    // published modpacks). The Browse tab renders the public modpack
-    // browser whose heading is "Browse Modpacks".
+    // surface into Modpacks. Default tab is "Installed" (followed +
+    // published modpacks) — renamed from "Yours" to match the All Mods
+    // page's Installed | Browse tabs. The Browse tab renders the public
+    // modpack browser whose heading is "Browse Modpacks".
     seedProfiles([baseProfile({ name: 'Alpha' })]);
     registerInvokeHandler('fetch_modpack_browser_page', () => ({
       cards: [],
@@ -158,8 +159,11 @@ describe('<ProfilesView>', () => {
     }));
     const user = userEvent.setup();
     render(<Wrap />);
-    // Yours tab content (existing modpack list)
+    // Installed tab content (existing modpack list)
     await waitFor(() => { expect(screen.getByText('Alpha')).toBeInTheDocument(); });
+    // The outer tab now reads "Installed", not "Yours".
+    expect(screen.getByRole('button', { name: /^Installed$/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Yours$/i })).toBeNull();
     // Click Browse — outer tab
     await user.click(screen.getByRole('button', { name: /^Browse$/i }));
     // The public modpack browser heading appears
@@ -167,7 +171,7 @@ describe('<ProfilesView>', () => {
       expect(screen.getByRole('heading', { name: 'Browse Modpacks' })).toBeInTheDocument();
     });
     // Switch back — the modpack row reappears
-    await user.click(screen.getByRole('button', { name: /^Yours$/i }));
+    await user.click(screen.getByRole('button', { name: /^Installed$/i }));
     await waitFor(() => { expect(screen.getByText('Alpha')).toBeInTheDocument(); });
   });
 

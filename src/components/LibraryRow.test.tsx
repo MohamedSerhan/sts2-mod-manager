@@ -60,6 +60,11 @@ function renderRow(overrides: Partial<LibraryRowProps> = {}) {
     state: baseState(),
     inPack: true,
     inPackIndex: 0,
+    // Default to the load-order context (ModpackDetail) so the drag
+    // handle / rank chip / draggable tests below exercise the
+    // reorderable path. Library-view tests pass enableReorder=false
+    // explicitly.
+    enableReorder: true,
     isDragOver: false,
     loadOrderSaving: false,
     membershipSaving: null,
@@ -91,36 +96,62 @@ describe('<LibraryRow>', () => {
     expect(screen.getByText('readable-folder')).toBeInTheDocument();
   });
 
-  it('shows the "Active in game" storage badge when installed_enabled is true', () => {
-    renderRow({ row: baseMod({ installed_enabled: true }) });
-    expect(screen.getByText(/Active in game/i)).toBeInTheDocument();
-  });
+  it('does not render the active/stored badge in the primary row (derived state moved to the kebab)', () => {
+    // The per-row "Active in game" / "Stored" chip was removed — it's
+    // derived from the active modpack, not a per-mod input. The
+    // capability lives in the kebab ("Activate / Disable in game").
+    const { unmount } = renderRow({ row: baseMod({ installed_enabled: true }) });
+    expect(document.querySelector('.gf-profile-library-storage')).toBeNull();
+    unmount();
 
-  it('shows the "Stored" storage badge when installed_enabled is false', () => {
     renderRow({ row: baseMod({ installed_enabled: false }) });
-    // The "Stored" badge appears alongside the Activate button — match
-    // the badge specifically by its container class.
-    const badge = document.querySelector('.gf-profile-library-storage.stored');
-    expect(badge).not.toBeNull();
-    expect(badge?.textContent).toMatch(/Stored/i);
+    expect(document.querySelector('.gf-profile-library-storage')).toBeNull();
   });
 
-  it('renders the rank chip "#N" only when inPack && inPackIndex >= 0', () => {
-    const { unmount } = renderRow({ inPack: true, inPackIndex: 2 });
+  it('does not render a primary-row Store / Activate button (moved to the kebab)', () => {
+    const { unmount } = renderRow({ row: baseMod({ installed_enabled: true }) });
+    expect(screen.queryByRole('button', { name: /Store BaseLib/i })).toBeNull();
+    unmount();
+
+    renderRow({ row: baseMod({ installed_enabled: false }) });
+    expect(screen.queryByRole('button', { name: /Activate BaseLib/i })).toBeNull();
+  });
+
+  it('renders the rank chip "#N" only when enableReorder && inPack && inPackIndex >= 0', () => {
+    const { unmount } = renderRow({ enableReorder: true, inPack: true, inPackIndex: 2 });
     expect(screen.getByText('#3')).toBeInTheDocument();
     unmount();
 
-    renderRow({ inPack: true, inPackIndex: -1 });
+    const { unmount: u2 } = renderRow({ enableReorder: true, inPack: true, inPackIndex: -1 });
+    expect(screen.queryByText(/^#/)).toBeNull();
+    u2();
+
+    // In-pack but reorder disabled (Library view) → no rank chip.
+    renderRow({ enableReorder: false, inPack: true, inPackIndex: 0 });
     expect(screen.queryByText(/^#/)).toBeNull();
   });
 
-  it('renders the drag-handle GripVertical only for in-pack rows', () => {
-    const { container, unmount } = renderRow({ inPack: true, inPackIndex: 0 });
+  it('renders the drag handle only when enableReorder && inPack && inPackIndex >= 0', () => {
+    const { container, unmount } = renderRow({ enableReorder: true, inPack: true, inPackIndex: 0 });
     expect(container.querySelector('.gf-load-order-drag')).not.toBeNull();
     unmount();
 
-    const { container: c2 } = renderRow({ inPack: false, inPackIndex: -1 });
+    // Not in pack → no handle even with reorder enabled.
+    const { container: c2, unmount: u2 } = renderRow({ enableReorder: true, inPack: false, inPackIndex: -1 });
     expect(c2.querySelector('.gf-load-order-drag')).toBeNull();
+    u2();
+
+    // In pack but reorder disabled (Library view) → no handle.
+    const { container: c3 } = renderRow({ enableReorder: false, inPack: true, inPackIndex: 0 });
+    expect(c3.querySelector('.gf-load-order-drag')).toBeNull();
+  });
+
+  it('drag handle / rank chip are absent in the Library view (enableReorder=false) even for in-pack rows', () => {
+    const { container } = renderRow({ enableReorder: false, inPack: true, inPackIndex: 1 });
+    expect(container.querySelector('.gf-load-order-drag')).toBeNull();
+    expect(screen.queryByText('#2')).toBeNull();
+    const card = container.querySelector('.gf-profile-library-row') as HTMLElement;
+    expect(card.getAttribute('draggable')).toBe('false');
   });
 
   it('membership checkbox reflects state.included and is disabled when state.editable is false', () => {
@@ -153,23 +184,6 @@ describe('<LibraryRow>', () => {
       name: 'BaseLib',
       folder_name: 'BaseLib',
     });
-  });
-
-  it('clicking the Store button calls onToggleStorage with the row', async () => {
-    const { callbacks } = renderRow({ row: baseMod({ installed_enabled: true }) });
-    const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /Store BaseLib/i }));
-    expect(callbacks.onToggleStorage).toHaveBeenCalledTimes(1);
-    expect(callbacks.onToggleStorage.mock.calls[0][0]).toMatchObject({
-      name: 'BaseLib',
-    });
-  });
-
-  it('shows the Activate button when the mod is stored, and clicking it calls onToggleStorage', async () => {
-    const { callbacks } = renderRow({ row: baseMod({ installed_enabled: false }) });
-    const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /Activate BaseLib/i }));
-    expect(callbacks.onToggleStorage).toHaveBeenCalledTimes(1);
   });
 
   it('drag-start fires onDragStart with the row inPackIndex', () => {
@@ -235,13 +249,17 @@ describe('<LibraryRow>', () => {
     expect(card.className).toContain('drag-over');
   });
 
-  it('storage button shows the in-flight spinner when storageSaving matches the row key', () => {
-    const { container } = renderRow({
+  it('disables the membership checkbox while a storage mutation is in flight', () => {
+    // The Store/Activate button (and its spinner) left the primary row,
+    // but storageSaving still gates the membership checkbox so a user
+    // can't toggle membership mid-storage-flip.
+    renderRow({
       row: baseMod({ folder_name: 'BaseLib' }),
       storageSaving: 'storage::BaseLib',
     });
-    // The Refresh icon (animate-spin) appears in the storage button.
-    expect(container.querySelector('.gf-profile-library-storage-actions .animate-spin')).not.toBeNull();
+    expect(
+      screen.getByRole('checkbox', { name: /Toggle BaseLib in Stable/i }),
+    ).toBeDisabled();
   });
 });
 
@@ -561,14 +579,14 @@ describe('<LibraryRow> kebab + audit pills', () => {
     expect(screen.getByText(/needs game ≥ v0\.110\.0/i)).toBeInTheDocument();
   });
 
-  it('HelpHint on the storage chip is rendered (Stored meaning explainer)', () => {
+  it('no storage HelpHint in the primary row (the active/stored concept left the row)', () => {
+    // The "what does Stored mean?" hint anchored the removed
+    // active/stored chip. With that chip gone, the hint goes too.
     const { container } = renderRow({ mod: baseModInfo() });
-    // The HelpHint renders a button with aria-label "What's this?".
-    // Inside the meta row, alongside the storage chip.
-    expect(container.querySelector('.gf-help-hint')).not.toBeNull();
+    expect(container.querySelector('.gf-help-hint')).toBeNull();
   });
 
-  it('GitHub + Nexus source pills render alongside the storage button when URLs are set', () => {
+  it('GitHub + Nexus source pills render in the row action area when URLs are set', () => {
     renderRow({
       mod: baseModInfo({
         github_url: 'https://github.com/foo/bar',
@@ -606,10 +624,35 @@ describe('<LibraryRow> modpackName=null mode', () => {
     expect(container.querySelector('.gf-load-order-drag')).toBeNull();
   });
 
-  it('still renders the storage chip + storage button', () => {
+  it('renders the mod identity but no storage chip or Store button', () => {
     renderRow({ modpackName: null, state: undefined, inPack: false, inPackIndex: -1 });
-    expect(screen.getByText(/Active in game/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Store BaseLib/i })).toBeInTheDocument();
+    // Mod is still identifiable by name + version.
+    expect(screen.getByText('BaseLib')).toBeInTheDocument();
+    expect(screen.getByText('1.2.3')).toBeInTheDocument();
+    // The active/stored chip + per-row Store/Activate button are gone.
+    expect(document.querySelector('.gf-profile-library-storage')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Store BaseLib/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Activate BaseLib/i })).toBeNull();
+  });
+
+  it('storage stays reachable via the kebab (Activate / Disable in game) in null mode', async () => {
+    const onToggleStorage = vi.fn();
+    const user = userEvent.setup();
+    renderRow({
+      modpackName: null,
+      state: undefined,
+      inPack: false,
+      inPackIndex: -1,
+      mod: baseModInfo({ enabled: false }),
+      row: baseMod({ installed_enabled: false }),
+      onToggleStorage,
+    });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    const labels = screen.getAllByText('Activate in game');
+    const itemLabel = labels.find((el) => el.className.includes('gf-kebab-label'));
+    expect(itemLabel).toBeDefined();
+    await user.click(itemLabel!.closest('button')!);
+    expect(onToggleStorage).toHaveBeenCalledTimes(1);
   });
 
   it('kebab does not render the modpack membership item when modpackName is null', async () => {

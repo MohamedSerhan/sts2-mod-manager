@@ -16,8 +16,12 @@
  *    workspace (we still need to handle 100+ mod libraries cleanly).
  *  - Membership toggle calls `setProfileModMembership` against the
  *    focused modpack.
- *  - "Store" / "Activate" preserved (calls `toggleMod`).
- *  - Drag-reorder of the in-pack mods calls `setProfileLoadOrder`.
+ *  - Storage toggle (Activate / Disable in game) calls `toggleMod` —
+ *    surfaced via the per-row kebab + the bulk "store unused" action,
+ *    not a primary per-row button (active/stored is derived from the
+ *    active modpack, not a per-mod input).
+ *  - Drag-reorder of the in-pack mods calls `setProfileLoadOrder`,
+ *    gated behind `enableReorder` (ModpackDetail only).
  *
  * Used inside `<ModpackDetail>`. Designed to be testable standalone —
  * accept callbacks for parent refresh so ProfilesView can re-pull
@@ -87,6 +91,12 @@ export interface LibraryTableProps {
   initialSort?: LibrarySortMode;
   /** Page size for the "show more" pagination footer. Defaults to 100. */
   pageSize?: number;
+  /** Whether rows live in a load-order context (ModpackDetail). When
+   *  true, in-pack rows show the drag handle + rank chip and the
+   *  table's drag handlers commit a reorder. When false (Library view),
+   *  the handle/chip stay hidden and the drag handlers no-op — there's
+   *  no load order to set across the all-installed-mods list. */
+  enableReorder?: boolean;
   /** Pre-filter the rows from the membership grid before sorting +
    *  rendering. Used by the Library view to apply tag / extra filters
    *  on top of the table's own search. */
@@ -156,6 +166,7 @@ export function LibraryTable({
   initialSearch = '',
   initialSort,
   pageSize = DEFAULT_PAGE_SIZE,
+  enableReorder = false,
   filterRow,
   modInfoByKey,
   auditByKey,
@@ -671,7 +682,16 @@ export function LibraryTable({
         </div>
       </div>
       <div className="gf-profile-library-help">
-        {t('profiles.library.storageHelp')}
+        {/* The explainer is context-driven. In ModpackDetail
+            (enableReorder) it teaches the checkbox + drag-to-order +
+            that switching the pack is what loads mods. In the Library
+            view it explains the all-installed list + that the checkbox
+            quick-adds to the active modpack. Neither teaches the old
+            active/stored concept — that's derived from the active pack
+            now, not a per-row toggle. */}
+        {enableReorder
+          ? t('profiles.library.explainerModpack')
+          : t('profiles.library.explainerLibrary')}
       </div>
       {filteredRows.length === 0 ? (
         <div className="gf-empty">
@@ -707,23 +727,26 @@ export function LibraryTable({
               state={state}
               inPack={inPack}
               inPackIndex={inPackIndex}
+              enableReorder={enableReorder}
               isDragOver={dragOverIndex === inPackIndex && inPack}
               loadOrderSaving={loadOrderSaving}
               membershipSaving={membershipSaving}
               storageSaving={storageSaving}
               onDragStart={(event, index) => {
-                if (!inPack || loadOrderSaving) return;
+                if (!enableReorder || !inPack || loadOrderSaving) return;
                 setDraggedIndex(index);
                 event.dataTransfer.effectAllowed = 'move';
                 event.dataTransfer.setData('text/plain', String(index));
               }}
               onDragOver={(event, index) => {
                 // Only intercept events that look like an in-app reorder
-                // (we're hovering an in-pack row + load order isn't saving).
-                // Anything else — including the user dragging a .zip from
-                // the OS — falls through to the document-level handler in
-                // App.tsx so the file-install dropzone overlay shows.
-                if (!inPack || loadOrderSaving || index < 0) return;
+                // (reorder is enabled, we're hovering an in-pack row, and
+                // load order isn't saving). Anything else — including the
+                // user dragging a .zip from the OS, or any drag in the
+                // Library view where reorder is off — falls through to the
+                // document-level handler in App.tsx so the file-install
+                // dropzone overlay shows.
+                if (!enableReorder || !inPack || loadOrderSaving || index < 0) return;
                 if (!event.dataTransfer.types.includes('text/plain')) return;
                 event.preventDefault();
                 event.dataTransfer.dropEffect = 'move';
@@ -737,7 +760,7 @@ export function LibraryTable({
                 // case. Returning BEFORE preventDefault lets file drops
                 // (the user dragging a mod archive from File Explorer)
                 // bubble up to App.tsx's installModFromFile handler.
-                if (!inPack || loadOrderSaving) return;
+                if (!enableReorder || !inPack || loadOrderSaving) return;
                 if (!event.dataTransfer.types.includes('text/plain')) return;
                 event.preventDefault();
                 const from

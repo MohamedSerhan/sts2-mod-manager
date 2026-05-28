@@ -83,8 +83,8 @@
   },
   "libraryTable": {
     "membershipCheckbox": "Toggle {{mod}} in {{modpack}}",
-    "inPack": "In {{modpack}}",
-    "notInPack": "Not in {{modpack}}",
+    "inPack": "In pack",
+    "notInPack": "Not in pack",
     "modpackMissing": "This modpack doesn't exist any more — try refreshing the list."
   },
   "createModpack": {
@@ -275,13 +275,8 @@
       "searchLabel": "Search mod library",
       "searchPlaceholder_one": "Search {{count}} library mod",
       "searchPlaceholder_other": "Search {{count}} library mods",
-      "storageHelp": "The mod library shows every installed mod. \"Active in game\" means the files are in the game folder; \"Stored\" means the files are kept installed but moved out of the game folder. Modpack checkboxes decide which modpacks include each mod.",
-      "storageActive": "Active in game",
-      "storageDisabled": "Stored",
-      "storeAction": "Store (keep installed but inactive)",
-      "activateAction": "Activate in game",
-      "storeAria": "Store {{mod}} (keep installed but move out of the game folder)",
-      "activateAria": "Activate {{mod}} in the game folder",
+      "explainerModpack": "Check a mod to include it in this modpack. Drag the handle to set load order. Switching to this modpack activates exactly these mods in the game.",
+      "explainerLibrary": "Every mod installed on your computer. Use the checkbox to add a mod to your active modpack — switching modpacks decides what's actually loaded in the game.",
       "bulkStoreUnused_one": "Store {{count}} unused active mod",
       "bulkStoreUnused_other": "Store {{count}} unused active mods",
       "bulkStoreNone": "No unused active mods",
@@ -487,7 +482,7 @@
   },
   "modpacks": {
     "tabs": {
-      "yours": "Yours",
+      "yours": "Installed",
       "browse": "Browse"
     },
     "quickAdd": {

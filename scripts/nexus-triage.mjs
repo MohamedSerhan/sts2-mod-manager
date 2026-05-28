@@ -122,7 +122,7 @@ const BUG_MED_RE = /\b(bug|doesn['']?t work|not working|glitch)\b/i;
 const FEAT_HIGH_RE = /\b(feature request|would be nice|please add|can you add|suggestion)\b/i;
 const QUESTION_PREFIX_RE = /\b(how do i|where is|can someone)\b/i;
 const QUESTION_MARK_RE = /[?？]/;
-const KUDOS_WORD_RE = /\b(thanks|great|love|awesome|amazing|nice work|good job)\b/i;
+const KUDOS_WORD_RE = /\b(thank you|thank u|thankyou|thanks|thx|ty|great|love(d| it| this)?|awesome|amazing|nice work|good job|god bless|appreciate[d]?|legend|kudos|works (great|perfectly|well))\b/i;
 
 export function classify(text, _kind) {
   const body = (text || '').trim();

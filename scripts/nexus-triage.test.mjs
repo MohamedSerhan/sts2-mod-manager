@@ -238,6 +238,21 @@ test('classify: positive + bug keyword goes to bug (priority order)', () => {
   assert.equal(classify(body, 'comment').classification, 'bug');
 });
 
+// kudos word variants (real comments observed on mod 856)
+for (const body of [
+  'Thank you so much!!! God bless 🙏',
+  'thank you for this',
+  'thanks!',
+  'appreciate the work',
+  'you are a legend',
+  'works perfectly, kudos',
+]) {
+  test(`classify: kudos matches gratitude variant "${body}"`, () => {
+    assert.equal(classify(body, 'comment').classification, 'kudos',
+      `expected kudos for "${body}"`);
+  });
+}
+
 // non-English
 test('classify: non-English non-keyword body defaults to needs-triage', () => {
   assert.equal(classify('这是一条测试评论', 'comment').classification, 'needs-triage');

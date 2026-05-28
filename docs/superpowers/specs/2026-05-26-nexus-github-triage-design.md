@@ -434,3 +434,72 @@ The response is HTML containing `<li id="comment-N" class="comment">` blocks. Ea
 ### Credit
 
 This pivot is informed by [jadistanbelly](https://github.com/jadistanbelly)'s [sts2-multiplayer-save-slots](https://github.com/jadistanbelly/sts2-multiplayer-save-slots) — specifically `scripts/sync_nexus_posts_to_github.py` (MIT-licensed). Our Node port is independent code but adopts their endpoint URL pattern, query params, HTML selectors, and the curl-impersonate-for-Cloudflare insight.
+
+---
+
+## Addendum 2026-05-27 (second): GraphQL commentThread — return to the original design
+
+**The HTML widget scraping approach is Cloudflare-blocked from GitHub Actions CI.** After implementing the HTML scraping pivot, empirical testing against GitHub Actions IP ranges showed 100% block rate: every request to the Nexus CommentContainer widget endpoint returns a Cloudflare "Just a moment..." challenge page regardless of TLS impersonation method (Python `curl_cffi` with `chrome136`/`chrome120`/`chrome131` rotation). The residential-IP pass-rate (~50%) reported for the reference implementation does not apply from cloud-hosted CI runners.
+
+### The actual working GraphQL path
+
+A deeper schema exploration of `api.nexusmods.com/v2/graphql` (documented at https://graphql.nexusmods.com/) surfaced a **root query that does expose mod-page comments**:
+
+```graphql
+query ModComments($threadId: ID!, $first: Int!, $after: String) {
+  commentThread(commentThreadId: $threadId) {
+    id
+    comments(first: $first, after: $after, sortBy: "createdAt", sortDirection: "DESC") {
+      nodes {
+        id
+        body
+        createdAt
+        discardedAt
+        hiddenAt
+        creator { name memberId }
+      }
+      pageInfo { hasNextPage endCursor }
+      totalCount
+    }
+  }
+}
+```
+
+The key: `commentThread(commentThreadId: ID!)` is a **root-level query** returning a `CommentThread` object. This is entirely separate from `mod.comments` (which does not exist on the `Mod` type — the original failure from Addendum 1 stands). The `commentThreadId` is the same numeric value as the widget's `thread_id` URL parameter, already stored as repo var `NEXUSMODS_POSTS_THREAD_ID=16866026`.
+
+### Why this works when HTML scraping doesn't
+
+The endpoint `POST api.nexusmods.com/v2/graphql` is a documented JSON API, not a webpage Cloudflare is protecting. It accepts `Content-Type: application/json` with `apikey: <NEXUS_API_KEY>` — the same authentication scheme and the same path already used by the `publish-nexus` workflow's upload calls. Cloudflare's bot protection does not challenge authenticated JSON API calls to `api.nexusmods.com`; it applies to HTML responses from `www.nexusmods.com`. The original evidence that JSON POST works: the schema introspection calls from Addendum 1 succeeded over the network — the failure was that the schema had no `mod.comments`, not a network rejection.
+
+### What changed in the codebase (implemented 2026-05-27)
+
+**Removed from the HTML-scraping implementation:**
+- Python `_nexus_fetch.py` shim (spawned via `execFile`)
+- `setHtmlFetcher` and `htmlFetcher` indirection
+- `CURL_IMPERSONATES`, `WIDGET_BASE_URL`, `GAME_ID`, `OBJECT_TYPE`, `PAGE_SIZE` constants
+- `buildWidgetUrl`, `fetchCommentsHtml`, `isCloudflareChallenge`, `discoverThreadId` functions
+- `parseCommentsFromHtml` and all supporting HTML regex helpers
+- HTML fixture files (`scripts/fixtures/nexus-comments-mixed.html`, `nexus-comments-empty.html`)
+- `--discover-thread-id` CLI flag (thread ID is now a known constant: `16866026`)
+
+**Added (returning to GraphQL, this time with the correct query):**
+- `NEXUS_GRAPHQL_URL = 'https://api.nexusmods.com/v2/graphql'` constant
+- `setHttpFetch(fn)` indirection — Node native `globalThis.fetch` by default; tests stub it
+- `graphqlPost({ apiKey, query, variables })` — POSTs the query, handles non-OK HTTP and `errors[]` array, exits 1 on failure
+- `fetchComments({ apiKey, threadId, first, after })` — single GraphQL call returning the `CommentThread.comments` connection
+- `fetchAllComments({ apiKey, threadId })` — paginates via `pageInfo.endCursor` until `hasNextPage === false` or `MAX_PAGES` safety cap
+- Updated `commentToItem`: maps `creator.name` → `author`, `creator.memberId` → `authorId`; filters `discardedAt`/`hiddenAt` before mapping
+- Updated `buildNexusCommentUrl`: uses `commentid=` param (matches Nexus deep-link format)
+- Updated `main`: receives `apiKey` parameter alongside `ghToken`; calls `fetchAllComments({ apiKey })`
+- Updated `runFromCli`: requires both `GITHUB_TOKEN` and `NEXUS_API_KEY`
+
+**Workflow changes (`nexus-triage.yml`):**
+- Removed Setup Python + Install curl_cffi steps
+- Added `NEXUS_API_KEY: ${{ secrets.NEXUS_API_KEY }}` to the env section
+- Removed `NEXUSMODS_GAME_ID`, `NEXUSMODS_OBJECT_TYPE`, `NEXUSMODS_POSTS_THREAD_ID` fallbacks (thread ID defaults to `16866026` in code)
+
+**Tests:** 73 tests, all passing. Added `graphqlPost`, `fetchComments`, `fetchAllComments` unit tests with fetch stub; added `discardedAt`/`hiddenAt` filter test; updated all integration tests to use `setHttpFetch` returning GraphQL-shaped JSON responses; updated `commentToItem` assertions to check `creator.name` / `creator.memberId` mapping.
+
+### Credit
+
+Schema discovery via https://graphql.nexusmods.com/ — the Nexus GraphQL playground that surfaces the `commentThread` root query.

@@ -77,34 +77,21 @@ This section covers the hourly Nexus → GitHub triage automation introduced in 
 
    Paste the token when prompted.
 
-3. **Confirm `NEXUS_API_KEY` is still set** (only needed for the `publish-nexus` upload job — NOT for triage):
+3. **Confirm `NEXUS_API_KEY` is set** (required for both triage and the `publish-nexus` upload job):
 
        gh secret list --repo MohamedSerhan/sts2-mod-manager | grep NEXUS_API_KEY
 
-   Triage no longer uses `NEXUS_API_KEY`. It reads from the Nexus HTML widget endpoint using curl-impersonate.
+   Triage fetches mod comments via `POST api.nexusmods.com/v2/graphql` using the `apikey:` header.
+   The same key already stored for `publish-nexus` is reused — no new secret needed.
 
-4. **Discover and set the Nexus posts thread ID** (one-time, needed before any triage run):
+4. **Optionally override `NEXUSMODS_POSTS_THREAD_ID`** (defaults to `16866026` in code; set as repo
+   var only if the thread ID ever changes):
 
-   Install `curl_cffi` locally (`pip install curl_cffi`) and run:
+       gh variable set NEXUSMODS_POSTS_THREAD_ID --body "16866026" --repo MohamedSerhan/sts2-mod-manager
 
-       node scripts/nexus-triage.mjs --discover-thread-id
+5. **Bootstrap the state file** locally so the first triage run doesn't refile months-old comments:
 
-   This prints the `thread_id` for mod 856's posts tab. Store it as a repo variable:
-
-       gh variable set NEXUSMODS_POSTS_THREAD_ID --body <value> --repo MohamedSerhan/sts2-mod-manager
-
-5. **Set the remaining NEXUSMODS_* repo variables** (defaults are fine if you haven't changed them, but
-   setting them explicitly makes the CI configuration self-documenting):
-
-       gh variable set NEXUSMODS_GAME_ID     --body "8916"    --repo MohamedSerhan/sts2-mod-manager
-       gh variable set NEXUSMODS_MOD_ID      --body "856"     --repo MohamedSerhan/sts2-mod-manager
-       gh variable set NEXUSMODS_OBJECT_TYPE --body "1"       --repo MohamedSerhan/sts2-mod-manager
-       gh variable set NEXUSMODS_POSTS_URL   --body "https://www.nexusmods.com/slaythespire2/mods/856?tab=posts" \
-         --repo MohamedSerhan/sts2-mod-manager
-
-6. **Bootstrap the state file** locally so the first triage run doesn't refile months-old comments:
-
-       NEXUSMODS_POSTS_THREAD_ID=<thread_id> node scripts/nexus-triage.mjs --bootstrap
+       NEXUS_API_KEY=<your-key> node scripts/nexus-triage.mjs --bootstrap
        git add scripts/nexus-triage-state.json
        git commit -m "chore(triage): bootstrap Nexus triage state"
        git push
@@ -151,50 +138,6 @@ To renew:
 
 The token expired. Follow the "Annual token renewal" steps above. The renewal issue includes the procedure inline.
 
-### Expected flake — Cloudflare challenges from CI
-
-The triage script fetches Nexus HTML via a Python `curl_cffi` shim
-(`scripts/_nexus_fetch.py`). We use `curl_cffi` — **not** the Node
-`curl-impersonate` binary — because the latter is 100% Cloudflare-blocked
-from GitHub Actions IP ranges. `curl_cffi` uses the same TLS fingerprinting
-approach as the reference mod
-[jadistanbelly/sts2-multiplayer-save-slots](https://github.com/jadistanbelly/sts2-multiplayer-save-slots),
-which demonstrates roughly a 50% pass rate from CI. This is the best available
-option until Nexus provides a documented API.
-
-When a run is blocked (exit 1 with "Cloudflare blocked"), re-run the failed
-workflow from the Actions UI. Multiple consecutive failures suggest Nexus
-tightened its bot detection — see steps below.
-
-### When triage fails with "Cloudflare blocked the request"
-
-The triage script bypasses Cloudflare TLS fingerprinting using Python's
-`curl_cffi` library (installed as a pip dependency in CI). The shim rotates
-through several Chrome impersonation targets automatically (`chrome136`,
-`chrome120`, `chrome131`, `chrome116`, `chrome110`).
-
-To fix persistent failures:
-
-1. Check if a newer `curl_cffi` version is available: `pip index versions curl_cffi`
-2. Update the pip install line in `.github/workflows/nexus-triage.yml`
-   (`python -m pip install curl_cffi==<new_version>`)
-3. Add a newer Chrome target to `CURL_IMPERSONATES` in `scripts/nexus-triage.mjs`
-   (e.g., `'chrome137'`) as the first entry
-4. Override the default per-run with the repo variable `NEXUSMODS_CURL_IMPERSONATE`
-   (no workflow file change required)
-5. Test with `--dry-run` before re-enabling the cron
-
-### When triage fails with "could not find thread_id"
-
-Nexus changed the HTML structure of the posts tab. Re-discover the thread ID:
-
-1. Install `curl_cffi` locally (`pip install curl_cffi`)
-2. `node scripts/nexus-triage.mjs --discover-thread-id`
-3. If that also fails, inspect the live page source manually:
-   `python scripts/_nexus_fetch.py "https://www.nexusmods.com/slaythespire2/mods/856?tab=posts" | grep -i thread_id`
-4. Update `NEXUSMODS_POSTS_THREAD_ID` repo variable with the new value, or update the
-   `discoverThreadId` regex patterns in `scripts/nexus-triage.mjs` if the embedded JS format changed
-
 ### When triage fails for a different reason
 
 - Open the failed workflow run in Actions UI
@@ -202,33 +145,13 @@ Nexus changed the HTML structure of the posts tab. Re-discover the thread ID:
   - exit 1: transient (network, GitHub API). Re-run the failed workflow.
   - exit 2: configuration drift (missing secret, missing state file, malformed state, hard schema drift). Read the error message — it names the missing piece.
 
-### Expected flake: Cloudflare blocking from CI
+### Reliability note: GraphQL is reliable from CI
 
-Nexus is fronted by Cloudflare, and Cloudflare's bot protection challenges
-requests from GitHub Actions IP ranges very aggressively. As a result, the
-hourly triage poll often gets a "Just a moment..." JS challenge page that
-the script cannot solve, even with `curl-impersonate` and Chrome version
-rotation across 5 retries per fetch.
+The triage script fetches Nexus mod-page comments via the documented GraphQL API
+(`POST api.nexusmods.com/v2/graphql`) using `NEXUS_API_KEY`. This is a JSON API
+call — not a webpage — so Cloudflare's bot protection does not apply. Expect
+near-100% success rate from GitHub Actions runners, unlike the prior HTML scraping
+approach which was 100% Cloudflare-blocked from CI IP ranges.
 
-**What's normal:** ~50-80% of cron runs will log "Cloudflare blocked all
-retries this run. Will try again on next cron." and exit 0 (green check
-in the Actions tab). The reference implementation
-([jadistanbelly/sts2-multiplayer-save-slots](https://github.com/jadistanbelly/sts2-multiplayer-save-slots))
-shows the same pattern — ~50% of their scheduled runs fail with the same
-challenge.
-
-**What's not normal:**
-- Cron runs failing with exit code other than 0 (real bug, investigate)
-- 7 consecutive days of every run blocked (Cloudflare may have tightened;
-  consider moving polling to a residential-IP host)
-
-**Why we accept the flake:** comments don't disappear — every successful
-run catches up on whatever was missed since the last successful run. With
-hourly cron, even at 30% success rate the system catches every comment
-within a few hours.
-
-**If you want 100% polling reliability:** move `node scripts/nexus-triage.mjs`
-to a Windows Task Scheduler entry on your machine (or a residential-IP VPS)
-that commits state changes back to the repo. The `@claude` reactive flow,
-the watchdog, and the state commit can all stay in CI; only the Nexus fetch
-needs the residential origin. Out of scope for the current iteration.
+`NEXUS_API_KEY` is required. If the secret is missing or expired, the script exits 2
+with a clear message. Rotate the key at https://www.nexusmods.com/users/myaccount?tab=api.

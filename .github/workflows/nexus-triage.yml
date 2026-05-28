@@ -35,24 +35,12 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install curl_cffi (Python)
-        # curl_cffi matches the TLS fingerprint approach used by the reference mod
-        # (jadistanbelly/sts2-multiplayer-save-slots) and avoids the 100% CI block
-        # rate of the Node curl-impersonate binary on GitHub Actions IPs.
-        run: python -m pip install curl_cffi
-
       - name: Run triage script
         env:
-          NEXUSMODS_GAME_ID:          ${{ vars.NEXUSMODS_GAME_ID }}
-          NEXUSMODS_MOD_ID:           ${{ vars.NEXUSMODS_MOD_ID }}
-          NEXUSMODS_OBJECT_TYPE:      ${{ vars.NEXUSMODS_OBJECT_TYPE }}
           NEXUSMODS_POSTS_THREAD_ID:  ${{ vars.NEXUSMODS_POSTS_THREAD_ID }}
+          NEXUSMODS_MOD_ID:           ${{ vars.NEXUSMODS_MOD_ID }}
           NEXUSMODS_POSTS_URL:        ${{ vars.NEXUSMODS_POSTS_URL }}
+          NEXUS_API_KEY:              ${{ secrets.NEXUS_API_KEY }}
           GITHUB_TOKEN:               ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ "${{ inputs.dry_run }}" = "true" ]; then

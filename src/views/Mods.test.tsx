@@ -236,6 +236,30 @@ describe('<ModsView>', () => {
     expect(screen.getByRole('button', { name: /Quick add URL/ })).toBeInTheDocument();
   });
 
+  it('Auto-detect sources toolbar button opens the AutoDetectModal', async () => {
+    // The bulk "Auto-detect sources" action (scan unlinked mods for their
+    // GitHub repos) was relocated here from the old Settings → Audit tab.
+    // Clicking it mounts AutoDetectModal, which immediately scans via
+    // auto_detect_sources on open.
+    seedMods([baseMod({ name: 'BaseLib', folder_name: 'BaseLib' })]);
+    registerInvokeHandler('auto_detect_sources', () => ({
+      matched: [],
+      unmatched: [],
+      skipped_already_linked: 0,
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
+    const autoBtn = screen.getByRole('button', { name: /Auto-detect sources/i });
+    await user.click(autoBtn);
+    // The modal scans on open — assert the command fired and the modal
+    // backdrop materialised.
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'auto_detect_sources')).toBe(true);
+    });
+    expect(document.querySelectorAll('.gf-modal-back').length).toBeGreaterThan(0);
+  });
+
   it('Audit mods button transitions to "Update 1 mod" when audit returns one pending GitHub update', async () => {
     seedMods([baseMod({ name: 'BaseLib', folder_name: 'BaseLib', github_url: 'https://github.com/foo/bar' })]);
     registerInvokeHandler('audit_mod_versions', () => [

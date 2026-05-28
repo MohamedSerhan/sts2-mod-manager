@@ -5,22 +5,13 @@ import {
   Key,
   FolderOpen,
   RefreshCw,
-  ClipboardCheck,
   ExternalLink,
-  Download,
-  Snowflake,
-  Sun,
   Archive,
   RotateCcw,
   Trash2,
   Play,
-  Check,
-  Clock,
-  AlertTriangle,
 } from 'lucide-react';
-import { isUpToDate } from '../lib/auditState';
 import { GITHUB_TOKEN_TEMPLATE_URL } from '../lib/githubLinks';
-import { nexusFilesUrl } from '../lib/nexusUrl';
 import { open } from '@tauri-apps/plugin-dialog';
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
@@ -31,7 +22,6 @@ import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../components/ConfirmDialog';
 import { LogsViewer } from '../components/LogsViewer';
 import { DiagnosticBundle } from '../components/DiagnosticBundle';
-import { AutoDetectModal } from '../components/AutoDetectModal';
 import { LanguageSelect } from '../components/LanguageSelect';
 import { AboutCard } from '../components/AboutCard';
 import {
@@ -43,10 +33,6 @@ import {
   openGameFolder,
   openModsFolder,
   getApiKeyStatus,
-  pinMod,
-  unpinMod,
-  setModSnooze,
-  updateMod,
   createBackup,
   createBackupPreserving,
   listBackups,
@@ -56,18 +42,14 @@ import {
   setLaunchMode,
 } from '../hooks/useTauri';
 import type { LaunchMode } from '../hooks/useTauri';
-import type { BackupInfo, ModAuditEntry } from '../types';
+import type { BackupInfo } from '../types';
 
-type Tab = 'general' | 'accounts' | 'backups' | 'audit' | 'advanced';
-
-function auditSnoozeTarget(entry: ModAuditEntry): string | null {
-  return entry.latest_release_with_assets_tag ?? entry.nexus_version ?? null;
-}
+type Tab = 'general' | 'accounts' | 'backups' | 'advanced';
 
 // v5 — tabbed Settings shell. Tabs are stateful; tab content is rendered
 // inline beneath the tab strip. All existing handlers preserved.
 export function SettingsView() {
-  const { gameInfo, refreshAll, auditResults, auditing, runAudit, refreshAuditEntries, updatingAll, updateAllGithub } = useApp();
+  const { gameInfo, refreshAll } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
   const { t } = useTranslation();
@@ -84,12 +66,6 @@ export function SettingsView() {
   const [nexusKeySaved, setNexusKeySaved] = useState(false);
   const [githubTokenSaved, setGithubTokenSaved] = useState(false);
 
-  // ── Audit ───────────────────────────────────────────
-  // Audit state (auditing + auditResults + refreshAuditEntries) lives in
-  // AppContext so the Mods view can share it. Keep updatingMod local —
-  // it's a Settings-only UI spinner.
-  const [updatingMod, setUpdatingMod] = useState<string | null>(null);
-
   // ── Backups ─────────────────────────────────────────
   const [backups, setBackups] = useState<BackupInfo[]>([]);
   const [backupBusy, setBackupBusy] = useState<string | null>(null);
@@ -99,7 +75,6 @@ export function SettingsView() {
 
   // ── Diagnostic bundle modal ─────────────────────────
   const [showDiag, setShowDiag] = useState(false);
-  const [showAutoDetect, setShowAutoDetect] = useState(false);
 
   async function refreshBackups() {
     try {
@@ -311,44 +286,6 @@ export function SettingsView() {
     }
   }
 
-  // runAudit + refreshAuditEntries now live in AppContext as runAudit
-  // and refreshAuditEntries. Settings consumes them directly via useApp().
-
-  // Update a single mod inline from the audit row. Only available for mods
-  // whose source is GitHub — Nexus mods still require the user to download
-  // through the browser via the existing "Download from Nexus" pill.
-  async function handleUpdateOne(modName: string, folderName: string | null) {
-    if (updatingMod) return;
-    setUpdatingMod(modName);
-    try {
-      const info = await updateMod(modName, folderName);
-      toast.success(t('settings.audit.updatedToToast', { name: modName, version: info.version }));
-      await refreshAll();
-      // Re-audit only this mod (and the manifest name if install_mod_from_zip
-      // ended up rewriting it) so the row flips fast — no full audit needed.
-      const names = info.name !== modName ? [modName, info.name] : [modName];
-      await refreshAuditEntries(names);
-    } catch (e) {
-      toast.error(t('settings.audit.updateFailedToast', { name: modName, error: e instanceof Error ? e.message : String(e) }));
-    } finally {
-      setUpdatingMod(null);
-    }
-  }
-
-  async function handleAuditSnooze(entry: ModAuditEntry, latestTag: string | null) {
-    try {
-      await setModSnooze(entry.mod_name, latestTag, entry.folder_name ?? null);
-      toast.success(
-        latestTag
-          ? t('settings.audit.snoozedToast', { name: entry.mod_name })
-          : t('settings.audit.unsnoozedToast', { name: entry.mod_name }),
-      );
-      await refreshAuditEntries([entry.mod_name]);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err));
-    }
-  }
-
   async function handleCheckUpdateNow() {
     if (checkingUpdate) return;
     setCheckingUpdate(true);
@@ -372,7 +309,6 @@ export function SettingsView() {
     { id: 'general',  label: t('settings.tabs.general') },
     { id: 'accounts', label: t('settings.tabs.accounts') },
     { id: 'backups',  label: t('settings.tabs.backups'),  count: backups.length || undefined },
-    { id: 'audit',    label: t('settings.tabs.audit'),    count: auditResults?.filter(r => r.needs_update).length || undefined },
     { id: 'advanced', label: t('settings.tabs.advanced') },
     // Help lives in the topbar `?` drawer (always one click). It used
     // to also be a Settings tab but that was redundant — the drawer is
@@ -722,421 +658,6 @@ export function SettingsView() {
           </>
         )}
 
-        {tab === 'audit' && (
-          <>
-            {(() => {
-              // Only the audit toolbar needs this — derive the GitHub-update
-              // list once per render and reuse it for the "Update all"
-              // gating below. We require latest_release_with_assets_tag too
-              // — same reason the per-row Update button does: rows where
-              // GitHub's latest release has no installable asset can't be
-              // updated via update_mod and would just produce errors during
-              // a bulk Update all.
-              const ghUpdates = auditResults
-                ? auditResults
-                    .filter((r) => r.needs_update && !r.snoozed && r.github_repo && r.latest_release_with_assets_tag)
-                    .map((r) => r.mod_name)
-                : [];
-              return (
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
-                  <div>
-                    <div className="gf-set-label" style={{ fontSize: 14 }}>{t('settings.audit.title')}</div>
-                    <div className="gf-set-desc">{t('settings.audit.desc')}</div>
-                  </div>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    {/* Show Update all only when there are 2+ GitHub-sourced
-                        updates queued — for a single one the inline Update
-                        button on the row is enough. */}
-                    {ghUpdates.length >= 2 && (
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        onClick={() => updateAllGithub(ghUpdates)}
-                        disabled={updatingAll || updatingMod !== null}
-                        title={ghUpdates.length === 1 ? t('settings.audit.updateAll_one', { count: ghUpdates.length }) : t('settings.audit.updateAll_other', { count: ghUpdates.length })}
-                      >
-                        {updatingAll ? (
-                          <RefreshCw size={14} className="animate-spin" />
-                        ) : (
-                          <Download size={14} />
-                        )}
-                        {updatingAll
-                          ? t('settings.audit.updatingAll', { count: ghUpdates.length })
-                          : (ghUpdates.length === 1 ? t('settings.audit.updateAll_one', { count: ghUpdates.length }) : t('settings.audit.updateAll_other', { count: ghUpdates.length }))}
-                      </Button>
-                    )}
-                    <Button variant="ghost" size="sm" onClick={() => setShowAutoDetect(true)} disabled={updatingAll}>
-                      {t('settings.audit.autoDetectSources')}
-                    </Button>
-                    <Button
-                      variant={ghUpdates.length >= 2 ? 'ghost' : 'secondary'}
-                      size="sm"
-                      onClick={runAudit}
-                      disabled={auditing || updatingAll}
-                    >
-                      <ClipboardCheck size={14} className={auditing ? 'animate-pulse' : ''} />
-                      {auditing ? t('settings.audit.auditing') : auditResults ? t('settings.audit.reaudit') : t('settings.audit.run')}
-                    </Button>
-                  </div>
-                </div>
-              );
-            })()}
-
-            {auditResults === null ? (
-              <div className="gf-empty">
-                <div className="gf-empty-art"><ClipboardCheck size={28} /></div>
-                <div className="gf-empty-title">{t('settings.audit.noAudit')}</div>
-                <div className="gf-empty-sub">{t('settings.audit.noAuditHint')}</div>
-                <div style={{ marginTop: 14 }}>
-                  <Button onClick={runAudit} disabled={auditing}>
-                    <ClipboardCheck size={14} /> {auditing ? t('settings.audit.auditing') : t('settings.audit.run')}
-                  </Button>
-                </div>
-              </div>
-            ) : auditResults.length === 0 ? (
-              <div className="gf-empty">
-                <div className="gf-empty-art"><ClipboardCheck size={28} /></div>
-                <div className="gf-empty-title">{t('settings.audit.noMods')}</div>
-                <div className="gf-empty-sub">{t('settings.audit.noModsHint')}</div>
-              </div>
-            ) : (
-              <>
-                <div className="space-y-1" style={{ maxHeight: 480, overflowY: 'auto' }}>
-                  {auditResults.map((entry) => {
-                    const hasAnySource = entry.github_repo || entry.nexus_url;
-                    const hasRealError = entry.error && !entry.github_auto_detected;
-                    // "gone" = GitHub has a latest release tagged but no
-                    // installable asset (zip/dll). Soft problem — counted
-                    // separately in the footer so it doesn't inflate the
-                    // error count.
-                    const isGone = !hasRealError && !!entry.latest_release_tag && !entry.latest_release_with_assets_tag;
-                    const isIncompatible = !!entry.game_version_too_old;
-                    const isLatestBlocked = !!entry.latest_release_blocked_by_game_version;
-                    const snoozeTarget = auditSnoozeTarget(entry);
-                    // Incompatible takes precedence over OK so the row reads
-                    // as "won't load" instead of "up to date" — but updates
-                    // and real errors still take precedence over it,
-                    // because the user can fix those by clicking Update /
-                    // resolving the error before they have to think about
-                    // the game-version mismatch.
-                    const state: 'ok' | 'update' | 'gone' | 'unlinked' | 'error' | 'incompatible' =
-                      hasRealError ? 'error'
-                        : entry.needs_update && !entry.snoozed ? 'update'
-                        : !hasAnySource ? 'unlinked'
-                        : (isIncompatible || isLatestBlocked) ? 'incompatible'
-                        : isGone ? 'gone'
-                        : 'ok';
-                    const ledClass = {
-                      ok: 'gf-audit-led-ok',
-                      update: 'gf-audit-led-update',
-                      gone: 'gf-audit-led-warn',
-                      incompatible: 'gf-audit-led-warn',
-                      unlinked: '',
-                      error: 'gf-audit-led-gone',
-                    }[state];
-                    return (
-                      <div
-                        key={entry.mod_name}
-                        className="text-xs p-2 rounded-lg"
-                        style={{
-                          background: 'var(--indigo-panel)',
-                          border: '1px solid var(--indigo-line)',
-                        }}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-medium flex items-center gap-2" style={{ color: 'var(--ink)' }}>
-                            <span className={`gf-audit-led ${ledClass}`} />
-                            {entry.mod_name}
-                            {isUpToDate(entry) && (
-                              <span className="gf-pill gf-pill-ok" title={t('settings.onLatestRelease')}>
-                                <Check size={9} /> {t('settings.audit.latest')}
-                              </span>
-                            )}
-                            {entry.pinned && (
-                              <span className="gf-pill" style={{ background: 'var(--indigo-elev)', color: 'var(--ink-mute)' }}>
-                                <Snowflake size={9} /> {t('settings.audit.pinned')}
-                              </span>
-                            )}
-                            {isLatestBlocked && (
-                              <span className="gf-pill gf-pill-warn" title={t('settings.audit.updateBlockedTitle')}>
-                                <AlertTriangle size={9} /> {t('settings.audit.updateBlockedByGameVersion')}
-                              </span>
-                            )}
-                            {entry.snoozed && (
-                              <span className="gf-pill" style={{ background: 'var(--indigo-elev)', color: 'var(--ink-mute)' }} title={t('settings.audit.snoozedTitle')}>
-                                <Clock size={9} /> {t('settings.audit.snoozed')}
-                              </span>
-                            )}
-                          </span>
-                          <span className="flex items-center gap-2">
-                            {entry.needs_update &&
-                              !entry.snoozed &&
-                              entry.github_repo &&
-                              entry.latest_release_with_assets_tag &&
-                              (entry.update_source === 'github' || entry.update_source === 'both') && (
-                              // Only show the Update button when GitHub
-                              // specifically has an actionable update —
-                              // i.e. there's an installable asset AND
-                              // the walked-back compatible tag is newer
-                              // than what's installed. If only Nexus
-                              // flagged an update, the Nexus pill below
-                              // handles it; clicking Update would call
-                              // update_mod which goes through GitHub and
-                              // (post-walk-back) refuses, surfacing as a
-                              // confusing error toast. Gating on
-                              // update_source keeps the button honest.
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleUpdateOne(entry.mod_name, entry.folder_name ?? null);
-                                }}
-                                disabled={updatingMod === entry.mod_name || updatingAll}
-                                className="gf-btn gf-btn-sm"
-                                title={
-                                  entry.latest_release_blocked_by_game_version && entry.latest_compatible_tag
-                                    ? t('settings.updateGameBlocked', {
-                                        version: entry.latest_release_with_assets_tag,
-                                        required: entry.latest_release_min_game_version ?? '?',
-                                        compatibleVersion: entry.latest_compatible_tag,
-                                      })
-                                    : t('settings.downloadInstall', { tag: entry.latest_compatible_tag ?? entry.latest_release_with_assets_tag })
-                                }
-                              >
-                                {updatingMod === entry.mod_name || updatingAll ? (
-                                  <><RefreshCw size={10} className="animate-spin" /> {t('settings.audit.updating')}</>
-                                ) : (
-                                  <><Download size={10} /> {t('settings.audit.update')}</>
-                                )}
-                              </button>
-                            )}
-                            {snoozeTarget && (entry.needs_update || entry.snoozed) && (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  void handleAuditSnooze(entry, entry.snoozed ? null : snoozeTarget);
-                                }}
-                                className="gf-btn-3 gf-btn-2-sm"
-                                title={
-                                  entry.snoozed
-                                    ? t('settings.audit.showUpdateAgainTooltip')
-                                    : t('settings.audit.skipUpdateTooltip', { version: snoozeTarget.replace(/^v/, '') })
-                                }
-                              >
-                                {entry.snoozed ? (
-                                  <><Check size={9} /> {t('settings.audit.showUpdateAgain')}</>
-                                ) : (
-                                  <><Clock size={9} /> {t('settings.audit.skipUpdate')}</>
-                                )}
-                              </button>
-                            )}
-                            <button
-                              onClick={async (e) => {
-                                e.stopPropagation();
-                                try {
-                                  // Pass folder_name so two same-named
-                                  // mods are pinned independently. Falls
-                                  // back to display-name keying when the
-                                  // audit row didn't carry a folder.
-                                  const folder = entry.folder_name ?? null;
-                                  if (entry.pinned) {
-                                    await unpinMod(entry.mod_name, folder);
-                                    toast.success(t('settings.unpinnedToast', { name: entry.mod_name }));
-                                  } else {
-                                    await pinMod(entry.mod_name, folder);
-                                    toast.success(t('settings.pinnedToast', { name: entry.mod_name }));
-                                  }
-                                  // Freeze/unfreeze only flips the `pinned` flag
-                                  // and recomputes needs_update for THIS
-                                  // row. No need to re-fetch every other
-                                  // mod's source.
-                                  await refreshAuditEntries([entry.mod_name]);
-                                } catch (err) {
-                                  toast.error(err instanceof Error ? err.message : String(err));
-                                }
-                              }}
-                              className="gf-btn-3 gf-btn-2-sm"
-                              title={entry.pinned ? t('settings.audit.unpinTooltip') : t('settings.audit.pinTooltip')}
-                            >
-                              {entry.pinned ? <><Sun size={9} /> {t('settings.audit.unpin')}</> : <><Snowflake size={9} /> {t('settings.audit.pin')}</>}
-                            </button>
-                            <span
-                              className="gf-audit-mono"
-                              title={
-                                isGone
-                                  ? t('settings.noAssetTooltip', { version: entry.latest_release_tag ?? '' })
-                                  : undefined
-                              }
-                            >
-                              {hasRealError
-                                ? t('settings.audit.error')
-                                : entry.snoozed
-                                ? t('settings.audit.snoozedVersion', { version: snoozeTarget?.replace(/^v/, '') ?? '?' })
-                                : entry.needs_update
-                                ? t('settings.audit.versionArrow', {
-                                    installed: entry.installed_version,
-                                    available:
-                                      entry.update_source === 'nexus' || (!entry.latest_release_with_assets_tag && entry.nexus_version)
-                                        ? entry.nexus_version
-                                        : entry.latest_compatible_tag ?? entry.latest_release_with_assets_tag,
-                                  })
-                                : !hasAnySource
-                                ? t('settings.audit.noSource')
-                                : isGone
-                                ? t('settings.audit.nexusReleaseMissing', { version: entry.installed_version })
-                                : `${entry.installed_version} ${t('settings.audit.latest2')}`}
-                            </span>
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-3 mt-1.5 ml-4" style={{ fontSize: 11 }}>
-                          {entry.github_repo && (
-                            <a
-                              href={`https://github.com/${entry.github_repo}/releases`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 hover:underline"
-                              style={{ color: entry.github_auto_detected ? 'var(--ink-dim)' : 'var(--gf)' }}
-                            >
-                              <ExternalLink size={10} />
-                              {entry.github_repo}
-                              {entry.github_auto_detected && (
-                                <span className="text-text-dim opacity-60">{t('settings.audit.autoDetected')}</span>
-                              )}
-                            </a>
-                          )}
-                          {entry.nexus_url && (
-                            <a
-                              href={entry.nexus_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 hover:underline"
-                              style={{ color: 'var(--gf)' }}
-                            >
-                              <ExternalLink size={10} />
-                              {entry.nexus_version ? t('settings.audit.nexusVersion', { version: entry.nexus_version }) : t('settings.nexusFallback')}
-                            </a>
-                          )}
-                          {entry.nexus_update_available && !entry.snoozed && entry.nexus_url && (
-                            <a
-                              href={nexusFilesUrl(entry.nexus_url) ?? `${entry.nexus_url}?tab=files`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="gf-pill gf-pill-update inline-flex items-center gap-1 hover:underline"
-                            >
-                              <Download size={10} /> {t('settings.audit.downloadFromNexus')}
-                            </a>
-                          )}
-                        </div>
-                        {hasRealError && (
-                          <div className="mt-1" style={{ color: 'oklch(0.75 0.13 25)', fontSize: 11 }}>
-                            {entry.error}
-                          </div>
-                        )}
-                        {entry.game_version_too_old && entry.min_game_version && (
-                          <div
-                            className="mt-1 ml-4"
-                            style={{
-                              fontSize: 11,
-                              color: 'oklch(0.78 0.16 60)',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 6,
-                            }}
-                            title={t('settings.auditGameVersionBlock', { declared: entry.min_game_version, installed: gameInfo?.game_version ?? 'unknown' })}
-                          >
-                            ⚠ {t('settings.auditWontLoad', { version: entry.min_game_version, installed: gameInfo?.game_version ?? '?' })}
-                          </div>
-                        )}
-                        {entry.latest_release_blocked_by_game_version && (
-                          entry.latest_compatible_tag ? (
-                            <div
-                              className="mt-1 ml-4"
-                              style={{
-                                fontSize: 11,
-                                color: 'var(--ink-dim)',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: 6,
-                              }}
-                              title={t('settings.auditCompatTag', { latest: entry.latest_release_with_assets_tag, required: entry.latest_release_min_game_version ?? '?', compatible: entry.latest_compatible_tag })}
-                            >
-                              ↺ {t('settings.auditCompatTagVisible', { latest: entry.latest_release_with_assets_tag, required: entry.latest_release_min_game_version ?? '?', compatible: entry.latest_compatible_tag })}
-                            </div>
-                          ) : (
-                            <div
-                              className="mt-1 ml-4"
-                              style={{
-                                fontSize: 11,
-                                color: 'var(--ink-dim)',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: 6,
-                              }}
-                              title={t('settings.auditAlreadyCompat', { version: entry.latest_release_with_assets_tag, required: entry.latest_release_min_game_version ?? '?', installed: entry.installed_version })}
-                            >
-                              ↺ {t('settings.auditAlreadyCompatVisible', { version: entry.latest_release_with_assets_tag, required: entry.latest_release_min_game_version ?? '?', installed: entry.installed_version })}
-                            </div>
-                          )
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-                {(() => {
-                  const incompatibleCount = auditResults.filter(r => r.game_version_too_old).length;
-                  const okCount = auditResults.filter(isUpToDate).length;
-                  const updateCount = auditResults.filter(r => r.needs_update && !r.snoozed).length;
-                  const goneCount = auditResults.filter(r =>
-                    !(r.error && !r.github_auto_detected) &&
-                    r.latest_release_tag &&
-                    !r.latest_release_with_assets_tag &&
-                    !r.needs_update
-                  ).length;
-                  const errCount = auditResults.filter(r => r.error && !r.github_auto_detected).length;
-                  const pinnedCount = auditResults.filter(r => r.pinned).length;
-                  const unlinkedCount = auditResults.filter(r => !r.github_repo && !r.nexus_url).length;
-                  return (
-                    <div className="gf-audit-foot" style={{ marginTop: 12 }}>
-                      <div className="gf-audit-foot-stat">
-                        <span className="gf-audit-led gf-audit-led-ok" />
-                        {okCount} {t('settings.audit.upToDate')}
-                      </div>
-                      <div className="gf-audit-foot-stat">
-                        <span className="gf-audit-led gf-audit-led-update" />
-                        {updateCount} {t('settings.audit.updatesAvailable')}
-                      </div>
-                      {incompatibleCount > 0 && (
-                        <div
-                          className="gf-audit-foot-stat"
-                          title={t('settings.audit.wontLoadTitle', { version: gameInfo?.game_version ?? '?' })}
-                        >
-                          <span className="gf-audit-led gf-audit-led-warn" />
-                          {incompatibleCount} {t('settings.audit.wontLoad')}
-                        </div>
-                      )}
-                      {goneCount > 0 && (
-                        <div
-                          className="gf-audit-foot-stat"
-                          title={t('settings.audit.goneTitle')}
-                        >
-                          <span className="gf-audit-led gf-audit-led-warn" />
-                          {goneCount === 1 ? t('settings.audit.releasesMissingAssets_one', { count: goneCount }) : t('settings.audit.releasesMissingAssets_other', { count: goneCount })}
-                        </div>
-                      )}
-                      <div className="gf-audit-foot-stat">
-                        <span className="gf-audit-led gf-audit-led-gone" />
-                        {errCount === 1 ? t('settings.audit.errorCount_one', { count: errCount }) : t('settings.audit.errorCount_other', { count: errCount })}
-                      </div>
-                      <div className="gf-audit-foot-stat" style={{ marginLeft: 'auto', color: 'var(--ink-dim)' }}>
-                        {t('settings.audit.pinnedCount', { count: pinnedCount })} · {t('settings.audit.unlinkedCount', { count: unlinkedCount })}
-                      </div>
-                    </div>
-                  );
-                })()}
-              </>
-            )}
-          </>
-        )}
-
         {tab === 'advanced' && (
           <>
             <div className="gf-section-title" style={{ marginTop: 0 }}>{t('settings.advanced.quickActions')}</div>
@@ -1168,13 +689,6 @@ export function SettingsView() {
       </div>
 
       <DiagnosticBundle open={showDiag} onClose={() => setShowDiag(false)} />
-      <AutoDetectModal
-        open={showAutoDetect}
-        onClose={() => setShowAutoDetect(false)}
-        onApplied={() => {
-          if (auditResults) runAudit();
-        }}
-      />
     </div>
   );
 }

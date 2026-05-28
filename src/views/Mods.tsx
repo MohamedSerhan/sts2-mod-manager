@@ -13,12 +13,14 @@ import {
   X,
   ClipboardCheck,
   Download,
+  Search,
 } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { Badge } from '../components/Badge';
 import { LibraryTable } from '../components/LibraryTable';
+import { AutoDetectModal } from '../components/AutoDetectModal';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../components/ConfirmDialog';
@@ -129,6 +131,7 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
   const confirm = useConfirm();
   const [tagFilter, setTagFilter] = useState('');
   const [showQuickAdd, setShowQuickAdd] = useState(false);
+  const [showAutoDetect, setShowAutoDetect] = useState(false);
   const [quickAddUrl, setQuickAddUrl] = useState('');
   const [quickAdding, setQuickAdding] = useState(false);
   // Per-row source editor opens inside the row's slot. The Library view
@@ -593,6 +596,10 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
             <Link size={14} />
             {t('mods.quickAddUrl')}
           </Button>
+          <Button variant="secondary" size="sm" onClick={() => setShowAutoDetect(true)}>
+            <Search size={14} />
+            {t('mods.autoDetectSources')}
+          </Button>
           {(() => {
             const ghUpdateCount = auditResults ? countGithubUpdates(auditResults) : 0;
             const ghUpdateNames = auditResults
@@ -811,6 +818,21 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
       />
         </>
       )}
+
+      {/* Auto-detect sources — scans unlinked mods against GitHub by
+          name and links high-confidence matches. Relocated from the
+          old Settings → Audit tab; the Library is the canonical
+          mod-management surface. */}
+      <AutoDetectModal
+        open={showAutoDetect}
+        onClose={() => setShowAutoDetect(false)}
+        onApplied={() => {
+          refreshMods();
+          // If an audit already ran, re-run it so the newly-linked rows
+          // pick up their update status without a manual re-audit.
+          if (auditResults) runAudit();
+        }}
+      />
     </div>
   );
 }

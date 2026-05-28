@@ -1248,23 +1248,6 @@ body {
   flex-direction: column;
   gap: 12px;
 }
-.gf-home-ready {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12.5px;
-  color: var(--ok);
-  margin: 0;
-}
-.gf-home-ready::before {
-  content: '';
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--ok);
-  box-shadow: 0 0 6px var(--ok);
-  flex: 0 0 auto;
-}
 .gf-home-secondary-actions {
   display: flex;
   flex-wrap: wrap;

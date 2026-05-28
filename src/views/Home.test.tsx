@@ -347,11 +347,8 @@ describe('<HomeView> game-not-detected banner', () => {
   });
 });
 
-describe('<HomeView> secondary surface (readiness + actions)', () => {
-  function withActive(
-    profile = 'Daily Pack',
-    opts: { detected?: boolean; updates?: unknown[] } = {},
-  ) {
+describe('<HomeView> secondary surface (actions)', () => {
+  function withActive(profile = 'Daily Pack', opts: { updates?: unknown[] } = {}) {
     registerInvokeHandler('get_active_profile', () => profile);
     registerInvokeHandler('list_profiles_cmd', () => [
       { name: profile, mods: [], created_at: '2026-01-01' },
@@ -360,17 +357,6 @@ describe('<HomeView> secondary surface (readiness + actions)', () => {
     registerInvokeHandler('get_subscriptions', () => []);
     registerInvokeHandler('check_subscription_updates', () => opts.updates ?? []);
     registerInvokeHandler('get_share_info', () => null);
-    if (opts.detected) {
-      registerInvokeHandler('get_game_info', () => ({
-        game_path: 'C:/Games/STS2',
-        mods_path: 'x',
-        disabled_mods_path: 'y',
-        mods_count: 1,
-        disabled_count: 0,
-        valid: true,
-        game_version: '0.103.2',
-      }));
-    }
   }
 
   it('Switch modpack routes to the Modpacks page', async () => {
@@ -393,13 +379,6 @@ describe('<HomeView> secondary surface (readiness + actions)', () => {
     expect(onCreateModpack).toHaveBeenCalledTimes(1);
   });
 
-  it('shows the "game detected" readiness line when the game is valid', async () => {
-    withActive('Daily Pack', { detected: true });
-    render(<Wrap />);
-    await waitFor(() => {
-      expect(screen.getByText(/ready to launch/i)).toBeInTheDocument();
-    });
-  });
 
   it('Review updates appears when packs have pending updates and routes to Modpacks', async () => {
     withActive('Daily Pack', {

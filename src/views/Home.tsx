@@ -413,9 +413,6 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
           a first-time user toward Modpacks. */}
       {activeProfile && (
         <div className="gf-home-secondary">
-          {gameInfo?.valid && (
-            <p className="gf-home-ready">{t('home.ready.gameDetected')}</p>
-          )}
           <div className="gf-home-secondary-actions">
             <button
               type="button"

@@ -3,14 +3,17 @@
   "spec": "docs/superpowers/specs/2026-05-28-per-pr-dev-builds-design.md",
   "subProject": "D (per-PR dev builds)",
   "generated": "2026-05-28",
-  "worktree": "optimistic-thompson-a5dc4c (branch claude/optimistic-thompson-a5dc4c)",
+  "lastUpdated": "2026-05-28",
+  "worktree": "per-pr-dev-builds (branch claude/per-pr-dev-builds, off main 960f9e5)",
   "tasks": [
     {
       "planTask": 1,
       "nativeId": "5",
+      "status": "completed",
+      "commit": "d0622eb",
       "subject": "Dev data isolation — version-driven app_dir_name()",
       "files": ["src-tauri/src/state.rs", "src-tauri/src/lib.rs"],
-      "verifyCommand": "cargo test --manifest-path=src-tauri/Cargo.toml dir_name_for",
+      "verifyCommand": "cargo test --manifest-path=src-tauri/Cargo.toml app_dir_name",
       "acceptanceCriteria": [
         "dir_name_for(\"1.6.1\") returns sts2-mod-manager",
         "dir_name_for(\"1.6.1-dev.pr42.ga1b2c3d\") returns sts2-mod-manager-dev",
@@ -24,6 +27,8 @@
     {
       "planTask": 2,
       "nativeId": "6",
+      "status": "completed",
+      "commit": "6ba0b67 + fix 31c72a9",
       "subject": "dev-build-stamp.mjs — version compute, file stamp, comment render",
       "files": ["scripts/dev-build-stamp.mjs", "scripts/dev-build-stamp.test.mjs", ".github/workflows/build.yml"],
       "verifyCommand": "node --test scripts/dev-build-stamp.test.mjs",
@@ -41,6 +46,8 @@
     {
       "planTask": 3,
       "nativeId": "7",
+      "status": "completed",
+      "commit": "cd330ea + fix b60d9bc (added labeled trigger + gate guards)",
       "subject": "build.yml — labeled-PR gate + stamp step + dev portable + artifact paths",
       "files": [".github/workflows/build.yml"],
       "verifyCommand": "python -c \"import yaml; yaml.safe_load(open('.github/workflows/build.yml')); print('OK')\"",
@@ -57,6 +64,8 @@
     {
       "planTask": 4,
       "nativeId": "8",
+      "status": "completed",
+      "commit": "87fcdbc + fix 68ce319 (hardened: partial-success gate, empty-dist guard, graceful no-artifacts)",
       "subject": "build.yml — publish-dev job (rolling prerelease + sticky comment)",
       "files": [".github/workflows/build.yml"],
       "verifyCommand": "python -c \"import yaml; yaml.safe_load(open('.github/workflows/build.yml')); print('OK')\"",
@@ -73,6 +82,8 @@
     {
       "planTask": 5,
       "nativeId": "9",
+      "status": "completed",
+      "commit": "0e99238",
       "subject": "dev-build-cleanup.yml — delete dev prerelease on PR close",
       "files": [".github/workflows/dev-build-cleanup.yml"],
       "verifyCommand": "python -c \"import yaml; yaml.safe_load(open('.github/workflows/dev-build-cleanup.yml')); print('OK')\"",

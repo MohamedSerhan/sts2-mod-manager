@@ -62,3 +62,7 @@ coverage/
 # Local Nexus triage runner logs (written by scripts/run-nexus-triage-local.bat).
 # Per-day rolling logs; not meaningful in history.
 .nexus-triage-runs/
+
+# Python bytecode cache (from the curl_cffi shim scripts/_nexus_fetch.py).
+__pycache__/
+*.pyc

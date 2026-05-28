@@ -185,14 +185,18 @@ export function renderIssueBody(item, template, { classification, confidence }) 
 
 // Default htmlFetcher: spawns the Python curl_cffi shim (scripts/_nexus_fetch.py).
 // Tests stub this via setHtmlFetcher — the fetch path is the only thing that changes.
-async function singleFetch(impersonate, url, headers) {
+async function singleFetch(impersonate, url, headers, opts = {}) {
   const headerArgs = [];
   for (const [k, v] of Object.entries(headers || {})) {
     headerArgs.push('--header', `${k}: ${v}`);
   }
+  const methodArgs = [];
+  if (opts.method === 'POST') {
+    methodArgs.push('--method', 'POST', '--data', opts.data || '');
+  }
   const { stdout, stderr } = await execFileP(
     'python',
-    ['scripts/_nexus_fetch.py', url, '--impersonate', impersonate, ...headerArgs],
+    ['scripts/_nexus_fetch.py', url, '--impersonate', impersonate, ...headerArgs, ...methodArgs],
   );
   // stderr last line: HTTP_STATUS=NNN
   const statusMatch = stderr.match(/HTTP_STATUS=(\d{3})/);
@@ -205,7 +209,7 @@ let htmlFetcher = async (url, opts = {}) => {
   // Retry across impersonate versions on Cloudflare challenge.
   for (let attempt = 0; attempt < CURL_IMPERSONATES.length; attempt++) {
     const impersonate = CURL_IMPERSONATES[attempt];
-    const { body } = await singleFetch(impersonate, url, headers);
+    const { body } = await singleFetch(impersonate, url, headers, opts);
     if (!isCloudflareChallenge(body)) return body;
     // CF challenge — try next impersonate version (or give up on last attempt)
     if (attempt < CURL_IMPERSONATES.length - 1) {
@@ -213,7 +217,7 @@ let htmlFetcher = async (url, opts = {}) => {
     }
   }
   // Return the last body regardless (caller's isCloudflareChallenge will handle it)
-  const { body } = await singleFetch(CURL_IMPERSONATES[CURL_IMPERSONATES.length - 1], url, headers);
+  const { body } = await singleFetch(CURL_IMPERSONATES[CURL_IMPERSONATES.length - 1], url, headers, opts);
   return body;
 };
 
@@ -556,6 +560,54 @@ function bugToItem(b) {
   };
 }
 
+// Fetch a bug's full report body via the lazy-loaded reply widget.
+// loadIssueReplies(id) in Nexus's app bundle POSTs to ModBugReplyList with
+// issue_id; the response reuses the comment markup. The FIRST comment-content
+// block is the original report (the rest are replies).
+const BUG_NAME_RE = /<span\s[^>]*\bclass="[^"]*\bcomment-name\b[^"]*"[^>]*>([\s\S]*?)<\/span>/i;
+const BUG_CONTENT_RE = /<div\s[^>]*\bclass="[^"]*\bcomment-content\b[^"]*"[^>]*>([\s\S]*?)<\/div>/i;
+const BUG_TIME_RE = /<time\s[^>]*\bdatetime="([^"]+)"[^>]*>/i;
+
+export function parseBugReport(html) {
+  if (isCloudflareChallenge(html)) {
+    const err = new Error('Cloudflare blocked the bug-reply request');
+    err.code = 'CLOUDFLARE_BLOCKED';
+    throw err;
+  }
+  const nameM = BUG_NAME_RE.exec(html);
+  const reporter = nameM ? stripTags(nameM[1]).replace(/\s+/g, ' ').trim() : '';
+
+  const contentM = BUG_CONTENT_RE.exec(html);
+  let body = '';
+  let createdAt = '';
+  if (contentM) {
+    let inner = contentM[1];
+    const timeM = BUG_TIME_RE.exec(inner);
+    if (timeM) createdAt = timeM[1].replace(' ', 'T') + 'Z';
+    inner = inner.replace(/<time[\s\S]*?<\/time>/i, '');
+    // Preserve link targets as "text (url)" — bug reports often link screenshots.
+    inner = inner.replace(/<a\s[^>]*\bhref="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi,
+      (_, href, txt) => `${stripTags(txt).trim()} (${href})`);
+    inner = inner.replace(/<br\s*\/?>/gi, ' ');
+    body = stripTags(inner).replace(/\s+/g, ' ').trim();
+  }
+  return { reporter, body, createdAt };
+}
+
+export async function fetchBugBody(issueId) {
+  const url = `${WIDGET_BASE_URL}/Core/Libs/Common/Widgets/ModBugReplyList`;
+  const html = await htmlFetcher(url, {
+    method: 'POST',
+    data: `issue_id=${encodeURIComponent(issueId)}`,
+    headers: {
+      'Referer': `${WIDGET_BASE_URL}/${GAME_DOMAIN}/mods/${MOD_ID_STR}?tab=bugs`,
+      'X-Requested-With': 'XMLHttpRequest',
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+  });
+  return parseBugReport(html);
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
@@ -655,6 +707,19 @@ export async function main({ dryRun, ghToken, state, templatePath = TEMPLATE_PAT
     if (filedThisRun >= PER_RUN_CAP) {
       result.pendingNextRun++;
       continue;
+    }
+    // For bugs, fetch the full report body lazily — only for the ones we're
+    // actually filing (within the per-run cap), to minimize extra requests.
+    if (item.kind === 'bug') {
+      try {
+        const report = await fetchBugBody(item.id);
+        if (report.body) item.body = report.body;
+        if (report.reporter) item.author = report.reporter;
+        if (report.createdAt) item.createdAt = report.createdAt;
+      } catch (err) {
+        if (err.code === 'CLOUDFLARE_BLOCKED') throw err;
+        console.error(`nexus-triage: couldn't fetch full body for bug ${item.id}, using title: ${err.message}`);
+      }
     }
     const body = renderIssueBody(item, template, cls);
     const title = `[Nexus] ${sanitizeTitle(item.title || item.body || '')}`;

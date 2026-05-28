@@ -521,7 +521,7 @@ test('fetchAllComments: concatenates comments from multiple pages correctly', as
 // Bug parser tests (ModBugsTab widget table)
 // ---------------------------------------------------------------------------
 
-import { parseBugsFromHtml, fetchAllBugs } from './nexus-triage.mjs';
+import { parseBugsFromHtml, fetchAllBugs, parseBugReport, fetchBugBody } from './nexus-triage.mjs';
 
 const BUGS_HTML = readFileSync('scripts/fixtures/nexus-bugs-mixed.html', 'utf-8');
 
@@ -558,6 +558,36 @@ test('fetchAllBugs: stubbed fetcher returns parsed bugs', async () => {
     assert.equal(bugs.length, 3);
   } finally {
     setHtmlFetcher(null); // reset (matches the pattern used by comment-fetch tests)
+  }
+});
+
+const BUG_REPLY_HTML = readFileSync('scripts/fixtures/nexus-bug-reply.html', 'utf-8');
+
+test('parseBugReport: extracts reporter + full report body + link + timestamp', () => {
+  const r = parseBugReport(BUG_REPLY_HTML);
+  assert.equal(r.reporter, 'Lch5423', 'first comment-name is the reporter');
+  assert.match(r.body, /reproduce: snapshot json from mac 1\.6\.1/, 'report body present');
+  assert.match(r.body, /\(https:\/\/imgur\.com\/a\/r1NZYpt\)/, 'screenshot link preserved as (url)');
+  assert.ok(!/Thanks for the bug report/.test(r.body), 'only the FIRST post (report), not the maintainer reply');
+  assert.equal(r.createdAt, '2026-05-25T08:43Z');
+});
+
+test('parseBugReport: Cloudflare challenge throws CLOUDFLARE_BLOCKED', () => {
+  const cf = '<html><head><title>Just a moment...</title></head><body>cf-chl</body></html>';
+  assert.throws(() => parseBugReport(cf), (e) => e.code === 'CLOUDFLARE_BLOCKED');
+});
+
+test('fetchBugBody: POSTs issue_id and returns parsed report', async () => {
+  let captured;
+  setHtmlFetcher(async (url, opts) => { captured = { url, opts }; return BUG_REPLY_HTML; });
+  try {
+    const r = await fetchBugBody('1084178');
+    assert.match(captured.url, /ModBugReplyList$/);
+    assert.equal(captured.opts.method, 'POST');
+    assert.equal(captured.opts.data, 'issue_id=1084178');
+    assert.equal(r.reporter, 'Lch5423');
+  } finally {
+    setHtmlFetcher(null);
   }
 });
 

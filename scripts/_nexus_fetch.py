@@ -8,6 +8,7 @@
 #
 # Usage:
 #   python scripts/_nexus_fetch.py <url> [--header "K: V" ...] [--impersonate chrome136]
+#   python scripts/_nexus_fetch.py <url> --method POST --data "k1=v1&k2=v2"
 #
 # Env vars:
 #   NEXUSMODS_CURL_IMPERSONATE  override the impersonate browser (default: chrome136)
@@ -43,6 +44,10 @@ def main():
     p.add_argument('--impersonate',
                    default=os.environ.get('NEXUSMODS_CURL_IMPERSONATE', 'chrome136'),
                    help='curl_cffi impersonate target (default: chrome136)')
+    p.add_argument('--method', default='GET', choices=['GET', 'POST'],
+                   help='HTTP method (default: GET)')
+    p.add_argument('--data', default=None,
+                   help='URL-encoded form body for POST (e.g. "issue_id=123")')
     args = p.parse_args()
 
     headers = {}
@@ -64,7 +69,13 @@ def main():
 
     try:
         sess = requests.Session(impersonate=args.impersonate)
-        r = sess.get(args.url, headers=headers, timeout=30)
+        if args.method == 'POST':
+            # Parse "k1=v1&k2=v2" into a dict for form-encoded POST
+            from urllib.parse import parse_qsl
+            form = dict(parse_qsl(args.data or ''))
+            r = sess.post(args.url, data=form, headers=headers, timeout=30)
+        else:
+            r = sess.get(args.url, headers=headers, timeout=30)
         sys.stdout.write(r.text)
         # Node side reads last "HTTP_STATUS=NNN" line from stderr
         print(f'HTTP_STATUS={r.status_code}', file=sys.stderr)

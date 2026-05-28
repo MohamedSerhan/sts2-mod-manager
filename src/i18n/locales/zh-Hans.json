@@ -415,6 +415,8 @@
       "note": "拖动行或使用箭头按钮。此顺序会随模组包保存，并在该模组包处于当前状态或被激活时写入 STS2 设置。",
       "rowLabel": "{{name}}，第 {{position}} 位",
       "dragHandle": "拖动以重新排序",
+      "searchPlaceholder": "搜索以跳转到某个模组（顺序保持不变）…",
+      "searchLabel": "搜索加载顺序",
       "empty": "此模组包没有可排序的模组。",
       "disabled": "已关闭",
       "moveUp": "上移 {{name}}",
@@ -1193,6 +1195,7 @@
     "findGitHubFromNexus": "从 Nexus 查找 GitHub",
     "recovery": "恢复",
     "removeMod": "移除模组…",
+    "removeModNamed": "移除 {{mod}}",
     "toast": {
       "updated": "已更新 '{{name}}' 至 v{{version}}",
       "updateFailed": "更新 '{{name}}' 失败：{{error}}",

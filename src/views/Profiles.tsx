@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Plus,
@@ -157,6 +157,10 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
   const [loadOrderSaving, setLoadOrderSaving] = useState(false);
   const [draggedLoadOrderIndex, setDraggedLoadOrderIndex] = useState<number | null>(null);
   const [dragOverLoadOrderIndex, setDragOverLoadOrderIndex] = useState<number | null>(null);
+  // Load-order search. Because load order matters, searching must NOT
+  // filter the list — it scrolls to + highlights the first match while
+  // every row stays visible in its real position.
+  const [loadOrderQuery, setLoadOrderQuery] = useState('');
   // Ref to the scrollable load-order list so pointer-drag can hit-test
   // rows by clientY. HTML5 drag-and-drop is unusable here because Tauri's
   // OS-level file drop (enabled for drag-to-install) swallows the
@@ -320,12 +324,14 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
   function openLoadOrderEditor(profile: Profile) {
     setLoadOrderProfile(profile);
     setLoadOrderDraft([...profile.mods]);
+    setLoadOrderQuery('');
   }
 
   function closeLoadOrderEditor() {
     if (loadOrderSaving) return;
     setLoadOrderProfile(null);
     setLoadOrderDraft([]);
+    setLoadOrderQuery('');
   }
 
   function moveLoadOrderItem(index: number, delta: -1 | 1) {
@@ -370,6 +376,28 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     }
     return rows.length > 0 ? rows.length - 1 : null;
   }
+
+  // First row matching the load-order search (by name or on-disk folder).
+  // -1 when the box is empty or nothing matches.
+  const loadOrderMatchIndex = useMemo(() => {
+    const q = loadOrderQuery.trim().toLowerCase();
+    if (!q) return -1;
+    return loadOrderDraft.findIndex(
+      (m) =>
+        m.name.toLowerCase().includes(q)
+        || (m.folder_name?.toLowerCase().includes(q) ?? false),
+    );
+  }, [loadOrderQuery, loadOrderDraft]);
+
+  // Scroll the matched row into view as the user types — the list itself
+  // is never filtered, so order stays intact.
+  useEffect(() => {
+    if (loadOrderMatchIndex < 0) return;
+    const list = loadOrderListRef.current;
+    if (!list) return;
+    const rows = list.querySelectorAll<HTMLElement>('.gf-load-order-row');
+    rows[loadOrderMatchIndex]?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [loadOrderMatchIndex]);
 
   function loadOrderToastKey(status: LoadOrderSettingsStatus): string {
     switch (status) {
@@ -708,13 +736,23 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
           </div>
           <div className="gf-modal-body">
             <div className="gf-load-order-note">{t('profiles.loadOrder.note')}</div>
+            {loadOrderDraft.length > 0 && (
+              <input
+                type="search"
+                className="gf-input gf-load-order-search"
+                value={loadOrderQuery}
+                onChange={(e) => setLoadOrderQuery(e.target.value)}
+                placeholder={t('profiles.loadOrder.searchPlaceholder')}
+                aria-label={t('profiles.loadOrder.searchLabel')}
+              />
+            )}
             {loadOrderDraft.length === 0 ? (
               <div className="gf-empty-sub">{t('profiles.loadOrder.empty')}</div>
             ) : (
               <div className="gf-load-order-list" role="list" ref={loadOrderListRef}>
                 {loadOrderDraft.map((mod, index) => (
                   <div
-                    className={`gf-load-order-row${dragOverLoadOrderIndex === index ? ' drag-over' : ''}${draggedLoadOrderIndex === index ? ' dragging' : ''}`}
+                    className={`gf-load-order-row${dragOverLoadOrderIndex === index ? ' drag-over' : ''}${draggedLoadOrderIndex === index ? ' dragging' : ''}${loadOrderMatchIndex === index ? ' match' : ''}`}
                     key={`${mod.folder_name ?? mod.mod_id ?? mod.name}-${index}`}
                     role="listitem"
                     aria-label={t('profiles.loadOrder.rowLabel', { name: mod.name, position: index + 1 })}

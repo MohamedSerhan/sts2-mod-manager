@@ -459,13 +459,15 @@ describe('<LibraryRow> kebab + audit pills', () => {
     expect(onRollback).toHaveBeenCalledTimes(1);
   });
 
-  it('kebab → Delete fires onDelete', async () => {
+  it('row Delete (trash) button fires onDelete and is not in the kebab', async () => {
     const onDelete = vi.fn();
     const user = userEvent.setup();
     renderRow({ mod: baseModInfo(), onDelete });
-    await user.click(screen.getByRole('button', { name: /mod actions/i }));
-    await user.click(screen.getByRole('menuitem', { name: /remove mod/i }));
+    // Delete moved out of the kebab to a visible trash button.
+    await user.click(screen.getByRole('button', { name: /Remove BaseLib/i }));
     expect(onDelete).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    expect(screen.queryByRole('menuitem', { name: /remove mod/i })).toBeNull();
   });
 
   it('kebab → Add to "modpack" / Remove from "modpack" reflects the membership chip and fires onToggleMembership', async () => {

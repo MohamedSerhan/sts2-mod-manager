@@ -339,6 +339,8 @@
       "note": "Drag rows or use the arrow buttons. This order is stored with the modpack and written to STS2 settings when the modpack is active or activated.",
       "rowLabel": "{{name}}, position {{position}}",
       "dragHandle": "Drag to reorder",
+      "searchPlaceholder": "Search to jump to a mod (order is preserved)…",
+      "searchLabel": "Search the load order",
       "empty": "This modpack has no mods to order.",
       "disabled": "off",
       "moveUp": "Move {{name}} up",
@@ -1193,6 +1195,7 @@
     "findGitHubFromNexus": "Find GitHub from Nexus",
     "recovery": "Recovery",
     "removeMod": "Remove mod…",
+    "removeModNamed": "Remove {{mod}}",
     "toast": {
       "updated": "Updated '{{name}}' to v{{version}}",
       "updateFailed": "Update failed for '{{name}}': {{error}}",

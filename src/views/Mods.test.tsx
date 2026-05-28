@@ -460,31 +460,29 @@ describe('<ModsView>', () => {
     expect(screen.getByText(/Type/)).toBeInTheDocument();
   });
 
-  it('kebab → Remove mod opens the destructive confirm', async () => {
+  it('Delete (trash) button opens the destructive confirm', async () => {
     seedMods([baseMod({ name: 'AutoPath', folder_name: 'AutoPath' })]);
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('AutoPath')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    await user.click(screen.getByRole('menuitem', { name: /Remove mod/ }));
+    await user.click(screen.getByRole('button', { name: /Remove AutoPath/i }));
     // Confirm modal shows
     await waitFor(() => {
       expect(screen.getByText(/Delete "AutoPath"/)).toBeInTheDocument();
     });
   });
 
-  it('Remove mod lives in the kebab — no standalone top-level button (T17)', async () => {
-    // T17 removed the per-row standalone Delete button. The row's
-    // primary visible UI is name + version + chips + ONE kebab; Remove
-    // mod is reachable from the kebab.
+  it('Delete is a visible trash button left of the kebab (not buried in it)', async () => {
+    // Delete is a frequent action, so it's a visible button on the row
+    // (left of the kebab) rather than a kebab item.
     seedMods([baseMod({ name: 'AutoPath', folder_name: 'AutoPath' })]);
+    const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('AutoPath')).toBeInTheDocument(); });
-    // No standalone button on the row.
-    expect(screen.queryByRole('button', { name: /^Remove mod/ })).toBeNull();
-    // Kebab item is the single source of truth.
-    const moreBtn = screen.getByRole('button', { name: 'Mod actions' });
-    expect(moreBtn).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Remove AutoPath/i })).toBeInTheDocument();
+    // ...and it's no longer inside the kebab.
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    expect(screen.queryByRole('menuitem', { name: /Remove mod/i })).toBeNull();
   });
 
   it('kebab → Freeze / Unfreeze toggles via pin_mod / unpin_mod', async () => {
@@ -1662,8 +1660,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('DelFail')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    await user.click(screen.getByRole('menuitem', { name: /Remove mod/ }));
+    await user.click(screen.getByRole('button', { name: /^Remove /i }));
     await waitFor(() => { expect(screen.getByText(/Delete "DelFail"/)).toBeInTheDocument(); });
     // ConfirmDialog renders TWO buttons with accessible name "Delete":
     //   - the destructive confirm in modal-foot
@@ -1685,8 +1682,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('KeepMe')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    await user.click(screen.getByRole('menuitem', { name: /Remove mod/ }));
+    await user.click(screen.getByRole('button', { name: /^Remove /i }));
     await waitFor(() => { expect(screen.getByText(/Delete "KeepMe"/)).toBeInTheDocument(); });
     // The modal Cancel button lives in .gf-modal-foot (left-most button).
     const cancelBtn = document.querySelector(
@@ -2361,8 +2357,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('D')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    await user.click(screen.getByRole('menuitem', { name: /Remove mod/ }));
+    await user.click(screen.getByRole('button', { name: /^Remove /i }));
     await waitFor(() => { expect(screen.getByText(/Delete "D"/)).toBeInTheDocument(); });
     const dangerBtn = document.querySelector('.gf-modal-foot button.gf-btn-danger') as HTMLButtonElement;
     expect(dangerBtn).toBeTruthy();
@@ -2934,8 +2929,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('DelOk')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    await user.click(screen.getByRole('menuitem', { name: /Remove mod/ }));
+    await user.click(screen.getByRole('button', { name: /^Remove /i }));
     await waitFor(() => { expect(screen.getByText(/Delete "DelOk"/)).toBeInTheDocument(); });
     const dangerBtn = document.querySelector('.gf-modal-foot button.gf-btn-danger') as HTMLButtonElement;
     expect(dangerBtn).toBeTruthy();

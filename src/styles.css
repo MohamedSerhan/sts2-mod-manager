@@ -708,15 +708,24 @@ body {
 .gf-profile-library-titlerow {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  /* Keep the tags on the same line, to the RIGHT of the name (4.2). The
+     name truncates instead of pushing tags onto a second row. */
+  flex-wrap: nowrap;
   gap: 8px;
   min-width: 0;
+}
+/* Title shrinks (and ellipsizes) so the tag chips stay beside it. */
+.gf-profile-library-titlerow .gf-profile-library-title {
+  flex: 0 1 auto;
+  min-width: 2.5em;
 }
 .gf-profile-library-rawname {
   font-size: 10px;
   font-weight: 400;
   color: var(--ink-dim);
+  flex: 0 0 auto;
 }
+.gf-row-tags { flex: 0 0 auto; }
 /* 4.2 — tag chips to the right of the mod name. */
 .gf-row-tags {
   display: inline-flex;
@@ -761,6 +770,29 @@ body {
   background: oklch(0.74 0.11 165 / 0.12);
   border-color: oklch(0.74 0.11 165 / 0.35);
 }
+/* Visible delete button — sits just left of the kebab. Reads as a quiet
+   icon button until hover, which turns it danger-red. */
+.gf-row-delete {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid var(--indigo-line);
+  background: transparent;
+  color: var(--ink-mute);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.gf-row-delete:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: oklch(0.65 0.18 25 / 0.5);
+  background: oklch(0.65 0.18 25 / 0.12);
+}
+.gf-row-delete:disabled { opacity: 0.4; cursor: not-allowed; }
 .gf-profile-library-title {
   font-size: 13.5px;
   font-weight: 700;
@@ -849,11 +881,19 @@ body {
   max-height: min(860px, calc(100vh - 24px));
   overflow: hidden;
 }
+/* The body is the flex container; only the list inside scrolls — so the
+   modal shows a single scrollbar instead of one on the body AND one on
+   the list. */
 .gf-load-order-modal .gf-modal-body {
   min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background: var(--indigo-panel);
 }
 .gf-load-order-note {
+  flex: 0 0 auto;
   border: 1px solid var(--indigo-line);
   background: oklch(0.18 0.035 280 / 0.72);
   border-radius: 7px;
@@ -863,13 +903,20 @@ body {
   font-size: 12px;
   line-height: 1.45;
 }
+.gf-load-order-search {
+  flex: 0 0 auto;
+  margin-bottom: 12px;
+}
 .gf-load-order-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-height: min(68vh, 680px);
+  gap: 9px;
+  /* Single scroll region — grows to fill the body, capped by the modal
+     height. No fixed max-height (which produced the second scrollbar). */
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
-  padding: 8px;
+  padding: 10px;
   border: 1px solid var(--indigo-line);
   border-radius: 8px;
   background: var(--indigo-deep);
@@ -878,12 +925,18 @@ body {
   display: grid;
   grid-template-columns: 20px 34px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
-  min-height: 48px;
-  padding: 8px 10px;
+  gap: 12px;
+  min-height: 54px;
+  padding: 11px 13px;
   border: 1px solid var(--indigo-line);
   border-radius: 7px;
   background: var(--indigo-side);
+}
+/* Search highlight — the matched row gets a gold ring; the list is never
+   filtered so the row stays in its real position. */
+.gf-load-order-row.match {
+  border-color: var(--gf);
+  box-shadow: 0 0 0 1px var(--gf) inset;
 }
 .gf-load-order-row.drag-over {
   border-color: var(--gf-line);

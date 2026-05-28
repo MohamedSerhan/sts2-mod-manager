@@ -1101,6 +1101,36 @@ describe('<ProfilesView>', () => {
     expect(names[names.length - 1]).toBe('BaseLib');
   });
 
+  it('load-order search highlights the matching row without filtering the list', async () => {
+    seedProfiles([
+      baseProfile({
+        name: 'Stable',
+        mods: [
+          profileMod({ name: 'BaseLib', folder_name: 'BaseLib', mod_id: 'BaseLib' }),
+          profileMod({ name: 'Card Art Editor', folder_name: 'CardArtEditor', mod_id: 'CardArtEditor' }),
+          profileMod({ name: 'Zoom Tweaks', folder_name: 'ZoomTweaks', mod_id: 'ZoomTweaks' }),
+        ],
+      }),
+    ]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await openDetailFor(user, 'Stable');
+    await user.click(screen.getByRole('button', { name: /Load order/i }));
+    const dialog = (await screen.findByRole('dialog', {
+      name: /Load order for Stable/i,
+    })) as HTMLElement;
+    await user.type(
+      within(dialog).getByRole('searchbox', { name: /Search the load order/i }),
+      'zoom',
+    );
+    // Order is preserved — all 3 rows still render — and the match is
+    // highlighted (not filtered to a single result).
+    expect(dialog.querySelectorAll('.gf-load-order-row')).toHaveLength(3);
+    const matched = dialog.querySelector('.gf-load-order-row.match');
+    expect(matched).not.toBeNull();
+    expect(matched!.textContent).toMatch(/Zoom Tweaks/);
+  });
+
   const loadOrderStatusCases: Array<[LoadOrderSettingsStatus, RegExp]> = [
     ['applied', /applied to settings\.save/i],
     ['skipped_missing', /settings\.save was not found/i],

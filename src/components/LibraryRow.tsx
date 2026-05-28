@@ -576,6 +576,25 @@ export function LibraryRow({
               </span>
             )
           )}
+          {/* Delete is a frequent action, so it's a visible trash button
+              just left of the kebab rather than buried inside it.
+              stopPropagation so it doesn't also open the row's editor;
+              the parent's handler shows a confirm before deleting. */}
+          {mod && onDelete !== noop && (
+            <button
+              type="button"
+              className="gf-row-delete"
+              onClick={(event) => {
+                event.stopPropagation();
+                onDelete();
+              }}
+              disabled={gameRunning}
+              title={gameRunning ? t('mods.closeSts2FirstDot') : t('mods.removeMod')}
+              aria-label={t('mods.removeModNamed', { mod: displayName })}
+            >
+              <Trash2 size={14} />
+            </button>
+          )}
           {mod && <LibraryRowKebab
             mod={mod}
             audit={audit}
@@ -597,7 +616,6 @@ export function LibraryRow({
             onFindGithubFromNexus={onFindGithubFromNexus}
             onRepair={onRepair}
             onRollback={onRollback}
-            onDelete={onDelete}
             onOpenExternalUrl={onOpenExternalUrl}
           />}
         </div>
@@ -646,7 +664,6 @@ interface LibraryRowKebabProps {
   onFindGithubFromNexus: () => void;
   onRepair: () => void;
   onRollback: () => void;
-  onDelete: () => void;
   onOpenExternalUrl: (url: string) => void;
 }
 
@@ -673,7 +690,6 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
     onFindGithubFromNexus,
     onRepair,
     onRollback,
-    onDelete,
     onOpenExternalUrl,
   } = props;
 
@@ -827,15 +843,6 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
             )}
           </KebabItem>
         </KebabSection>
-        <KebabDivider />
-        <KebabItem
-          danger
-          icon={<Trash2 size={12} />}
-          onClick={onDelete}
-          disabled={gameRunning}
-        >
-          {t('mods.removeMod')}
-        </KebabItem>
       </KebabMenu>
     </div>
   );

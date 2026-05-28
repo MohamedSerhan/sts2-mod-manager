@@ -696,6 +696,30 @@ function AppInner() {
             </div>
 
             <div className="flex gap-1.5">
+              {/* STS2 detection status — shown on every screen so the
+                  user can tell at a glance whether the game folder is
+                  wired up (the previous at-a-glance signal was a sidebar
+                  status block that got dropped in the 1.7.0
+                  consolidation). Clicking jumps to Settings, where the
+                  game path is configured. */}
+              <button
+                onClick={() => setActiveView('settings')}
+                title={
+                  gameInfo?.valid
+                    ? t('topbar.gameDetectedTitle', { path: gameInfo.game_path })
+                    : t('topbar.gameNotFoundTitle')
+                }
+                className={cn('gf-game-status', gameInfo?.valid ? 'is-ok' : 'is-warn')}
+              >
+                {gameInfo?.valid ? (
+                  <span className="gf-game-status-dot" aria-hidden />
+                ) : (
+                  <AlertTriangle size={13} aria-hidden />
+                )}
+                <span className="gf-game-status-label">
+                  {gameInfo?.valid ? t('topbar.gameDetected') : t('topbar.gameNotFound')}
+                </span>
+              </button>
               {/* 1.7.0 — Help moved out of the sidebar. The `?` button
                   opens a slide-out HelpDrawer (right side) that renders
                   the same content the Settings → Help tab shows. */}

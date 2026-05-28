@@ -2040,12 +2040,11 @@ describe('<App>', () => {
     expect(profilesNav!.querySelector('.gf-nav-badge')).toBeNull();
   });
 
-  it('gameInfo.valid=true renders the mod-count line in the topbar profile chip', async () => {
+  it('gameInfo.valid=true renders the mod-count line + an "STS2 detected" topbar status', async () => {
     // Mod count surfaces in the topbar profile chip; that's the
-    // canonical place (it changes live with mod state). The 1.7.0
-    // cleanup removed the duplicate "STS2 detected / N active / N mods"
-    // sidebar status block — game-path detection state lives in
-    // Settings → General now, not in two places at once.
+    // canonical place (it changes live with mod state). Detection state
+    // is ALSO surfaced as an at-a-glance topbar pill (restored 1.7.0
+    // after users said there was no easy way to tell if STS2 was found).
     registerInvokeHandler('get_game_info', () => ({
       game_path: 'C:/Games/STS2',
       mods_path: 'C:/Games/STS2/Mods',
@@ -2059,6 +2058,25 @@ describe('<App>', () => {
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     await waitFor(() => {
       expect(screen.getByText(/0 active \/ 0 mods/)).toBeInTheDocument();
+    });
+    expect(
+      screen.getByRole('button', { name: /STS2 detected/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('topbar shows "STS2 not found" and routes to Settings when the game is undetected', async () => {
+    // Default safe-mock get_game_info returns valid:false. The warning
+    // pill must surface so the user knows to set the game folder, and
+    // clicking it jumps straight to Settings.
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    const status = screen.getByRole('button', { name: /STS2 not found/i });
+    expect(status).toBeInTheDocument();
+    await user.click(status);
+    // Settings view is now active — the Game Path field renders there.
+    await waitFor(() => {
+      expect(screen.getByText('Game Path')).toBeInTheDocument();
     });
   });
 

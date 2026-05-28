@@ -520,7 +520,11 @@
     "settings": "设置"
   },
   "topbar": {
-    "help": "帮助"
+    "help": "帮助",
+    "gameDetected": "已检测到 STS2",
+    "gameNotFound": "未找到 STS2",
+    "gameDetectedTitle": "已在 {{path}} 检测到《杀戮尖塔 2》——点击打开设置",
+    "gameNotFoundTitle": "未找到《杀戮尖塔 2》——点击在设置中指定游戏文件夹"
   },
   "app": {
     "closeSts2First": "请先关闭 STS2",

@@ -520,7 +520,11 @@
     "settings": "Settings"
   },
   "topbar": {
-    "help": "Help"
+    "help": "Help",
+    "gameDetected": "STS2 detected",
+    "gameNotFound": "STS2 not found",
+    "gameDetectedTitle": "Slay the Spire 2 detected at {{path}} — click to open Settings",
+    "gameNotFoundTitle": "Slay the Spire 2 wasn't found — click to set the game folder in Settings"
   },
   "app": {
     "closeSts2First": "Close STS2 first",

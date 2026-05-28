@@ -227,6 +227,16 @@ export async function graphqlPost({ apiKey, query, variables }) {
 
   const json = await res.json();
   if (json.errors && json.errors.length > 0) {
+    // NOT_FOUND on commentThread means the thread ID is misconfigured — treat as
+    // a soft error (exit 0) so the cron doesn't go red while the ID is being fixed.
+    const notFound = json.errors.some(
+      (e) => e?.extensions?.code === 'NOT_FOUND' || /not found/i.test(e?.message || '')
+    );
+    if (notFound) {
+      const err = new Error(json.errors[0]?.message || 'NOT_FOUND');
+      err.code = 'THREAD_NOT_FOUND';
+      throw err;
+    }
     console.error(`nexus-triage: GraphQL errors: ${JSON.stringify(json.errors)}`);
     process.exit(1);
   }
@@ -472,6 +482,16 @@ export async function runFromCli(argv = process.argv.slice(2)) {
 const isMainModule = fileURLToPath(import.meta.url) === process.argv[1];
 if (isMainModule) {
   runFromCli().catch((err) => {
+    if (err.code === 'THREAD_NOT_FOUND') {
+      console.error(
+        `nexus-triage: commentThread not found — NEXUSMODS_POSTS_THREAD_ID may be wrong.\n` +
+        `  Current value: ${POSTS_THREAD_ID}\n` +
+        `  Check the Nexus mod page source for the correct thread_id, then update the repo var:\n` +
+        `    gh variable set NEXUSMODS_POSTS_THREAD_ID --body <value> --repo MohamedSerhan/sts2-mod-manager\n` +
+        `  Details: ${err.message}`
+      );
+      process.exit(0); // soft failure — cron stays green while ID is investigated
+    }
     console.error(`nexus-triage: fatal: ${err.stack || err.message}`);
     process.exit(1);
   });

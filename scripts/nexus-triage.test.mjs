@@ -398,10 +398,10 @@ test('graphqlPost: exits 1 on HTTP error status', async (t) => {
   }
 });
 
-test('graphqlPost: exits 1 when response contains errors array', async (t) => {
+test('graphqlPost: exits 1 when response contains non-NOT_FOUND errors array', async (t) => {
   setHttpFetch(async () => ({
     ok: true,
-    json: async () => ({ errors: [{ message: 'Unauthorized' }] }),
+    json: async () => ({ errors: [{ message: 'Unauthorized', extensions: { code: 'UNAUTHORIZED' } }] }),
   }));
   const exitCalls = [];
   t.mock.method(process, 'exit', (code) => { exitCalls.push(code); throw new Error('exit'); });
@@ -412,6 +412,24 @@ test('graphqlPost: exits 1 when response contains errors array', async (t) => {
       /exit/
     );
     assert.deepEqual(exitCalls, [1]);
+  } finally {
+    setHttpFetch(null);
+  }
+});
+
+test('graphqlPost: throws THREAD_NOT_FOUND error on NOT_FOUND extension code', async () => {
+  setHttpFetch(async () => ({
+    ok: true,
+    json: async () => ({ errors: [{ message: 'Comments::Thread with id 99 not found', extensions: { code: 'NOT_FOUND' } }] }),
+  }));
+  try {
+    await assert.rejects(
+      () => graphqlPost({ apiKey: 'k', query: 'q', variables: {} }),
+      (err) => {
+        assert.equal(err.code, 'THREAD_NOT_FOUND');
+        return true;
+      }
+    );
   } finally {
     setHttpFetch(null);
   }

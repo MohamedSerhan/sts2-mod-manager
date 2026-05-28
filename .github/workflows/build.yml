@@ -449,3 +449,108 @@ jobs:
           file_category:                main
           archive_existing_file:        true
           display_name:                 STS2 Mod Manager ${{ steps.meta.outputs.version }} (Windows Portable)
+
+  # Per-PR dev builds: gather the platform artifacts into a rolling dev-pr<N>
+  # prerelease and upsert a sticky PR comment with download links. Runs whenever
+  # the build job produced something — even if one platform leg failed (so a
+  # flaky leg doesn't sink the whole dev delivery); skipped only when the build
+  # itself was skipped or cancelled.
+  publish-dev:
+    if: >-
+      ${{ always()
+          && needs.build.result != 'skipped'
+          && needs.build.result != 'cancelled'
+          && github.event_name == 'pull_request'
+          && contains(github.event.pull_request.labels.*.name, 'dev-build') }}
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: dev-artifacts
+
+      - name: Publish rolling dev prerelease + sticky PR comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          SHORT=$(printf '%s' "$HEAD_SHA" | cut -c1-7)
+          TAG="dev-pr${PR}"
+
+          # Flatten downloaded artifacts into one dir of release-able files.
+          mkdir -p dist
+          find dev-artifacts -type f \
+            \( -name '*.exe' -o -name '*.msi' -o -name '*.dmg' -o -name '*.deb' \
+               -o -name '*.rpm' -o -name '*.AppImage' -o -name '*_portable.zip' \) \
+            -exec cp -f {} dist/ \;
+          echo "Collected assets:"; ls -1 dist || true
+
+          shopt -s nullglob
+          files=(dist/*)
+          if [ ${#files[@]} -gt 0 ]; then
+            # Recreate the rolling prerelease so its assets are exactly this run's.
+            if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+              gh release delete "$TAG" --repo "$REPO" --yes
+            fi
+            # Delete any leftover tag so create starts clean.
+            git push origin ":refs/tags/$TAG" 2>/dev/null || true
+            gh release create "$TAG" "${files[@]}" \
+              --repo "$REPO" \
+              --prerelease \
+              --target "$HEAD_SHA" \
+              --title "Dev build — PR #${PR} (g${SHORT})" \
+              --notes "Automated dev build for PR #${PR}. Prerelease — not for end users."
+          else
+            echo "No artifacts collected this run (a build leg may have failed) — keeping any existing ${TAG} release."
+          fi
+
+          # Build the sticky comment body via the tested renderer, deriving the
+          # asset list from the files we just collected (so it matches this run).
+          node -e '
+            import("./scripts/dev-build-stamp.mjs").then(async (m) => {
+              const fs = await import("node:fs");
+              const repo = process.env.REPO, tag = "dev-pr" + process.env.PR;
+              const names = fs.existsSync("dist") ? fs.readdirSync("dist") : [];
+              const platformOf = (n) => /portable\.zip$/i.test(n) ? "Windows (portable)"
+                : /-setup\.exe$|\.msi$/i.test(n) ? "Windows (installer)"
+                : /\.dmg$/i.test(n) ? "macOS"
+                : /\.deb$/i.test(n) ? "Linux (.deb)"
+                : /\.rpm$/i.test(n) ? "Linux (.rpm)"
+                : /\.AppImage$/i.test(n) ? "Linux (AppImage)" : "Other";
+              const base = `https://github.com/${repo}/releases/download/${tag}`;
+              const assets = names.map(n => ({ platform: platformOf(n), name: n, url: `${base}/${encodeURIComponent(n)}` }))
+                .sort((a, b) => a.platform.localeCompare(b.platform));
+              const conf = JSON.parse(fs.readFileSync("src-tauri/tauri.conf.json", "utf-8"));
+              const version = m.computeDevVersion(conf.version, process.env.PR, process.env.HEAD_SHA.slice(0, 7));
+              const body = m.renderDevComment({ pr: process.env.PR, version, sha: process.env.HEAD_SHA.slice(0, 7), runUrl: process.env.RUN_URL, assets });
+              fs.writeFileSync("dev-comment.md", body);
+            }).catch((e) => { console.error(e); process.exit(1); });
+          '
+
+          # Upsert: find an existing sticky comment by marker, edit or create.
+          MARKER="<!-- dev-build-comment -->"
+          CID=$(gh api "repos/${REPO}/issues/${PR}/comments" --jq \
+            "[.[] | select(.body | contains(\"${MARKER}\"))][0].id // empty")
+          if [ -n "$CID" ]; then
+            gh api -X PATCH "repos/${REPO}/issues/comments/${CID}" -F body=@dev-comment.md >/dev/null
+            echo "Updated sticky comment $CID"
+          else
+            gh pr comment "$PR" --repo "$REPO" --body-file dev-comment.md
+            echo "Created sticky comment"
+          fi

@@ -1582,7 +1582,9 @@ body {
   align-items: center;
 }
 .gf-modrow-meta {
-  padding: 0 14px 8px 14px;
+  /* Description/note sit in the identity column — align flush-left with
+     the title + version line above (no extra indent). */
+  margin-top: 4px;
 }
 .gf-modrow-desc {
   font-size: 12px;

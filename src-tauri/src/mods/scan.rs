@@ -636,7 +636,7 @@ fn mod_quality(info: &ModInfo) -> u32 {
 /// (parse_manifest, dll_only_mod, install_mod_from_zip all set it). The
 /// fallback is defensive — if a future code path forgets, we still get
 /// SOME dedup rather than infinite duplicates.
-pub(super) fn dedup_key(info: &ModInfo) -> String {
+pub(crate) fn dedup_key(info: &ModInfo) -> String {
     info.folder_name
         .clone()
         .unwrap_or_else(|| normalize_name(&info.name))

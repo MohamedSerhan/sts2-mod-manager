@@ -41,14 +41,14 @@ pub use install::{
     snapshot_after_fresh_install, snapshot_mod_configs, PreservedConfig,
 };
 pub use scan::{scan_disabled_mods, scan_mods, strip_utf8_bom};
-pub(crate) use scan::merge_active_disabled_mods;
+pub(crate) use scan::{dedup_key, merge_active_disabled_mods};
 pub use state::{
     delete_mod_files_by_info, disable_mod, enable_mod, move_directory, move_mod_by_info,
     path_is_inside, sanitize_path_segment,
 };
 
 // Crate-internal helpers used from within `mods/` itself.
-use scan::{dedup_key, normalize_name, scan_mods_inner, RawManifest};
+use scan::{normalize_name, scan_mods_inner, RawManifest};
 use state::{move_mod_files, safe_mod_relative_path, sanitize_for_filename};
 
 /// Information about an installed mod.

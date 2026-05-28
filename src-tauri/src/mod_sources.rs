@@ -1495,16 +1495,34 @@ struct Candidate {
 pub async fn auto_detect_sources(
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<AutoDetectResult, String> {
-    let (config_path, mods_path, token) = {
+    let (config_path, mods_path, disabled_mods_path, token) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let config_path = s.config_path.clone();
         let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
+        let disabled_mods_path = s.disabled_mods_path.clone();
         let token = s.github_token.clone();
-        (config_path, mods_path, token)
+        (config_path, mods_path, disabled_mods_path, token)
     };
 
     let mut db = load_sources(&config_path);
-    let installed = crate::mods::scan_mods(&mods_path);
+
+    // Scan BOTH the active game folder and the stored (disabled) folder so
+    // auto-detect covers every installed mod — not just the ones currently
+    // active in the game. Mirrors get_installed_mods' union + folder-dedup
+    // so a half-toggled mod present in both folders isn't scanned twice.
+    // Without this, auto-detect silently skipped stored mods and reported
+    // counts like "12 installed" when the library actually had 22.
+    let active = crate::mods::scan_mods(&mods_path);
+    let active_keys: std::collections::HashSet<String> =
+        active.iter().map(crate::mods::dedup_key).collect();
+    let mut installed = active;
+    if let Some(ref dp) = disabled_mods_path {
+        for stored in crate::mods::scan_disabled_mods(dp) {
+            if !active_keys.contains(&crate::mods::dedup_key(&stored)) {
+                installed.push(stored);
+            }
+        }
+    }
 
     let mut matched = Vec::new();
     let mut unmatched = Vec::new();

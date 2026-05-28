@@ -480,7 +480,7 @@
     "cached": "Showing cached results — couldn't reach GitHub.",
     "rateLimited": "GitHub is rate-limiting us — try again in a minute, or connect a GitHub token in Settings for a higher limit.",
     "noPacks": "No public modpacks found yet — be the first to share one!",
-    "goProfiles": "Go to Profiles",
+    "goProfiles": "Go to Modpacks",
     "cta": "Want yours here too? Publish a new pack — or re-share an existing one — from Profiles and pick <1>Public</1> visibility.",
     "modCount_one": "{{count}} mod",
     "modCount_other": "{{count}} mods",
@@ -941,18 +941,18 @@
     "faqHeading": "FAQ",
     "playerQuickStart": {
       "title": "Playing modpacks",
-      "step1": "Choose a modpack by pasting a friend's code on Home, browsing public modpacks, or creating your own.",
-      "step2": "When you've added a modpack, switch to it from Home or the topbar so it becomes your active modpack.",
+      "step1": "Choose a modpack by pasting a friend's code on the Modpacks page, browsing public modpacks on the Modpacks → Browse tab, or creating your own.",
+      "step2": "Once it's added, switch to it from the topbar's active-modpack chip — or open it on the Modpacks page and click Switch to — so it becomes your active modpack.",
       "step3": "Click Launch to start STS2 with the mods from your active modpack loaded.",
       "step4": "Switch modpacks anytime — the app updates your game folder so you don't have to manage files manually."
     },
     "creatorQuickStart": {
       "title": "Making modpacks",
-      "step1": "Open Create Modpack and choose how to start: from your active mods, empty, or by cloning an existing modpack.",
-      "step2": "Pick which installed mods belong to this modpack. You can change membership later.",
+      "step1": "Open the Modpacks tab and click Create modpack, then choose how to start: from your active mods, empty, or by cloning an existing modpack.",
+      "step2": "Pick which installed mods belong to this modpack. You can change membership later from the All Mods list or the modpack's own list.",
       "step3": "Check the health summary so you know how many mods have linked sources and which ones have available updates.",
-      "step4": "When you're ready to share, click Share. The app walks you through a one-time GitHub setup so friends can install your modpack from a short code.",
-      "step5": "Maintain your modpack later by running Mod Health, accepting updates, or freezing mods at a known good version."
+      "step4": "When you're ready to share, open the modpack and click Share. The app walks you through a one-time GitHub setup so friends can install your modpack from a short code.",
+      "step5": "Maintain your modpack later by reviewing the update summary on the modpack, accepting updates, or freezing mods at a known good version."
     },
     "faq": {
       "modpackWhat": {

@@ -264,7 +264,7 @@ describe('<App>', () => {
     await user.click(getNavButton('Modpacks'));
     await user.click(screen.getByRole('button', { name: /^Browse$/i }));
 
-    await user.click(await screen.findByRole('button', { name: /Go to Profiles/i }));
+    await user.click(await screen.findByRole('button', { name: /Go to Modpacks/i }));
 
     await waitFor(() => {
       expect(screen.getByText(/All the modpacks you follow/i)).toBeInTheDocument();

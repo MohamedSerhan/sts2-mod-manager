@@ -160,7 +160,7 @@ describe('<BrowseModpacksView>', () => {
 
     const { unmount } = render(<Wrap onGoToProfiles={onGoToProfiles} />);
 
-    fireEvent.click(await screen.findByRole('button', { name: /Go to Profiles/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Go to Modpacks/i }));
     expect(onGoToProfiles).toHaveBeenCalledTimes(1);
     unmount();
 
@@ -183,7 +183,7 @@ describe('<BrowseModpacksView>', () => {
 
     expect(await screen.findByText('One Mod Pack')).toBeInTheDocument();
     expect(screen.getByText(/1 mod/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Go to Profiles/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Go to Modpacks/i }));
     expect(onGoToProfiles).toHaveBeenCalledTimes(2);
   });
 

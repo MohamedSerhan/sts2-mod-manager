@@ -57,6 +57,7 @@
     "share": "Share modpack",
     "shared": "Shared",
     "advanced": "Advanced",
+    "advancedActions": "Advanced actions",
     "backToList": "Back to modpacks",
     "openDetailAria": "Open {{name}} modpack",
     "modCount_one": "{{count}} mod",
@@ -77,6 +78,7 @@
     "detail": {
       "inPackHeading": "In this modpack",
       "inPackCount": "In this modpack ({{count}})",
+      "inPackOrderNote": "Listed in load order (top loads first). Use Load order to reorder. The All Mods list isn't ordered.",
       "availableHeading": "Add from your library",
       "availableCount": "Add from your library ({{count}})",
       "search": "Search mods…",

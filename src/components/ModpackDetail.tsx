@@ -48,6 +48,7 @@ import { Badge } from './Badge';
 import { Button } from './Button';
 import { Card } from './Card';
 import { HelpHint } from './HelpHint';
+import { KebabDivider, KebabItem, KebabMenu, KebabSection } from './KebabMenu';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { setProfileModMembership, toggleMod } from '../hooks/useTauri';
@@ -388,6 +389,48 @@ export function ModpackDetail({
                 : t('profiles.card.share')}
             </Button>
           )}
+          {/* Advanced / power-user actions live in a header kebab so
+              they're always reachable at the top instead of buried under
+              a long mod list. Destructive Delete is grouped below a
+              divider with danger styling. */}
+          {(onSnapshot || onDuplicate || onExportJson || (onRepairDrift && hasDrift) || onDelete) && (
+            <KebabMenu title={t('modpack.advancedActions')} size="sm">
+              <KebabSection head={t('modpack.advanced')}>
+                {onSnapshot && (
+                  <KebabItem icon={<Camera size={12} />} onClick={() => onSnapshot(profile.name)}>
+                    {t('profiles.kebab.snapshotFromCurrent')}
+                  </KebabItem>
+                )}
+                {onDuplicate && (
+                  <KebabItem icon={<Files size={12} />} onClick={() => onDuplicate(profile.name)}>
+                    {t('profiles.kebab.duplicate')}
+                  </KebabItem>
+                )}
+                {onExportJson && (
+                  <KebabItem icon={<Copy size={12} />} onClick={() => onExportJson(profile.name)}>
+                    {t('profiles.kebab.exportJson')}
+                  </KebabItem>
+                )}
+                {onRepairDrift && hasDrift && (
+                  <KebabItem icon={<Download size={12} />} onClick={() => onRepairDrift(profile.name)}>
+                    {t('profiles.drift.repair')}
+                  </KebabItem>
+                )}
+              </KebabSection>
+              {onDelete && (
+                <>
+                  <KebabDivider />
+                  <KebabItem
+                    danger
+                    icon={<Trash2 size={12} />}
+                    onClick={() => onDelete(profile.name)}
+                  >
+                    {t('profiles.kebab.deleteProfile')}
+                  </KebabItem>
+                </>
+              )}
+            </KebabMenu>
+          )}
         </div>
       </div>
 
@@ -457,6 +500,12 @@ export function ModpackDetail({
             </Button>
           )}
         </div>
+
+        {profile.mods.length > 1 && (
+          <p className="gf-modpack-detail-section-note">
+            {t('modpack.detail.inPackOrderNote')}
+          </p>
+        )}
 
         {profile.mods.length === 0 ? (
           <p className="gf-modpack-detail-empty">
@@ -562,71 +611,6 @@ export function ModpackDetail({
           {t('modpack.detail.allInPack')}
         </p>
       )}
-
-      {/* ── Advanced: power-user / destructive actions ───────────── */}
-      <section
-        className="gf-modpack-detail-advanced-section"
-        data-testid="modpack-detail-advanced"
-      >
-        <h3 className="gf-modpack-detail-advanced-heading">
-          {t('modpack.advanced')}
-        </h3>
-        <div
-          className="gf-modpack-detail-advanced-panel"
-          data-testid="modpack-detail-advanced-panel"
-        >
-          {onSnapshot && (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => onSnapshot(profile.name)}
-            >
-              <Camera size={14} />
-              {t('profiles.kebab.snapshotFromCurrent')}
-            </Button>
-          )}
-          {onDuplicate && (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => onDuplicate(profile.name)}
-            >
-              <Files size={14} />
-              {t('profiles.kebab.duplicate')}
-            </Button>
-          )}
-          {onExportJson && (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => onExportJson(profile.name)}
-            >
-              <Copy size={14} />
-              {t('profiles.kebab.exportJson')}
-            </Button>
-          )}
-          {onRepairDrift && hasDrift && (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => onRepairDrift(profile.name)}
-            >
-              <Download size={14} />
-              {t('profiles.drift.repair')}
-            </Button>
-          )}
-          {onDelete && (
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() => onDelete(profile.name)}
-            >
-              <Trash2 size={14} />
-              {t('profiles.kebab.deleteProfile')}
-            </Button>
-          )}
-        </div>
-      </section>
     </div>
   );
 }

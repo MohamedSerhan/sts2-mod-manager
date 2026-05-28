@@ -436,6 +436,12 @@ body {
   display: flex;
   align-items: center;
 }
+.gf-modpack-detail-section-note {
+  font-size: 12px;
+  color: var(--ink-dim);
+  margin: 2px 0 10px;
+  line-height: 1.45;
+}
 .gf-modpack-detail-rows {
   display: flex;
   flex-direction: column;
@@ -839,8 +845,8 @@ body {
   font-size: 12px;
 }
 .gf-load-order-modal {
-  width: min(560px, calc(100vw - 28px));
-  max-height: min(760px, calc(100vh - 32px));
+  width: min(760px, calc(100vw - 28px));
+  max-height: min(860px, calc(100vh - 24px));
   overflow: hidden;
 }
 .gf-load-order-modal .gf-modal-body {
@@ -861,7 +867,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: min(56vh, 520px);
+  max-height: min(68vh, 680px);
   overflow-y: auto;
   padding: 8px;
   border: 1px solid var(--indigo-line);
@@ -883,14 +889,22 @@ body {
   border-color: var(--gf-line);
   background: var(--indigo-elev);
 }
+.gf-load-order-row.dragging {
+  opacity: 0.55;
+  border-color: var(--gf-line);
+}
 .gf-load-order-drag {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   color: var(--ink-dim);
   cursor: grab;
+  /* Pointer-drag handle: block touch-scroll + text selection so the
+     drag gesture is clean. */
+  touch-action: none;
+  user-select: none;
 }
-.gf-load-order-row:active .gf-load-order-drag { cursor: grabbing; }
+.gf-load-order-drag:active { cursor: grabbing; }
 .gf-load-order-rank {
   width: 28px;
   height: 28px;

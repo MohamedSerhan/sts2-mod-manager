@@ -152,6 +152,11 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
   const [loadOrderSaving, setLoadOrderSaving] = useState(false);
   const [draggedLoadOrderIndex, setDraggedLoadOrderIndex] = useState<number | null>(null);
   const [dragOverLoadOrderIndex, setDragOverLoadOrderIndex] = useState<number | null>(null);
+  // Ref to the scrollable load-order list so pointer-drag can hit-test
+  // rows by clientY. HTML5 drag-and-drop is unusable here because Tauri's
+  // OS-level file drop (enabled for drag-to-install) swallows the
+  // webview's drag events — so reordering uses pointer events instead.
+  const loadOrderListRef = useRef<HTMLDivElement>(null);
   const { t, i18n } = useTranslation();
   const { refreshAll, setActiveProfile, activeProfile, subUpdates, refreshSubUpdates } = useApp();
   const toastCtx = useToast();
@@ -287,16 +292,20 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     }
   }, [profiles, selectedModpack]);
 
-  async function loadProfiles() {
+  async function loadProfiles(opts?: { silent?: boolean }) {
     try {
-      setLoading(true);
+      // A silent reload skips the full-screen loading flag so an open
+      // ModpackDetail isn't unmounted/remounted (which resets its scroll
+      // position) on a background refresh after an add/remove. The
+      // initial mount + explicit retries still show the skeleton.
+      if (!opts?.silent) setLoading(true);
       setError(null);
       const list = await listProfiles();
       setProfiles(list);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
     }
   }
 
@@ -337,6 +346,21 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       next.splice(toIndex, 0, moved);
       return next;
     });
+  }
+
+  /** Which row index the pointer is currently over, by hit-testing the
+   *  rendered rows against clientY. Used by the pointer-drag reorder. */
+  function loadOrderDropIndex(clientY: number): number | null {
+    const list = loadOrderListRef.current;
+    if (!list) return null;
+    const rows = Array.from(
+      list.querySelectorAll<HTMLElement>('.gf-load-order-row'),
+    );
+    for (let i = 0; i < rows.length; i++) {
+      const rect = rows[i].getBoundingClientRect();
+      if (clientY < rect.top + rect.height / 2) return i;
+    }
+    return rows.length > 0 ? rows.length - 1 : null;
   }
 
   function loadOrderToastKey(status: LoadOrderSettingsStatus): string {
@@ -398,7 +422,9 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
    *  membership / storage mutation. We re-pull the profile list so
    *  the parent's drift map + share map see the updated manifests. */
   async function handleLibraryChanged() {
-    await loadProfiles();
+    // Silent so the open ModpackDetail keeps its scroll position while
+    // the manifest re-pulls after an add/remove.
+    await loadProfiles({ silent: true });
     refreshShareAndDrift();
   }
 
@@ -677,42 +703,47 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
             {loadOrderDraft.length === 0 ? (
               <div className="gf-empty-sub">{t('profiles.loadOrder.empty')}</div>
             ) : (
-              <div className="gf-load-order-list" role="list">
+              <div className="gf-load-order-list" role="list" ref={loadOrderListRef}>
                 {loadOrderDraft.map((mod, index) => (
                   <div
-                    className={`gf-load-order-row ${dragOverLoadOrderIndex === index ? 'drag-over' : ''}`}
+                    className={`gf-load-order-row${dragOverLoadOrderIndex === index ? ' drag-over' : ''}${draggedLoadOrderIndex === index ? ' dragging' : ''}`}
                     key={`${mod.folder_name ?? mod.mod_id ?? mod.name}-${index}`}
                     role="listitem"
-                    draggable={!loadOrderSaving}
                     aria-label={t('profiles.loadOrder.rowLabel', { name: mod.name, position: index + 1 })}
-                    onDragStart={(event) => {
-                      if (loadOrderSaving) return;
-                      setDraggedLoadOrderIndex(index);
-                      event.dataTransfer.effectAllowed = 'move';
-                      event.dataTransfer.setData('text/plain', String(index));
-                    }}
-                    onDragOver={(event) => {
-                      if (loadOrderSaving) return;
-                      event.preventDefault();
-                      event.dataTransfer.dropEffect = 'move';
-                      setDragOverLoadOrderIndex(index);
-                    }}
-                    onDragLeave={() => {
-                      if (dragOverLoadOrderIndex === index) setDragOverLoadOrderIndex(null);
-                    }}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      const from = draggedLoadOrderIndex ?? Number.parseInt(event.dataTransfer.getData('text/plain'), 10);
-                      if (Number.isFinite(from)) moveLoadOrderItemTo(from, index);
-                      setDraggedLoadOrderIndex(null);
-                      setDragOverLoadOrderIndex(null);
-                    }}
-                    onDragEnd={() => {
-                      setDraggedLoadOrderIndex(null);
-                      setDragOverLoadOrderIndex(null);
-                    }}
                   >
-                    <div className="gf-load-order-drag" title={t('profiles.loadOrder.dragHandle')}>
+                    {/* Pointer-drag handle. Uses pointer events + capture
+                        (not HTML5 DnD, which Tauri's native file-drop
+                        breaks) and hit-tests rows by clientY to reorder. */}
+                    <div
+                      className="gf-load-order-drag"
+                      title={t('profiles.loadOrder.dragHandle')}
+                      aria-label={t('profiles.loadOrder.dragHandle')}
+                      onPointerDown={(event) => {
+                        if (loadOrderSaving) return;
+                        event.preventDefault();
+                        setDraggedLoadOrderIndex(index);
+                        setDragOverLoadOrderIndex(index);
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                      }}
+                      onPointerMove={(event) => {
+                        if (draggedLoadOrderIndex === null) return;
+                        const to = loadOrderDropIndex(event.clientY);
+                        if (to !== null) setDragOverLoadOrderIndex(to);
+                      }}
+                      onPointerUp={(event) => {
+                        if (draggedLoadOrderIndex !== null) {
+                          const to = dragOverLoadOrderIndex ?? draggedLoadOrderIndex;
+                          moveLoadOrderItemTo(draggedLoadOrderIndex, to);
+                        }
+                        setDraggedLoadOrderIndex(null);
+                        setDragOverLoadOrderIndex(null);
+                        try {
+                          event.currentTarget.releasePointerCapture(event.pointerId);
+                        } catch {
+                          /* capture may already be gone — harmless */
+                        }
+                      }}
+                    >
                       <GripVertical size={14} />
                     </div>
                     <div className="gf-load-order-rank">{index + 1}</div>
@@ -1089,7 +1120,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
             variant="secondary"
             size="sm"
             className="mt-3"
-            onClick={loadProfiles}
+            onClick={() => loadProfiles()}
           >
             {t('common.retry')}
           </Button>

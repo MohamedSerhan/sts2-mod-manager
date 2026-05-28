@@ -56,6 +56,12 @@ async function openDetailFor(user: ReturnType<typeof userEvent.setup>, name: str
   });
 }
 
+async function openAdvancedMenu(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  // Advanced actions live behind the detail header's ⋯ kebab. Each
+  // selection closes the menu, so call this before every action.
+  await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
+}
+
 const baseProfile = (overrides: Partial<Profile> = {}): Profile =>
   ({
     name: 'My Pack',
@@ -531,14 +537,15 @@ describe('<ProfilesView>', () => {
   // kebabs no longer exist. Post-rework the Advanced panel is an
   // always-visible divided section (no disclosure), so the action set is
   // reachable without a toggle.
-  it('detail Advanced shows Snapshot/Export/Delete options', async () => {
+  it('detail Advanced kebab shows Snapshot/Export/Delete options', async () => {
     seedProfiles([baseProfile({ name: 'Pack' })]);
     const user = userEvent.setup();
     render(<Wrap />);
     await openDetailFor(user, 'Pack');
-    expect(screen.getByRole('button', { name: /Snapshot from current/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Export JSON/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Delete modpack/i })).toBeInTheDocument();
+    await openAdvancedMenu(user);
+    expect(screen.getByRole('menuitem', { name: /Snapshot from current/i })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /Export JSON/i })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /Delete modpack/i })).toBeInTheDocument();
   });
 
   it('renders all modpack metadata on the card (mod count + author)', async () => {
@@ -946,14 +953,14 @@ describe('<ProfilesView>', () => {
   // present as soon as the detail view opens. Each action is tested in
   // detail in ModpackDetail.test.tsx; here we only assert the section
   // renders with its heading + a representative action.
-  it('detail Advanced section renders its actions inline', async () => {
+  it('detail Advanced actions live in the header kebab', async () => {
     seedProfiles([baseProfile({ name: 'X' })]);
     const user = userEvent.setup();
     render(<Wrap />);
     await openDetailFor(user, 'X');
-    const advanced = screen.getByTestId('modpack-detail-advanced-panel');
-    expect(within(advanced).getByRole('button', { name: /Delete modpack/i })).toBeInTheDocument();
-    expect(within(advanced).getByRole('button', { name: /Duplicate/i })).toBeInTheDocument();
+    await openAdvancedMenu(user);
+    expect(screen.getByRole('menuitem', { name: /Delete modpack/i })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /Duplicate/i })).toBeInTheDocument();
   });
 
 
@@ -1019,7 +1026,12 @@ describe('<ProfilesView>', () => {
     });
   });
 
-  it('profile load-order rows can be reordered with drag and drop', async () => {
+  it('profile load-order rows can be reordered (arrow controls) and saved', async () => {
+    // Drag reordering uses pointer events + clientY hit-testing in the
+    // real app (HTML5 DnD is swallowed by Tauri's native file drop), which
+    // jsdom can't exercise (getBoundingClientRect returns zeros). The
+    // arrow controls drive the same moveLoadOrderItem reorder + save path,
+    // so we assert reorder→save through them here.
     const user = userEvent.setup();
     seedProfiles([
       baseProfile({
@@ -1046,22 +1058,9 @@ describe('<ProfilesView>', () => {
     await openDetailFor(user, 'Stable');
     await user.click(screen.getByRole('button', { name: /Load order/i }));
     const dialog = await screen.findByRole('dialog', { name: /Load order for Stable/i });
-    const baseRow = within(dialog).getByRole('listitem', { name: /BaseLib.*position 1/i });
-    const cardRow = within(dialog).getByRole('listitem', { name: /Card Art Editor.*position 2/i });
-    const dataTransfer = {
-      data: new Map<string, string>(),
-      setData(type: string, value: string) { this.data.set(type, value); },
-      getData(type: string) { return this.data.get(type) ?? ''; },
-      effectAllowed: '',
-      dropEffect: '',
-    };
-
-    fireEvent.dragStart(cardRow, { dataTransfer });
-    fireEvent.dragOver(baseRow, { dataTransfer });
-    fireEvent.dragLeave(baseRow, { dataTransfer });
-    fireEvent.dragOver(baseRow, { dataTransfer });
-    fireEvent.dragEnd(cardRow, { dataTransfer });
-    fireEvent.drop(baseRow, { dataTransfer });
+    // Move BaseLib (position 1) down so the order becomes
+    // [Card Art Editor, BaseLib] — the reversed order the handler asserts.
+    await user.click(within(dialog).getByRole('button', { name: /Move BaseLib down/i }));
     await user.click(within(dialog).getByRole('button', { name: /Save order/i }));
 
     await waitFor(() => {
@@ -1335,7 +1334,8 @@ describe('<ProfilesView>', () => {
       const user = userEvent.setup();
       render(<Wrap />);
       await openDetailFor(user, 'Original');
-      await user.click(screen.getByRole('button', { name: /Duplicate/i }));
+      await openAdvancedMenu(user);
+      await user.click(screen.getByRole('menuitem', { name: /Duplicate/i }));
       await waitFor(() => {
         expect(getInvokeCalls().some((c) => c.cmd === 'duplicate_profile')).toBe(true);
       });
@@ -1355,7 +1355,8 @@ describe('<ProfilesView>', () => {
       const user = userEvent.setup();
       render(<Wrap />);
       await openDetailFor(user, 'Original');
-      await user.click(screen.getByRole('button', { name: /Duplicate/i }));
+      await openAdvancedMenu(user);
+      await user.click(screen.getByRole('menuitem', { name: /Duplicate/i }));
       expect(getInvokeCalls().some((c) => c.cmd === 'duplicate_profile')).toBe(false);
     } finally {
       window.prompt = origPrompt;
@@ -1371,7 +1372,8 @@ describe('<ProfilesView>', () => {
       const user = userEvent.setup();
       render(<Wrap />);
       await openDetailFor(user, 'Original');
-      await user.click(screen.getByRole('button', { name: /Duplicate/i }));
+      await openAdvancedMenu(user);
+      await user.click(screen.getByRole('menuitem', { name: /Duplicate/i }));
       await waitFor(() => {
         expect(screen.getByText(/Failed to duplicate.*exists/)).toBeInTheDocument();
       });
@@ -1386,7 +1388,8 @@ describe('<ProfilesView>', () => {
     const user = setupUserWithClipboard();
     render(<Wrap />);
     await openDetailFor(user, 'Exportable');
-    await user.click(screen.getByRole('button', { name: /Export JSON/i }));
+    await openAdvancedMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Export JSON/i }));
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'export_profile_cmd')).toBe(true);
     });
@@ -1402,7 +1405,8 @@ describe('<ProfilesView>', () => {
     const user = setupUserWithClipboard();
     render(<Wrap />);
     await openDetailFor(user, 'X');
-    await user.click(screen.getByRole('button', { name: /Export JSON/i }));
+    await openAdvancedMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Export JSON/i }));
     await waitFor(() => {
       expect(screen.getByText(/Failed to export.*locked/)).toBeInTheDocument();
     });
@@ -1417,7 +1421,8 @@ describe('<ProfilesView>', () => {
       const user = userEvent.setup();
       render(<Wrap />);
       await openDetailFor(user, 'A');
-      await user.click(screen.getByRole('button', { name: /Snapshot from current/i }));
+      await openAdvancedMenu(user);
+      await user.click(screen.getByRole('menuitem', { name: /Snapshot from current/i }));
       await waitFor(() => {
         expect(getInvokeCalls().some((c) => c.cmd === 'snapshot_profile')).toBe(true);
       });
@@ -1432,7 +1437,8 @@ describe('<ProfilesView>', () => {
     const user = setupUserWithClipboard();
     render(<Wrap />);
     await openDetailFor(user, 'Doomed');
-    await user.click(screen.getByRole('button', { name: /Delete modpack/i }));
+    await openAdvancedMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Delete modpack/i }));
     await waitFor(() => {
       expect(screen.getByText(/Delete modpack "Doomed"/)).toBeInTheDocument();
     });
@@ -1453,7 +1459,8 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await openDetailFor(user, 'SafePack');
-    await user.click(screen.getByRole('button', { name: /Delete modpack/i }));
+    await openAdvancedMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Delete modpack/i }));
     const modal = await confirmModal();
     await user.click(modal.getByRole('button', { name: 'Cancel' }));
     expect(getInvokeCalls().some((c) => c.cmd === 'delete_profile_cmd')).toBe(false);
@@ -1465,7 +1472,8 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await openDetailFor(user, 'Stubborn');
-    await user.click(screen.getByRole('button', { name: /Delete modpack/i }));
+    await openAdvancedMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Delete modpack/i }));
     const modal = await confirmModal();
     await user.click(modal.getByRole('button', { name: /Delete modpack/i }));
     await waitFor(() => {
@@ -2223,14 +2231,11 @@ describe('<ProfilesView> orphan-modpack guard', () => {
     render(<Wrap />);
     // Open Alpha detail.
     await openDetailFor(user, 'Alpha');
-    // Inside the detail view, expand Advanced and click Delete. The
-    // detail's own onDelete handler also calls setSelectedModpack(null)
-    // when it sees the deleted name matches the open one — to isolate
-    // the guard effect, we just rely on this happy path which fires
-    // the same setSelectedModpack and proves the bounce works.
-    // The Advanced action button label is "Delete modpack..." (with the
-    // trailing ellipsis denoting a confirmation step).
-    await user.click(screen.getByRole('button', { name: /Delete modpack\.\.\./i }));
+    // Inside the detail view, open the Advanced kebab and click Delete.
+    // The detail's onDelete handler also calls setSelectedModpack(null)
+    // when the deleted name matches the open one, which fires the bounce.
+    await openAdvancedMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Delete modpack/i }));
     // Confirm the destructive prompt — its confirm button is just
     // "Delete modpack" (no ellipsis).
     const foot = await waitFor(() => {

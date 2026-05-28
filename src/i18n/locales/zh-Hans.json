@@ -57,6 +57,7 @@
     "share": "分享模组包",
     "shared": "已分享",
     "advanced": "高级",
+    "advancedActions": "高级操作",
     "backToList": "返回模组包列表",
     "openDetailAria": "打开模组包 {{name}}",
     "modCount_one": "{{count}} 个模组",
@@ -77,6 +78,7 @@
     "detail": {
       "inPackHeading": "此模组包中的模组",
       "inPackCount": "此模组包中的模组（{{count}}）",
+      "inPackOrderNote": "按加载顺序排列（最上面最先加载）。使用「加载顺序」重新排序。「全部模组」列表不排序。",
       "availableHeading": "从模组库添加",
       "availableCount": "从模组库添加（{{count}}）",
       "search": "搜索模组…",

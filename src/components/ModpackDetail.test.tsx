@@ -357,8 +357,8 @@ describe('<ModpackDetail>', () => {
     expect(onOpenLoadOrder).not.toHaveBeenCalled();
   });
 
-  // ── Advanced section ──────────────────────────────────────────────
-  it('Advanced section renders its actions inline (no disclosure) and fires handlers', async () => {
+  // ── Advanced actions (header kebab) ───────────────────────────────
+  it('Advanced actions live in the header kebab and fire their handlers', async () => {
     const onDelete = vi.fn();
     const onDuplicate = vi.fn();
     const onExportJson = vi.fn();
@@ -374,21 +374,29 @@ describe('<ModpackDetail>', () => {
       />,
     );
     await screen.findByRole('heading', { level: 2, name: 'Sample' });
-    const advanced = screen.getByTestId('modpack-detail-advanced-panel');
-    expect(advanced).toBeInTheDocument();
-    expect(within(advanced).getByRole('button', { name: /Delete modpack/i })).toBeInTheDocument();
+    // The bottom advanced panel is gone — actions moved to a header kebab.
+    expect(screen.queryByTestId('modpack-detail-advanced-panel')).toBeNull();
 
-    await user.click(within(advanced).getByRole('button', { name: /Duplicate/i }));
+    // Each selection closes the kebab, so reopen between clicks.
+    await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
+    expect(screen.getByRole('menuitem', { name: /Delete modpack/i })).toBeInTheDocument();
+    await user.click(screen.getByRole('menuitem', { name: /Duplicate/i }));
     expect(onDuplicate).toHaveBeenCalledWith('Sample');
-    await user.click(within(advanced).getByRole('button', { name: /Export JSON/i }));
+
+    await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /Export JSON/i }));
     expect(onExportJson).toHaveBeenCalledWith('Sample');
-    await user.click(within(advanced).getByRole('button', { name: /Snapshot/i }));
+
+    await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /Snapshot/i }));
     expect(onSnapshot).toHaveBeenCalledWith('Sample');
-    await user.click(within(advanced).getByRole('button', { name: /Delete modpack/i }));
+
+    await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /Delete modpack/i }));
     expect(onDelete).toHaveBeenCalledWith('Sample');
   });
 
-  it('Repair drift button shows in Advanced only when drift.has_drift is true and fires its handler', async () => {
+  it('Repair drift item shows in the kebab only when drift.has_drift is true and fires its handler', async () => {
     const onRepairDrift = vi.fn();
     const drift: ProfileDrift = {
       added: ['Orphan'],
@@ -400,16 +408,19 @@ describe('<ModpackDetail>', () => {
     const user = userEvent.setup();
     render(<Wrap {...baseProps()} drift={drift} onRepairDrift={onRepairDrift} />);
     await screen.findByRole('heading', { level: 2, name: 'Sample' });
-    const advanced = screen.getByTestId('modpack-detail-advanced-panel');
-    await user.click(within(advanced).getByRole('button', { name: /Repair/i }));
+    await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /Repair/i }));
     expect(onRepairDrift).toHaveBeenCalledWith('Sample');
   });
 
-  it('Repair button is omitted when no drift is reported', async () => {
-    render(<Wrap {...baseProps()} onRepairDrift={vi.fn()} />);
+  it('Repair item is omitted from the kebab when no drift is reported', async () => {
+    const user = userEvent.setup();
+    // onDelete keeps the kebab present so we can assert Repair's absence
+    // (a kebab with zero items wouldn't render at all).
+    render(<Wrap {...baseProps()} onDelete={vi.fn()} onRepairDrift={vi.fn()} />);
     await screen.findByRole('heading', { level: 2, name: 'Sample' });
-    const advanced = screen.getByTestId('modpack-detail-advanced-panel');
-    expect(within(advanced).queryByRole('button', { name: /Repair/i })).toBeNull();
+    await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
+    expect(screen.queryByRole('menuitem', { name: /Repair/i })).toBeNull();
   });
 
   // ── Search ────────────────────────────────────────────────────────

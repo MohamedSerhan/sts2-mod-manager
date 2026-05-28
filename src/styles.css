@@ -986,10 +986,12 @@ body {
   white-space: nowrap;
 }
 @media (max-width: 760px) {
-  .gf-profile-library-row { grid-template-columns: 1fr; }
   .gf-profile-library-launch { align-items: flex-start; }
-  .gf-profile-library-main { align-items: flex-start; flex-direction: column; }
-  .gf-profile-memberships { justify-content: flex-start; }
+  /* Stack the row (status / identity / actions) so nothing is squeezed
+     to one word per line on a narrow window. */
+  .gf-profile-library-main { align-items: stretch; flex-direction: column; gap: 8px; }
+  .gf-row-status { flex-direction: row; width: auto; gap: 8px; }
+  .gf-profile-library-row-actions { flex-wrap: wrap; }
   .gf-profile-library-toolbar { align-items: stretch; flex-direction: column; }
   .gf-profile-library-toolbar-actions { align-items: flex-start; flex-wrap: wrap; justify-content: flex-start; }
   .gf-profile-library-sort { align-self: flex-start; }
@@ -999,6 +1001,10 @@ body {
 /* ── Top bar ─────────────────────────────────────────────────────── */
 .gf-top {
   display: flex; align-items: center; justify-content: space-between;
+  /* Wrap the launch/status cluster below the modpack chip rather than
+     overflowing on a narrow window. */
+  flex-wrap: wrap;
+  gap: 10px;
   padding: 11px 22px;
   background: var(--indigo-top);
   border-bottom: 1px solid var(--indigo-line);
@@ -1230,12 +1236,18 @@ body {
 }
 .gf-page-head {
   display: flex; justify-content: space-between; align-items: flex-end;
+  /* Wrap so a wide action cluster drops below the title instead of
+     squeezing the heading column down to one word per line. */
+  flex-wrap: wrap;
   margin-bottom: 18px;
   gap: 18px;
 }
+/* The title/description column keeps a sane minimum and grows to fill —
+   without this it has no flex basis and collapses next to the buttons. */
+.gf-page-head > :first-child { flex: 1 1 300px; min-width: 0; }
 .gf-page-title { font-size: 22px; font-weight: 600; letter-spacing: -0.015em; margin: 0; color: var(--ink); }
 .gf-page-sub { font-size: 13px; color: var(--ink-mute); margin-top: 4px; }
-.gf-page-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.gf-page-actions { display: flex; gap: 8px; flex-wrap: wrap; flex-shrink: 0; }
 
 /* ── Tabs ─────────────────────────────────────────────────────────── */
 .gf-tabs {

@@ -1,7 +1,7 @@
 @echo off
 REM scripts/run-nexus-triage-local.bat
 REM
-REM Hourly Nexus triage runner for Windows Task Scheduler.
+REM Daily Nexus triage runner for Windows Task Scheduler.
 REM
 REM Why this exists: GitHub Actions runner IPs are Cloudflare-blocked from
 REM Nexus's CommentContainer widget endpoint (empirically 100% in our testing).
@@ -11,7 +11,7 @@ REM
 REM One-time setup:
 REM   1. python -m pip install --user curl_cffi
 REM   2. Open Task Scheduler -> Create Task...
-REM      - Trigger: Daily, repeat every 1 hour for 24 hours (or whatever cadence)
+REM      - Trigger: Daily at 10:00 (or whatever cadence you prefer)
 REM      - Action: Start a program -> this .bat file
 REM      - "Run whether user is logged on or not" if you want it to run when locked
 REM   3. Test once: double-click this .bat from Explorer and check the log

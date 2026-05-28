@@ -170,12 +170,23 @@ approach which was 100% Cloudflare-blocked from CI IP ranges.
 
 1. `python -m pip install --user curl_cffi` (the Python TLS-impersonate shim)
 2. `gh auth status` — make sure you're logged in
-3. **Task Scheduler → Create Task…**:
-   - Name: `Nexus triage`
-   - **Triggers:** Daily, repeat every **1 hour** for a duration of 1 day
+3. **Task Scheduler → Create Task…** (already created as "Nexus Triage" on
+   2026-05-27 — these are the settings if you ever need to recreate it):
+   - Name: `Nexus Triage`
+   - **Triggers:** Daily at 10:00
    - **Actions:** Start a program → `C:\Users\xxsku\repos\sts2-mod-manager\scripts\run-nexus-triage-local.bat`
    - Start in: `C:\Users\xxsku\repos\sts2-mod-manager`
 4. Double-click the .bat once to test. Check `.nexus-triage-runs\<today>.log`.
+
+The per-run cap is 5 issues. With a daily trigger, a backlog drains at 5/day;
+steady-state mod traffic is well under that. Bump `PER_RUN_CAP` in
+`scripts/nexus-triage.mjs` if you want faster catch-up.
+
+> **`@claude` investigation requires the Claude GitHub App.** Filing issues
+> works without it, but the reactive investigation comments need the app
+> installed at <https://github.com/apps/claude> on this repo (one-time, separate
+> from the `CLAUDE_CODE_OAUTH_TOKEN` secret). Until then, `claude.yml` runs fail
+> with "Claude Code is not installed on this repository".
 
 #### What still runs in CI
 

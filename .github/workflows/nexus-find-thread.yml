@@ -10,27 +10,27 @@ jobs:
   find-thread:
     runs-on: ubuntu-latest
     steps:
-      - name: Query mod type and mod 856 for thread ID hints
+      - name: Explore comment/searchComments/commentThread query args
         env:
           NEXUS_API_KEY: ${{ secrets.NEXUS_API_KEY }}
         run: |
-          echo "=== Mod 856 top-level fields ==="
+          echo "=== Args for 'comment' root query ==="
           curl -sS -X POST https://api.nexusmods.com/v2/graphql \
             -H "Content-Type: application/json" \
             -H "apikey: $NEXUS_API_KEY" \
-            -d '{"query":"query { mod(id: 856, gameId: 8916) { id name } }"}' | jq .
+            -d '{"query":"query { __type(name: \"Query\") { fields { name args { name type { name kind ofType { name } } } } } }"}' | \
+            jq '[.data.__type.fields[] | select(.name == "comment" or .name == "commentThread" or .name == "searchComments") | {name, args: [.args[] | {name, type: (.type.name // .type.ofType.name // .type.kind)}]}]'
 
           echo
-          echo "=== Mod type fields ==="
+          echo "=== Mod 856 via correct modId arg ==="
           curl -sS -X POST https://api.nexusmods.com/v2/graphql \
             -H "Content-Type: application/json" \
             -H "apikey: $NEXUS_API_KEY" \
-            -d '{"query":"query { __type(name: \"Mod\") { fields { name } } }"}' | jq '.data.__type.fields[].name'
+            -d '{"query":"query { mod(modId: 856, gameId: 8916) { modId name uid } }"}' | jq .
 
           echo
-          echo "=== Root Query fields containing thread/comment/post ==="
+          echo "=== searchComments for mod 856 (first 3) ==="
           curl -sS -X POST https://api.nexusmods.com/v2/graphql \
             -H "Content-Type: application/json" \
             -H "apikey: $NEXUS_API_KEY" \
-            -d '{"query":"query { __type(name: \"Query\") { fields { name } } }"}' | \
-            jq '[.data.__type.fields[].name | select(test("(?i)thread|comment|post|forum|review"))]'
+            -d '{"query":"query { searchComments(modId: 856, gameId: 8916, first: 3) { nodes { id body threadId } pageInfo { hasNextPage } totalCount } }"}' | jq .

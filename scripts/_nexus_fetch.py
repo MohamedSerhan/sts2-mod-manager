@@ -23,6 +23,14 @@ import os
 import json
 import argparse
 
+# Windows defaults stdout to cp1252 which can't encode Chinese / emoji / many
+# real Nexus comment characters. Force UTF-8 so the Node side gets a clean
+# string regardless of the OS code page.
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 from curl_cffi import requests
 
 

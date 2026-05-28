@@ -297,12 +297,14 @@ export function buildNexusPostUrl(postsUrl, commentId) {
 // We parse the full HTML string, not line by line, because HTML attributes
 // may span multiple lines. The s (dotAll) flag is used where needed.
 
-// Matches a single comment <li> block.
-// Captured groups: [1] id, [2] everything inside the <li>
-const LI_COMMENT_RE = /<li\s[^>]*\bid="comment-(\d+)"[^>]*\bclass="[^"]*\bcomment\b[^"]*"[^>]*>([\s\S]*?)<\/li>/gi;
-
-// Alternatively id before class order
-const LI_COMMENT_RE2 = /<li\s[^>]*\bclass="[^"]*\bcomment\b[^"]*"[^>]*\bid="comment-(\d+)"[^>]*>([\s\S]*?)<\/li>/gi;
+// Matches the OPENING tag of a comment <li>. We don't try to capture the body
+// via `[\s\S]*?<\/li>` because each comment contains nested <li> elements (for
+// member-status / kudos bullets), and non-greedy matching stops at the first
+// nested </li> — which truncates before the comment-content div we want.
+// Instead, we find each comment's opening position + id, then bound a per-
+// comment slice by the NEXT comment's opening position (or end of HTML).
+const LI_COMMENT_OPEN_ID_FIRST = /<li\s[^>]*\bid="comment-(\d+)"[^>]*\bclass="[^"]*\bcomment\b[^"]*"[^>]*>/gi;
+const LI_COMMENT_OPEN_CLASS_FIRST = /<li\s[^>]*\bclass="[^"]*\bcomment\b[^"]*"[^>]*\bid="comment-(\d+)"[^>]*>/gi;
 
 // Author: <span class="comment-name">...</span>  (first match in the li body)
 const AUTHOR_RE = /<span\s[^>]*\bclass="[^"]*\bcomment-name\b[^"]*"[^>]*>([\s\S]*?)<\/span>/i;
@@ -334,68 +336,54 @@ export function parseCommentsFromHtml(html, { postsUrl = POSTS_URL } = {}) {
     throw err;
   }
 
-  const comments = [];
-
-  // Try both attribute orderings (id-first or class-first)
-  function runRe(re) {
+  // Step 1: find every comment opening tag — record {id, startIndex} for each.
+  // We try both attribute orderings (id-first, class-first) and dedupe by id.
+  const opens = []; // [{ id, startIndex }, ...]
+  const seenIds = new Set();
+  function scan(re) {
     let m;
     while ((m = re.exec(html)) !== null) {
       const id = m[1];
-      const liBody = m[2];
-
-      // Extract author
-      const authorM = AUTHOR_RE.exec(liBody);
-      const author = authorM ? stripTags(authorM[1]).trim() : '<unknown>';
-
-      // Extract body
-      const bodyM = buildBodyRe(id).exec(liBody);
-      if (!bodyM) {
-        // Body div missing — skip this comment per spec (malformed)
-        continue;
-      }
-      const body = stripTags(bodyM[1]).replace(/\s+/g, ' ').trim();
-      if (!body) continue; // skip empty bodies
-
-      // Extract timestamp
-      const timeM = TIME_RE.exec(liBody);
-      const createdAt = timeM ? unixToIso(timeM[1]) : '';
-
-      comments.push({
-        id,
-        author,
-        body,
-        createdAt,
-        parentId: null, // parent tracking not critical for first pass
-        nexus_url: buildNexusPostUrl(postsUrl, id),
-      });
+      if (seenIds.has(id)) continue;
+      seenIds.add(id);
+      opens.push({ id, startIndex: m.index });
     }
   }
+  scan(LI_COMMENT_OPEN_ID_FIRST);
+  scan(LI_COMMENT_OPEN_CLASS_FIRST);
 
-  runRe(LI_COMMENT_RE);
-  // If the class comes before id in the HTML, we need the second pattern.
-  // Collect ids already found to avoid duplicates.
-  const foundIds = new Set(comments.map((c) => c.id));
+  // Order opens by position in the document.
+  opens.sort((a, b) => a.startIndex - b.startIndex);
 
-  let m2;
-  while ((m2 = LI_COMMENT_RE2.exec(html)) !== null) {
-    if (foundIds.has(m2[1])) continue;
-    const id = m2[1];
-    const liBody = m2[2];
+  // Step 2: for each open, slice from its start to the NEXT open's start
+  // (or end of html). That slice is guaranteed to contain this comment's
+  // body div, author span, and timestamp — without straying into the next
+  // comment, and without being truncated by nested <li> tags.
+  const comments = [];
+  for (let i = 0; i < opens.length; i++) {
+    const { id, startIndex } = opens[i];
+    const endIndex = i + 1 < opens.length ? opens[i + 1].startIndex : html.length;
+    const slice = html.slice(startIndex, endIndex);
 
-    const authorM = AUTHOR_RE.exec(liBody);
+    const authorM = AUTHOR_RE.exec(slice);
     const author = authorM ? stripTags(authorM[1]).trim() : '<unknown>';
 
-    const bodyM = buildBodyRe(id).exec(liBody);
-    if (!bodyM) continue;
+    const bodyM = buildBodyRe(id).exec(slice);
+    if (!bodyM) continue; // body div missing — skip per spec (malformed)
     const body = stripTags(bodyM[1]).replace(/\s+/g, ' ').trim();
-    if (!body) continue;
+    if (!body) continue; // skip empty bodies
 
-    const timeM = TIME_RE.exec(liBody);
+    const timeM = TIME_RE.exec(slice);
     const createdAt = timeM ? unixToIso(timeM[1]) : '';
 
-    comments.push({ id, author, body, createdAt, parentId: null,
-      nexus_url: buildNexusPostUrl(postsUrl, id) });
-    foundIds.add(id);
+    comments.push({
+      id,
+      author,
+      body,
+      createdAt,
+      parentId: null, // parent tracking not critical for first pass
+      nexus_url: buildNexusPostUrl(postsUrl, id),
+    });
   }
 
   return comments;

@@ -95,7 +95,8 @@
     {
       "planTask": 6,
       "nativeId": "20",
-      "status": "pending",
+      "status": "completed",
+      "evidence": "PASSED — user-confirmed one-click silent swap+relaunch (PR60->PR61, no installer), DEV badge+icon visible, sts2-mod-manager-dev isolation intact; server-side latest.json manifests published w/ windows entries (.sig-naming risk did not materialize).",
       "subject": "Manual Windows end-to-end verification (USER GATE)",
       "userGate": true,
       "tags": ["user-gate"],

@@ -199,3 +199,94 @@ steady-state mod traffic is well under that. Bump `PER_RUN_CAP` in
 - Create `scripts/nexus-triage.disabled` (any content) — the .bat exits 0 immediately
 - Disable the Task Scheduler entry from the Task Scheduler UI
 - Both leave the state file frozen at the last successful run
+
+---
+
+## Operator runbook — auto-fix bot (sub-project C)
+
+The auto-fix bot lets the maintainer ask Claude to implement a fix for a
+GitHub issue and open a PR — all from the GitHub UI, without touching a
+terminal.  The underlying workflows live in `.github/workflows/claude-autofix.yml`.
+
+### How to use it
+
+**Start a fix** — label any issue `auto-fix` from the issue sidebar.
+Claude opens a branch named EXACTLY `auto-fix/<issue-number>` (no suffix or
+slug), implements a fix, and opens a PR with title/body referencing the issue
+(`Fixes #N`).  A workflow step then applies the `dev-build` + `auto-fix` labels
+via `DEV_BUILD_LABEL_TOKEN` so the dev-build trigger fires deterministically.
+
+The `dev-build` label triggers sub-project D to build a `dev-pr<N>` prerelease
+so you can install and test the fix immediately via Settings → Dev Builds (sub-project E).
+
+**Revise the PR** — post a comment on the PR:
+
+```
+@claude <your feedback here>
+```
+
+Claude updates the branch in-place.  Repeat as many times as needed.
+
+**Review and merge** — PRs are **never auto-merged**.  Inspect the diff,
+check that the `check` job passed (it runs automatically on every push to the
+PR branch), then merge when satisfied.
+
+### One-time setup
+
+Run these once after merging this PR:
+
+**1. Create the `auto-fix` label**
+
+```bash
+gh label create auto-fix \
+  --color 5319e7 \
+  --description "Ask the Claude bot to implement a fix for this issue" \
+  --repo MohamedSerhan/sts2-mod-manager
+```
+
+**2. Enable Dependabot security updates**
+
+Go to **Settings → Code security** and turn on "Dependabot security updates".
+Dependabot PRs are automatically labeled `dev-build` by `.github/workflows/dependabot-label.yml`,
+so they flow through the same dev-build pipeline.
+
+**3. Create and store the `DEV_BUILD_LABEL_TOKEN` secret**
+
+After Claude opens the PR, a dedicated workflow step applies `dev-build` +
+`auto-fix` using this PAT.  The default `GITHUB_TOKEN` cannot trigger downstream
+workflows (GitHub prevents workflow-to-workflow triggers with the default token
+for security reasons), so the PAT is what makes sub-project D's dev build fire.
+
+Minimum PAT scopes — when creating the PAT at
+<https://github.com/settings/tokens?type=beta>:
+- Repository access: `MohamedSerhan/sts2-mod-manager` only
+- Permissions: **Contents: Read** + **Pull requests: Write**
+
+Store it:
+
+```bash
+gh secret set DEV_BUILD_LABEL_TOKEN \
+  --repo MohamedSerhan/sts2-mod-manager
+# paste the PAT when prompted
+```
+
+Without this secret the `dev-build` label is not applied and the dev-build
+pipeline does not trigger.  The PR itself is still opened — only the automatic
+test build is skipped.
+
+**4. Install the Claude GitHub App** (if not already done for `claude.yml`)
+
+<https://github.com/apps/claude> → Install on `MohamedSerhan/sts2-mod-manager`.
+Both the investigate flow (`claude.yml`) and the auto-fix flow
+(`claude-autofix.yml`) require the app.
+
+### Safety posture
+
+| Property | Detail |
+|---|---|
+| **Opt-in only** | The bot acts only when a maintainer explicitly labels an issue `auto-fix` or posts `@claude` on a PR. No automatic triggering on code push or PR open. |
+| **Actor gate** | Both the label-to-fix and the `@claude`-revise jobs check that the actor has `write`, `admin`, or `maintain` permission on the repo before doing any work. External contributors cannot trigger the bot. |
+| **CI gate** | Every push to an auto-fix PR branch runs the `check` job (lint + tests). The PR cannot be merged without it passing. |
+| **No auto-merge** | The bot opens PRs; you merge them. There is no auto-merge, no squash-on-approve, no bypass of branch-protection rules. |
+| **Read-only investigate flow unchanged** | `claude.yml` (the `@claude` mention handler on regular issues and PRs) is separate and read-only. It was not modified by sub-project C. |
+| **Write access scope** | The bot's write access is confined to creating branches and opening/updating PRs via the Claude GitHub App. It cannot modify secrets, settings, or workflows.

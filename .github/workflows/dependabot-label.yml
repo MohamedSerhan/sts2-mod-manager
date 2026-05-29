@@ -1,0 +1,26 @@
+name: Label Dependabot PRs
+
+# Auto-label Dependabot PRs `dev-build` so D builds them and E can switch to them.
+# Uses pull_request_target so it has write access even for the bot's PR.
+on:
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  label:
+    if: ${{ github.actor == 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add dev-build label
+        env:
+          # Prefer a PAT (DEV_BUILD_LABEL_TOKEN) so the label event triggers the build
+          # workflow; the default GITHUB_TOKEN does NOT trigger downstream workflows
+          # (anti-recursion). If the secret is absent, fall back to GITHUB_TOKEN — the
+          # label still applies, but you may need to re-apply it manually to start a build.
+          GH_TOKEN: ${{ secrets.DEV_BUILD_LABEL_TOKEN || secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: gh pr edit "$PR" --repo "$REPO" --add-label dev-build

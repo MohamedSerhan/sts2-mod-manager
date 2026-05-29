@@ -1,6 +1,6 @@
 //! Sub-project E (build switcher). Lists the repo's per-PR dev builds
-//! (`dev-pr<N>` prereleases produced by sub-project D) and installs a chosen
-//! one into the "(Dev)" slot. Discovery reuses `download::fetch_releases`;
+//! (`dev-pr<N>` prereleases produced by sub-project D) and switches to a
+//! chosen one in the "(Dev)" slot. Discovery reuses `download::fetch_releases`;
 //! the GitHub fetch + CSP constraints are why this lives in Rust, not the
 //! frontend. See docs/superpowers/specs/2026-05-28-build-switcher-design.md.
 
@@ -98,6 +98,7 @@ fn parse_dev_builds(releases: Vec<GitHubRelease>) -> Vec<DevBuild> {
             let assets = r
                 .assets
                 .iter()
+                .filter(|a| !a.name.eq_ignore_ascii_case("latest.json"))
                 .map(|a| DevBuildAsset {
                     name: a.name.clone(),
                     url: a.browser_download_url.clone(),
@@ -142,6 +143,8 @@ pub async fn list_dev_builds(state: State<'_, AppState>) -> Result<Vec<DevBuild>
 /// "Install & Restart" uses. A permissive version_comparator lets the user
 /// switch to a LOWER pr (semver ranks pr61 > pr60), which a default
 /// updater would refuse. No installer UI (NSIS runs passively on Windows).
+/// Unguarded by platform: on non-Windows the updater simply fails at
+/// download_and_install (propagated as an Err), so there's no silent misbehavior.
 #[tauri::command]
 pub async fn switch_dev_build(
     app: tauri::AppHandle,
@@ -259,6 +262,10 @@ mod tests {
             "manifest_url surfaced from latest.json asset"
         );
         assert!(builds[0].manifest_url.is_none(), "PR60 has no manifest");
+        assert!(
+            !builds[1].assets.iter().any(|a| a.name.eq_ignore_ascii_case("latest.json")),
+            "latest.json manifest must not appear as a downloadable asset"
+        );
         let dmg = builds[1].assets.iter().find(|a| a.name.ends_with(".dmg")).unwrap();
         assert_eq!(dmg.platform, "macOS");
     }

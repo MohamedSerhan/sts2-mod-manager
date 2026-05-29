@@ -656,7 +656,7 @@ function AppInner() {
         <div className="flex-1 min-w-0 flex flex-col">
           {/* Top bar — profile chip + Vanilla + Launch */}
           <div className="gf-top">
-            <div style={{ position: 'relative' }}>
+            <div className="gf-top-chip" style={{ position: 'relative' }}>
               <button
                 className="gf-prof"
                 onClick={() => setShowProfileSwitcher((v) => !v)}
@@ -695,31 +695,36 @@ function AppInner() {
               )}
             </div>
 
-            <div className="flex gap-1.5 gf-top-actions">
-              {/* STS2 detection status — shown on every screen so the
-                  user can tell at a glance whether the game folder is
-                  wired up (the previous at-a-glance signal was a sidebar
-                  status block that got dropped in the 1.7.0
-                  consolidation). Clicking jumps to Settings, where the
-                  game path is configured. */}
-              <button
-                onClick={() => setActiveView('settings')}
-                title={
-                  gameInfo?.valid
-                    ? t('topbar.gameDetectedTitle', { path: gameInfo.game_path })
-                    : t('topbar.gameNotFoundTitle')
-                }
-                className={cn('gf-game-status', gameInfo?.valid ? 'is-ok' : 'is-warn')}
-              >
-                {gameInfo?.valid ? (
-                  <span className="gf-game-status-dot" aria-hidden />
-                ) : (
-                  <AlertTriangle size={13} aria-hidden />
-                )}
-                <span className="gf-game-status-label">
-                  {gameInfo?.valid ? t('topbar.gameDetected') : t('topbar.gameNotFound')}
-                </span>
-              </button>
+            {/* STS2 detection status — shown on every screen so the user
+                can tell at a glance whether the game folder is wired up
+                (the previous at-a-glance signal was a sidebar status block
+                that got dropped in the 1.7.0 consolidation). Clicking jumps
+                to Settings, where the game path is configured. On a narrow
+                topbar the launch controls drop to their own row below this
+                status (see the @container rule in styles.css), so the
+                status ends up directly above the launch button. */}
+            <button
+              onClick={() => setActiveView('settings')}
+              title={
+                gameInfo?.valid
+                  ? t('topbar.gameDetectedTitle', { path: gameInfo.game_path })
+                  : t('topbar.gameNotFoundTitle')
+              }
+              className={cn('gf-game-status', gameInfo?.valid ? 'is-ok' : 'is-warn')}
+            >
+              {gameInfo?.valid ? (
+                <span className="gf-game-status-dot" aria-hidden />
+              ) : (
+                <AlertTriangle size={13} aria-hidden />
+              )}
+              <span className="gf-game-status-label">
+                {gameInfo?.valid ? t('topbar.gameDetected') : t('topbar.gameNotFound')}
+              </span>
+            </button>
+            {/* Launch controls (help + vanilla + modded launch) grouped so
+                they wrap together onto a row below the STS2 status when the
+                topbar gets narrow. */}
+            <div className="gf-top-launch">
               {/* 1.7.0 — Help moved out of the sidebar. The `?` button
                   opens a slide-out HelpDrawer (right side) that renders
                   the same content the Settings → Help tab shows. */}

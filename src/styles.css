@@ -1053,23 +1053,37 @@ body {
 
 /* ── Top bar ─────────────────────────────────────────────────────── */
 .gf-top {
-  display: flex; align-items: center; justify-content: space-between;
-  /* Wrap the launch/status cluster below the modpack chip rather than
-     overflowing on a narrow window. */
+  display: flex; align-items: center;
+  /* Chip on the left, status + launch controls clustered on the right
+     (the chip's auto right-margin eats the free space). They wrap onto
+     their own rows rather than overflowing on a narrow window. */
   flex-wrap: wrap;
   gap: 10px;
   padding: 11px 22px;
   background: var(--indigo-top);
   border-bottom: 1px solid var(--indigo-line);
   flex-shrink: 0;
+  /* Query container so the launch controls reflow against the topbar's
+     own width rather than the viewport (the sidebar eats ~230px, so a
+     viewport breakpoint would fire at the wrong time). */
+  container-type: inline-size;
+  container-name: topbar;
 }
-/* Launch/status cluster: stays pinned to the right even when the topbar
-   wraps it onto its own line (margin-left:auto eats the free space), and
-   its own buttons wrap right-aligned if the window gets very narrow. */
-.gf-top-actions {
-  margin-left: auto;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+/* Push everything after the modpack chip to the right edge. This keeps the
+   status + launch cluster right-aligned (replacing the old
+   justify-content:space-between, which would have stranded the status pill
+   in the middle once the cluster was flattened). */
+.gf-top-chip { margin-right: auto; }
+/* Launch controls grouped (help + vanilla + modded launch) so they wrap as
+   one unit; flex-end keeps them right-aligned when they take a full row. */
+.gf-top-launch { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
+/* Narrow topbar: drop the launch controls to their own full-width row,
+   which leaves the STS2 status sitting directly above the launch button.
+   flex-basis:100% resolves against .gf-top's definite width, so there's no
+   shrink-wrap ambiguity. Tune this breakpoint if the split should kick in
+   at a different topbar width. */
+@container topbar (max-width: 960px) {
+  .gf-top-launch { flex-basis: 100%; }
 }
 .gf-prof {
   display: flex; align-items: center; gap: 10px;

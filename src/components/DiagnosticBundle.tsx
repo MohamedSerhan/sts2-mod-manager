@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { getVersion } from '@tauri-apps/api/app';
 import { useToast } from '../contexts/ToastContext';
 import { useApp } from '../contexts/AppContext';
-import { readLogTail, getLogPath, openExternalUrl, listProfiles } from '../hooks/useTauri';
+import { readLogTail, getLogPath, openExternalUrl, listProfiles, createBugReportGist } from '../hooks/useTauri';
 import { buildGitHubIssueUrl } from '../lib/githubLinks';
 
 // 1.7.0 — "Report a bug". Reworked from the old support-bundle: builds a
@@ -138,18 +138,46 @@ export function DiagnosticBundle({ open, onClose }: Props) {
     }
   }
 
-  /** Primary action: build + copy the full report, then open a prefilled
-   *  GitHub issue. The body is truncated to fit GitHub's URL limit, so the
-   *  clipboard copy is the safety net for long reports. */
+  /** Primary action: build the full report, then open a prefilled GitHub
+   *  issue. Best path — upload the FULL report as a secret gist (via the
+   *  stored token) and link it in the issue, so nothing is truncated and
+   *  the user does nothing. Fallback (no token / upload refused) — copy the
+   *  full report to the clipboard and prefill a truncated issue body. */
   async function openBugReport() {
     if (busy) return;
     setBusy(true);
     try {
       const report = await buildReport();
       setGenerated(report);
+      const title = t('diagnosticBundle.reportGitHubIssueTitle');
+
+      // Try the zero-effort path: full report → secret gist → link it.
+      let gistUrl: string | null = null;
+      try {
+        gistUrl = await createBugReportGist(report);
+      } catch {
+        // No token configured or the token lacks the Gist permission —
+        // fall through to the clipboard + truncated-issue path.
+        gistUrl = null;
+      }
+
+      if (gistUrl) {
+        // Issue body carries the user's note + a link to the full report,
+        // so GitHub's URL limit never truncates the diagnostics. Redact the
+        // free-text description the same way the report is redacted.
+        const body = [
+          redact(description.trim()) || t('diagnosticBundle.reportNoDescription'),
+          '',
+          t('diagnosticBundle.reportFullLogLink', { url: gistUrl }),
+        ].join('\n');
+        await openExternalUrl(buildGitHubIssueUrl(title, body));
+        toast.success(t('diagnosticBundle.openedWithReportToast'));
+        return;
+      }
+
+      // Fallback: clipboard is the safety net for the truncated body.
       const copied = await copyToClipboard(report);
-      const url = buildGitHubIssueUrl(t('diagnosticBundle.reportGitHubIssueTitle'), report);
-      await openExternalUrl(url);
+      await openExternalUrl(buildGitHubIssueUrl(title, report));
       toast.success(
         copied
           ? t('diagnosticBundle.openedAndCopiedToast')

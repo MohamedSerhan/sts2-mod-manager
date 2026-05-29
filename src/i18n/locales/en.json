@@ -702,6 +702,8 @@
     "readyToast": "Report ready — scroll the preview to copy manually.",
     "openedToast": "Opened a prefilled GitHub issue — review and submit it.",
     "openedAndCopiedToast": "Opened a prefilled GitHub issue and copied the full report — paste it in if GitHub trimmed anything.",
+    "openedWithReportToast": "Opened a prefilled GitHub issue with the full report attached — review and submit it.",
+    "reportFullLogLink": "Full diagnostic report (app + game version, mod list, load order, recent logs): {{url}}",
     "buildFailed": "Couldn't build the report: {{error}}",
     "reportHeader": "=== STS2 Mod Manager — Bug Report ===",
     "reportGenerated": "Generated: {{date}}",

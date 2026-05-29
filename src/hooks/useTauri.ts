@@ -280,6 +280,13 @@ export async function quickAddMod(url: string): Promise<QuickAddResult> {
   return invoke('quick_add_mod', { url });
 }
 
+/** Upload a bug report as a secret GitHub Gist (via the stored token) and
+ *  return its URL. Rejects when no token is configured or the API refuses,
+ *  so the caller can fall back to clipboard + a truncated issue. */
+export async function createBugReportGist(content: string): Promise<string> {
+  return invoke('create_bug_report_gist', { content });
+}
+
 // ── Mod Source Linking ─────────────────────────────────────────────────────
 
 export async function getModSources(): Promise<Record<string, ModSourceEntry>> {

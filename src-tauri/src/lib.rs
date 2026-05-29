@@ -1,4 +1,5 @@
 mod backup;
+mod bug_report;
 mod download;
 mod downloads_watcher;
 mod error;
@@ -308,6 +309,7 @@ pub fn run() {
             profiles::import_profile_cmd,
             profiles::get_profile_drift,
             profiles::save_profile_drift,
+            bug_report::create_bug_report_gist,
             // Curator workflow
             updater::check_for_updates,
             updater::update_mod,

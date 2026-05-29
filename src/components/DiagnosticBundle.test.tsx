@@ -234,6 +234,41 @@ describe('<DiagnosticBundle> (Report a bug)', () => {
     expect(await screen.findByText(/no browser/)).toBeInTheDocument();
   });
 
+  it('"Open bug report" uploads a gist and links it (no truncation) when a token is set', async () => {
+    // A configured token lets us upload the FULL report as a secret gist;
+    // the issue body then just links it, so nothing is truncated.
+    registerInvokeHandler('read_log_tail', () => 'x'.repeat(12000)); // long → would truncate
+    registerInvokeHandler('get_log_path', () => '/x.log');
+    registerInvokeHandler('create_bug_report_gist', () => 'https://gist.github.com/u/abc123');
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.click(getOpenButton());
+
+    expect(openUrl).toHaveBeenCalledTimes(1);
+    const url = vi.mocked(openUrl).mock.calls[0][0] as string;
+    const body = new URL(url).searchParams.get('body') ?? '';
+    // The body links the gist and is NOT the truncated full log.
+    expect(body).toContain('https://gist.github.com/u/abc123');
+    expect(body).not.toContain('Truncated to fit GitHub issue URL limits');
+    await waitFor(() => {
+      expect(screen.getByText(/full report attached/i)).toBeInTheDocument();
+    });
+  });
+
+  it('"Open bug report" falls back to clipboard + truncated issue when the gist upload fails', async () => {
+    registerInvokeHandler('read_log_tail', () => 'GH body');
+    registerInvokeHandler('get_log_path', () => '/x.log');
+    registerInvokeHandler('create_bug_report_gist', () => { throw new Error('no gist scope'); });
+    const writeText = setClipboard(async () => {});
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.click(getOpenButton());
+
+    const url = vi.mocked(openUrl).mock.calls[0][0] as string;
+    expect(new URL(url).searchParams.get('body')).toContain('STS2 Mod Manager');
+    await waitFor(() => expect(writeText).toHaveBeenCalled());
+  });
+
   it('shows the game version / not-detected status from AppContext', async () => {
     render(<Wrap />);
     const gameRow = (await screen.findByText('Game version')).closest('.gf-diag-item');

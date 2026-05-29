@@ -119,6 +119,11 @@ function setupPack(opts: {
   });
 }
 
+/** Open the "+ Add mods" dropdown (install actions live inside it now). */
+async function openAddMods(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: /Add mods/i }));
+}
+
 /** The "Add from your Library" section is collapsed by default; expand it
  *  so its rows are in the DOM. Returns the section element. */
 async function expandLibrary(user: ReturnType<typeof userEvent.setup>) {
@@ -157,8 +162,11 @@ describe('<ModpackDetail>', () => {
         onSwitch={vi.fn()}
       />,
     );
-    await screen.findByRole('heading', { level: 2, name: 'Sample' });
-    expect(await screen.findByText(/ACTIVE/i)).toBeInTheDocument();
+    const titleRow = (await screen.findByRole('heading', { level: 2, name: 'Sample' }))
+      .closest('.gf-modpack-detail-title-row') as HTMLElement;
+    // The ACTIVE badge sits next to the name (scoped so it doesn't match
+    // the word "active" in the status line).
+    expect(within(titleRow).getByText(/active/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Switch to/i })).toBeNull();
   });
 
@@ -186,13 +194,18 @@ describe('<ModpackDetail>', () => {
     expect(screen.getByRole('button', { name: /Re-share/i })).toBeInTheDocument();
   });
 
-  it('renders the shared mod-library toolbar (same affordances as All Mods)', async () => {
-    render(<Wrap {...baseProps()} />);
+  it('consolidates the install actions into the "+ Add mods" dropdown', async () => {
+    const profile = setupPack({ inPack: [modInfo({ name: 'PackMod', folder_name: 'PackMod' })] });
+    const user = userEvent.setup();
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
     await screen.findByRole('heading', { level: 2, name: 'Sample' });
-    expect(screen.getByRole('button', { name: /Open folder/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Import mod/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Quick add URL/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Refresh/i })).toBeInTheDocument();
+    // Hidden until the dropdown is opened.
+    expect(screen.queryByRole('menuitem', { name: /Quick add URL/i })).toBeNull();
+    await openAddMods(user);
+    expect(screen.getByRole('menuitem', { name: /Quick add URL/i })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /Import mod/i })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /Open folder/i })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /Auto-detect sources/i })).toBeInTheDocument();
   });
 
   it('the Audit action checks ONLY this pack\'s mods (scoped audit)', async () => {
@@ -207,7 +220,8 @@ describe('<ModpackDetail>', () => {
     const user = userEvent.setup();
     render(<Wrap profile={profile} onBack={vi.fn()} />);
     await screen.findByRole('heading', { level: 2, name: 'Sample' });
-    await user.click(screen.getByRole('button', { name: /Audit mods/i }));
+    // Audit is the updates pill in the section header.
+    await user.click(screen.getByRole('button', { name: /Check for updates/i }));
 
     await waitFor(() => {
       const call = getInvokeCalls().find((c) => c.cmd === 'audit_mod_versions');
@@ -411,7 +425,8 @@ describe('<ModpackDetail>', () => {
     render(<Wrap {...baseProps()} />);
     await screen.findByRole('heading', { level: 2, name: 'Sample' });
 
-    await user.click(screen.getByRole('button', { name: /Quick add URL/i }));
+    await openAddMods(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/i }));
     const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
     await user.type(input, 'https://github.com/x/y');
     await user.click(screen.getByRole('button', { name: 'Add' }));
@@ -473,8 +488,10 @@ describe('<ModpackDetail>', () => {
     registerInvokeHandler('delete_mod_cmd', () => true);
     const user = userEvent.setup();
     render(<Wrap profile={profile} onBack={vi.fn()} />);
-    const inPack = await screen.findByTestId('modpack-detail-in-pack');
-    await user.click(within(inPack).getByRole('button', { name: /Delete all/i }));
+    await screen.findByRole('heading', { level: 2, name: 'Sample' });
+    // Delete all lives in the header kebab now.
+    await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /Delete all/i }));
 
     // Typed-phrase guard, same as the All Mods destructive delete.
     const phraseInput = await screen.findByPlaceholderText('delete all');
@@ -495,10 +512,12 @@ describe('<ModpackDetail>', () => {
     ).toBe(false);
   });
 
-  it('Delete all is hidden when the pack is empty', async () => {
-    render(<Wrap {...baseProps()} />);
-    const inPack = await screen.findByTestId('modpack-detail-in-pack');
-    expect(within(inPack).queryByRole('button', { name: /Delete all/i })).toBeNull();
+  it('Delete all is omitted from the kebab when the pack is empty', async () => {
+    const user = userEvent.setup();
+    render(<Wrap {...baseProps()} onDelete={vi.fn()} />);
+    await screen.findByRole('heading', { level: 2, name: 'Sample' });
+    await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
+    expect(screen.queryByRole('menuitem', { name: /Delete all/i })).toBeNull();
   });
 
   // ── Load order ────────────────────────────────────────────────────
@@ -607,29 +626,12 @@ describe('<ModpackDetail>', () => {
     });
   });
 
-  // ── Audit summary chips (carried over) ────────────────────────────
-  it('audit summary chips are hidden when there is no audit data', async () => {
-    render(<Wrap {...baseProps()} />);
-    await screen.findByRole('heading', { level: 2, name: 'Sample' });
-    expect(screen.queryByTestId('modpack-detail-audit')).toBeNull();
-  });
-
-  it('missing-source audit chip shows count of mods with no source + no bundle', async () => {
-    render(
-      <Wrap
-        profile={baseProfile({
-          name: 'Sample',
-          mods: [
-            profileMod({ name: 'NoSource', folder_name: 'NoSource', source: null, bundle_url: null }),
-            profileMod({ name: 'HasSource', folder_name: 'HasSource', source: 'https://github.com/x/y' }),
-          ],
-        })}
-        onBack={vi.fn()}
-      />,
-    );
-    await screen.findByRole('heading', { level: 2, name: 'Sample' });
-    expect(await screen.findByTestId('audit-chip-missing')).toBeInTheDocument();
-    expect(screen.getByText(/1 mod missing source/i)).toBeInTheDocument();
+  // ── Updates affordance (section header) ───────────────────────────
+  it('shows a "Check for updates" pill before an audit has run', async () => {
+    const profile = setupPack({ inPack: [modInfo({ name: 'PackMod', folder_name: 'PackMod' })] });
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+    const inPack = await screen.findByTestId('modpack-detail-in-pack');
+    expect(within(inPack).getByRole('button', { name: /Check for updates/i })).toBeInTheDocument();
   });
 
   // ── Available row presentation edge case ──────────────────────────

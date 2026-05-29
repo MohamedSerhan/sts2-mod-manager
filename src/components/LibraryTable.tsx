@@ -110,6 +110,11 @@ export interface LibraryTableProps {
    *  (all redundant or wrong there), and switches each row's visible action
    *  to "Remove from pack". */
   packScoped?: boolean;
+  /** Extra controls rendered in the toolbar, to the right of the search box
+   *  (where sort/store-unused sit in the All Mods view). The modpack view
+   *  puts its "+ Add mods" / Edit / Load order actions here so they share
+   *  the search row. */
+  toolbarActions?: ReactNode;
   /** External re-fetch trigger. When this value changes, the focused-mode
    *  membership grid is re-pulled. Lets a parent that mutates membership
    *  outside this table (e.g. the modpack view's "Add from your Library"
@@ -187,6 +192,7 @@ export function LibraryTable({
   enableReorder = false,
   coupleActiveStorage = false,
   packScoped = false,
+  toolbarActions,
   reloadToken,
   filterRow,
   modInfoByKey,
@@ -690,7 +696,7 @@ export function LibraryTable({
     );
   }
 
-  if (effectiveGrid.mods.length === 0) {
+  if (effectiveGrid.mods.length === 0 && !packScoped) {
     return (
       <div className="gf-empty">
         <div className="gf-empty-title">{t('profiles.library.empty.title')}</div>
@@ -713,6 +719,12 @@ export function LibraryTable({
             aria-label={t('profiles.library.searchLabel')}
           />
         </label>
+        {/* Modpack view: the caller's actions (+ Add mods / Edit / Load
+            order) share the search row, where sort/store-unused sit in the
+            All Mods view. */}
+        {packScoped && toolbarActions && (
+          <div className="gf-profile-library-toolbar-actions">{toolbarActions}</div>
+        )}
         {/* The bulk "store unused" action + the sort control are hidden in
             the dedicated modpack view: every row is already in the pack
             (nothing "unused" to store) and the list always shows load
@@ -789,12 +801,21 @@ export function LibraryTable({
       )}
       {filteredRows.length === 0 ? (
         <div className="gf-empty">
-          <div className="gf-empty-title">
-            {t('profiles.library.noMatches.title')}
-          </div>
-          <div className="gf-empty-sub">
-            {t('profiles.library.noMatches.hint')}
-          </div>
+          {packScoped && !filter.trim() ? (
+            <>
+              <div className="gf-empty-title">{t('profiles.library.packEmpty.title')}</div>
+              <div className="gf-empty-sub">{t('profiles.library.packEmpty.hint')}</div>
+            </>
+          ) : (
+            <>
+              <div className="gf-empty-title">
+                {t('profiles.library.noMatches.title')}
+              </div>
+              <div className="gf-empty-sub">
+                {t('profiles.library.noMatches.hint')}
+              </div>
+            </>
+          )}
         </div>
       ) : (
         visibleRows.map((row) => {

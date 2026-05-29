@@ -33,17 +33,23 @@ import { useTranslation } from 'react-i18next';
 import {
   ArrowLeft,
   Camera,
+  Check,
   ChevronDown,
+  ClipboardCheck,
   Copy,
   Download,
   Files,
+  FolderOpen,
+  Link,
   ListOrdered,
   Pencil,
   Play,
   Plus,
   RefreshCw,
+  Search,
   Share2,
   Trash2,
+  Upload,
 } from 'lucide-react';
 import { Badge } from './Badge';
 import { Button } from './Button';
@@ -52,13 +58,12 @@ import { HelpHint } from './HelpHint';
 import { KebabDivider, KebabItem, KebabMenu, KebabSection } from './KebabMenu';
 import { EditModpackModal } from './EditModpackModal';
 import { LibraryTable } from './LibraryTable';
-import { ModLibraryToolbar } from './ModLibraryToolbar';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from './ConfirmDialog';
 import { useModLibrary } from '../hooks/useModLibrary';
 import { deleteMod, setProfileModMembership, toggleMod } from '../hooks/useTauri';
-import type { ModAuditEntry, ModInfo, Profile, ShareResult } from '../types';
+import type { ModInfo, Profile, ShareResult } from '../types';
 import type { ProfileDrift } from '../hooks/useTauri';
 
 export interface ModpackDetailProps {
@@ -93,38 +98,6 @@ export interface ModpackDetailProps {
  *  used across the membership grid. */
 function modKey(mod: { folder_name: string | null; name: string }): string {
   return mod.folder_name ?? mod.name;
-}
-
-function countAuditUpdates(
-  audit: ModAuditEntry[] | null,
-  modNames: Set<string>,
-): number {
-  if (!audit) return 0;
-  return audit.filter(
-    (entry) =>
-      entry.needs_update
-      && !entry.snoozed
-      && modNames.has(entry.mod_name),
-  ).length;
-}
-
-function countMissingSource(profile: Profile): number {
-  return profile.mods.filter(
-    (mod) => mod.source === null && mod.bundle_url === null,
-  ).length;
-}
-
-function countBlockedByGameVersion(
-  audit: ModAuditEntry[] | null,
-  modNames: Set<string>,
-): number {
-  if (!audit) return 0;
-  return audit.filter(
-    (entry) =>
-      modNames.has(entry.mod_name)
-      && (entry.game_version_too_old
-        || entry.latest_release_blocked_by_game_version),
-  ).length;
 }
 
 /** Source badges for a row, derived from the matching installed
@@ -193,18 +166,29 @@ export function ModpackDetail({
   // LibraryTable owns its own search (same as the All Mods view).
   const [availableQuery, setAvailableQuery] = useState('');
 
-  // Build a set of mod-display-names that belong to this pack — the
-  // audit summary is filtered to just these mods so users see counts
-  // scoped to the detail view.
+  // Build a set of mod-names that belong to this pack so the updates
+  // affordance is scoped to the pack's own mods.
   const modNames = useMemo(
     () => new Set(profile.mods.map((m) => m.name)),
     [profile.mods],
   );
-  const updatesCount = countAuditUpdates(auditResults, modNames);
-  const missingSourceCount = countMissingSource(profile);
-  const blockedCount = countBlockedByGameVersion(auditResults, modNames);
-  const hasAuditChips
-    = updatesCount > 0 || missingSourceCount > 0 || blockedCount > 0;
+  // GitHub-updatable mods in THIS pack (drives the "N updates available"
+  // pill + the update-all action).
+  const packUpdateNames = useMemo(
+    () =>
+      (auditResults ?? [])
+        .filter(
+          (r) =>
+            r.needs_update
+            && !r.snoozed
+            && r.github_repo
+            && r.latest_release_with_assets_tag
+            && modNames.has(r.mod_name),
+        )
+        .map((r) => r.mod_name),
+    [auditResults, modNames],
+  );
+  const updatesCount = packUpdateNames.length;
 
   // The pack's mods, in load order. (profile.mods is the manifest order.)
   const inPackKeys = useMemo(
@@ -329,6 +313,101 @@ export function ModpackDetail({
     }
   };
 
+  // "+ Add mods ▾" dropdown + Edit + Load order — these share the search
+  // row inside the LibraryTable (via its toolbarActions slot). All install
+  // methods are consolidated into the one dropdown to keep the row calm.
+  const packToolbarActions = (
+    <>
+      <KebabMenu
+        align="right"
+        title={t('modpack.detail.addMods')}
+        buttonClassName="gf-btn gf-btn-2-sm"
+        trigger={
+          <>
+            <Plus size={14} /> {t('modpack.detail.addMods')} <ChevronDown size={13} />
+          </>
+        }
+      >
+        <KebabSection>
+          <KebabItem icon={<Link size={12} />} onClick={() => lib.setShowQuickAdd(true)}>
+            {t('mods.quickAddUrl')}
+          </KebabItem>
+          <KebabItem icon={<Upload size={12} />} onClick={lib.handleImportFile} disabled={lib.gameRunning}>
+            {t('mods.importMod')}
+          </KebabItem>
+          <KebabItem icon={<FolderOpen size={12} />} onClick={lib.handleOpenFolder}>
+            {t('mods.openFolder')}
+          </KebabItem>
+          <KebabItem icon={<Search size={12} />} onClick={() => lib.setShowAutoDetect(true)}>
+            {t('mods.autoDetectSources')}
+          </KebabItem>
+        </KebabSection>
+      </KebabMenu>
+      <Button
+        variant="secondary"
+        size="sm"
+        onClick={() => setEditing(true)}
+        title={t('modpack.detail.editModsTitle')}
+      >
+        <Pencil size={14} />
+        {t('modpack.detail.editMods')}
+      </Button>
+      {onOpenLoadOrder && (
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => onOpenLoadOrder(profile)}
+          disabled={profile.mods.length === 0}
+          title={t('profiles.loadOrder.buttonTitle', { name: profile.name })}
+        >
+          <ListOrdered size={14} />
+          {t('profiles.loadOrder.button')}
+        </Button>
+      )}
+    </>
+  );
+
+  // Updates affordance shown beside the section title. Mirrors the audit
+  // button's states but scoped to this pack: not-yet-checked → "Check for
+  // updates"; checked-with-updates → "N updates available" (updates all);
+  // checked-current → quiet "Up to date".
+  const updatesControl = lib.auditing ? (
+    <span className="gf-pill gf-pill-ok gf-pill-toolbar">
+      <RefreshCw size={12} className="animate-spin" /> {t('mods.audit.running')}
+    </span>
+  ) : lib.updatingAll ? (
+    <span className="gf-pill gf-pill-update gf-pill-toolbar">
+      <RefreshCw size={12} className="animate-spin" /> {t('mods.updatingCount', { count: updatesCount })}
+    </span>
+  ) : auditResults === null ? (
+    <button
+      type="button"
+      className="gf-pill gf-pill-update gf-pill-toolbar"
+      onClick={lib.handleCheckUpdates}
+      title={t('mods.checkForUpdates')}
+    >
+      <ClipboardCheck size={12} /> {t('modpack.detail.checkUpdates')}
+    </button>
+  ) : updatesCount > 0 ? (
+    <button
+      type="button"
+      className="gf-pill gf-pill-update gf-pill-toolbar"
+      onClick={() => lib.updateAllGithub(packUpdateNames)}
+      title={t('mods.updateAllTitle')}
+    >
+      <Download size={12} /> {t('modpack.detail.updatesAvailable', { count: updatesCount })}
+    </button>
+  ) : (
+    <button
+      type="button"
+      className="gf-pill gf-pill-ok gf-pill-toolbar"
+      onClick={lib.handleCheckUpdates}
+      title={t('mods.reaudit')}
+    >
+      <Check size={12} /> {t('mods.audit.upToDate')}
+    </button>
+  );
+
   return (
     <div className="gf-modpack-detail" data-testid="modpack-detail">
       <div className="gf-modpack-detail-head">
@@ -391,37 +470,54 @@ export function ModpackDetail({
                 : t('profiles.card.share')}
             </Button>
           )}
-          {/* Advanced / power-user actions live in a header kebab so
-              they're always reachable at the top instead of buried under
-              a long mod list. Destructive Delete is grouped below a
-              divider with danger styling. */}
-          {(onSnapshot || onDuplicate || onExportJson || (onRepairDrift && hasDrift) || onDelete) && (
-            <KebabMenu title={t('modpack.advancedActions')} size="sm">
-              <KebabSection head={t('modpack.advanced')}>
-                {onSnapshot && (
-                  <KebabItem icon={<Camera size={12} />} onClick={() => onSnapshot(profile.name)}>
-                    {t('profiles.kebab.snapshotFromCurrent')}
+          {/* Advanced / power-user actions live in a header kebab so the
+              toolbar below stays focused on the common add/edit actions.
+              Destructive items sit below a divider with danger styling. */}
+          <KebabMenu title={t('modpack.advancedActions')} size="sm">
+            <KebabSection head={t('modpack.advanced')}>
+              {onSnapshot && (
+                <KebabItem icon={<Camera size={12} />} onClick={() => onSnapshot(profile.name)}>
+                  {t('profiles.kebab.snapshotFromCurrent')}
+                </KebabItem>
+              )}
+              {onDuplicate && (
+                <KebabItem icon={<Files size={12} />} onClick={() => onDuplicate(profile.name)}>
+                  {t('profiles.kebab.duplicate')}
+                </KebabItem>
+              )}
+              {onExportJson && (
+                <KebabItem icon={<Copy size={12} />} onClick={() => onExportJson(profile.name)}>
+                  {t('profiles.kebab.exportJson')}
+                </KebabItem>
+              )}
+              {onRepairDrift && hasDrift && (
+                <KebabItem icon={<Download size={12} />} onClick={() => onRepairDrift(profile.name)}>
+                  {t('profiles.drift.repair')}
+                </KebabItem>
+              )}
+              <KebabItem
+                icon={<RefreshCw size={12} className={lib.refreshing ? 'animate-spin' : undefined} />}
+                onClick={lib.handleRefresh}
+                disabled={lib.refreshing}
+              >
+                {t('common.refresh')}
+              </KebabItem>
+            </KebabSection>
+            {(profile.mods.length > 0 || onDelete) && (
+              <>
+                <KebabDivider />
+                {profile.mods.length > 0 && (
+                  <KebabItem
+                    danger
+                    icon={<Trash2 size={12} />}
+                    onClick={handleDeleteAllInPack}
+                    disabled={gameRunning || deletingAll}
+                    description={t('modpack.detail.deleteAllTitleShort')}
+                  >
+                    {t('modpack.detail.deleteAll')}
                   </KebabItem>
                 )}
-                {onDuplicate && (
-                  <KebabItem icon={<Files size={12} />} onClick={() => onDuplicate(profile.name)}>
-                    {t('profiles.kebab.duplicate')}
-                  </KebabItem>
-                )}
-                {onExportJson && (
-                  <KebabItem icon={<Copy size={12} />} onClick={() => onExportJson(profile.name)}>
-                    {t('profiles.kebab.exportJson')}
-                  </KebabItem>
-                )}
-                {onRepairDrift && hasDrift && (
-                  <KebabItem icon={<Download size={12} />} onClick={() => onRepairDrift(profile.name)}>
-                    {t('profiles.drift.repair')}
-                  </KebabItem>
-                )}
-              </KebabSection>
-              {onDelete && (
-                <>
-                  <KebabDivider />
+                {onDelete && (
                   <KebabItem
                     danger
                     icon={<Trash2 size={12} />}
@@ -429,52 +525,26 @@ export function ModpackDetail({
                   >
                     {t('profiles.kebab.deleteProfile')}
                   </KebabItem>
-                </>
-              )}
-            </KebabMenu>
-          )}
+                )}
+              </>
+            )}
+          </KebabMenu>
         </div>
       </div>
 
-      {/* Shared mod-library toolbar — same affordances as the All Mods
-          view (Open folder / Import / Quick add URL / Auto-detect / Audit /
-          Refresh). Installs from here auto-join this pack (targetPack). */}
-      <div className="gf-modpack-detail-toolbar">
-        <ModLibraryToolbar lib={lib} />
+      {/* Status line — a quick read of what's loaded + game state. */}
+      <div className="gf-modpack-detail-status">
+        {t('modpack.detail.statusCounts', { active: profile.mods.length, library: mods.length })}
+        {isActive && gameRunning && (
+          <>
+            {' · '}
+            <span className="gf-modpack-detail-running">{t('modpack.detail.runningNow')}</span>
+          </>
+        )}
       </div>
+
+      {/* Quick-add form (shown when "+ Add mods → Quick add URL" is picked). */}
       {lib.renderQuickAddForm()}
-
-      {hasAuditChips && (
-        <div
-          className="gf-modpack-detail-audit"
-          data-testid="modpack-detail-audit"
-        >
-          {updatesCount > 0 && (
-            <span
-              className="gf-chip gf-chip-update"
-              data-testid="audit-chip-updates"
-            >
-              {t('modpack.auditSummary.updates', { count: updatesCount })}
-            </span>
-          )}
-          {missingSourceCount > 0 && (
-            <span
-              className="gf-chip gf-chip-warn"
-              data-testid="audit-chip-missing"
-            >
-              {t('modpack.auditSummary.missing', { count: missingSourceCount })}
-            </span>
-          )}
-          {blockedCount > 0 && (
-            <span
-              className="gf-chip gf-chip-danger"
-              data-testid="audit-chip-blocked"
-            >
-              {t('modpack.auditSummary.blocked', { count: blockedCount })}
-            </span>
-          )}
-        </div>
-      )}
 
       {/* ── Section 1: mods in this pack ─────────────────────────── */}
       <section
@@ -482,86 +552,45 @@ export function ModpackDetail({
         data-testid="modpack-detail-in-pack"
       >
         <div className="gf-modpack-detail-section-head">
-          <h3 className="gf-modpack-detail-section-title">
-            {t('modpack.detail.inPackCount', { count: profile.mods.length })}
+          <div className="gf-modpack-detail-section-title-group">
+            <h3 className="gf-modpack-detail-section-title">
+              {t('modpack.detail.inPackHeading')}
+            </h3>
+            <span className="gf-modpack-detail-count" aria-hidden>
+              {profile.mods.length}
+            </span>
             <HelpHint helpKey="modpackWhat" />
-          </h3>
-          {/* Bulk-edit membership with the same checkbox picker as the
-              create wizard — quick add/remove across the whole library. */}
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => setEditing(true)}
-            title={t('modpack.detail.editModsTitle')}
-          >
-            <Pencil size={14} />
-            {t('modpack.detail.editMods')}
-          </Button>
-          {onOpenLoadOrder && (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => onOpenLoadOrder(profile)}
-              disabled={profile.mods.length === 0}
-              title={t('profiles.loadOrder.buttonTitle', { name: profile.name })}
-            >
-              <ListOrdered size={14} />
-              {t('profiles.loadOrder.button')}
-            </Button>
-          )}
-          {/* Delete-all is scoped to THIS pack's mods (not the whole
-              install). Hidden when the pack is empty. */}
-          {profile.mods.length > 0 && (
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={handleDeleteAllInPack}
-              disabled={gameRunning || deletingAll}
-              title={gameRunning ? t('mods.closeSts2First') : t('modpack.detail.deleteAllTitleShort')}
-            >
-              {deletingAll ? (
-                <RefreshCw size={14} className="animate-spin" />
-              ) : (
-                <Trash2 size={14} />
-              )}
-              {t('modpack.detail.deleteAll')}
-            </Button>
-          )}
+          </div>
+          {/* Updates affordance — scoped to this pack's mods. */}
+          {updatesControl}
         </div>
 
-        {profile.mods.length > 1 && (
+        {profile.mods.length > 0 && (
           <p className="gf-modpack-detail-section-note">
             {t('modpack.detail.inPackOrderNote')}
           </p>
         )}
 
-        {profile.mods.length === 0 ? (
-          <p className="gf-modpack-detail-empty">
-            {t('modpack.detail.emptyInPack')}
-          </p>
-        ) : (
-          // The pack's mods render with the SAME rich rows as the All Mods
-          // view (toggle / source badges / kebab / inline source editor),
-          // filtered to just this pack's members. packScoped drops the
-          // redundant In-Modpack badge + sort, and turns each row's visible
-          // action into "Remove from pack". Reordering is the Load order
-          // modal (no inline drag — it doesn't work in the webview).
-          // coupleActiveStorage makes removing from the active pack also
-          // unload the mod. reloadToken re-syncs when membership changes
-          // from outside the table.
-          <LibraryTable
-            modpackName={profile.name}
-            packScoped
-            coupleActiveStorage
-            reloadToken={membershipSignature}
-            filterRow={(row) =>
-              !!row.profiles.find((p) => p.profile_name === profile.name)?.included
-            }
-            onMembershipChanged={refreshAfterMutation}
-            onLoadOrderChanged={refreshAfterMutation}
-            {...lib.tableActionProps}
-          />
-        )}
+        {/* The pack's mods render with the SAME rich rows as the All Mods
+            view (toggle / source badges / kebab / inline source editor),
+            filtered to just this pack's members. The toolbar's "+ Add mods"
+            / Edit / Load order share the search row (toolbarActions).
+            packScoped drops the redundant In-Modpack badge + sort and turns
+            each row's visible action into "Remove from pack". reloadToken
+            re-syncs when membership changes from outside the table. */}
+        <LibraryTable
+          modpackName={profile.name}
+          packScoped
+          coupleActiveStorage
+          reloadToken={membershipSignature}
+          toolbarActions={packToolbarActions}
+          filterRow={(row) =>
+            !!row.profiles.find((p) => p.profile_name === profile.name)?.included
+          }
+          onMembershipChanged={refreshAfterMutation}
+          onLoadOrderChanged={refreshAfterMutation}
+          {...lib.tableActionProps}
+        />
       </section>
 
       {/* ── Section 2: add from your library (collapsed by default) ── */}

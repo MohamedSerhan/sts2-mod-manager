@@ -412,6 +412,55 @@ body {
   gap: 8px;
   flex-wrap: wrap;
 }
+/* Status sub-line — hugs the header (pulled up against the flex gap) so it
+   reads as part of the header, then leaves a clear break before the
+   "In this modpack" section below. */
+.gf-modpack-detail-status {
+  margin-top: -8px;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--ink-mute);
+}
+.gf-modpack-detail-running {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ok);
+  font-weight: 600;
+}
+.gf-modpack-detail-running::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 6px var(--ok);
+}
+/* Section title + count badge cluster (left of the updates pill). */
+.gf-modpack-detail-section-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.gf-modpack-detail-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 10px;
+  background: var(--gf-tint);
+  color: var(--gf);
+  font-size: 12px;
+  font-weight: 700;
+  flex: 0 0 auto;
+}
 /* Shared mod-library toolbar row inside the modpack detail view. Right-
    aligns the action cluster (same buttons as All Mods) below the header. */
 .gf-modpack-detail-toolbar {

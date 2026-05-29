@@ -78,7 +78,13 @@
     "detail": {
       "inPackHeading": "In this modpack",
       "inPackCount": "In this modpack ({{count}})",
-      "inPackOrderNote": "Listed in load order (top loads first). Use Load order to reorder. The All Mods list isn't ordered.",
+      "statusCounts": "{{active}} active / {{library}} in library",
+      "runningNow": "running in game now",
+      "addMods": "Add mods",
+      "checkUpdates": "Check for updates",
+      "updatesAvailable_one": "{{count}} update available",
+      "updatesAvailable_other": "{{count}} updates available",
+      "inPackOrderNote": "Listed in load order (top loads first). Use Load order to reorder.",
       "availableHeading": "Add from your library",
       "availableCount": "Add from your library ({{count}})",
       "availableNoMatch": "No library mods match your search.",
@@ -345,6 +351,10 @@
       "noMatches": {
         "title": "No matching mods",
         "hint": "Try a different name, folder, ID, or version."
+      },
+      "packEmpty": {
+        "title": "No mods in this modpack yet",
+        "hint": "Use “+ Add mods” to install one, or “Add from your Library” below to include mods you already have."
       },
       "toastAdded": "Added {{mod}} to {{profile}}",
       "toastRemoved": "Removed {{mod}} from {{profile}}",

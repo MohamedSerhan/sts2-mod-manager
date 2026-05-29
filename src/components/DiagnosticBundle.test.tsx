@@ -234,31 +234,37 @@ describe('<DiagnosticBundle> (Report a bug)', () => {
     expect(await screen.findByText(/no browser/)).toBeInTheDocument();
   });
 
-  it('"Open bug report" uploads a gist and links it (no truncation) when a token is set', async () => {
-    // A configured token lets us upload the FULL report as a secret gist;
-    // the issue body then just links it, so nothing is truncated.
+  it('"Open bug report" uploads the report and links it (no truncation) when the endpoint is configured', async () => {
+    // The maintainer endpoint stores the FULL report and returns a view
+    // URL; the issue body then just links it, so nothing is truncated — and
+    // the user needs no token.
     registerInvokeHandler('read_log_tail', () => 'x'.repeat(12000)); // long → would truncate
     registerInvokeHandler('get_log_path', () => '/x.log');
-    registerInvokeHandler('create_bug_report_gist', () => 'https://gist.github.com/u/abc123');
+    registerInvokeHandler('upload_bug_report', () => 'https://reports.example.dev/r/abc123');
     const user = userEvent.setup();
     render(<Wrap />);
+    // A typed description flows into the issue body (redacted) alongside
+    // the link — covers the "has description" branch.
+    await user.type(screen.getByRole('textbox'), 'crash on launch');
     await user.click(getOpenButton());
 
     expect(openUrl).toHaveBeenCalledTimes(1);
     const url = vi.mocked(openUrl).mock.calls[0][0] as string;
     const body = new URL(url).searchParams.get('body') ?? '';
-    // The body links the gist and is NOT the truncated full log.
-    expect(body).toContain('https://gist.github.com/u/abc123');
+    // The body carries the user's note + links the uploaded report, and is
+    // NOT the truncated full log.
+    expect(body).toContain('crash on launch');
+    expect(body).toContain('https://reports.example.dev/r/abc123');
     expect(body).not.toContain('Truncated to fit GitHub issue URL limits');
     await waitFor(() => {
       expect(screen.getByText(/full report attached/i)).toBeInTheDocument();
     });
   });
 
-  it('"Open bug report" falls back to clipboard + truncated issue when the gist upload fails', async () => {
+  it('"Open bug report" falls back to clipboard + truncated issue when the upload fails', async () => {
     registerInvokeHandler('read_log_tail', () => 'GH body');
     registerInvokeHandler('get_log_path', () => '/x.log');
-    registerInvokeHandler('create_bug_report_gist', () => { throw new Error('no gist scope'); });
+    registerInvokeHandler('upload_bug_report', () => { throw new Error('endpoint not configured'); });
     const writeText = setClipboard(async () => {});
     const user = userEvent.setup();
     render(<Wrap />);

@@ -1,0 +1,16 @@
+# Cloudflare Worker config for the STS2 bug-report ingest endpoint.
+# See README.md for the full deploy walkthrough.
+
+name = "sts2-bug-reports"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+# KV namespace that stores the uploaded reports. Create it with:
+#   wrangler kv namespace create REPORTS
+# then paste the returned id below.
+[[kv_namespaces]]
+binding = "REPORTS"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+
+# APP_KEY (optional shared key) is set as a secret, NOT here:
+#   wrangler secret put APP_KEY

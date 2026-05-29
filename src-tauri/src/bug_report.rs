@@ -2,74 +2,87 @@
 //!
 //! The "Report a bug" flow builds a redacted diagnostic report on the
 //! frontend. To get the FULL report into a GitHub issue without truncating
-//! it into the issue URL (and without asking the user to paste anything),
-//! we upload it as a secret GitHub Gist using the GitHub token the user has
-//! already configured for modpack sharing, and the issue links to the gist.
+//! it into the issue URL — and without the user needing any token — we POST
+//! it to a maintainer-hosted ingest endpoint (a small Cloudflare Worker;
+//! see tools/bug-report-worker/). The endpoint stores the report and returns
+//! a short view URL that the issue links to. This is the standard
+//! vendor-hosted telemetry pattern: the app talks to the maintainer's
+//! endpoint, the reporter authenticates with nothing.
 //!
-//! No token configured (or the token lacks the Gist permission) → the
-//! command errors and the frontend falls back to the
-//! copy-to-clipboard + truncated-issue path.
+//! The endpoint is configured at build time via the STS2_BUG_REPORT_ENDPOINT
+//! env var (so it ships only in release builds the maintainer cuts). When
+//! it's unset — or the upload fails — the command errors and the frontend
+//! falls back to the copy-to-clipboard + truncated-issue path.
+
+use std::time::Duration;
 
 use serde::Deserialize;
 
-use crate::state::AppState;
+/// Maintainer-hosted ingest endpoint, baked in at build time. `None` when
+/// the env var wasn't set for this build → the frontend falls back.
+const BUG_REPORT_ENDPOINT: Option<&str> = option_env!("STS2_BUG_REPORT_ENDPOINT");
+/// Optional shared key sent as `x-app-key`, so the endpoint can reject
+/// traffic that isn't from the app. Baked in at build time alongside the URL.
+const BUG_REPORT_KEY: Option<&str> = option_env!("STS2_BUG_REPORT_KEY");
+
+const UPLOAD_TIMEOUT: Duration = Duration::from_secs(30);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Deserialize)]
-struct GistResponse {
-    html_url: String,
+struct UploadResponse {
+    /// Public view URL for the stored report.
+    url: String,
 }
 
-/// JSON body for the create-gist request. A secret (non-public) gist with
-/// the report as a single Markdown file. Pure helper so the shape is
-/// unit-testable without hitting the network.
-fn gist_request_body(content: &str) -> serde_json::Value {
-    serde_json::json!({
-        "description": "STS2 Mod Manager — bug report",
-        "public": false,
-        "files": {
-            "sts2-mod-manager-bug-report.md": { "content": content }
-        }
-    })
+/// Extract the view URL from the endpoint's JSON response. Pure helper so
+/// the contract is unit-testable without the network.
+fn parse_upload_response(body: &str) -> Result<String, String> {
+    let parsed: UploadResponse =
+        serde_json::from_str(body).map_err(|e| format!("Unexpected upload response: {}", e))?;
+    if parsed.url.trim().is_empty() {
+        return Err("Upload response had no URL".to_string());
+    }
+    Ok(parsed.url)
 }
 
-/// Create a secret gist with the bug report and return its URL. Uses the
-/// stored GitHub token; errors (so the frontend can fall back) when there's
-/// no token or the API rejects the request.
+/// Upload the bug report to the maintainer's ingest endpoint and return the
+/// view URL. Errors (so the frontend can fall back) when no endpoint is
+/// configured, the report is empty, or the request is rejected. Requires NO
+/// user token — the endpoint is the maintainer's, not the reporter's.
 #[tauri::command]
-pub async fn create_bug_report_gist(
-    content: String,
-    state: tauri::State<'_, AppState>,
-) -> Result<String, String> {
-    let token = {
-        let s = state.lock().map_err(|e| e.to_string())?;
-        s.github_token.clone()
-    };
-    let token = token
-        .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| "No GitHub token configured".to_string())?;
+pub async fn upload_bug_report(content: String) -> Result<String, String> {
+    let endpoint = BUG_REPORT_ENDPOINT
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+        .ok_or_else(|| "Bug report upload endpoint not configured".to_string())?;
 
     if content.trim().is_empty() {
         return Err("Empty report".to_string());
     }
 
-    let client = crate::sharing::build_client(&token);
-    let resp = client
-        .post("https://api.github.com/gists")
-        .json(&gist_request_body(&content))
-        .send()
-        .await
+    let client = reqwest::Client::builder()
+        .user_agent(concat!("sts2-mod-manager/", env!("CARGO_PKG_VERSION")))
+        .timeout(UPLOAD_TIMEOUT)
+        .connect_timeout(CONNECT_TIMEOUT)
+        .build()
         .map_err(|e| e.to_string())?;
 
+    let mut req = client
+        .post(endpoint)
+        .json(&serde_json::json!({ "report": content }));
+    if let Some(key) = BUG_REPORT_KEY.map(str::trim).filter(|k| !k.is_empty()) {
+        req = req.header("x-app-key", key);
+    }
+
+    let resp = req.send().await.map_err(|e| e.to_string())?;
     let status = resp.status();
     if !status.is_success() {
         let text = resp.text().await.unwrap_or_default();
-        // 403 here is usually "token lacks Gist permission" — surface it so
-        // the frontend logs it before falling back.
-        return Err(format!("Gist upload failed ({}): {}", status, text));
+        return Err(format!("Upload failed ({}): {}", status, text));
     }
 
-    let gist: GistResponse = resp.json().await.map_err(|e| e.to_string())?;
-    Ok(gist.html_url)
+    let body = resp.text().await.map_err(|e| e.to_string())?;
+    parse_upload_response(&body)
 }
 
 #[cfg(test)]
@@ -77,13 +90,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn gist_body_is_a_secret_single_file_gist() {
-        let body = gist_request_body("hello world");
-        assert_eq!(body["public"], serde_json::json!(false));
-        assert_eq!(
-            body["files"]["sts2-mod-manager-bug-report.md"]["content"],
-            serde_json::json!("hello world"),
-        );
-        assert!(body["description"].as_str().unwrap().contains("bug report"));
+    fn parse_upload_response_extracts_url() {
+        let url = parse_upload_response(r#"{"url":"https://reports.example.dev/r/abc123"}"#).unwrap();
+        assert_eq!(url, "https://reports.example.dev/r/abc123");
+    }
+
+    #[test]
+    fn parse_upload_response_rejects_missing_or_blank_url() {
+        assert!(parse_upload_response(r#"{"url":""}"#).is_err());
+        assert!(parse_upload_response(r#"{"nope":1}"#).is_err());
+        assert!(parse_upload_response("not json").is_err());
     }
 }

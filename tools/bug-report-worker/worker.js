@@ -1,0 +1,99 @@
+/**
+ * STS2 Mod Manager — bug-report ingest Worker.
+ *
+ * A tiny Cloudflare Worker that lets the app upload a (already-redacted)
+ * diagnostic report and get back a short view URL to drop into a GitHub
+ * issue — so the reporter needs NO token and nothing is truncated.
+ *
+ *   POST /            { "report": "<text>" }   ->  { "url": "<base>/r/<id>" }
+ *   GET  /r/<id>                                ->  the stored report (text/plain)
+ *
+ * Storage is a KV namespace (binding REPORTS) with a TTL. An optional
+ * shared key (secret APP_KEY) gates uploads: when set, the app must send a
+ * matching `x-app-key` header. Reports are stored verbatim — the app
+ * redacts paths/tokens/username before uploading.
+ *
+ * Deploy: see README.md in this folder.
+ */
+
+const MAX_BYTES = 512 * 1024; // 512 KB per report — plenty for logs.
+const TTL_SECONDS = 60 * 60 * 24 * 90; // keep reports 90 days.
+const ID_LENGTH = 16;
+
+function jsonResponse(obj, status = 200, extraHeaders = {}) {
+  return new Response(JSON.stringify(obj), {
+    status,
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      // The upload comes from the desktop app (not a browser), but allow
+      // CORS so a future in-browser caller works too.
+      'access-control-allow-origin': '*',
+      'access-control-allow-methods': 'POST, OPTIONS',
+      'access-control-allow-headers': 'content-type, x-app-key',
+      ...extraHeaders,
+    },
+  });
+}
+
+function newId() {
+  // 16 hex chars from a random UUID — unguessable enough for a non-listed
+  // report link (the report is already redacted regardless).
+  return crypto.randomUUID().replace(/-/g, '').slice(0, ID_LENGTH);
+}
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+
+    if (request.method === 'OPTIONS') {
+      return jsonResponse({}, 204);
+    }
+
+    // ── Retrieve a stored report ──────────────────────────────────
+    if (request.method === 'GET' && url.pathname.startsWith('/r/')) {
+      const id = url.pathname.slice('/r/'.length);
+      if (!id || !env.REPORTS) return new Response('Not found', { status: 404 });
+      const report = await env.REPORTS.get(`report:${id}`);
+      if (report === null) return new Response('Not found', { status: 404 });
+      return new Response(report, {
+        status: 200,
+        headers: {
+          'content-type': 'text/plain; charset=utf-8',
+          // Render inline rather than download.
+          'content-disposition': 'inline; filename="sts2-bug-report.txt"',
+        },
+      });
+    }
+
+    // ── Ingest a new report ───────────────────────────────────────
+    if (request.method === 'POST') {
+      if (!env.REPORTS) {
+        return jsonResponse({ error: 'storage not configured' }, 500);
+      }
+      // Optional shared-key gate.
+      if (env.APP_KEY && request.headers.get('x-app-key') !== env.APP_KEY) {
+        return jsonResponse({ error: 'unauthorized' }, 401);
+      }
+
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return jsonResponse({ error: 'invalid JSON' }, 400);
+      }
+      const report = typeof body?.report === 'string' ? body.report : '';
+      if (!report.trim()) {
+        return jsonResponse({ error: 'empty report' }, 400);
+      }
+      if (report.length > MAX_BYTES) {
+        return jsonResponse({ error: 'report too large' }, 413);
+      }
+
+      const id = newId();
+      await env.REPORTS.put(`report:${id}`, report, { expirationTtl: TTL_SECONDS });
+      return jsonResponse({ url: `${url.origin}/r/${id}` });
+    }
+
+    return jsonResponse({ error: 'method not allowed' }, 405);
+  },
+};

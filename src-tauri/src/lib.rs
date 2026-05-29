@@ -309,7 +309,7 @@ pub fn run() {
             profiles::import_profile_cmd,
             profiles::get_profile_drift,
             profiles::save_profile_drift,
-            bug_report::create_bug_report_gist,
+            bug_report::upload_bug_report,
             // Curator workflow
             updater::check_for_updates,
             updater::update_mod,

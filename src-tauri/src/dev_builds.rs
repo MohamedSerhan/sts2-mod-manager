@@ -78,6 +78,10 @@ fn parse_dev_builds(releases: Vec<GitHubRelease>) -> Vec<DevBuild> {
             let pr = parse_pr_from_tag(&r.tag_name)?;
             let title = r.name.clone().unwrap_or_else(|| r.tag_name.clone());
             let sha = parse_sha_from_title(&title).unwrap_or_default();
+            // Dev builds ship the NSIS `-setup.exe` on Windows (sub-project D
+            // drops the MSI target for dev builds), so the in-place swap targets
+            // `-setup.exe`. A `.msi`, if ever present, is shown as a download
+            // link via `platform_of` but is not auto-installed.
             let windows_installer_url = r
                 .assets
                 .iter()
@@ -116,7 +120,10 @@ pub async fn list_dev_builds(state: State<'_, AppState>) -> Result<Vec<DevBuild>
     };
     let releases = fetch_releases(REPO_OWNER, REPO_NAME, 1, 100, token.as_deref())
         .await
-        .map_err(|e| format!("Failed to list dev builds: {e}"))?;
+        .map_err(|e| {
+            log::warn!("list_dev_builds: failed to fetch releases: {e}");
+            format!("Failed to list dev builds: {e}")
+        })?;
     Ok(parse_dev_builds(releases))
 }
 
@@ -167,6 +174,8 @@ mod tests {
     fn filters_sorts_and_shapes() {
         let releases = vec![
             release("v1.6.1", "1.6.1", false, vec![asset("STS2_1.6.1_x64-setup.exe")]),
+            // dev-pr tag but NOT a prerelease — must be excluded by the prerelease filter.
+            release("dev-pr42", "dev-pr42", false, vec![]),
             release(
                 "dev-pr59",
                 "Dev build — PR #59 (g837f5ba)",
@@ -184,7 +193,7 @@ mod tests {
             ),
         ];
         let builds = parse_dev_builds(releases);
-        assert_eq!(builds.len(), 2, "release excluded, only dev-pr* kept");
+        assert_eq!(builds.len(), 2, "stable release + non-prerelease dev-pr tag both excluded");
         assert_eq!(builds[0].pr, 60, "newest PR first");
         assert_eq!(builds[1].pr, 59);
         assert_eq!(builds[1].sha, "837f5ba");

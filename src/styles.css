@@ -705,6 +705,8 @@ body {
      Card p-5 (20px). Overrides the utility padding so a long mod list
      scans as a compact list, not a stack of fat cards. */
   padding: 11px 14px;
+  /* Smooth the clickable-row hover + active-border changes. */
+  transition: background 0.13s ease, border-color 0.13s ease;
 }
 /* 4.4 — the whole row is a click target that opens Edit sources. */
 .gf-profile-library-row.is-clickable { cursor: pointer; }
@@ -1593,10 +1595,36 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  transition: filter 0.12s ease, transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
 }
 .gf-pill-github { background: oklch(0.30 0.04 280); color: var(--ink-mute); }
 .gf-pill-nexus { background: oklch(0.55 0.16 50 / 0.18); color: oklch(0.78 0.13 55); }
 .gf-pill-update { background: var(--gf-tint); color: var(--gf); border: 1px solid var(--gf-line); }
+/* The update pill is a button — make it read as clickable. */
+.gf-pill-update { cursor: pointer; }
+.gf-pill-update:hover:not(:disabled) {
+  background: oklch(0.78 0.13 80 / 0.30);
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+.gf-pill-update:active:not(:disabled) { transform: translateY(0); }
+.gf-pill-update:disabled { opacity: 0.55; cursor: not-allowed; }
+/* Source-badge links (GitHub / Nexus / custom) — clickable, so they lift +
+   brighten on hover and carry a focus ring for keyboard users. */
+.gf-source-link {
+  display: inline-flex;
+  border-radius: 4px;
+  transition: transform 0.12s ease, filter 0.12s ease;
+}
+.gf-source-link:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.14);
+}
+.gf-source-link:focus-visible {
+  outline: 2px solid var(--gf);
+  outline-offset: 2px;
+}
+.gf-source-link .gf-pill { cursor: pointer; }
 .gf-pill-active { background: var(--gf-tint); color: var(--gf); border: 1px solid var(--gf-line); }
 .gf-pill-ok { background: oklch(0.74 0.11 165 / 0.18); color: var(--ok); }
 .gf-pill-warn { background: oklch(0.78 0.16 60 / 0.18); color: oklch(0.86 0.13 75); border: 1px solid oklch(0.78 0.16 60 / 0.28); }

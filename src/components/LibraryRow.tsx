@@ -363,7 +363,7 @@ export function LibraryRow({
                   href={mod.github_url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex"
+                  className="gf-source-link"
                   title={t('mods.viewOnGitHub', { url: mod.github_url })}
                   onClick={(e) => e.stopPropagation()}
                 >
@@ -375,7 +375,7 @@ export function LibraryRow({
                   href={mod.nexus_url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex"
+                  className="gf-source-link"
                   title={t('mods.viewOnNexus', { url: mod.nexus_url })}
                   onClick={(e) => e.stopPropagation()}
                 >
@@ -387,7 +387,7 @@ export function LibraryRow({
                   href={mod.custom_url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex"
+                  className="gf-source-link"
                   title={t('mods.openLink', { url: mod.custom_url })}
                   onClick={(e) => e.stopPropagation()}
                 >

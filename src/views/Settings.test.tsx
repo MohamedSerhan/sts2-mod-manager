@@ -7,7 +7,7 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 
 import { SettingsView } from './Settings';
 import { AllProviders } from '../__test__/providers';
-import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
+import { getInvokeCalls, registerInvokeHandler, setMockAppVersion } from '../__test__/setup';
 
 function Wrap() {
   return (
@@ -2300,5 +2300,28 @@ describe('<SettingsView>', () => {
     const reAuditBtn = await screen.findByRole('button', { name: /^Re-audit$/ });
     // ghost variant maps to gf-btn-3 in Button.tsx
     expect(reAuditBtn.className).toMatch(/gf-btn-3/);
+  });
+
+  // ── Dev Builds gating ─────────────────────────────────────────────
+
+  it('shows the Dev Builds section on a dev build', async () => {
+    setMockAppVersion('1.6.1-dev.pr59.g837f5ba');
+    registerInvokeHandler('list_dev_builds', () => []);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: /Advanced/ }));
+    expect(await screen.findByText('Dev Builds')).toBeInTheDocument();
+  });
+
+  it('hides the Dev Builds section on a release build', async () => {
+    setMockAppVersion('1.6.1');
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: /Advanced/ }));
+    // Wait for the Advanced tab to settle (always-present element is visible).
+    await waitFor(() => expect(screen.getByText(/Check for updates/i)).toBeInTheDocument());
+    expect(screen.queryByText('Dev Builds')).not.toBeInTheDocument();
   });
 });

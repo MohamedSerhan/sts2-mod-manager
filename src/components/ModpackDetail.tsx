@@ -168,9 +168,12 @@ export function ModpackDetail({
   const toast = useToast();
   const confirm = useConfirm();
   // Shared mod-library surface (toolbar + install actions), scoped so a
-  // mod installed from here auto-joins THIS pack. The same hook powers the
-  // All Mods view, so the add affordances are identical.
-  const lib = useModLibrary({ targetPack: profile.name });
+  // mod installed from here auto-joins THIS pack, and the Audit action
+  // checks only this pack's mods. The same hook powers the All Mods view.
+  const lib = useModLibrary({
+    targetPack: profile.name,
+    auditScope: () => profile.mods.map((m) => m.name),
+  });
   // "Add from your Library" is collapsed by default to keep the focus on
   // the pack's own mods; the user expands it to browse the rest.
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -538,14 +541,17 @@ export function ModpackDetail({
           </p>
         ) : (
           // The pack's mods render with the SAME rich rows as the All Mods
-          // view (toggle / source badges / kebab / delete / inline source
-          // editor), filtered to just this pack's members and drag-
-          // reorderable. coupleActiveStorage makes removing a mod from the
-          // active pack also unload it from the game. reloadToken re-syncs
-          // the rows when membership changes from outside the table.
+          // view (toggle / source badges / kebab / inline source editor),
+          // filtered to just this pack's members. packScoped drops the
+          // redundant In-Modpack badge + sort, and turns each row's visible
+          // action into "Remove from pack". Reordering is the Load order
+          // modal (no inline drag — it doesn't work in the webview).
+          // coupleActiveStorage makes removing from the active pack also
+          // unload the mod. reloadToken re-syncs when membership changes
+          // from outside the table.
           <LibraryTable
             modpackName={profile.name}
-            enableReorder
+            packScoped
             coupleActiveStorage
             reloadToken={membershipSignature}
             filterRow={(row) =>

@@ -96,6 +96,8 @@
       "deleteAllFailed": "Couldn't delete the modpack's mods: {{error}}",
       "search": "Search mods…",
       "remove": "Remove",
+      "removeFromPackTitle": "Remove this mod from the modpack",
+      "removeFromPackAria": "Remove {{mod}} from this modpack",
       "add": "Add",
       "emptyInPack": "No mods in this modpack yet — add some from your library below.",
       "allInPack": "Every installed mod is already in this modpack.",
@@ -1303,7 +1305,7 @@
     "rollbackNoSource": "'{{name}}' has no GitHub source linked — rollback fetches from GitHub. Add a source via Edit sources… first.",
     "rollbackConfirmTitle": "Roll back '{{name}}'?",
     "rollbackConfirmBody": "This will delete the current on-disk install and recover a compatible GitHub release. If this install still has a usable version, rollback picks the closest lower release; if the version reads \"unknown\", it reinstalls the last known-good release. Use it when the newest release is broken. Make sure STS2 is closed.",
-    "rollbackConfirmWarning": "Rollback is a beta recovery feature. It preserves mod configs and resolves a compatible GitHub release before deleting files, but some mods package releases inconsistently, so check the result before launching a long run.",
+    "rollbackConfirmWarning": "Rollback preserves mod configs and resolves a compatible GitHub release before deleting files, but some mods package releases inconsistently, so check the result before launching a long run.",
     "rollbackNow": "Roll back now",
     "rollbackDesc": "Recover a compatible GitHub release. Uses the previous release when the current version is known, or the last known-good release when this install reads \"unknown\".",
     "rollbackNeedSource": "Link a GitHub source first via \"Edit sources...\" - rollback fetches from GitHub.",
@@ -1331,7 +1333,9 @@
       "addToModpack": "Add to \"{{pack}}\"",
       "addToModpackDesc": "Include this mod the next time you switch to {{pack}}.",
       "removeFromModpack": "Remove from \"{{pack}}\"",
-      "removeFromModpackDesc": "Drop this mod from {{pack}}'s manifest. The files stay installed."
+      "removeFromModpackDesc": "Drop this mod from {{pack}}'s manifest. The files stay installed.",
+      "deleteFromDisk": "Delete from disk",
+      "deleteFromDiskDesc": "Permanently delete this mod's files from your computer."
     },
     "membership": {
       "addTo": "Click to add to \"{{pack}}\"",

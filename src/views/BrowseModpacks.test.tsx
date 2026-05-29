@@ -56,13 +56,14 @@ describe('dedupeBrowserCards', () => {
 });
 
 describe('<BrowseModpacksView>', () => {
-  it('marks the modpack browser as beta', async () => {
+  it('renders the Browse Modpacks heading', async () => {
     registerInvokeHandler('fetch_modpack_browser_page', () => makePage({ cards: [] }));
 
     render(<Wrap />);
 
     expect(await screen.findByRole('heading', { name: 'Browse Modpacks' })).toBeInTheDocument();
-    expect(screen.getByText('Beta')).toBeInTheDocument();
+    // No "Beta" tag — those were removed app-wide.
+    expect(screen.queryByText('Beta')).toBeNull();
   });
 
   it('renders cards on success', async () => {

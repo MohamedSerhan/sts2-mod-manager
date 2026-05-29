@@ -901,6 +901,68 @@ describe('<LibraryTable modpackName={null}>', () => {
     expect(help?.textContent).not.toMatch(/Drag the handle to set load order/i);
   });
 
+  // ── packScoped (dedicated modpack view) ───────────────────────────
+  describe('packScoped', () => {
+    function seedInPack() {
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [
+          {
+            name: 'PackMod',
+            version: '1.0.0',
+            folder_name: 'PackMod',
+            mod_id: 'PackMod',
+            installed_enabled: true,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+          },
+        ],
+      }));
+      registerInvokeHandler('set_profile_mod_membership', () => baseProfile({ name: 'Stable' }));
+      return new Map([
+        ['PackMod', mkModInfo({ name: 'PackMod', folder_name: 'PackMod', mod_id: 'PackMod' })],
+      ]);
+    }
+
+    it('hides the sort control, store-unused, explainer, and In-Modpack badge', async () => {
+      const modInfoByKey = seedInPack();
+      const { container } = render(<Wrap modpackName="Stable" packScoped modInfoByKey={modInfoByKey} />);
+      await screen.findByText('PackMod');
+      expect(container.querySelector('.gf-sort-control')).toBeNull();
+      expect(container.querySelector('.gf-profile-library-help')).toBeNull();
+      expect(container.querySelector('.gf-row-inpack')).toBeNull();
+      // The visible row action is "Remove from pack", not the disk trash.
+      expect(container.querySelector('.gf-row-remove')).not.toBeNull();
+      expect(container.querySelector('.gf-row-delete')).toBeNull();
+    });
+
+    it('the visible Remove button removes the mod from the pack', async () => {
+      const modInfoByKey = seedInPack();
+      const user = userEvent.setup();
+      const { container } = render(<Wrap modpackName="Stable" packScoped modInfoByKey={modInfoByKey} />);
+      await screen.findByText('PackMod');
+      await user.click(container.querySelector('.gf-row-remove') as HTMLElement);
+      await waitFor(() => {
+        expect(getInvokeCalls().some(
+          (c) => c.cmd === 'set_profile_mod_membership' && c.args?.included === false,
+        )).toBe(true);
+      });
+    });
+
+    it('moves delete-from-disk into the kebab', async () => {
+      const modInfoByKey = seedInPack();
+      const user = userEvent.setup();
+      const onDelete = vi.fn();
+      render(<Wrap modpackName="Stable" packScoped modInfoByKey={modInfoByKey} onDelete={onDelete} />);
+      const row = (await screen.findByText('PackMod')).closest(
+        '[data-testid="library-row"]',
+      ) as HTMLElement;
+      await user.click(within(row).getByRole('button', { name: /mod actions/i }));
+      await user.click(screen.getByRole('menuitem', { name: /Delete from disk/i }));
+      expect(onDelete).toHaveBeenCalled();
+    });
+  });
+
   // ── coupleActiveStorage (modpack view: pack = live loadout) ───────
   describe('coupleActiveStorage', () => {
     function seedInPackActive() {

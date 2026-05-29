@@ -96,6 +96,8 @@
       "deleteAllFailed": "无法删除整合包的模组：{{error}}",
       "search": "搜索模组…",
       "remove": "移除",
+      "removeFromPackTitle": "从整合包中移除此模组",
+      "removeFromPackAria": "从此整合包移除 {{mod}}",
       "add": "添加",
       "emptyInPack": "此模组包中还没有模组——可从下方的模组库添加。",
       "allInPack": "所有已安装的模组都已加入此模组包。",
@@ -1303,7 +1305,7 @@
     "rollbackNoSource": "'{{name}}' 尚未关联 GitHub 来源 — 回滚需要从 GitHub 获取。请先通过「编辑来源…」添加来源。",
     "rollbackConfirmTitle": "回滚「{{name}}」？",
     "rollbackConfirmBody": "这会删除当前磁盘上的安装，并恢复到兼容的 GitHub 版本。如果当前安装有可用版本，会选择最接近的较旧版；如果版本显示为未知，则重新安装上一个已知良好版本。请先关闭 STS2。",
-    "rollbackConfirmWarning": "回滚是测试版恢复功能。它会保留模组配置并在删除文件前解析兼容的 GitHub 版本，但某些模组的发布包结构不一致，请在开始长时间游戏前检查结果。",
+    "rollbackConfirmWarning": "回滚会保留模组配置并在删除文件前解析兼容的 GitHub 版本，但某些模组的发布包结构不一致，请在开始长时间游戏前检查结果。",
     "rollbackNow": "立即回滚",
     "rollbackDesc": "恢复到兼容的 GitHub 版本。当前版本已知时使用上一个版本，如果安装显示未知，则使用上一个已知良好版本。",
     "rollbackNeedSource": "请先通过编辑来源关联 GitHub 来源 - 回滚需要从 GitHub 获取。",
@@ -1331,7 +1333,9 @@
       "addToModpack": "添加到「{{pack}}」",
       "addToModpackDesc": "下次切换到 {{pack}} 时将包含此模组。",
       "removeFromModpack": "从「{{pack}}」中移除",
-      "removeFromModpackDesc": "从 {{pack}} 的清单中移除此模组。文件仍保留在本地。"
+      "removeFromModpackDesc": "从 {{pack}} 的清单中移除此模组。文件仍保留在本地。",
+      "deleteFromDisk": "从磁盘删除",
+      "deleteFromDiskDesc": "从你的电脑中永久删除此模组的文件。"
     },
     "membership": {
       "addTo": "点击添加到「{{pack}}」",

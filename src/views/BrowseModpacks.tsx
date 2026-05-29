@@ -4,7 +4,6 @@ import { RefreshCw, Search, Plus } from 'lucide-react';
 
 import { fetchModpackBrowserPage } from '../hooks/useTauri';
 import { withTimeout } from '../lib/withTimeout';
-import { Badge } from '../components/Badge';
 import { BrowseModpackDetail } from '../components/BrowseModpackDetail';
 import type { BrowserCard, BrowserPage } from '../types';
 
@@ -98,7 +97,6 @@ export function BrowseModpacksView({ onGoToProfiles }: Props = {}) {
       <div className="gf-view-head">
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
           <h2 className="gf-view-title">{t('browseModpacks.title')}</h2>
-          <Badge variant="beta" title={t('browseModpacks.betaTitle')}>{t('common.beta')}</Badge>
         </div>
         <button
           className="gf-btn-3"

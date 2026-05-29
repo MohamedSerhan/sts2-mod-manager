@@ -118,6 +118,12 @@ export interface LibraryRowProps {
    *  nothing to reorder across all-installed-mods), so the handle/chip
    *  never render there even though rows can be "in pack". */
   enableReorder?: boolean;
+  /** Dedicated modpack view (the page that shows ONLY this pack's mods).
+   *  When true: the redundant In-Modpack indicator is hidden (every row
+   *  is in the pack), the visible row action is "Remove from pack" instead
+   *  of the disk-delete trash, and the kebab gains a "Delete from disk"
+   *  item. The All Mods view leaves this false. */
+  packScoped?: boolean;
   /** Drag highlight target. */
   isDragOver: boolean;
   /** True while a setProfileLoadOrder commit is in flight. Disables
@@ -193,6 +199,7 @@ export function LibraryRow({
   inPack,
   inPackIndex,
   enableReorder = false,
+  packScoped = false,
   isDragOver,
   loadOrderSaving,
   membershipSaving,
@@ -344,16 +351,125 @@ export function LibraryRow({
             {row.display_name && (
               <span className="gf-profile-library-rawname">{row.name}</span>
             )}
-            {/* 4.2 — tags sit to the right of the mod name. */}
-            {mod?.tags && mod.tags.length > 0 && (
-              <span className="gf-row-tags">
-                {mod.tags.slice(0, 5).map((tag) => (
-                  <span key={tag} className="gf-row-tag">
-                    {tag}
-                  </span>
-                ))}
-              </span>
-            )}
+            {/* Tags, source badges and audit pills all cluster to the
+                right of the name — there's more room here than mid-row, so
+                they read as one group instead of scattered bits. */}
+            <span className="gf-row-tagcluster">
+              {mod?.tags?.slice(0, 5).map((tag) => (
+                <span key={tag} className="gf-row-tag">{tag}</span>
+              ))}
+              {mod?.github_url && (
+                <a
+                  href={mod.github_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex"
+                  title={t('mods.viewOnGitHub', { url: mod.github_url })}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Badge variant="github"><GitBranch size={10} className="mr-1" />{t('mods.gitHub')}</Badge>
+                </a>
+              )}
+              {mod?.nexus_url && (
+                <a
+                  href={mod.nexus_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex"
+                  title={t('mods.viewOnNexus', { url: mod.nexus_url })}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Badge variant="nexus">{t('mods.nexus')}</Badge>
+                </a>
+              )}
+              {mod?.custom_url && (
+                <a
+                  href={mod.custom_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex"
+                  title={t('mods.openLink', { url: mod.custom_url })}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Badge variant="default"><ExternalLink size={10} className="mr-1" />{t('mods.link')}</Badge>
+                </a>
+              )}
+              {mod && !mod.github_url && !mod.nexus_url && !mod.custom_url && (
+                <Badge variant={mod.source ? 'local' : 'default'}>
+                  {mod.source ? t('mods.local') : t('mods.unlinked')}
+                </Badge>
+              )}
+              {/* Audit pills — one at a time. Update fires onUpdate; the
+                  rest are informational. */}
+              {audit && isUpToDate(audit) && !showUpdatePill && !showBlockedPill && !showFrozenPill && !showSnoozedPill && (
+                <span className="gf-pill gf-pill-ok" title={t('mods.latestTitle')}>
+                  <Check size={9} /> {t('mods.latest')}
+                </span>
+              )}
+              {showUpdatePill && (
+                <button
+                  type="button"
+                  className="gf-pill gf-pill-update"
+                  onClick={(e) => { e.stopPropagation(); onUpdate(); }}
+                  disabled={gameRunning || isUpdating || anyUpdating}
+                  title={
+                    gameRunning
+                      ? t('mods.closeSts2FirstDot')
+                      : t('mods.updateClickTitle', {
+                          current: mod!.version,
+                          target: compatibleTag?.replace(/^v/, ''),
+                        })
+                  }
+                >
+                  {isUpdating ? (
+                    <><RefreshCw size={9} className="animate-spin" />{t('mods.updating')}</>
+                  ) : (
+                    <><Download size={9} />{t('mods.updateAvailable', { version: compatibleTag?.replace(/^v/, '') })}</>
+                  )}
+                </button>
+              )}
+              {showBlockedPill && (
+                <span
+                  className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300"
+                  title={t('mods.gameVersionBlockedTitle', { target: audit!.latest_release_with_assets_tag?.replace(/^v/, '') ?? '?' })}
+                >
+                  <AlertTriangle size={9} /> {t('mods.updateBlockedByGameVersion')}
+                </span>
+              )}
+              {showFrozenPill && (
+                <span
+                  className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300"
+                  title={t('mods.pinnedTitle')}
+                >
+                  <Snowflake size={9} /> {t('mods.pinned')}
+                </span>
+              )}
+              {showSnoozedPill && (
+                <span
+                  className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-500/20 text-slate-300"
+                  title={t('mods.snoozedTitle', { version: audit!.latest_release_with_assets_tag?.replace(/^v/, '') ?? '?' })}
+                >
+                  {t('mods.snoozed')}
+                </span>
+              )}
+              {auditError && (
+                <span
+                  className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-red-500/20 text-red-300"
+                  title={auditError}
+                >
+                  <AlertTriangle size={9} /> {t('mods.auditError')}
+                </span>
+              )}
+              {minGameViolated && (
+                <span
+                  className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded"
+                  style={{ background: 'oklch(0.78 0.16 60 / 0.18)', color: 'oklch(0.85 0.16 60)' }}
+                  title={t('mods.minGameVersionTitle', { minVer: mod!.min_game_version, yourVer: gameVersion ?? 'unknown' })}
+                >
+                  <AlertTriangle size={9} /> {t('mods.needsGameVersion', { version: mod!.min_game_version })}
+                </span>
+              )}
+            </span>
           </div>
           <div className="gf-profile-library-meta">
             {/* 4.5 — version is v-prefixed and the on-disk folder carries
@@ -375,97 +491,6 @@ export function LibraryRow({
             {reorderable && (
               <span className="gf-load-order-rank-inline">
                 #{inPackIndex + 1}
-              </span>
-            )}
-            {/* Audit pills — one at a time. The update pill fires
-                onUpdate (per-row install); blocked / frozen / snoozed
-                are informational. */}
-            {audit && isUpToDate(audit) && !showUpdatePill && !showBlockedPill && !showFrozenPill && !showSnoozedPill && (
-              <span className="gf-pill gf-pill-ok" title={t('mods.latestTitle')}>
-                <Check size={9} /> {t('mods.latest')}
-              </span>
-            )}
-            {showUpdatePill && (
-              <button
-                type="button"
-                className="gf-pill gf-pill-update"
-                onClick={onUpdate}
-                disabled={gameRunning || isUpdating || anyUpdating}
-                title={
-                  gameRunning
-                    ? t('mods.closeSts2FirstDot')
-                    : t('mods.updateClickTitle', {
-                        current: mod!.version,
-                        target: compatibleTag?.replace(/^v/, ''),
-                      })
-                }
-              >
-                {isUpdating ? (
-                  <>
-                    <RefreshCw size={9} className="animate-spin" />
-                    {t('mods.updating')}
-                  </>
-                ) : (
-                  <>
-                    <Download size={9} />
-                    {t('mods.updateAvailable', {
-                      version: compatibleTag?.replace(/^v/, ''),
-                    })}
-                  </>
-                )}
-              </button>
-            )}
-            {showBlockedPill && (
-              <span
-                className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300"
-                title={t('mods.gameVersionBlockedTitle', {
-                  target:
-                    audit!.latest_release_with_assets_tag?.replace(/^v/, '') ?? '?',
-                })}
-              >
-                <AlertTriangle size={9} /> {t('mods.updateBlockedByGameVersion')}
-              </span>
-            )}
-            {showFrozenPill && (
-              <span
-                className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300"
-                title={t('mods.pinnedTitle')}
-              >
-                <Snowflake size={9} /> {t('mods.pinned')}
-              </span>
-            )}
-            {showSnoozedPill && (
-              <span
-                className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-500/20 text-slate-300"
-                title={t('mods.snoozedTitle', {
-                  version:
-                    audit!.latest_release_with_assets_tag?.replace(/^v/, '') ?? '?',
-                })}
-              >
-                {t('mods.snoozed')}
-              </span>
-            )}
-            {auditError && (
-              <span
-                className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-red-500/20 text-red-300"
-                title={auditError}
-              >
-                <AlertTriangle size={9} /> {t('mods.auditError')}
-              </span>
-            )}
-            {minGameViolated && (
-              <span
-                className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded"
-                style={{
-                  background: 'oklch(0.78 0.16 60 / 0.18)',
-                  color: 'oklch(0.85 0.16 60)',
-                }}
-                title={t('mods.minGameVersionTitle', {
-                  minVer: mod!.min_game_version,
-                  yourVer: gameVersion ?? 'unknown',
-                })}
-              >
-                <AlertTriangle size={9} /> {t('mods.needsGameVersion', { version: mod!.min_game_version })}
               </span>
             )}
           </div>
@@ -491,66 +516,11 @@ export function LibraryRow({
           )}
         </div>
         <div className="gf-profile-library-row-actions">
-          {/* Source pills + tags. Only rendered when we have a ModInfo
-              to read from. When the mod has no link at all, we surface
-              an "Unlinked" / "Local" badge so the user can tell the row
-              apart from linked mods (this matches the old ModRow drawer
-              behavior). */}
-          {mod && (
-            <div className="gf-modrow-drawer-sources">
-              {mod.github_url && (
-                <a
-                  href={mod.github_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex"
-                  title={t('mods.viewOnGitHub', { url: mod.github_url })}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <Badge variant="github">
-                    <GitBranch size={10} className="mr-1" />
-                    {t('mods.gitHub')}
-                  </Badge>
-                </a>
-              )}
-              {mod.nexus_url && (
-                <a
-                  href={mod.nexus_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex"
-                  title={t('mods.viewOnNexus', { url: mod.nexus_url })}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <Badge variant="nexus">{t('mods.nexus')}</Badge>
-                </a>
-              )}
-              {mod.custom_url && (
-                <a
-                  href={mod.custom_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex"
-                  title={t('mods.openLink', { url: mod.custom_url })}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <Badge variant="default">
-                    <ExternalLink size={10} className="mr-1" />
-                    {t('mods.link')}
-                  </Badge>
-                </a>
-              )}
-              {!mod.github_url && !mod.nexus_url && !mod.custom_url && (
-                <Badge variant={mod.source ? 'local' : 'default'}>
-                  {mod.source ? t('mods.local') : t('mods.unlinked')}
-                </Badge>
-              )}
-            </div>
-          )}
-          {/* 4.6 — static In-pack / Not-in-pack indicator. Membership is
-              changed from the kebab (Add to / Remove from modpack); this
-              is read-only status, not a control. */}
-          {modpackName != null && (
+          {/* In-pack / not-in-pack indicator — only in the All Mods view,
+              where membership against the active pack is informative. In the
+              dedicated modpack view every row is already in the pack, so it
+              would be redundant and is hidden. */}
+          {modpackName != null && !packScoped && (
             state ? (
               <span
                 className={`gf-row-inpack${state.included ? ' is-in' : ''}`}
@@ -576,30 +546,52 @@ export function LibraryRow({
               </span>
             )
           )}
-          {/* Delete is a frequent action, so it's a visible trash button
-              just left of the kebab rather than buried inside it.
-              stopPropagation so it doesn't also open the row's editor;
-              the parent's handler shows a confirm before deleting. */}
-          {mod && onDelete !== noop && (
+          {/* Primary visible row action. Modpack view → "Remove from pack"
+              (membership remove; on the active pack it also unloads the mod).
+              All Mods view → the disk-delete trash. Delete-from-disk for the
+              modpack view lives in the kebab. */}
+          {mod && packScoped ? (
             <button
               type="button"
-              className="gf-row-delete"
+              className="gf-row-remove"
               onClick={(event) => {
                 event.stopPropagation();
-                onDelete();
+                onToggleMembership(row);
               }}
-              disabled={gameRunning}
-              title={gameRunning ? t('mods.closeSts2FirstDot') : t('mods.removeMod')}
-              aria-label={t('mods.removeModNamed', { mod: displayName })}
+              disabled={saving || (!!state && !state.editable)}
+              title={t('modpack.detail.removeFromPackTitle')}
+              aria-label={t('modpack.detail.removeFromPackAria', { mod: displayName })}
             >
-              <Trash2 size={14} />
+              {saving ? (
+                <RefreshCw size={13} className="animate-spin" />
+              ) : (
+                <X size={13} />
+              )}
+              {t('modpack.detail.remove')}
             </button>
+          ) : (
+            mod && onDelete !== noop && (
+              <button
+                type="button"
+                className="gf-row-delete"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDelete();
+                }}
+                disabled={gameRunning}
+                title={gameRunning ? t('mods.closeSts2FirstDot') : t('mods.removeMod')}
+                aria-label={t('mods.removeModNamed', { mod: displayName })}
+              >
+                <Trash2 size={14} />
+              </button>
+            )
           )}
           {mod && <LibraryRowKebab
             mod={mod}
             audit={audit}
             modpackName={modpackName}
             state={state}
+            packScoped={packScoped}
             isUpdating={isUpdating}
             isRepairing={isRepairing}
             isRollingBack={isRollingBack}
@@ -616,6 +608,7 @@ export function LibraryRow({
             onFindGithubFromNexus={onFindGithubFromNexus}
             onRepair={onRepair}
             onRollback={onRollback}
+            onDelete={onDelete}
             onOpenExternalUrl={onOpenExternalUrl}
           />}
         </div>
@@ -648,6 +641,10 @@ interface LibraryRowKebabProps {
   audit: ModAuditEntry | undefined;
   modpackName: string | null;
   state: ProfileMembershipState | undefined;
+  /** Dedicated modpack view: the membership toggle moves to the visible
+   *  "Remove from pack" button, and the kebab instead offers
+   *  "Delete from disk". */
+  packScoped: boolean;
   isUpdating: boolean;
   isRepairing: boolean;
   isRollingBack: boolean;
@@ -664,6 +661,7 @@ interface LibraryRowKebabProps {
   onFindGithubFromNexus: () => void;
   onRepair: () => void;
   onRollback: () => void;
+  onDelete: () => void;
   onOpenExternalUrl: (url: string) => void;
 }
 
@@ -674,6 +672,7 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
     audit,
     modpackName,
     state,
+    packScoped,
     isUpdating,
     isRepairing,
     isRollingBack,
@@ -690,6 +689,7 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
     onFindGithubFromNexus,
     onRepair,
     onRollback,
+    onDelete,
     onOpenExternalUrl,
   } = props;
 
@@ -707,7 +707,9 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
     <div onClick={(e) => e.stopPropagation()}>
       <KebabMenu title={t('mods.modActions')}>
         <KebabSection>
-          {modpackName && membershipChip && (
+          {/* Membership toggle — only in the All Mods view. In the modpack
+              view the visible "Remove from pack" button covers it. */}
+          {!packScoped && modpackName && membershipChip && (
             <KebabItem
               icon={
                 membershipChip === 'notIn' ? (
@@ -831,18 +833,29 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
               mod.github_url ? t('mods.rollbackDesc') : t('mods.rollbackNeedSource')
             }
           >
-            {isRollingBack ? (
-              t('mods.rollingBack')
-            ) : (
-              <span className="inline-flex items-center gap-1">
-                {t('mods.rollBackOneVersion')}
-                <Badge variant="beta" ariaHidden>
-                  {t('common.beta')}
-                </Badge>
-              </span>
-            )}
+            {isRollingBack ? t('mods.rollingBack') : t('mods.rollBackOneVersion')}
           </KebabItem>
         </KebabSection>
+        {/* In the modpack view, deleting the mod from disk lives here (the
+            visible row button is "Remove from pack"). In All Mods the
+            visible trash handles disk-delete, so this stays out of the
+            kebab there. */}
+        {packScoped && (
+          <>
+            <KebabDivider />
+            <KebabSection>
+              <KebabItem
+                danger
+                icon={<Trash2 size={12} />}
+                onClick={onDelete}
+                disabled={gameRunning}
+                description={t('mods.kebab.deleteFromDiskDesc')}
+              >
+                {t('mods.kebab.deleteFromDisk')}
+              </KebabItem>
+            </KebabSection>
+          </>
+        )}
       </KebabMenu>
     </div>
   );

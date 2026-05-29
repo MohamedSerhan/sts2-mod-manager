@@ -23,7 +23,6 @@ import {
   Upload,
 } from 'lucide-react';
 
-import { Badge } from './Badge';
 import { Button } from './Button';
 import { countGithubUpdates } from '../lib/auditState';
 import type { ModLibrary } from '../hooks/useModLibrary';
@@ -95,7 +94,6 @@ export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
             <Button variant="secondary" size="sm" onClick={handleCheckUpdates} title={t('mods.checkForUpdates')}>
               <ClipboardCheck size={14} />
               {t('mods.audit.run')}
-              <Badge variant="beta" ariaHidden>{t('common.beta')}</Badge>
             </Button>
           );
         }
@@ -106,8 +104,8 @@ export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
               <span className="gf-pill gf-pill-ok gf-pill-toolbar" title={t('mods.allUpToDate')}>
                 {t('mods.audit.upToDate')}
               </span>
-              <Button variant="ghost" size="sm" onClick={handleCheckUpdates} title={t('mods.reaudit')} aria-label={t('mods.reaudit')}>
-                <RefreshCw size={14} />
+              <Button variant="ghost" size="sm" onClick={handleCheckUpdates} title={t('mods.reaudit')}>
+                <RefreshCw size={14} /> {t('mods.reaudit')}
               </Button>
             </>
           );
@@ -119,8 +117,8 @@ export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
               <Download size={14} />
               {t('mods.updateAllLabel', { count: ghUpdateCount })}
             </Button>
-            <Button variant="ghost" size="sm" onClick={handleCheckUpdates} title={t('mods.reaudit')} aria-label={t('mods.reaudit')}>
-              <RefreshCw size={14} />
+            <Button variant="ghost" size="sm" onClick={handleCheckUpdates} title={t('mods.reaudit')}>
+              <RefreshCw size={14} /> {t('mods.reaudit')}
             </Button>
           </>
         );

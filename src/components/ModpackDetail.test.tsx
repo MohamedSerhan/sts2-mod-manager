@@ -195,6 +195,28 @@ describe('<ModpackDetail>', () => {
     expect(screen.getByRole('button', { name: /Refresh/i })).toBeInTheDocument();
   });
 
+  it('the Audit action checks ONLY this pack\'s mods (scoped audit)', async () => {
+    const profile = setupPack({
+      inPack: [
+        modInfo({ name: 'PackA', folder_name: 'PackA' }),
+        modInfo({ name: 'PackB', folder_name: 'PackB' }),
+      ],
+      available: [modInfo({ name: 'OutsiderMod', folder_name: 'OutsiderMod' })],
+    });
+    registerInvokeHandler('audit_mod_versions', () => []);
+    const user = userEvent.setup();
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+    await screen.findByRole('heading', { level: 2, name: 'Sample' });
+    await user.click(screen.getByRole('button', { name: /Audit mods/i }));
+
+    await waitFor(() => {
+      const call = getInvokeCalls().find((c) => c.cmd === 'audit_mod_versions');
+      expect(call).toBeDefined();
+      // Scoped to the pack's two mods, not the outsider.
+      expect((call?.args?.only as string[]).sort()).toEqual(['PackA', 'PackB']);
+    });
+  });
+
   // ── Two-section layout ────────────────────────────────────────────
   it('Section 1 lists the pack mods and Section 2 lists installed mods not in the pack', async () => {
     const profile = setupPack({
@@ -229,20 +251,38 @@ describe('<ModpackDetail>', () => {
     expect(within(inPack).getByRole('switch')).toBeInTheDocument();
   });
 
-  it('the in-pack rows support drag-reorder (load-order handle present)', async () => {
+  it('the in-pack rows have no inline drag handle (reorder is the Load order modal)', async () => {
     const profile = setupPack({
       inPack: [
         modInfo({ name: 'First', folder_name: 'First' }),
         modInfo({ name: 'Second', folder_name: 'Second' }),
       ],
     });
+    const { container } = render(<Wrap profile={profile} onBack={vi.fn()} onOpenLoadOrder={vi.fn()} />);
+    const inPack = await screen.findByTestId('modpack-detail-in-pack');
+    // The HTML5 drag handle was removed — it never worked in the webview.
+    // Reordering is the Load order modal.
+    await waitFor(() => {
+      expect(within(inPack).getAllByRole('switch').length).toBeGreaterThan(0);
+    });
+    expect(container.querySelector('.gf-load-order-drag')).toBeNull();
+    expect(within(inPack).getByRole('button', { name: /Load order/i })).toBeInTheDocument();
+  });
+
+  it('the modpack rows drop the redundant In-Modpack badge and show a Remove action', async () => {
+    const profile = setupPack({
+      inPack: [modInfo({ name: 'PackMod', folder_name: 'PackMod' })],
+    });
     const { container } = render(<Wrap profile={profile} onBack={vi.fn()} />);
     await screen.findByTestId('modpack-detail-in-pack');
-    // enableReorder is on for the modpack view, so the drag handle renders
-    // (it stays hidden in the All Mods list).
+    // Visible "Remove from pack" button on the row…
     await waitFor(() => {
-      expect(container.querySelector('.gf-load-order-drag')).not.toBeNull();
+      expect(container.querySelector('.gf-row-remove')).not.toBeNull();
     });
+    // …and no "In Modpack" indicator (redundant here) and no disk-delete
+    // trash on the row (that moved into the kebab).
+    expect(container.querySelector('.gf-row-inpack')).toBeNull();
+    expect(container.querySelector('.gf-row-delete')).toBeNull();
   });
 
   it('the Add-from-library section is collapsed by default and expands on click', async () => {

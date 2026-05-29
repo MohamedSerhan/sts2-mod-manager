@@ -105,6 +105,11 @@ export interface LibraryTableProps {
    *  your active pack actually unloads it. All Mods leaves it off (default),
    *  keeping membership and on-disk state independent there. */
   coupleActiveStorage?: boolean;
+  /** Dedicated modpack view (shows only this pack's mods). Hides the sort
+   *  control + the "store unused" bulk action + the checkbox/drag explainer
+   *  (all redundant or wrong there), and switches each row's visible action
+   *  to "Remove from pack". */
+  packScoped?: boolean;
   /** External re-fetch trigger. When this value changes, the focused-mode
    *  membership grid is re-pulled. Lets a parent that mutates membership
    *  outside this table (e.g. the modpack view's "Add from your Library"
@@ -181,6 +186,7 @@ export function LibraryTable({
   pageSize = DEFAULT_PAGE_SIZE,
   enableReorder = false,
   coupleActiveStorage = false,
+  packScoped = false,
   reloadToken,
   filterRow,
   modInfoByKey,
@@ -707,77 +713,80 @@ export function LibraryTable({
             aria-label={t('profiles.library.searchLabel')}
           />
         </label>
-        <div className="gf-profile-library-toolbar-actions">
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={
-              unusedActiveRows.length === 0
-              || storageSaving !== null
-              || membershipSaving !== null
-            }
-            onClick={handleStoreUnused}
-            aria-label={
-              unusedActiveRows.length === 0
+        {/* The bulk "store unused" action + the sort control are hidden in
+            the dedicated modpack view: every row is already in the pack
+            (nothing "unused" to store) and the list always shows load
+            order (sorting would fight it). */}
+        {!packScoped && (
+          <div className="gf-profile-library-toolbar-actions">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={
+                unusedActiveRows.length === 0
+                || storageSaving !== null
+                || membershipSaving !== null
+              }
+              onClick={handleStoreUnused}
+              aria-label={
+                unusedActiveRows.length === 0
+                  ? t('profiles.library.bulkStoreNone')
+                  : t('profiles.library.bulkStoreUnused', {
+                      count: unusedActiveRows.length,
+                    })
+              }
+            >
+              {storageSaving === BULK_STORAGE_KEY ? (
+                <RefreshCw size={13} className="animate-spin" />
+              ) : (
+                <Download size={13} />
+              )}
+              {unusedActiveRows.length === 0
                 ? t('profiles.library.bulkStoreNone')
                 : t('profiles.library.bulkStoreUnused', {
                     count: unusedActiveRows.length,
-                  })
-            }
-          >
-            {storageSaving === BULK_STORAGE_KEY ? (
-              <RefreshCw size={13} className="animate-spin" />
-            ) : (
-              <Download size={13} />
-            )}
-            {unusedActiveRows.length === 0
-              ? t('profiles.library.bulkStoreNone')
-              : t('profiles.library.bulkStoreUnused', {
-                  count: unusedActiveRows.length,
-                })}
-          </Button>
-          <label className="gf-sort-control gf-profile-library-sort">
-            <span>{t('profiles.library.sort.label')}</span>
-            <select
-              value={sort}
-              onChange={(event) =>
-                setSort(event.target.value as LibrarySortMode)
-              }
-              aria-label={t('profiles.library.sort.label')}
-            >
-              {/* "In this modpack first" only makes sense when a modpack
-                  is focused. In the no-focus Library view, this option
-                  is hidden so the user doesn't see a sort option that
-                  has no effect. */}
-              {modpackName != null && (
-                <option value="inPackFirst">
-                  {t('profiles.library.sort.inPackFirst')}
+                  })}
+            </Button>
+            <label className="gf-sort-control gf-profile-library-sort">
+              <span>{t('profiles.library.sort.label')}</span>
+              <select
+                value={sort}
+                onChange={(event) =>
+                  setSort(event.target.value as LibrarySortMode)
+                }
+                aria-label={t('profiles.library.sort.label')}
+              >
+                {/* "In this modpack first" only makes sense when a modpack
+                    is focused. In the no-focus Library view, this option
+                    is hidden so the user doesn't see a sort option that
+                    has no effect. */}
+                {modpackName != null && (
+                  <option value="inPackFirst">
+                    {t('profiles.library.sort.inPackFirst')}
+                  </option>
+                )}
+                <option value="nameAsc">{t('profiles.library.sort.nameAsc')}</option>
+                <option value="nameDesc">{t('profiles.library.sort.nameDesc')}</option>
+                <option value="activeFirst">
+                  {t('profiles.library.sort.activeFirst')}
                 </option>
-              )}
-              <option value="nameAsc">{t('profiles.library.sort.nameAsc')}</option>
-              <option value="nameDesc">{t('profiles.library.sort.nameDesc')}</option>
-              <option value="activeFirst">
-                {t('profiles.library.sort.activeFirst')}
-              </option>
-              <option value="storedFirst">
-                {t('profiles.library.sort.storedFirst')}
-              </option>
-            </select>
-          </label>
+                <option value="storedFirst">
+                  {t('profiles.library.sort.storedFirst')}
+                </option>
+              </select>
+            </label>
+          </div>
+        )}
+      </div>
+      {/* The checkbox/drag explainer only applies to the All Mods view. The
+          modpack view carries its own "listed in load order" note. */}
+      {!packScoped && (
+        <div className="gf-profile-library-help">
+          {enableReorder
+            ? t('profiles.library.explainerModpack')
+            : t('profiles.library.explainerLibrary')}
         </div>
-      </div>
-      <div className="gf-profile-library-help">
-        {/* The explainer is context-driven. In ModpackDetail
-            (enableReorder) it teaches the checkbox + drag-to-order +
-            that switching the pack is what loads mods. In the Library
-            view it explains the all-installed list + that the checkbox
-            quick-adds to the active modpack. Neither teaches the old
-            active/stored concept — that's derived from the active pack
-            now, not a per-row toggle. */}
-        {enableReorder
-          ? t('profiles.library.explainerModpack')
-          : t('profiles.library.explainerLibrary')}
-      </div>
+      )}
       {filteredRows.length === 0 ? (
         <div className="gf-empty">
           <div className="gf-empty-title">
@@ -813,6 +822,7 @@ export function LibraryTable({
               inPack={inPack}
               inPackIndex={inPackIndex}
               enableReorder={enableReorder}
+              packScoped={packScoped}
               isDragOver={dragOverIndex === inPackIndex && inPack}
               loadOrderSaving={loadOrderSaving}
               membershipSaving={membershipSaving}

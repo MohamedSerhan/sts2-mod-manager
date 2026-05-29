@@ -31,6 +31,10 @@
 
 /* v5 raw tokens — used by the .gf-* utility classes below */
 :root {
+  /* Render every native control (select popups, scrollbars, date pickers)
+     in dark mode so OS-drawn widgets like <select> option lists aren't a
+     light popup with near-invisible text. */
+  color-scheme: dark;
   --gf:        oklch(0.78 0.13 80);
   --gf-hov:    oklch(0.83 0.13 80);
   --gf-ink:    oklch(0.18 0.04 285);
@@ -750,13 +754,13 @@ body {
 .gf-profile-library-titlerow {
   display: flex;
   align-items: center;
-  /* Keep the tags on the same line, to the RIGHT of the name (4.2). The
-     name truncates instead of pushing tags onto a second row. */
-  flex-wrap: nowrap;
+  /* Tags + source badges + audit pills cluster to the RIGHT of the name.
+     The whole row wraps when there's a lot, rather than overflowing. */
+  flex-wrap: wrap;
   gap: 8px;
   min-width: 0;
 }
-/* Title shrinks (and ellipsizes) so the tag chips stay beside it. */
+/* Title shrinks (and ellipsizes) so the tag/badge cluster stays beside it. */
 .gf-profile-library-titlerow .gf-profile-library-title {
   flex: 0 1 auto;
   min-width: 2.5em;
@@ -766,6 +770,14 @@ body {
   font-weight: 400;
   color: var(--ink-dim);
   flex: 0 0 auto;
+}
+/* The cluster of tags + source badges + audit pills, right of the name. */
+.gf-row-tagcluster {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 .gf-row-tags { flex: 0 0 auto; }
 /* 4.2 — tag chips to the right of the mod name. */
@@ -835,6 +847,32 @@ body {
   background: oklch(0.65 0.18 25 / 0.12);
 }
 .gf-row-delete:disabled { opacity: 0.4; cursor: not-allowed; }
+/* Modpack view: the visible row action is "Remove from pack" (membership,
+   not disk-delete). A labeled button, quiet until hover. */
+.gf-row-remove {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 11px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid var(--indigo-line);
+  background: transparent;
+  color: var(--ink-mute);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.gf-row-remove:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: oklch(0.65 0.18 25 / 0.5);
+  background: oklch(0.65 0.18 25 / 0.12);
+}
+.gf-row-remove:disabled { opacity: 0.4; cursor: not-allowed; }
 .gf-profile-library-title {
   font-size: 13.5px;
   font-weight: 700;
@@ -2888,6 +2926,12 @@ body {
    readable <option> text instead of the OS default (light popup + faint
    text) — same reason .gf-sort-control select sets this. */
 .gf-set-input { color-scheme: dark; }
+/* Belt-and-suspenders for browsers that honor option styling: dark popup
+   rows with readable text (matches .gf-sort-control select option). */
+.gf-set-input option {
+  background-color: var(--indigo-panel);
+  color: var(--ink);
+}
 .gf-help { font-size: 11.5px; margin-top: 6px; display: flex; align-items: center; gap: 6px; }
 .gf-help.ok { color: var(--ok); }
 .gf-help.err { color: oklch(0.82 0.16 25); }

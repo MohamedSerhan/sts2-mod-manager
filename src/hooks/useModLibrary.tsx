@@ -91,10 +91,14 @@ export interface UseModLibraryOptions {
   /** When set, installs (Quick add URL / Import) add the new mod to this
    *  pack's membership immediately. Unset = All Mods (install to disk only). */
   targetPack?: string | null;
+  /** When set, the Audit action checks ONLY these mods (the modpack view
+   *  audits just its pack). Unset = audit everything (All Mods view).
+   *  A function so callers can read the latest pack contents at click time. */
+  auditScope?: () => string[];
 }
 
 export function useModLibrary(opts: UseModLibraryOptions = {}) {
-  const { targetPack } = opts;
+  const { targetPack, auditScope } = opts;
   const { t } = useTranslation();
   const {
     mods,
@@ -407,7 +411,8 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
   }
 
   async function handleCheckUpdates() {
-    await runAudit();
+    // Scope to the pack's mods in the modpack view; full audit otherwise.
+    await runAudit(auditScope ? auditScope() : undefined);
   }
 
   /** Inline Quick-add URL form, shown when `showQuickAdd` is on. Shared

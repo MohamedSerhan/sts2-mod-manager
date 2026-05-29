@@ -211,10 +211,10 @@ terminal.  The underlying workflows live in `.github/workflows/claude-autofix.ym
 ### How to use it
 
 **Start a fix** — label any issue `auto-fix` from the issue sidebar.
-Claude opens a branch named `autofix/<issue-number>-<slug>`, implements a
-fix, and opens a PR with:
-- title/body referencing the issue (`Fixes #N`)
-- labels `dev-build` + `auto-fix` applied automatically
+Claude opens a branch named EXACTLY `auto-fix/<issue-number>` (no suffix or
+slug), implements a fix, and opens a PR with title/body referencing the issue
+(`Fixes #N`).  A workflow step then applies the `dev-build` + `auto-fix` labels
+via `DEV_BUILD_LABEL_TOKEN` so the dev-build trigger fires deterministically.
 
 The `dev-build` label triggers sub-project D to build a `dev-pr<N>` prerelease
 so you can install and test the fix immediately via Settings → Dev Builds (sub-project E).
@@ -252,10 +252,10 @@ so they flow through the same dev-build pipeline.
 
 **3. Create and store the `DEV_BUILD_LABEL_TOKEN` secret**
 
-The auto-fix workflow labels the new PR `dev-build` immediately after opening it.
-The default `GITHUB_TOKEN` cannot trigger downstream workflows (GitHub prevents
-workflow-to-workflow triggers with the default token for security reasons), so a
-fine-grained PAT is required.
+After Claude opens the PR, a dedicated workflow step applies `dev-build` +
+`auto-fix` using this PAT.  The default `GITHUB_TOKEN` cannot trigger downstream
+workflows (GitHub prevents workflow-to-workflow triggers with the default token
+for security reasons), so the PAT is what makes sub-project D's dev build fire.
 
 Minimum PAT scopes — when creating the PAT at
 <https://github.com/settings/tokens?type=beta>:

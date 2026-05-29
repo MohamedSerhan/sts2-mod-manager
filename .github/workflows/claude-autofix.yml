@@ -53,19 +53,39 @@ jobs:
             Do the following:
             1. Read issue #${{ github.event.issue.number }} — its title, body, and any prior
                `@claude` investigation comment — to understand the bug or request.
-            2. Investigate the codebase and implement a fix on a NEW branch named
-               `auto-fix/${{ github.event.issue.number }}` (branch off the default branch).
+            2. Investigate the codebase and implement a fix on a NEW branch named EXACTLY
+               `auto-fix/${{ github.event.issue.number }}` (no suffix or slug — a later
+               workflow step locates the PR by this exact branch name). Branch off the
+               default branch.
             3. Run the relevant tests (`npm test` runs the frontend + Rust suites; for a
                Rust-only change `cargo test --manifest-path=src-tauri/Cargo.toml`). Iterate
                until they pass. CI will also run the full suite on the PR.
             4. Open a pull request targeting `main` whose body STARTS with
                `Fixes #${{ github.event.issue.number }}`, summarizes the change, and explains
-               how to test it via the dev build.
-            5. Apply the labels `dev-build` AND `auto-fix` to that PR (so it produces a dev
-               build and is eligible for `@claude` revision).
+               how to test it via the dev build. Do NOT apply any labels — a workflow step
+               applies them after you finish.
 
             If you CANNOT produce a confident fix, do NOT open a PR — instead post a comment
             on the issue explaining precisely what blocks the fix.
+
+      - name: Apply dev-build + auto-fix labels (PAT so the build triggers)
+        env:
+          # Apply the labels with a PAT, not the default GITHUB_TOKEN: a label added by
+          # GITHUB_TOKEN does NOT trigger the build workflow (anti-recursion). Applying
+          # them here (rather than letting Claude add them) also avoids a no-op re-add
+          # that would generate no `labeled` event. No-op if Claude opened no PR.
+          GH_TOKEN: ${{ secrets.DEV_BUILD_LABEL_TOKEN || secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          PR=$(gh pr list --repo "$REPO" --head "auto-fix/${ISSUE}" --state open \
+                 --json number --jq '.[0].number // empty')
+          if [ -z "$PR" ]; then
+            echo "No PR on branch auto-fix/${ISSUE} (Claude may have declined to fix). Nothing to label."
+            exit 0
+          fi
+          gh pr edit "$PR" --repo "$REPO" --add-label dev-build --add-label auto-fix
+          echo "Labeled PR #$PR with dev-build + auto-fix."
 
   revise:
     # Only `@claude` comments on a PR that carries the `auto-fix` label.

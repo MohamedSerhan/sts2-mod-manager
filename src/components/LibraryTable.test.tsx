@@ -900,4 +900,137 @@ describe('<LibraryTable modpackName={null}>', () => {
     expect(help?.textContent).toMatch(/Every mod installed on your computer/i);
     expect(help?.textContent).not.toMatch(/Drag the handle to set load order/i);
   });
+
+  // ── coupleActiveStorage (modpack view: pack = live loadout) ───────
+  describe('coupleActiveStorage', () => {
+    function seedInPackActive() {
+      registerInvokeHandler('get_active_profile', () => 'Stable');
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [
+          {
+            name: 'PackMod',
+            version: '1.0.0',
+            folder_name: 'PackMod',
+            mod_id: 'PackMod',
+            installed_enabled: true,
+            profiles: [
+              { profile_name: 'Stable', included: true, enabled: true, editable: true },
+            ],
+          },
+        ],
+      }));
+      registerInvokeHandler('set_profile_mod_membership', () => baseProfile({ name: 'Stable' }));
+      return new Map([
+        ['PackMod', mkModInfo({ name: 'PackMod', folder_name: 'PackMod', mod_id: 'PackMod' })],
+      ]);
+    }
+
+    it('removing from the ACTIVE pack also disables the mod in-game', async () => {
+      const modInfoByKey = seedInPackActive();
+      const user = userEvent.setup();
+      render(<Wrap modpackName="Stable" coupleActiveStorage modInfoByKey={modInfoByKey} />);
+      const row = (await screen.findByText('PackMod')).closest(
+        '[data-testid="library-row"]',
+      ) as HTMLElement;
+      await user.click(within(row).getByRole('button', { name: /mod actions/i }));
+      await user.click(screen.getByRole('menuitem', { name: /remove from "stable"/i }));
+
+      await waitFor(() => {
+        expect(getInvokeCalls().some((c) => c.cmd === 'set_profile_mod_membership' && c.args?.included === false)).toBe(true);
+      });
+      // Coupling: the active loadout is updated too.
+      const toggleCall = getInvokeCalls().find((c) => c.cmd === 'toggle_mod');
+      expect(toggleCall?.args).toMatchObject({ name: 'PackMod', folderName: 'PackMod', enable: false });
+    });
+
+    it('does NOT couple when coupleActiveStorage is off (default)', async () => {
+      const modInfoByKey = seedInPackActive();
+      const user = userEvent.setup();
+      render(<Wrap modpackName="Stable" modInfoByKey={modInfoByKey} />);
+      const row = (await screen.findByText('PackMod')).closest(
+        '[data-testid="library-row"]',
+      ) as HTMLElement;
+      await user.click(within(row).getByRole('button', { name: /mod actions/i }));
+      await user.click(screen.getByRole('menuitem', { name: /remove from "stable"/i }));
+
+      await waitFor(() => {
+        expect(getInvokeCalls().some((c) => c.cmd === 'set_profile_mod_membership' && c.args?.included === false)).toBe(true);
+      });
+      // No coupling: membership changes, the game folder is left alone.
+      expect(getInvokeCalls().some((c) => c.cmd === 'toggle_mod')).toBe(false);
+    });
+
+    it('does NOT couple when the focused pack is not the active one', async () => {
+      // Active is some OTHER pack; editing "Stable" must not touch the loadout.
+      registerInvokeHandler('get_active_profile', () => 'OtherPack');
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [
+          {
+            name: 'PackMod',
+            version: '1.0.0',
+            folder_name: 'PackMod',
+            mod_id: 'PackMod',
+            installed_enabled: true,
+            profiles: [
+              { profile_name: 'Stable', included: true, enabled: true, editable: true },
+            ],
+          },
+        ],
+      }));
+      registerInvokeHandler('set_profile_mod_membership', () => baseProfile({ name: 'Stable' }));
+      const modInfoByKey = new Map([
+        ['PackMod', mkModInfo({ name: 'PackMod', folder_name: 'PackMod', mod_id: 'PackMod' })],
+      ]);
+      const user = userEvent.setup();
+      render(<Wrap modpackName="Stable" coupleActiveStorage modInfoByKey={modInfoByKey} />);
+      const row = (await screen.findByText('PackMod')).closest(
+        '[data-testid="library-row"]',
+      ) as HTMLElement;
+      await user.click(within(row).getByRole('button', { name: /mod actions/i }));
+      await user.click(screen.getByRole('menuitem', { name: /remove from "stable"/i }));
+
+      await waitFor(() => {
+        expect(getInvokeCalls().some((c) => c.cmd === 'set_profile_mod_membership' && c.args?.included === false)).toBe(true);
+      });
+      expect(getInvokeCalls().some((c) => c.cmd === 'toggle_mod')).toBe(false);
+    });
+  });
+
+  // ── reloadToken (external re-fetch trigger) ───────────────────────
+  it('re-fetches the membership grid when reloadToken changes', async () => {
+    registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+    let memberships = 0;
+    registerInvokeHandler('get_profile_memberships', () => {
+      memberships += 1;
+      return {
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [
+          {
+            name: 'PackMod',
+            version: '1.0.0',
+            folder_name: 'PackMod',
+            mod_id: 'PackMod',
+            installed_enabled: true,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+          },
+        ],
+      };
+    });
+    const { rerender } = render(<Wrap modpackName="Stable" reloadToken="a" />);
+    await screen.findAllByText('PackMod');
+    const before = memberships;
+    // Bump the token → the table re-pulls the grid.
+    rerender(
+      <AllProviders>
+        <LibraryTable modpackName="Stable" reloadToken="b" />
+      </AllProviders>,
+    );
+    await waitFor(() => {
+      expect(memberships).toBeGreaterThan(before);
+    });
+  });
 });

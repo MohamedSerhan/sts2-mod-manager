@@ -98,6 +98,18 @@ export interface LibraryTableProps {
    *  the handle/chip stay hidden and the drag handlers no-op — there's
    *  no load order to set across the all-installed-mods list. */
   enableReorder?: boolean;
+  /** Couple membership with the active loadout: when true AND this table
+   *  is focused on the *active* modpack, adding/removing a mod via the
+   *  kebab also enables/disables it in the game folder. The modpack detail
+   *  view sets this so "the pack is the live loadout" — removing a mod from
+   *  your active pack actually unloads it. All Mods leaves it off (default),
+   *  keeping membership and on-disk state independent there. */
+  coupleActiveStorage?: boolean;
+  /** External re-fetch trigger. When this value changes, the focused-mode
+   *  membership grid is re-pulled. Lets a parent that mutates membership
+   *  outside this table (e.g. the modpack view's "Add from your Library"
+   *  section) keep the in-pack rows in sync. */
+  reloadToken?: string | number;
   /** Pre-filter the rows from the membership grid before sorting +
    *  rendering. Used by the Library view to apply tag / extra filters
    *  on top of the table's own search. */
@@ -168,6 +180,8 @@ export function LibraryTable({
   initialSort,
   pageSize = DEFAULT_PAGE_SIZE,
   enableReorder = false,
+  coupleActiveStorage = false,
+  reloadToken,
   filterRow,
   modInfoByKey,
   auditByKey,
@@ -195,7 +209,7 @@ export function LibraryTable({
   const { t } = useTranslation();
   const toastCtx = useToast();
   const confirm = useConfirm();
-  const { mods: appMods, refreshAll } = useApp();
+  const { mods: appMods, refreshAll, activeProfile } = useApp();
 
   const [grid, setGrid] = useState<ProfileMembershipGrid | null>(null);
   const [loading, setLoading] = useState(modpackName != null);
@@ -247,10 +261,11 @@ export function LibraryTable({
     } finally {
       setLoading(false);
     }
-    // installedIdentitySignal is intentionally a dep: when the installed
-    // set changes (install/delete), re-pull the membership grid.
+    // installedIdentitySignal + reloadToken are intentionally deps: re-pull
+    // the grid when the installed set changes (install/delete) or when a
+    // parent signals an external membership change via reloadToken.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modpackName, installedIdentitySignal]);
+  }, [modpackName, installedIdentitySignal, reloadToken]);
 
   useEffect(() => {
     load();
@@ -453,6 +468,19 @@ export function LibraryTable({
         nextIncluded,
       );
       patchRowMembership(membershipRowKey(row), nextIncluded);
+      // When the modpack view treats the pack as the live loadout, mirror
+      // the membership change onto the active game folder: adding enables,
+      // removing disables. Only for the *active* pack (others aren't live)
+      // and only when disk state actually needs to change.
+      if (
+        coupleActiveStorage
+        && modpackName === activeProfile
+        && row.installed_enabled !== nextIncluded
+      ) {
+        await toggleMod(row.name, row.folder_name, nextIncluded);
+        patchRowStorage(membershipRowKey(row), nextIncluded);
+        await refreshAll();
+      }
       toastCtx.success(
         nextIncluded
           ? t('profiles.library.toastAdded', {

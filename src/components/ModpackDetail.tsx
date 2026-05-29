@@ -43,19 +43,19 @@ import {
   RefreshCw,
   Share2,
   Trash2,
-  X,
 } from 'lucide-react';
 import { Badge } from './Badge';
 import { Button } from './Button';
 import { Card } from './Card';
 import { HelpHint } from './HelpHint';
 import { KebabDivider, KebabItem, KebabMenu, KebabSection } from './KebabMenu';
+import { LibraryTable } from './LibraryTable';
 import { ModLibraryToolbar } from './ModLibraryToolbar';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { useModLibrary } from '../hooks/useModLibrary';
 import { setProfileModMembership, toggleMod } from '../hooks/useTauri';
-import type { ModAuditEntry, ModInfo, Profile, ProfileMod, ShareResult } from '../types';
+import type { ModAuditEntry, ModInfo, Profile, ShareResult } from '../types';
 import type { ProfileDrift } from '../hooks/useTauri';
 
 export interface ModpackDetailProps {
@@ -178,9 +178,11 @@ export function ModpackDetail({
   const switchingOther = !!switchingProfile && switchingProfile !== profile.name;
 
   // Per-row in-flight keys so a double-click can't double-fire the
-  // membership mutation. Keyed by modKey().
+  // membership add. Keyed by modKey().
   const [busyKeys, setBusyKeys] = useState<Set<string>>(new Set());
-  const [query, setQuery] = useState('');
+  // Search for the "Add from your Library" section only — the in-pack
+  // LibraryTable owns its own search (same as the All Mods view).
+  const [availableQuery, setAvailableQuery] = useState('');
 
   // Build a set of mod-display-names that belong to this pack — the
   // audit summary is filtered to just these mods so users see counts
@@ -195,14 +197,6 @@ export function ModpackDetail({
   const hasAuditChips
     = updatesCount > 0 || missingSourceCount > 0 || blockedCount > 0;
 
-  // Map installed mods by identity key so each row can look up its
-  // ModInfo (display name override, source links) in O(1).
-  const installedByKey = useMemo(() => {
-    const map = new Map<string, ModInfo>();
-    for (const m of mods) map.set(modKey(m), m);
-    return map;
-  }, [mods]);
-
   // The pack's mods, in load order. (profile.mods is the manifest order.)
   const inPackKeys = useMemo(
     () => new Set(profile.mods.map((m) => modKey(m))),
@@ -215,42 +209,28 @@ export function ModpackDetail({
     [mods, inPackKeys],
   );
 
-  // Substring filter applied to both sections.
-  const normalizedQuery = query.trim().toLowerCase();
-  const matchesQuery = (
-    name: string,
-    folder: string | null,
-    version: string,
-  ): boolean => {
-    if (!normalizedQuery) return true;
-    return (
-      name.toLowerCase().includes(normalizedQuery)
-      || (folder?.toLowerCase().includes(normalizedQuery) ?? false)
-      || version.toLowerCase().includes(normalizedQuery)
-    );
-  };
-
-  const filteredInPack = useMemo(
-    () =>
-      profile.mods.filter((m) =>
-        matchesQuery(
-          installedByKey.get(modKey(m))?.display_name?.trim() || m.name,
-          m.folder_name,
-          m.version,
-        ),
-      ),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [profile.mods, installedByKey, normalizedQuery],
+  // Order-sensitive membership signature. Feeds LibraryTable's reloadToken
+  // so the in-pack rows re-fetch when this pack's membership OR load order
+  // changes from outside the table (Add-from-library, the Load order modal,
+  // a drift save) — keeping the rich rows in sync with the manifest.
+  const membershipSignature = useMemo(
+    () => profile.mods.map((m) => modKey(m)).join('>'),
+    [profile.mods],
   );
 
-  const filteredAvailable = useMemo(
-    () =>
-      availableMods.filter((m) =>
-        matchesQuery(m.display_name?.trim() || m.name, m.folder_name, m.version),
-      ),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [availableMods, normalizedQuery],
-  );
+  // Available section filter (its own search box).
+  const filteredAvailable = useMemo(() => {
+    const q = availableQuery.trim().toLowerCase();
+    if (!q) return availableMods;
+    return availableMods.filter((m) => {
+      const name = (m.display_name?.trim() || m.name).toLowerCase();
+      return (
+        name.includes(q)
+        || (m.folder_name?.toLowerCase().includes(q) ?? false)
+        || m.version.toLowerCase().includes(q)
+      );
+    });
+  }, [availableMods, availableQuery]);
 
   const refreshAfterMutation = async () => {
     await refreshAll();
@@ -295,40 +275,6 @@ export function ModpackDetail({
       toast.error(
         t('modpack.detail.addFailed', {
           mod: mod.display_name?.trim() || mod.name,
-          error: e instanceof Error ? e.message : String(e),
-        }),
-      );
-    } finally {
-      setBusy(key, false);
-    }
-  };
-
-  const handleRemove = async (mod: ProfileMod) => {
-    const key = modKey(mod);
-    if (busyKeys.has(key)) return;
-    const displayName = installedByKey.get(key)?.display_name?.trim() || mod.name;
-    setBusy(key, true);
-    try {
-      await setProfileModMembership(
-        profile.name,
-        mod.name,
-        mod.folder_name ?? null,
-        mod.mod_id ?? null,
-        false,
-      );
-      // On the active pack, also store the mod (move it out of the game
-      // folder) so removing it from the pack takes effect immediately.
-      if (isActive) {
-        await toggleMod(mod.name, mod.folder_name ?? null, false);
-      }
-      await refreshAfterMutation();
-      toast.success(
-        t('modpack.detail.removed', { mod: displayName, pack: profile.name }),
-      );
-    } catch (e) {
-      toast.error(
-        t('modpack.detail.removeFailed', {
-          mod: displayName,
           error: e instanceof Error ? e.message : String(e),
         }),
       );
@@ -484,17 +430,6 @@ export function ModpackDetail({
         </div>
       )}
 
-      <div className="gf-modpack-detail-search">
-        <input
-          type="search"
-          className="gf-input"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={t('modpack.detail.search')}
-          aria-label={t('modpack.detail.search')}
-        />
-      </div>
-
       {/* ── Section 1: mods in this pack ─────────────────────────── */}
       <section
         className="gf-modpack-detail-section"
@@ -530,45 +465,24 @@ export function ModpackDetail({
             {t('modpack.detail.emptyInPack')}
           </p>
         ) : (
-          <div className="gf-modpack-detail-rows">
-            {filteredInPack.map((mod) => {
-              const key = modKey(mod);
-              const info = installedByKey.get(key);
-              const busy = busyKeys.has(key);
-              return (
-                <Card
-                  key={key}
-                  className="gf-modpack-mod-row"
-                  data-testid="modpack-mod-row-in-pack"
-                >
-                  <div className="gf-modpack-mod-row-info">
-                    <span className="gf-modpack-mod-row-name">
-                      {info?.display_name?.trim() || mod.name}
-                    </span>
-                    <span className="gf-modpack-mod-row-meta">
-                      <span>{mod.version}</span>
-                      <SourceBadges mod={info} />
-                    </span>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="gf-modpack-mod-row-remove"
-                    onClick={() => handleRemove(mod)}
-                    disabled={busy}
-                    aria-label={t('modpack.detail.remove')}
-                  >
-                    {busy ? (
-                      <RefreshCw size={13} className="animate-spin" />
-                    ) : (
-                      <X size={13} />
-                    )}
-                    {t('modpack.detail.remove')}
-                  </Button>
-                </Card>
-              );
-            })}
-          </div>
+          // The pack's mods render with the SAME rich rows as the All Mods
+          // view (toggle / source badges / kebab / delete / inline source
+          // editor), filtered to just this pack's members and drag-
+          // reorderable. coupleActiveStorage makes removing a mod from the
+          // active pack also unload it from the game. reloadToken re-syncs
+          // the rows when membership changes from outside the table.
+          <LibraryTable
+            modpackName={profile.name}
+            enableReorder
+            coupleActiveStorage
+            reloadToken={membershipSignature}
+            filterRow={(row) =>
+              !!row.profiles.find((p) => p.profile_name === profile.name)?.included
+            }
+            onMembershipChanged={refreshAfterMutation}
+            onLoadOrderChanged={refreshAfterMutation}
+            {...lib.tableActionProps}
+          />
         )}
       </section>
 
@@ -604,6 +518,16 @@ export function ModpackDetail({
               className="gf-modpack-detail-rows"
               id="gf-modpack-detail-library-rows"
             >
+              <div className="gf-modpack-detail-search">
+                <input
+                  type="search"
+                  className="gf-input"
+                  value={availableQuery}
+                  onChange={(e) => setAvailableQuery(e.target.value)}
+                  placeholder={t('modpack.detail.search')}
+                  aria-label={t('modpack.detail.search')}
+                />
+              </div>
               {filteredAvailable.length === 0 && (
                 <p className="gf-modpack-detail-empty">
                   {t('modpack.detail.availableNoMatch')}

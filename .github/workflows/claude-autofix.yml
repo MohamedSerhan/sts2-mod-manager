@@ -24,6 +24,17 @@ jobs:
       issues: write
       id-token: write
     steps:
+      - name: Assert authorized actor
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ROLE=$(gh api "repos/${{ github.repository }}/collaborators/${{ github.actor }}/permission" \
+                   --jq '.permission' 2>/dev/null || echo "none")
+          echo "Actor ${{ github.actor }} has repo permission: $ROLE"
+          case "$ROLE" in
+            admin|write|maintain) echo "Authorized." ;;
+            *) echo "::error::Actor ${{ github.actor }} ('$ROLE') is not authorized to run the auto-fix bot."; exit 1 ;;
+          esac
       - name: Checkout
         uses: actions/checkout@v5
         with:
@@ -73,7 +84,20 @@ jobs:
       issues: write
       id-token: write
     steps:
+      - name: Assert authorized actor
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ROLE=$(gh api "repos/${{ github.repository }}/collaborators/${{ github.actor }}/permission" \
+                   --jq '.permission' 2>/dev/null || echo "none")
+          echo "Actor ${{ github.actor }} has repo permission: $ROLE"
+          case "$ROLE" in
+            admin|write|maintain) echo "Authorized." ;;
+            *) echo "::error::Actor ${{ github.actor }} ('$ROLE') is not authorized to run the auto-fix bot."; exit 1 ;;
+          esac
       - name: Checkout
+        # Seeds the workspace + git config; claude-code-action switches to the
+        # PR branch itself in tag mode, so we don't check out the PR head here.
         uses: actions/checkout@v5
         with:
           fetch-depth: 0

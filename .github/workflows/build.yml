@@ -154,6 +154,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Bug-report ingest endpoint (Cloudflare Worker, tools/bug-report-worker/).
+          # Baked in at compile time via option_env! in src-tauri/src/bug_report.rs so
+          # release builds upload the full report (no truncation, no user token) and
+          # link it in the GitHub issue. Unset in forks/PRs → app falls back to
+          # clipboard + truncated issue. The key gates uploads (Worker secret APP_KEY).
+          STS2_BUG_REPORT_ENDPOINT: ${{ vars.STS2_BUG_REPORT_ENDPOINT }}
+          STS2_BUG_REPORT_KEY: ${{ secrets.STS2_BUG_REPORT_KEY }}
         with:
           # On tag pushes, let tauri-action create/update the release and upload
           # signed bundles (consumed by tauri-plugin-updater).

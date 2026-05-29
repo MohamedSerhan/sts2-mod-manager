@@ -10,7 +10,7 @@ compatibility_date = "2024-11-01"
 # then paste the returned id below.
 [[kv_namespaces]]
 binding = "REPORTS"
-id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+id = "feb64d31e2e0482781a560775c79c75d"
 
 # APP_KEY (optional shared key) is set as a secret, NOT here:
 #   wrangler secret put APP_KEY

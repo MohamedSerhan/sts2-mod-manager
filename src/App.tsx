@@ -322,6 +322,7 @@ function AppInner() {
   // release" nag is counterproductive there (build management lives in the
   // Dev Builds section instead). Release builds are unchanged.
   useEffect(() => {
+    let active = true;
     let interval: ReturnType<typeof setInterval> | undefined;
     function doCheck() {
       check()
@@ -333,12 +334,13 @@ function AppInner() {
         });
     }
     isDevBuild().then((dev) => {
-      if (dev) return;
+      if (!active || dev) return;
       doCheck();
       const ONE_DAY_MS = 24 * 60 * 60 * 1000;
       interval = setInterval(doCheck, ONE_DAY_MS);
     });
     return () => {
+      active = false;
       if (interval) clearInterval(interval);
     };
   }, []);

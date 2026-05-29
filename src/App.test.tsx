@@ -873,7 +873,6 @@ describe('<App>', () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     expect(screen.queryByText(/Mod Manager v9\.9\.9 is available/)).not.toBeInTheDocument();
-    setMockAppVersion('1.3.4'); // restore default for later tests
   });
 
   it('routes external anchor clicks through the backend opener', async () => {

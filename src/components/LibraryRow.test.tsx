@@ -10,7 +10,7 @@
  * wiring — no Tauri mock plumbing required.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { LibraryRow, type LibraryRowProps } from './LibraryRow';
@@ -319,6 +319,28 @@ const baseAudit = (overrides: Partial<ModAuditEntry> = {}): ModAuditEntry => ({
 });
 
 describe('<LibraryRow> kebab + audit pills', () => {
+  it('clusters source badges + audit pills next to the name (in the title row)', () => {
+    const { container } = renderRow({
+      mod: baseModInfo({ github_url: 'https://github.com/x/y', nexus_url: 'https://nexusmods.com/z' }),
+      audit: {
+        mod_name: 'BaseLib', folder_name: 'BaseLib', github_repo: 'x/y',
+        installed_version: '1.0.0', latest_release_tag: '1.0.0',
+        latest_release_with_assets_tag: '1.0.0', latest_has_assets: true,
+        needs_update: false, asset_names: [], releases_scanned: 1, error: null,
+        nexus_url: null, nexus_version: null, nexus_update_available: false,
+        update_source: null, github_auto_detected: false, pinned: false,
+        game_version_too_old: false, snoozed: false,
+      } as never,
+    });
+    const titlerow = container.querySelector('.gf-profile-library-titlerow') as HTMLElement;
+    expect(titlerow).not.toBeNull();
+    // GitHub + Nexus source badges live in the title row now, not far-right.
+    expect(within(titlerow).getByText('GitHub')).toBeInTheDocument();
+    expect(within(titlerow).getByText('Nexus')).toBeInTheDocument();
+    // The audit pill (Latest) is in the title row too, not the meta line.
+    expect(within(titlerow).getByText(/Latest/i)).toBeInTheDocument();
+  });
+
   it('renders the kebab trigger when a mod prop is supplied', () => {
     renderRow({ mod: baseModInfo() });
     expect(screen.getByRole('button', { name: /mod actions/i })).toBeInTheDocument();

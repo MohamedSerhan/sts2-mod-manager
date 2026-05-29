@@ -403,6 +403,7 @@
       "searchLabel": "搜索模组库",
       "searchPlaceholder_one": "搜索 {{count}} 个库中模组",
       "searchPlaceholder_other": "搜索 {{count}} 个库中模组",
+      "searchPackPlaceholder": "搜索模组…",
       "explainerModpack": "勾选模组即可将其加入此模组包。拖动手柄可设置加载顺序。切换到此模组包时，将在游戏中精确激活这些模组。",
       "explainerLibrary": "你电脑上已安装的所有模组。使用复选框可将模组加入当前活跃的模组包 — 切换模组包决定游戏中实际加载的内容。",
       "bulkStoreUnused_one": "存储 {{count}} 个未使用的活跃模组",

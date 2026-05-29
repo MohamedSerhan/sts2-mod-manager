@@ -494,7 +494,9 @@ function AppInner() {
               if (pack) {
                 try {
                   await setProfileModMembership(pack, mod.name, mod.folder_name ?? null, mod.mod_id ?? null, true);
-                  if (pack === activeProfileRef.current) {
+                  // Only enable when it isn't already active — toggleMod
+                  // errors on an already-active mod (looks in mods_disabled).
+                  if (pack === activeProfileRef.current && !mod.enabled) {
                     await toggleMod(mod.name, mod.folder_name ?? null, true);
                   }
                   toast.success(t('app.toast.installedModToPack', { name: mod.name, pack }));

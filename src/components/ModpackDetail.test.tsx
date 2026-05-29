@@ -443,6 +443,33 @@ describe('<ModpackDetail>', () => {
     });
   });
 
+  it('Quick add of an already-active mod does not try to re-enable it (no toggle_mod, no failure)', async () => {
+    // Regression: re-adding a mod that's already installed + active made
+    // the auto-add call toggle_mod(enable=true), which errors ("not in
+    // mods_disabled") and surfaced a bogus "Quick add failed" toast.
+    registerInvokeHandler('get_active_profile', () => 'Sample');
+    registerInvokeHandler('quick_add_mod', () => ({
+      type: 'github_installed',
+      mod_info: modInfo({ name: 'BaseLib', folder_name: 'BaseLib', mod_id: 'BaseLib', enabled: true }),
+    }));
+    registerInvokeHandler('set_profile_mod_membership', () => baseProfile({ name: 'Sample' }));
+    const user = userEvent.setup();
+    render(<Wrap {...baseProps()} />);
+    await screen.findByRole('heading', { level: 2, name: 'Sample' });
+
+    await openAddMods(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/i }));
+    await user.type(await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/), 'https://github.com/x/y');
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'set_profile_mod_membership')).toBe(true);
+    });
+    // The mod is already active → no toggle, and no "Quick add failed".
+    expect(getInvokeCalls().some((c) => c.cmd === 'toggle_mod')).toBe(false);
+    expect(screen.queryByText(/Quick add failed/i)).toBeNull();
+  });
+
   it('surfaces an error toast when adding a mod fails', async () => {
     const profile = setupPack({
       available: [modInfo({ name: 'LibMod', folder_name: 'LibMod' })],

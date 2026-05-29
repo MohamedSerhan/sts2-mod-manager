@@ -159,7 +159,13 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
   const confirm = useConfirm();
 
   /** Add a just-installed mod to the target pack (and enable it in-game if
-   *  that pack is active). No-op when there's no target pack. */
+   *  that pack is active). No-op when there's no target pack.
+   *
+   *  Re-adding a mod that's already installed + active is common (e.g.
+   *  Quick-adding a mod already in the pack to update it). setProfileMod-
+   *  Membership is idempotent, but toggleMod(enable=true) errors when the
+   *  mod is already active (it looks for it in mods_disabled). So only
+   *  flip it on when it's actually stored. */
   async function addToTargetPack(mod: ModInfo) {
     if (!targetPack) return;
     await setProfileModMembership(
@@ -169,7 +175,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
       mod.mod_id ?? null,
       true,
     );
-    if (activeProfile === targetPack) {
+    if (activeProfile === targetPack && !mod.enabled) {
       await toggleMod(mod.name, mod.folder_name ?? null, true);
     }
   }

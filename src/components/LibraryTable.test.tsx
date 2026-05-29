@@ -928,6 +928,9 @@ describe('<LibraryTable modpackName={null}>', () => {
       const modInfoByKey = seedInPack();
       const { container } = render(<Wrap modpackName="Stable" packScoped modInfoByKey={modInfoByKey} />);
       await screen.findByText('PackMod');
+      // Search placeholder is just "Search mods…" (not "N library mods").
+      expect(screen.getByPlaceholderText(/^Search mods/i)).toBeInTheDocument();
+      expect(screen.queryByPlaceholderText(/library mods/i)).toBeNull();
       expect(container.querySelector('.gf-sort-control')).toBeNull();
       expect(container.querySelector('.gf-profile-library-help')).toBeNull();
       expect(container.querySelector('.gf-row-inpack')).toBeNull();

@@ -713,9 +713,11 @@ export function LibraryTable({
           <input
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
-            placeholder={t('profiles.library.searchPlaceholder', {
-              count: effectiveGrid.mods.length,
-            })}
+            placeholder={
+              packScoped
+                ? t('profiles.library.searchPackPlaceholder')
+                : t('profiles.library.searchPlaceholder', { count: effectiveGrid.mods.length })
+            }
             aria-label={t('profiles.library.searchLabel')}
           />
         </label>

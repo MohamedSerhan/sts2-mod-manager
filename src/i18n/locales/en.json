@@ -327,6 +327,7 @@
       "searchLabel": "Search mod library",
       "searchPlaceholder_one": "Search {{count}} library mod",
       "searchPlaceholder_other": "Search {{count}} library mods",
+      "searchPackPlaceholder": "Search mods…",
       "explainerModpack": "Check a mod to include it in this modpack. Drag the handle to set load order. Switching to this modpack activates exactly these mods in the game.",
       "explainerLibrary": "Every mod installed on your computer. Use the checkbox to add a mod to your active modpack — switching modpacks decides what's actually loaded in the game.",
       "bulkStoreUnused_one": "Store {{count}} unused active mod",

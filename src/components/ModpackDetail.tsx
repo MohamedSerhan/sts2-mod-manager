@@ -338,9 +338,6 @@ export function ModpackDetail({
           <KebabItem icon={<FolderOpen size={12} />} onClick={lib.handleOpenFolder}>
             {t('mods.openFolder')}
           </KebabItem>
-          <KebabItem icon={<Search size={12} />} onClick={() => lib.setShowAutoDetect(true)}>
-            {t('mods.autoDetectSources')}
-          </KebabItem>
         </KebabSection>
       </KebabMenu>
       <Button
@@ -495,6 +492,9 @@ export function ModpackDetail({
                   {t('profiles.drift.repair')}
                 </KebabItem>
               )}
+              <KebabItem icon={<Search size={12} />} onClick={() => lib.setShowAutoDetect(true)}>
+                {t('mods.autoDetectSources')}
+              </KebabItem>
               <KebabItem
                 icon={<RefreshCw size={12} className={lib.refreshing ? 'animate-spin' : undefined} />}
                 onClick={lib.handleRefresh}

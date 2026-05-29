@@ -195,7 +195,12 @@ describe('<DiagnosticBundle> (Report a bug)', () => {
     expect(ta.value).not.toContain('<redacted>');
   });
 
-  it('"Open bug report" copies the full report and opens a prefilled GitHub issue', async () => {
+  it('"Open bug report" (no upload endpoint) copies the full report and opens a clean paste-me issue', async () => {
+    // No upload_bug_report handler → the command resolves null (endpoint not
+    // configured for this build). We must NOT stuff the full report into the
+    // issue URL (GitHub would truncate the logs). Instead the full report goes
+    // to the clipboard and the prefilled issue stays short, asking the
+    // reporter to paste — so nothing is lost.
     const writeText = setClipboard(async () => {});
     registerInvokeHandler('read_log_tail', () => 'GH body');
     registerInvokeHandler('get_log_path', () => '/x.log');
@@ -203,17 +208,28 @@ describe('<DiagnosticBundle> (Report a bug)', () => {
     render(<Wrap />);
     await user.click(getOpenButton());
 
+    // Full report copied to the clipboard…
+    await waitFor(() => expect(writeText).toHaveBeenCalled());
+    expect(writeText.mock.calls[0][0] as string).toContain('STS2 Mod Manager — Bug Report');
+
+    // …and the prefilled issue is the SHORT paste-me body, not a report dump.
     expect(openUrl).toHaveBeenCalledTimes(1);
     const url = vi.mocked(openUrl).mock.calls[0][0] as string;
     expect(url).toMatch(/^https:\/\/github\.com\/MohamedSerhan\/sts2-mod-manager\/issues\/new\?/);
-    expect(new URL(url).searchParams.get('body')).toContain('STS2 Mod Manager');
-    await waitFor(() => expect(writeText).toHaveBeenCalled());
+    const body = new URL(url).searchParams.get('body') ?? '';
+    expect(body).toContain('clipboard'); // the paste instruction
+    expect(body).not.toContain('--- Log tail'); // not the report dump
+    expect(body).not.toContain('Truncated to fit GitHub issue URL limits');
     await waitFor(() => {
-      expect(screen.getByText(/Opened a prefilled GitHub issue/i)).toBeInTheDocument();
+      expect(screen.getByText(/copied the full report/i)).toBeInTheDocument();
     });
   });
 
-  it('"Open bug report" caps the issue URL when the report is long', async () => {
+  it('"Open bug report" caps the issue URL only as a last resort (clipboard unavailable)', async () => {
+    // When the clipboard is also unavailable we can't ask the reporter to
+    // paste, so the report goes into the issue body — and THEN GitHub's URL
+    // limit truncates it. This is the last-resort branch.
+    setClipboard(async () => { throw new Error('blocked'); });
     registerInvokeHandler('read_log_tail', () => 'x'.repeat(12000));
     registerInvokeHandler('get_log_path', () => '/x.log');
     const user = userEvent.setup();
@@ -222,6 +238,9 @@ describe('<DiagnosticBundle> (Report a bug)', () => {
     const url = vi.mocked(openUrl).mock.calls[0][0] as string;
     expect(url.length).toBeLessThanOrEqual(3900);
     expect(new URL(url).searchParams.get('body')).toContain('Truncated to fit GitHub issue URL limits');
+    await waitFor(() => {
+      expect(screen.getByText(/review and submit it/i)).toBeInTheDocument();
+    });
   });
 
   it('"Open bug report" surfaces a toast when the opener rejects', async () => {
@@ -261,7 +280,10 @@ describe('<DiagnosticBundle> (Report a bug)', () => {
     });
   });
 
-  it('"Open bug report" falls back to clipboard + truncated issue when the upload fails', async () => {
+  it('"Open bug report" falls back to clipboard + a clean paste-me issue when the upload throws', async () => {
+    // Covers the catch around uploadBugReport: a thrown error (vs a null
+    // return) lands on the same lossless fallback — full report to clipboard,
+    // short paste-me issue body.
     registerInvokeHandler('read_log_tail', () => 'GH body');
     registerInvokeHandler('get_log_path', () => '/x.log');
     registerInvokeHandler('upload_bug_report', () => { throw new Error('endpoint not configured'); });
@@ -270,9 +292,12 @@ describe('<DiagnosticBundle> (Report a bug)', () => {
     render(<Wrap />);
     await user.click(getOpenButton());
 
-    const url = vi.mocked(openUrl).mock.calls[0][0] as string;
-    expect(new URL(url).searchParams.get('body')).toContain('STS2 Mod Manager');
     await waitFor(() => expect(writeText).toHaveBeenCalled());
+    expect(writeText.mock.calls[0][0] as string).toContain('STS2 Mod Manager — Bug Report');
+    const url = vi.mocked(openUrl).mock.calls[0][0] as string;
+    const body = new URL(url).searchParams.get('body') ?? '';
+    expect(body).toContain('clipboard');
+    expect(body).not.toContain('--- Log tail');
   });
 
   it('shows the game version / not-detected status from AppContext', async () => {

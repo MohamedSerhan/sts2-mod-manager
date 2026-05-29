@@ -205,7 +205,9 @@ describe('<ModpackDetail>', () => {
     expect(screen.getByRole('menuitem', { name: /Quick add URL/i })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: /Import mod/i })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: /Open folder/i })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: /Auto-detect sources/i })).toBeInTheDocument();
+    // Auto-detect sources is NOT an install action — it lives in the header
+    // "Advanced actions" kebab, not this dropdown.
+    expect(screen.queryByRole('menuitem', { name: /Auto-detect sources/i })).toBeNull();
   });
 
   it('the Audit action checks ONLY this pack\'s mods (scoped audit)', async () => {
@@ -604,6 +606,18 @@ describe('<ModpackDetail>', () => {
     await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
     await user.click(screen.getByRole('menuitem', { name: /Delete modpack/i }));
     expect(onDelete).toHaveBeenCalledWith('Sample');
+  });
+
+  it('Auto-detect sources lives in the header kebab (not "+ Add mods") and opens the scan modal', async () => {
+    const user = userEvent.setup();
+    render(<Wrap {...baseProps()} />);
+    await screen.findByRole('heading', { level: 2, name: 'Sample' });
+    await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /Auto-detect sources/i }));
+    // The scan modal opens — its subtitle is distinctive.
+    expect(
+      await screen.findByText(/Scan installed mods against GitHub/i),
+    ).toBeInTheDocument();
   });
 
   it('Repair drift item shows in the kebab only when drift.has_drift is true and fires its handler', async () => {

@@ -176,14 +176,26 @@ export function DiagnosticBundle({ open, onClose }: Props) {
         return;
       }
 
-      // Fallback: clipboard is the safety net for the truncated body.
+      // Fallback (endpoint not configured / upload failed). The full report
+      // is far larger than a prefilled-issue URL can carry, so DON'T stuff it
+      // into the URL — GitHub would truncate the logs (the exact problem we're
+      // avoiding). Instead copy the full report to the clipboard and prefill a
+      // short body that asks the reporter to paste it: nothing is lost, just
+      // one Ctrl/Cmd+V. Only if the clipboard is unavailable do we fall back to
+      // a truncated body, so at least partial diagnostics reach the issue.
       const copied = await copyToClipboard(report);
-      await openExternalUrl(buildGitHubIssueUrl(title, report));
-      toast.success(
-        copied
-          ? t('diagnosticBundle.openedAndCopiedToast')
-          : t('diagnosticBundle.openedToast'),
-      );
+      if (copied) {
+        const body = [
+          redact(description.trim()) || t('diagnosticBundle.reportNoDescription'),
+          '',
+          t('diagnosticBundle.pasteReportNote'),
+        ].join('\n');
+        await openExternalUrl(buildGitHubIssueUrl(title, body));
+        toast.success(t('diagnosticBundle.openedAndCopiedToast'));
+      } else {
+        await openExternalUrl(buildGitHubIssueUrl(title, report));
+        toast.success(t('diagnosticBundle.openedToast'));
+      }
     } catch (e) {
       toast.error(t('diagnosticBundle.buildFailed', { error: e instanceof Error ? e.message : String(e) }));
     } finally {

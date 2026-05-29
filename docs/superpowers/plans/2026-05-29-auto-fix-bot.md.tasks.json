@@ -9,7 +9,8 @@
     {
       "planTask": 1,
       "nativeId": "32",
-      "status": "pending",
+      "status": "completed",
+      "commit": "cd270f5 + fix 52929da (explicit actor-auth gate)",
       "subject": "claude-autofix.yml — initiate-fix + revise entry points",
       "files": [".github/workflows/claude-autofix.yml"],
       "verifyCommand": "python -c \"import yaml; yaml.safe_load(open('.github/workflows/claude-autofix.yml')); print('OK')\"",
@@ -26,7 +27,8 @@
     {
       "planTask": 2,
       "nativeId": "33",
-      "status": "pending",
+      "status": "completed",
+      "commit": "ad72fce",
       "subject": "Dependabot config + auto-label workflow",
       "files": [".github/dependabot.yml", ".github/workflows/dependabot-label.yml"],
       "verifyCommand": "python -c \"import yaml; yaml.safe_load(open('.github/dependabot.yml')); yaml.safe_load(open('.github/workflows/dependabot-label.yml')); print('OK')\"",
@@ -41,7 +43,8 @@
     {
       "planTask": 3,
       "nativeId": "34",
-      "status": "pending",
+      "status": "completed",
+      "commit": "f749d07",
       "subject": "Operator runbook (RELEASING.md)",
       "files": ["RELEASING.md"],
       "verifyCommand": "grep -q \"auto-fix\" RELEASING.md && echo OK",

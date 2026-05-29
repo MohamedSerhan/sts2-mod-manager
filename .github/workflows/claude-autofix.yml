@@ -1,0 +1,89 @@
+name: Claude auto-fix
+
+# Write-scoped companion to claude.yml (which stays read-only / investigate).
+# Two entry points:
+#   - initiate: maintainer labels an issue `auto-fix` -> implement + open a dev-build PR
+#   - revise:   maintainer comments `@claude ...` on an auto-fix-labeled PR -> push a revision
+# Actor authorization is enforced by claude-code-action (write/admin only).
+on:
+  issues:
+    types: [labeled]
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+jobs:
+  initiate:
+    # Only when the just-added label is `auto-fix`.
+    if: ${{ github.event_name == 'issues' && github.event.label.name == 'auto-fix' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Run Claude (implement fix + open PR)
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: |
+            --allowedTools Edit,Read,Write,Bash
+            --max-turns 40
+          prompt: |
+            A maintainer labeled issue #${{ github.event.issue.number }} with `auto-fix`,
+            greenlighting an automated fix. Repository: ${{ github.repository }}.
+
+            Do the following:
+            1. Read issue #${{ github.event.issue.number }} — its title, body, and any prior
+               `@claude` investigation comment — to understand the bug or request.
+            2. Investigate the codebase and implement a fix on a NEW branch named
+               `auto-fix/${{ github.event.issue.number }}` (branch off the default branch).
+            3. Run the relevant tests (`npm test` runs the frontend + Rust suites; for a
+               Rust-only change `cargo test --manifest-path=src-tauri/Cargo.toml`). Iterate
+               until they pass. CI will also run the full suite on the PR.
+            4. Open a pull request targeting `main` whose body STARTS with
+               `Fixes #${{ github.event.issue.number }}`, summarizes the change, and explains
+               how to test it via the dev build.
+            5. Apply the labels `dev-build` AND `auto-fix` to that PR (so it produces a dev
+               build and is eligible for `@claude` revision).
+
+            If you CANNOT produce a confident fix, do NOT open a PR — instead post a comment
+            on the issue explaining precisely what blocks the fix.
+
+  revise:
+    # Only `@claude` comments on a PR that carries the `auto-fix` label.
+    if: >-
+      ${{ ((github.event_name == 'issue_comment'
+              && github.event.issue.pull_request
+              && contains(github.event.issue.labels.*.name, 'auto-fix')
+              && contains(github.event.comment.body, '@claude'))
+           || (github.event_name == 'pull_request_review_comment'
+              && contains(github.event.pull_request.labels.*.name, 'auto-fix')
+              && contains(github.event.comment.body, '@claude'))) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Run Claude (revise the auto-fix PR)
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: |
+            --allowedTools Edit,Read,Write,Bash
+            --max-turns 40
+          # No explicit prompt: the action picks up the triggering @claude comment as the
+          # instruction (tag mode). It checks out the PR branch, applies the requested change,
+          # re-runs tests, and pushes to the same branch -> the dev build rebuilds.

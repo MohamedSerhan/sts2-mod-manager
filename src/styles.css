@@ -1674,7 +1674,9 @@ body {
   outline-offset: 2px;
 }
 .gf-source-link .gf-pill { cursor: pointer; }
-.gf-pill-active { background: var(--gf-tint); color: var(--gf); border: 1px solid var(--gf-line); }
+/* "Active" means active-in-game everywhere — render it in the --ok green
+   (matching the modpack-detail ACTIVE badge), not the gold update tint. */
+.gf-pill-active { background: oklch(0.74 0.11 165 / 0.18); color: var(--ok); border: 1px solid oklch(0.74 0.11 165 / 0.30); }
 .gf-pill-ok { background: oklch(0.74 0.11 165 / 0.18); color: var(--ok); }
 .gf-pill-warn { background: oklch(0.78 0.16 60 / 0.18); color: oklch(0.86 0.13 75); border: 1px solid oklch(0.78 0.16 60 / 0.28); }
 .gf-pill-beta { background: oklch(0.70 0.14 85 / 0.16); color: oklch(0.86 0.13 82); border: 1px solid oklch(0.70 0.14 85 / 0.28); }

@@ -627,135 +627,6 @@ describe('<LibraryTable>', () => {
     expect(row.querySelector('.gf-row-inpack')?.textContent).toMatch(/Not in Modpack/i);
   });
 
-  it('bulk-store unused active mods — happy path: stores only the unused-active ones + success toast', async () => {
-    // The toolbar "Store N unused active mods" button calls
-    // handleStoreUnused (LibraryTable.tsx:371-417). Only rows that are
-    // (a) installed_enabled=true AND (b) not in ANY profile should be
-    // toggled off. Rows in a profile, or already stored, are skipped.
-    registerInvokeHandler('list_profiles_cmd', () => [
-      baseProfile({ name: 'Stable' }),
-      baseProfile({ name: 'Beta' }),
-    ]);
-    registerInvokeHandler('get_profile_memberships', () => ({
-      profiles: [
-        { name: 'Stable', editable: true },
-        { name: 'Beta', editable: true },
-      ],
-      mods: [
-        {
-          name: 'Unused Active',
-          version: '1.0.0',
-          folder_name: 'UnusedActive',
-          mod_id: 'unused-active',
-          installed_enabled: true,
-          profiles: [
-            { profile_name: 'Stable', included: false, enabled: false, editable: true },
-            { profile_name: 'Beta', included: false, enabled: false, editable: true },
-          ],
-        },
-        {
-          name: 'Used Active',
-          version: '1.0.0',
-          folder_name: 'UsedActive',
-          mod_id: 'used-active',
-          installed_enabled: true,
-          profiles: [
-            { profile_name: 'Stable', included: true, enabled: true, editable: true },
-            { profile_name: 'Beta', included: false, enabled: false, editable: true },
-          ],
-        },
-        {
-          name: 'Unused Stored',
-          version: '1.0.0',
-          folder_name: 'UnusedStored',
-          mod_id: 'unused-stored',
-          installed_enabled: false,
-          profiles: [
-            { profile_name: 'Stable', included: false, enabled: false, editable: true },
-            { profile_name: 'Beta', included: false, enabled: false, editable: true },
-          ],
-        },
-      ],
-    }));
-    registerInvokeHandler('toggle_mod', () => undefined);
-
-    const user = userEvent.setup();
-    render(<Wrap modpackName="Stable" />);
-    await screen.findAllByText('Unused Active');
-
-    await user.click(screen.getByRole('button', { name: /Store 1 unused active mod/i }));
-
-    await waitFor(() => {
-      const toggles = getInvokeCalls().filter((c) => c.cmd === 'toggle_mod');
-      // Only the "Unused Active" row gets toggled off.
-      expect(toggles).toEqual([
-        {
-          cmd: 'toggle_mod',
-          args: {
-            name: 'Unused Active',
-            folderName: 'UnusedActive',
-            enable: false,
-          },
-        },
-      ]);
-    });
-    expect(await screen.findByText(/Stored 1 unused active mod/i)).toBeInTheDocument();
-  });
-
-  it('bulk-store partial failure → aggregate error + successful items still applied', async () => {
-    // Two unused-active mods. One toggle_mod call succeeds, the other
-    // fails. The success path should still flip the storage chip on
-    // the successful row; the aggregate error toast must list the
-    // failed mod by display name.
-    registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
-    registerInvokeHandler('get_profile_memberships', () => ({
-      profiles: [{ name: 'Stable', editable: true }],
-      mods: [
-        {
-          name: 'Stores Cleanly',
-          version: '1.0.0',
-          folder_name: 'StoresCleanly',
-          mod_id: 'stores-cleanly',
-          installed_enabled: true,
-          profiles: [
-            { profile_name: 'Stable', included: false, enabled: false, editable: true },
-          ],
-        },
-        {
-          name: 'Fails To Store',
-          version: '1.0.0',
-          folder_name: 'FailsToStore',
-          mod_id: 'fails-to-store',
-          installed_enabled: true,
-          profiles: [
-            { profile_name: 'Stable', included: false, enabled: false, editable: true },
-          ],
-        },
-      ],
-    }));
-    registerInvokeHandler('toggle_mod', (args) => {
-      if (args?.name === 'Fails To Store') throw new Error('busy');
-      return undefined;
-    });
-
-    const user = userEvent.setup();
-    render(<Wrap modpackName="Stable" />);
-    await screen.findAllByText('Stores Cleanly');
-    await user.click(screen.getByRole('button', { name: /Store 2 unused active mods/i }));
-
-    await waitFor(() => {
-      expect(getInvokeCalls().filter((c) => c.cmd === 'toggle_mod')).toHaveLength(2);
-    });
-    // Both rows were attempted (one cleanly, one failed). The
-    // active/stored chip no longer renders in the row, so the
-    // observable outcome is the aggregate error toast naming the failed
-    // mod — the success row's flip is verified by the toggle call set
-    // above plus the toast's "1 of 2" count.
-    expect(
-      await screen.findByText(/Stored 1 of 2 unused active mods\. Failed: Fails To Store/i),
-    ).toBeInTheDocument();
-  });
-
   it('display_name override is shown in the row title; folder name from manifest renders as the hint', async () => {
     // membershipDisplayName falls back to `name` when display_name is
     // empty (or whitespace). When set, the row title shows the
@@ -924,7 +795,7 @@ describe('<LibraryTable modpackName={null}>', () => {
       ]);
     }
 
-    it('hides the sort control, store-unused, explainer, and In-Modpack badge', async () => {
+    it('hides the sort control, explainer, and In-Modpack badge', async () => {
       const modInfoByKey = seedInPack();
       const { container } = render(<Wrap modpackName="Stable" packScoped modInfoByKey={modInfoByKey} />);
       await screen.findByText('PackMod');

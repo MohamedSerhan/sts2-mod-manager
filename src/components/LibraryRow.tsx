@@ -124,6 +124,12 @@ export interface LibraryRowProps {
    *  of the disk-delete trash, and the kebab gains a "Delete from disk"
    *  item. The All Mods view leaves this false. */
   packScoped?: boolean;
+  /** Whether the focused pack is the ACTIVE one. Only meaningful with
+   *  packScoped: the active/stored toggle (and the green "active in game"
+   *  border) appear only for the active pack's rows, since in-game state is
+   *  irrelevant for a pack that isn't loaded. Ignored outside packScoped —
+   *  the All Mods view always shows the toggle. */
+  packActive?: boolean;
   /** Drag highlight target. */
   isDragOver: boolean;
   /** True while a setProfileLoadOrder commit is in flight. Disables
@@ -200,6 +206,7 @@ export function LibraryRow({
   inPackIndex,
   enableReorder = false,
   packScoped = false,
+  packActive = false,
   isDragOver,
   loadOrderSaving,
   membershipSaving,
@@ -273,7 +280,7 @@ export function LibraryRow({
 
   return (
     <Card
-      className={`gf-profile-library-row${row.installed_enabled ? ' is-active' : ''}${isDragOver ? ' drag-over' : ''}${mod?.pinned ? ' gf-mod-pinned' : ''}${mod ? ' is-clickable' : ''}`}
+      className={`gf-profile-library-row${(!packScoped || packActive) && row.installed_enabled ? ' is-active' : ''}${isDragOver ? ' drag-over' : ''}${mod?.pinned ? ' gf-mod-pinned' : ''}${mod ? ' is-clickable' : ''}`}
       draggable={reorderable && !loadOrderSaving}
       onDragStart={(event) => onDragStart(event, inPackIndex)}
       onDragOver={(event) => onDragOver(event, inPackIndex)}
@@ -316,7 +323,10 @@ export function LibraryRow({
         {/* 4.1 — active/stored switch, leftmost. The card's green left
             border mirrors this (on = active in game, off = stored).
             stopPropagation so flipping it doesn't open Edit-sources. */}
-        {mod && (
+        {/* Active/stored toggle — only where in-game state is meaningful:
+            the All Mods view, or the ACTIVE pack's rows. A non-active pack's
+            members aren't loaded, so showing a toggle there is misleading. */}
+        {mod && (!packScoped || packActive) && (
           <div
             className="gf-row-status"
             role="presentation"

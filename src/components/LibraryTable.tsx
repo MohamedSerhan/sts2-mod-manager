@@ -29,11 +29,7 @@
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  Download,
-  RefreshCw,
-  Search,
-} from 'lucide-react';
+import { Search } from 'lucide-react';
 import { Card } from './Card';
 import { Button } from './Button';
 import {
@@ -60,7 +56,6 @@ import type {
 } from '../types';
 
 const DEFAULT_PAGE_SIZE = 100;
-const BULK_STORAGE_KEY = '__bulk_storage__';
 
 export type LibrarySortMode =
   | 'nameAsc'
@@ -414,15 +409,6 @@ export function LibraryTable({
 
   const visibleRows = filteredRows.slice(0, visibleLimit);
 
-  const unusedActiveRows = useMemo(() => {
-    if (!effectiveGrid) return [] as ProfileMembershipMod[];
-    return effectiveGrid.mods.filter(
-      (row) =>
-        row.installed_enabled
-        && row.profiles.filter((p) => p.included).length === 0,
-    );
-  }, [effectiveGrid]);
-
   function patchRowMembership(
     rowKey: string,
     nextIncluded: boolean,
@@ -589,54 +575,6 @@ export function LibraryTable({
     }
   }
 
-  async function handleStoreUnused() {
-    if (unusedActiveRows.length === 0 || storageSaving || membershipSaving)
-      return;
-    const stored = new Set<string>();
-    const failed: string[] = [];
-    try {
-      setStorageSaving(BULK_STORAGE_KEY);
-      for (const row of unusedActiveRows) {
-        try {
-          await toggleMod(row.name, row.folder_name, false);
-          stored.add(membershipRowKey(row));
-        } catch {
-          failed.push(membershipDisplayName(row));
-        }
-      }
-      if (stored.size > 0) {
-        setGrid((prev) => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            mods: prev.mods.map((mod) =>
-              stored.has(membershipRowKey(mod))
-                ? { ...mod, installed_enabled: false }
-                : mod,
-            ),
-          };
-        });
-        await refreshAll();
-      }
-      if (failed.length > 0) {
-        toastCtx.error(
-          t('profiles.library.toastBulkStorageFailed', {
-            stored: stored.size,
-            total: unusedActiveRows.length,
-            mods: failed.slice(0, 3).join(', '),
-          }),
-        );
-      } else {
-        toastCtx.success(
-          t('profiles.library.toastBulkStored', { count: stored.size }),
-        );
-      }
-      onMembershipChanged?.();
-    } finally {
-      setStorageSaving(null);
-    }
-  }
-
   // ── Drag reorder for the in-pack list ─────────────────────────────
   // The drag handles only appear on rows that are in the modpack. The
   // reorder commits via setProfileLoadOrder which persists the order
@@ -727,40 +665,10 @@ export function LibraryTable({
         {packScoped && toolbarActions && (
           <div className="gf-profile-library-toolbar-actions">{toolbarActions}</div>
         )}
-        {/* The bulk "store unused" action + the sort control are hidden in
-            the dedicated modpack view: every row is already in the pack
-            (nothing "unused" to store) and the list always shows load
-            order (sorting would fight it). */}
+        {/* The sort control is hidden in the dedicated modpack view: the list
+            always shows load order there (sorting would fight it). */}
         {!packScoped && (
           <div className="gf-profile-library-toolbar-actions">
-            <Button
-              variant="secondary"
-              size="sm"
-              disabled={
-                unusedActiveRows.length === 0
-                || storageSaving !== null
-                || membershipSaving !== null
-              }
-              onClick={handleStoreUnused}
-              aria-label={
-                unusedActiveRows.length === 0
-                  ? t('profiles.library.bulkStoreNone')
-                  : t('profiles.library.bulkStoreUnused', {
-                      count: unusedActiveRows.length,
-                    })
-              }
-            >
-              {storageSaving === BULK_STORAGE_KEY ? (
-                <RefreshCw size={13} className="animate-spin" />
-              ) : (
-                <Download size={13} />
-              )}
-              {unusedActiveRows.length === 0
-                ? t('profiles.library.bulkStoreNone')
-                : t('profiles.library.bulkStoreUnused', {
-                    count: unusedActiveRows.length,
-                  })}
-            </Button>
             <label className="gf-sort-control gf-profile-library-sort">
               <span>{t('profiles.library.sort.label')}</span>
               <select
@@ -846,6 +754,7 @@ export function LibraryTable({
               inPackIndex={inPackIndex}
               enableReorder={enableReorder}
               packScoped={packScoped}
+              packActive={modpackName != null && modpackName === activeProfile}
               isDragOver={dragOverIndex === inPackIndex && inPack}
               loadOrderSaving={loadOrderSaving}
               membershipSaving={membershipSaving}

@@ -332,9 +332,6 @@
       "searchPackPlaceholder": "Search mods…",
       "explainerModpack": "Check a mod to include it in this modpack. Drag the handle to set load order. Switching to this modpack activates exactly these mods in the game.",
       "explainerLibrary": "Every mod installed on your computer. Use the checkbox to add a mod to your active modpack — switching modpacks decides what's actually loaded in the game.",
-      "bulkStoreUnused_one": "Store {{count}} unused active mod",
-      "bulkStoreUnused_other": "Store {{count}} unused active mods",
-      "bulkStoreNone": "No unused active mods",
       "showing": "Showing {{shown}} of {{total}}",
       "showMore": "Show {{count}} more",
       "sort": {
@@ -372,10 +369,7 @@
         "enableAndAdd": "Enable & add to \"{{pack}}\"",
         "enableOnly": "Enable only",
         "keepStored": "Keep it stored"
-      },
-      "toastBulkStored_one": "Stored {{count}} unused active mod",
-      "toastBulkStored_other": "Stored {{count}} unused active mods",
-      "toastBulkStorageFailed": "Stored {{stored}} of {{total}} unused active mods. Failed: {{mods}}"
+      }
     },
     "loadOrder": {
       "button": "Load order",

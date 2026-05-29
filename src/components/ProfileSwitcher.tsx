@@ -200,7 +200,7 @@ export function ProfileSwitcher({ onClose, onAddPack, onManageAll }: Props) {
               {switching === p.name ? (
                 <RefreshCw size={12} className="animate-spin" style={{ color: 'var(--ink-mute)' }} />
               ) : isActive ? (
-                <span className="gf-pill gf-pill-update">{t('profileSwitcher.active')}</span>
+                <span className="gf-pill gf-pill-active">{t('profileSwitcher.active')}</span>
               ) : null}
             </button>
           );

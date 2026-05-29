@@ -408,9 +408,6 @@
       "searchPackPlaceholder": "搜索模组…",
       "explainerModpack": "勾选模组即可将其加入此模组包。拖动手柄可设置加载顺序。切换到此模组包时，将在游戏中精确激活这些模组。",
       "explainerLibrary": "你电脑上已安装的所有模组。使用复选框可将模组加入当前活跃的模组包 — 切换模组包决定游戏中实际加载的内容。",
-      "bulkStoreUnused_one": "存储 {{count}} 个未使用的活跃模组",
-      "bulkStoreUnused_other": "存储 {{count}} 个未使用的活跃模组",
-      "bulkStoreNone": "没有未使用的活跃模组",
       "showing": "正在显示 {{shown}} / {{total}}",
       "showMore": "再显示 {{count}} 个",
       "sort": {
@@ -448,10 +445,7 @@
         "enableAndAdd": "启用并添加到「{{pack}}」",
         "enableOnly": "仅启用",
         "keepStored": "保持存储"
-      },
-      "toastBulkStored_one": "已存储 {{count}} 个未使用的活跃模组",
-      "toastBulkStored_other": "已存储 {{count}} 个未使用的活跃模组",
-      "toastBulkStorageFailed": "已存储 {{stored}} / {{total}} 个未使用的活跃模组。失败：{{mods}}"
+      }
     },
     "loadOrder": {
       "button": "加载顺序",

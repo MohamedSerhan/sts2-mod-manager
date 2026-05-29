@@ -590,7 +590,7 @@ export function ModpackDetail({
           modpackName={profile.name}
           packScoped
           coupleActiveStorage
-          reloadToken={membershipSignature}
+          reloadToken={`${membershipSignature}|active:${activeProfile ?? ''}`}
           toolbarActions={packToolbarActions}
           filterRow={(row) =>
             !!row.profiles.find((p) => p.profile_name === profile.name)?.included

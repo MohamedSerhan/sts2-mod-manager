@@ -252,19 +252,35 @@ describe('<ModpackDetail>', () => {
     expect(within(available).queryByText('PackMod')).toBeNull();
   });
 
-  it('in-pack rows are the rich LibraryTable rows (toggle + kebab), not plain Remove buttons', async () => {
+  it('in-pack rows are the rich LibraryTable rows (toggle + kebab) on the ACTIVE pack', async () => {
+    // The active/stored toggle only shows for the active pack (in-game state
+    // is meaningful only there), so mark Sample active to see the switch.
+    registerInvokeHandler('get_active_profile', () => 'Sample');
     const profile = setupPack({
       inPack: [modInfo({ name: 'PackMod', folder_name: 'PackMod' })],
     });
     render(<Wrap profile={profile} onBack={vi.fn()} />);
     const inPack = await screen.findByTestId('modpack-detail-in-pack');
-    // Rich row markers: the active/stored toggle (a checkbox/switch) and
-    // the per-row "Mod actions" kebab — same as the All Mods list.
+    // Rich row markers: the per-row "Mod actions" kebab and the active/stored
+    // switch — the same controls the Mod Library rows use.
     await waitFor(() => {
       expect(within(inPack).getByRole('button', { name: /Mod actions/i })).toBeInTheDocument();
     });
-    // The active/stored switch — the same control the All Mods rows use.
-    expect(within(inPack).getByRole('switch')).toBeInTheDocument();
+    expect(await within(inPack).findByRole('switch')).toBeInTheDocument();
+  });
+
+  it('omits the active/stored toggle for a NON-active modpack', async () => {
+    // A non-active pack's members aren't loaded in game, so the in-game toggle
+    // would be misleading — it's omitted (no get_active_profile → not active).
+    const profile = setupPack({
+      inPack: [modInfo({ name: 'PackMod', folder_name: 'PackMod' })],
+    });
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+    const inPack = await screen.findByTestId('modpack-detail-in-pack');
+    await within(inPack).findByText('PackMod');
+    // Kebab/actions remain, but there's no in-game switch on a non-active pack.
+    expect(within(inPack).getByRole('button', { name: /Mod actions/i })).toBeInTheDocument();
+    expect(within(inPack).queryByRole('switch')).toBeNull();
   });
 
   it('the in-pack rows have no inline drag handle (reorder is the Load order modal)', async () => {
@@ -277,9 +293,11 @@ describe('<ModpackDetail>', () => {
     const { container } = render(<Wrap profile={profile} onBack={vi.fn()} onOpenLoadOrder={vi.fn()} />);
     const inPack = await screen.findByTestId('modpack-detail-in-pack');
     // The HTML5 drag handle was removed — it never worked in the webview.
-    // Reordering is the Load order modal.
+    // Reordering is the Load order modal. (Use the per-row kebab as the
+    // "rows rendered" proxy — the in-game switch only shows on the active
+    // pack, and this pack isn't active.)
     await waitFor(() => {
-      expect(within(inPack).getAllByRole('switch').length).toBeGreaterThan(0);
+      expect(within(inPack).getAllByRole('button', { name: /Mod actions/i }).length).toBeGreaterThan(0);
     });
     expect(container.querySelector('.gf-load-order-drag')).toBeNull();
     expect(within(inPack).getByRole('button', { name: /Load order/i })).toBeInTheDocument();

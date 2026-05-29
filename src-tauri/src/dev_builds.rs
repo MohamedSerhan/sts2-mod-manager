@@ -127,6 +127,38 @@ pub async fn list_dev_builds(state: State<'_, AppState>) -> Result<Vec<DevBuild>
     Ok(parse_dev_builds(releases))
 }
 
+/// Download a dev build's Windows NSIS installer and run it. Because every
+/// dev build shares the `com.sts2mm.app.dev` identity, the installer replaces
+/// the running "(Dev)" app in place and relaunches into the chosen build.
+/// The exact silent/relaunch flags are confirmed by the manual gate; this
+/// launches the installer, which Tauri's NSIS handles for a running
+/// same-identity app.
+#[cfg(target_os = "windows")]
+#[tauri::command]
+pub async fn install_dev_build(installer_url: String) -> Result<(), String> {
+    use std::process::Command;
+    let dest = std::env::temp_dir().join("sts2mm-dev-setup.exe");
+    crate::download::download_file(&installer_url, &dest, |_, _| {})
+        .await
+        .map_err(|e| {
+            log::warn!("install_dev_build: download failed: {e}");
+            format!("Download failed: {e}")
+        })?;
+    Command::new(&dest)
+        .spawn()
+        .map_err(|e| {
+            log::warn!("install_dev_build: failed to launch installer: {e}");
+            format!("Failed to launch installer: {e}")
+        })?;
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+pub async fn install_dev_build(_installer_url: String) -> Result<(), String> {
+    Err("In-app install is Windows-only — use the download link instead.".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1436,7 +1436,7 @@
     "switching": "正在切换到 PR #{{pr}}——（Dev）应用将替换并重新启动。",
     "switchFailed": "切换失败：{{error}}",
     "downloads": "下载",
-    "noWindowsBuild": "无更新包 manifest，无法一键切换到此版本。",
+    "noWindowsBuild": "无更新包 manifest，无法一键切换。",
     "backToRelease": "要回到稳定版应用，只需启动你的正式版 STS2 Mod Manager——它是独立安装、不受影响的。"
   }
 }

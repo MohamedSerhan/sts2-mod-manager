@@ -92,6 +92,8 @@
       "libraryHide": "收起",
       "editMods": "编辑",
       "editModsTitle": "用复选框列表添加或移除模组",
+      "repair": "修复模组包",
+      "repairHint": "重新安装缺失或被更改的模组，使此模组包恢复到已保存的版本。",
       "deleteAll": "全部删除",
       "deleteAllTitleShort": "从电脑中删除此整合包的模组",
       "deleteAllTitle": "删除“{{name}}”中的 {{count}} 个模组？",

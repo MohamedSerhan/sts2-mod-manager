@@ -92,6 +92,8 @@
       "libraryHide": "Hide",
       "editMods": "Edit",
       "editModsTitle": "Add or remove mods with a checkbox list",
+      "repair": "Repair modpack",
+      "repairHint": "Reinstall missing or changed mods so this modpack matches its saved version.",
       "deleteAll": "Delete all",
       "deleteAllTitleShort": "Delete this modpack's mods from your computer",
       "deleteAllTitle": "Delete {{count}} mod(s) in \"{{name}}\"?",

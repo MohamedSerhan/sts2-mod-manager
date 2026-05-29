@@ -487,9 +487,17 @@ export function ModpackDetail({
                   {t('profiles.kebab.exportJson')}
                 </KebabItem>
               )}
-              {onRepairDrift && hasDrift && (
-                <KebabItem icon={<Download size={12} />} onClick={() => onRepairDrift(profile.name)}>
-                  {t('profiles.drift.repair')}
+              {/* Repair is always offered for the ACTIVE modpack (not only when
+                  drift is auto-detected) so a user who messed up their install
+                  has an on-demand "reset to the saved version" action. It also
+                  shows for any pack with detected drift. */}
+              {onRepairDrift && (isActive || hasDrift) && (
+                <KebabItem
+                  icon={<Download size={12} />}
+                  onClick={() => onRepairDrift(profile.name)}
+                  description={t('modpack.detail.repairHint')}
+                >
+                  {t('modpack.detail.repair')}
                 </KebabItem>
               )}
               <KebabItem icon={<Search size={12} />} onClick={() => lib.setShowAutoDetect(true)}>

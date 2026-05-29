@@ -637,12 +637,30 @@ describe('<ModpackDetail>', () => {
     expect(onRepairDrift).toHaveBeenCalledWith('Sample');
   });
 
-  it('Repair item is omitted from the kebab when no drift is reported', async () => {
+  it('Repair modpack is omitted for a non-active pack with no drift', async () => {
+    // Non-active pack (no get_active_profile) with no drift → nothing to repair
+    // from here; switching to the pack re-applies its manifest instead.
     const user = userEvent.setup();
     render(<Wrap {...baseProps()} onDelete={vi.fn()} onRepairDrift={vi.fn()} />);
     await screen.findByRole('heading', { level: 2, name: 'Sample' });
     await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
     expect(screen.queryByRole('menuitem', { name: /Repair/i })).toBeNull();
+  });
+
+  it('Repair modpack is always available for the ACTIVE pack, even with no drift', async () => {
+    // On-demand "reset to the saved version": a user who messed up their active
+    // install can repair without waiting for drift to be auto-detected.
+    registerInvokeHandler('get_active_profile', () => 'Sample');
+    const onRepairDrift = vi.fn();
+    const user = userEvent.setup();
+    render(<Wrap {...baseProps()} onRepairDrift={onRepairDrift} />);
+    const titleRow = (await screen.findByRole('heading', { level: 2, name: 'Sample' }))
+      .closest('.gf-modpack-detail-title-row') as HTMLElement;
+    // Wait for the ACTIVE badge so isActive has propagated from AppContext.
+    await within(titleRow).findByText(/active/i);
+    await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /Repair modpack/i }));
+    expect(onRepairDrift).toHaveBeenCalledWith('Sample');
   });
 
   // ── Available section search ──────────────────────────────────────

@@ -1418,5 +1418,20 @@
     "searchPlaceholder_other": "Search {{count}} mods",
     "updateAllLabel_one": "Update {{count}} mod",
     "updateAllLabel_other": "Update {{count}} mods"
+  },
+  "devBuilds": {
+    "title": "Dev Builds",
+    "subtitle": "Switch the (Dev) app between open PRs' builds. Your release app is untouched.",
+    "loading": "Loading dev builds…",
+    "error": "Couldn't load dev builds: {{error}}",
+    "retry": "Retry",
+    "empty": "No open dev builds — open a PR and label it dev-build.",
+    "current": "(current — you're running this)",
+    "switchTo": "Switch to this build",
+    "installingShort": "Installing…",
+    "installing": "Installing PR #{{pr}} — the (Dev) app will replace itself and relaunch.",
+    "installFailed": "Install failed: {{error}}",
+    "noWindowsBuild": "No Windows build (its build leg may have failed)",
+    "backToRelease": "To return to the stable app, just launch your release STS2 Mod Manager — it's a separate, untouched install."
   }
 }

@@ -96,6 +96,10 @@ body {
   font-size: 9px; font-weight: 800;
 }
 .gf-titlebar-title { color: var(--ink); }
+.gf-titlebar-dev {
+  margin-left: 8px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
+  padding: 1px 5px; border-radius: 3px; background: var(--amber, #fbca04); color: #1a1a1a;
+}
 .gf-titlebar-controls { display: flex; -webkit-app-region: no-drag; }
 .gf-titlebar-btn {
   width: 44px; height: 30px;
@@ -2320,3 +2324,34 @@ body {
 @keyframes gf-spin {
   to { transform: rotate(360deg); }
 }
+
+/* Dev Builds panel (sub-project E). */
+.gf-error { color: var(--danger); }
+.gf-badge {
+  display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 4px;
+  background: var(--indigo-line); color: var(--ink-dim); margin-left: 6px; white-space: nowrap;
+}
+.gf-badge-current { background: var(--amber, #fbca04); color: #1a1a1a; }
+.gf-devbuilds-search {
+  display: flex; align-items: center; gap: 6px; margin: 8px 0;
+  border: 1px solid var(--indigo-line); border-radius: 6px; padding: 4px 8px;
+}
+.gf-devbuilds-search input { flex: 1; background: transparent; border: 0; color: inherit; outline: none; }
+.gf-devbuilds-list {
+  list-style: none; padding: 0; margin: 8px 0;
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 320px; overflow-y: auto;
+}
+.gf-devbuilds-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 6px 8px; border: 1px solid var(--indigo-line); border-radius: 6px;
+}
+.gf-devbuilds-meta { min-width: 0; }
+.gf-devbuilds-pr { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; }
+.gf-devbuilds-date { font-size: 12px; }
+.gf-devbuilds-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.gf-devbuilds-downloads summary { cursor: pointer; color: var(--ink-dim); font-size: 12px; list-style: none; }
+.gf-devbuilds-downloads summary::-webkit-details-marker { display: none; }
+.gf-devbuilds-dl-list { display: flex; flex-direction: column; gap: 2px; padding: 4px 0; }
+.gf-link-btn { background: transparent; border: 0; color: var(--indigo, #8ab4f8); cursor: pointer; text-align: left; padding: 2px 0; font-size: 12px; }
+.gf-devbuilds-foot { margin-top: 10px; }

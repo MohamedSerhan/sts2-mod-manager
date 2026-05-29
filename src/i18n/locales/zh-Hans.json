@@ -486,6 +486,7 @@
     },
     "dismiss": "忽略",
     "windowTitle": "STS2 模组管理器",
+    "devBadge": "DEV",
     "minimize": "最小化",
     "maximize": "最大化",
     "close": "关闭",
@@ -1418,5 +1419,24 @@
     "searchPlaceholder_other": "搜索 {{count}} 个模组",
     "updateAllLabel_one": "更新 {{count}} 个模组",
     "updateAllLabel_other": "更新 {{count}} 个模组"
+  },
+  "devBuilds": {
+    "title": "开发版本",
+    "subtitle": "在各开放 PR 的版本之间切换（Dev）应用。你的正式版应用不受影响。",
+    "loading": "正在加载开发版本…",
+    "error": "无法加载开发版本：{{error}}",
+    "retry": "重试",
+    "search": "按 PR 编号、sha 或标题搜索",
+    "empty": "暂无开放的开发版本——请新建 PR 并打上 dev-build 标签。",
+    "noMatch": "没有匹配搜索的开发版本。",
+    "current": "当前",
+    "running": "运行中",
+    "switchTo": "切换到此版本",
+    "switchingShort": "正在切换…",
+    "switching": "正在切换到 PR #{{pr}}——（Dev）应用将替换并重新启动。",
+    "switchFailed": "切换失败：{{error}}",
+    "downloads": "下载",
+    "noWindowsBuild": "无 Windows 版本（其构建可能已失败）",
+    "backToRelease": "要回到稳定版应用，只需启动你的正式版 STS2 Mod Manager——它是独立安装、不受影响的。"
   }
 }

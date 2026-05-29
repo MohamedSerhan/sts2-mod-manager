@@ -1420,18 +1420,18 @@
     "updateAllLabel_other": "更新 {{count}} 个模组"
   },
   "devBuilds": {
-    "title": "Dev Builds",
-    "subtitle": "Switch the (Dev) app between open PRs' builds. Your release app is untouched.",
-    "loading": "Loading dev builds…",
-    "error": "Couldn't load dev builds: {{error}}",
-    "retry": "Retry",
-    "empty": "No open dev builds — open a PR and label it dev-build.",
-    "current": "(current — you're running this)",
-    "switchTo": "Switch to this build",
-    "installingShort": "Installing…",
-    "installing": "Installing PR #{{pr}} — the (Dev) app will replace itself and relaunch.",
-    "installFailed": "Install failed: {{error}}",
-    "noWindowsBuild": "No Windows build (its build leg may have failed)",
-    "backToRelease": "To return to the stable app, just launch your release STS2 Mod Manager — it's a separate, untouched install."
+    "title": "开发版本",
+    "subtitle": "在各开放 PR 的版本之间切换（Dev）应用。你的正式版应用不受影响。",
+    "loading": "正在加载开发版本…",
+    "error": "无法加载开发版本：{{error}}",
+    "retry": "重试",
+    "empty": "暂无开放的开发版本——请新建 PR 并打上 dev-build 标签。",
+    "current": "（当前——你正在运行此版本）",
+    "switchTo": "切换到此版本",
+    "installingShort": "正在安装…",
+    "installing": "正在安装 PR #{{pr}}——（Dev）应用将自我替换并重新启动。",
+    "installFailed": "安装失败：{{error}}",
+    "noWindowsBuild": "无 Windows 版本（其构建可能已失败）",
+    "backToRelease": "要回到稳定版应用，只需启动你的正式版 STS2 Mod Manager——它是独立安装、不受影响的。"
   }
 }

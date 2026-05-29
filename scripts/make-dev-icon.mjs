@@ -39,6 +39,7 @@ async function badgeOne(path, font32, font16) {
   if (w >= 64) {
     // Use a smaller font for 64–127px, larger for 128+.
     const font = w >= 128 ? font32 : font16;
+    // jimp v1: composite + print are synchronous (return `this`); only read/write are async.
     img.print({
       font,
       x: 0,

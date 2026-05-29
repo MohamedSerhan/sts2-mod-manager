@@ -29,6 +29,17 @@ test('badgeIcons rewrites the windows PNGs and (re)builds icon.ico', async () =>
     // Idempotent: a second run does not throw.
     await badgeIcons(dir);
     assert.ok(existsSync(join(dir, 'icon.ico')));
+    assert.ok(statSync(join(dir, 'icon.ico')).size > 0, 'icon.ico still valid after re-run');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('badgeIcons writes no icon.ico when no source PNGs exist', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'devicon-'));
+  try {
+    await badgeIcons(dir); // empty dir — must not throw
+    assert.ok(!existsSync(join(dir, 'icon.ico')), 'no icon.ico when there were no source PNGs');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

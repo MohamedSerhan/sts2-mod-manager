@@ -18,8 +18,12 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use super::apply::{disk_mod_matches_pin, switch_profile_from_paths};
-use super::crud::{load_profile, mod_key, version_is_wildcard};
-use super::Profile;
+use super::crud::{
+    hide_app_created_by, load_profile, mod_key, profile_mod_from_installed, save_profile,
+    version_is_wildcard,
+};
+use super::{Profile, ProfileMod};
+use crate::error::Result;
 
 /// A mod whose installed version differs from the profile's recorded version.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -148,6 +152,87 @@ pub(super) fn compute_profile_drift(
     }
 }
 
+/// Reconcile a profile's manifest with the current active loadout by
+/// applying ONLY the drift difference — the inverse of `repair`.
+///
+/// This is what the "Save changes" button on the drift banner calls. It
+/// deliberately does NOT re-snapshot the whole install (the old behavior,
+/// which pulled every enabled *and disabled* mod on disk into the pack,
+/// flooding a curated pack with the entire library). Instead it mirrors the
+/// drift definition exactly:
+///   - `added`   → enabled-on-disk mods not in the pack are appended.
+///   - `removed` → pack mods no longer present on disk (neither enabled nor
+///                 disabled) are dropped.
+///   - `toggled` / `version_changed` → pack mods still on disk have their
+///                 enabled flag + version synced to disk.
+///
+/// Disabled extras on disk that aren't in the pack are left alone — they're
+/// library items, not active drift. Durable per-mod metadata (source,
+/// bundle_url, hash, files) is preserved for mods already in the pack.
+///
+/// Post-condition: `compute_profile_drift` returns `has_drift == false`
+/// immediately after this runs (same `mod_key` matching on both sides).
+pub(super) fn reconcile_profile_with_disk(
+    name: &str,
+    mods_path: &Path,
+    disabled_path: &Path,
+    profiles_path: &Path,
+) -> Result<Profile> {
+    let mut profile = load_profile(name, profiles_path)?;
+
+    let enabled_mods = crate::mods::scan_mods(mods_path);
+    let disabled_mods = crate::mods::scan_disabled_mods(disabled_path);
+
+    // installed key -> (ModInfo, enabled-on-disk). Enabled scan wins on
+    // key collision (a mod can't be in both, but be defensive).
+    let mut installed_by_key: std::collections::HashMap<String, (crate::mods::ModInfo, bool)> =
+        std::collections::HashMap::new();
+    for m in &disabled_mods {
+        let key = mod_key(&m.name, m.folder_name.as_deref(), m.mod_id.as_deref());
+        installed_by_key.entry(key).or_insert_with(|| (m.clone(), false));
+    }
+    for m in &enabled_mods {
+        let key = mod_key(&m.name, m.folder_name.as_deref(), m.mod_id.as_deref());
+        installed_by_key.insert(key, (m.clone(), true));
+    }
+
+    let mut reconciled: Vec<ProfileMod> = Vec::new();
+    let mut kept_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    // 1. Keep pack mods still on disk (sync enabled + version); drop the rest.
+    for pm in &profile.mods {
+        let key = mod_key(&pm.name, pm.folder_name.as_deref(), pm.mod_id.as_deref());
+        if let Some((info, enabled)) = installed_by_key.get(&key) {
+            let mut updated = pm.clone();
+            updated.enabled = *enabled;
+            if !version_is_wildcard(&info.version) {
+                updated.version = info.version.clone();
+            }
+            reconciled.push(updated);
+            kept_keys.insert(key);
+        }
+        // else: removed (not on disk at all) → drop from the pack.
+    }
+
+    // 2. Append enabled-on-disk mods not already in the pack (the `added`
+    //    drift). Disabled extras are intentionally skipped.
+    for m in &enabled_mods {
+        let key = mod_key(&m.name, m.folder_name.as_deref(), m.mod_id.as_deref());
+        if kept_keys.contains(&key) {
+            continue;
+        }
+        let mut info = m.clone();
+        info.enabled = true;
+        reconciled.push(profile_mod_from_installed(&info));
+        kept_keys.insert(key);
+    }
+
+    profile.mods = reconciled;
+    profile.updated_at = chrono::Utc::now();
+    save_profile(&profile, profiles_path)?;
+    Ok(hide_app_created_by(profile))
+}
+
 /// Repair a profile: re-apply the manifest and disable active orphan mods
 /// that are not in the manifest. It intentionally does not delete orphan
 /// mods. Like `switch_profile`, it separates the active loadout from the
@@ -224,4 +309,143 @@ pub(super) async fn repair_profile_from_paths(
         disabled_orphans,
         deleted_orphans: Vec::new(),
     })
+}
+
+#[cfg(test)]
+mod reconcile_tests {
+    use super::*;
+    use crate::profiles::crud::save_profile;
+    use std::fs;
+    use std::path::Path;
+
+    fn write_mod(root: &Path, folder: &str, display: &str, version: &str) {
+        let dir = root.join(folder);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join(format!("{folder}.json")),
+            format!(r#"{{"id":"{folder}","name":"{display}","version":"{version}","author":"QA"}}"#),
+        )
+        .unwrap();
+        fs::write(dir.join(format!("{folder}.dll")), b"dll").unwrap();
+    }
+
+    fn pack_mod(name: &str, folder: &str, version: &str, enabled: bool) -> ProfileMod {
+        ProfileMod {
+            name: name.into(),
+            version: version.into(),
+            source: Some(format!("github:example/{folder}")),
+            hash: Some(format!("hash-{folder}")),
+            files: vec![format!("{folder}/{folder}.dll")],
+            folder_name: Some(folder.into()),
+            mod_id: Some(folder.into()),
+            enabled,
+            bundle_url: Some(format!("https://example.test/{folder}.zip")),
+            bundle_sha256: Some(format!("sha-{folder}")),
+        }
+    }
+
+    fn base_profile(name: &str, mods: Vec<ProfileMod>) -> Profile {
+        Profile {
+            name: name.into(),
+            game_version: Some("0.105.0".into()),
+            created_by: None,
+            mods,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+        }
+    }
+
+    /// The core bug: "Save changes" used to re-snapshot the whole install,
+    /// pulling every enabled AND disabled mod into a curated pack. Reconcile
+    /// must apply only the diff.
+    #[test]
+    fn reconcile_applies_only_the_diff_not_the_whole_install() {
+        let game_tmp = tempfile::tempdir().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let mods_path = game_tmp.path().join("mods");
+        let disabled_path = game_tmp.path().join("mods_disabled");
+        let profiles_path = config_tmp.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        // On disk: PackMod (enabled, already in pack), Extra (enabled, NOT in
+        // pack → should be added), LibraryOnly (disabled, NOT in pack →
+        // must be left out — this is the mod that the old snapshot wrongly
+        // pulled in).
+        write_mod(&mods_path, "PackMod", "Pack Mod", "1.0.0");
+        write_mod(&mods_path, "Extra", "Extra", "1.0.0");
+        write_mod(&disabled_path, "LibraryOnly", "Library Only", "1.0.0");
+
+        // Pack also lists GoneMod, which is no longer on disk → should be
+        // dropped.
+        let profile = base_profile(
+            "Stable",
+            vec![
+                pack_mod("Pack Mod", "PackMod", "1.0.0", true),
+                pack_mod("Gone Mod", "GoneMod", "1.0.0", true),
+            ],
+        );
+        save_profile(&profile, &profiles_path).unwrap();
+
+        let result =
+            reconcile_profile_with_disk("Stable", &mods_path, &disabled_path, &profiles_path)
+                .unwrap();
+
+        let folders: std::collections::HashSet<&str> = result
+            .mods
+            .iter()
+            .filter_map(|m| m.folder_name.as_deref())
+            .collect();
+        assert!(folders.contains("PackMod"), "kept the existing pack mod");
+        assert!(folders.contains("Extra"), "added the enabled extra");
+        assert!(!folders.contains("GoneMod"), "dropped the missing pack mod");
+        assert!(
+            !folders.contains("LibraryOnly"),
+            "must NOT pull in the disabled library mod (the bug)"
+        );
+        assert_eq!(result.mods.len(), 2, "exactly PackMod + Extra");
+
+        // Durable metadata for the kept mod is preserved (not blown away).
+        let kept = result
+            .mods
+            .iter()
+            .find(|m| m.folder_name.as_deref() == Some("PackMod"))
+            .unwrap();
+        assert_eq!(kept.source.as_deref(), Some("github:example/PackMod"));
+
+        // Post-condition: no drift remains.
+        let drift = compute_profile_drift(&result, &mods_path, &disabled_path);
+        assert!(!drift.has_drift, "reconcile should leave zero drift");
+    }
+
+    /// A pack mod that's been disabled on disk (toggled drift) stays in the
+    /// pack but flips to disabled — it is NOT dropped.
+    #[test]
+    fn reconcile_syncs_toggled_state_without_dropping() {
+        let game_tmp = tempfile::tempdir().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let mods_path = game_tmp.path().join("mods");
+        let disabled_path = game_tmp.path().join("mods_disabled");
+        let profiles_path = config_tmp.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        // PackMod is in the pack as enabled, but on disk it's disabled.
+        write_mod(&disabled_path, "PackMod", "Pack Mod", "1.0.0");
+        let profile = base_profile("Stable", vec![pack_mod("Pack Mod", "PackMod", "1.0.0", true)]);
+        save_profile(&profile, &profiles_path).unwrap();
+
+        let result =
+            reconcile_profile_with_disk("Stable", &mods_path, &disabled_path, &profiles_path)
+                .unwrap();
+
+        assert_eq!(result.mods.len(), 1, "mod stays in the pack");
+        assert!(!result.mods[0].enabled, "enabled state synced to disk (disabled)");
+
+        let drift = compute_profile_drift(&result, &mods_path, &disabled_path);
+        assert!(!drift.has_drift, "no drift after syncing the toggle");
+    }
 }

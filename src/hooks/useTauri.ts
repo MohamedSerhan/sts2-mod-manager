@@ -225,6 +225,14 @@ export async function getProfileDrift(name: string): Promise<ProfileDrift> {
   return invoke('get_profile_drift', { name });
 }
 
+/** Save the drift: reconcile the manifest to the current loadout by applying
+ *  only the diff (add enabled extras, drop missing mods, sync toggled/version
+ *  for present mods). Unlike snapshotProfile, this preserves the pack's
+ *  curated set rather than absorbing the whole install. */
+export async function saveProfileDrift(name: string): Promise<Profile> {
+  return invoke('save_profile_drift', { name });
+}
+
 // ── Curator Workflow ───────────────────────────────────────────────────────
 
 export async function checkForUpdates(): Promise<ModUpdate[]> {

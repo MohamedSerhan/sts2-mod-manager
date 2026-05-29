@@ -642,7 +642,7 @@ describe('<ProfilesView>', () => {
   });
 
   it('drift banner Save changes failure surfaces a Failed-to-save toast (handleSaveDrift catch)', async () => {
-    // snapshot_profile rejects → handleSaveDrift catch fires the
+    // save_profile_drift rejects → handleSaveDrift catch fires the
     // profiles.toast.saveFailed string with the underlying error.
     seedProfiles([baseProfile({ name: 'DriftedPack' })]);
     registerInvokeHandler('get_active_profile', () => 'DriftedPack');
@@ -653,7 +653,7 @@ describe('<ProfilesView>', () => {
       version_changed: [],
       has_drift: true,
     }));
-    registerInvokeHandler('snapshot_profile', () => { throw new Error('readonly fs'); });
+    registerInvokeHandler('save_profile_drift', () => { throw new Error('readonly fs'); });
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('DriftedPack')).toBeInTheDocument(); });
@@ -663,7 +663,7 @@ describe('<ProfilesView>', () => {
     });
   });
 
-  it('drift banner Save changes snapshots the active profile without repairing disk', async () => {
+  it('drift banner Save changes reconciles the diff (save_profile_drift) without repairing disk', async () => {
     seedProfiles([baseProfile({ name: 'DriftedPack' })]);
     registerInvokeHandler('get_active_profile', () => 'DriftedPack');
     registerInvokeHandler('get_profile_drift', () => ({
@@ -673,7 +673,9 @@ describe('<ProfilesView>', () => {
       version_changed: [],
       has_drift: true,
     }));
-    registerInvokeHandler('snapshot_profile', (args) =>
+    // The drift-save path must use save_profile_drift (apply the diff), NOT
+    // snapshot_profile (which would absorb the whole install into the pack).
+    registerInvokeHandler('save_profile_drift', (args) =>
       baseProfile({
         name: String(args?.name),
         mods: [{ name: 'NewMod', enabled: true } as any],
@@ -689,10 +691,12 @@ describe('<ProfilesView>', () => {
     await waitFor(() => {
       expect(
         getInvokeCalls().some(
-          (c) => c.cmd === 'snapshot_profile' && c.args?.name === 'DriftedPack',
+          (c) => c.cmd === 'save_profile_drift' && c.args?.name === 'DriftedPack',
         ),
       ).toBe(true);
     });
+    // Must NOT fall back to the whole-install snapshot, and must not repair disk.
+    expect(getInvokeCalls().some((c) => c.cmd === 'snapshot_profile')).toBe(false);
     expect(getInvokeCalls().some((c) => c.cmd === 'repair_profile')).toBe(false);
     await waitFor(() => {
       expect(screen.getByText(/Saved changes to "DriftedPack"/)).toBeInTheDocument();

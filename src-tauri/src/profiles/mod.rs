@@ -424,6 +424,22 @@ pub fn get_profile_drift(
     drift::compute_drift_for_profile(&name, mods_path, disabled_path, &s.profiles_path)
 }
 
+/// Save the drift: reconcile the manifest to the current loadout by applying
+/// only the diff (add enabled extras, drop missing mods, sync toggled/version
+/// for mods still present). Unlike `snapshot_profile`, this preserves the
+/// pack's curated set instead of pulling the whole install into it.
+#[tauri::command]
+pub fn save_profile_drift(
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Profile, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
+    let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
+    drift::reconcile_profile_with_disk(&name, mods_path, disabled_path, &s.profiles_path)
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn repair_profile(
     name: String,

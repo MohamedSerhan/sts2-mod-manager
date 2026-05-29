@@ -33,6 +33,7 @@ import {
   switchProfile,
   repairProfile,
   snapshotProfile,
+  saveProfileDrift,
   deleteProfile,
   duplicateProfile,
   exportProfile,
@@ -581,7 +582,12 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     if (savingProfile) return;
     try {
       setSavingProfile(name);
-      const profile = await snapshotProfile(name);
+      // Apply only the drift diff — NOT a full re-snapshot. snapshotProfile
+      // would pull every enabled + disabled mod on disk into the pack,
+      // flooding a curated pack with the whole library. saveProfileDrift
+      // adds just the enabled extras, drops missing mods, and syncs
+      // toggled/version for mods still present.
+      const profile = await saveProfileDrift(name);
       setProfiles((prev) => {
         const exists = prev.some((p) => p.name === profile.name);
         return exists

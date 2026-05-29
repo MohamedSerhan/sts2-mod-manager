@@ -307,6 +307,7 @@ pub fn run() {
             profiles::export_profile_cmd,
             profiles::import_profile_cmd,
             profiles::get_profile_drift,
+            profiles::save_profile_drift,
             // Curator workflow
             updater::check_for_updates,
             updater::update_mod,

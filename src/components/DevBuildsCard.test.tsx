@@ -78,4 +78,11 @@ describe('DevBuildsCard', () => {
     await waitFor(() => expect(screen.getByText(/rate limited/i)).toBeInTheDocument());
     expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
   });
+
+  it('shows an empty state when there are no dev builds', async () => {
+    setMockAppVersion('1.6.1-dev.pr1.gdeadbee');
+    registerInvokeHandler('list_dev_builds', () => []);
+    renderCard();
+    await waitFor(() => expect(screen.getByText(/no open dev builds/i)).toBeInTheDocument());
+  });
 });

@@ -14,7 +14,7 @@ interface DevBuild {
   sha: string;
   title: string;
   published_at: string;
-  windows_installer_url: string | null;
+  windows_installer_url: string | null; // returned by the backend; not used here (switching gates on manifest_url). Kept for interface completeness / a potential direct-download fallback.
   manifest_url: string | null;
   assets: DevBuildAsset[];
 }
@@ -114,6 +114,7 @@ export function DevBuildsCard() {
         <ul className="gf-devbuilds-list">
           {filtered.map((b) => {
             const isCurrent = b.sha !== '' && b.sha === currentSha;
+            const isOpen = openDownloads.has(b.pr);
             return (
               <li key={b.pr} className="gf-devbuilds-row">
                 <div className="gf-devbuilds-meta">
@@ -138,7 +139,7 @@ export function DevBuildsCard() {
                   )}
                   <details
                     className="gf-devbuilds-downloads"
-                    open={openDownloads.has(b.pr)}
+                    open={isOpen}
                     onToggle={(e) => {
                       const open = (e.currentTarget as HTMLDetailsElement).open;
                       setOpenDownloads((prev) => {
@@ -149,7 +150,7 @@ export function DevBuildsCard() {
                     }}
                   >
                     <summary>{t('devBuilds.downloads')}</summary>
-                    {openDownloads.has(b.pr) && (
+                    {isOpen && (
                       <div className="gf-devbuilds-dl-list">
                         {b.assets.map((a) => (
                           <button

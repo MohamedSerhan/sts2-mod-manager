@@ -368,6 +368,47 @@ describe('<ModsView>', () => {
     });
   });
 
+  it('Refresh surfaces a newly-installed mod in focus mode without a remount', async () => {
+    // Regression: with an active modpack the table renders from the
+    // membership grid, which was fetched once and never re-pulled on
+    // refresh — so a freshly-installed mod only appeared after switching
+    // tabs. The table must re-fetch the grid when the installed set grows.
+    registerInvokeHandler('get_active_profile', () => 'TestPack');
+    registerInvokeHandler('list_profiles_cmd', () => [
+      { name: 'TestPack', mods: [], created_at: '2026-01-01T00:00:00Z', created_by: null, game_version: null },
+    ]);
+    let installedCount = 1;
+    const mkRow = (name: string) => ({
+      name,
+      version: '1.0.0',
+      folder_name: name,
+      mod_id: name,
+      installed_enabled: true,
+      profiles: [{ profile_name: 'TestPack', included: true, enabled: true, editable: true }],
+    });
+    registerInvokeHandler('get_installed_mods', () =>
+      (installedCount === 1 ? ['OldMod'] : ['OldMod', 'FreshMod']).map((n) =>
+        baseMod({ name: n, folder_name: n }),
+      ),
+    );
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'TestPack', editable: true }],
+      mods: (installedCount === 1 ? ['OldMod'] : ['OldMod', 'FreshMod']).map(mkRow),
+    }));
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getAllByText('OldMod').length).toBeGreaterThan(0); });
+    expect(screen.queryByText('FreshMod')).toBeNull();
+
+    // Simulate an install landing on disk, then hit Refresh.
+    installedCount = 2;
+    await user.click(screen.getByRole('button', { name: /Refresh/ }));
+
+    // The new mod shows up without unmounting/remounting the table.
+    await waitFor(() => { expect(screen.getAllByText('FreshMod').length).toBeGreaterThan(0); });
+  });
+
   it('Open folder triggers open_mods_folder', async () => {
     seedMods([]);
     const user = userEvent.setup();

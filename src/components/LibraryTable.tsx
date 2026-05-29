@@ -219,6 +219,16 @@ export function LibraryTable({
   // confirms. The grid still drives the rest of the rendering.
   const [loadOrderDraft, setLoadOrderDraft] = useState<Profile['mods']>([]);
 
+  // Stable signature of the *set* of installed mods (identity only, not
+  // enabled-state/version). Changes when a mod is installed or deleted —
+  // which is exactly when the focused-mode grid must re-fetch so a newly
+  // added mod shows up without a remount. Toggles/version bumps don't
+  // change this, so they don't clobber the table's optimistic patches.
+  const installedIdentitySignal = useMemo(
+    () => appMods.map((m) => m.folder_name ?? m.name).sort().join(' '),
+    [appMods],
+  );
+
   const load = useCallback(async () => {
     if (modpackName == null) {
       // No-focus mode — rows are synthesized from the AppContext mods
@@ -237,7 +247,10 @@ export function LibraryTable({
     } finally {
       setLoading(false);
     }
-  }, [modpackName]);
+    // installedIdentitySignal is intentionally a dep: when the installed
+    // set changes (install/delete), re-pull the membership grid.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modpackName, installedIdentitySignal]);
 
   useEffect(() => {
     load();

@@ -33,6 +33,7 @@ import { useTranslation } from 'react-i18next';
 import {
   ArrowLeft,
   Camera,
+  ChevronDown,
   Copy,
   Download,
   Files,
@@ -49,8 +50,10 @@ import { Button } from './Button';
 import { Card } from './Card';
 import { HelpHint } from './HelpHint';
 import { KebabDivider, KebabItem, KebabMenu, KebabSection } from './KebabMenu';
+import { ModLibraryToolbar } from './ModLibraryToolbar';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
+import { useModLibrary } from '../hooks/useModLibrary';
 import { setProfileModMembership, toggleMod } from '../hooks/useTauri';
 import type { ModAuditEntry, ModInfo, Profile, ProfileMod, ShareResult } from '../types';
 import type { ProfileDrift } from '../hooks/useTauri';
@@ -160,6 +163,13 @@ export function ModpackDetail({
   const { t } = useTranslation();
   const { activeProfile, auditResults, mods, refreshAll } = useApp();
   const toast = useToast();
+  // Shared mod-library surface (toolbar + install actions), scoped so a
+  // mod installed from here auto-joins THIS pack. The same hook powers the
+  // All Mods view, so the add affordances are identical.
+  const lib = useModLibrary({ targetPack: profile.name });
+  // "Add from your Library" is collapsed by default to keep the focus on
+  // the pack's own mods; the user expands it to browse the rest.
+  const [libraryOpen, setLibraryOpen] = useState(false);
 
   const isActive = activeProfile === profile.name;
   const isShared = !!shareInfo;
@@ -434,6 +444,14 @@ export function ModpackDetail({
         </div>
       </div>
 
+      {/* Shared mod-library toolbar — same affordances as the All Mods
+          view (Open folder / Import / Quick add URL / Auto-detect / Audit /
+          Refresh). Installs from here auto-join this pack (targetPack). */}
+      <div className="gf-modpack-detail-toolbar">
+        <ModLibraryToolbar lib={lib} />
+      </div>
+      {lib.renderQuickAddForm()}
+
       {hasAuditChips && (
         <div
           className="gf-modpack-detail-audit"
@@ -554,55 +572,81 @@ export function ModpackDetail({
         )}
       </section>
 
-      {/* ── Section 2: add from your library ─────────────────────── */}
+      {/* ── Section 2: add from your library (collapsed by default) ── */}
       {availableMods.length > 0 && (
         <section
           className="gf-modpack-detail-section"
           data-testid="modpack-detail-available"
         >
-          <div className="gf-modpack-detail-section-head">
-            <h3 className="gf-modpack-detail-section-title">
+          {/* Prominent expander so it's obvious there's more to add
+              without cluttering the view with every installed mod. */}
+          <button
+            type="button"
+            className="gf-modpack-detail-library-toggle"
+            onClick={() => setLibraryOpen((o) => !o)}
+            aria-expanded={libraryOpen}
+            aria-controls="gf-modpack-detail-library-rows"
+          >
+            <ChevronDown
+              size={16}
+              className={`gf-modpack-detail-library-chevron ${libraryOpen ? 'is-open' : ''}`}
+              aria-hidden
+            />
+            <span className="gf-modpack-detail-section-title">
               {t('modpack.detail.availableCount', { count: availableMods.length })}
-            </h3>
-          </div>
-          <div className="gf-modpack-detail-rows">
-            {filteredAvailable.map((mod) => {
-              const key = modKey(mod);
-              const busy = busyKeys.has(key);
-              return (
-                <Card
-                  key={key}
-                  className="gf-modpack-mod-row"
-                  data-testid="modpack-mod-row-available"
-                >
-                  <div className="gf-modpack-mod-row-info">
-                    <span className="gf-modpack-mod-row-name">
-                      {mod.display_name?.trim() || mod.name}
-                    </span>
-                    <span className="gf-modpack-mod-row-meta">
-                      <span>{mod.version}</span>
-                      <SourceBadges mod={mod} />
-                    </span>
-                  </div>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    className="gf-modpack-mod-row-add"
-                    onClick={() => handleAdd(mod)}
-                    disabled={busy}
-                    aria-label={t('modpack.detail.add')}
+            </span>
+            <span className="gf-modpack-detail-library-hint">
+              {libraryOpen ? t('modpack.detail.libraryHide') : t('modpack.detail.libraryShow')}
+            </span>
+          </button>
+          {libraryOpen && (
+            <div
+              className="gf-modpack-detail-rows"
+              id="gf-modpack-detail-library-rows"
+            >
+              {filteredAvailable.length === 0 && (
+                <p className="gf-modpack-detail-empty">
+                  {t('modpack.detail.availableNoMatch')}
+                </p>
+              )}
+              {filteredAvailable.map((mod) => {
+                const key = modKey(mod);
+                const busy = busyKeys.has(key);
+                return (
+                  <Card
+                    key={key}
+                    className="gf-modpack-mod-row"
+                    data-testid="modpack-mod-row-available"
                   >
-                    {busy ? (
-                      <RefreshCw size={13} className="animate-spin" />
-                    ) : (
-                      <Plus size={13} />
-                    )}
-                    {t('modpack.detail.add')}
-                  </Button>
-                </Card>
-              );
-            })}
-          </div>
+                    <div className="gf-modpack-mod-row-info">
+                      <span className="gf-modpack-mod-row-name">
+                        {mod.display_name?.trim() || mod.name}
+                      </span>
+                      <span className="gf-modpack-mod-row-meta">
+                        <span>{mod.version}</span>
+                        <SourceBadges mod={mod} />
+                      </span>
+                    </div>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="gf-modpack-mod-row-add"
+                      onClick={() => handleAdd(mod)}
+                      disabled={busy}
+                      aria-label={t('modpack.detail.add')}
+                    >
+                      {busy ? (
+                        <RefreshCw size={13} className="animate-spin" />
+                      ) : (
+                        <Plus size={13} />
+                      )}
+                      {t('modpack.detail.add')}
+                    </Button>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
         </section>
       )}
 
@@ -611,6 +655,9 @@ export function ModpackDetail({
           {t('modpack.detail.allInPack')}
         </p>
       )}
+
+      {/* Auto-detect sources modal (shared). */}
+      {lib.renderAutoDetectModal()}
     </div>
   );
 }

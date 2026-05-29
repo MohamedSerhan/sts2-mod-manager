@@ -408,8 +408,50 @@ body {
   gap: 8px;
   flex-wrap: wrap;
 }
+/* Shared mod-library toolbar row inside the modpack detail view. Right-
+   aligns the action cluster (same buttons as All Mods) below the header. */
+.gf-modpack-detail-toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
 .gf-modpack-detail-search {
   display: flex;
+}
+/* Collapsible "Add from your library" header — a full-width clickable
+   row that clearly reads as expandable (chevron + Show/Hide hint). */
+.gf-modpack-detail-library-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--indigo-elev);
+  border: 1px solid var(--indigo-line);
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--ink);
+  text-align: left;
+  transition: background 0.15s, border-color 0.15s;
+}
+.gf-modpack-detail-library-toggle:hover {
+  background: oklch(0.28 0.05 280);
+  border-color: var(--gf-line);
+}
+.gf-modpack-detail-library-chevron {
+  flex-shrink: 0;
+  transition: transform 0.18s ease;
+  transform: rotate(-90deg);
+  color: var(--ink-mute);
+}
+.gf-modpack-detail-library-chevron.is-open {
+  transform: rotate(0deg);
+}
+.gf-modpack-detail-library-hint {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gf);
 }
 .gf-modpack-detail-search .gf-input {
   width: 100%;

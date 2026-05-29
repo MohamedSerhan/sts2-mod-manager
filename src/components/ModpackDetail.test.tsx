@@ -75,6 +75,16 @@ function installMods(mods: ModInfo[]) {
   registerInvokeHandler('get_installed_mods', () => mods);
 }
 
+/** The "Add from your Library" section is collapsed by default; expand it
+ *  so its rows are in the DOM. Returns the section element. */
+async function expandLibrary(user: ReturnType<typeof userEvent.setup>) {
+  const available = await screen.findByTestId('modpack-detail-available');
+  await user.click(
+    within(available).getByRole('button', { name: /Add from your library/i }),
+  );
+  return available;
+}
+
 describe('<ModpackDetail>', () => {
   // ── Header ────────────────────────────────────────────────────────
   it('renders the header row with name, Back button, and Switch button for inactive profile', async () => {
@@ -138,6 +148,7 @@ describe('<ModpackDetail>', () => {
       modInfo({ name: 'PackMod', folder_name: 'PackMod' }),
       modInfo({ name: 'LibMod', folder_name: 'LibMod' }),
     ]);
+    const user = userEvent.setup();
     render(
       <Wrap
         profile={baseProfile({ mods: [profileMod({ name: 'PackMod', folder_name: 'PackMod' })] })}
@@ -150,9 +161,73 @@ describe('<ModpackDetail>', () => {
     expect(within(inPack).getByText('PackMod')).toBeInTheDocument();
     expect(within(inPack).queryByText('LibMod')).toBeNull();
 
-    const available = await screen.findByTestId('modpack-detail-available');
+    const available = await expandLibrary(user);
     expect(within(available).getByText('LibMod')).toBeInTheDocument();
     expect(within(available).queryByText('PackMod')).toBeNull();
+  });
+
+  it('the Add-from-library section is collapsed by default and expands on click', async () => {
+    installMods([
+      modInfo({ name: 'PackMod', folder_name: 'PackMod' }),
+      modInfo({ name: 'LibMod', folder_name: 'LibMod' }),
+    ]);
+    const user = userEvent.setup();
+    render(
+      <Wrap
+        profile={baseProfile({ mods: [profileMod({ name: 'PackMod', folder_name: 'PackMod' })] })}
+        onBack={vi.fn()}
+      />,
+    );
+    const available = await screen.findByTestId('modpack-detail-available');
+    // Collapsed: the section + its toggle are present, but the rows aren't.
+    expect(within(available).queryByText('LibMod')).toBeNull();
+    expect(within(available).queryByTestId('modpack-mod-row-available')).toBeNull();
+    const toggle = within(available).getByRole('button', { name: /Add from your library/i });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    // Expand → rows appear.
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(within(available).getByText('LibMod')).toBeInTheDocument();
+  });
+
+  it('renders the shared mod-library toolbar (same affordances as All Mods)', async () => {
+    render(<Wrap {...baseProps()} />);
+    await screen.findByRole('heading', { level: 2, name: 'Sample' });
+    // Install affordances from the shared toolbar are present in the
+    // modpack view too.
+    expect(screen.getByRole('button', { name: /Open folder/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Import mod/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Quick add URL/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Refresh/i })).toBeInTheDocument();
+  });
+
+  it('Quick add URL in the modpack view auto-adds the installed mod to this pack', async () => {
+    // Installing from the modpack view should drop the mod straight into
+    // THIS pack (targetPack), not just onto disk.
+    registerInvokeHandler('quick_add_mod', () => ({
+      type: 'github_installed',
+      mod_info: modInfo({ name: 'NewMod', folder_name: 'NewMod', mod_id: 'NewMod' }),
+    }));
+    registerInvokeHandler('set_profile_mod_membership', () => baseProfile());
+    const user = userEvent.setup();
+    render(<Wrap {...baseProps()} />);
+    await screen.findByRole('heading', { level: 2, name: 'Sample' });
+
+    await user.click(screen.getByRole('button', { name: /Quick add URL/i }));
+    const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
+    await user.type(input, 'https://github.com/x/y');
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+
+    await waitFor(() => {
+      const call = getInvokeCalls().find(
+        (c) => c.cmd === 'set_profile_mod_membership' && c.args?.modName === 'NewMod',
+      );
+      expect(call?.args).toMatchObject({
+        profileName: 'Sample',
+        modName: 'NewMod',
+        included: true,
+      });
+    });
   });
 
   it('shows the empty in-pack message when the pack has no mods', async () => {
@@ -201,6 +276,7 @@ describe('<ModpackDetail>', () => {
       modInfo({ name: 'PackMod', folder_name: 'PackMod', github_url: 'https://github.com/x/y' }),
       modInfo({ name: 'LibMod', folder_name: 'LibMod', nexus_url: 'https://nexusmods.com/z' }),
     ]);
+    const user = userEvent.setup();
     render(
       <Wrap
         profile={baseProfile({ mods: [profileMod({ name: 'PackMod', folder_name: 'PackMod' })] })}
@@ -209,7 +285,7 @@ describe('<ModpackDetail>', () => {
     );
     const inPack = await screen.findByTestId('modpack-detail-in-pack');
     expect(within(inPack).getByText('GitHub')).toBeInTheDocument();
-    const available = await screen.findByTestId('modpack-detail-available');
+    const available = await expandLibrary(user);
     expect(within(available).getByText('Nexus')).toBeInTheDocument();
   });
 
@@ -252,8 +328,8 @@ describe('<ModpackDetail>', () => {
     const onLibraryChanged = vi.fn();
     const user = userEvent.setup();
     render(<Wrap {...baseProps()} onLibraryChanged={onLibraryChanged} />);
-    const available = await screen.findByTestId('modpack-detail-available');
-    await user.click(within(available).getByRole('button', { name: /Add/i }));
+    const available = await expandLibrary(user);
+    await user.click(within(available).getByRole('button', { name: /^Add$/i }));
 
     await waitFor(() => {
       expect(
@@ -278,8 +354,8 @@ describe('<ModpackDetail>', () => {
     registerInvokeHandler('set_profile_mod_membership', () => baseProfile());
     const user = userEvent.setup();
     render(<Wrap {...baseProps()} />);
-    const available = await screen.findByTestId('modpack-detail-available');
-    await user.click(within(available).getByRole('button', { name: /Add/i }));
+    const available = await expandLibrary(user);
+    await user.click(within(available).getByRole('button', { name: /^Add$/i }));
 
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'toggle_mod')).toBe(true);
@@ -323,8 +399,8 @@ describe('<ModpackDetail>', () => {
     registerInvokeHandler('set_profile_mod_membership', () => baseProfile());
     const user = userEvent.setup();
     render(<Wrap {...baseProps()} />);
-    const available = await screen.findByTestId('modpack-detail-available');
-    await user.click(within(available).getByRole('button', { name: /Add/i }));
+    const available = await expandLibrary(user);
+    await user.click(within(available).getByRole('button', { name: /^Add$/i }));
 
     await waitFor(() => {
       expect(
@@ -438,7 +514,7 @@ describe('<ModpackDetail>', () => {
       />,
     );
     const inPack = await screen.findByTestId('modpack-detail-in-pack');
-    const available = await screen.findByTestId('modpack-detail-available');
+    const available = await expandLibrary(user);
     // Before filtering: AlphaPack in-pack, BetaLib + GammaLib available.
     expect(within(inPack).getByText('AlphaPack')).toBeInTheDocument();
     expect(within(available).getByText('BetaLib')).toBeInTheDocument();
@@ -483,8 +559,9 @@ describe('<ModpackDetail>', () => {
     installMods([
       modInfo({ name: 'SideloadMod', folder_name: 'SideloadMod', source: 'file:///x', github_url: null, nexus_url: null }),
     ]);
+    const user = userEvent.setup();
     render(<Wrap {...baseProps()} />);
-    const available = await screen.findByTestId('modpack-detail-available');
+    const available = await expandLibrary(user);
     expect(within(available).getByText(/^Local$/i)).toBeInTheDocument();
   });
 
@@ -509,8 +586,8 @@ describe('<ModpackDetail>', () => {
     });
     const user = userEvent.setup();
     render(<Wrap {...baseProps()} />);
-    const available = await screen.findByTestId('modpack-detail-available');
-    await user.click(within(available).getByRole('button', { name: /Add/i }));
+    const available = await expandLibrary(user);
+    await user.click(within(available).getByRole('button', { name: /^Add$/i }));
     expect(await screen.findByText(/Couldn't add LibMod: disk full/i)).toBeInTheDocument();
   });
 

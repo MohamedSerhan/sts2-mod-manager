@@ -199,12 +199,19 @@ describe('<App>', () => {
     await user.click(link);
 
     // Land directly on the active modpack's detail view: H2 with the
-    // modpack name + Back-to-list button + LibraryTable rendering.
+    // modpack name + Back-to-list button.
     expect(
       await screen.findByRole('heading', { level: 2, name: 'Stable' }),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Back to modpacks/i })).toBeInTheDocument();
-    expect((await screen.findAllByText('BaseLib')).length).toBeGreaterThan(0);
+    // BaseLib isn't in this pack, so it lives in the (collapsed-by-default)
+    // "Add from your Library" section. Expand it to confirm the mod is
+    // reachable from the detail view.
+    const available = await screen.findByTestId('modpack-detail-available');
+    await user.click(
+      within(available).getByRole('button', { name: /Add from your library/i }),
+    );
+    expect((await within(available).findAllByText('BaseLib')).length).toBeGreaterThan(0);
   }, 10000);
 
   it('clicking Settings nav swaps to the Settings view', async () => {

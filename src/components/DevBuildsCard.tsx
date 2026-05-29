@@ -49,7 +49,7 @@ export function DevBuildsCard() {
     getVersion()
       .then((v) => {
         const m = v.match(/\.g([0-9a-f]+)/i);
-        if (m) setCurrentSha(m[1]);
+        if (m) setCurrentSha(m[1].toLowerCase());
       })
       .catch(() => {});
     load();
@@ -126,7 +126,9 @@ export function DevBuildsCard() {
         </ul>
       )}
 
-      <p className="gf-dim">{t('devBuilds.backToRelease')}</p>
+      {!loading && !error && (
+        <p className="gf-dim">{t('devBuilds.backToRelease')}</p>
+      )}
     </Card>
   );
 }

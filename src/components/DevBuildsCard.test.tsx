@@ -46,6 +46,7 @@ describe('DevBuildsCard', () => {
     expect(screen.getByText(/PR #59/)).toBeInTheDocument();
     // PR60 has no windows installer → shows the no-Windows note.
     expect(screen.getByText(/no Windows build/i)).toBeInTheDocument();
+    expect(screen.getByText(/current/i)).toBeInTheDocument();
   });
 
   it('Switch calls install_dev_build with the build installer url', async () => {

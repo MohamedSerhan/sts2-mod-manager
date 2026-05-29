@@ -220,7 +220,27 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
     setCreating(true);
     setCreateError(null);
     try {
-      await createProfile(trimmed);
+      // createProfile snapshots the *entire* current install, so the new
+      // pack starts with every installed mod. Prune everything the user
+      // didn't pick — otherwise the pack silently contains all mods, not
+      // just the selected ones. We prune from the returned snapshot (the
+      // authoritative list of what actually landed) rather than the
+      // frontend mod list.
+      const created = await createProfile(trimmed);
+      for (const pm of created.mods) {
+        if (selectedMods.has(pm.name)) continue;
+        await setProfileModMembership(
+          trimmed,
+          pm.name,
+          pm.folder_name ?? null,
+          pm.mod_id ?? null,
+          false,
+        );
+      }
+      // Ensure every selected mod is present. Mostly a no-op (selected
+      // mods are already in the snapshot), but it re-adds anything the
+      // snapshot's compatibility filter dropped that the user explicitly
+      // chose.
       for (const modName of selectedMods) {
         const mod = mods.find((m) => m.name === modName);
         if (!mod) continue;

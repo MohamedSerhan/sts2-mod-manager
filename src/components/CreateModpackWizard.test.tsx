@@ -634,4 +634,61 @@ describe('<CreateModpackWizard>', () => {
       await act(async () => { resolveAudit([]); });
     });
   });
+
+  // ── The created pack must contain ONLY the selected mods ──────────
+  // Regression: create_profile snapshots the whole install, so without an
+  // explicit prune the new pack ended up with every installed mod.
+  describe('exact membership', () => {
+    it('prunes snapshot mods the user did not select', async () => {
+      const installed = [
+        baseMod({ name: 'Keep', enabled: true, folder_name: 'keep' }),
+        baseMod({ name: 'Drop1', enabled: true, folder_name: 'drop1' }),
+        baseMod({ name: 'Drop2', enabled: true, folder_name: 'drop2' }),
+      ];
+      seed({
+        mods: installed,
+        // Simulate the backend snapshot: create_profile returns a profile
+        // already containing every installed mod.
+        onCreate: (n) => ({
+          ...baseProfile({ name: n }),
+          mods: installed.map((m) => ({
+            name: m.name,
+            version: m.version,
+            source: null,
+            hash: null,
+            files: [],
+            enabled: true,
+            bundle_url: null,
+            folder_name: m.folder_name,
+            mod_id: m.mod_id,
+          })),
+        }),
+      });
+      render(<Wrap />);
+
+      // from-active selects all three (all enabled); deselect two of them.
+      await chooseFromActive();
+      await waitFor(() => { expect(screen.getByText(/3 selected/i)).toBeInTheDocument(); });
+      fireEvent.click(screen.getByLabelText(/^Drop1$/));
+      fireEvent.click(screen.getByLabelText(/^Drop2$/));
+      await waitFor(() => { expect(screen.getByText(/1 selected/i)).toBeInTheDocument(); });
+
+      await clickNext();
+      await clickContinueAnyway();
+      fireEvent.change(await screen.findByLabelText(/modpack name/i), {
+        target: { value: 'Lean Pack' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /^create modpack$/i }));
+
+      await waitFor(() => {
+        const calls = getInvokeCalls().filter((c) => c.cmd === 'set_profile_mod_membership');
+        // The two unselected snapshot mods are pruned (included=false).
+        expect(calls.some((c) => c.args?.modName === 'Drop1' && c.args?.included === false)).toBe(true);
+        expect(calls.some((c) => c.args?.modName === 'Drop2' && c.args?.included === false)).toBe(true);
+      });
+      // The kept mod is never removed.
+      const calls = getInvokeCalls().filter((c) => c.cmd === 'set_profile_mod_membership');
+      expect(calls.some((c) => c.args?.modName === 'Keep' && c.args?.included === false)).toBe(false);
+    });
+  });
 });

@@ -1879,4 +1879,21 @@ describe('<App>', () => {
       }
     }
   });
+
+  // ── DEV titlebar badge ────────────────────────────────────────────
+  it('shows a DEV titlebar badge on a dev build', async () => {
+    const { setMockAppVersion } = await import('./__test__/setup');
+    setMockAppVersion('1.6.1-dev.pr60.g150366e');
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument());
+    expect(screen.getByText('DEV')).toBeInTheDocument();
+  });
+
+  it('shows no DEV titlebar badge on a release build', async () => {
+    const { setMockAppVersion } = await import('./__test__/setup');
+    setMockAppVersion('1.6.1');
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument());
+    expect(screen.queryByText('DEV')).not.toBeInTheDocument();
+  });
 });

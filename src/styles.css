@@ -96,6 +96,10 @@ body {
   font-size: 9px; font-weight: 800;
 }
 .gf-titlebar-title { color: var(--ink); }
+.gf-titlebar-dev {
+  margin-left: 8px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
+  padding: 1px 5px; border-radius: 3px; background: var(--amber, #fbca04); color: #1a1a1a;
+}
 .gf-titlebar-controls { display: flex; -webkit-app-region: no-drag; }
 .gf-titlebar-btn {
   width: 44px; height: 30px;

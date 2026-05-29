@@ -104,6 +104,10 @@ function AppInner() {
   // itself is meaningless, only the change matters.
   const [focusCodeBarSignal, setFocusCodeBarSignal] = useState(0);
   const [launching, setLaunching] = useState<null | 'modded' | 'vanilla'>(null);
+  const [isDev, setIsDev] = useState(false);
+  useEffect(() => {
+    isDevBuild().then(setIsDev).catch(() => {});
+  }, []);
 
   useEffect(() => { getVersion().then(setAppVersion).catch(() => {}); }, []);
 
@@ -555,6 +559,7 @@ function AppInner() {
         <div className="gf-titlebar-app" data-tauri-drag-region>
           <div className="gf-titlebar-mark" data-tauri-drag-region>✦</div>
           <span className="gf-titlebar-title" data-tauri-drag-region>{t('app.windowTitle')}</span>
+          {isDev && <span className="gf-titlebar-dev" title="Development build">{t('app.devBadge')}</span>}
         </div>
         <div className="gf-titlebar-controls">
           <button className="gf-titlebar-btn" title={t('app.minimize')} onClick={handleTitlebarMin}>

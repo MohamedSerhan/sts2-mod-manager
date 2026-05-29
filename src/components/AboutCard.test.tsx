@@ -72,29 +72,24 @@ describe('<AboutCard>', () => {
     });
   });
 
-  it('"Generate support bundle" opens the diagnostic modal', async () => {
+  it('"Report a bug" opens the bug-report modal', async () => {
     const user = userEvent.setup();
     render(<Wrapped />);
-    await user.click(screen.getByRole('button', { name: 'Generate support bundle' }));
-    // DiagnosticBundle exposes a dialog with the prompt text "Generate
-    // diagnostics bundle". We don't assert deep DOM here; just that the
-    // modal opened.
+    await user.click(screen.getByRole('button', { name: 'Report a bug' }));
+    // The bug-report modal mounts with its describe field.
     await waitFor(() => {
-      // The diagnostic modal renders some descriptive copy; we look for
-      // the title or a known label without locking to a specific phrase.
-      const candidates = screen.queryAllByText(/diagnostic|support|bundle/i);
-      expect(candidates.length).toBeGreaterThan(1); // toolbar button + modal content
+      expect(document.querySelector('.gf-modal-back')).not.toBeNull();
     });
+    expect(screen.getByText('What happened?')).toBeInTheDocument();
   });
 
-  it('Diagnostic modal Close button closes the modal (covers onClose wiring)', async () => {
-    // Exercises the inline onClose callback passed to DiagnosticBundle —
-    // line 78 of AboutCard.tsx — by opening the modal and then clicking
-    // its dedicated Close button. After close, the modal back-drop and
-    // its descriptive copy must drop out of the DOM.
+  it('Bug-report modal Close button closes the modal (covers onClose wiring)', async () => {
+    // Exercises the inline onClose callback passed to DiagnosticBundle by
+    // opening the modal and then clicking its dedicated Close button.
+    // After close, the modal back-drop must drop out of the DOM.
     const user = userEvent.setup();
     render(<Wrapped />);
-    await user.click(screen.getByRole('button', { name: 'Generate support bundle' }));
+    await user.click(screen.getByRole('button', { name: 'Report a bug' }));
     // Wait for the modal to mount.
     await waitFor(() => {
       expect(document.querySelector('.gf-modal-back')).not.toBeNull();

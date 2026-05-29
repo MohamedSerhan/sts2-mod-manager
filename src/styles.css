@@ -2939,6 +2939,36 @@ body {
 .gf-diag-list { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; background: var(--indigo-deep); border: 1px solid var(--indigo-line); border-radius: 9px; }
 .gf-diag-item { display: flex; align-items: center; gap: 10px; font-size: 12px; padding: 4px 0; color: var(--ink-mute); }
 .gf-diag-item .check { color: var(--ok); }
+/* "Report a bug" describe field + the "attached automatically" note. */
+.gf-bug-describe-label {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+.gf-bug-describe {
+  width: 100%;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink);
+  background: var(--indigo-deep);
+  border: 1px solid var(--indigo-line);
+  border-radius: 7px;
+  padding: 9px 11px;
+  resize: vertical;
+  margin-bottom: 14px;
+}
+.gf-bug-describe:focus { border-color: var(--gf-line, var(--gf)); outline: none; }
+.gf-diag-attached-note {
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-dim);
+  margin-bottom: 7px;
+}
 
 /* Audit empty (scoped — gf-empty-pad uses larger glyph art) */
 .gf-empty-pad { padding: 60px 20px; text-align: center; }

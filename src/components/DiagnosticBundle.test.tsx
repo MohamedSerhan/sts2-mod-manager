@@ -8,10 +8,9 @@ import { AllProviders } from '../__test__/providers';
 import { registerInvokeHandler } from '../__test__/setup';
 
 /**
- * jsdom 27 gotcha: when jsdom exposes a real Clipboard prototype, a
- * `defineProperty` on `navigator.clipboard` itself is shadowed by the
- * proto getter. Install on the proto when present; otherwise fall back
- * to defining `navigator.clipboard` directly.
+ * "Report a bug" modal (reworked from the old support bundle). Builds a
+ * redacted text report and either copies it or opens a prefilled GitHub
+ * issue. jsdom 27 clipboard gotcha handled via setClipboard().
  */
 let clipboardSpy: ReturnType<typeof vi.fn>;
 
@@ -47,39 +46,38 @@ function Wrap(props: Partial<React.ComponentProps<typeof DiagnosticBundle>> = {}
   );
 }
 
-function getGenerateButton(): HTMLButtonElement {
-  // The primary action button shows "Generate bundle" before generation
-  // and "Re-generate" afterwards; both end with the same text family.
+function getCopyButton(): HTMLButtonElement {
+  return screen.getByRole('button', { name: /Copy report/i }) as HTMLButtonElement;
+}
+
+function getOpenButton(): HTMLButtonElement {
+  // Primary action — "Open bug report on GitHub", or "Working…" mid-flight.
   const btn = screen
     .getAllByRole('button')
-    .find((b) => /Generate bundle|Re-generate|Generating/i.test(b.textContent ?? ''));
-  expect(btn, 'Generate/Re-generate button must be in the DOM').toBeDefined();
+    .find((b) => /Open bug report|Working/i.test(b.textContent ?? ''));
+  expect(btn, 'Open bug report button must be in the DOM').toBeDefined();
   return btn as HTMLButtonElement;
 }
 
-describe('<DiagnosticBundle>', () => {
+describe('<DiagnosticBundle> (Report a bug)', () => {
   it('renders nothing when open=false', () => {
     const { container } = render(<Wrap open={false} />);
     expect(container.querySelector('.gf-modal')).toBeNull();
   });
 
-  it('renders the modal title + generate + close buttons', async () => {
+  it('renders the title, the describe field, and the action buttons', async () => {
     render(<Wrap />);
-    await waitFor(() => {
-      expect(screen.getAllByText(/Generate/i).length).toBeGreaterThan(0);
-    });
-    expect(screen.getByText('Generate support bundle')).toBeInTheDocument();
+    expect(screen.getByText('Report a bug')).toBeInTheDocument();
+    expect(screen.getByText('What happened?')).toBeInTheDocument();
+    expect(getOpenButton()).toBeInTheDocument();
+    expect(getCopyButton()).toBeInTheDocument();
   });
 
-  it('Close button calls onClose', async () => {
+  it('Close (X) button calls onClose', async () => {
     const onClose = vi.fn();
     const user = userEvent.setup();
     render(<Wrap onClose={onClose} />);
-    await waitFor(() => {
-      expect(screen.getAllByText(/Generate/i).length).toBeGreaterThan(0);
-    });
-    const close = screen.getAllByTitle(/Close/i)[0];
-    await user.click(close);
+    await user.click(screen.getAllByTitle(/Close/i)[0]);
     expect(onClose).toHaveBeenCalled();
   });
 
@@ -95,254 +93,194 @@ describe('<DiagnosticBundle>', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it('clicking the modal backdrop calls onClose, but body clicks do not', async () => {
+  it('clicking the backdrop calls onClose, but body clicks do not', async () => {
     const onClose = vi.fn();
     const user = userEvent.setup();
     const { container } = render(<Wrap onClose={onClose} />);
     const backdrop = container.querySelector('.gf-modal-back') as HTMLElement;
     const modal = container.querySelector('.gf-modal') as HTMLElement;
-    expect(backdrop).not.toBeNull();
-    expect(modal).not.toBeNull();
-
-    // Click inside the modal — stopPropagation should keep onClose silent.
     await user.click(modal);
     expect(onClose).not.toHaveBeenCalled();
-
-    // Click on the backdrop itself — should propagate to onClose.
     await user.click(backdrop);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('Generate copies bundle to clipboard, shows preview, and toasts success', async () => {
+  it('Copy report builds + copies the redacted report and toasts success', async () => {
     const writeText = setClipboard(async () => {});
     registerInvokeHandler('read_log_tail', () => 'line A\nline B');
     registerInvokeHandler('get_log_path', () => 'C:\\Users\\me\\AppData\\sts2mm.log');
 
     render(<Wrap />);
-    const gen = getGenerateButton();
-    // Use fireEvent (not userEvent) — userEvent advances microtasks in a
-    // way that races with clipboard promise resolution in jsdom 27.
-    fireEvent.click(gen);
+    fireEvent.click(getCopyButton());
 
-    // Preview textarea appears with the bundle content.
-    const ta = await screen.findByDisplayValue(/STS2 Mod Manager — Support Bundle/);
-    expect(ta).toBeInTheDocument();
-    // Redaction is on by default — the username segment must be scrubbed.
+    const ta = await screen.findByDisplayValue(/STS2 Mod Manager — Bug Report/);
     expect((ta as HTMLTextAreaElement).value).toContain('C:\\Users\\<redacted>');
     expect((ta as HTMLTextAreaElement).value).toContain('line A');
     expect((ta as HTMLTextAreaElement).value).toContain('line B');
 
-    // Clipboard was written with the same content.
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
-    const written = writeText.mock.calls[0][0] as string;
-    expect(written).toContain('STS2 Mod Manager');
-    expect(written).toContain('line A');
-
-    // Success toast appears.
+    expect(writeText.mock.calls[0][0] as string).toContain('Bug Report');
     await waitFor(() => {
       expect(screen.getByText(/copied to clipboard/i)).toBeInTheDocument();
     });
-
-    // The action button now reads "Re-generate".
-    await waitFor(() => {
-      expect(getGenerateButton().textContent).toMatch(/Re-generate/);
-    });
   });
 
-  it('Re-generate runs generate() a second time', async () => {
-    let calls = 0;
-    registerInvokeHandler('read_log_tail', () => { calls += 1; return 'L'; });
-    registerInvokeHandler('get_log_path', () => '/var/log/app.log');
-
+  it('includes the typed description in the report', async () => {
+    registerInvokeHandler('read_log_tail', () => 'L');
+    registerInvokeHandler('get_log_path', () => '/p.log');
     const user = userEvent.setup();
     render(<Wrap />);
-    await user.click(getGenerateButton());
-    await screen.findByDisplayValue(/Support Bundle/);
-    expect(calls).toBe(1);
-
-    await user.click(getGenerateButton());
-    await waitFor(() => expect(calls).toBe(2));
+    await user.type(
+      screen.getByPlaceholderText(/what did you do/i),
+      'crashed right after launch',
+    );
+    fireEvent.click(getCopyButton());
+    const ta = (await screen.findByDisplayValue(/Bug Report/)) as HTMLTextAreaElement;
+    expect(ta.value).toContain('--- What happened ---');
+    expect(ta.value).toContain('crashed right after launch');
   });
 
-  it('falls back to info toast when clipboard.writeText rejects', async () => {
+  it('uses the "no description" placeholder when the field is empty', async () => {
+    registerInvokeHandler('read_log_tail', () => 'L');
+    registerInvokeHandler('get_log_path', () => '/p.log');
+    render(<Wrap />);
+    fireEvent.click(getCopyButton());
+    const ta = (await screen.findByDisplayValue(/Bug Report/)) as HTMLTextAreaElement;
+    expect(ta.value).toContain('(no description provided)');
+  });
+
+  it('falls back to an info toast when clipboard.writeText rejects', async () => {
     setClipboard(async () => { throw new Error('blocked'); });
     registerInvokeHandler('read_log_tail', () => 'hello');
     registerInvokeHandler('get_log_path', () => '/tmp/log.txt');
-
     render(<Wrap />);
-    fireEvent.click(getGenerateButton());
-
+    fireEvent.click(getCopyButton());
     await waitFor(() => {
       expect(screen.getByText(/scroll the preview to copy manually/i)).toBeInTheDocument();
     });
-    // The preview still rendered even though clipboard failed.
-    expect(await screen.findByDisplayValue(/Support Bundle/)).toBeInTheDocument();
+    expect(await screen.findByDisplayValue(/Bug Report/)).toBeInTheDocument();
   });
 
-  it('toasts an error when bundle construction throws (mods.map blows up)', async () => {
-    // A poisoned mod object whose `.name` getter throws — `mods.map(...)`
-    // inside generate() will propagate the error to the outer catch.
+  it('toasts an error when report construction throws', async () => {
     registerInvokeHandler('get_installed_mods', () => [
       Object.defineProperty(
-        { enabled: true, version: '1.0', pinned: false, github_url: null, nexus_url: null },
+        { enabled: true, version: '1.0', pinned: false, github_url: null, nexus_url: null, folder_name: null },
         'name',
         { get() { throw new Error('poisoned-mod'); }, enumerable: true },
       ),
     ]);
-
-    const user = userEvent.setup();
     render(<Wrap />);
-
-    // Wait until the AppContext has refreshed and surfaced 1 mod.
     await waitFor(() => {
       expect(screen.getByText(/1 entries/)).toBeInTheDocument();
     });
-
-    await user.click(getGenerateButton());
-
+    fireEvent.click(getCopyButton());
     await waitFor(() => {
-      expect(screen.getByText(/Couldn't build bundle/i)).toBeInTheDocument();
+      expect(screen.getByText(/Couldn't build the report/i)).toBeInTheDocument();
     });
-    // Error message includes the original Error.message.
     expect(screen.getByText(/poisoned-mod/)).toBeInTheDocument();
   });
 
-  it('un-checking the redact toggle leaves paths un-redacted in the bundle', async () => {
+  it('un-checking the redact toggle leaves home paths un-redacted', async () => {
     registerInvokeHandler('read_log_tail', () => 'tail');
     registerInvokeHandler('get_log_path', () => 'C:\\Users\\alice\\app.log');
-
     const user = userEvent.setup();
     render(<Wrap />);
-
     const checkbox = screen.getByRole('checkbox', { name: /Redact home-folder/i }) as HTMLInputElement;
     expect(checkbox.checked).toBe(true);
     await user.click(checkbox);
     expect(checkbox.checked).toBe(false);
-
-    await user.click(getGenerateButton());
-    const ta = await screen.findByDisplayValue(/Support Bundle/);
-    // With redaction off, the literal username survives.
-    expect((ta as HTMLTextAreaElement).value).toContain('C:\\Users\\alice');
-    expect((ta as HTMLTextAreaElement).value).not.toContain('<redacted>');
+    fireEvent.click(getCopyButton());
+    const ta = (await screen.findByDisplayValue(/Bug Report/)) as HTMLTextAreaElement;
+    expect(ta.value).toContain('C:\\Users\\alice');
+    expect(ta.value).not.toContain('<redacted>');
   });
 
-  it('"Open GitHub issue" button appears after generation and opens through the Tauri opener', async () => {
+  it('"Open bug report" copies the full report and opens a prefilled GitHub issue', async () => {
+    const writeText = setClipboard(async () => {});
     registerInvokeHandler('read_log_tail', () => 'GH body');
     registerInvokeHandler('get_log_path', () => '/x.log');
-
     const user = userEvent.setup();
     render(<Wrap />);
-
-    // Before generating, the GitHub-issue button is not in the DOM.
-    expect(screen.queryByRole('button', { name: /Open GitHub issue/i })).toBeNull();
-
-    await user.click(getGenerateButton());
-    const ghBtn = await screen.findByRole('button', { name: /Open GitHub issue/i });
-    await user.click(ghBtn);
+    await user.click(getOpenButton());
 
     expect(openUrl).toHaveBeenCalledTimes(1);
     const url = vi.mocked(openUrl).mock.calls[0][0] as string;
     expect(url).toMatch(/^https:\/\/github\.com\/MohamedSerhan\/sts2-mod-manager\/issues\/new\?/);
-    expect(url).toContain('title=');
-    expect(url).toContain('body=');
     expect(new URL(url).searchParams.get('body')).toContain('STS2 Mod Manager');
+    await waitFor(() => expect(writeText).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(screen.getByText(/Opened a prefilled GitHub issue/i)).toBeInTheDocument();
+    });
   });
 
-  it('"Open GitHub issue" caps the issue URL when the bundle is long', async () => {
+  it('"Open bug report" caps the issue URL when the report is long', async () => {
     registerInvokeHandler('read_log_tail', () => 'x'.repeat(12000));
     registerInvokeHandler('get_log_path', () => '/x.log');
-
     const user = userEvent.setup();
     render(<Wrap />);
-
-    await user.click(getGenerateButton());
-    const ghBtn = await screen.findByRole('button', { name: /Open GitHub issue/i });
-    await user.click(ghBtn);
-
+    await user.click(getOpenButton());
     const url = vi.mocked(openUrl).mock.calls[0][0] as string;
-    const parsed = new URL(url);
     expect(url.length).toBeLessThanOrEqual(3900);
-    expect(parsed.searchParams.get('body')).toContain('Truncated to fit GitHub issue URL limits');
+    expect(new URL(url).searchParams.get('body')).toContain('Truncated to fit GitHub issue URL limits');
   });
 
-  it('"Open GitHub issue" surfaces a toast when the opener rejects', async () => {
+  it('"Open bug report" surfaces a toast when the opener rejects', async () => {
     registerInvokeHandler('read_log_tail', () => 'GH body');
     registerInvokeHandler('get_log_path', () => '/x.log');
     vi.mocked(openUrl).mockRejectedValueOnce(new Error('no browser'));
-
     const user = userEvent.setup();
     render(<Wrap />);
-
-    await user.click(getGenerateButton());
-    const ghBtn = await screen.findByRole('button', { name: /Open GitHub issue/i });
-    await user.click(ghBtn);
-
-    expect(await screen.findByText(/Couldn't open GitHub issue: no browser/)).toBeInTheDocument();
+    await user.click(getOpenButton());
+    expect(await screen.findByText(/no browser/)).toBeInTheDocument();
   });
 
-  it('shows valid/not-detected game status from AppContext', async () => {
+  it('shows the game version / not-detected status from AppContext', async () => {
     render(<Wrap />);
-    // Safe defaults set valid=false, so the right-aligned status reads "not detected".
-    const gameRow = (await screen.findByText('Game info')).closest('.gf-diag-item');
+    const gameRow = (await screen.findByText('Game version')).closest('.gf-diag-item');
     expect(gameRow).not.toBeNull();
     expect(within(gameRow as HTMLElement).getByText(/not detected/i)).toBeInTheDocument();
   });
 
-  it('uses readonly textarea for the preview (no manual edits possible)', async () => {
+  it('uses a readonly textarea for the preview', async () => {
     registerInvokeHandler('read_log_tail', () => 'X');
     registerInvokeHandler('get_log_path', () => '/p.log');
-    const user = userEvent.setup();
     render(<Wrap />);
-    await user.click(getGenerateButton());
-    const ta = await screen.findByDisplayValue(/Support Bundle/);
+    fireEvent.click(getCopyButton());
+    const ta = await screen.findByDisplayValue(/Bug Report/);
     expect(ta).toHaveAttribute('readOnly');
   });
 
-  it('swallows readLogTail + getLogPath rejections (log appears as empty/<unknown>)', async () => {
+  it('swallows log read failures (empty log + <unknown> source)', async () => {
     registerInvokeHandler('read_log_tail', () => { throw new Error('disk-gone'); });
     registerInvokeHandler('get_log_path', () => { throw new Error('no-path'); });
-
     render(<Wrap />);
-    fireEvent.click(getGenerateButton());
-
-    const ta = await screen.findByDisplayValue(/Support Bundle/) as HTMLTextAreaElement;
+    fireEvent.click(getCopyButton());
+    const ta = (await screen.findByDisplayValue(/Bug Report/)) as HTMLTextAreaElement;
     expect(ta.value).toContain('<log empty>');
     expect(ta.value).toContain('Source: <unknown>');
-    // Success toast still fires because clipboard write succeeded.
     await waitFor(() => {
       expect(screen.getByText(/copied to clipboard/i)).toBeInTheDocument();
     });
   });
 
-  it('renders enabled, frozen, github_url, nexus_url, and disabled mods in the bundle', async () => {
+  it('renders enabled/frozen/links/disabled mods in the report', async () => {
     registerInvokeHandler('get_installed_mods', () => [
-      {
-        name: 'Alpha', version: '1.0', enabled: true, pinned: true,
-        github_url: 'https://github.com/x/a', nexus_url: null,
-      },
-      {
-        name: 'Beta', version: '2.0', enabled: false, pinned: false,
-        github_url: null, nexus_url: 'https://nexusmods.com/b',
-      },
+      { name: 'Alpha', version: '1.0', enabled: true, pinned: true, folder_name: 'Alpha', github_url: 'https://github.com/x/a', nexus_url: null },
+      { name: 'Beta', version: '2.0', enabled: false, pinned: false, folder_name: 'Beta', github_url: null, nexus_url: 'https://nexusmods.com/b' },
     ]);
     registerInvokeHandler('read_log_tail', () => 'tail');
     registerInvokeHandler('get_log_path', () => '/p.log');
-
     render(<Wrap />);
-    // Wait for AppContext refresh to populate mods.
     await waitFor(() => {
       expect(screen.getByText(/2 entries/)).toBeInTheDocument();
     });
-    fireEvent.click(getGenerateButton());
-
-    const ta = await screen.findByDisplayValue(/Support Bundle/) as HTMLTextAreaElement;
-    // Enabled tick + frozen marker + github url for Alpha.
+    fireEvent.click(getCopyButton());
+    const ta = (await screen.findByDisplayValue(/Bug Report/)) as HTMLTextAreaElement;
     expect(ta.value).toMatch(/✓ Alpha 1\.0 \[frozen\] <https:\/\/github\.com\/x\/a>/);
-    // Disabled marker + nexus url for Beta.
     expect(ta.value).toMatch(/✗ Beta 2\.0 <https:\/\/nexusmods\.com\/b>/);
   });
 
-  it('shows "valid" when gameInfo.valid=true and surfaces the game_path in the bundle', async () => {
+  it('includes game version + active modpack load order, and omits the game path', async () => {
     registerInvokeHandler('get_game_info', () => ({
       game_path: 'D:\\Steam\\steamapps\\common\\STS2',
       mods_path: 'D:\\Steam\\steamapps\\common\\STS2\\Mods',
@@ -352,197 +290,162 @@ describe('<DiagnosticBundle>', () => {
       valid: true,
       game_version: '0.105.0',
     }));
-    registerInvokeHandler('detect_game_path', () => ({
-      game_path: 'D:\\Steam\\steamapps\\common\\STS2',
-      mods_path: null, disabled_mods_path: null,
-      mods_count: 3, disabled_count: 1, valid: true, game_version: '0.105.0',
-    }));
     registerInvokeHandler('get_active_profile', () => 'My Build');
+    registerInvokeHandler('get_installed_mods', () => [
+      { name: 'Core', version: '1.2', enabled: true, pinned: false, folder_name: 'Core', github_url: 'https://github.com/x/core', nexus_url: null },
+    ]);
+    registerInvokeHandler('list_profiles_cmd', () => [
+      {
+        name: 'My Build',
+        game_version: '0.105.0',
+        created_by: null,
+        created_at: '2026-01-01',
+        updated_at: '2026-01-01',
+        mods: [
+          { name: 'Core', version: '1.2', source: null, hash: null, files: [], enabled: true, bundle_url: null, folder_name: 'Core', mod_id: 'Core' },
+        ],
+      },
+    ]);
     registerInvokeHandler('read_log_tail', () => '');
     registerInvokeHandler('get_log_path', () => '/p.log');
 
     render(<Wrap />);
-    // Game-info row shows "valid" once gameInfo.valid flips to true.
     await waitFor(() => {
-      const row = screen.getByText('Game info').closest('.gf-diag-item') as HTMLElement;
-      expect(within(row).getByText(/^valid$/i)).toBeInTheDocument();
+      const row = screen.getByText('Game version').closest('.gf-diag-item') as HTMLElement;
+      expect(within(row).getByText('0.105.0')).toBeInTheDocument();
     });
-    // Active-profile row shows the profile name.
-    expect(within(screen.getByText('Active profile').closest('.gf-diag-item') as HTMLElement)
-      .getByText('My Build')).toBeInTheDocument();
-
-    fireEvent.click(getGenerateButton());
-    const ta = await screen.findByDisplayValue(/Support Bundle/) as HTMLTextAreaElement;
-    expect(ta.value).toContain('Path: D:\\Steam\\steamapps\\common\\STS2');
-    expect(ta.value).toContain('Valid: true');
+    fireEvent.click(getCopyButton());
+    const ta = (await screen.findByDisplayValue(/Bug Report/)) as HTMLTextAreaElement;
+    expect(ta.value).toContain('Game version: 0.105.0');
+    expect(ta.value).toContain('Detected: true');
     expect(ta.value).toContain('Mods on disk: 3 (1 disabled)');
     expect(ta.value).toContain('Name: My Build');
-    // Empty logs path renders the placeholder.
-    expect(ta.value).toContain('<log empty>');
+    // Load order section with the manifest order + cross-referenced link.
+    expect(ta.value).toContain('--- Load order (top loads first) ---');
+    expect(ta.value).toMatch(/1\. Core 1\.2 <https:\/\/github\.com\/x\/core>/);
+    // The full game install path is NOT included (privacy).
+    expect(ta.value).not.toContain('D:\\Steam');
   });
 
-  it('catches non-Error throw values from generate (String(e) branch)', async () => {
-    // Throw a string so `e instanceof Error` is false and the
-    // `String(e)` branch runs.
+  it('catches non-Error throw values (String(e) branch)', async () => {
     registerInvokeHandler('get_installed_mods', () => [
       Object.defineProperty(
-        { enabled: true, version: '1.0', pinned: false, github_url: null, nexus_url: null },
+        { enabled: true, version: '1.0', pinned: false, github_url: null, nexus_url: null, folder_name: null },
         'name',
         // eslint-disable-next-line @typescript-eslint/only-throw-error
         { get(): string { throw 'plain-string-throw'; }, enumerable: true },
       ),
     ]);
-
     render(<Wrap />);
     await waitFor(() => {
       expect(screen.getByText(/1 entries/)).toBeInTheDocument();
     });
-    fireEvent.click(getGenerateButton());
-
+    fireEvent.click(getCopyButton());
     await waitFor(() => {
       expect(screen.getByText(/plain-string-throw/)).toBeInTheDocument();
     });
   });
 
-  it('shows "Generating…" label and disables the button while a generate is in flight', async () => {
+  it('shows "Working…" and disables the actions while a report builds', async () => {
     let resolveLog!: (s: string) => void;
     registerInvokeHandler('read_log_tail', () => new Promise<string>((res) => { resolveLog = res; }));
     registerInvokeHandler('get_log_path', () => '/p.log');
-
     render(<Wrap />);
-    const btn = getGenerateButton();
-    fireEvent.click(btn);
-
-    // While busy, the button is disabled and shows the "Generating…" label.
+    fireEvent.click(getOpenButton());
     await waitFor(() => {
-      expect(getGenerateButton()).toBeDisabled();
+      expect(getOpenButton()).toBeDisabled();
     });
-    expect(getGenerateButton().textContent).toMatch(/Generating/);
-
+    expect(getOpenButton().textContent).toMatch(/Working/);
     resolveLog('done');
-    await screen.findByDisplayValue(/Support Bundle/);
-    // After resolution the button re-enables.
-    expect(getGenerateButton()).not.toBeDisabled();
+    await waitFor(() => expect(openUrl).toHaveBeenCalled());
   });
 
-  it('redacts classic GitHub PATs (ghp_…) in log content', async () => {
-    // A 40-char ghp_ token — common length, well above the 36-char floor.
+  it('redacts classic GitHub PATs (ghp_…)', async () => {
     const token = 'ghp_abcdefghijklmnopqrstuvwxyz0123456789AB';
     registerInvokeHandler('read_log_tail', () => `Authorization: Bearer ${token}\nother line`);
     registerInvokeHandler('get_log_path', () => '/x.log');
-
     render(<Wrap />);
-    fireEvent.click(getGenerateButton());
-    const ta = await screen.findByDisplayValue(/Support Bundle/) as HTMLTextAreaElement;
+    fireEvent.click(getCopyButton());
+    const ta = (await screen.findByDisplayValue(/Bug Report/)) as HTMLTextAreaElement;
     expect(ta.value).not.toContain(token);
     expect(ta.value).toContain('[REDACTED_GITHUB_TOKEN]');
-    // The non-token line should still be intact.
     expect(ta.value).toContain('other line');
   });
 
-  it('redacts gho_/ghu_/ghs_/ghr_ tokens too', async () => {
+  it('redacts gho_/ghu_ tokens too', async () => {
     const ghoToken = 'gho_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     const ghuToken = 'ghu_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
     registerInvokeHandler('read_log_tail', () => `a=${ghoToken} b=${ghuToken}`);
     registerInvokeHandler('get_log_path', () => '/x.log');
-
     render(<Wrap />);
-    fireEvent.click(getGenerateButton());
-    const ta = await screen.findByDisplayValue(/Support Bundle/) as HTMLTextAreaElement;
+    fireEvent.click(getCopyButton());
+    const ta = (await screen.findByDisplayValue(/Bug Report/)) as HTMLTextAreaElement;
     expect(ta.value).not.toContain(ghoToken);
     expect(ta.value).not.toContain(ghuToken);
-    // Both occurrences are replaced (count matches).
-    const matches = ta.value.match(/\[REDACTED_GITHUB_TOKEN\]/g) ?? [];
-    expect(matches.length).toBe(2);
+    expect((ta.value.match(/\[REDACTED_GITHUB_TOKEN\]/g) ?? []).length).toBe(2);
   });
 
   it('redacts fine-grained PATs (github_pat_…)', async () => {
-    // Fine-grained PATs are `github_pat_` + 82 chars.
     const pat = 'github_pat_' + 'A'.repeat(82);
     registerInvokeHandler('read_log_tail', () => `secret=${pat}`);
     registerInvokeHandler('get_log_path', () => '/x.log');
-
     render(<Wrap />);
-    fireEvent.click(getGenerateButton());
-    const ta = await screen.findByDisplayValue(/Support Bundle/) as HTMLTextAreaElement;
+    fireEvent.click(getCopyButton());
+    const ta = (await screen.findByDisplayValue(/Bug Report/)) as HTMLTextAreaElement;
     expect(ta.value).not.toContain(pat);
     expect(ta.value).toContain('[REDACTED_GITHUB_PAT]');
   });
 
-  it('redacts query-string secret values but keeps the key name visible', async () => {
+  it('redacts query-string secret values but keeps the key name', async () => {
     registerInvokeHandler(
       'read_log_tail',
       () => 'GET https://api.example.com/items?api_key=abc123xyz&page=2\n' +
-            'GET https://api.example.com/?token=secrettoken&user=alice\n' +
             'GET https://x.test/?ACCESS_TOKEN=BIGSECRET&z=1',
     );
     registerInvokeHandler('get_log_path', () => '/x.log');
-
     render(<Wrap />);
-    fireEvent.click(getGenerateButton());
-    const ta = await screen.findByDisplayValue(/Support Bundle/) as HTMLTextAreaElement;
-    // Values stripped.
+    fireEvent.click(getCopyButton());
+    const ta = (await screen.findByDisplayValue(/Bug Report/)) as HTMLTextAreaElement;
     expect(ta.value).not.toContain('abc123xyz');
-    expect(ta.value).not.toContain('secrettoken');
     expect(ta.value).not.toContain('BIGSECRET');
-    // Keys + non-secret params survive.
     expect(ta.value).toContain('api_key=[REDACTED]');
-    expect(ta.value).toContain('token=[REDACTED]');
     expect(ta.value).toMatch(/ACCESS_TOKEN=\[REDACTED\]/i);
     expect(ta.value).toContain('page=2');
-    expect(ta.value).toContain('user=alice');
     expect(ta.value).toContain('z=1');
+  });
+
+  it('redacts the user sts2mm-profiles repo owner but keeps public mod links', async () => {
+    registerInvokeHandler('get_installed_mods', () => [
+      { name: 'CoolMod', version: '1.0', enabled: true, pinned: false, folder_name: 'CoolMod', github_url: 'https://github.com/author/coolmod', nexus_url: null },
+    ]);
+    registerInvokeHandler('read_log_tail', () => 'pushed manifest to https://github.com/alice/sts2mm-profiles done');
+    registerInvokeHandler('get_log_path', () => '/x.log');
+    render(<Wrap />);
+    await waitFor(() => {
+      expect(screen.getByText(/1 entries/)).toBeInTheDocument();
+    });
+    fireEvent.click(getCopyButton());
+    const ta = (await screen.findByDisplayValue(/Bug Report/)) as HTMLTextAreaElement;
+    // The user's own sharing repo owner is scrubbed.
+    expect(ta.value).toContain('github.com/<redacted>/sts2mm-profiles');
+    expect(ta.value).not.toContain('github.com/alice/sts2mm-profiles');
+    // A public mod source link is intentionally kept for triage.
+    expect(ta.value).toContain('github.com/author/coolmod');
   });
 
   it('token redaction runs even when redactPaths is OFF', async () => {
     const token = 'ghp_zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz';
     registerInvokeHandler('read_log_tail', () => `Bearer ${token}`);
     registerInvokeHandler('get_log_path', () => 'C:\\Users\\alice\\app.log');
-
     const user = userEvent.setup();
     render(<Wrap />);
-
     const checkbox = screen.getByRole('checkbox', { name: /Redact home-folder/i }) as HTMLInputElement;
     await user.click(checkbox);
     expect(checkbox.checked).toBe(false);
-
-    await user.click(getGenerateButton());
-    const ta = await screen.findByDisplayValue(/Support Bundle/) as HTMLTextAreaElement;
-    // Token redaction is a security concern — runs regardless of the
-    // privacy checkbox.
+    fireEvent.click(getCopyButton());
+    const ta = (await screen.findByDisplayValue(/Bug Report/)) as HTMLTextAreaElement;
     expect(ta.value).not.toContain(token);
     expect(ta.value).toContain('[REDACTED_GITHUB_TOKEN]');
-    // Path redaction off — username survives.
     expect(ta.value).toContain('C:\\Users\\alice');
-  });
-
-  it('disables the generate button while a generate is already in flight (re-entrancy UX guard)', async () => {
-    // The defensive `if (busy) return;` inside generate() is marked
-    // /* v8 ignore */ because it is unreachable via the UI — the
-    // button is `disabled={busy}` and React refuses to dispatch onClick
-    // to disabled buttons. This test exercises the UX guard (the
-    // disabled attribute) so a regression that drops it would fail.
-    let logCalls = 0;
-    let resolveLog!: (s: string) => void;
-    registerInvokeHandler('read_log_tail', () => {
-      logCalls += 1;
-      return new Promise<string>((res) => { resolveLog = res; });
-    });
-    registerInvokeHandler('get_log_path', () => '/p.log');
-
-    render(<Wrap />);
-    const btn = getGenerateButton();
-    fireEvent.click(btn);
-
-    // Wait until React flushed `disabled={busy}`.
-    await waitFor(() => expect(btn).toBeDisabled());
-    // A second click while the button is disabled is a no-op — React
-    // refuses to dispatch onClick, so generate() is never re-entered.
-    fireEvent.click(btn);
-    fireEvent.click(btn);
-    expect(logCalls).toBe(1);
-
-    resolveLog('done');
-    await screen.findByDisplayValue(/Support Bundle/);
   });
 });

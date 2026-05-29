@@ -36,7 +36,7 @@ jobs:
             *) echo "::error::Actor ${{ github.actor }} ('$ROLE') is not authorized to run the auto-fix bot."; exit 1 ;;
           esac
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Run Claude (implement fix + open PR)
@@ -118,7 +118,7 @@ jobs:
       - name: Checkout
         # Seeds the workspace + git config; claude-code-action switches to the
         # PR branch itself in tag mode, so we don't check out the PR head here.
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Run Claude (revise the auto-fix PR)

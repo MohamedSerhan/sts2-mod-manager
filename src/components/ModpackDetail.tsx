@@ -53,8 +53,9 @@ import { LibraryTable } from './LibraryTable';
 import { ModLibraryToolbar } from './ModLibraryToolbar';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
+import { useConfirm } from './ConfirmDialog';
 import { useModLibrary } from '../hooks/useModLibrary';
-import { setProfileModMembership, toggleMod } from '../hooks/useTauri';
+import { deleteMod, setProfileModMembership, toggleMod } from '../hooks/useTauri';
 import type { ModAuditEntry, ModInfo, Profile, ShareResult } from '../types';
 import type { ProfileDrift } from '../hooks/useTauri';
 
@@ -161,8 +162,9 @@ export function ModpackDetail({
   onLibraryChanged,
 }: ModpackDetailProps) {
   const { t } = useTranslation();
-  const { activeProfile, auditResults, mods, refreshAll } = useApp();
+  const { activeProfile, auditResults, mods, refreshAll, gameRunning } = useApp();
   const toast = useToast();
+  const confirm = useConfirm();
   // Shared mod-library surface (toolbar + install actions), scoped so a
   // mod installed from here auto-joins THIS pack. The same hook powers the
   // All Mods view, so the add affordances are identical.
@@ -280,6 +282,43 @@ export function ModpackDetail({
       );
     } finally {
       setBusy(key, false);
+    }
+  };
+
+  // Delete-all scoped to THIS pack: deletes only the pack's mods from disk
+  // (not the whole install, unlike the All Mods "Delete all"). Typed-phrase
+  // confirm, mirroring the All Mods destructive guard.
+  const [deletingAll, setDeletingAll] = useState(false);
+  const handleDeleteAllInPack = async () => {
+    if (profile.mods.length === 0 || deletingAll) return;
+    const ok = await confirm({
+      title: t('modpack.detail.deleteAllTitle', { count: profile.mods.length, name: profile.name }),
+      body: t('modpack.detail.deleteAllBody'),
+      warning: t('modpack.detail.deleteAllWarning'),
+      confirmLabel: t('modpack.detail.deleteAllConfirm'),
+      destructive: true,
+      typedPhrase: 'delete all',
+    });
+    if (!ok) return;
+    setDeletingAll(true);
+    try {
+      // Snapshot the list first — refreshing mid-loop would mutate it.
+      const targets = profile.mods.map((m) => ({ name: m.name, folder_name: m.folder_name ?? null }));
+      for (const m of targets) {
+        await deleteMod(m.name, m.folder_name);
+      }
+      await refreshAfterMutation();
+      toast.success(
+        t('modpack.detail.deleteAllDone', { count: targets.length, name: profile.name }),
+      );
+    } catch (e) {
+      toast.error(
+        t('modpack.detail.deleteAllFailed', {
+          error: e instanceof Error ? e.message : String(e),
+        }),
+      );
+    } finally {
+      setDeletingAll(false);
     }
   };
 
@@ -450,6 +489,24 @@ export function ModpackDetail({
             >
               <ListOrdered size={14} />
               {t('profiles.loadOrder.button')}
+            </Button>
+          )}
+          {/* Delete-all is scoped to THIS pack's mods (not the whole
+              install). Hidden when the pack is empty. */}
+          {profile.mods.length > 0 && (
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={handleDeleteAllInPack}
+              disabled={gameRunning || deletingAll}
+              title={gameRunning ? t('mods.closeSts2First') : t('modpack.detail.deleteAllTitleShort')}
+            >
+              {deletingAll ? (
+                <RefreshCw size={14} className="animate-spin" />
+              ) : (
+                <Trash2 size={14} />
+              )}
+              {t('modpack.detail.deleteAll')}
             </Button>
           )}
         </div>

@@ -402,6 +402,46 @@ describe('<ModpackDetail>', () => {
     expect(await screen.findByText(/Couldn't add LibMod: disk full/i)).toBeInTheDocument();
   });
 
+  // ── Pack-scoped Delete all ────────────────────────────────────────
+  it('Delete all (in pack) deletes ONLY this pack\'s mods from disk', async () => {
+    const profile = setupPack({
+      inPack: [
+        modInfo({ name: 'PackOne', folder_name: 'PackOne' }),
+        modInfo({ name: 'PackTwo', folder_name: 'PackTwo' }),
+      ],
+      available: [modInfo({ name: 'OutsiderMod', folder_name: 'OutsiderMod' })],
+    });
+    registerInvokeHandler('delete_mod_cmd', () => true);
+    const user = userEvent.setup();
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+    const inPack = await screen.findByTestId('modpack-detail-in-pack');
+    await user.click(within(inPack).getByRole('button', { name: /Delete all/i }));
+
+    // Typed-phrase guard, same as the All Mods destructive delete.
+    const phraseInput = await screen.findByPlaceholderText('delete all');
+    await user.type(phraseInput, 'delete all');
+    const confirmBtn = screen
+      .getAllByRole('button')
+      .find((b) => /Delete these mods/i.test(b.textContent ?? ''));
+    expect(confirmBtn).toBeDefined();
+    await user.click(confirmBtn!);
+
+    await waitFor(() => {
+      const deletes = getInvokeCalls().filter((c) => c.cmd === 'delete_mod_cmd');
+      expect(deletes.map((c) => c.args?.name).sort()).toEqual(['PackOne', 'PackTwo']);
+    });
+    // The non-pack mod is never touched.
+    expect(
+      getInvokeCalls().some((c) => c.cmd === 'delete_mod_cmd' && c.args?.name === 'OutsiderMod'),
+    ).toBe(false);
+  });
+
+  it('Delete all is hidden when the pack is empty', async () => {
+    render(<Wrap {...baseProps()} />);
+    const inPack = await screen.findByTestId('modpack-detail-in-pack');
+    expect(within(inPack).queryByRole('button', { name: /Delete all/i })).toBeNull();
+  });
+
   // ── Load order ────────────────────────────────────────────────────
   it('Load order button in Section 1 calls onOpenLoadOrder', async () => {
     const profile = setupPack({ inPack: [modInfo({ name: 'PackMod', folder_name: 'PackMod' })] });

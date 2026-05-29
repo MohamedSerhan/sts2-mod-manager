@@ -325,7 +325,15 @@
       "toastFailed": "Failed to update membership: {{error}}",
       "toastStored": "{{mod}} stored (kept installed, moved out of the game folder)",
       "toastActivated": "Activated {{mod}} in the game folder",
+      "toastActivatedAndAdded": "Activated {{mod}} and added it to {{pack}}",
       "toastStorageFailed": "Failed to move {{mod}}: {{error}}",
+      "enableNotInPack": {
+        "title": "Enable {{mod}}?",
+        "body": "This mod isn't in your active modpack \"{{pack}}\". Add it to the pack, or just enable it this time?",
+        "enableAndAdd": "Enable & add to \"{{pack}}\"",
+        "enableOnly": "Enable only",
+        "keepStored": "Keep it stored"
+      },
       "toastBulkStored_one": "Stored {{count}} unused active mod",
       "toastBulkStored_other": "Stored {{count}} unused active mods",
       "toastBulkStorageFailed": "Stored {{stored}} of {{total}} unused active mods. Failed: {{mods}}"

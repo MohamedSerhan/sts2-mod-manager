@@ -355,6 +355,84 @@ describe('<LibraryTable>', () => {
     });
   });
 
+  // ── Enabling a stored mod that isn't in the active pack ──────────────
+  // Prompts the user: enable + add to the pack, enable only, or back out.
+  function seedStoredNotInPack(included = false) {
+    registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [
+        {
+          name: 'Loner',
+          version: '1.0',
+          folder_name: 'Loner',
+          mod_id: 'Loner',
+          installed_enabled: false,
+          profiles: [{ profile_name: 'Stable', included, enabled: false, editable: true }],
+        },
+      ],
+    }));
+    registerInvokeHandler('toggle_mod', () => undefined);
+    registerInvokeHandler('set_profile_mod_membership', () => baseProfile({ name: 'Stable' }));
+    return new Map([
+      ['Loner', mkModInfo({ name: 'Loner', folder_name: 'Loner', mod_id: 'Loner', enabled: false })],
+    ]);
+  }
+
+  it('enable not-in-pack → "Enable & add" activates AND adds to the pack', async () => {
+    const modInfoByKey = seedStoredNotInPack(false);
+    const user = userEvent.setup();
+    render(<Wrap modpackName="Stable" modInfoByKey={modInfoByKey} />);
+    await user.click(
+      await screen.findByRole('switch', { name: /toggle whether Loner is active in game/i }),
+    );
+    await user.click(await screen.findByRole('button', { name: /Enable & add/i }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'toggle_mod' && c.args?.enable === true)).toBe(true);
+      expect(
+        getInvokeCalls().some((c) => c.cmd === 'set_profile_mod_membership' && c.args?.included === true),
+      ).toBe(true);
+    });
+  });
+
+  it('enable not-in-pack → "Enable only" activates without adding to the pack', async () => {
+    const modInfoByKey = seedStoredNotInPack(false);
+    const user = userEvent.setup();
+    render(<Wrap modpackName="Stable" modInfoByKey={modInfoByKey} />);
+    await user.click(
+      await screen.findByRole('switch', { name: /toggle whether Loner is active in game/i }),
+    );
+    await user.click(await screen.findByRole('button', { name: /^Enable only$/i }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'toggle_mod' && c.args?.enable === true)).toBe(true);
+    });
+    expect(getInvokeCalls().some((c) => c.cmd === 'set_profile_mod_membership')).toBe(false);
+  });
+
+  it('enable not-in-pack → "Keep it stored" makes no changes', async () => {
+    const modInfoByKey = seedStoredNotInPack(false);
+    const user = userEvent.setup();
+    render(<Wrap modpackName="Stable" modInfoByKey={modInfoByKey} />);
+    await user.click(
+      await screen.findByRole('switch', { name: /toggle whether Loner is active in game/i }),
+    );
+    await user.click(await screen.findByRole('button', { name: /Keep it stored/i }));
+    expect(getInvokeCalls().some((c) => c.cmd === 'toggle_mod')).toBe(false);
+  });
+
+  it('enabling a stored mod that IS already in the pack does not prompt', async () => {
+    const modInfoByKey = seedStoredNotInPack(true);
+    const user = userEvent.setup();
+    render(<Wrap modpackName="Stable" modInfoByKey={modInfoByKey} />);
+    await user.click(
+      await screen.findByRole('switch', { name: /toggle whether Loner is active in game/i }),
+    );
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'toggle_mod' && c.args?.enable === true)).toBe(true);
+    });
+    expect(screen.queryByRole('button', { name: /^Enable only$/i })).toBeNull();
+  });
+
   it('drag reordering an in-pack mod calls set_profile_load_order', async () => {
     registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
     registerInvokeHandler('get_profile_memberships', () => ({

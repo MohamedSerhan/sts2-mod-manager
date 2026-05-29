@@ -39,9 +39,13 @@ export interface ConfirmOptions {
   /** Optional override for the modal's pixel width. Default 480. The
    *  share-import preview wants more room for the source list. */
   width?: number;
+  /** When provided, replaces the single confirm button with one button
+   *  per choice. Clicking one resolves with `{ confirmed: true, choice }`.
+   *  Dismissing (X / backdrop / the cancel button) still resolves `false`. */
+  choices?: Array<{ value: string; label: string; variant?: 'primary' | 'secondary' | 'danger' }>;
 }
 
-export type ConfirmResult = false | { confirmed: true; checked: boolean };
+export type ConfirmResult = false | { confirmed: true; checked: boolean; choice?: string };
 
 type ConfirmFn = (opts: ConfirmOptions) => Promise<ConfirmResult>;
 
@@ -71,6 +75,12 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
   function close(confirmed: boolean) {
     if (!pending) return;
     pending.resolve(confirmed ? { confirmed: true, checked: checkedRef.current } : false);
+    setPending(null);
+  }
+
+  function resolveChoice(value: string) {
+    if (!pending) return;
+    pending.resolve({ confirmed: true, checked: checkedRef.current, choice: value });
     setPending(null);
   }
 
@@ -167,15 +177,33 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
                 {pending.cancelLabel || t('common.cancel')}
               </button>
               <div style={{ flex: 1 }} />
-              <button
-                className={pending.destructive ? 'gf-btn-3 gf-btn-danger' : 'gf-btn'}
-                onClick={() => close(true)}
-                disabled={!phraseOk}
-                autoFocus={!pending.typedPhrase}
-                style={pending.destructive && pending.typedPhrase ? { background: 'oklch(0.65 0.18 25)', color: '#fff', border: 0 } : undefined}
-              >
-                {pending.confirmLabel || (pending.destructive ? t('common.delete') : t('common.confirm'))}
-              </button>
+              {pending.choices ? (
+                pending.choices.map((choice) => (
+                  <button
+                    key={choice.value}
+                    className={
+                      choice.variant === 'danger'
+                        ? 'gf-btn-3 gf-btn-danger'
+                        : choice.variant === 'secondary'
+                        ? 'gf-btn-2'
+                        : 'gf-btn'
+                    }
+                    onClick={() => resolveChoice(choice.value)}
+                  >
+                    {choice.label}
+                  </button>
+                ))
+              ) : (
+                <button
+                  className={pending.destructive ? 'gf-btn-3 gf-btn-danger' : 'gf-btn'}
+                  onClick={() => close(true)}
+                  disabled={!phraseOk}
+                  autoFocus={!pending.typedPhrase}
+                  style={pending.destructive && pending.typedPhrase ? { background: 'oklch(0.65 0.18 25)', color: '#fff', border: 0 } : undefined}
+                >
+                  {pending.confirmLabel || (pending.destructive ? t('common.delete') : t('common.confirm'))}
+                </button>
+              )}
             </div>
           </div>
         </div>

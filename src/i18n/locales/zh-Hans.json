@@ -401,7 +401,15 @@
       "toastFailed": "更新关联失败：{{error}}",
       "toastStored": "{{mod}} 已存储（保留安装，已移出游戏文件夹）",
       "toastActivated": "已将 {{mod}} 激活到游戏文件夹",
+      "toastActivatedAndAdded": "已激活 {{mod}} 并将其添加到 {{pack}}",
       "toastStorageFailed": "移动 {{mod}} 失败：{{error}}",
+      "enableNotInPack": {
+        "title": "启用 {{mod}}？",
+        "body": "此模组不在你当前的模组包「{{pack}}」中。要将它添加到模组包，还是仅这次启用？",
+        "enableAndAdd": "启用并添加到「{{pack}}」",
+        "enableOnly": "仅启用",
+        "keepStored": "保持存储"
+      },
       "toastBulkStored_one": "已存储 {{count}} 个未使用的活跃模组",
       "toastBulkStored_other": "已存储 {{count}} 个未使用的活跃模组",
       "toastBulkStorageFailed": "已存储 {{stored}} / {{total}} 个未使用的活跃模组。失败：{{mods}}"

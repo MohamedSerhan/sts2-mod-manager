@@ -44,6 +44,7 @@ import {
 } from './LibraryRow';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
+import { useConfirm } from './ConfirmDialog';
 import {
   getProfileMemberships,
   setProfileLoadOrder,
@@ -193,6 +194,7 @@ export function LibraryTable({
 }: LibraryTableProps) {
   const { t } = useTranslation();
   const toastCtx = useToast();
+  const confirm = useConfirm();
   const { mods: appMods, refreshAll } = useApp();
 
   const [grid, setGrid] = useState<ProfileMembershipGrid | null>(null);
@@ -464,26 +466,68 @@ export function LibraryTable({
   async function handleToggleStorage(row: ProfileMembershipMod) {
     if (storageSaving || membershipSaving) return;
     const nextEnabled = !row.installed_enabled;
+    const displayName = membershipDisplayName(row);
+    const state = focusedState(row);
+
+    // Enabling a stored mod that isn't in the active modpack: ask whether
+    // to also add it to the pack, just enable it on its own, or back out
+    // and keep it stored. Only when there's an editable active pack to add
+    // to — otherwise enabling proceeds straight through.
+    let alsoAddToPack = false;
+    if (nextEnabled && modpackName != null && state && !state.included && state.editable) {
+      const result = await confirm({
+        title: t('profiles.library.enableNotInPack.title', { mod: displayName }),
+        body: t('profiles.library.enableNotInPack.body', { pack: modpackName }),
+        cancelLabel: t('profiles.library.enableNotInPack.keepStored'),
+        width: 560,
+        choices: [
+          {
+            value: 'enableAndAdd',
+            label: t('profiles.library.enableNotInPack.enableAndAdd', { pack: modpackName }),
+            variant: 'primary',
+          },
+          {
+            value: 'enableOnly',
+            label: t('profiles.library.enableNotInPack.enableOnly'),
+            variant: 'secondary',
+          },
+        ],
+      });
+      if (!result) return; // backed out — the mod stays stored
+      alsoAddToPack = result.choice === 'enableAndAdd';
+    }
+
     const key = libraryStorageKey(row);
     try {
       setStorageSaving(key);
       await toggleMod(row.name, row.folder_name, nextEnabled);
       patchRowStorage(membershipRowKey(row), nextEnabled);
+      if (alsoAddToPack && modpackName != null) {
+        await setProfileModMembership(
+          modpackName,
+          row.name,
+          row.folder_name,
+          row.mod_id,
+          true,
+        );
+        patchRowMembership(membershipRowKey(row), true);
+      }
       await refreshAll();
       toastCtx.success(
-        nextEnabled
-          ? t('profiles.library.toastActivated', {
-              mod: membershipDisplayName(row),
+        !nextEnabled
+          ? t('profiles.library.toastStored', { mod: displayName })
+          : alsoAddToPack
+          ? t('profiles.library.toastActivatedAndAdded', {
+              mod: displayName,
+              pack: modpackName,
             })
-          : t('profiles.library.toastStored', {
-              mod: membershipDisplayName(row),
-            }),
+          : t('profiles.library.toastActivated', { mod: displayName }),
       );
       onMembershipChanged?.();
     } catch (e) {
       toastCtx.error(
         t('profiles.library.toastStorageFailed', {
-          mod: membershipDisplayName(row),
+          mod: displayName,
           error: e instanceof Error ? e.message : String(e),
         }),
       );

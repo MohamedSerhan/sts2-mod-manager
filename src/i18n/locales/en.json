@@ -84,6 +84,8 @@
       "availableNoMatch": "No library mods match your search.",
       "libraryShow": "Show",
       "libraryHide": "Hide",
+      "editMods": "Edit",
+      "editModsTitle": "Add or remove mods with a checkbox list",
       "deleteAll": "Delete all",
       "deleteAllTitleShort": "Delete this modpack's mods from your computer",
       "deleteAllTitle": "Delete {{count}} mod(s) in \"{{name}}\"?",
@@ -102,6 +104,15 @@
       "addFailed": "Couldn't add {{mod}}: {{error}}",
       "removeFailed": "Couldn't remove {{mod}}: {{error}}",
       "advanced": "Advanced"
+    },
+    "edit": {
+      "title": "Edit \"{{name}}\"",
+      "subtitle": "Tick the mods to include in this modpack.",
+      "save": "Save changes",
+      "saving": "Saving…",
+      "cancel": "Cancel",
+      "saved": "Updated \"{{name}}\" (+{{added}} / −{{removed}})",
+      "failed": "Couldn't save changes: {{error}}"
     },
     "storage": {
       "active": "Active in game",

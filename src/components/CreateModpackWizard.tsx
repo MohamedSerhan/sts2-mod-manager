@@ -27,7 +27,7 @@
  *                        "Create and share now" button; the share flow
  *                        itself handles the token + repo setup later.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useApp } from '../contexts/AppContext';
 import {
@@ -37,7 +37,8 @@ import {
   setProfileModMembership,
 } from '../hooks/useTauri';
 import { withTimeout } from '../lib/withTimeout';
-import type { ModAuditEntry, ModInfo, Profile } from '../types';
+import { ModMultiSelect } from './ModMultiSelect';
+import type { ModAuditEntry, Profile } from '../types';
 
 /** Ceiling for the step-3 health audit. The audit is informational and
  *  non-blocking, so if GitHub/Nexus is slow we'd rather fall back to the
@@ -55,7 +56,6 @@ interface Props {
 
 type Step = 1 | 2 | 3 | 4;
 type Strategy = 'fromActive' | 'empty' | 'clone';
-type SortMode = 'name' | 'size' | 'enabled';
 
 interface HealthSummary {
   linked: number;
@@ -73,8 +73,6 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
   const [existingProfiles, setExistingProfiles] = useState<Profile[]>([]);
   const [selectedMods, setSelectedMods] = useState<Set<string>>(new Set());
   const [touchedSelection, setTouchedSelection] = useState(false);
-  const [search, setSearch] = useState('');
-  const [sort, setSort] = useState<SortMode>('name');
   const [name, setName] = useState('');
   const [health, setHealth] = useState<HealthSummary | null>(null);
   const [auditing, setAuditing] = useState(false);
@@ -125,49 +123,6 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
     }
     setTouchedSelection(true);
     setStep(2);
-  }
-
-  // Step 2's visible list — applies search + sort. Filtering is done
-  // against the mod name in lowercase to match the "case-insensitive"
-  // contract surfaced in the placeholder text.
-  const visibleMods = useMemo(() => {
-    const lower = search.trim().toLowerCase();
-    let list = lower
-      ? mods.filter((m) => m.name.toLowerCase().includes(lower))
-      : [...mods];
-    if (sort === 'name') {
-      list.sort((a, b) => a.name.localeCompare(b.name));
-    } else if (sort === 'size') {
-      list.sort((a, b) => (b.size_bytes ?? 0) - (a.size_bytes ?? 0));
-    } else if (sort === 'enabled') {
-      list.sort((a, b) => Number(b.enabled) - Number(a.enabled));
-    }
-    return list;
-  }, [mods, search, sort]);
-
-  function toggleSelected(modName: string) {
-    setSelectedMods((prev) => {
-      const next = new Set(prev);
-      if (next.has(modName)) next.delete(modName);
-      else next.add(modName);
-      return next;
-    });
-  }
-
-  // Bulk select/deselect for the currently-visible (filtered) rows — handy
-  // when a pack has lots of mods. Operates on the filtered list so the user
-  // can search, then "Select all" just the matches.
-  const allVisibleSelected =
-    visibleMods.length > 0 && visibleMods.every((m) => selectedMods.has(m.name));
-  function toggleSelectAllVisible() {
-    setSelectedMods((prev) => {
-      const next = new Set(prev);
-      const names = visibleMods.map((m) => m.name);
-      const everyChecked = names.length > 0 && names.every((n) => next.has(n));
-      if (everyChecked) names.forEach((n) => next.delete(n));
-      else names.forEach((n) => next.add(n));
-      return next;
-    });
   }
 
   // Trigger the audit when the user advances to step 3. One-shot per
@@ -260,10 +215,22 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
     }
   }
 
-  const selectedCount = selectedMods.size;
   const showCloneOption = existingProfiles.length > 0;
   const trimmedName = name.trim();
   const canCreate = trimmedName.length > 0 && !creating;
+
+  // Labels for the shared checkbox picker (step 2).
+  const modPickerLabels = {
+    searchPlaceholder: t('createModpack.step2SearchPlaceholder'),
+    sortLabel: t('createModpack.step2SortLabel'),
+    sortByName: t('createModpack.step2SortByName'),
+    sortBySize: t('createModpack.step2SortBySize'),
+    sortByActive: t('createModpack.step2SortByEnabled'),
+    selectedCount: (count: number) => t('createModpack.step2SelectedCount', { count }),
+    selectAll: t('createModpack.step2SelectAll'),
+    deselectAll: t('createModpack.step2DeselectAll'),
+    noMods: t('createModpack.step2NoMods'),
+  };
 
   return (
     <div
@@ -301,17 +268,11 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
             />
           )}
           {step === 2 && (
-            <StepChoose
-              mods={visibleMods}
+            <ModMultiSelect
+              mods={mods}
               selected={selectedMods}
-              toggleSelected={toggleSelected}
-              search={search}
-              setSearch={setSearch}
-              sort={sort}
-              setSort={setSort}
-              selectedCount={selectedCount}
-              allVisibleSelected={allVisibleSelected}
-              onToggleSelectAll={toggleSelectAllVisible}
+              onChange={setSelectedMods}
+              labels={modPickerLabels}
             />
           )}
           {step === 3 && (
@@ -503,108 +464,6 @@ function StrategyOption({
       <span className="gf-create-wizard-strategy-title">{title}</span>
       <span className="gf-create-wizard-strategy-desc">{desc}</span>
     </button>
-  );
-}
-
-// ── Step 2: Choose mods ───────────────────────────────────────────────
-
-interface StepChooseProps {
-  mods: ModInfo[];
-  selected: Set<string>;
-  toggleSelected: (name: string) => void;
-  search: string;
-  setSearch: (s: string) => void;
-  sort: SortMode;
-  setSort: (s: SortMode) => void;
-  selectedCount: number;
-  /** True when every visible (filtered) row is already selected — drives
-   *  the bulk button's Select-all vs Deselect-all label. */
-  allVisibleSelected: boolean;
-  onToggleSelectAll: () => void;
-}
-
-function StepChoose({
-  mods,
-  selected,
-  toggleSelected,
-  search,
-  setSearch,
-  sort,
-  setSort,
-  selectedCount,
-  allVisibleSelected,
-  onToggleSelectAll,
-}: StepChooseProps) {
-  const { t } = useTranslation();
-  return (
-    <div className="gf-create-wizard-choose">
-      <div className="gf-create-wizard-choose-controls">
-        <input
-          type="text"
-          className="gf-set-input"
-          placeholder={t('createModpack.step2SearchPlaceholder')}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          aria-label={t('createModpack.step2SearchPlaceholder')}
-        />
-        <label className="gf-create-wizard-sort">
-          <span className="gf-field-label">{t('createModpack.step2SortLabel')}</span>
-          <select
-            className="gf-set-input"
-            value={sort}
-            onChange={(e) => setSort(e.target.value as SortMode)}
-          >
-            <option value="name">{t('createModpack.step2SortByName')}</option>
-            <option value="size">{t('createModpack.step2SortBySize')}</option>
-            <option value="enabled">{t('createModpack.step2SortByEnabled')}</option>
-          </select>
-        </label>
-      </div>
-      <div className="gf-create-wizard-choose-actions">
-        <span className="gf-create-wizard-selected-count" aria-live="polite">
-          {t('createModpack.step2SelectedCount', { count: selectedCount })}
-        </span>
-        {mods.length > 0 && (
-          <button
-            type="button"
-            className="gf-link-button"
-            onClick={onToggleSelectAll}
-          >
-            {allVisibleSelected
-              ? t('createModpack.step2DeselectAll')
-              : t('createModpack.step2SelectAll')}
-          </button>
-        )}
-      </div>
-      <div className="gf-create-wizard-list">
-        {mods.length === 0 && (
-          <div className="gf-create-wizard-empty">
-            {t('createModpack.step2NoMods')}
-          </div>
-        )}
-        {mods.map((mod) => {
-          const key = mod.folder_name ?? mod.name;
-          const checked = selected.has(mod.name);
-          return (
-            <label
-              key={key}
-              className="gf-create-wizard-list-row"
-            >
-              <input
-                type="checkbox"
-                checked={checked}
-                onChange={() => toggleSelected(mod.name)}
-                aria-label={mod.name}
-              />
-              <span className="gf-create-wizard-list-name">{mod.name}</span>
-              <span className="gf-create-wizard-list-meta">
-                v{mod.version}
-              </span>
-            </label>
-          );
-        })}
-      </div>
-    </div>
   );
 }
 

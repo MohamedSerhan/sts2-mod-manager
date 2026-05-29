@@ -402,6 +402,25 @@ describe('<ModpackDetail>', () => {
     expect(await screen.findByText(/Couldn't add LibMod: disk full/i)).toBeInTheDocument();
   });
 
+  // ── Edit modpack (checkbox picker) ────────────────────────────────
+  it('Edit opens the membership picker pre-filled with the pack\'s mods', async () => {
+    const profile = setupPack({
+      inPack: [modInfo({ name: 'PackMod', folder_name: 'PackMod' })],
+      available: [modInfo({ name: 'LibMod', folder_name: 'LibMod' })],
+    });
+    const user = userEvent.setup();
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+    const inPack = await screen.findByTestId('modpack-detail-in-pack');
+    await user.click(within(inPack).getByRole('button', { name: /^Edit$/i }));
+
+    // The picker modal mounts with the pack member checked.
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /Edit "Sample"/i })).toBeInTheDocument();
+    });
+    expect(screen.getByLabelText('PackMod')).toBeChecked();
+    expect(screen.getByLabelText('LibMod')).not.toBeChecked();
+  });
+
   // ── Pack-scoped Delete all ────────────────────────────────────────
   it('Delete all (in pack) deletes ONLY this pack\'s mods from disk', async () => {
     const profile = setupPack({

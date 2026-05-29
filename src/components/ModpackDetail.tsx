@@ -38,6 +38,7 @@ import {
   Download,
   Files,
   ListOrdered,
+  Pencil,
   Play,
   Plus,
   RefreshCw,
@@ -49,6 +50,7 @@ import { Button } from './Button';
 import { Card } from './Card';
 import { HelpHint } from './HelpHint';
 import { KebabDivider, KebabItem, KebabMenu, KebabSection } from './KebabMenu';
+import { EditModpackModal } from './EditModpackModal';
 import { LibraryTable } from './LibraryTable';
 import { ModLibraryToolbar } from './ModLibraryToolbar';
 import { useApp } from '../contexts/AppContext';
@@ -172,6 +174,8 @@ export function ModpackDetail({
   // "Add from your Library" is collapsed by default to keep the focus on
   // the pack's own mods; the user expands it to browse the rest.
   const [libraryOpen, setLibraryOpen] = useState(false);
+  // Bulk-edit membership via the wizard's checkbox picker.
+  const [editing, setEditing] = useState(false);
 
   const isActive = activeProfile === profile.name;
   const isShared = !!shareInfo;
@@ -479,6 +483,17 @@ export function ModpackDetail({
             {t('modpack.detail.inPackCount', { count: profile.mods.length })}
             <HelpHint helpKey="modpackWhat" />
           </h3>
+          {/* Bulk-edit membership with the same checkbox picker as the
+              create wizard — quick add/remove across the whole library. */}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setEditing(true)}
+            title={t('modpack.detail.editModsTitle')}
+          >
+            <Pencil size={14} />
+            {t('modpack.detail.editMods')}
+          </Button>
           {onOpenLoadOrder && (
             <Button
               variant="secondary"
@@ -639,6 +654,15 @@ export function ModpackDetail({
 
       {/* Auto-detect sources modal (shared). */}
       {lib.renderAutoDetectModal()}
+
+      {/* Bulk membership editor (checkbox picker). */}
+      {editing && (
+        <EditModpackModal
+          profile={profile}
+          onClose={() => setEditing(false)}
+          onSaved={refreshAfterMutation}
+        />
+      )}
     </div>
   );
 }

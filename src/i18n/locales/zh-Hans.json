@@ -84,6 +84,8 @@
       "availableNoMatch": "没有匹配搜索的模组库模组。",
       "libraryShow": "展开",
       "libraryHide": "收起",
+      "editMods": "编辑",
+      "editModsTitle": "用复选框列表添加或移除模组",
       "deleteAll": "全部删除",
       "deleteAllTitleShort": "从电脑中删除此整合包的模组",
       "deleteAllTitle": "删除“{{name}}”中的 {{count}} 个模组？",
@@ -102,6 +104,15 @@
       "addFailed": "无法添加 {{mod}}：{{error}}",
       "removeFailed": "无法移除 {{mod}}：{{error}}",
       "advanced": "高级"
+    },
+    "edit": {
+      "title": "编辑“{{name}}”",
+      "subtitle": "勾选要包含在此整合包中的模组。",
+      "save": "保存更改",
+      "saving": "保存中…",
+      "cancel": "取消",
+      "saved": "已更新“{{name}}”（+{{added}} / −{{removed}}）",
+      "failed": "无法保存更改：{{error}}"
     },
     "storage": {
       "active": "已激活于游戏",

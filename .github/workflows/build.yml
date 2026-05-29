@@ -83,6 +83,9 @@ jobs:
       - name: Test dev-build-stamp script
         run: node --test scripts/dev-build-stamp.test.mjs
 
+      - name: Test make-dev-icon script
+        run: node --test scripts/make-dev-icon.test.mjs
+
   build:
     # Runs on version tags, manual dispatch, or a PR carrying the `dev-build`
     # label. On `labeled` events we also require the just-added label to be
@@ -164,6 +167,9 @@ jobs:
         run: |
           SHORT=$(printf '%s' "$DEV_HEAD_SHA" | cut -c1-7)
           DEV_SHORT_SHA="$SHORT" node scripts/dev-build-stamp.mjs --stamp
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            node scripts/make-dev-icon.mjs src-tauri/icons || echo "DEV icon badge failed (non-fatal)."
+          fi
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0

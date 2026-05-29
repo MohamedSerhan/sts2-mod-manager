@@ -9,7 +9,8 @@
     {
       "planTask": 1,
       "nativeId": "24",
-      "status": "pending",
+      "status": "completed",
+      "commit": "e71790d + fix 9ff8340 (filter latest.json from assets)",
       "subject": "Rust switch_dev_build + DevBuild.manifest_url, remove install_dev_build",
       "files": ["src-tauri/src/dev_builds.rs", "src-tauri/src/lib.rs"],
       "verifyCommand": "cargo test --manifest-path=src-tauri/Cargo.toml dev_builds",
@@ -25,7 +26,9 @@
     {
       "planTask": 2,
       "nativeId": "25",
-      "status": "pending",
+      "status": "completed",
+      "commit": "34e3c8b + fix cbf4e7e (tolerate missing .sig in publish-updater)",
+      "gateNote": "GATE MUST CONFIRM: Tauri NSIS .sig is named '<setup.exe>.sig' (publish-updater.sh sig() expects that). If it is '<setup.exe>.nsis.zip.sig' instead, the manifest's windows entry is silently dropped and one-click switch won't work on Windows — fix = one-line tweak to asset_name/sig in publish-updater.sh.",
       "subject": "CI — publish per-build latest.json manifest + attach signatures",
       "files": ["scripts/publish-updater.sh", ".github/workflows/build.yml"],
       "verifyCommand": "python -c \"import yaml; yaml.safe_load(open('.github/workflows/build.yml')); print('OK')\"",
@@ -42,7 +45,8 @@
     {
       "planTask": 3,
       "nativeId": "26",
-      "status": "pending",
+      "status": "completed",
+      "commit": "6cd5ced + fix 08fe687 (restore empty-state test, hoist isOpen)",
       "subject": "Frontend — DevBuildsCard redesign (rows + search + Downloads disclosure + updater switch)",
       "files": ["src/components/DevBuildsCard.tsx", "src/components/DevBuildsCard.test.tsx", "src/styles.css", "src/i18n/locales/en.json", "src/i18n/locales/zh-Hans.json"],
       "verifyCommand": "npm test -- src/components/DevBuildsCard.test.tsx",
@@ -59,7 +63,8 @@
     {
       "planTask": 4,
       "nativeId": "27",
-      "status": "pending",
+      "status": "completed",
+      "commit": "affc825",
       "subject": "DEV title-bar badge",
       "files": ["src/App.tsx", "src/App.test.tsx", "src/styles.css", "src/i18n/locales/en.json", "src/i18n/locales/zh-Hans.json"],
       "verifyCommand": "npm test -- src/App.test.tsx",
@@ -73,7 +78,8 @@
     {
       "planTask": 5,
       "nativeId": "28",
-      "status": "pending",
+      "status": "completed",
+      "commit": "183423d + fix 6e9c3b4 (tighten icon tests)",
       "subject": "DEV-badged Windows icon (build-time)",
       "files": ["scripts/make-dev-icon.mjs", "scripts/make-dev-icon.test.mjs", "package.json", ".github/workflows/build.yml"],
       "verifyCommand": "node --test scripts/make-dev-icon.test.mjs",

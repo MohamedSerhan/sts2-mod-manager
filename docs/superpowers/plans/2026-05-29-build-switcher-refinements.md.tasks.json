@@ -1,0 +1,119 @@
+{
+  "planPath": "docs/superpowers/plans/2026-05-29-build-switcher-refinements.md",
+  "spec": "docs/superpowers/specs/2026-05-29-build-switcher-refinements-design.md",
+  "subProject": "E round 2 (build-switcher refinements)",
+  "generated": "2026-05-29",
+  "lastUpdated": "2026-05-29",
+  "worktree": "build-switcher (branch claude/build-switcher, PR #60)",
+  "tasks": [
+    {
+      "planTask": 1,
+      "nativeId": "24",
+      "status": "completed",
+      "commit": "e71790d + fix 9ff8340 (filter latest.json from assets)",
+      "subject": "Rust switch_dev_build + DevBuild.manifest_url, remove install_dev_build",
+      "files": ["src-tauri/src/dev_builds.rs", "src-tauri/src/lib.rs"],
+      "verifyCommand": "cargo test --manifest-path=src-tauri/Cargo.toml dev_builds",
+      "acceptanceCriteria": [
+        "DevBuild.manifest_url set from latest.json asset (None when absent)",
+        "parse_dev_builds populates manifest_url; parse test asserts it",
+        "install_dev_build removed (both arms) + unregistered",
+        "switch_dev_build builds updater w/ always-true comparator, installs, app.restart()",
+        "cargo test dev_builds passes + cargo check clean"
+      ],
+      "blockedBy": []
+    },
+    {
+      "planTask": 2,
+      "nativeId": "25",
+      "status": "completed",
+      "commit": "34e3c8b + fix cbf4e7e (tolerate missing .sig in publish-updater)",
+      "gateNote": "GATE MUST CONFIRM: Tauri NSIS .sig is named '<setup.exe>.sig' (publish-updater.sh sig() expects that). If it is '<setup.exe>.nsis.zip.sig' instead, the manifest's windows entry is silently dropped and one-click switch won't work on Windows — fix = one-line tweak to asset_name/sig in publish-updater.sh.",
+      "subject": "CI — publish per-build latest.json manifest + attach signatures",
+      "files": ["scripts/publish-updater.sh", ".github/workflows/build.yml"],
+      "verifyCommand": "python -c \"import yaml; yaml.safe_load(open('.github/workflows/build.yml')); print('OK')\"",
+      "acceptanceCriteria": [
+        "publish-updater.sh optional 3rd arg sets manifest version; omitted = byte-identical",
+        "Upload build artifacts captures **/*.sig",
+        "publish-dev find copies *.sig into dist",
+        "publish-dev runs publish-updater.sh with version override → latest.json attached",
+        "build.yml valid YAML + publish-updater.sh bash -n valid",
+        "release/tag path unchanged"
+      ],
+      "blockedBy": []
+    },
+    {
+      "planTask": 3,
+      "nativeId": "26",
+      "status": "completed",
+      "commit": "6cd5ced + fix 08fe687 (restore empty-state test, hoist isOpen)",
+      "subject": "Frontend — DevBuildsCard redesign (rows + search + Downloads disclosure + updater switch)",
+      "files": ["src/components/DevBuildsCard.tsx", "src/components/DevBuildsCard.test.tsx", "src/styles.css", "src/i18n/locales/en.json", "src/i18n/locales/zh-Hans.json"],
+      "verifyCommand": "npm test -- src/components/DevBuildsCard.test.tsx",
+      "acceptanceCriteria": [
+        "search filters by PR#/sha/title (case-insensitive)",
+        "clean two-column rows; CURRENT tag non-wrapping; platform links behind Downloads disclosure",
+        "Switch shown when manifest_url present + not current; calls switch_dev_build({manifestUrl})",
+        "newest-first preserved; list scrolls within max-height",
+        "empty/error/retry preserved; no silent-skip",
+        "DevBuildsCard tests pass + i18n parity green"
+      ],
+      "blockedBy": ["24"]
+    },
+    {
+      "planTask": 4,
+      "nativeId": "27",
+      "status": "completed",
+      "commit": "affc825",
+      "subject": "DEV title-bar badge",
+      "files": ["src/App.tsx", "src/App.test.tsx", "src/styles.css", "src/i18n/locales/en.json", "src/i18n/locales/zh-Hans.json"],
+      "verifyCommand": "npm test -- src/App.test.tsx",
+      "acceptanceCriteria": [
+        "dev version → DEV badge in titlebar next to title",
+        "release version → no badge",
+        "App tests pass"
+      ],
+      "blockedBy": []
+    },
+    {
+      "planTask": 5,
+      "nativeId": "28",
+      "status": "completed",
+      "commit": "183423d + fix 6e9c3b4 (tighten icon tests)",
+      "subject": "DEV-badged Windows icon (build-time)",
+      "files": ["scripts/make-dev-icon.mjs", "scripts/make-dev-icon.test.mjs", "package.json", ".github/workflows/build.yml"],
+      "verifyCommand": "node --test scripts/make-dev-icon.test.mjs",
+      "acceptanceCriteria": [
+        "badgeIcons badges the 3 windows PNGs + rebuilds non-empty icon.ico",
+        "idempotent on re-run",
+        "missing source png skipped with warning, no crash",
+        "dev stamp step runs it only on the Windows leg after --stamp",
+        "make-dev-icon test passes + build.yml parses"
+      ],
+      "blockedBy": ["25"]
+    },
+    {
+      "planTask": 6,
+      "nativeId": "20",
+      "status": "completed",
+      "evidence": "PASSED — user-confirmed one-click silent swap+relaunch (PR60->PR61, no installer), DEV badge+icon visible, sts2-mod-manager-dev isolation intact; server-side latest.json manifests published w/ windows entries (.sig-naming risk did not materialize).",
+      "subject": "Manual Windows end-to-end verification (USER GATE)",
+      "userGate": true,
+      "tags": ["user-gate"],
+      "requireEvidenceTokens": [
+        ["one-click", "no installer", "relaunched", "version changed", "switched", "g"],
+        ["sts2-mod-manager-dev", "release untouched", "isolated", "DEV badge", "DEV icon"]
+      ],
+      "files": [],
+      "verifyCommand": "(manual, Windows) one-click Switch → silent swap+relaunch (version changes); Test-Path %APPDATA%\\sts2-mod-manager-dev = True; release dir unchanged; DEV titlebar badge + DEV taskbar icon visible",
+      "acceptanceCriteria": [
+        "Dev Builds list clean/aligned, newest-first, working search, Downloads disclosure",
+        "one-click Switch: no installer UI, silent download+swap+relaunch into target (version changes)",
+        "after switch uses sts2-mod-manager-dev; release dir untouched",
+        "dev app shows DEV titlebar badge + DEV-badged taskbar/desktop icon",
+        "release build: no Dev Builds section, no DEV badge, normal update behavior"
+      ],
+      "blockedBy": ["24", "25", "26", "27", "28"]
+    }
+  ]
+}

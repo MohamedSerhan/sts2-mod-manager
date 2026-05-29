@@ -7,7 +7,7 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 
 import { SettingsView } from './Settings';
 import { AllProviders } from '../__test__/providers';
-import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
+import { getInvokeCalls, registerInvokeHandler, setMockAppVersion } from '../__test__/setup';
 
 function Wrap() {
   return (
@@ -1181,4 +1181,28 @@ describe('<SettingsView>', () => {
     });
   });
 
+  // ── Dev Builds gating (merged from main's dev-build work) ──────────
+  // The Audit-tab tests main added here don't apply: this branch moved audit
+  // out of Settings (it lives in Mod Library / a modpack's detail now).
+
+  it('shows the Dev Builds section on a dev build', async () => {
+    setMockAppVersion('1.6.1-dev.pr59.g837f5ba');
+    registerInvokeHandler('list_dev_builds', () => []);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: /Advanced/ }));
+    expect(await screen.findByText('Dev Builds')).toBeInTheDocument();
+  });
+
+  it('hides the Dev Builds section on a release build', async () => {
+    setMockAppVersion('1.6.1');
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: /Advanced/ }));
+    // Settle on the always-present "Check for updates" control, then assert absence.
+    await screen.findByText(/Check for updates/i);
+    expect(screen.queryByText('Dev Builds')).not.toBeInTheDocument();
+  });
 });

@@ -1,0 +1,84 @@
+{
+  "planPath": "docs/superpowers/plans/2026-05-29-auto-fix-bot.md",
+  "spec": "docs/superpowers/specs/2026-05-29-auto-fix-bot-design.md",
+  "subProject": "C (auto-fix bot)",
+  "generated": "2026-05-29",
+  "lastUpdated": "2026-05-29",
+  "worktree": "auto-fix-bot (branch claude/auto-fix-bot, stacked on claude/build-switcher; merge E #60 then C)",
+  "tasks": [
+    {
+      "planTask": 1,
+      "nativeId": "32",
+      "status": "completed",
+      "commit": "cd270f5 + fix 52929da (actor-auth gate) + fix f188164 (PAT-applied labels post-step so D triggers)",
+      "subject": "claude-autofix.yml — initiate-fix + revise entry points",
+      "files": [".github/workflows/claude-autofix.yml"],
+      "verifyCommand": "python -c \"import yaml; yaml.safe_load(open('.github/workflows/claude-autofix.yml')); print('OK')\"",
+      "acceptanceCriteria": [
+        "on: issues[labeled] + issue_comment[created] + pull_request_review_comment[created]",
+        "initiate job gated on label==auto-fix, write perms, prompt implements+tests+opens PR (Fixes #N)+labels dev-build+auto-fix",
+        "revise job gated on @claude on auto-fix-labeled PR (both event shapes), write perms, pushes revision",
+        "claude.yml untouched (investigate stays read-only)",
+        "claude-autofix.yml parses as valid YAML",
+        "action input names confirmed against v1 docs"
+      ],
+      "blockedBy": []
+    },
+    {
+      "planTask": 2,
+      "nativeId": "33",
+      "status": "completed",
+      "commit": "ad72fce",
+      "subject": "Dependabot config + auto-label workflow",
+      "files": [".github/dependabot.yml", ".github/workflows/dependabot-label.yml"],
+      "verifyCommand": "python -c \"import yaml; yaml.safe_load(open('.github/dependabot.yml')); yaml.safe_load(open('.github/workflows/dependabot-label.yml')); print('OK')\"",
+      "acceptanceCriteria": [
+        "dependabot.yml: npm / + cargo /src-tauri + github-actions /, weekly, grouped minor/patch",
+        "dependabot-label.yml on pull_request_target[opened], actor==dependabot[bot] adds dev-build label",
+        "label applied with DEV_BUILD_LABEL_TOKEN||GITHUB_TOKEN",
+        "both files parse as valid YAML"
+      ],
+      "blockedBy": []
+    },
+    {
+      "planTask": 3,
+      "nativeId": "34",
+      "status": "completed",
+      "commit": "f749d07",
+      "subject": "Operator runbook (RELEASING.md)",
+      "files": ["RELEASING.md"],
+      "verifyCommand": "grep -q \"auto-fix\" RELEASING.md && echo OK",
+      "acceptanceCriteria": [
+        "section documents auto-fix label start + @claude revise + never auto-merged",
+        "one-time setup: create auto-fix label, enable Dependabot security updates, DEV_BUILD_LABEL_TOKEN PAT (why + scope)",
+        "safety posture noted (opt-in, actor-authorized, tests gate, write-scoped)"
+      ],
+      "blockedBy": []
+    },
+    {
+      "planTask": 4,
+      "nativeId": "35",
+      "status": "pending",
+      "subject": "Auto-fix end-to-end verification (USER GATE)",
+      "userGate": true,
+      "tags": ["user-gate"],
+      "gateNote": "MUST run POST-MERGE: GitHub fires issues/issue_comment/pull_request_target workflows only from the DEFAULT branch, so claude-autofix.yml + dependabot-label.yml can't be exercised until C is on main. Sequence: merge E (#60) -> merge C -> one-time setup (auto-fix label, DEV_BUILD_LABEL_TOKEN PAT, enable Dependabot security updates) -> live gate on a throwaway issue -> fix forward if needed. PAT + Dependabot toggle are user-account/browser actions only the maintainer can do.",
+      "requireEvidenceTokens": [
+        ["Fixes #", "dev-build", "auto-fix", "dev-pr", "revision commit", "rebuilt"],
+        ["not found", "cleanup", "investigate only", "read-only", "did not trigger"]
+      ],
+      "files": [],
+      "verifyCommand": "gh pr view <N> --json labels,body (dev-build+auto-fix + Fixes #<issue>); gh release view dev-pr<N> (assets while open, not found after close)",
+      "acceptanceCriteria": [
+        "auto-fix label exists + DEV_BUILD_LABEL_TOKEN configured (or manual relabel accepted)",
+        "labeling throwaway issue auto-fix opens a PR: Fixes #<issue>, dev-build+auto-fix, real code change",
+        "PR triggers D -> dev-pr<N> prerelease produced (label-token risk resolved)",
+        "@claude <tweak> on PR -> revision commit -> D rebuilds",
+        "check test job ran on the PR",
+        "closing PR unmerged -> D cleanup deletes dev-pr<N>",
+        "@claude on non-auto-fix PR/issue does NOT trigger write/PR; non-auto-fix label does not trigger bot"
+      ],
+      "blockedBy": ["32", "33", "34"]
+    }
+  ]
+}

@@ -595,6 +595,7 @@
       "modded": "Launch"
     },
     "windowTitle": "STS2 Mod Manager",
+    "devBadge": "DEV",
     "minimize": "Minimize",
     "maximize": "Maximize",
     "close": "Close",
@@ -1349,5 +1350,24 @@
       "addTo": "Click to add to \"{{pack}}\"",
       "removeFrom": "Click to remove from \"{{pack}}\""
     }
+  },
+  "devBuilds": {
+    "title": "Dev Builds",
+    "subtitle": "Switch the (Dev) app between open PRs' builds. Your release app is untouched.",
+    "loading": "Loading dev builds…",
+    "error": "Couldn't load dev builds: {{error}}",
+    "retry": "Retry",
+    "search": "Search by PR #, sha, or title",
+    "empty": "No open dev builds — open a PR and label it dev-build.",
+    "noMatch": "No dev builds match your search.",
+    "current": "current",
+    "running": "Running",
+    "switchTo": "Switch to this build",
+    "switchingShort": "Switching…",
+    "switching": "Switching to PR #{{pr}} — the (Dev) app will swap and relaunch.",
+    "switchFailed": "Switch failed: {{error}}",
+    "downloads": "Downloads",
+    "noWindowsBuild": "No updater manifest — can't one-click switch.",
+    "backToRelease": "To return to the stable app, just launch your release STS2 Mod Manager — it's a separate, untouched install."
   }
 }

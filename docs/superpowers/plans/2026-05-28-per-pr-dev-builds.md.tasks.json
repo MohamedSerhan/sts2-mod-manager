@@ -1,0 +1,120 @@
+{
+  "plan": "docs/superpowers/plans/2026-05-28-per-pr-dev-builds.md",
+  "spec": "docs/superpowers/specs/2026-05-28-per-pr-dev-builds-design.md",
+  "subProject": "D (per-PR dev builds)",
+  "generated": "2026-05-28",
+  "lastUpdated": "2026-05-28",
+  "worktree": "per-pr-dev-builds (branch claude/per-pr-dev-builds, off main 960f9e5)",
+  "tasks": [
+    {
+      "planTask": 1,
+      "nativeId": "5",
+      "status": "completed",
+      "commit": "d0622eb",
+      "subject": "Dev data isolation — version-driven app_dir_name()",
+      "files": ["src-tauri/src/state.rs", "src-tauri/src/lib.rs"],
+      "verifyCommand": "cargo test --manifest-path=src-tauri/Cargo.toml app_dir_name",
+      "acceptanceCriteria": [
+        "dir_name_for(\"1.6.1\") returns sts2-mod-manager",
+        "dir_name_for(\"1.6.1-dev.pr42.ga1b2c3d\") returns sts2-mod-manager-dev",
+        "config_path and cache_path in state.rs use app_dir_name()",
+        "lib.rs logging dir uses crate::state::app_dir_name()",
+        "STS2_CONFIG_DIR/STS2_CACHE_DIR overrides still take precedence",
+        "cargo test passes including the two new tests"
+      ],
+      "blockedBy": []
+    },
+    {
+      "planTask": 2,
+      "nativeId": "6",
+      "status": "completed",
+      "commit": "6ba0b67 + fix 31c72a9",
+      "subject": "dev-build-stamp.mjs — version compute, file stamp, comment render",
+      "files": ["scripts/dev-build-stamp.mjs", "scripts/dev-build-stamp.test.mjs", ".github/workflows/build.yml"],
+      "verifyCommand": "node --test scripts/dev-build-stamp.test.mjs",
+      "acceptanceCriteria": [
+        "computeDevVersion('1.6.1','42','a1b2c3d') -> 1.6.1-dev.pr42.ga1b2c3d",
+        "all-digit sha 0123456 -> g0123456 (valid SemVer)",
+        "stampFiles rewrites version+identifier+productName in conf and [package] version in Cargo, nothing else",
+        "renderDevComment includes marker, metadata, every asset, isolation note; empty assets -> no-artifacts line",
+        "--stamp reads base from tauri.conf.json, requires DEV_PR_NUMBER+DEV_SHORT_SHA, prints stamped version",
+        "module importable without running main",
+        "no silent-skip patterns; every test asserts"
+      ],
+      "blockedBy": []
+    },
+    {
+      "planTask": 3,
+      "nativeId": "7",
+      "status": "completed",
+      "commit": "cd330ea + fix b60d9bc (added labeled trigger + gate guards)",
+      "subject": "build.yml — labeled-PR gate + stamp step + dev portable + artifact paths",
+      "files": [".github/workflows/build.yml"],
+      "verifyCommand": "python -c \"import yaml; yaml.safe_load(open('.github/workflows/build.yml')); print('OK')\"",
+      "acceptanceCriteria": [
+        "build gate fires for pull_request with dev-build label; tag+dispatch unchanged",
+        "Stamp dev version step runs before Build Tauri app, labeled-PR only, via dev-build-stamp.mjs --stamp",
+        "dev-only Windows portable step produces root STS2.Mod.Manager_<ver>_x64_portable.zip with no gh release upload",
+        "Upload build artifacts paths include root *_x64_portable.zip",
+        "build.yml parses as valid YAML",
+        "release/tag path byte-unchanged"
+      ],
+      "blockedBy": ["6"]
+    },
+    {
+      "planTask": 4,
+      "nativeId": "8",
+      "status": "completed",
+      "commit": "87fcdbc + fix 68ce319 (hardened: partial-success gate, empty-dist guard, graceful no-artifacts)",
+      "subject": "build.yml — publish-dev job (rolling prerelease + sticky comment)",
+      "files": [".github/workflows/build.yml"],
+      "verifyCommand": "python -c \"import yaml; yaml.safe_load(open('.github/workflows/build.yml')); print('OK')\"",
+      "acceptanceCriteria": [
+        "new publish-dev job needs:build, labeled-PR only",
+        "downloads all binaries-* artifacts",
+        "creates-or-updates prerelease tag dev-pr<N> with --prerelease, replacing assets",
+        "upserts sticky PR comment found by <!-- dev-build-comment --> via renderDevComment",
+        "permissions contents:write + pull-requests:write",
+        "build.yml parses as valid YAML"
+      ],
+      "blockedBy": ["7"]
+    },
+    {
+      "planTask": 5,
+      "nativeId": "9",
+      "status": "completed",
+      "commit": "0e99238",
+      "subject": "dev-build-cleanup.yml — delete dev prerelease on PR close",
+      "files": [".github/workflows/dev-build-cleanup.yml"],
+      "verifyCommand": "python -c \"import yaml; yaml.safe_load(open('.github/workflows/dev-build-cleanup.yml')); print('OK')\"",
+      "acceptanceCriteria": [
+        "triggers on pull_request types:[closed]",
+        "deletes release dev-pr<N> + tag, idempotent",
+        "permissions contents:write",
+        "YAML parses"
+      ],
+      "blockedBy": []
+    },
+    {
+      "planTask": 6,
+      "nativeId": "10",
+      "subject": "Create dev-build label + end-to-end verification (USER GATE)",
+      "userGate": true,
+      "tags": ["user-gate"],
+      "requireEvidenceTokens": [
+        ["portable.zip", ".dmg", ".AppImage", ".deb", "3 platforms"],
+        ["CLEANUP OK", "release not found", "not found"]
+      ],
+      "files": [],
+      "verifyCommand": "gh release view dev-pr<N> --repo MohamedSerhan/sts2-mod-manager --json assets --jq '.assets[].name'",
+      "acceptanceCriteria": [
+        "dev-build label exists (gh label list)",
+        "throwaway PR labeled dev-build produces dev-pr<N> prerelease with Win+macOS+Linux assets",
+        "PR has sticky comment containing <!-- dev-build-comment --> + per-platform links",
+        "downloaded Windows portable build writes …/sts2-mod-manager-dev/ NOT release sts2-mod-manager/ — maintainer-confirmed",
+        "closing the PR deletes the dev-pr<N> prerelease (gh release view -> not found)"
+      ],
+      "blockedBy": ["5", "6", "7", "8", "9"]
+    }
+  ]
+}

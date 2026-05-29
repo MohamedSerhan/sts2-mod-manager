@@ -5,6 +5,7 @@ import zhHans from './zh-Hans.json';
 type LocaleTree = Record<string, unknown>;
 
 const SAME_AS_ENGLISH_ALLOWED = new Set([
+  'app.devBadge',        // DEV is an acronym — intentionally identical across locales
   'app.vanillaInitials',
   'browse.tabs.github',
   'browseDetail.github',

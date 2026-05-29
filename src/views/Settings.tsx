@@ -24,6 +24,8 @@ import { LogsViewer } from '../components/LogsViewer';
 import { DiagnosticBundle } from '../components/DiagnosticBundle';
 import { LanguageSelect } from '../components/LanguageSelect';
 import { AboutCard } from '../components/AboutCard';
+import { DevBuildsCard } from '../components/DevBuildsCard';
+import { isDevBuild } from '../lib/isDevBuild';
 import {
   detectGamePath,
   setGamePath,
@@ -75,6 +77,12 @@ export function SettingsView() {
 
   // ── Diagnostic bundle modal ─────────────────────────
   const [showDiag, setShowDiag] = useState(false);
+
+  // ── Dev-builds gate ─────────────────────────────────
+  const [showDevBuilds, setShowDevBuilds] = useState(false);
+  useEffect(() => {
+    isDevBuild().then(setShowDevBuilds).catch(() => {});
+  }, []);
 
   async function refreshBackups() {
     try {
@@ -683,6 +691,8 @@ export function SettingsView() {
 
             <div className="gf-section-title">{t('settings.advanced.inAppLogs')}</div>
             <LogsViewer />
+
+            {showDevBuilds && <DevBuildsCard />}
           </>
         )}
 

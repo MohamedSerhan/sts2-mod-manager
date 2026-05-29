@@ -49,6 +49,7 @@ export function resetTauriMocks(): void {
   invokeHandlers.clear();
   invokeCalls.length = 0;
   invokeFallback = null;
+  mockAppVersion = DEFAULT_APP_VERSION;
 }
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -96,7 +97,8 @@ vi.mock('@tauri-apps/plugin-updater', () => ({
   check: vi.fn(async () => null),
 }));
 
-let mockAppVersion = '1.3.4';
+const DEFAULT_APP_VERSION = '1.3.4';
+let mockAppVersion = DEFAULT_APP_VERSION;
 
 /** Override the app version reported by `@tauri-apps/api/app::getVersion`. */
 export function setMockAppVersion(v: string): void {

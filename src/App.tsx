@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { check, type Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
+import { isDevBuild } from './lib/isDevBuild';
 import { cn } from './lib/utils';
 import { ToastProvider, useToast } from './contexts/ToastContext';
 import { AppProvider, useApp } from './contexts/AppContext';
@@ -117,6 +118,10 @@ function AppInner() {
   // the focus pump above.
   const [openCreateWizardSignal, setOpenCreateWizardSignal] = useState(0);
   const [launching, setLaunching] = useState<null | 'modded' | 'vanilla'>(null);
+  const [isDev, setIsDev] = useState(false);
+  useEffect(() => {
+    isDevBuild().then(setIsDev).catch(() => {});
+  }, []);
 
   // First-launch onboarding wizard (v5 batch 4). Shown once unless dismissed.
   useEffect(() => {
@@ -338,8 +343,13 @@ function AppInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Check for app updates on launch and every 24 hours while the app is open
+  // Check for app updates on launch and every 24h — but NOT on dev builds.
+  // A dev build deliberately runs a pre-release; the "update to the latest
+  // release" nag is counterproductive there (build management lives in the
+  // Dev Builds section instead). Release builds are unchanged.
   useEffect(() => {
+    let active = true;
+    let interval: ReturnType<typeof setInterval> | undefined;
     function doCheck() {
       check()
         .then((update) => {
@@ -349,11 +359,16 @@ function AppInner() {
           console.warn('Update check failed:', e);
         });
     }
-
-    doCheck();
-    const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-    const interval = setInterval(doCheck, ONE_DAY_MS);
-    return () => clearInterval(interval);
+    isDevBuild().then((dev) => {
+      if (!active || dev) return;
+      doCheck();
+      const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+      interval = setInterval(doCheck, ONE_DAY_MS);
+    });
+    return () => {
+      active = false;
+      if (interval) clearInterval(interval);
+    };
   }, []);
 
   const RELEASES_URL = 'https://github.com/MohamedSerhan/sts2-mod-manager/releases/latest';
@@ -585,6 +600,7 @@ function AppInner() {
         <div className="gf-titlebar-app" data-tauri-drag-region>
           <div className="gf-titlebar-mark" data-tauri-drag-region>✦</div>
           <span className="gf-titlebar-title" data-tauri-drag-region>{t('app.windowTitle')}</span>
+          {isDev && <span className="gf-titlebar-dev" title="Development build">{t('app.devBadge')}</span>}
         </div>
         <div className="gf-titlebar-controls">
           <button className="gf-titlebar-btn" title={t('app.minimize')} onClick={handleTitlebarMin}>

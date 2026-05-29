@@ -1,0 +1,115 @@
+{
+  "planPath": "docs/superpowers/plans/2026-05-28-build-switcher.md",
+  "spec": "docs/superpowers/specs/2026-05-28-build-switcher-design.md",
+  "subProject": "E (build switcher)",
+  "generated": "2026-05-28",
+  "lastUpdated": "2026-05-28",
+  "worktree": "build-switcher (branch claude/build-switcher, off main 085384b)",
+  "tasks": [
+    {
+      "planTask": 1,
+      "nativeId": "15",
+      "status": "completed",
+      "commit": "a186ca0 + fix 1bc7992 (active-flag guard + mock-version reset)",
+      "subject": "isDevBuild helper + suppress self-update nag",
+      "files": ["src/lib/isDevBuild.ts", "src/lib/isDevBuild.test.ts", "src/App.tsx", "src/App.test.tsx"],
+      "verifyCommand": "npm test -- src/lib/isDevBuild.test.ts src/App.test.tsx",
+      "acceptanceCriteria": [
+        "isDevBuild() true for 1.6.1-dev.pr59.g837f5ba, false for 1.6.1, false on getVersion reject",
+        "dev build shows no update banner on launch even when check() returns an update",
+        "release build banner behavior unchanged",
+        "npm test for isDevBuild + App passes"
+      ],
+      "blockedBy": []
+    },
+    {
+      "planTask": 2,
+      "nativeId": "16",
+      "status": "completed",
+      "commit": "d5e6f7a + fix 34b79ac (log on failure + -setup.exe targeting doc + exclusion test)",
+      "subject": "Rust list_dev_builds command + dev-pr parsing + tests",
+      "files": ["src-tauri/src/dev_builds.rs", "src-tauri/src/lib.rs"],
+      "verifyCommand": "cargo test --manifest-path=src-tauri/Cargo.toml dev_builds",
+      "acceptanceCriteria": [
+        "parse_pr_from_tag dev-pr59->59, v1.6.1->None",
+        "parse_sha_from_title extracts 837f5ba",
+        "parse_dev_builds filters dev-pr prereleases, sorts newest-first, sets windows_installer_url, maps platforms",
+        "list_dev_builds registered + reads github_token from AppState",
+        "cargo test dev_builds passes"
+      ],
+      "blockedBy": []
+    },
+    {
+      "planTask": 3,
+      "nativeId": "17",
+      "status": "completed",
+      "commit": "3272f7c",
+      "subject": "Rust install_dev_build (download + run installer) + register",
+      "files": ["src-tauri/src/dev_builds.rs", "src-tauri/src/lib.rs"],
+      "verifyCommand": "cargo check --manifest-path=src-tauri/Cargo.toml",
+      "acceptanceCriteria": [
+        "install_dev_build on Windows downloads via download_file + spawns the installer",
+        "non-Windows returns a clear Windows-only error",
+        "command registered in invoke_handler",
+        "cargo check passes + dev_builds tests still pass"
+      ],
+      "blockedBy": ["16"]
+    },
+    {
+      "planTask": 4,
+      "nativeId": "18",
+      "status": "completed",
+      "commit": "b64d13c + fix 733e5cf (CSS classes + lowercase sha + badge test)",
+      "subject": "DevBuildsCard frontend component + tests",
+      "files": ["src/components/DevBuildsCard.tsx", "src/components/DevBuildsCard.test.tsx", "src/i18n/locales/en.json", "src/i18n/locales/zh-Hans.json"],
+      "verifyCommand": "npm test -- src/components/DevBuildsCard.test.tsx",
+      "acceptanceCriteria": [
+        "calls list_dev_builds on mount, renders PR #N · g<sha> newest-first",
+        "running build marked current + Switch disabled",
+        "Switch on another build calls install_dev_build with installerUrl",
+        "no-windows build shows note instead of Switch",
+        "empty + error(+retry) states render",
+        "no silent-skip patterns",
+        "DevBuildsCard tests pass"
+      ],
+      "blockedBy": ["16", "17"]
+    },
+    {
+      "planTask": 5,
+      "nativeId": "19",
+      "status": "completed",
+      "commit": "c725fc0",
+      "subject": "Wire DevBuildsCard into Settings (gated on dev build)",
+      "files": ["src/views/Settings.tsx", "src/views/Settings.test.tsx"],
+      "verifyCommand": "npm test -- src/views/Settings.test.tsx",
+      "acceptanceCriteria": [
+        "dev version → Dev Builds section renders in Settings",
+        "release version → Dev Builds section absent",
+        "Settings tests pass"
+      ],
+      "blockedBy": ["15", "18"]
+    },
+    {
+      "planTask": 6,
+      "nativeId": "20",
+      "status": "pending",
+      "subject": "Manual Windows end-to-end verification (USER GATE)",
+      "userGate": true,
+      "tags": ["user-gate"],
+      "requireEvidenceTokens": [
+        ["relaunched", "now running", "switched", "version changed", "g"],
+        ["sts2-mod-manager-dev", "release untouched", "isolated"]
+      ],
+      "files": [],
+      "verifyCommand": "(manual, Windows) after switch: (Dev) app reports target PR version+g<sha>; Test-Path %APPDATA%\\sts2-mod-manager-dev = True; release dir unchanged",
+      "acceptanceCriteria": [
+        "Dev Builds lists open PRs newest-first, running one marked current",
+        "Switch to a different PR downloads + replaces in place + relaunches into the chosen build",
+        "after swap the (Dev) app uses sts2-mod-manager-dev; release dir untouched",
+        "release app (com.sts2mm.app) unaffected throughout",
+        "release build shows no Dev Builds section + normal update-nag"
+      ],
+      "blockedBy": ["15", "16", "17", "18", "19"]
+    }
+  ]
+}

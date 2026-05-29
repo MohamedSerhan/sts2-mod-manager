@@ -29,6 +29,7 @@ mod subscriptions;
 // audit_mod_versions directly so the qa-cassette playback layer can be
 // verified without spinning up a Tauri window.
 pub mod updater;
+pub mod dev_builds;
 
 use state::create_app_state;
 use state::AppState;
@@ -80,7 +81,7 @@ fn setup_logging(log_path: &std::path::Path) {
 pub fn run() {
     let config_dir = dirs::config_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("sts2-mod-manager");
+        .join(crate::state::app_dir_name());
     setup_logging(&config_dir.join("sts2mm.log"));
 
     // Startup banner -- makes it easy to find session boundaries when
@@ -317,6 +318,8 @@ pub fn run() {
             updater::rollback_mod,
             updater::update_all_mods,
             updater::audit_mod_versions,
+            dev_builds::list_dev_builds,
+            dev_builds::switch_dev_build,
             quick_add::quick_add_mod,
             // Mod source linking
             mod_sources::get_mod_sources,

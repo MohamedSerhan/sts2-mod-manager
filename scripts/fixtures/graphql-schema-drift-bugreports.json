@@ -1,0 +1,11 @@
+{
+  "data": {
+    "__type": {
+      "name": "Mod",
+      "fields": [
+        {"name": "id", "type": {"name": "ID"}},
+        {"name": "comments", "type": {"name": "CommentConnection"}}
+      ]
+    }
+  }
+}

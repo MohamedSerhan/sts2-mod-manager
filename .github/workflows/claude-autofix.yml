@@ -1,0 +1,133 @@
+name: Claude auto-fix
+
+# Write-scoped companion to claude.yml (which stays read-only / investigate).
+# Two entry points:
+#   - initiate: maintainer labels an issue `auto-fix` -> implement + open a dev-build PR
+#   - revise:   maintainer comments `@claude ...` on an auto-fix-labeled PR -> push a revision
+# Actor authorization is enforced by claude-code-action (write/admin only).
+on:
+  issues:
+    types: [labeled]
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+jobs:
+  initiate:
+    # Only when the just-added label is `auto-fix`.
+    if: ${{ github.event_name == 'issues' && github.event.label.name == 'auto-fix' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      - name: Assert authorized actor
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ROLE=$(gh api "repos/${{ github.repository }}/collaborators/${{ github.actor }}/permission" \
+                   --jq '.permission' 2>/dev/null || echo "none")
+          echo "Actor ${{ github.actor }} has repo permission: $ROLE"
+          case "$ROLE" in
+            admin|write|maintain) echo "Authorized." ;;
+            *) echo "::error::Actor ${{ github.actor }} ('$ROLE') is not authorized to run the auto-fix bot."; exit 1 ;;
+          esac
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Run Claude (implement fix + open PR)
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: |
+            --allowedTools Edit,Read,Write,Bash
+            --max-turns 40
+          prompt: |
+            A maintainer labeled issue #${{ github.event.issue.number }} with `auto-fix`,
+            greenlighting an automated fix. Repository: ${{ github.repository }}.
+
+            Do the following:
+            1. Read issue #${{ github.event.issue.number }} — its title, body, and any prior
+               `@claude` investigation comment — to understand the bug or request.
+            2. Investigate the codebase and implement a fix on a NEW branch named EXACTLY
+               `auto-fix/${{ github.event.issue.number }}` (no suffix or slug — a later
+               workflow step locates the PR by this exact branch name). Branch off the
+               default branch.
+            3. Run the relevant tests (`npm test` runs the frontend + Rust suites; for a
+               Rust-only change `cargo test --manifest-path=src-tauri/Cargo.toml`). Iterate
+               until they pass. CI will also run the full suite on the PR.
+            4. Open a pull request targeting `main` whose body STARTS with
+               `Fixes #${{ github.event.issue.number }}`, summarizes the change, and explains
+               how to test it via the dev build. Do NOT apply any labels — a workflow step
+               applies them after you finish.
+
+            If you CANNOT produce a confident fix, do NOT open a PR — instead post a comment
+            on the issue explaining precisely what blocks the fix.
+
+      - name: Apply dev-build + auto-fix labels (PAT so the build triggers)
+        env:
+          # Apply the labels with a PAT, not the default GITHUB_TOKEN: a label added by
+          # GITHUB_TOKEN does NOT trigger the build workflow (anti-recursion). Applying
+          # them here (rather than letting Claude add them) also avoids a no-op re-add
+          # that would generate no `labeled` event. No-op if Claude opened no PR.
+          GH_TOKEN: ${{ secrets.DEV_BUILD_LABEL_TOKEN || secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          PR=$(gh pr list --repo "$REPO" --head "auto-fix/${ISSUE}" --state open \
+                 --json number --jq '.[0].number // empty')
+          if [ -z "$PR" ]; then
+            echo "No PR on branch auto-fix/${ISSUE} (Claude may have declined to fix). Nothing to label."
+            exit 0
+          fi
+          gh pr edit "$PR" --repo "$REPO" --add-label dev-build --add-label auto-fix
+          echo "Labeled PR #$PR with dev-build + auto-fix."
+
+  revise:
+    # Only `@claude` comments on a PR that carries the `auto-fix` label.
+    if: >-
+      ${{ ((github.event_name == 'issue_comment'
+              && github.event.issue.pull_request
+              && contains(github.event.issue.labels.*.name, 'auto-fix')
+              && contains(github.event.comment.body, '@claude'))
+           || (github.event_name == 'pull_request_review_comment'
+              && contains(github.event.pull_request.labels.*.name, 'auto-fix')
+              && contains(github.event.comment.body, '@claude'))) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      - name: Assert authorized actor
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ROLE=$(gh api "repos/${{ github.repository }}/collaborators/${{ github.actor }}/permission" \
+                   --jq '.permission' 2>/dev/null || echo "none")
+          echo "Actor ${{ github.actor }} has repo permission: $ROLE"
+          case "$ROLE" in
+            admin|write|maintain) echo "Authorized." ;;
+            *) echo "::error::Actor ${{ github.actor }} ('$ROLE') is not authorized to run the auto-fix bot."; exit 1 ;;
+          esac
+      - name: Checkout
+        # Seeds the workspace + git config; claude-code-action switches to the
+        # PR branch itself in tag mode, so we don't check out the PR head here.
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Run Claude (revise the auto-fix PR)
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: |
+            --allowedTools Edit,Read,Write,Bash
+            --max-turns 40
+          # No explicit prompt: the action picks up the triggering @claude comment as the
+          # instruction (tag mode). It checks out the PR branch, applies the requested change,
+          # re-runs tests, and pushes to the same branch -> the dev build rebuilds.

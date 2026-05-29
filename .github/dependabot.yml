@@ -1,58 +1,27 @@
-# Dependabot configuration.
-#
-# Three ecosystems are tracked:
-#   - npm (frontend)            → src/, package.json
-#   - cargo (Tauri backend)     → src-tauri/Cargo.toml
-#   - github-actions (workflows) → .github/workflows/*.yml
-#
-# Security updates always flow as separate PRs immediately. The
-# weekly schedule below is for non-security version bumps, which
-# get grouped to keep PR noise low.
 version: 2
 updates:
+  # Frontend (npm) — package.json at the repo root.
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"
-      day: "monday"
     open-pull-requests-limit: 5
-    labels:
-      - "dependencies"
-      - "frontend"
     groups:
-      # Group all non-security patch + minor bumps into one PR per
-      # week so the queue stays manageable. Majors and security
-      # advisories still ship as their own PRs.
-      frontend-minor:
-        patterns:
-          - "*"
-        update-types:
-          - "minor"
-          - "patch"
+      npm-minor-patch:
+        update-types: ["minor", "patch"]
 
+  # Rust (cargo) — the Tauri backend.
   - package-ecosystem: "cargo"
     directory: "/src-tauri"
     schedule:
       interval: "weekly"
-      day: "monday"
     open-pull-requests-limit: 5
-    labels:
-      - "dependencies"
-      - "rust"
     groups:
-      rust-minor:
-        patterns:
-          - "*"
-        update-types:
-          - "minor"
-          - "patch"
+      cargo-minor-patch:
+        update-types: ["minor", "patch"]
 
+  # Keep the GitHub Actions themselves current.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
-      day: "monday"
-    open-pull-requests-limit: 3
-    labels:
-      - "dependencies"
-      - "ci"

@@ -1,0 +1,31 @@
+name: Nexus watchdog — ping
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"  # Monday 09:00 UTC
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open ping issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DATE=$(date -u +%F)
+          TITLE="[watchdog] @claude reply check ${DATE}"
+          BODY=$(cat <<'EOF'
+          @claude please reply to this issue with the literal string `PING-OK` (no quotes, no other content needed) so the watchdog confirms the reactive flow is working.
+
+          Auto-filed by `.github/workflows/nexus-watchdog.yml`. The companion check job at Mon 11:00 UTC will look for your reply and close this issue.
+          EOF
+          )
+          gh issue create \
+            --title "$TITLE" \
+            --label "watchdog-ping" \
+            --body "$BODY" \
+            --repo "$GITHUB_REPOSITORY"

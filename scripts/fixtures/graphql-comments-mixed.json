@@ -1,0 +1,15 @@
+{
+  "data": {
+    "mod": {
+      "comments": {
+        "nodes": [
+          {"id": "300001", "body": "thanks great mod love it works perfectly!", "createdAt": "2026-05-25T10:00:00Z", "creator": {"name": "HappyUser", "memberId": "1001"}},
+          {"id": "300002", "body": "the share button crashes the app on click", "createdAt": "2026-05-25T11:00:00Z", "creator": {"name": "BugUser", "memberId": "1002"}},
+          {"id": "300003", "body": "would be nice to have a dark mode toggle", "createdAt": "2026-05-25T12:00:00Z", "creator": {"name": "FeatUser", "memberId": "1003"}},
+          {"id": "300004", "body": "how do I install this on Linux?", "createdAt": "2026-05-25T13:00:00Z", "creator": {"name": "QuestionUser", "memberId": "1004"}},
+          {"id": "300005", "body": "thanks for adding the new wizard, just noticed an awesome workflow improvement here too", "createdAt": "2026-05-25T14:00:00Z", "creator": {"name": "WordyUser", "memberId": "1005"}}
+        ]
+      }
+    }
+  }
+}

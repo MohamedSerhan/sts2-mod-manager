@@ -619,6 +619,7 @@
       "launchingVanilla": "正在以原版模式启动 STS2（所有模组已禁用，已创建备份）...",
       "launchVanillaFailed": "启动失败：{{error}}",
       "installedMod": "已安装模组：{{name}}",
+      "installedModToPack": "已安装 {{name}} 并添加到“{{pack}}”",
       "installZipFailed": "安装 {{file}} 失败：{{error}}",
       "unsupportedFile": "不支持的文件：{{name}}。请使用 .zip、.7z 或 .rar。",
       "preservedConfigs_one": "已保留你在「{{mod}}」中编辑过的 {{count}} 个配置文件：{{files}}",

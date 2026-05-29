@@ -85,9 +85,13 @@ interface ProfilesViewProps {
    *  wizard re-opens every time this view remounts (e.g. on every nav
    *  back to the Modpacks tab). */
   onCreateWizardConsumed?: () => void;
+  /** Reports which modpack the user is currently viewing in detail (null
+   *  when on the list or another tab). App uses it to auto-add a
+   *  drag-dropped zip to the pack being viewed. */
+  onViewedModpackChange?: (name: string | null) => void;
 }
 
-export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, initialTab = 'yours', focusQuickAddSignal, openCreateWizardSignal, onCreateWizardConsumed }: ProfilesViewProps = {}) {
+export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, initialTab = 'yours', focusQuickAddSignal, openCreateWizardSignal, onCreateWizardConsumed, onViewedModpackChange }: ProfilesViewProps = {}) {
   // 1.7.0 outer Yours/Browse tabs. 'yours' renders the user's
   // followed/published modpack list (the legacy Profiles content);
   // 'browse' renders the public modpack browser (formerly its own
@@ -289,6 +293,13 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     // navigating away and back to Modpacks) doesn't re-open the wizard.
     onCreateWizardConsumed?.();
   }, [openCreateWizardSignal, onCreateWizardConsumed]);
+
+  // Report the currently-viewed modpack up to App so a drag-dropped zip
+  // can auto-join it. Clear on unmount (leaving the Modpacks view).
+  useEffect(() => {
+    onViewedModpackChange?.(selectedModpack);
+    return () => onViewedModpackChange?.(null);
+  }, [selectedModpack, onViewedModpackChange]);
 
   // T16 review fix — orphan-modpack guard. If the open detail view's
   // modpack disappears (deleted while detail is open, or signal bumped

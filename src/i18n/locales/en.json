@@ -619,6 +619,7 @@
       "launchingVanilla": "Launching STS2 in vanilla mode (all mods disabled, backup created)...",
       "launchVanillaFailed": "Failed to launch: {{error}}",
       "installedMod": "Installed mod: {{name}}",
+      "installedModToPack": "Installed {{name}} and added it to \"{{pack}}\"",
       "installZipFailed": "Failed to install {{file}}: {{error}}",
       "unsupportedFile": "Unsupported file: {{name}}. Use .zip, .7z, or .rar.",
       "preservedConfigs_one": "Preserved {{count}} config file you edited in \"{{mod}}\": {{files}}",

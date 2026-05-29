@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type MouseEvent } from 'react';
+import { useState, useEffect, useRef, useCallback, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
@@ -34,7 +34,7 @@ import { HomeView } from './views/Home';
 import { ModsView } from './views/Mods';
 import { ProfilesView } from './views/Profiles';
 import { SettingsView } from './views/Settings';
-import { launchGame, launchVanilla, installModFromFile, openExternalUrl } from './hooks/useTauri';
+import { launchGame, launchVanilla, installModFromFile, openExternalUrl, setProfileModMembership, toggleMod } from './hooks/useTauri';
 
 // View IDs include legacy ones ('browse-mods', 'browse-modpacks')
 // so internal handlers + deep-links that pre-date the 1.7.0 IA
@@ -222,6 +222,16 @@ function AppInner() {
   const subUpdatesRef = useRef(subUpdates);
   useEffect(() => { activeProfileRef.current = activeProfile; }, [activeProfile]);
   useEffect(() => { subUpdatesRef.current = subUpdates; }, [subUpdates]);
+
+  // The modpack the user is currently viewing in ProfilesView (null when
+  // they're on a list/other view). A zip dropped while viewing a pack
+  // auto-joins it — same "added through the modpack view → in the pack"
+  // behavior as Quick add / Import. A ref so the global drop handler reads
+  // the latest without re-binding its listeners.
+  const viewedPackRef = useRef<string | null>(null);
+  const handleViewedModpackChange = useCallback((name: string | null) => {
+    viewedPackRef.current = name;
+  }, []);
 
   // De-dupe ref: a URL can arrive via two paths (cold-start buffer
   // drain AND the live `sts2mm-open-url` event) within milliseconds of
@@ -477,7 +487,24 @@ function AppInner() {
             const filePath = file.path as string;
             if (filePath) {
               const mod = await installModFromFile(filePath);
-              toast.success(t('app.toast.installedMod', { name: mod.name }));
+              // If a modpack detail view is open, the dropped mod joins
+              // that pack (and, on the active pack, loads in-game) — the
+              // same auto-add the modpack toolbar's Quick add / Import do.
+              const pack = viewedPackRef.current;
+              if (pack) {
+                try {
+                  await setProfileModMembership(pack, mod.name, mod.folder_name ?? null, mod.mod_id ?? null, true);
+                  if (pack === activeProfileRef.current) {
+                    await toggleMod(mod.name, mod.folder_name ?? null, true);
+                  }
+                  toast.success(t('app.toast.installedModToPack', { name: mod.name, pack }));
+                } catch {
+                  // Membership failed — the mod is still installed on disk.
+                  toast.success(t('app.toast.installedMod', { name: mod.name }));
+                }
+              } else {
+                toast.success(t('app.toast.installedMod', { name: mod.name }));
+              }
               await refreshAll();
             }
           } catch (err) {
@@ -853,6 +880,7 @@ function AppInner() {
                 focusQuickAddSignal={focusModpacksCodeBarSignal}
                 openCreateWizardSignal={openCreateWizardSignal}
                 onCreateWizardConsumed={() => setOpenCreateWizardSignal(0)}
+                onViewedModpackChange={handleViewedModpackChange}
               />
             )}
             {/* Library view. The legacy 'browse-mods' view-id

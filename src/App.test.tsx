@@ -431,6 +431,71 @@ describe('<App>', () => {
     });
   });
 
+  it('dropping a zip while viewing a modpack adds the installed mod to that pack', async () => {
+    registerInvokeHandler('get_active_profile', () => 'Stable');
+    registerInvokeHandler('list_profiles_cmd', () => [
+      { name: 'Stable', mods: [], created_at: '2026-01-01T00:00:00Z', created_by: null, game_version: '0.105.0' },
+    ]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [],
+    }));
+    registerInvokeHandler('install_mod_from_file', () => ({
+      name: 'Dropped', version: '1.0', description: '', enabled: true, files: [],
+      source: null, hash: null, dependencies: [], size_bytes: 0,
+      folder_name: 'Dropped', mod_id: 'Dropped', github_url: null, nexus_url: null,
+      pinned: false, min_game_version: null, author: null, tags: [],
+      display_name: null, display_description: null,
+    }));
+    registerInvokeHandler('set_profile_mod_membership', () => ({
+      name: 'Stable', mods: [], created_at: '2026-01-01T00:00:00Z', created_by: null, game_version: '0.105.0',
+    }));
+
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    // Open the Modpacks tab, then the 'Stable' modpack detail.
+    await user.click(getNavButton('Modpacks'));
+    await user.click(await screen.findByRole('button', { name: /Open Stable modpack/i }));
+    await screen.findByRole('heading', { level: 2, name: 'Stable' });
+
+    // Drop a zip — the global handler installs it AND joins the viewed pack.
+    const file = { name: 'cool-mod.zip', path: 'C:/downloads/cool-mod.zip' };
+    const drop = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, 'dataTransfer', { value: { files: [file] }, configurable: true });
+    document.dispatchEvent(drop);
+
+    await waitFor(() => {
+      const call = getInvokeCalls().find(
+        (c) => c.cmd === 'set_profile_mod_membership' && c.args?.modName === 'Dropped',
+      );
+      expect(call?.args).toMatchObject({ profileName: 'Stable', included: true });
+    });
+  }, 10000);
+
+  it('dropping a zip when NOT viewing a modpack just installs it (no membership change)', async () => {
+    registerInvokeHandler('install_mod_from_file', () => ({
+      name: 'LooseMod', version: '1.0', description: '', enabled: true, files: [],
+      source: null, hash: null, dependencies: [], size_bytes: 0,
+      folder_name: 'LooseMod', mod_id: 'LooseMod', github_url: null, nexus_url: null,
+      pinned: false, min_game_version: null, author: null, tags: [],
+      display_name: null, display_description: null,
+    }));
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    // On Home (no modpack open) — drop a zip.
+    const file = { name: 'loose.zip', path: 'C:/loose.zip' };
+    const drop = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, 'dataTransfer', { value: { files: [file] }, configurable: true });
+    document.dispatchEvent(drop);
+
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'install_mod_from_file')).toBe(true);
+    });
+    // No pack is being viewed, so it must not touch membership.
+    expect(getInvokeCalls().some((c) => c.cmd === 'set_profile_mod_membership')).toBe(false);
+  });
+
   it('Drag-leave hides the drop overlay', async () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });

@@ -1436,7 +1436,7 @@
     "switching": "Switching to PR #{{pr}} — the (Dev) app will swap and relaunch.",
     "switchFailed": "Switch failed: {{error}}",
     "downloads": "Downloads",
-    "noWindowsBuild": "No Windows build (its build leg may have failed)",
+    "noWindowsBuild": "No updater manifest — can't one-click switch.",
     "backToRelease": "To return to the stable app, just launch your release STS2 Mod Manager — it's a separate, untouched install."
   }
 }

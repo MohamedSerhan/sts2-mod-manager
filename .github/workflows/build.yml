@@ -10,6 +10,10 @@ on:
       - ".gitignore"
       - "LICENSE"
   pull_request:
+    # `labeled` is included so applying the `dev-build` label to an existing PR
+    # triggers a dev build. The build job further filters to that label, and the
+    # check job skips bare label events (see their `if:` conditions).
+    types: [opened, synchronize, reopened, labeled]
     branches: [main]
     paths-ignore:
       - "**/*.md"
@@ -26,10 +30,14 @@ permissions:
   contents: write
 
 jobs:
-  # Cheap pre-flight check: runs on every PR and push to main.
-  # The expensive 3-platform bundle build only runs on tag pushes (and manual dispatch).
+  # Cheap pre-flight check: runs on PRs and pushes to main (skipped on bare
+  # label events — see its `if:`). The expensive 3-platform bundle build runs on
+  # version tags, manual dispatch, and PRs labeled `dev-build`.
   check:
-    if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+    # Skip on bare label events: check already ran on the PR's commits and a
+    # label change can't change its result. Pushes to main and other PR actions
+    # still run it.
+    if: ${{ !startsWith(github.ref, 'refs/tags/v') && github.event.action != 'labeled' }}
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout repository
@@ -72,8 +80,21 @@ jobs:
       - name: Test nexus-triage script
         run: node --test scripts/nexus-triage.test.mjs
 
+      - name: Test dev-build-stamp script
+        run: node --test scripts/dev-build-stamp.test.mjs
+
   build:
-    if: ${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}
+    # Runs on version tags, manual dispatch, or a PR carrying the `dev-build`
+    # label. On `labeled` events we also require the just-added label to be
+    # `dev-build`, so adding an unrelated label to an already-labeled PR does
+    # not kick off a fresh (expensive) 3-platform build.
+    if: >-
+      ${{ startsWith(github.ref, 'refs/tags/v')
+          || github.event_name == 'workflow_dispatch'
+          || (github.event_name == 'pull_request'
+              && contains(github.event.pull_request.labels.*.name, 'dev-build')
+              && (github.event.action != 'labeled'
+                  || github.event.label.name == 'dev-build')) }}
     # Job-level permissions are also declared here in addition to the
     # workflow-level block above. tauri-action's "Create a release" call has
     # been seen to fail with "Resource not accessible by integration" on tag
@@ -134,6 +155,16 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Stamp dev version + identity (labeled-PR dev builds only)
+        if: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'dev-build') }}
+        shell: bash
+        env:
+          DEV_PR_NUMBER: ${{ github.event.pull_request.number }}
+          DEV_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          SHORT=$(printf '%s' "$DEV_HEAD_SHA" | cut -c1-7)
+          DEV_SHORT_SHA="$SHORT" node scripts/dev-build-stamp.mjs --stamp
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -185,6 +216,36 @@ jobs:
 
           gh release upload "$env:TAG" $zip --clobber
 
+      - name: Package portable zip (dev builds, Windows only)
+        if: matrix.platform == 'windows-latest' && github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'dev-build')
+        shell: pwsh
+        run: |
+          # Read the (already dev-stamped) version from tauri.conf.json.
+          $conf = Get-Content 'src-tauri/tauri.conf.json' -Raw | ConvertFrom-Json
+          $version = $conf.version
+
+          $candidates = Get-ChildItem 'src-tauri/target/release/*.exe' |
+                        Where-Object {
+                          $_.Name -notlike '*-setup.exe' -and
+                          $_.Name -notlike '*build-script*' -and
+                          $_.Name -notlike '*.tmp.exe'
+                        }
+          if ($candidates.Count -ne 1) {
+            Write-Error "Expected exactly one app exe in target/release, found $($candidates.Count): $($candidates.Name -join ', ')"
+            exit 1
+          }
+          $exe = $candidates[0]
+
+          $staging = 'portable-staging'
+          New-Item -ItemType Directory -Path $staging -Force | Out-Null
+          Copy-Item $exe.FullName (Join-Path $staging 'STS2 Mod Manager (Dev).exe')
+          Copy-Item scripts/portable-README.txt (Join-Path $staging 'README.txt')
+
+          # Repo-root zip; the artifact-upload step captures it. No gh release
+          # upload here — publish-dev attaches it to the dev-pr<N> prerelease.
+          $zip = "STS2.Mod.Manager_${version}_x64_portable.zip"
+          Compress-Archive -Path "$staging/*" -DestinationPath $zip -Force
+
       - name: Patch AppImage AppRun (Arch/Wayland LD_PRELOAD fix)
         if: matrix.platform == 'ubuntu-22.04'
         env:
@@ -218,6 +279,7 @@ jobs:
             src-tauri/target/release/bundle/**/*.msi
             src-tauri/target/release/bundle/**/*.nsis
             src-tauri/target/universal-apple-darwin/release/bundle/**/*.dmg
+            STS2.Mod.Manager_*_x64_portable.zip
           if-no-files-found: warn
           retention-days: 7
 
@@ -387,3 +449,109 @@ jobs:
           file_category:                main
           archive_existing_file:        true
           display_name:                 STS2 Mod Manager ${{ steps.meta.outputs.version }} (Windows Portable)
+
+  # Per-PR dev builds: gather the platform artifacts into a rolling dev-pr<N>
+  # prerelease and upsert a sticky PR comment with download links. Runs whenever
+  # the build job produced something — even if one platform leg failed (so a
+  # flaky leg doesn't sink the whole dev delivery); skipped only when the build
+  # itself was skipped or cancelled.
+  publish-dev:
+    if: >-
+      ${{ always()
+          && needs.build.result != 'skipped'
+          && needs.build.result != 'cancelled'
+          && github.event_name == 'pull_request'
+          && contains(github.event.pull_request.labels.*.name, 'dev-build') }}
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v5
+        continue-on-error: true
+        with:
+          path: dev-artifacts
+
+      - name: Publish rolling dev prerelease + sticky PR comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          SHORT=$(printf '%s' "$HEAD_SHA" | cut -c1-7)
+          TAG="dev-pr${PR}"
+
+          # Flatten downloaded artifacts into one dir of release-able files.
+          mkdir -p dev-artifacts dist
+          find dev-artifacts -type f \
+            \( -name '*.exe' -o -name '*.msi' -o -name '*.dmg' -o -name '*.deb' \
+               -o -name '*.rpm' -o -name '*.AppImage' -o -name '*_portable.zip' \) \
+            -exec cp -f {} dist/ \;
+          echo "Collected assets:"; ls -1 dist || true
+
+          shopt -s nullglob
+          files=(dist/*)
+          if [ ${#files[@]} -gt 0 ]; then
+            # Recreate the rolling prerelease so its assets are exactly this run's.
+            if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+              gh release delete "$TAG" --repo "$REPO" --yes
+            fi
+            # Delete any leftover tag so create starts clean.
+            git push origin ":refs/tags/$TAG" 2>/dev/null || true
+            gh release create "$TAG" "${files[@]}" \
+              --repo "$REPO" \
+              --prerelease \
+              --target "$HEAD_SHA" \
+              --title "Dev build — PR #${PR} (g${SHORT})" \
+              --notes "Automated dev build for PR #${PR}. Prerelease — not for end users."
+          else
+            echo "No artifacts collected this run (a build leg may have failed) — keeping any existing ${TAG} release."
+          fi
+
+          # Build the sticky comment body via the tested renderer, deriving the
+          # asset list from the files we just collected (so it matches this run).
+          node -e '
+            import("./scripts/dev-build-stamp.mjs").then(async (m) => {
+              const fs = await import("node:fs");
+              const repo = process.env.REPO, tag = "dev-pr" + process.env.PR;
+              const names = fs.existsSync("dist") ? fs.readdirSync("dist") : [];
+              const platformOf = (n) => /portable\.zip$/i.test(n) ? "Windows (portable)"
+                : /-setup\.exe$|\.msi$/i.test(n) ? "Windows (installer)"
+                : /\.dmg$/i.test(n) ? "macOS"
+                : /\.deb$/i.test(n) ? "Linux (.deb)"
+                : /\.rpm$/i.test(n) ? "Linux (.rpm)"
+                : /\.AppImage$/i.test(n) ? "Linux (AppImage)" : "Other";
+              const base = `https://github.com/${repo}/releases/download/${tag}`;
+              const assets = names.map(n => ({ platform: platformOf(n), name: n, url: `${base}/${encodeURIComponent(n)}` }))
+                .sort((a, b) => a.platform.localeCompare(b.platform));
+              const conf = JSON.parse(fs.readFileSync("src-tauri/tauri.conf.json", "utf-8"));
+              const version = m.computeDevVersion(conf.version, process.env.PR, process.env.HEAD_SHA.slice(0, 7));
+              const body = m.renderDevComment({ pr: process.env.PR, version, sha: process.env.HEAD_SHA.slice(0, 7), runUrl: process.env.RUN_URL, assets });
+              fs.writeFileSync("dev-comment.md", body);
+            }).catch((e) => { console.error(e); process.exit(1); });
+          '
+
+          # Upsert: find an existing sticky comment by marker, edit or create.
+          MARKER="<!-- dev-build-comment -->"
+          CID=$(gh api "repos/${REPO}/issues/${PR}/comments" --jq \
+            "[.[] | select(.body | contains(\"${MARKER}\"))][0].id // empty")
+          if [ -n "$CID" ]; then
+            gh api -X PATCH "repos/${REPO}/issues/comments/${CID}" -F body=@dev-comment.md >/dev/null
+            echo "Updated sticky comment $CID"
+          else
+            gh pr comment "$PR" --repo "$REPO" --body-file dev-comment.md
+            echo "Created sticky comment"
+          fi

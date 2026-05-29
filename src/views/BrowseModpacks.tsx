@@ -50,6 +50,25 @@ function isRateLimit(err: unknown): boolean {
   return /\b429\b/.test(m) || /rate limit/i.test(m);
 }
 
+/** Hard ceiling on how long we'll show skeletons before giving up. The
+ *  backend bounds itself too (per-request + overall timeouts), so this is
+ *  a frontend safety net: without it, any backend stall left the view
+ *  stuck on skeletons forever with no error and no way to retry. */
+const BROWSER_LOAD_TIMEOUT_MS = 45_000;
+
+/** Reject with `Error(timeoutMessage)` if `p` hasn't settled within `ms`.
+ *  The timer is always cleared so a slow-but-successful load doesn't leak
+ *  it. Exported for direct unit testing. */
+export function withTimeout<T>(p: Promise<T>, ms: number, timeoutMessage: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(timeoutMessage)), ms);
+    p.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
+}
+
 export function BrowseModpacksView({ onGoToProfiles }: Props = {}) {
   const { t } = useTranslation();
   const [page, setPage] = useState<BrowserPage | null>(null);
@@ -63,7 +82,11 @@ export function BrowseModpacksView({ onGoToProfiles }: Props = {}) {
     setRateLimited(false);
     setError(null);
     try {
-      const result = await fetchModpackBrowserPage(1, force);
+      const result = await withTimeout(
+        fetchModpackBrowserPage(1, force),
+        BROWSER_LOAD_TIMEOUT_MS,
+        t('browseModpacks.timedOut'),
+      );
       setPage(result);
     } catch (e) {
       if (isRateLimit(e)) {
@@ -109,12 +132,28 @@ export function BrowseModpacksView({ onGoToProfiles }: Props = {}) {
       )}
 
       {rateLimited && (
-        <div className="gf-banner gf-banner-warn">
-          {t('browseModpacks.rateLimited')}
+        <div
+          className="gf-banner gf-banner-warn"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}
+        >
+          <span>{t('browseModpacks.rateLimited')}</span>
+          <button className="gf-btn-3" onClick={() => load(true)} disabled={loading}>
+            <RefreshCw size={14} className={loading ? 'gf-spin' : undefined} /> {t('browseModpacks.tryAgain')}
+          </button>
         </div>
       )}
 
-      {error && <div className="gf-banner gf-banner-error">{error}</div>}
+      {error && (
+        <div
+          className="gf-banner gf-banner-error"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}
+        >
+          <span>{error}</span>
+          <button className="gf-btn-3" onClick={() => load(true)} disabled={loading}>
+            <RefreshCw size={14} className={loading ? 'gf-spin' : undefined} /> {t('browseModpacks.tryAgain')}
+          </button>
+        </div>
+      )}
 
       {loading && !page && (
         <div className="gf-card-list">

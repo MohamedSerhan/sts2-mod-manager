@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-import { BrowseModpacksView, dedupeBrowserCards } from './BrowseModpacks';
+import { BrowseModpacksView, dedupeBrowserCards, withTimeout } from './BrowseModpacks';
 import { AllProviders } from '../__test__/providers';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
 import type { BrowserPage, Profile } from '../types';
@@ -52,6 +52,30 @@ describe('dedupeBrowserCards', () => {
     };
     const b = { ...a, owner: 'bob', code: 'BBBB' };
     expect(dedupeBrowserCards([a, b])).toHaveLength(2);
+  });
+});
+
+describe('withTimeout', () => {
+  it('resolves with the value and clears the timer when the promise settles first', async () => {
+    await expect(withTimeout(Promise.resolve(7), 1000, 'too slow')).resolves.toBe(7);
+  });
+
+  it('propagates the underlying rejection when the promise fails first', async () => {
+    await expect(withTimeout(Promise.reject(new Error('boom')), 1000, 'too slow')).rejects.toThrow('boom');
+  });
+
+  it('rejects with the timeout message when the promise stalls past the ceiling', async () => {
+    vi.useFakeTimers();
+    try {
+      // A promise that never settles — only the timeout can resolve the race.
+      const stalled = new Promise<number>(() => {});
+      const raced = withTimeout(stalled, 1000, 'took too long');
+      const expectation = expect(raced).rejects.toThrow('took too long');
+      await vi.advanceTimersByTimeAsync(1000);
+      await expectation;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -275,5 +299,55 @@ describe('<BrowseModpacksView>', () => {
     const calls = getInvokeCalls().filter((c) => c.cmd === 'fetch_shared_profile_cmd');
     expect(calls).toHaveLength(1);
     expect(calls[0]?.args).toEqual({ code: 'somebody/AA5A-315D-61AE' });
+  });
+
+  it('error banner "Try again" re-runs the load and can recover', async () => {
+    let call = 0;
+    registerInvokeHandler('fetch_modpack_browser_page', () => {
+      call += 1;
+      if (call === 1) {
+        // eslint-disable-next-line @typescript-eslint/only-throw-error
+        throw 'GitHub returned 500 server error';
+      }
+      return makePage({
+        cards: [
+          {
+            owner: 'rescuer',
+            code: 'AA5A-315D-61AE',
+            name: 'Recovered Pack',
+            mod_count: 1,
+            created_at: '2026-05-01T00:00:00Z',
+            updated_at: '2026-05-10T00:00:00Z',
+          },
+        ],
+      });
+    });
+
+    render(<Wrap />);
+
+    // The error banner mounts a dedicated "Try again" button (the header's
+    // is a Refresh button, so this name is unambiguous).
+    fireEvent.click(await screen.findByRole('button', { name: /Try again/i }));
+
+    expect(await screen.findByText('Recovered Pack')).toBeInTheDocument();
+  });
+
+  it('rate-limit banner "Try again" re-runs the load', async () => {
+    let call = 0;
+    registerInvokeHandler('fetch_modpack_browser_page', () => {
+      call += 1;
+      if (call === 1) throw new Error('GitHub search returned 429: API rate limit exceeded');
+      return makePage({ cards: [] });
+    });
+
+    render(<Wrap />);
+
+    await screen.findByText(/rate-limiting us/i);
+    fireEvent.click(screen.getByRole('button', { name: /Try again/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByText(/rate-limiting us/i)).toBeNull();
+    });
+    expect(await screen.findByText(/be the first to share/i)).toBeInTheDocument();
   });
 });

@@ -489,6 +489,8 @@
     "daysAgo": "{{count}} 天前",
     "cached": "显示缓存结果 — 无法连接 GitHub。",
     "rateLimited": "GitHub 正在限流 — 请稍后再试，或在设置中连接 GitHub Token 以获得更高限制。",
+    "timedOut": "加载时间过长 — GitHub 可能响应缓慢或无法访问。请重试。",
+    "tryAgain": "重试",
     "noPacks": "尚未找到公开整合包 — 成为第一个分享的人！",
     "goProfiles": "前往模组包",
     "cta": "想让你的也出现在这里？在方案中发布新整合包或重新分享现有整合包，选择 <1>公开</1> 可见性。",

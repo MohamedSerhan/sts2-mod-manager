@@ -489,6 +489,8 @@
     "daysAgo": "{{count}}d ago",
     "cached": "Showing cached results — couldn't reach GitHub.",
     "rateLimited": "GitHub is rate-limiting us — try again in a minute, or connect a GitHub token in Settings for a higher limit.",
+    "timedOut": "Loading is taking longer than expected — GitHub may be slow or unreachable. Try again.",
+    "tryAgain": "Try again",
     "noPacks": "No public modpacks found yet — be the first to share one!",
     "goProfiles": "Go to Modpacks",
     "cta": "Want yours here too? Publish a new pack — or re-share an existing one — from Profiles and pick <1>Public</1> visibility.",

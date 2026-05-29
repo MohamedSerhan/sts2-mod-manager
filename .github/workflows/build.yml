@@ -448,7 +448,7 @@ jobs:
         run: gh release download "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" -p "${{ steps.meta.outputs.filename }}"
 
       - name: Upload to Nexus Mods
-        uses: Nexus-Mods/upload-action@v1.0.0-beta.5
+        uses: Nexus-Mods/upload-action@v1.0.0-beta.6
         with:
           api_key:                      ${{ secrets.NEXUS_API_KEY }}
           file_group_id:                ${{ secrets.NEXUS_FILE_GROUP_ID }}

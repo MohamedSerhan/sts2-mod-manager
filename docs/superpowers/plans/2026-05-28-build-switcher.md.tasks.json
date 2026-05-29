@@ -9,7 +9,8 @@
     {
       "planTask": 1,
       "nativeId": "15",
-      "status": "pending",
+      "status": "completed",
+      "commit": "a186ca0 + fix 1bc7992 (active-flag guard + mock-version reset)",
       "subject": "isDevBuild helper + suppress self-update nag",
       "files": ["src/lib/isDevBuild.ts", "src/lib/isDevBuild.test.ts", "src/App.tsx", "src/App.test.tsx"],
       "verifyCommand": "npm test -- src/lib/isDevBuild.test.ts src/App.test.tsx",
@@ -24,7 +25,8 @@
     {
       "planTask": 2,
       "nativeId": "16",
-      "status": "pending",
+      "status": "completed",
+      "commit": "d5e6f7a + fix 34b79ac (log on failure + -setup.exe targeting doc + exclusion test)",
       "subject": "Rust list_dev_builds command + dev-pr parsing + tests",
       "files": ["src-tauri/src/dev_builds.rs", "src-tauri/src/lib.rs"],
       "verifyCommand": "cargo test --manifest-path=src-tauri/Cargo.toml dev_builds",
@@ -40,7 +42,8 @@
     {
       "planTask": 3,
       "nativeId": "17",
-      "status": "pending",
+      "status": "completed",
+      "commit": "3272f7c",
       "subject": "Rust install_dev_build (download + run installer) + register",
       "files": ["src-tauri/src/dev_builds.rs", "src-tauri/src/lib.rs"],
       "verifyCommand": "cargo check --manifest-path=src-tauri/Cargo.toml",
@@ -55,7 +58,8 @@
     {
       "planTask": 4,
       "nativeId": "18",
-      "status": "pending",
+      "status": "completed",
+      "commit": "b64d13c + fix 733e5cf (CSS classes + lowercase sha + badge test)",
       "subject": "DevBuildsCard frontend component + tests",
       "files": ["src/components/DevBuildsCard.tsx", "src/components/DevBuildsCard.test.tsx", "src/i18n/locales/en.json", "src/i18n/locales/zh-Hans.json"],
       "verifyCommand": "npm test -- src/components/DevBuildsCard.test.tsx",
@@ -73,7 +77,8 @@
     {
       "planTask": 5,
       "nativeId": "19",
-      "status": "pending",
+      "status": "completed",
+      "commit": "c725fc0",
       "subject": "Wire DevBuildsCard into Settings (gated on dev build)",
       "files": ["src/views/Settings.tsx", "src/views/Settings.test.tsx"],
       "verifyCommand": "npm test -- src/views/Settings.test.tsx",

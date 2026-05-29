@@ -10,7 +10,7 @@
       "planTask": 1,
       "nativeId": "32",
       "status": "completed",
-      "commit": "cd270f5 + fix 52929da (explicit actor-auth gate)",
+      "commit": "cd270f5 + fix 52929da (actor-auth gate) + fix f188164 (PAT-applied labels post-step so D triggers)",
       "subject": "claude-autofix.yml — initiate-fix + revise entry points",
       "files": [".github/workflows/claude-autofix.yml"],
       "verifyCommand": "python -c \"import yaml; yaml.safe_load(open('.github/workflows/claude-autofix.yml')); print('OK')\"",
@@ -62,6 +62,7 @@
       "subject": "Auto-fix end-to-end verification (USER GATE)",
       "userGate": true,
       "tags": ["user-gate"],
+      "gateNote": "MUST run POST-MERGE: GitHub fires issues/issue_comment/pull_request_target workflows only from the DEFAULT branch, so claude-autofix.yml + dependabot-label.yml can't be exercised until C is on main. Sequence: merge E (#60) -> merge C -> one-time setup (auto-fix label, DEV_BUILD_LABEL_TOKEN PAT, enable Dependabot security updates) -> live gate on a throwaway issue -> fix forward if needed. PAT + Dependabot toggle are user-account/browser actions only the maintainer can do.",
       "requireEvidenceTokens": [
         ["Fixes #", "dev-build", "auto-fix", "dev-pr", "revision commit", "rebuilt"],
         ["not found", "cleanup", "investigate only", "read-only", "did not trigger"]

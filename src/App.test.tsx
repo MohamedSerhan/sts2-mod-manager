@@ -861,6 +861,21 @@ describe('<App>', () => {
     });
   });
 
+  it('app-update banner is suppressed on a dev build', async () => {
+    const { setMockAppVersion } = await import('./__test__/setup');
+    setMockAppVersion('1.6.1-dev.pr59.g837f5ba');
+    const updater = await import('@tauri-apps/plugin-updater');
+    (updater.check as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      version: '9.9.9',
+      currentVersion: '1.6.1-dev.pr59.g837f5ba',
+      downloadAndInstall: vi.fn(async () => {}),
+    });
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    expect(screen.queryByText(/Mod Manager v9\.9\.9 is available/)).not.toBeInTheDocument();
+    setMockAppVersion('1.3.4'); // restore default for later tests
+  });
+
   it('routes external anchor clicks through the backend opener', async () => {
     const opener = await import('@tauri-apps/plugin-opener');
     (opener.openUrl as ReturnType<typeof vi.fn>).mockClear();

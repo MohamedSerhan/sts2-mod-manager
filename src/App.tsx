@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { check, type Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
+import { isDevBuild } from './lib/isDevBuild';
 import { cn } from './lib/utils';
 import { ToastProvider, useToast } from './contexts/ToastContext';
 import { AppProvider, useApp } from './contexts/AppContext';
@@ -316,8 +317,12 @@ function AppInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Check for app updates on launch and every 24 hours while the app is open
+  // Check for app updates on launch and every 24h — but NOT on dev builds.
+  // A dev build deliberately runs a pre-release; the "update to the latest
+  // release" nag is counterproductive there (build management lives in the
+  // Dev Builds section instead). Release builds are unchanged.
   useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | undefined;
     function doCheck() {
       check()
         .then((update) => {
@@ -327,11 +332,15 @@ function AppInner() {
           console.warn('Update check failed:', e);
         });
     }
-
-    doCheck();
-    const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-    const interval = setInterval(doCheck, ONE_DAY_MS);
-    return () => clearInterval(interval);
+    isDevBuild().then((dev) => {
+      if (dev) return;
+      doCheck();
+      const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+      interval = setInterval(doCheck, ONE_DAY_MS);
+    });
+    return () => {
+      if (interval) clearInterval(interval);
+    };
   }, []);
 
   const RELEASES_URL = 'https://github.com/MohamedSerhan/sts2-mod-manager/releases/latest';

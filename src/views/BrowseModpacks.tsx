@@ -3,6 +3,7 @@ import { useTranslation, Trans } from 'react-i18next';
 import { RefreshCw, Search, Plus } from 'lucide-react';
 
 import { fetchModpackBrowserPage } from '../hooks/useTauri';
+import { withTimeout } from '../lib/withTimeout';
 import { Badge } from '../components/Badge';
 import { BrowseModpackDetail } from '../components/BrowseModpackDetail';
 import type { BrowserCard, BrowserPage } from '../types';
@@ -55,19 +56,6 @@ function isRateLimit(err: unknown): boolean {
  *  a frontend safety net: without it, any backend stall left the view
  *  stuck on skeletons forever with no error and no way to retry. */
 const BROWSER_LOAD_TIMEOUT_MS = 45_000;
-
-/** Reject with `Error(timeoutMessage)` if `p` hasn't settled within `ms`.
- *  The timer is always cleared so a slow-but-successful load doesn't leak
- *  it. Exported for direct unit testing. */
-export function withTimeout<T>(p: Promise<T>, ms: number, timeoutMessage: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(timeoutMessage)), ms);
-    p.then(
-      (v) => { clearTimeout(timer); resolve(v); },
-      (e) => { clearTimeout(timer); reject(e); },
-    );
-  });
-}
 
 export function BrowseModpacksView({ onGoToProfiles }: Props = {}) {
   const { t } = useTranslation();

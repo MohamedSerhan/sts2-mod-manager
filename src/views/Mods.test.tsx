@@ -988,6 +988,27 @@ describe('<ModsView>', () => {
     });
   });
 
+  it('clicking a mod row toggles its inline source editor open, then closed', async () => {
+    // 1.7.x — the row body is a click target that opens Edit-sources, and
+    // clicking it again must close it (toggle), not re-open the same panel.
+    seedMods([baseMod({ name: 'ToggleMod', folder_name: 'ToggleMod' })]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('ToggleMod')).toBeInTheDocument(); });
+
+    const row = screen.getByTestId('library-row');
+    // First click opens the editor.
+    await user.click(row);
+    await waitFor(() => {
+      expect(screen.getByText('Sources for ToggleMod')).toBeInTheDocument();
+    });
+    // Clicking the row again toggles it closed.
+    await user.click(row);
+    await waitFor(() => {
+      expect(screen.queryByText('Sources for ToggleMod')).toBeNull();
+    });
+  });
+
   it('GitHub badge link on the row points at the mod\'s github_url', async () => {
     seedMods([baseMod({ github_url: 'https://github.com/foo/bar' })]);
     render(<Wrap />);

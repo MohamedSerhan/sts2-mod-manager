@@ -811,7 +811,12 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
         onDelete={handleDelete}
         onCopyVersion={handleCopyVersion}
         onOpenModsFolder={handleOpenFolder}
-        onEditSources={(mod) => setSourceEditorRowKey(mod.folder_name ?? mod.name)}
+        onEditSources={(mod) => {
+          // Toggle: clicking a row whose source editor is already open
+          // closes it rather than re-opening the same panel.
+          const key = mod.folder_name ?? mod.name;
+          setSourceEditorRowKey((cur) => (cur === key ? null : key));
+        }}
         onFindGithubFromNexus={handleFindGithubFromNexus}
         onOpenExternalUrl={handleOpenExternalUrl}
         renderSourceEditor={renderSourceEditor}

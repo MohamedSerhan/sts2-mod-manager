@@ -41,7 +41,12 @@ BASE="https://github.com/${REPO}/releases/download/${TAG}"
 
 SIGDIR=$(mktemp -d)
 trap 'rm -rf "$SIGDIR"' EXIT
-gh release download "$TAG" --repo "$REPO" --pattern "*.sig" --dir "$SIGDIR"
+# Tolerate a release with no (or only some) .sig files: under set -e a
+# no-match would abort the whole script. Dev builds can have a platform leg
+# fail, so a partial sig set is normal — sig()/add_platform skip missing ones,
+# yielding a partial-but-valid manifest. Release builds always have all sigs,
+# so this is a no-op there.
+gh release download "$TAG" --repo "$REPO" --pattern "*.sig" --dir "$SIGDIR" || true
 
 sig() {
   local f="${SIGDIR}/$1.sig"

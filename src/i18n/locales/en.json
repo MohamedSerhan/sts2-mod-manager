@@ -85,8 +85,8 @@
       "updatesAvailable_one": "{{count}} update available",
       "updatesAvailable_other": "{{count}} updates available",
       "inPackOrderNote": "Listed in load order (top loads first). Use Load order to reorder.",
-      "availableHeading": "Add from your library",
-      "availableCount": "Add from your library ({{count}})",
+      "availableHeading": "Add from Mod Library",
+      "availableCount": "Add from Mod Library ({{count}})",
       "availableNoMatch": "No library mods match your search.",
       "libraryShow": "Show",
       "libraryHide": "Hide",
@@ -355,7 +355,7 @@
       },
       "packEmpty": {
         "title": "No mods in this modpack yet",
-        "hint": "Use “+ Add mods” to install one, or “Add from your Library” below to include mods you already have."
+        "hint": "Use “+ Add mods” to install one, or “Add from Mod Library” below to include mods you already have."
       },
       "toastAdded": "Added {{mod}} to {{profile}}",
       "toastRemoved": "Removed {{mod}} from {{profile}}",
@@ -569,7 +569,7 @@
   "nav": {
     "home": "Home",
     "profiles": "Modpacks",
-    "mods": "All Mods",
+    "mods": "Mod Library",
     "settings": "Settings"
   },
   "topbar": {
@@ -1015,7 +1015,7 @@
     "creatorQuickStart": {
       "title": "Making modpacks",
       "step1": "Open the Modpacks tab and click Create modpack, then choose how to start: from your active mods, empty, or by cloning an existing modpack.",
-      "step2": "Pick which installed mods belong to this modpack. You can change membership later from the All Mods list or the modpack's own list.",
+      "step2": "Pick which installed mods belong to this modpack. You can change membership later from the Mod Library list or the modpack's own list.",
       "step3": "Check the health summary so you know how many mods have linked sources and which ones have available updates.",
       "step4": "When you're ready to share, open the modpack and click Share. The app walks you through a one-time GitHub setup so friends can install your modpack from a short code.",
       "step5": "Maintain your modpack later by reviewing the update summary on the modpack, accepting updates, or freezing mods at a known good version."

@@ -219,9 +219,9 @@ manager project repo can't be acted on from here.
 
 ### Audit
 - **Check for updates** scans each installed mod against its source and shows
-  up-to-date / has-update / no-compatible-release. Run it from **All Mods**
-  (the Library view) for every mod, or from a modpack's detail page to check
-  just that pack's mods.
+  up-to-date / has-update / no-compatible-release. Run it from **Mod Library**
+  for every mod, or from a modpack's detail page to check just that pack's
+  mods.
 - **Per-row pin toggle** to lock a mod at its current version even when the
   source publishes updates.
 
@@ -379,7 +379,7 @@ and exposed to TS via [src/hooks/useTauri.ts](src/hooks/useTauri.ts).
 src/
   App.tsx                 # chrome (titlebar, sidebar, top bar, banners)
   views/                  # Home / Profiles / Mods / Browse / BrowseModpacks / Settings / Help
-                          # (user-facing: Profiles = Modpacks, Mods = Library;
+                          # (user-facing: Profiles = Modpacks, Mods = Mod Library;
                           #  Help also opens as a top-bar drawer — HelpDrawer)
   components/             # Button, Card, Toggle, Badge, Input,
                           # ConfirmDialog, OnboardingOverlay,

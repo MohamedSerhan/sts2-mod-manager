@@ -56,7 +56,7 @@ type ResizeDirection = 'East' | 'North' | 'NorthEast' | 'NorthWest' | 'South' | 
 const NAV: { id: View; label: string; icon: typeof Home }[] = [
   { id: 'home',     label: 'Home',     icon: Home },
   { id: 'profiles', label: 'Modpacks', icon: Layers },
-  { id: 'mods',     label: 'Library',  icon: Package },
+  { id: 'mods',     label: 'Mod Library', icon: Package },
 ];
 const FOOT_NAV: { id: View; label: string; icon: typeof Home }[] = [
   { id: 'settings', label: 'Settings', icon: Settings },

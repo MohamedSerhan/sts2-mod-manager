@@ -107,7 +107,7 @@ describe('<App>', () => {
     });
     expect(getNavButton('Home')).toBeInTheDocument();
     expect(getNavButton('Modpacks')).toBeInTheDocument();
-    expect(getNavButton('All Mods')).toBeInTheDocument();
+    expect(getNavButton('Mod Library')).toBeInTheDocument();
     expect(getNavButton('Settings')).toBeInTheDocument();
     // Browse Mods / Browse Modpacks / Help should NOT be sidebar
     // buttons any more. Use queryAllByRole + filter to assert absence
@@ -131,7 +131,7 @@ describe('<App>', () => {
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     // Sidebar item renamed Mods → Library in 1.7.0; default tab is
     // Installed, which shows the existing "All installed mods" page.
-    await user.click(getNavButton('All Mods'));
+    await user.click(getNavButton('Mod Library'));
     await waitFor(() => {
       expect(screen.getByText(/All installed mods/i)).toBeInTheDocument();
     });
@@ -189,7 +189,7 @@ describe('<App>', () => {
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    await user.click(getNavButton('All Mods'));
+    await user.click(getNavButton('Mod Library'));
     await waitFor(() => { expect(screen.getByText(/All installed mods/i)).toBeInTheDocument(); });
 
     // Click the page-header "Manage active modpack →" link — this
@@ -209,7 +209,7 @@ describe('<App>', () => {
     // reachable from the detail view.
     const available = await screen.findByTestId('modpack-detail-available');
     await user.click(
-      within(available).getByRole('button', { name: /Add from your library/i }),
+      within(available).getByRole('button', { name: /Add from Mod Library/i }),
     );
     expect((await within(available).findAllByText('BaseLib')).length).toBeGreaterThan(0);
   }, 10000);
@@ -233,7 +233,7 @@ describe('<App>', () => {
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    await user.click(getNavButton('All Mods'));
+    await user.click(getNavButton('Mod Library'));
     await user.click(screen.getByRole('button', { name: /^Browse$/i }));
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /GitHub/i })).toBeInTheDocument();
@@ -296,7 +296,7 @@ describe('<App>', () => {
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     // (Onboarding overlay is suppressed by default in beforeEach so we
     //  don't need a Skip-setup click.)
-    await user.click(getNavButton('All Mods'));
+    await user.click(getNavButton('Mod Library'));
     await waitFor(() => { expect(screen.getByText(/All installed mods/i)).toBeInTheDocument(); });
     await user.click(getNavButton('Home'));
     // 1.7 v7 — Home is the single-block launcher. With no active modpack
@@ -925,7 +925,7 @@ describe('<App>', () => {
     // (Onboarding overlay is suppressed by default in beforeEach so we
     //  don't need a Skip-setup click.)
     // Navigate to a non-home view first so we can observe the switch.
-    await user.click(getNavButton('All Mods'));
+    await user.click(getNavButton('Mod Library'));
     await waitFor(() => { expect(screen.getByText(/All installed mods/i)).toBeInTheDocument(); });
     // Open switcher, click Add modpack.
     const chip = document.querySelector('button.gf-prof') as HTMLButtonElement | null;
@@ -957,7 +957,7 @@ describe('<App>', () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     // Start on Library so the switch to Modpacks is observable.
-    await user.click(getNavButton('All Mods'));
+    await user.click(getNavButton('Mod Library'));
     await waitFor(() => { expect(screen.getByText(/All installed mods/i)).toBeInTheDocument(); });
     const chip = document.querySelector('button.gf-prof') as HTMLButtonElement | null;
     expect(chip).toBeTruthy();
@@ -1428,7 +1428,7 @@ describe('<App>', () => {
     // (Onboarding overlay is suppressed by default in beforeEach so we
     //  don't need a Skip-setup click.)
     // Navigate to Library so we can prove the deep-link bounces us back to Home.
-    await user.click(getNavButton('All Mods'));
+    await user.click(getNavButton('Mod Library'));
     await waitFor(() => { expect(screen.getByText(/All installed mods/i)).toBeInTheDocument(); });
     await fireTauriEvent('sts2mm-open-url', 'sts2mm://import/alice/AA5A-315D-61AE');
     // After route() fires, view should have switched to Home — assert
@@ -1572,7 +1572,7 @@ describe('<App>', () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     // 1.7.0: Browse Mods is a tab inside Library, not its own sidebar entry.
-    await user.click(getNavButton('All Mods'));
+    await user.click(getNavButton('Mod Library'));
     await user.click(screen.getByRole('button', { name: /^Browse$/i }));
     // Default Browse tab is github; switch to Nexus Trending so the
     // effect fires and surfaces the key-missing banner.

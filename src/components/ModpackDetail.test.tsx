@@ -129,7 +129,7 @@ async function openAddMods(user: ReturnType<typeof userEvent.setup>) {
 async function expandLibrary(user: ReturnType<typeof userEvent.setup>) {
   const available = await screen.findByTestId('modpack-detail-available');
   await user.click(
-    within(available).getByRole('button', { name: /Add from your library/i }),
+    within(available).getByRole('button', { name: /Add from Mod Library/i }),
   );
   return available;
 }
@@ -311,7 +311,7 @@ describe('<ModpackDetail>', () => {
     const available = await screen.findByTestId('modpack-detail-available');
     expect(within(available).queryByText('LibMod')).toBeNull();
     expect(within(available).queryByTestId('modpack-mod-row-available')).toBeNull();
-    const toggle = within(available).getByRole('button', { name: /Add from your library/i });
+    const toggle = within(available).getByRole('button', { name: /Add from Mod Library/i });
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await user.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');

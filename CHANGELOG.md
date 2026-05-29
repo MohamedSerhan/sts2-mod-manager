@@ -53,8 +53,8 @@ A UX simplification release. The app feels like a launcher first: pick a modpack
 ### Changed
 
 - "Profile" is now called "Modpack" everywhere a player sees it.
-- The sidebar shrinks from seven items to four: Home, Modpacks, Library, Settings.
-- Browse Modpacks and Browse Mods are now tabs inside Modpacks and Library, not separate sidebar items.
+- The sidebar shrinks from seven items to four: Home, Modpacks, Mod Library, Settings.
+- Browse Modpacks and Browse Mods are now tabs inside Modpacks and Mod Library, not separate sidebar items.
 - Home shows the active modpack and Play, and nothing else. Pasting a friend's code moves to the Modpacks page where modpack management already lives.
 - The Mods view is now called "All installed mods" with a clearer subtitle. Each row shows whether a mod is active in game or stored on disk, and whether it belongs to the current modpack.
 - Each mod row now opens an inline drawer when you click it, with sources, audit details, and per-mod actions all in one place. The kebab menu carries every per-mod action.

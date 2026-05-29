@@ -15,7 +15,7 @@
  *   - The mod picker pre-selection persists across Back/Next navigation.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { CreateModpackWizard } from './CreateModpackWizard';
 import { AllProviders } from '../__test__/providers';
@@ -580,6 +580,58 @@ describe('<CreateModpackWizard>', () => {
       await waitFor(() => {
         expect(screen.getByText(/disk full/i)).toBeInTheDocument();
       });
+    });
+  });
+
+  // ── Bulk select / deselect ────────────────────────────────────────
+  describe('select all', () => {
+    it('Select all checks every visible mod, then Deselect all clears them', async () => {
+      seed({
+        mods: [
+          baseMod({ name: 'A', enabled: false, folder_name: 'a' }),
+          baseMod({ name: 'B', enabled: false, folder_name: 'b' }),
+          baseMod({ name: 'C', enabled: false, folder_name: 'c' }),
+        ],
+      });
+      render(<Wrap />);
+      // Start empty so nothing is pre-selected.
+      fireEvent.click(await screen.findByRole('button', { name: /start empty/i }));
+      await screen.findByPlaceholderText(/search installed mods/i);
+      await waitFor(() => { expect(screen.getByText(/0 selected/i)).toBeInTheDocument(); });
+
+      // Select all → all three checked, button flips to Deselect all.
+      fireEvent.click(screen.getByRole('button', { name: /^select all$/i }));
+      await waitFor(() => { expect(screen.getByText(/3 selected/i)).toBeInTheDocument(); });
+
+      // Deselect all → back to none.
+      fireEvent.click(screen.getByRole('button', { name: /^deselect all$/i }));
+      await waitFor(() => { expect(screen.getByText(/0 selected/i)).toBeInTheDocument(); });
+    });
+  });
+
+  // ── Step 3 must never trap the user ───────────────────────────────
+  describe('step 3 escape hatch', () => {
+    it('lets the user Continue anyway while the audit is still running', async () => {
+      // Audit handler that never settles on its own — proves step 3 never
+      // strands the user behind a slow/stalled check.
+      seed({ mods: [baseMod({ name: 'A', enabled: true })] });
+      let resolveAudit!: (v: ModAuditEntry[]) => void;
+      registerInvokeHandler(
+        'audit_mod_versions',
+        () => new Promise<ModAuditEntry[]>((r) => { resolveAudit = r; }),
+      );
+      render(<Wrap />);
+      await chooseFromActive();
+      await clickNext();
+
+      // Still "Checking…", but Continue anyway is enabled and works.
+      const continueBtn = await screen.findByRole('button', { name: /continue anyway/i });
+      expect(continueBtn).toBeEnabled();
+      fireEvent.click(continueBtn);
+      expect(await screen.findByLabelText(/modpack name/i)).toBeInTheDocument();
+
+      // Settle the dangling audit so withTimeout clears its timer.
+      await act(async () => { resolveAudit([]); });
     });
   });
 });

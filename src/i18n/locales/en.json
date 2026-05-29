@@ -125,6 +125,8 @@
     "step2SortByEnabled": "Active first",
     "step2SelectedCount_one": "{{count}} selected",
     "step2SelectedCount_other": "{{count}} selected",
+    "step2SelectAll": "Select all",
+    "step2DeselectAll": "Deselect all",
     "step2NoMods": "No installed mods match your search.",
     "step3Subtitle": "A quick look at the mods you've chosen.",
     "step3Checking": "Checking selected mods...",

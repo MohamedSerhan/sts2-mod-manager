@@ -36,7 +36,14 @@ import {
   listProfiles,
   setProfileModMembership,
 } from '../hooks/useTauri';
+import { withTimeout } from '../lib/withTimeout';
 import type { ModAuditEntry, ModInfo, Profile } from '../types';
+
+/** Ceiling for the step-3 health audit. The audit is informational and
+ *  non-blocking, so if GitHub/Nexus is slow we'd rather fall back to the
+ *  "couldn't check" zeros than leave the step spinning forever. The user
+ *  can also skip it outright via "Continue anyway". */
+const AUDIT_TIMEOUT_MS = 20_000;
 
 interface Props {
   onClose: () => void;
@@ -147,6 +154,22 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
     });
   }
 
+  // Bulk select/deselect for the currently-visible (filtered) rows — handy
+  // when a pack has lots of mods. Operates on the filtered list so the user
+  // can search, then "Select all" just the matches.
+  const allVisibleSelected =
+    visibleMods.length > 0 && visibleMods.every((m) => selectedMods.has(m.name));
+  function toggleSelectAllVisible() {
+    setSelectedMods((prev) => {
+      const next = new Set(prev);
+      const names = visibleMods.map((m) => m.name);
+      const everyChecked = names.length > 0 && names.every((n) => next.has(n));
+      if (everyChecked) names.forEach((n) => next.delete(n));
+      else names.forEach((n) => next.add(n));
+      return next;
+    });
+  }
+
   // Trigger the audit when the user advances to step 3. One-shot per
   // wizard run — no caching, no debouncing; the audit can take a
   // moment but the typical pack size makes it tolerable.
@@ -155,7 +178,14 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
     setHealth(null);
     setAuditing(true);
     try {
-      const entries: ModAuditEntry[] = await auditModVersions(Array.from(selectedMods));
+      // Bound the audit: a large selection against a slow GitHub/Nexus
+      // could otherwise spin "Checking…" indefinitely. On timeout we fall
+      // through to the catch (zeros) so the step always resolves.
+      const entries: ModAuditEntry[] = await withTimeout(
+        auditModVersions(Array.from(selectedMods)),
+        AUDIT_TIMEOUT_MS,
+        'audit timed out',
+      );
       const selected = new Set(selectedMods);
       const linked = mods.filter(
         (m) => selected.has(m.name) && (m.github_url || m.nexus_url),
@@ -260,6 +290,8 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
               sort={sort}
               setSort={setSort}
               selectedCount={selectedCount}
+              allVisibleSelected={allVisibleSelected}
+              onToggleSelectAll={toggleSelectAllVisible}
             />
           )}
           {step === 3 && (
@@ -305,11 +337,13 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
             </button>
           )}
           {step === 3 && (
+            // Not disabled while auditing: the check is informational, so
+            // "Continue anyway" must always let the user move on — never
+            // trap them behind a slow/stalled audit.
             <button
               type="button"
               className="gf-btn"
               onClick={() => setStep(4)}
-              disabled={auditing}
             >
               {t('createModpack.step3ContinueAnyway')}
             </button>
@@ -463,6 +497,10 @@ interface StepChooseProps {
   sort: SortMode;
   setSort: (s: SortMode) => void;
   selectedCount: number;
+  /** True when every visible (filtered) row is already selected — drives
+   *  the bulk button's Select-all vs Deselect-all label. */
+  allVisibleSelected: boolean;
+  onToggleSelectAll: () => void;
 }
 
 function StepChoose({
@@ -474,6 +512,8 @@ function StepChoose({
   sort,
   setSort,
   selectedCount,
+  allVisibleSelected,
+  onToggleSelectAll,
 }: StepChooseProps) {
   const { t } = useTranslation();
   return (
@@ -500,8 +540,21 @@ function StepChoose({
           </select>
         </label>
       </div>
-      <div className="gf-create-wizard-selected-count" aria-live="polite">
-        {t('createModpack.step2SelectedCount', { count: selectedCount })}
+      <div className="gf-create-wizard-choose-actions">
+        <span className="gf-create-wizard-selected-count" aria-live="polite">
+          {t('createModpack.step2SelectedCount', { count: selectedCount })}
+        </span>
+        {mods.length > 0 && (
+          <button
+            type="button"
+            className="gf-link-button"
+            onClick={onToggleSelectAll}
+          >
+            {allVisibleSelected
+              ? t('createModpack.step2DeselectAll')
+              : t('createModpack.step2SelectAll')}
+          </button>
+        )}
       </div>
       <div className="gf-create-wizard-list">
         {mods.length === 0 && (

@@ -125,6 +125,8 @@
     "step2SortByEnabled": "已激活优先",
     "step2SelectedCount_one": "已选 {{count}} 个",
     "step2SelectedCount_other": "已选 {{count}} 个",
+    "step2SelectAll": "全选",
+    "step2DeselectAll": "取消全选",
     "step2NoMods": "未找到匹配的已安装模组。",
     "step3Subtitle": "快速浏览所选模组的状态。",
     "step3Checking": "正在检查所选模组...",

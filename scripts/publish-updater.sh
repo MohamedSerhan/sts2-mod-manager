@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/updater-signature.sh"
 
 # Usage:
-#   ./scripts/publish-updater.sh <tag> [repo]
+#   ./scripts/publish-updater.sh <tag> [repo] [version_override]
 #
 # Assembles latest.json from the .sig files already attached to a GitHub
 # release and uploads it back to that release. Safe to re-run; replaces any
@@ -18,9 +18,10 @@ source "$SCRIPT_DIR/lib/updater-signature.sh"
 
 TAG="${1:-}"
 REPO="${2:-}"
+VERSION_OVERRIDE="${3:-}"
 
 if [ -z "$TAG" ]; then
-  echo "usage: $0 <tag> [repo]" >&2
+  echo "usage: $0 <tag> [repo] [version_override]" >&2
   exit 2
 fi
 
@@ -28,7 +29,14 @@ if [ -z "$REPO" ]; then
   REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
 fi
 
-VERSION="${TAG#v}"
+# Release tags (vX.Y.Z) derive the version from the tag. Dev builds pass an
+# explicit override because their tag (dev-pr<N>) is not the SemVer version
+# the updater needs.
+if [ -n "$VERSION_OVERRIDE" ]; then
+  VERSION="$VERSION_OVERRIDE"
+else
+  VERSION="${TAG#v}"
+fi
 BASE="https://github.com/${REPO}/releases/download/${TAG}"
 
 SIGDIR=$(mktemp -d)

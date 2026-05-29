@@ -175,8 +175,8 @@ describe('<LibraryTable>', () => {
     const row = (await screen.findByText('NewMod')).closest(
       '[data-testid="library-row"]',
     ) as HTMLElement;
-    // Read-only indicator starts at "Not in pack".
-    expect(row.querySelector('.gf-row-inpack')?.textContent).toMatch(/Not in pack/i);
+    // Read-only indicator starts at "Not in Modpack".
+    expect(row.querySelector('.gf-row-inpack')?.textContent).toMatch(/Not in Modpack/i);
     // Membership is changed from the kebab.
     await user.click(within(row).getByRole('button', { name: /mod actions/i }));
     await user.click(screen.getByRole('menuitem', { name: /add to "stable"/i }));
@@ -193,9 +193,9 @@ describe('<LibraryTable>', () => {
         },
       });
     });
-    // Optimistic patch flips the indicator to "In pack".
+    // Optimistic patch flips the indicator to "In Modpack".
     await waitFor(() => {
-      expect(row.querySelector('.gf-row-inpack')?.textContent).toMatch(/In pack/i);
+      expect(row.querySelector('.gf-row-inpack')?.textContent).toMatch(/In Modpack/i);
     });
   });
 
@@ -526,7 +526,7 @@ describe('<LibraryTable>', () => {
 
   it('editable=false (followed modpack) → indicator shows status; kebab membership item is disabled', async () => {
     // Followed modpacks come back with `editable: false`. The row shows
-    // the read-only "In pack" indicator, and the kebab's Remove-from-pack
+    // the read-only "In Modpack" indicator, and the kebab's Remove-from-pack
     // item is disabled so the user can't mutate a pack they don't own.
     registerInvokeHandler('list_profiles_cmd', () => [
       baseProfile({ name: 'Friend Pack', created_by: 'alice' }),
@@ -556,7 +556,7 @@ describe('<LibraryTable>', () => {
     const row = (await screen.findByText('BaseLib')).closest(
       '[data-testid="library-row"]',
     ) as HTMLElement;
-    expect(row.querySelector('.gf-row-inpack')?.textContent).toMatch(/In pack/i);
+    expect(row.querySelector('.gf-row-inpack')?.textContent).toMatch(/In Modpack/i);
     await user.click(within(row).getByRole('button', { name: /mod actions/i }));
     const removeItem = await screen.findByRole('menuitem', {
       name: /remove from "friend pack"/i,
@@ -586,9 +586,9 @@ describe('<LibraryTable>', () => {
     expect(attempts).toBe(2);
   });
 
-  it('membership update failure (kebab) → toast fires + indicator stays "Not in pack"', async () => {
+  it('membership update failure (kebab) → toast fires + indicator stays "Not in Modpack"', async () => {
     // set_profile_mod_membership throws; the optimistic patch must NOT
-    // apply, the indicator must stay "Not in pack", and the failure
+    // apply, the indicator must stay "Not in Modpack", and the failure
     // toast surfaces the backend error.
     registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
     registerInvokeHandler('get_profile_memberships', () => ({
@@ -624,7 +624,7 @@ describe('<LibraryTable>', () => {
     expect(
       await screen.findByText(/Failed to update membership: profile locked/i),
     ).toBeInTheDocument();
-    expect(row.querySelector('.gf-row-inpack')?.textContent).toMatch(/Not in pack/i);
+    expect(row.querySelector('.gf-row-inpack')?.textContent).toMatch(/Not in Modpack/i);
   });
 
   it('bulk-store unused active mods — happy path: stores only the unused-active ones + success toast', async () => {

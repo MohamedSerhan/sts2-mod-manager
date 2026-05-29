@@ -101,8 +101,8 @@
   },
   "libraryTable": {
     "membershipCheckbox": "切换 {{mod}} 在 {{modpack}} 中的状态",
-    "inPack": "已在包中",
-    "notInPack": "不在包中",
+    "inPack": "已在整合包中",
+    "notInPack": "不在整合包中",
     "inPackTitle": "已在 {{modpack}} 中 — 在 ⋯ 菜单中更改归属",
     "notInPackTitle": "不在 {{modpack}} 中 — 在 ⋯ 菜单中添加",
     "modpackMissing": "此模组包已不存在 — 请尝试刷新列表。"

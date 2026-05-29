@@ -3012,7 +3012,7 @@ describe('<ModsView>', () => {
   // (active/stored is derived from the active modpack, not a per-mod
   // input — the capability lives in the kebab now). What the row still
   // surfaces is the membership checkbox against the active modpack,
-  // with a short "In pack" / "Not in pack" label (the full pack name
+  // with a short "In Modpack" / "Not in Modpack" label (the full pack name
   // lives in the aria-label/title). Solo's old confusion case — a mod
   // disabled on disk yet still a modpack member — is now expressed
   // purely through the checkbox's checked state, independent of any
@@ -3061,8 +3061,8 @@ describe('<ModsView>', () => {
     }
 
     // Wait for the membership column to settle. The row exposes
-    // membership through a read-only indicator: "In pack" (with a check
-    // glyph + the is-in class) when a member, "Not in pack" otherwise.
+    // membership through a read-only indicator: "In Modpack" (with a check
+    // glyph + the is-in class) when a member, "Not in Modpack" otherwise.
     // Membership is changed from the kebab, not from this indicator.
     async function waitForMembershipStatus(row: HTMLElement, included: boolean): Promise<HTMLElement> {
       await waitFor(() => {
@@ -3070,51 +3070,51 @@ describe('<ModsView>', () => {
         expect(ind).not.toBeNull();
         if (included) {
           expect(ind!.className).toContain('is-in');
-          expect(ind!.textContent).toMatch(/In pack/i);
+          expect(ind!.textContent).toMatch(/In Modpack/i);
         } else {
           expect(ind!.className).not.toContain('is-in');
-          expect(ind!.textContent).toMatch(/Not in pack/i);
+          expect(ind!.textContent).toMatch(/Not in Modpack/i);
         }
       });
       return row.querySelector('.gf-row-inpack') as HTMLElement;
     }
 
-    it('no active/stored chip in the row; "In pack" indicator when a member', async () => {
+    it('no active/stored chip in the row; "In Modpack" indicator when a member', async () => {
       setupRow(true, 'in');
       render(<Wrap />);
       const row = await getModRow('TargetMod');
       // Storage chip removed from the row.
       expect(row.querySelector('.gf-profile-library-storage')).toBeNull();
       await waitForMembershipStatus(row, true);
-      expect(within(row).getByText(/^In pack$/i)).toBeInTheDocument();
+      expect(within(row).getByText(/^In Modpack$/i)).toBeInTheDocument();
     });
 
-    it('"Not in pack" indicator when not a member (storage chip still absent)', async () => {
+    it('"Not in Modpack" indicator when not a member (storage chip still absent)', async () => {
       setupRow(false, 'notIn');
       render(<Wrap />);
       const row = await getModRow('TargetMod');
       expect(row.querySelector('.gf-profile-library-storage')).toBeNull();
       await waitForMembershipStatus(row, false);
-      expect(within(row).getByText(/^Not in pack$/i)).toBeInTheDocument();
+      expect(within(row).getByText(/^Not in Modpack$/i)).toBeInTheDocument();
     });
 
-    it('active-on-disk but not a member → "Not in pack" (membership is independent of storage)', async () => {
+    it('active-on-disk but not a member → "Not in Modpack" (membership is independent of storage)', async () => {
       setupRow(true, 'notIn');
       render(<Wrap />);
       const row = await getModRow('TargetMod');
       await waitForMembershipStatus(row, false);
-      expect(within(row).getByText(/^Not in pack$/i)).toBeInTheDocument();
+      expect(within(row).getByText(/^Not in Modpack$/i)).toBeInTheDocument();
     });
 
     // Solo's confusion case — disabled on disk yet still a modpack
     // member. The row no longer shows a "Stored" chip; the in-pack
     // indicator stays on, which is the unambiguous membership signal.
-    it("disabled on disk yet still a member → still in pack (Solo's case)", async () => {
+    it("disabled on disk yet still a member → still in Modpack (Solo's case)", async () => {
       setupRow(false, 'in');
       render(<Wrap />);
       const row = await getModRow('TargetMod');
       await waitForMembershipStatus(row, true);
-      expect(within(row).getByText(/^In pack$/i)).toBeInTheDocument();
+      expect(within(row).getByText(/^In Modpack$/i)).toBeInTheDocument();
     });
 
     it('hides the membership column entirely when no active modpack', async () => {

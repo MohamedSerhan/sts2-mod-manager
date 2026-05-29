@@ -101,8 +101,8 @@
   },
   "libraryTable": {
     "membershipCheckbox": "Toggle {{mod}} in {{modpack}}",
-    "inPack": "In pack",
-    "notInPack": "Not in pack",
+    "inPack": "In Modpack",
+    "notInPack": "Not in Modpack",
     "inPackTitle": "In {{modpack}} — change membership from the ⋯ menu",
     "notInPackTitle": "Not in {{modpack}} — add it from the ⋯ menu",
     "modpackMissing": "This modpack doesn't exist any more — try refreshing the list."

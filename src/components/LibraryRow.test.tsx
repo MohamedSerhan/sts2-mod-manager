@@ -159,7 +159,7 @@ describe('<LibraryRow>', () => {
     const inEl = container.querySelector('.gf-row-inpack');
     expect(inEl).not.toBeNull();
     expect(inEl!.className).toContain('is-in');
-    expect(inEl!.textContent).toMatch(/In pack/i);
+    expect(inEl!.textContent).toMatch(/In Modpack/i);
     // Membership is changed from the kebab now — no checkbox on the row.
     expect(screen.queryByRole('checkbox')).toBeNull();
     unmount();
@@ -168,7 +168,7 @@ describe('<LibraryRow>', () => {
     const outEl = c2.querySelector('.gf-row-inpack');
     expect(outEl).not.toBeNull();
     expect(outEl!.className).not.toContain('is-in');
-    expect(outEl!.textContent).toMatch(/Not in pack/i);
+    expect(outEl!.textContent).toMatch(/Not in Modpack/i);
   });
 
   it('renders the no-modpack-state muted message when state is undefined', () => {

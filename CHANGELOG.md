@@ -35,7 +35,7 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ---
 
-## [1.7.0] - 2026-05-25
+## [1.7.0] - 2026-05-29
 
 A UX simplification release. The app feels like a launcher first: pick a modpack, click Play. Power-user tools are still there, just behind progressive disclosure so they don't compete with the normal flow.
 
@@ -45,9 +45,10 @@ A UX simplification release. The app feels like a launcher first: pick a modpack
 - A guided Create Modpack wizard takes you from picking mods to checking they're healthy to finishing — no GitHub knowledge required.
 - A Help button in the top bar opens a slide-out drawer with a player quick-start, a creator quick-start, and an FAQ covering frozen mods, skipped updates, Nexus manual downloads, and more.
 - Small "?" tooltips throughout the app explain confusing wording in place — what "Stored" means, why GitHub is needed for sharing, why an update is blocked, and more.
-- Each Modpack now opens to a detail page with its mod list, audit, and share button so you can manage one modpack at a time instead of flipping between workspaces.
+- Each modpack now opens to its own detail page for managing that one pack: the mod list, a one-line status showing how many mods are active versus stored (and whether the game is running), an updates check scoped to just that modpack, a share button, and an "Add mods" menu to paste a URL, import a .zip, or open the mods folder. An "Edit" button adds or removes mods in bulk using the same picker as the Create wizard, and dragging a mod .zip onto the page adds it to that modpack.
 - Sharing a modpack now sets up GitHub inside the share flow with a plain-language explanation, instead of sending you to Settings first.
 - When a share fails because some mods can't be bundled, the app now offers to repair those mods inline and retry the share automatically.
+- "Report a bug" replaces the old support-bundle export: it builds a redacted report — app and game version, your installed mods, the active modpack's load order, and recent logs — and opens a prefilled GitHub issue. The full report is attached automatically so nothing important is cut off, and you never need a token.
 
 ### Changed
 
@@ -60,17 +61,27 @@ A UX simplification release. The app feels like a launcher first: pick a modpack
 - "Disable in game" wording is replaced with "Stored" (and "Active in game" for the other state), and the per-row storage toggle moves into the kebab where it doesn't compete with modpack switching.
 - Power-user actions (delete, rollback, repair, source editing, import/export JSON, snapshot, load order) group under an Advanced disclosure inside each modpack's detail.
 - Network requests now time out after sixty seconds with a ten-second connect timeout so a stalled GitHub or Nexus connection no longer hangs forever.
+- Inside a modpack, removing a mod is now "Remove from pack" — it stays in your library — while deleting it from disk moved into the mod's menu. Checking for updates there audits only that modpack's mods.
+- Auto-detect sources (matching installed mods to their GitHub pages) moved into each modpack's Advanced menu and now scans stored mods too.
+- Buttons always show a label instead of a bare icon, a mod's tags and badges sit beside its name where there's more room, and the leftover "beta" tags were removed.
 
 ### Fixed
 
 - Sharing a modpack with mods that are missing bundled copies now offers a one-click repair-and-retry instead of failing with a wall-of-text error.
 - Deep links that arrive with an unknown action prefix now show a friendly "didn't recognize" instead of being silently rewritten.
 - Diagnostic bundles now redact GitHub tokens and API keys in URLs before they're copied to the clipboard.
+- The bug report no longer truncates your logs: the full report is uploaded and linked in the issue, or — when no upload endpoint is configured — copied to your clipboard with a one-tap prompt to paste it in, instead of being cut down to fit a URL.
+- Quick-adding a mod that's already active in the game no longer reports a false failure.
+- Creating a modpack now includes only the mods you picked, instead of sometimes pulling in your whole install.
+- Saving a modpack's drift applies only what differs from disk rather than re-snapshotting the whole install.
+- Browse Modpacks no longer loads forever when the source is slow or unreachable, and newly added mods appear in a modpack's list right after a refresh.
+- Narrow windows no longer squeeze the top bar off-screen or break headings onto one word per line.
 
 ### Security
 
 - GitHub personal access tokens and query-string API keys are stripped from diagnostic bundles automatically.
 - The share-link parser now accepts only `import`, `install`, and `load` action prefixes; unknown actions are rejected rather than silently coerced.
+- Updated bundled dependencies to clear security advisories (the `openssl` library and the `tmp` test helper).
 
 ---
 

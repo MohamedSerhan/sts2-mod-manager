@@ -1335,7 +1335,11 @@ body {
 .gf-page-head > :first-child { flex: 1 1 300px; min-width: 0; }
 .gf-page-title { font-size: 22px; font-weight: 600; letter-spacing: -0.015em; margin: 0; color: var(--ink); }
 .gf-page-sub { font-size: 13px; color: var(--ink-mute); margin-top: 4px; }
-.gf-page-actions { display: flex; gap: 8px; flex-wrap: wrap; flex-shrink: 0; }
+/* Action cluster. min-width:0 (and no flex-shrink:0) lets it shrink below
+   its single-row content width so the inner flex-wrap actually kicks in
+   instead of overflowing the viewport; flex-end keeps the wrapped rows
+   right-aligned, matching their resting position on a wide screen. */
+.gf-page-actions { display: flex; gap: 8px; flex-wrap: wrap; min-width: 0; justify-content: flex-end; }
 
 /* ── Tabs ─────────────────────────────────────────────────────────── */
 .gf-tabs {

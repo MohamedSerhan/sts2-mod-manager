@@ -1063,6 +1063,14 @@ body {
   border-bottom: 1px solid var(--indigo-line);
   flex-shrink: 0;
 }
+/* Launch/status cluster: stays pinned to the right even when the topbar
+   wraps it onto its own line (margin-left:auto eats the free space), and
+   its own buttons wrap right-aligned if the window gets very narrow. */
+.gf-top-actions {
+  margin-left: auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
 .gf-prof {
   display: flex; align-items: center; gap: 10px;
   padding: 5px 11px 5px 6px;

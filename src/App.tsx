@@ -695,7 +695,7 @@ function AppInner() {
               )}
             </div>
 
-            <div className="flex gap-1.5">
+            <div className="flex gap-1.5 gf-top-actions">
               {/* STS2 detection status — shown on every screen so the
                   user can tell at a glance whether the game folder is
                   wired up (the previous at-a-glance signal was a sidebar

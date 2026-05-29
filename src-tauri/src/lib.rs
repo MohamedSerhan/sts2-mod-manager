@@ -316,7 +316,7 @@ pub fn run() {
             updater::update_all_mods,
             updater::audit_mod_versions,
             dev_builds::list_dev_builds,
-            dev_builds::install_dev_build,
+            dev_builds::switch_dev_build,
             quick_add::quick_add_mod,
             // Mod source linking
             mod_sources::get_mod_sources,

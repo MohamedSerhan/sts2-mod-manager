@@ -27,6 +27,9 @@ pub struct DevBuild {
     pub title: String,
     pub published_at: String,
     pub windows_installer_url: Option<String>,
+    /// URL of the `latest.json` updater manifest attached to this build's
+    /// release, if present. Drives the one-click updater-based switch.
+    pub manifest_url: Option<String>,
     pub assets: Vec<DevBuildAsset>,
 }
 
@@ -87,6 +90,11 @@ fn parse_dev_builds(releases: Vec<GitHubRelease>) -> Vec<DevBuild> {
                 .iter()
                 .find(|a| a.name.to_ascii_lowercase().ends_with("-setup.exe"))
                 .map(|a| a.browser_download_url.clone());
+            let manifest_url = r
+                .assets
+                .iter()
+                .find(|a| a.name.eq_ignore_ascii_case("latest.json"))
+                .map(|a| a.browser_download_url.clone());
             let assets = r
                 .assets
                 .iter()
@@ -102,6 +110,7 @@ fn parse_dev_builds(releases: Vec<GitHubRelease>) -> Vec<DevBuild> {
                 title,
                 published_at: r.published_at.clone().unwrap_or_default(),
                 windows_installer_url,
+                manifest_url,
                 assets,
             })
         })
@@ -127,36 +136,48 @@ pub async fn list_dev_builds(state: State<'_, AppState>) -> Result<Vec<DevBuild>
     Ok(parse_dev_builds(releases))
 }
 
-/// Download a dev build's Windows NSIS installer and run it. Because every
-/// dev build shares the `com.sts2mm.app.dev` identity, the installer replaces
-/// the running "(Dev)" app in place and relaunches into the chosen build.
-/// The exact silent/relaunch flags are confirmed by the manual gate; this
-/// launches the installer, which Tauri's NSIS handles for a running
-/// same-identity app.
-#[cfg(target_os = "windows")]
+/// One-click switch: install a chosen dev build from its `latest.json`
+/// updater manifest using tauri-plugin-updater — the same silent
+/// download + signature-verify + install + relaunch path the release
+/// "Install & Restart" uses. A permissive version_comparator lets the user
+/// switch to a LOWER pr (semver ranks pr61 > pr60), which a default
+/// updater would refuse. No installer UI (NSIS runs passively on Windows).
 #[tauri::command]
-pub async fn install_dev_build(installer_url: String) -> Result<(), String> {
-    use std::process::Command;
-    let dest = std::env::temp_dir().join("sts2mm-dev-setup.exe");
-    crate::download::download_file(&installer_url, &dest, |_, _| {})
+pub async fn switch_dev_build(
+    app: tauri::AppHandle,
+    manifest_url: String,
+) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let url = manifest_url
+        .parse()
+        .map_err(|e| format!("Bad manifest URL: {e}"))?;
+    let updater = app
+        .updater_builder()
+        .endpoints(vec![url])
+        .map_err(|e| format!("Updater endpoint error: {e}"))?
+        .version_comparator(|_current, _update| true)
+        .build()
+        .map_err(|e| format!("Updater build error: {e}"))?;
+    let maybe_update = updater
+        .check()
         .await
         .map_err(|e| {
-            log::warn!("install_dev_build: download failed: {e}");
-            format!("Download failed: {e}")
+            log::warn!("switch_dev_build: update check failed: {e}");
+            format!("Switch check failed: {e}")
         })?;
-    Command::new(&dest)
-        .spawn()
+    let update = maybe_update.ok_or_else(|| {
+        "No installable build found in the dev manifest.".to_string()
+    })?;
+    update
+        .download_and_install(|_, _| {}, || {})
+        .await
         .map_err(|e| {
-            log::warn!("install_dev_build: failed to launch installer: {e}");
-            format!("Failed to launch installer: {e}")
+            log::warn!("switch_dev_build: install failed: {e}");
+            format!("Switch install failed: {e}")
         })?;
-    Ok(())
-}
-
-#[cfg(not(target_os = "windows"))]
-#[tauri::command]
-pub async fn install_dev_build(_installer_url: String) -> Result<(), String> {
-    Err("In-app install is Windows-only — use the download link instead.".to_string())
+    // Mirror the release "Install & Restart": exit so the (NSIS) installer can
+    // finish replacing the running app, then relaunch into the new build.
+    app.restart();
 }
 
 #[cfg(test)]
@@ -215,6 +236,7 @@ mod tests {
                 vec![
                     asset("STS2 Mod Manager (Dev)_1.6.1-dev.pr59.g837f5ba_x64-setup.exe"),
                     asset("STS2 Mod Manager (Dev)_1.6.1-dev.pr59.g837f5ba_universal.dmg"),
+                    asset("latest.json"),
                 ],
             ),
             release(
@@ -231,6 +253,12 @@ mod tests {
         assert_eq!(builds[1].sha, "837f5ba");
         assert!(builds[1].windows_installer_url.is_some());
         assert!(builds[0].windows_installer_url.is_none(), "PR60 has no win setup");
+        assert_eq!(
+            builds[1].manifest_url.as_deref(),
+            Some("https://example/latest.json"),
+            "manifest_url surfaced from latest.json asset"
+        );
+        assert!(builds[0].manifest_url.is_none(), "PR60 has no manifest");
         let dmg = builds[1].assets.iter().find(|a| a.name.ends_with(".dmg")).unwrap();
         assert_eq!(dmg.platform, "macOS");
     }

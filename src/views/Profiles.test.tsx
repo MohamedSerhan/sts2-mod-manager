@@ -663,6 +663,27 @@ describe('<ProfilesView>', () => {
     });
   });
 
+  it('drift banner on a FOLLOWED pack hides Save changes but keeps Repair', async () => {
+    // A subscribed (followed) pack isn't yours to edit — the backend rejects
+    // save_profile_drift, so the banner must not offer "Save changes". Repair
+    // (restore the author's manifest) stays available.
+    seedProfiles([baseProfile({ name: 'Henry Pack' })]);
+    registerInvokeHandler('get_active_profile', () => 'Henry Pack');
+    registerInvokeHandler('get_profile_drift', () => ({
+      added: ['NewMod'], removed: [], toggled: [], version_changed: [], has_drift: true,
+    }));
+    registerInvokeHandler('get_subscriptions', () => [
+      { share_id: 'henry/AAAA-BBBB', profile_name: 'Henry Pack' },
+    ]);
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText(/has drifted/)).toBeInTheDocument(); });
+    // No "Save changes" for a followed pack, and the followed-pack hint shows.
+    expect(screen.queryByRole('button', { name: /Save changes/i })).toBeNull();
+    expect(screen.getByText(/duplicate the pack to keep your edits/i)).toBeInTheDocument();
+    // Repair is still offered.
+    expect(screen.getByRole('button', { name: /Repair/i })).toBeInTheDocument();
+  });
+
   it('drift banner Save changes reconciles the diff (save_profile_drift) without repairing disk', async () => {
     seedProfiles([baseProfile({ name: 'DriftedPack' })]);
     registerInvokeHandler('get_active_profile', () => 'DriftedPack');

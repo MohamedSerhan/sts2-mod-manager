@@ -298,6 +298,7 @@
       "title": "{{name}} has drifted",
       "desc": "{{details}}",
       "hint": "since the manifest. Save changes to update the modpack, or Repair to restore it.",
+      "followedHint": "since the manifest. This pack is followed, so you can't save changes to it — Repair to restore the original, or duplicate the pack to keep your edits.",
       "newItems": "{{count}} new",
       "removedItems": "{{count}} removed",
       "toggledItems": "{{count}} toggled",

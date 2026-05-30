@@ -20,10 +20,10 @@ use serde::{Deserialize, Serialize};
 use super::apply::{disk_mod_matches_pin, switch_profile_from_paths};
 use super::crud::{
     hide_app_created_by, load_profile, mod_key, profile_mod_from_installed, save_profile,
-    version_is_wildcard,
+    subscribed_profile_names, version_is_wildcard,
 };
 use super::{Profile, ProfileMod};
-use crate::error::Result;
+use crate::error::{AppError, Result};
 
 /// A mod whose installed version differs from the profile's recorded version.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -177,7 +177,20 @@ pub(super) fn reconcile_profile_with_disk(
     mods_path: &Path,
     disabled_path: &Path,
     profiles_path: &Path,
+    config_path: &Path,
 ) -> Result<Profile> {
+    // A followed (subscribed) pack's manifest belongs to its author. Saving
+    // drift would overwrite their curated set with whatever happens to be on
+    // this user's disk, so refuse it — the same gate set_profile_mod_membership
+    // and set_profile_load_order enforce. Repair stays allowed: it only
+    // restores the followed manifest onto disk, never the reverse.
+    if subscribed_profile_names(config_path).contains(&name.to_lowercase()) {
+        return Err(AppError::Other(format!(
+            "Cannot edit subscribed profile '{}'. Duplicate it first to make a local copy.",
+            name
+        )));
+    }
+
     let mut profile = load_profile(name, profiles_path)?;
 
     let enabled_mods = crate::mods::scan_mods(mods_path);
@@ -390,7 +403,7 @@ mod reconcile_tests {
         save_profile(&profile, &profiles_path).unwrap();
 
         let result =
-            reconcile_profile_with_disk("Stable", &mods_path, &disabled_path, &profiles_path)
+            reconcile_profile_with_disk("Stable", &mods_path, &disabled_path, &profiles_path, config_tmp.path())
                 .unwrap();
 
         let folders: std::collections::HashSet<&str> = result
@@ -439,7 +452,7 @@ mod reconcile_tests {
         save_profile(&profile, &profiles_path).unwrap();
 
         let result =
-            reconcile_profile_with_disk("Stable", &mods_path, &disabled_path, &profiles_path)
+            reconcile_profile_with_disk("Stable", &mods_path, &disabled_path, &profiles_path, config_tmp.path())
                 .unwrap();
 
         assert_eq!(result.mods.len(), 1, "mod stays in the pack");
@@ -447,5 +460,63 @@ mod reconcile_tests {
 
         let drift = compute_profile_drift(&result, &mods_path, &disabled_path);
         assert!(!drift.has_drift, "no drift after syncing the toggle");
+    }
+
+    /// A FOLLOWED (subscribed) pack — e.g. one you installed from a friend —
+    /// must not be editable via drift save. Saving would overwrite the
+    /// author's curated manifest with whatever is on your disk.
+    #[test]
+    fn reconcile_refuses_subscribed_profiles() {
+        let game_tmp = tempfile::tempdir().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let mods_path = game_tmp.path().join("mods");
+        let disabled_path = game_tmp.path().join("mods_disabled");
+        let profiles_path = config_tmp.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        // An enabled mod on disk that isn't in the followed pack → there IS
+        // drift, but saving it must still be refused.
+        write_mod(&mods_path, "Extra", "Extra", "1.0.0");
+        save_profile(&base_profile("Henry Pack", vec![]), &profiles_path).unwrap();
+        crate::subscriptions::save_subscriptions(
+            &crate::subscriptions::SubscriptionsDb {
+                subscriptions: std::collections::HashMap::from([(
+                    "henry/AAAA-BBBB-CCCC".into(),
+                    crate::subscriptions::Subscription {
+                        share_id: "henry/AAAA-BBBB-CCCC".into(),
+                        share_url: "https://example.test".into(),
+                        profile_name: "Henry Pack".into(),
+                        curator: Some("henry".into()),
+                        last_synced_profile: base_profile("Henry Pack", vec![]),
+                        last_checked: "2026-05-19T00:00:00Z".parse().unwrap(),
+                        last_synced: "2026-05-19T00:00:00Z".parse().unwrap(),
+                    },
+                )]),
+            },
+            config_tmp.path(),
+        )
+        .unwrap();
+
+        let err = reconcile_profile_with_disk(
+            "Henry Pack",
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config_tmp.path(),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("subscribed profile"),
+            "drift save must refuse a followed pack; got: {}",
+            err
+        );
+
+        // The followed manifest was left untouched (Extra not written in).
+        assert!(
+            load_profile("Henry Pack", &profiles_path).unwrap().mods.is_empty(),
+            "the followed manifest must not be mutated"
+        );
     }
 }

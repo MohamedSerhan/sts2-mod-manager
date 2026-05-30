@@ -436,7 +436,7 @@ pub fn save_profile_drift(
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
     let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
-    drift::reconcile_profile_with_disk(&name, mods_path, disabled_path, &s.profiles_path)
+    drift::reconcile_profile_with_disk(&name, mods_path, disabled_path, &s.profiles_path, &s.config_path)
         .map_err(|e| e.to_string())
 }
 

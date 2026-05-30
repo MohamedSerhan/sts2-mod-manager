@@ -298,6 +298,7 @@
       "title": "{{name}} 已发生偏离",
       "desc": "{{details}}",
       "hint": "自清单记录以来。保存更改以更新模组包，或修复以恢复。",
+      "followedHint": "自清单记录以来。此模组包为关注的他人作品，无法保存更改——可修复以恢复原版，或复制一份以保留你的改动。",
       "newItems": "{{count}} 个新增",
       "removedItems": "{{count}} 个移除",
       "toggledItems": "{{count}} 个切换",

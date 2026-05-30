@@ -47,7 +47,7 @@ import {
 } from '../hooks/useTauri';
 import { importShareCodeSmart, buildShareLink, buildShareMessage } from '../lib/shareImport';
 import type { ProfileDrift } from '../hooks/useTauri';
-import type { LoadOrderSettingsStatus, Profile, ShareResult } from '../types';
+import type { LoadOrderSettingsStatus, Profile, ShareResult, Subscription } from '../types';
 
 interface ProfilesViewProps {
   /** Navigates to Settings → Accounts. Passed down to PublishModal's
@@ -147,6 +147,9 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
   const quickAddRowRef = useRef<HTMLDivElement | null>(null);
   const [quickAddPulse, setQuickAddPulse] = useState(false);
   const [shareInfoMap, setShareInfoMap] = useState<Record<string, ShareResult>>({});
+  // Followed (subscribed) packs aren't yours to edit — tracked so the drift
+  // banner offers Repair but not Save changes for them.
+  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [publishTarget, setPublishTarget] = useState<{ profile: Profile; isReshare: boolean } | null>(null);
   const [driftMap, setDriftMap] = useState<Record<string, ProfileDrift>>({});
   const [switchingProfile, setSwitchingProfile] = useState<string | null>(null);
@@ -254,6 +257,10 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     }
     setShareInfoMap(shareMap);
 
+    // Track followed packs so the drift banner offers Repair (restore the
+    // author's manifest) but never Save changes for them.
+    setSubscriptions(await getSubscriptions().catch(() => []));
+
     const driftEntries: Record<string, ProfileDrift> = {};
     if (activeProfile) {
       try {
@@ -268,6 +275,13 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     if (profiles.length === 0) return;
     refreshShareAndDrift();
   }, [profiles, activeProfile, refreshShareAndDrift]);
+
+  // The active pack is a followed one when it shows up in our subscriptions.
+  // A followed manifest isn't ours to write, so the drift banner drops its
+  // "Save changes" button for it (the backend rejects the write either way).
+  const activeIsSubscribed =
+    !!activeProfile
+    && subscriptions.some((s) => s.profile_name.toLowerCase() === activeProfile.toLowerCase());
 
   // 1.7.0 T16 — open the active modpack's detail view when a sibling
   // surface pumps the signal (Mods view's "Manage active modpack →"
@@ -1118,23 +1132,26 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
                 driftMap[activeProfile].toggled.length && t('profiles.drift.toggledItems', { count: driftMap[activeProfile].toggled.length }),
                 (driftMap[activeProfile].version_changed?.length ?? 0) && t('profiles.drift.versionChanged', { count: driftMap[activeProfile].version_changed.length }),
               ].filter(Boolean).join(' · ') || t('profiles.drift.outOfSyncFallback')}
-              {' '}{t('profiles.drift.hint')}
+              {' '}{t(activeIsSubscribed ? 'profiles.drift.followedHint' : 'profiles.drift.hint')}
             </div>
           </div>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => handleSaveDrift(activeProfile)}
-            title={t('profiles.drift.saveChanges')}
-            disabled={savingProfile !== null}
-          >
-            {savingProfile === activeProfile ? (
-              <RefreshCw size={12} className="animate-spin" />
-            ) : (
-              <Save size={12} />
-            )}
-            {t('profiles.drift.saveChanges')}
-          </Button>
+          {/* Followed packs are read-only — no Save changes (only Repair). */}
+          {!activeIsSubscribed && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => handleSaveDrift(activeProfile)}
+              title={t('profiles.drift.saveChanges')}
+              disabled={savingProfile !== null}
+            >
+              {savingProfile === activeProfile ? (
+                <RefreshCw size={12} className="animate-spin" />
+              ) : (
+                <Save size={12} />
+              )}
+              {t('profiles.drift.saveChanges')}
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"

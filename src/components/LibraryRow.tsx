@@ -335,7 +335,15 @@ export function LibraryRow({
             <Toggle
               checked={row.installed_enabled}
               onChange={() => onToggleStorage(row)}
-              disabled={gameRunning || storageSaving !== null}
+              // Only gate on the game running. We deliberately do NOT disable
+              // while a save is in flight: disabling the just-clicked control
+              // rips keyboard focus off it (it falls to <body>), and some
+              // WebViews react to that focus loss by scrolling the list — so
+              // the user gets yanked to the top on every toggle. Re-entrancy /
+              // double-clicks are already guarded inside handleToggleStorage
+              // (`if (storageSaving || membershipSaving) return`), so the
+              // disabled attribute was only ever redundant insurance.
+              disabled={gameRunning}
               ariaLabel={t('modpack.storage.toggleAria', { mod: displayName })}
               title={
                 row.installed_enabled

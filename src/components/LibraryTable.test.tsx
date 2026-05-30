@@ -1006,4 +1006,71 @@ describe('<LibraryTable modpackName={null}>', () => {
       expect(memberships).toBeGreaterThan(before);
     });
   });
+
+  it('pins the scroll position when a row mutates, so the user is never yanked to the top', async () => {
+    registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [
+        {
+          name: 'BaseLib', version: '1.0.0', folder_name: 'BaseLib', mod_id: 'BaseLib',
+          installed_enabled: true,
+          profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+        },
+      ],
+    }));
+    registerInvokeHandler('toggle_mod', () => null);
+
+    const modInfoByKey = new Map([
+      ['BaseLib', mkModInfo({ name: 'BaseLib', folder_name: 'BaseLib', mod_id: 'BaseLib' })],
+    ]);
+    const { container } = render(
+      <AllProviders>
+        <div data-scroller="yes">
+          <LibraryTable modpackName="Stable" modInfoByKey={modInfoByKey} />
+        </div>
+      </AllProviders>,
+    );
+    await screen.findAllByText('BaseLib');
+
+    // jsdom reports 0 layout, so fake a real scroll container around the table
+    // so pinScroll can find it and engage.
+    const scroller = container.querySelector('[data-scroller="yes"]') as HTMLElement;
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 4000 });
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 400 });
+    let scrollTopVal = 1800;
+    Object.defineProperty(scroller, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopVal,
+      set: (v: number) => { scrollTopVal = v; },
+    });
+    const realGCS = window.getComputedStyle.bind(window);
+    const gcs = vi
+      .spyOn(window, 'getComputedStyle')
+      .mockImplementation((el: Element, pe?: string | null) =>
+        (el === scroller
+          ? ({ overflowY: 'auto' } as CSSStyleDeclaration)
+          : realGCS(el, pe)));
+    const rafCbs: FrameRequestCallback[] = [];
+    const raf = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((cb: FrameRequestCallback) => { rafCbs.push(cb); return rafCbs.length; });
+
+    try {
+      await userEvent.click(
+        screen.getByRole('switch', { name: /toggle whether BaseLib is active in game/i }),
+      );
+      // Simulate the engine yanking the list to the top mid-operation…
+      scrollTopVal = 0;
+      // …the pin re-asserts the captured position on the following frames.
+      let guard = 0;
+      while (rafCbs.length && guard++ < 50) {
+        rafCbs.shift()!(0);
+      }
+      expect(scrollTopVal).toBe(1800);
+    } finally {
+      gcs.mockRestore();
+      raf.mockRestore();
+    }
+  });
 });

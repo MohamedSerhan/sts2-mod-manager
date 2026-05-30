@@ -749,20 +749,31 @@ describe('<LibraryRow> active/stored switch', () => {
     ).toBeDisabled();
   });
 
-  it('disables the switch while any storage mutation is in flight', () => {
+  it('keeps the switch interactive while a storage mutation is in flight', () => {
+    // A save in flight must NOT disable the switch. Disabling the just-clicked
+    // control rips keyboard focus off it (focus falls to <body>), and some
+    // WebViews react to that focus loss by scrolling the list — yanking the
+    // user to the top on every toggle. Re-entrancy is guarded inside the
+    // handler instead, so the switch stays enabled (a spinner conveys the
+    // in-flight state — see the next test).
     renderRow({ mod: baseModInfo(), storageSaving: 'storage::SomethingElse' });
     expect(
       screen.getByRole('switch', { name: /toggle whether BaseLib is active in game/i }),
-    ).toBeDisabled();
+    ).not.toBeDisabled();
   });
 
-  it('shows a spinner next to the switch while THIS row is flipping storage', () => {
+  it('shows a spinner next to the switch — but keeps it enabled — while THIS row is flipping storage', () => {
     const { container } = renderRow({
       mod: baseModInfo(),
       row: baseMod({ folder_name: 'BaseLib' }),
       storageSaving: 'storage::BaseLib',
     });
     expect(container.querySelector('.gf-row-status .animate-spin')).not.toBeNull();
+    // The spinner conveys the in-flight state without disabling the control,
+    // so focus stays put (see the focus/scroll rationale above).
+    expect(
+      screen.getByRole('switch', { name: /toggle whether BaseLib is active in game/i }),
+    ).not.toBeDisabled();
   });
 });
 

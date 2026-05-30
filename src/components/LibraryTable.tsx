@@ -27,7 +27,7 @@
  * view can re-pull after a mutation without leaking into LibraryTable
  * state.
  */
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Search } from 'lucide-react';
 import { Card } from './Card';
@@ -228,6 +228,38 @@ export function LibraryTable({
   const [visibleLimit, setVisibleLimit] = useState(pageSize);
   const [membershipSaving, setMembershipSaving] = useState<string | null>(null);
   const [storageSaving, setStorageSaving] = useState<string | null>(null);
+
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // Safety net so the user is NEVER scrolled against their will when a row
+  // mutates. The root cause we know of is focus-loss on the toggled control
+  // (fixed in LibraryRow by not disabling it mid-save), but a row mutation
+  // triggers a refreshAll + full re-render, and we don't want ANY engine /
+  // layout quirk to be able to yank the page. This briefly re-pins the
+  // nearest scrollable ancestor to where it was when the mutation began.
+  // Inert under jsdom (scrollHeight/clientHeight are 0 there), so it doesn't
+  // touch the test suite.
+  const pinScroll = useCallback(() => {
+    let el: HTMLElement | null = rootRef.current?.parentElement ?? null;
+    while (el) {
+      const oy = getComputedStyle(el).overflowY;
+      if ((oy === 'auto' || oy === 'scroll' || oy === 'overlay') && el.scrollHeight > el.clientHeight) {
+        break;
+      }
+      el = el.parentElement;
+    }
+    if (!el) return;
+    const scroller = el;
+    const top = scroller.scrollTop;
+    let frame = 0;
+    const hold = () => {
+      if (scroller.scrollTop !== top) scroller.scrollTop = top;
+      // ~12 frames (~200ms) covers the synchronous re-render plus any async
+      // focus-driven scroll the engine schedules just after.
+      if (++frame < 12) requestAnimationFrame(hold);
+    };
+    requestAnimationFrame(hold);
+  }, []);
 
   // Drag-and-drop reorder state for the in-pack mods. Indices refer
   // to the filtered "in this modpack" list, not the full grid.
@@ -457,6 +489,7 @@ export function LibraryTable({
     const nextIncluded = !state.included;
     const key = `${membershipRowKey(row)}::${modpackName}`;
     try {
+      pinScroll();
       setMembershipSaving(key);
       await setProfileModMembership(
         modpackName,
@@ -544,6 +577,7 @@ export function LibraryTable({
 
     const key = libraryStorageKey(row);
     try {
+      pinScroll();
       setStorageSaving(key);
       await toggleMod(row.name, row.folder_name, nextEnabled);
       patchRowStorage(membershipRowKey(row), nextEnabled);
@@ -653,7 +687,7 @@ export function LibraryTable({
   }
 
   return (
-    <div className="gf-profile-library" data-testid="library-table">
+    <div ref={rootRef} className="gf-profile-library" data-testid="library-table">
       <div className="gf-profile-library-toolbar">
         <label className="gf-profile-library-search">
           <Search size={13} />

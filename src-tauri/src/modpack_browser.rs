@@ -93,11 +93,17 @@ struct ContentsListEntry {
     kind: String,        // "file" | "dir"
 }
 
-// GitHub search caps per_page at 100. Fetch the full first page so every
-// curator's `sts2mm-profiles` repo is considered (there were 44 globally and
-// the old value of 30 silently hid the rest). has_next_page still flags a
-// 100+ overflow for a future paginated pass.
+// GitHub search caps per_page at 100; use the max to minimise the number of
+// search requests. The browser walks EVERY result page (see the loop in
+// fetch_modpack_browser_page) so it scales as the curator list grows — not
+// just the first page.
 const PER_PAGE: u32 = 100;
+
+// Backstop on how many search pages we walk per refresh (100 curators each),
+// so a runaway/abusive search index can't loop forever. 20 pages = 2000
+// curators — far beyond today's count, and the per-owner fan-out + overall
+// timeout bound things well before this in practice.
+const MAX_SEARCH_PAGES: u32 = 20;
 
 /// Search GitHub for repos literally named `sts2mm-profiles`. Returns
 /// `(items, has_next_page)`. The caller decides how to fan out from there.
@@ -222,13 +228,33 @@ pub async fn fetch_modpack_browser_page(
     // Live fetch: GitHub search → per-owner manifest listing → manifest
     // bodies. Wrapped in an overall timeout below so a slow/unreachable
     // GitHub can't pin the command (and the UI) open indefinitely. Returns
-    // (cards, has_next_page, owners_was_empty) on success.
+    // (cards, more_pages_exist, owners_was_empty) on success.
     //
     // `owners_was_empty` is captured before the fan-out moves `owners`; the
     // caller uses it to tell "GitHub had nothing" (legitimate empty) apart
     // from "fan-out was rate-limited mid-page" (don't clobber prior cache).
     let fetch_fresh = async {
-        let (owners, has_next_page) = search_profiles_repos(&client, page).await?;
+        // Walk every search-result page (PER_PAGE=100 each) so the browser
+        // scales with the curator list instead of stopping at the first page.
+        // `page` (the command arg) is now only the cache slot — the search
+        // always starts from page 1. `more_pages_exist` is set only if we hit
+        // the MAX_SEARCH_PAGES backstop with more results still pending.
+        let mut owners: Vec<(String, String)> = Vec::new();
+        let mut more_pages_exist = false;
+        let mut search_page = 1u32;
+        loop {
+            let (page_owners, has_next) = search_profiles_repos(&client, search_page).await?;
+            let page_was_empty = page_owners.is_empty();
+            owners.extend(page_owners);
+            if page_was_empty || !has_next {
+                break;
+            }
+            if search_page >= MAX_SEARCH_PAGES {
+                more_pages_exist = true;
+                break;
+            }
+            search_page += 1;
+        }
         let owners_was_empty = owners.is_empty();
 
         let mut list_tasks = FuturesUnordered::new();
@@ -269,7 +295,7 @@ pub async fn fetch_modpack_browser_page(
         }
 
         let cards = filter_to_browser_cards(raw);
-        Ok::<(Vec<BrowserCard>, bool, bool), String>((cards, has_next_page, owners_was_empty))
+        Ok::<(Vec<BrowserCard>, bool, bool), String>((cards, more_pages_exist, owners_was_empty))
     };
 
     let fetched = match tokio::time::timeout(BROWSER_FETCH_TIMEOUT, fetch_fresh).await {

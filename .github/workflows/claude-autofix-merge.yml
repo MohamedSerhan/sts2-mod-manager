@@ -1,0 +1,59 @@
+name: Claude auto-fix merge
+
+# Auto-merge a qa-passed PR the moment the maintainer (and only the maintainer)
+# approves it AND CI is green. No other reviewer's approval does anything.
+on:
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  merge:
+    # Cheap pre-filter; the authoritative gate is the qa-pipeline step below.
+    if: >-
+      ${{ github.event.review.state == 'approved'
+          && github.event.review.user.login == 'MohamedSerhan'
+          && contains(github.event.pull_request.labels.*.name, 'qa') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      # PAT (not plain GITHUB_TOKEN) so the merge's `pull_request: closed` event
+      # triggers D's dev-build-cleanup; a GITHUB_TOKEN-authored close would not.
+      GH_TOKEN: ${{ secrets.DEV_BUILD_LABEL_TOKEN || secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: Gate — approved by maintainer + qa + qa-passed
+        id: gate
+        run: |
+          if node scripts/qa-pipeline.mjs merge-eligible; then
+            echo "eligible=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            gh pr comment "$PR" --repo "$REPO" --body "Approved, but not auto-merging: this PR isn't \`qa\`+\`qa-passed\` yet (QA must pass first). Holding."
+          fi
+      - name: Require CI green
+        if: ${{ steps.gate.outputs.eligible == 'true' }}
+        id: ci
+        run: |
+          # `gh pr checks` exits non-zero if any check is failing/pending (gh >= 2.29).
+          if gh pr checks "$PR" --repo "$REPO"; then
+            echo "green=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "green=false" >> "$GITHUB_OUTPUT"
+            gh pr comment "$PR" --repo "$REPO" --body "Approved + QA-passed, but CI isn't green yet — holding the merge until checks pass. Re-approve (or it'll merge once green if you re-trigger)."
+          fi
+      - name: Merge
+        if: ${{ steps.gate.outputs.eligible == 'true' && steps.ci.outputs.green == 'true' }}
+        run: |
+          gh pr merge "$PR" --repo "$REPO" --merge
+          echo "Merged PR #$PR (maintainer-approved, qa-passed, CI green)."

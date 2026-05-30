@@ -201,7 +201,11 @@ export function BrowseModpacksView({ onGoToProfiles }: Props = {}) {
               </button>
             )}
           </div>
-          <label className="gf-profile-library-search" style={{ marginBottom: 12 }}>
+          {/* flex:none — this shared search class is `flex: 1 1 280px`, which
+              is right inside the row toolbar it was built for but stretches
+              vertically here (Browse lays its children out in a column),
+              ballooning the bar. Pin it to its natural height. */}
+          <label className="gf-profile-library-search" style={{ marginBottom: 12, flex: 'none' }}>
             <Search size={13} />
             <input
               value={query}

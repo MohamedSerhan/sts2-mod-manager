@@ -912,6 +912,26 @@ describe('<App>', () => {
     });
   });
 
+  it('mod-configs-lost event fires a warning toast naming the lost configs', async () => {
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    await fireTauriEvent('mod-configs-lost', {
+      mod_name: 'UpdatedMod',
+      files: ['settings.json', 'keymap.json'],
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/re-apply.*settings\.json/i)).toBeInTheDocument();
+    });
+  });
+
+  it('mod-configs-lost with empty files array fires no toast (early return)', async () => {
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    await fireTauriEvent('mod-configs-lost', { mod_name: 'NoLossMod', files: [] });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByText(/re-apply/i)).toBeNull();
+  });
+
   it('mod-configs-preserved with empty files array fires no toast (early return)', async () => {
     // Defensive early return in the handler — files.length === 0 means
     // there's nothing to surface. Exercise the guard so the early-exit

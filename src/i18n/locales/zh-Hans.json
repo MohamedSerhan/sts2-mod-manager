@@ -644,7 +644,10 @@
       "unsupportedFile": "不支持的文件：{{name}}。请使用 .zip、.7z 或 .rar。",
       "preservedConfigs_one": "已保留你在「{{mod}}」中编辑过的 {{count}} 个配置文件：{{files}}",
       "preservedConfigs_other": "已保留你在「{{mod}}」中编辑过的 {{count}} 个配置文件：{{files}}",
-      "preservedConfigs_more": "（还有 {{count}} 个）"
+      "preservedConfigs_more": "（还有 {{count}} 个）",
+      "lostConfigs_one": "无法重新应用你在「{{mod}}」中编辑过的 {{count}} 个配置文件——需要你重新设置：{{files}}",
+      "lostConfigs_other": "无法重新应用你在「{{mod}}」中编辑过的 {{count}} 个配置文件——需要你重新设置：{{files}}",
+      "lostConfigs_more": "（还有 {{count}} 个）"
     },
     "skippedMod": "跳过了 1 个模组：{{name}} 需要游戏 v{{version}}（你当前为 v{{gameVersion}}）。",
     "skippedMods": "跳过了 {{n}} 个模组（需要比你更新的游戏版本）：{{names}}。",

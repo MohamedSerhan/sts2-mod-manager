@@ -147,6 +147,18 @@ function AppInner() {
     return `${base}${tail}`;
   };
 
+  // "Couldn't re-apply N config files" — same shape as the preserved toast, but
+  // a warning: the update overwrote these and the restore failed, so the user
+  // has to redo those edits. (Rust leaves the baseline untouched so a later
+  // update can still recover them.)
+  const formatLostConfigsMessage = (modName: string, files: string[]): string => {
+    const n = files.length;
+    const shown = files.slice(0, 3).join(', ');
+    const base = t('app.toast.lostConfigs', { count: n, mod: modName, files: shown });
+    const tail = n > 3 ? t('app.toast.lostConfigs_more', { count: n - 3 }) : '';
+    return `${base}${tail}`;
+  };
+
   // Listen for auto-installed mods from the Downloads watcher
   useEffect(() => {
     const unlisten1 = listen<{
@@ -184,6 +196,17 @@ function AppInner() {
         toast.info(formatPreservedConfigsMessage(mod_name, files));
       },
     );
+    // Emitted when an update could NOT re-apply user-edited configs (restore
+    // failed after extraction). A warning, not a quiet info — those edits are
+    // gone and need redoing.
+    const unlistenLost = listen<{ mod_name: string; files: string[] }>(
+      'mod-configs-lost',
+      (event) => {
+        const { mod_name, files } = event.payload;
+        if (files.length === 0) return;
+        toast.error(formatLostConfigsMessage(mod_name, files));
+      },
+    );
     // Modpack apply / subscription update emits this when one or more
     // mods in the pack require a newer game version than the user's
     // STS2 ships. We've already deleted the offending files (the install
@@ -205,6 +228,7 @@ function AppInner() {
       unlisten2.then(f => f());
       unlisten3.then(f => f());
       unlistenPreserve.then(f => f());
+      unlistenLost.then(f => f());
     };
   }, []);
 

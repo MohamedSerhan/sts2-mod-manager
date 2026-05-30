@@ -760,33 +760,56 @@ pub fn prepare_update_with_preserved_configs(
     read_user_edited_configs(&old_folder_abs, &snapshot)
 }
 
+/// Outcome of finalizing an update's config preservation: which user-edited
+/// files were successfully restored onto the new release, and which were LOST
+/// because the restore failed after extraction.
+#[derive(Debug, Clone, Default)]
+pub struct PreservedConfigOutcome {
+    /// Edits that were written back onto the new release.
+    pub preserved: Vec<String>,
+    /// Edits that could NOT be re-applied — the user will need to redo them.
+    pub lost: Vec<String>,
+}
+
 /// Restore the previously-read user edits and re-snapshot the post-extract
-/// state so the next update has a fresh baseline. Returns the list of
-/// relative paths that were restored — the downloads watcher / updater
-/// command forwards this to the frontend so the post-update toast can
-/// name what was kept. Empty list when `preserved` was empty.
+/// state so the next update has a fresh baseline.
+///
+/// On a *successful* restore the new on-disk configs become the baseline and
+/// the restored paths are reported as `preserved`. On a *failed* restore we
+/// deliberately do TWO things differently: (1) we do NOT advance the baseline
+/// snapshot, so the prior baseline survives and a later update can still detect
+/// (and re-attempt to preserve) the edits instead of silently treating the
+/// upstream defaults as the user's content — which would lock in the loss; and
+/// (2) we report the affected paths as `lost`, never as "preserved", so the UI
+/// tells the truth rather than naming wiped files as kept. The update itself
+/// still proceeds either way (we don't block on a config-restore hiccup).
 pub fn finalize_update_with_preserved_configs(
     new_info: &ModInfo,
     mods_path: &Path,
     preserved: Vec<PreservedConfig>,
     config_path: &Path,
-) -> Result<Vec<String>> {
+) -> Result<PreservedConfigOutcome> {
     let new_folder_name = new_info
         .folder_name
         .clone()
         .unwrap_or_else(|| new_info.name.clone());
     let new_folder_abs = mods_path.join(&new_folder_name);
 
-    let preserved_names: Vec<String> = preserved.iter().map(|p| p.rel_path.clone()).collect();
+    let names: Vec<String> = preserved.iter().map(|p| p.rel_path.clone()).collect();
 
     if !preserved.is_empty() {
         if let Err(e) = restore_preserved_configs(&new_folder_abs, &preserved) {
             log::warn!(
-                "Failed to restore preserved configs for '{}': {} — \
-                 the update proceeds but user-edited configs were lost.",
+                "Failed to restore preserved configs for '{}': {} — the update \
+                 proceeds, but these edits could not be re-applied and are LOST: \
+                 {}. The config baseline is left untouched so a future update can \
+                 still recover them.",
                 new_info.name,
-                e
+                e,
+                names.join(", "),
             );
+            // Leave the baseline as-is (no re-snapshot) and surface the loss.
+            return Ok(PreservedConfigOutcome { preserved: Vec::new(), lost: names });
         }
     }
 
@@ -798,7 +821,7 @@ pub fn finalize_update_with_preserved_configs(
         config_path,
     );
 
-    Ok(preserved_names)
+    Ok(PreservedConfigOutcome { preserved: names, lost: Vec::new() })
 }
 
 /// Snapshot the freshly-installed mod's config files so future updates
@@ -1302,6 +1325,86 @@ mod config_snapshot_tests {
             stored, &user_hash,
             "post-update snapshot must reflect the actual on-disk file (user's edit), \
              not the upstream's shipped default"
+        );
+    }
+
+    #[test]
+    fn finalize_failed_restore_reports_loss_and_keeps_baseline() {
+        // When the post-extract config restore fails, the update still proceeds
+        // but the affected files are reported as LOST (never as "preserved"),
+        // and — critically — the config baseline is NOT advanced. Re-snapshotting
+        // the upstream defaults here would make the loss permanent (a later
+        // update couldn't tell defaults from the user's content).
+        let game_tmp = tempdir().unwrap();
+        let config_tmp = tempdir().unwrap();
+        let mods_path = game_tmp.path();
+        let config_path = config_tmp.path();
+
+        let info = ModInfo {
+            name: "MyMod".to_string(),
+            version: "2.0".to_string(),
+            description: String::new(),
+            enabled: true,
+            files: vec![],
+            source: None,
+            hash: None,
+            dependencies: vec![],
+            size_bytes: 0,
+            folder_name: Some("MyMod".to_string()),
+            mod_id: None,
+            github_url: None,
+            nexus_url: None,
+            pinned: false,
+            min_game_version: None,
+            author: None,
+            note: None,
+            custom_url: None,
+            tags: vec![],
+            display_name: None,
+            display_description: None,
+        };
+        let new_folder = mods_path.join("MyMod");
+        fs::create_dir_all(&new_folder).unwrap();
+        write_at(&new_folder, "ok.cfg", b"upstream-default-v2");
+
+        // The user's prior baseline — what their last install snapshotted.
+        crate::mod_sources::save_config_snapshot(
+            Some("MyMod"),
+            "MyMod",
+            std::collections::HashMap::from([(
+                "settings.cfg".to_string(),
+                "old-baseline-hash".to_string(),
+            )]),
+            config_path,
+        );
+
+        // Force the restore to fail: a DIRECTORY sits where the preserved file
+        // must be written, so fs::write errors.
+        fs::create_dir_all(new_folder.join("settings.cfg")).unwrap();
+        let preserved = vec![PreservedConfig {
+            rel_path: "settings.cfg".into(),
+            bytes: b"user-edited".to_vec(),
+        }];
+
+        let outcome =
+            finalize_update_with_preserved_configs(&info, mods_path, preserved, config_path)
+                .unwrap();
+
+        assert_eq!(
+            outcome.lost,
+            vec!["settings.cfg".to_string()],
+            "the un-restorable edit is reported as lost"
+        );
+        assert!(
+            outcome.preserved.is_empty(),
+            "nothing is reported as preserved on a failed restore"
+        );
+
+        let baseline = crate::mod_sources::load_config_snapshot(Some("MyMod"), "MyMod", config_path);
+        assert_eq!(
+            baseline.get("settings.cfg").map(String::as_str),
+            Some("old-baseline-hash"),
+            "the config baseline must survive a failed restore so recovery stays possible"
         );
     }
 }

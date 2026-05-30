@@ -38,7 +38,7 @@ mod state;
 pub use install::{
     finalize_update_with_preserved_configs, install_mod_from_archive, install_mod_from_zip,
     prepare_update_with_preserved_configs, read_user_edited_configs, restore_preserved_configs,
-    snapshot_after_fresh_install, snapshot_mod_configs, PreservedConfig,
+    snapshot_after_fresh_install, snapshot_mod_configs, PreservedConfig, PreservedConfigOutcome,
 };
 pub use scan::{scan_disabled_mods, scan_mods, strip_utf8_bom};
 pub(crate) use scan::{dedup_key, merge_active_disabled_mods};

@@ -227,6 +227,36 @@ pub fn emit_configs_preserved<R: tauri::Runtime>(
     );
 }
 
+/// Tauri event payload emitted when a mod update could NOT re-apply one or
+/// more user-edited config files (they were overwritten by the new release and
+/// the restore failed). Frontend listens and shows a non-blocking WARNING toast
+/// naming them so the user knows those edits need redoing.
+#[derive(Debug, Clone, Serialize)]
+pub struct ConfigsLostEvent {
+    pub mod_name: String,
+    pub files: Vec<String>,
+}
+
+/// Emit `mod-configs-lost` when an update finalized with a non-empty lost
+/// list. No-op for empty lists.
+pub fn emit_configs_lost<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    mod_name: &str,
+    files: &[String],
+) {
+    use tauri::Emitter;
+    if files.is_empty() {
+        return;
+    }
+    let _ = app.emit(
+        "mod-configs-lost",
+        ConfigsLostEvent {
+            mod_name: mod_name.to_string(),
+            files: files.to_vec(),
+        },
+    );
+}
+
 /// Read a mod's stored config-file hash snapshot. Returns an empty map
 /// when the mod has no entry, no snapshot, or was last installed before
 /// the config-overwrite-detection feature shipped — in any of those

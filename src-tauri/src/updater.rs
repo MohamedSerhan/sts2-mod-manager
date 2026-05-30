@@ -864,14 +864,15 @@ pub async fn update_mod(
         // Overlay user-edited configs + refresh snapshot. Emits the
         // mod-configs-preserved event for the toast when anything was
         // actually preserved.
-        let preserved_names = crate::mods::finalize_update_with_preserved_configs(
+        let outcome = crate::mods::finalize_update_with_preserved_configs(
             &info,
             &mods_path,
             pre_update_preserved,
             &config_path,
         )
         .map_err(|e| e.to_string())?;
-        crate::mod_sources::emit_configs_preserved(&app, &info.name, &preserved_names);
+        crate::mod_sources::emit_configs_preserved(&app, &info.name, &outcome.preserved);
+        crate::mod_sources::emit_configs_lost(&app, &info.name, &outcome.lost);
     } else {
         log::error!(
             "update_mod: install of '{}' from {}/{}@{} produced an unhealthy ModInfo (version='{}'); \
@@ -1057,14 +1058,15 @@ pub async fn repair_mod(
         // walk-back (re-install of an older release), so preservation
         // matters the same way it does for forward updates — user's
         // tweaks shouldn't die just because they fixed a broken install.
-        let preserved_names = crate::mods::finalize_update_with_preserved_configs(
+        let outcome = crate::mods::finalize_update_with_preserved_configs(
             &info,
             &mods_path,
             pre_update_preserved,
             &config_path,
         )
         .map_err(|e| e.to_string())?;
-        crate::mod_sources::emit_configs_preserved(&app, &info.name, &preserved_names);
+        crate::mod_sources::emit_configs_preserved(&app, &info.name, &outcome.preserved);
+        crate::mod_sources::emit_configs_lost(&app, &info.name, &outcome.lost);
     } else {
         log::error!(
             "repair_mod: install of '{}' from {}/{}@{} produced an unhealthy ModInfo (version='{}'); \
@@ -1170,14 +1172,15 @@ pub async fn rollback_mod(
             crate::mod_sources::update_installed_version(&info.name, &chosen.tag, &config_path);
         }
 
-        let preserved_names = crate::mods::finalize_update_with_preserved_configs(
+        let outcome = crate::mods::finalize_update_with_preserved_configs(
             &info,
             &mods_path,
             pre_update_preserved,
             &config_path,
         )
         .map_err(|e| e.to_string())?;
-        crate::mod_sources::emit_configs_preserved(&app, &info.name, &preserved_names);
+        crate::mod_sources::emit_configs_preserved(&app, &info.name, &outcome.preserved);
+        crate::mod_sources::emit_configs_lost(&app, &info.name, &outcome.lost);
     } else {
         log::error!(
             "rollback_mod: install of '{}' from {}/{}@{} produced an unhealthy ModInfo (version='{}'); \
@@ -1671,11 +1674,16 @@ pub async fn update_all_mods(
                     pre_update_preserved,
                     &config_path,
                 ) {
-                    Ok(preserved_names) => {
+                    Ok(outcome) => {
                         crate::mod_sources::emit_configs_preserved(
                             &app,
                             &info.name,
-                            &preserved_names,
+                            &outcome.preserved,
+                        );
+                        crate::mod_sources::emit_configs_lost(
+                            &app,
+                            &info.name,
+                            &outcome.lost,
                         );
                     }
                     Err(e) => {

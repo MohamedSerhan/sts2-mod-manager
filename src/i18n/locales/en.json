@@ -644,7 +644,10 @@
       "unsupportedFile": "Unsupported file: {{name}}. Use .zip, .7z, or .rar.",
       "preservedConfigs_one": "Preserved {{count}} config file you edited in \"{{mod}}\": {{files}}",
       "preservedConfigs_other": "Preserved {{count}} config files you edited in \"{{mod}}\": {{files}}",
-      "preservedConfigs_more": " (and {{count}} more)"
+      "preservedConfigs_more": " (and {{count}} more)",
+      "lostConfigs_one": "Couldn't re-apply {{count}} config file you edited in \"{{mod}}\" — you'll need to redo it: {{files}}",
+      "lostConfigs_other": "Couldn't re-apply {{count}} config files you edited in \"{{mod}}\" — you'll need to redo them: {{files}}",
+      "lostConfigs_more": " (and {{count}} more)"
     },
     "skippedMod": "Skipped 1 mod: {{name}} needs game v{{version}} (you have v{{gameVersion}}).",
     "skippedMods": "Skipped {{n}} mods (need a newer game build than yours): {{names}}.",

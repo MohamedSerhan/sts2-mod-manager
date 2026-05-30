@@ -70,20 +70,28 @@ jobs:
                  `auto-fix/${{ github.event.issue.number }}` (no suffix or slug — a later
                  workflow step locates the PR by this exact branch name). Branch off the
                  default branch.
-              2. Run the relevant tests (`npm test` runs the frontend + Rust suites; for a
-                 Rust-only change `cargo test --manifest-path=src-tauri/Cargo.toml`). Iterate
-                 until they pass. CI will also run the full suite on the PR.
-              3. Open a pull request targeting `main` whose body STARTS with
-                 `Fixes #${{ github.event.issue.number }}`, summarizes the change, and explains
-                 how to test it via the dev build. Do NOT apply any labels — a workflow step
-                 applies them after you finish.
+              2. Write unit tests that cover the fix (follow the repo's conventions —
+                 frontend: vitest; Rust: #[test] / cargo test). Run the relevant tests
+                 (`npm test` runs the frontend + Rust suites; for a Rust-only change
+                 `cargo test --manifest-path=src-tauri/Cargo.toml`) and iterate until they
+                 pass. CI will also run the full suite on the PR.
+              3. If — and only if — the change is user-facing, add ONE concise, player-
+                 language bullet to the `[Unreleased]` section of CHANGELOG.md under the
+                 right heading (Added/Changed/Fixed/Security), following the CHANGELOG
+                 "Writing rules" (no file paths, function names, or dev-speak; one short
+                 active-voice sentence). Skip the changelog for internal-only changes.
+              4. Open a pull request targeting `main` whose body STARTS with
+                 `Fixes #${{ github.event.issue.number }}`, summarizes the change, notes
+                 whether you added a changelog entry, and explains how to test it via the
+                 dev build. Do NOT apply any labels — a workflow step applies them after
+                 you finish.
 
             NEVER finish having silently done nothing. Every run must end in exactly one of:
             a PR opened (contained fix), or a comment posted on the issue (a plan for a
             too-large change, or — if you cannot produce a confident fix — a precise
             explanation of what blocks it).
 
-      - name: Apply dev-build + auto-fix labels (PAT so the build triggers)
+      - name: Apply dev-build + auto-fix + qa labels (PAT so build + QA trigger)
         id: label
         if: always()
         env:
@@ -102,8 +110,8 @@ jobs:
             echo "No PR on branch auto-fix/${ISSUE} (Claude declined, posted a plan, or errored). Nothing to label."
             exit 0
           fi
-          gh pr edit "$PR" --repo "$REPO" --add-label dev-build --add-label auto-fix
-          echo "Labeled PR #$PR with dev-build + auto-fix."
+          gh pr edit "$PR" --repo "$REPO" --add-label dev-build --add-label auto-fix --add-label qa
+          echo "Labeled PR #$PR with dev-build + auto-fix + qa."
 
       - name: Report back if the bot errored without opening a PR
         # Never fail silently. If Claude errored (e.g. hit the step cap) and opened no PR,
@@ -128,14 +136,16 @@ jobs:
           echo "Posted a no-PR failure comment on issue #${ISSUE}."
 
   revise:
-    # Only `@claude` comments on a PR that carries the `auto-fix` label.
+    # Only `@claude` comments on a PR that carries the `auto-fix` or `qa` label.
     if: >-
       ${{ ((github.event_name == 'issue_comment'
               && github.event.issue.pull_request
-              && contains(github.event.issue.labels.*.name, 'auto-fix')
+              && (contains(github.event.issue.labels.*.name, 'auto-fix')
+                  || contains(github.event.issue.labels.*.name, 'qa'))
               && contains(github.event.comment.body, '@claude'))
            || (github.event_name == 'pull_request_review_comment'
-              && contains(github.event.pull_request.labels.*.name, 'auto-fix')
+              && (contains(github.event.pull_request.labels.*.name, 'auto-fix')
+                  || contains(github.event.pull_request.labels.*.name, 'qa'))
               && contains(github.event.comment.body, '@claude'))) }}
     runs-on: ubuntu-latest
     permissions:

@@ -290,3 +290,62 @@ Both the investigate flow (`claude.yml`) and the auto-fix flow
 | **No auto-merge** | The bot opens PRs; you merge them. There is no auto-merge, no squash-on-approve, no bypass of branch-protection rules. |
 | **Read-only investigate flow unchanged** | `claude.yml` (the `@claude` mention handler on regular issues and PRs) is separate and read-only. It was not modified by sub-project C. |
 | **Write access scope** | The bot's write access is confined to creating branches and opening/updating PRs via the Claude GitHub App. It cannot modify secrets, settings, or workflows.
+
+### QA review + approval-merge (the `qa` label)
+
+#### How it works
+
+Add the `qa` label to any PR — including your own hand-written PRs — to enable
+the QA-review loop and approval-gated auto-merge.  When the auto-fix bot opens
+a fix PR it applies `qa` automatically, so the loop runs without any extra
+action on your part.
+
+Once labeled, a second adversarial QA-Claude reads the PR diff, the CI results,
+and the codebase context, then either approves or posts revision feedback.  If
+there is feedback the bot revises the branch in-place and QA re-checks —
+**including your own PRs**: the bot will commit revisions to whichever branch
+carries the `qa` label.  That is the point — it minimises back-and-forth before
+the PR ever reaches your desk.
+
+The loop continues for up to **5 rounds**.
+
+- **QA satisfied** → the PR receives the `qa-passed` label and a ping to you.
+  Do a single final read of the diff, then **approve** the PR.  Your approval
+  (`MohamedSerhan`) — and only yours — combined with a green CI run triggers
+  the auto-merge.
+- **Round cap reached without QA sign-off** → the PR is labeled `qa-needs-human`
+  and the loop stops.  Review it manually; merge (or close) at your discretion.
+
+A PR that does **not** carry the `qa` label is unaffected — it stays on the
+normal merge-manually path.
+
+#### One-time label setup
+
+Run these once after merging the QA-merge PR:
+
+```bash
+gh label create qa \
+  --color 1d76db \
+  --description "Run the QA-review loop + enable approval-merge" \
+  --repo MohamedSerhan/sts2-mod-manager
+
+gh label create qa-passed \
+  --color 0e8a16 \
+  --description "QA satisfied — ready for the maintainer's final check" \
+  --repo MohamedSerhan/sts2-mod-manager
+
+gh label create qa-needs-human \
+  --color b60205 \
+  --description "QA hit the round cap — needs the maintainer" \
+  --repo MohamedSerhan/sts2-mod-manager
+```
+
+#### Safety posture
+
+| Property | Detail |
+|---|---|
+| **Approval gate** | Only `MohamedSerhan`'s approval triggers the auto-merge. Another reviewer's approval has no effect. |
+| **Dual condition** | Auto-merge requires both `qa-passed` **and** a green CI run. Either condition alone is not enough. |
+| **5-round cap** | The loop escalates to `qa-needs-human` rather than running forever. You always get the final word. |
+| **Releases stay manual** | The bot updates the `[Unreleased]` CHANGELOG section as part of its fix work, but it never cuts or publishes a release. `scripts/release.sh` remains your manual step. |
+| **No-`qa` PRs unaffected** | Removing the `qa` label (or never adding it) leaves the PR on the normal manual-merge path with no QA loop and no auto-merge. |

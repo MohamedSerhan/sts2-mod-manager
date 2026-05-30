@@ -86,6 +86,9 @@ jobs:
       - name: Test make-dev-icon script
         run: node --test scripts/make-dev-icon.test.mjs
 
+      - name: Test qa-pipeline script
+        run: node --test scripts/qa-pipeline.test.mjs
+
   build:
     # Runs on version tags, manual dispatch, or a PR carrying the `dev-build`
     # label. On `labeled` events we also require the just-added label to be

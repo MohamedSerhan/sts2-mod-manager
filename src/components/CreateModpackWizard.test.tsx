@@ -690,5 +690,113 @@ describe('<CreateModpackWizard>', () => {
       const calls = getInvokeCalls().filter((c) => c.cmd === 'set_profile_mod_membership');
       expect(calls.some((c) => c.args?.modName === 'Keep' && c.args?.included === false)).toBe(false);
     });
+
+    it('keys selection by folder so two same-named mods stay independent', async () => {
+      // Two installed mods share the manifest name "Twin" but live in
+      // different folders. A name-keyed selection would collapse them into
+      // one entry — deselecting one would uncheck both, and the prune below
+      // would leak the unselected twin into the new pack. Folder-keying keeps
+      // them distinct end-to-end.
+      const installed = [
+        baseMod({ name: 'Twin', enabled: true, folder_name: 'twinA' }),
+        baseMod({ name: 'Twin', enabled: true, folder_name: 'twinB' }),
+        baseMod({ name: 'Solo', enabled: true, folder_name: 'solo' }),
+      ];
+      seed({
+        mods: installed,
+        onCreate: (n) => ({
+          ...baseProfile({ name: n }),
+          mods: installed.map((m) => ({
+            name: m.name,
+            version: m.version,
+            source: null,
+            hash: null,
+            files: [],
+            enabled: true,
+            bundle_url: null,
+            folder_name: m.folder_name,
+            mod_id: m.mod_id,
+          })),
+        }),
+      });
+      render(<Wrap />);
+
+      // from-active selects all THREE distinct mods — the twins are not
+      // collapsed (the bug would read "2 selected").
+      await chooseFromActive();
+      await waitFor(() => { expect(screen.getByText(/3 selected/i)).toBeInTheDocument(); });
+
+      // Deselect exactly one twin; the other stays checked (a name-keyed
+      // toggle would uncheck both).
+      const twinBoxes = screen.getAllByLabelText(/^Twin$/) as HTMLInputElement[];
+      expect(twinBoxes).toHaveLength(2);
+      expect(twinBoxes.every((b) => b.checked)).toBe(true);
+      fireEvent.click(twinBoxes[1]);
+      await waitFor(() => { expect(screen.getByText(/2 selected/i)).toBeInTheDocument(); });
+      expect(screen.getAllByLabelText(/^Twin$/).filter((b) => (b as HTMLInputElement).checked)).toHaveLength(1);
+
+      // Create → only the deselected twin's folder is pruned; the kept twin
+      // is re-added, never removed.
+      await clickNext();
+      await clickContinueAnyway();
+      fireEvent.change(await screen.findByLabelText(/modpack name/i), { target: { value: 'Twins' } });
+      fireEvent.click(screen.getByRole('button', { name: /^create modpack$/i }));
+
+      await waitFor(() => {
+        const calls = getInvokeCalls().filter((c) => c.cmd === 'set_profile_mod_membership');
+        const prunedTwins = ['twinA', 'twinB'].filter((f) =>
+          calls.some((c) => c.args?.folderName === f && c.args?.included === false),
+        );
+        // Exactly one twin pruned — not zero (the bug) and not both.
+        expect(prunedTwins).toHaveLength(1);
+        const keptTwin = prunedTwins[0] === 'twinA' ? 'twinB' : 'twinA';
+        expect(calls.some((c) => c.args?.folderName === keptTwin && c.args?.included === false)).toBe(false);
+      });
+    });
+
+    it('falls back to the manifest name when a mod has no folder_name', async () => {
+      // folder_name is optional; the whole select → audit → prune → re-add
+      // chain must key by name when it's absent (the `folder_name ?? name`
+      // fallback).
+      const noFolder = baseMod({ name: 'NoFolder', enabled: true, folder_name: null });
+      seed({
+        mods: [noFolder],
+        onCreate: (n) => ({
+          ...baseProfile({ name: n }),
+          mods: [
+            {
+              name: 'NoFolder',
+              version: noFolder.version,
+              source: null,
+              hash: null,
+              files: [],
+              enabled: true,
+              bundle_url: null,
+              folder_name: null,
+              mod_id: null,
+            },
+          ],
+        }),
+      });
+      render(<Wrap />);
+
+      await chooseFromActive();
+      await waitFor(() => { expect(screen.getByText(/1 selected/i)).toBeInTheDocument(); });
+      await clickNext();
+      await clickContinueAnyway();
+      fireEvent.change(await screen.findByLabelText(/modpack name/i), { target: { value: 'NF Pack' } });
+      fireEvent.click(screen.getByRole('button', { name: /^create modpack$/i }));
+
+      await waitFor(() => {
+        const calls = getInvokeCalls().filter((c) => c.cmd === 'set_profile_mod_membership');
+        // Re-added by name with a null folder; never pruned.
+        expect(
+          calls.some(
+            (c) => c.args?.modName === 'NoFolder' && c.args?.folderName === null && c.args?.included === true,
+          ),
+        ).toBe(true);
+        expect(calls.some((c) => c.args?.modName === 'NoFolder' && c.args?.included === false)).toBe(false);
+      });
+    });
   });
 });

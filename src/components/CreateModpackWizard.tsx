@@ -109,12 +109,12 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
   function applyStrategyAndAdvance(chosen: Strategy) {
     setStrategy(chosen);
     if (chosen === 'fromActive') {
-      setSelectedMods(new Set(mods.filter((m) => m.enabled).map((m) => m.name)));
+      setSelectedMods(new Set(mods.filter((m) => m.enabled).map((m) => m.folder_name ?? m.name)));
     } else if (chosen === 'empty') {
       setSelectedMods(new Set());
     } else if (chosen === 'clone' && cloneFrom) {
       const target = existingProfiles.find((p) => p.name === cloneFrom);
-      setSelectedMods(new Set(target ? target.mods.map((m) => m.name) : []));
+      setSelectedMods(new Set(target ? target.mods.map((m) => m.folder_name ?? m.name) : []));
     } else {
       // clone strategy without a chosen profile — keep empty; the
       // step 1 Clone tile is disabled until cloneFrom is set so the
@@ -136,23 +136,31 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
       // Bound the audit: a large selection against a slow GitHub/Nexus
       // could otherwise spin "Checking…" indefinitely. On timeout we fall
       // through to the catch (zeros) so the step always resolves.
+      // `selectedMods` is keyed by folder; the audit's `only` filter matches
+      // by mod NAME, so translate the selection to names for the call. A
+      // same-named twin may get audited too, but the folder-keyed filters
+      // below only count the mods the user actually picked.
+      const selectedNames = mods
+        .filter((m) => selectedMods.has(m.folder_name ?? m.name))
+        .map((m) => m.name);
       const entries: ModAuditEntry[] = await withTimeout(
-        auditModVersions(Array.from(selectedMods)),
+        auditModVersions(selectedNames),
         AUDIT_TIMEOUT_MS,
         'audit timed out',
       );
-      const selected = new Set(selectedMods);
+      const isSelected = (folder: string | null | undefined, name: string) =>
+        selectedMods.has(folder ?? name);
       const linked = mods.filter(
-        (m) => selected.has(m.name) && (m.github_url || m.nexus_url),
+        (m) => isSelected(m.folder_name, m.name) && (m.github_url || m.nexus_url),
       ).length;
       const updates = entries.filter(
-        (e) => e.needs_update && selected.has(e.mod_name),
+        (e) => e.needs_update && isSelected(e.folder_name, e.mod_name),
       ).length;
       const blocked = entries.filter(
-        (e) => e.game_version_too_old === true && selected.has(e.mod_name),
+        (e) => e.game_version_too_old === true && isSelected(e.folder_name, e.mod_name),
       ).length;
       const frozen = entries.filter(
-        (e) => e.pinned && selected.has(e.mod_name),
+        (e) => e.pinned && isSelected(e.folder_name, e.mod_name),
       ).length;
       setHealth({ linked, updates, blocked, frozen });
     } catch {
@@ -183,7 +191,9 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
       // frontend mod list.
       const created = await createProfile(trimmed);
       for (const pm of created.mods) {
-        if (selectedMods.has(pm.name)) continue;
+        // Key by folder so a same-named twin the user DIDN'T pick is still
+        // pruned (a name-keyed check would treat both as selected and leak it).
+        if (selectedMods.has(pm.folder_name ?? pm.name)) continue;
         await setProfileModMembership(
           trimmed,
           pm.name,
@@ -196,12 +206,12 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
       // mods are already in the snapshot), but it re-adds anything the
       // snapshot's compatibility filter dropped that the user explicitly
       // chose.
-      for (const modName of selectedMods) {
-        const mod = mods.find((m) => m.name === modName);
+      for (const key of selectedMods) {
+        const mod = mods.find((m) => (m.folder_name ?? m.name) === key);
         if (!mod) continue;
         await setProfileModMembership(
           trimmed,
-          modName,
+          mod.name,
           mod.folder_name ?? null,
           mod.mod_id ?? null,
           true,

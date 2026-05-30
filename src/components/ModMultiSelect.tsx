@@ -5,9 +5,11 @@
  * Select-all / Deselect-all toggle (operating on the visible/filtered set).
  *
  * Selection is controlled: the parent holds the `Set<string>` of selected
- * mod names and updates it via `onChange`. Labels are injected so the
- * component stays caller-agnostic (the wizard and the edit modal pass their
- * own i18n strings).
+ * mod KEYS (`folder_name ?? name`) and updates it via `onChange`. Keying by
+ * folder — not display name — is what lets two installed mods that share a
+ * manifest name be selected (and pruned) independently. Labels are injected
+ * so the component stays caller-agnostic (the wizard and the edit modal pass
+ * their own i18n strings).
  */
 import { useMemo, useState } from 'react';
 
@@ -30,7 +32,7 @@ export interface ModMultiSelectLabels {
 export interface ModMultiSelectProps {
   /** Full installed-mod list to choose from. */
   mods: ModInfo[];
-  /** Controlled selection (mod names). */
+  /** Controlled selection, keyed by `folder_name ?? name`. */
   selected: Set<string>;
   onChange: (next: Set<string>) => void;
   labels: ModMultiSelectLabels;
@@ -56,22 +58,22 @@ export function ModMultiSelect({ mods, selected, onChange, labels }: ModMultiSel
     return list;
   }, [mods, search, sort]);
 
-  function toggle(modName: string) {
+  function toggle(modKey: string) {
     const next = new Set(selected);
-    if (next.has(modName)) next.delete(modName);
-    else next.add(modName);
+    if (next.has(modKey)) next.delete(modKey);
+    else next.add(modKey);
     onChange(next);
   }
 
   // Bulk select/deselect over the currently-visible (filtered) rows.
   const allVisibleSelected =
-    visibleMods.length > 0 && visibleMods.every((m) => selected.has(m.name));
+    visibleMods.length > 0 && visibleMods.every((m) => selected.has(m.folder_name ?? m.name));
   function toggleSelectAllVisible() {
     const next = new Set(selected);
-    const names = visibleMods.map((m) => m.name);
-    const everyChecked = names.length > 0 && names.every((n) => next.has(n));
-    if (everyChecked) names.forEach((n) => next.delete(n));
-    else names.forEach((n) => next.add(n));
+    const keys = visibleMods.map((m) => m.folder_name ?? m.name);
+    const everyChecked = keys.length > 0 && keys.every((k) => next.has(k));
+    if (everyChecked) keys.forEach((k) => next.delete(k));
+    else keys.forEach((k) => next.add(k));
     onChange(next);
   }
 
@@ -119,13 +121,13 @@ export function ModMultiSelect({ mods, selected, onChange, labels }: ModMultiSel
         )}
         {visibleMods.map((mod) => {
           const key = mod.folder_name ?? mod.name;
-          const checked = selected.has(mod.name);
+          const checked = selected.has(key);
           return (
             <label key={key} className="gf-create-wizard-list-row">
               <input
                 type="checkbox"
                 checked={checked}
-                onChange={() => toggle(mod.name)}
+                onChange={() => toggle(key)}
                 aria-label={mod.name}
               />
               <span className="gf-create-wizard-list-name">{mod.name}</span>

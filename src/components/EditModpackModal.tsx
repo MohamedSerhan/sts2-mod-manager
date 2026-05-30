@@ -32,9 +32,10 @@ export function EditModpackModal({ profile, onClose, onSaved }: Props) {
   const toast = useToast();
   const isActive = activeProfile === profile.name;
 
-  // Selection starts as the pack's current members (by name).
+  // Selection starts as the pack's current members, keyed by folder so two
+  // mods that share a manifest name are tracked (and diffed) independently.
   const initialSelected = useMemo(
-    () => new Set(profile.mods.map((m) => m.name)),
+    () => new Set(profile.mods.map((m) => m.folder_name ?? m.name)),
     [profile.mods],
   );
   const [selected, setSelected] = useState<Set<string>>(initialSelected);
@@ -54,11 +55,13 @@ export function EditModpackModal({ profile, onClose, onSaved }: Props) {
 
   async function handleSave() {
     if (saving) return;
-    const current = new Set(profile.mods.map((m) => m.name));
+    const current = new Set(profile.mods.map((m) => m.folder_name ?? m.name));
     // toAdd: now-checked mods that weren't in the pack.
-    const toAdd = mods.filter((m) => selected.has(m.name) && !current.has(m.name));
+    const toAdd = mods.filter(
+      (m) => selected.has(m.folder_name ?? m.name) && !current.has(m.folder_name ?? m.name),
+    );
     // toRemove: pack mods that are no longer checked.
-    const toRemove = profile.mods.filter((m) => !selected.has(m.name));
+    const toRemove = profile.mods.filter((m) => !selected.has(m.folder_name ?? m.name));
 
     if (toAdd.length === 0 && toRemove.length === 0) {
       onClose();

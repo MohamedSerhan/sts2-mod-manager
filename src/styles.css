@@ -384,7 +384,7 @@ body {
   align-items: center;
   flex-wrap: wrap;
   gap: 10px;
-  padding-bottom: 4px;
+  padding-bottom: 10px;
   border-bottom: 1px solid var(--indigo-line);
 }
 .gf-modpack-detail-back {
@@ -416,11 +416,10 @@ body {
   gap: 8px;
   flex-wrap: wrap;
 }
-/* Status sub-line — hugs the header (pulled up against the flex gap) so it
-   reads as part of the header, then leaves a clear break before the
-   "In this modpack" section below. */
+/* Status sub-line — sits just below the header divider with a little breathing
+   room, then leaves a clear break before the "In this modpack" section below. */
 .gf-modpack-detail-status {
-  margin-top: -8px;
+  margin-top: -4px;
   margin-bottom: 6px;
   display: flex;
   align-items: center;

@@ -1822,18 +1822,19 @@ body {
   font-size: 12px;
   color: var(--ink-dim);
   margin: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* Full description. The view switcher's Compact mode hides .gf-modrow-meta
+     for density, so Comfortable shows the whole thing — wrap onto as many
+     lines as it needs instead of clamping to one with an ellipsis. */
+  white-space: normal;
+  line-height: 1.45;
 }
 .gf-modrow-note {
   font-size: 11px;
   color: var(--ink-dim);
   font-style: italic;
   margin: 2px 0 0 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  line-height: 1.4;
 }
 .gf-modrow-drawer {
   padding: 12px 14px 14px 14px;

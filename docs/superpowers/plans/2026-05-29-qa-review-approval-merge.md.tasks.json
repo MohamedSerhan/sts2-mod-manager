@@ -3,13 +3,13 @@
   "spec": "docs/superpowers/specs/2026-05-29-qa-review-approval-merge-design.md",
   "subProject": "C+ (QA-review loop + approval-gated auto-merge)",
   "generated": "2026-05-29",
-  "lastUpdated": "2026-05-29",
+  "lastUpdated": "2026-05-30",
   "worktree": "qa-merge (branch claude/qa-merge, off main c0962c1; gate runs post-merge)",
   "tasks": [
     {
       "planTask": 1,
       "nativeId": "39",
-      "status": "pending",
+      "status": "completed",
       "subject": "qa-pipeline.mjs — round-count + merge-eligibility helpers",
       "files": ["scripts/qa-pipeline.mjs", "scripts/qa-pipeline.test.mjs", ".github/workflows/build.yml"],
       "verifyCommand": "node --test scripts/qa-pipeline.test.mjs",
@@ -24,7 +24,7 @@
     {
       "planTask": 2,
       "nativeId": "40",
-      "status": "pending",
+      "status": "completed",
       "subject": "Extend claude-autofix.yml — upfront tests+changelog, qa label, revise gate",
       "files": [".github/workflows/claude-autofix.yml"],
       "verifyCommand": "python -c \"import yaml; yaml.safe_load(open('.github/workflows/claude-autofix.yml')); print('OK')\"",
@@ -39,7 +39,7 @@
     {
       "planTask": 3,
       "nativeId": "41",
-      "status": "pending",
+      "status": "completed",
       "subject": "claude-autofix-qa.yml — the QA-review loop",
       "files": [".github/workflows/claude-autofix-qa.yml"],
       "verifyCommand": "python -c \"import yaml; yaml.safe_load(open('.github/workflows/claude-autofix-qa.yml')); print('OK')\"",
@@ -55,7 +55,7 @@
     {
       "planTask": 4,
       "nativeId": "42",
-      "status": "pending",
+      "status": "completed",
       "subject": "claude-autofix-merge.yml — merge on the maintainer's approval",
       "files": [".github/workflows/claude-autofix-merge.yml"],
       "verifyCommand": "python -c \"import yaml; yaml.safe_load(open('.github/workflows/claude-autofix-merge.yml')); print('OK')\"",
@@ -70,7 +70,7 @@
     {
       "planTask": 5,
       "nativeId": "43",
-      "status": "pending",
+      "status": "completed",
       "subject": "Operator runbook (RELEASING.md) for QA + approval-merge",
       "files": ["RELEASING.md"],
       "verifyCommand": "grep -q \"qa-passed\" RELEASING.md && echo OK",

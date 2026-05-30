@@ -511,7 +511,7 @@ jobs:
           node-version: "22"
 
       - name: Download all build artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         continue-on-error: true
         with:
           path: dev-artifacts

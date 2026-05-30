@@ -47,6 +47,11 @@ interface OnboardingProps {
    *  onSkip; the rename clarifies intent at call sites where the user
    *  finished the flow rather than abandoning it. */
   onComplete: () => void;
+  /** Closes the overlay WITHOUT persisting the dismissal, so onboarding shows
+   *  again next launch. Used by the detect-game step's Skip when no game has
+   *  been found yet, so a no-game first-run user isn't locked out of the
+   *  guided intro forever. Optional; falls back to onSkip when not provided. */
+  onDismissWithoutPersist?: () => void;
   /** Creator path's primary CTA. Closes onboarding AND opens the
    *  CreateModpackWizard (or routes to the Modpacks page where the
    *  user can click Create — App.tsx owns the choice). Optional so
@@ -66,6 +71,7 @@ export function OnboardingOverlay({
   gameInfo,
   onSkip,
   onComplete,
+  onDismissWithoutPersist,
   onCreateModpack,
   onGoToHome,
   refreshGame,
@@ -413,9 +419,19 @@ export function OnboardingOverlay({
           >
             {t('common.back')}
           </button>
-          <button className="gf-btn-3" onClick={onSkip}>
-            {t('onboarding.skip')}
-          </button>
+          {/* On the detect-game step with no game found yet, Skip must NOT
+              permanently dismiss onboarding (the user can't pass the gate, so
+              they'd otherwise be locked out of the guided intro forever). Use a
+              non-persisting close + a label that signals it'll return. */}
+          {step === 'detect-game' && !detected ? (
+            <button className="gf-btn-3" onClick={onDismissWithoutPersist ?? onSkip}>
+              {t('onboarding.setUpLater')}
+            </button>
+          ) : (
+            <button className="gf-btn-3" onClick={onSkip}>
+              {t('onboarding.skip')}
+            </button>
+          )}
           <div style={{ flex: 1 }} />
 
           {/* Step-specific primary action. The audience step has no

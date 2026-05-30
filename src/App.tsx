@@ -131,9 +131,15 @@ function AppInner() {
     setShowOnboarding(true);
   }, []);
 
-  function dismissOnboarding() {
+  // `persist` defaults true (the normal "done / not interested" dismissal).
+  // The detect-game step passes false when no game is found yet, so a no-game
+  // first-run user — who can otherwise only Skip — still sees onboarding again
+  // next launch (e.g. once they've installed STS2) instead of being locked out.
+  function dismissOnboarding(persist = true) {
     setShowOnboarding(false);
-    try { localStorage.setItem('sts2mm-onboarded', 'true'); } catch {}
+    if (persist) {
+      try { localStorage.setItem('sts2mm-onboarded', 'true'); } catch {}
+    }
   }
 
   // Build the "preserved N config files" toast message. Includes up to
@@ -968,8 +974,9 @@ function AppInner() {
             {showOnboarding && (
               <OnboardingOverlay
                 gameInfo={gameInfo}
-                onSkip={dismissOnboarding}
-                onComplete={dismissOnboarding}
+                onSkip={() => dismissOnboarding(true)}
+                onComplete={() => dismissOnboarding(true)}
+                onDismissWithoutPersist={() => dismissOnboarding(false)}
                 onCreateModpack={() => {
                   // Creator-path final CTA. Close + route to Modpacks
                   // + pump the Create-wizard signal so ProfilesView

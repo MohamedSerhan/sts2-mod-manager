@@ -43,6 +43,7 @@ type GameInfoLike = Partial<React.ComponentProps<typeof OnboardingOverlay>['game
 function setup(gameInfo: GameInfoLike | null = null) {
   const onSkip = vi.fn();
   const onComplete = vi.fn();
+  const onDismissWithoutPersist = vi.fn();
   const onCreateModpack = vi.fn();
   const onGoToHome = vi.fn();
   const refreshGame = vi.fn(async () => {});
@@ -51,12 +52,13 @@ function setup(gameInfo: GameInfoLike | null = null) {
       gameInfo={gameInfo as any}
       onSkip={onSkip}
       onComplete={onComplete}
+      onDismissWithoutPersist={onDismissWithoutPersist}
       onCreateModpack={onCreateModpack}
       onGoToHome={onGoToHome}
       refreshGame={refreshGame}
     />,
   );
-  return { onSkip, onComplete, onCreateModpack, onGoToHome, refreshGame };
+  return { onSkip, onComplete, onDismissWithoutPersist, onCreateModpack, onGoToHome, refreshGame };
 }
 
 /** Walk from a freshly mounted overlay (with a valid game seeded so the
@@ -404,12 +406,24 @@ describe('<OnboardingOverlay> creator path', () => {
 });
 
 describe('<OnboardingOverlay> Skip behaviour', () => {
-  it('Skip button on detect-game calls onSkip', async () => {
+  it('detect-game with no game shows "Set up later" and dismisses WITHOUT persisting', async () => {
     const user = userEvent.setup();
-    const { onSkip, onComplete } = setup({ valid: false } as any);
+    const { onSkip, onDismissWithoutPersist, onComplete } = setup({ valid: false } as any);
+    // No game found → the user can't pass the gate, so Skip must not lock them
+    // out forever: it's relabelled and routed to the non-persisting close.
+    expect(screen.queryByRole('button', { name: /Skip setup/i })).toBeNull();
+    await user.click(screen.getByRole('button', { name: /Set up later/i }));
+    expect(onDismissWithoutPersist).toHaveBeenCalledTimes(1);
+    expect(onSkip).not.toHaveBeenCalled();
+    expect(onComplete).not.toHaveBeenCalled();
+  });
+
+  it('detect-game WITH a game shows "Skip setup" and calls onSkip (persists)', async () => {
+    const user = userEvent.setup();
+    const { onSkip, onDismissWithoutPersist } = setup({ valid: true, game_path: 'C:/STS2' } as any);
     await user.click(screen.getByRole('button', { name: /Skip setup/i }));
     expect(onSkip).toHaveBeenCalledTimes(1);
-    expect(onComplete).not.toHaveBeenCalled();
+    expect(onDismissWithoutPersist).not.toHaveBeenCalled();
   });
 
   it('Skip is reachable from every step in the player branch', async () => {

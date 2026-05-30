@@ -778,6 +778,7 @@
   },
   "onboarding": {
     "skip": "跳过设置",
+    "setUpLater": "稍后设置",
     "next": "下一步",
     "eyebrow": {
       "step1": "第 1 步 / 共 2 步 — 找到你的游戏",

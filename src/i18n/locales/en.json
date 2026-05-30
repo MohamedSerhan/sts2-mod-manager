@@ -778,6 +778,7 @@
   },
   "onboarding": {
     "skip": "Skip setup",
+    "setUpLater": "Set up later",
     "next": "Next",
     "eyebrow": {
       "step1": "Step 1 of 2 — Find your game",

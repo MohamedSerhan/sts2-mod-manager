@@ -72,7 +72,7 @@ describe('<App>', () => {
     );
     // Default: pretend the user has already dismissed onboarding. The
     // few tests that exercise the wizard explicitly `removeItem` this
-    // key before rendering. With this default, the `Skip setup` button
+    // key before rendering. With this default, the onboarding overlay
     // is NOT in the tree on render, so tests can deterministically skip
     // the `if (skip) await user.click(skip)` dance.
     try { localStorage.setItem('sts2mm-onboarded', 'true'); } catch {}
@@ -664,21 +664,21 @@ describe('<App>', () => {
     localStorage.removeItem('sts2mm-onboarded');
     render(<App />);
     await waitFor(() => {
-      // The onboarding step copy mentions "Slay the Spire 2 install" or similar.
-      expect(screen.queryByRole('button', { name: /Skip setup/i })).toBeInTheDocument();
+      // No game is detected in tests, so the dismiss button reads "Set up later".
+      expect(screen.queryByRole('button', { name: /Set up later/i })).toBeInTheDocument();
     });
   });
 
-  it('Onboarding overlay can be dismissed via Skip setup', async () => {
+  it('Onboarding overlay can be dismissed via Set up later (no game detected)', async () => {
     localStorage.removeItem('sts2mm-onboarded');
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /Skip setup/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Set up later/i })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole('button', { name: /Skip setup/i }));
+    await user.click(screen.getByRole('button', { name: /Set up later/i }));
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /Skip setup/i })).toBeNull();
+      expect(screen.queryByRole('button', { name: /Set up later/i })).toBeNull();
     });
   });
 
@@ -1660,7 +1660,7 @@ describe('<App>', () => {
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /Skip setup/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Set up later/i })).toBeInTheDocument();
     });
     // Step 1 — detect game.
     await user.click(await screen.findByRole('button', { name: /Try again/i }));
@@ -1700,7 +1700,7 @@ describe('<App>', () => {
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /Skip setup/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Set up later/i })).toBeInTheDocument();
     });
     // Step 1 — game's not yet detected by default, so click Try again
     // to use the registered detect_game_path mock above.
@@ -1854,7 +1854,7 @@ describe('<App>', () => {
     registerInvokeHandler('launch_game', () => true);
     render(<App />);
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /Skip setup/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Set up later/i })).toBeInTheDocument();
     });
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', ctrlKey: true }));
     // launch_game was NOT invoked.

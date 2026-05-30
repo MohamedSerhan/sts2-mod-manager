@@ -731,7 +731,7 @@ describe('<HomeView> Share-this-pack CTA error paths + PublishModal close', () =
     const share = screen.getAllByRole('button').find((b) => /Share modpack/i.test(b.textContent ?? ''));
     await user.click(share!);
     await waitFor(() => {
-      expect(screen.getByText(/Couldn't find this profile on disk\./)).toBeInTheDocument();
+      expect(screen.getByText(/Couldn't find this modpack on disk\./)).toBeInTheDocument();
     });
   });
 
@@ -751,7 +751,7 @@ describe('<HomeView> Share-this-pack CTA error paths + PublishModal close', () =
     breakIt = true;
     await user.click(share!);
     await waitFor(() => {
-      expect(screen.getByText(/Couldn't load profile: disk explode/)).toBeInTheDocument();
+      expect(screen.getByText(/Couldn't load modpack: disk explode/)).toBeInTheDocument();
     });
   });
 
@@ -771,7 +771,7 @@ describe('<HomeView> Share-this-pack CTA error paths + PublishModal close', () =
     const share = screen.getAllByRole('button').find((b) => /Share modpack/i.test(b.textContent ?? ''));
     await user.click(share!);
     await waitFor(() => {
-      expect(screen.getByText(/Couldn't load profile: list-fail-str/)).toBeInTheDocument();
+      expect(screen.getByText(/Couldn't load modpack: list-fail-str/)).toBeInTheDocument();
     });
   });
 

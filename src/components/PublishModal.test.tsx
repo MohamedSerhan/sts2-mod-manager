@@ -786,7 +786,7 @@ describe('<PublishModal>', () => {
         mod_name: null,
       },
     });
-    await screen.findByText(/Uploading profile manifest/);
+    await screen.findByText(/Uploading modpack manifest/);
     resolveShare(shareOk);
     await waitForModalTitle('Modpack published');
   });

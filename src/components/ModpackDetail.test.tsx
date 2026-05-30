@@ -210,6 +210,33 @@ describe('<ModpackDetail>', () => {
     expect(screen.queryByRole('menuitem', { name: /Auto-detect sources/i })).toBeNull();
   });
 
+  it('status line counts active mods in THIS pack, not the whole library', async () => {
+    // Library has 5 installed mods; the pack contains 4 of them, 3 enabled.
+    // The status line must read against the pack — never the 5-mod library.
+    registerInvokeHandler('get_installed_mods', () => [
+      modInfo({ name: 'A', folder_name: 'A', mod_id: 'A', enabled: true }),
+      modInfo({ name: 'B', folder_name: 'B', mod_id: 'B', enabled: false }),
+      modInfo({ name: 'C', folder_name: null, mod_id: 'C', enabled: true }),
+      modInfo({ name: 'D', folder_name: null, mod_id: null, enabled: true }),
+      // A library extra NOT in the pack — must not inflate the active count.
+      modInfo({ name: 'X', folder_name: 'X', mod_id: 'X', enabled: true }),
+    ]);
+    const profile = baseProfile({
+      name: 'MyPack',
+      mods: [
+        profileMod({ name: 'A', folder_name: 'A', mod_id: 'A' }),
+        profileMod({ name: 'B', folder_name: 'B', mod_id: 'B' }),
+        profileMod({ name: 'C', folder_name: null, mod_id: 'C' }),
+        profileMod({ name: 'D', folder_name: null, mod_id: null }),
+      ],
+    });
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+    await screen.findByRole('heading', { level: 2, name: 'MyPack' });
+    // A, C, D are enabled AND in the pack → 3 active of 4; library size (5) ignored.
+    expect(screen.getByText(/3 active \/ 4 mods in this modpack/i)).toBeInTheDocument();
+    expect(screen.queryByText(/in library/i)).toBeNull();
+  });
+
   it('the Audit action checks ONLY this pack\'s mods (scoped audit)', async () => {
     const profile = setupPack({
       inPack: [

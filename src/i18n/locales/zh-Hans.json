@@ -78,7 +78,7 @@
     "detail": {
       "inPackHeading": "此模组包中的模组",
       "inPackCount": "此模组包中的模组（{{count}}）",
-      "statusCounts": "{{active}} 个激活 / 库中 {{library}} 个",
+      "statusCounts": "{{active}} 个激活 / 此模组包共 {{total}} 个模组",
       "runningNow": "正在游戏中运行",
       "addMods": "添加模组",
       "checkUpdates": "检查更新",

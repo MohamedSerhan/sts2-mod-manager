@@ -78,7 +78,7 @@
     "detail": {
       "inPackHeading": "In this modpack",
       "inPackCount": "In this modpack ({{count}})",
-      "statusCounts": "{{active}} active / {{library}} in library",
+      "statusCounts": "{{active}} active / {{total}} mods in this modpack",
       "runningNow": "running in game now",
       "addMods": "Add mods",
       "checkUpdates": "Check for updates",

@@ -170,6 +170,16 @@ export function ModpackDetail({
     () => new Set(profile.mods.map((m) => m.name)),
     [profile.mods],
   );
+  // How many of THIS pack's mods are currently active (enabled) in the game.
+  // The status line is scoped to the pack — it must not report the whole
+  // library. Matched against the live on-disk state so it agrees with the
+  // active/stored toggles shown in the row list.
+  const activeInPack = useMemo(() => {
+    const key = (m: { folder_name?: string | null; mod_id?: string | null; name: string }) =>
+      m.folder_name ?? m.mod_id ?? m.name;
+    const enabled = new Set(mods.filter((m) => m.enabled).map(key));
+    return profile.mods.filter((pm) => enabled.has(key(pm))).length;
+  }, [mods, profile.mods]);
   // GitHub-updatable mods in THIS pack (drives the "N updates available"
   // pill + the update-all action).
   const packUpdateNames = useMemo(
@@ -519,7 +529,7 @@ export function ModpackDetail({
 
       {/* Status line — a quick read of what's loaded + game state. */}
       <div className="gf-modpack-detail-status">
-        {t('modpack.detail.statusCounts', { active: profile.mods.length, library: mods.length })}
+        {t('modpack.detail.statusCounts', { active: activeInPack, total: profile.mods.length })}
         {isActive && gameRunning && (
           <>
             {' · '}

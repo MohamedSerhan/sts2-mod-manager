@@ -90,6 +90,34 @@ describe('<BrowseModpacksView>', () => {
     expect(screen.getByText(/7 mods/)).toBeInTheDocument();
   });
 
+  it('filters cards via the search box (by name or author) and shows a no-matches state', async () => {
+    registerInvokeHandler('fetch_modpack_browser_page', () =>
+      makePage({
+        cards: [
+          { owner: 'alice', code: 'AAAA-AAAA-AAAA', name: 'Spire Essentials', mod_count: 5, created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-10T00:00:00Z' },
+          { owner: 'bob', code: 'BBBB-BBBB-BBBB', name: 'Anime Overhaul', mod_count: 12, created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-11T00:00:00Z' },
+        ],
+      }),
+    );
+    render(<Wrap />);
+    expect(await screen.findByText('Spire Essentials')).toBeInTheDocument();
+    expect(screen.getByText('Anime Overhaul')).toBeInTheDocument();
+
+    const search = screen.getByPlaceholderText(/Search modpacks/i);
+    // By name.
+    fireEvent.change(search, { target: { value: 'anime' } });
+    expect(screen.getByText('Anime Overhaul')).toBeInTheDocument();
+    expect(screen.queryByText('Spire Essentials')).toBeNull();
+    // By author.
+    fireEvent.change(search, { target: { value: 'alice' } });
+    expect(screen.getByText('Spire Essentials')).toBeInTheDocument();
+    expect(screen.queryByText('Anime Overhaul')).toBeNull();
+    // No matches.
+    fireEvent.change(search, { target: { value: 'zzzz-nothing' } });
+    expect(screen.getByText(/No modpacks match your search/i)).toBeInTheDocument();
+    expect(screen.queryByText('Spire Essentials')).toBeNull();
+  });
+
   it('collapses duplicate publishes from the same curator down to the newest', async () => {
     registerInvokeHandler('fetch_modpack_browser_page', () =>
       makePage({

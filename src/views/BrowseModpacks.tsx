@@ -63,6 +63,7 @@ export function BrowseModpacksView({ onGoToProfiles }: Props = {}) {
   const [rateLimited, setRateLimited] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<BrowserCard | null>(null);
+  const [query, setQuery] = useState('');
 
   async function load(force = false) {
     setLoading(true);
@@ -90,6 +91,16 @@ export function BrowseModpacksView({ onGoToProfiles }: Props = {}) {
     load(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Client-side filter over the loaded cards (name + author). The list is
+  // already deduped; the search just narrows it.
+  const allCards = page ? dedupeBrowserCards(page.cards) : [];
+  const q = query.trim().toLowerCase();
+  const visibleCards = q
+    ? allCards.filter(
+        (c) => c.name.toLowerCase().includes(q) || c.owner.toLowerCase().includes(q),
+      )
+    : allCards;
 
   return (
     <>
@@ -163,7 +174,7 @@ export function BrowseModpacksView({ onGoToProfiles }: Props = {}) {
         </div>
       )}
 
-      {page && page.cards.length > 0 && (
+      {page && allCards.length > 0 && (
         <>
           <div
             style={{
@@ -190,20 +201,36 @@ export function BrowseModpacksView({ onGoToProfiles }: Props = {}) {
               </button>
             )}
           </div>
-          <div className="gf-card-list">
-            {dedupeBrowserCards(page.cards).map((c) => (
-              <button
-                key={`${c.owner}/${c.code}`}
-                className="gf-card gf-card-clickable"
-                onClick={() => setSelected(c)}
-              >
-                <div className="gf-card-title">{c.name}</div>
-                <div className="gf-card-sub">
-                  @{c.owner} · {t('browseModpacks.modCount', { count: c.mod_count })} · {t('browseModpacks.updated', { time: relativeTime(c.updated_at, t) })}
-                </div>
-              </button>
-            ))}
-          </div>
+          <label className="gf-profile-library-search" style={{ marginBottom: 12 }}>
+            <Search size={13} />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={t('browseModpacks.searchPlaceholder')}
+              aria-label={t('browseModpacks.searchPlaceholder')}
+            />
+          </label>
+          {visibleCards.length === 0 ? (
+            <div className="gf-empty">
+              <Search size={28} />
+              <div className="gf-empty-title">{t('browseModpacks.noMatches')}</div>
+            </div>
+          ) : (
+            <div className="gf-card-list">
+              {visibleCards.map((c) => (
+                <button
+                  key={`${c.owner}/${c.code}`}
+                  className="gf-card gf-card-clickable"
+                  onClick={() => setSelected(c)}
+                >
+                  <div className="gf-card-title">{c.name}</div>
+                  <div className="gf-card-sub">
+                    @{c.owner} · {t('browseModpacks.modCount', { count: c.mod_count })} · {t('browseModpacks.updated', { time: relativeTime(c.updated_at, t) })}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
         </>
       )}
       </div>

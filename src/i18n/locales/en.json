@@ -525,6 +525,8 @@
     "timedOut": "Loading is taking longer than expected — GitHub may be slow or unreachable. Try again.",
     "tryAgain": "Try again",
     "noPacks": "No public modpacks found yet — be the first to share one!",
+    "searchPlaceholder": "Search modpacks by name or author…",
+    "noMatches": "No modpacks match your search.",
     "goProfiles": "Go to Modpacks",
     "cta": "Want yours here too? Publish a new pack — or re-share an existing one — from Profiles and pick <1>Public</1> visibility.",
     "modCount_one": "{{count}} mod",

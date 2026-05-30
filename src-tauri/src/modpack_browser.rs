@@ -93,7 +93,11 @@ struct ContentsListEntry {
     kind: String,        // "file" | "dir"
 }
 
-const PER_PAGE: u32 = 30;
+// GitHub search caps per_page at 100. Fetch the full first page so every
+// curator's `sts2mm-profiles` repo is considered (there were 44 globally and
+// the old value of 30 silently hid the rest). has_next_page still flags a
+// 100+ overflow for a future paginated pass.
+const PER_PAGE: u32 = 100;
 
 /// Search GitHub for repos literally named `sts2mm-profiles`. Returns
 /// `(items, has_next_page)`. The caller decides how to fan out from there.

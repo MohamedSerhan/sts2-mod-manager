@@ -20,6 +20,15 @@ test('classifyPaths ignores src-tauri/target, handles mixed + empty/null', () =>
   assert.deepEqual(classifyPaths([null, 42, 'src/a.ts']), { app: true, scripts: false, workflows: false });
 });
 
+test('classifyPaths flags root build/test config + public as app, not qa/registry', () => {
+  for (const p of ['index.html', 'tsconfig.json', 'tsconfig.node.json', 'vite.config.ts', 'vitest.config.ts', 'public/icon.png']) {
+    assert.equal(classifyPaths([p]).app, true, `${p} should be app`);
+  }
+  for (const p of ['qa/runner/x.mjs', 'registry/registry.json', 'AGENTS.md', 'README.md']) {
+    assert.equal(classifyPaths([p]).app, false, `${p} should NOT be app`);
+  }
+});
+
 test('unreleasedBulletCount counts bullets under [Unreleased] only', () => {
   const cl = `# Changelog
 

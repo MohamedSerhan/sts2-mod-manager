@@ -3,11 +3,20 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
+// Anything that affects the built app: frontend + Rust source, bundled assets,
+// and the root build/test config (Vite/TS/Tauri/manifests). NOT qa/ (test
+// harness) or registry/ (standalone data) — neither is imported by src/ or
+// bundled as a Tauri resource.
 const APP_PATTERNS = [
   /^src\//,
   /^src-tauri\/(?!target\/)/,
+  /^public\//,
+  /^index\.html$/,
   /^package\.json$/,
   /^package-lock\.json$/,
+  /^tsconfig(\.\w+)?\.json$/,
+  /^vite\.config\.[cm]?[jt]s$/,
+  /^vitest\.config\.[cm]?[jt]s$/,
   /^src-tauri\/Cargo\.toml$/,
   /^src-tauri\/Cargo\.lock$/,
   /^src-tauri\/tauri\.conf\.json$/,

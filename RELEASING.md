@@ -357,8 +357,9 @@ gh label create qa-needs-human \
 `CI Gate` is a single required status check on `main`.  It is change-aware: the
 checks it runs depend on what files a PR touches.
 
-- **App PRs** (changes under `src/`, `src-tauri/`, `public/`, `package.json`,
-  `Cargo.toml`, etc.) run the full suite:
+- **App PRs** (changes under `src/`, `src-tauri/`, `public/`, `index.html`, the
+  build/test config — `vite.config.ts`, `vitest.config.ts`, `tsconfig*.json` — or
+  the manifests `package.json` / `src-tauri/Cargo.toml`) run the full suite:
   - Vitest unit tests (`npm run test`)
   - Rust tests (`cargo test`)
   - A 3-platform build (Windows, macOS, Linux)

@@ -281,7 +281,11 @@ export function LibraryTable({
   // added mod shows up without a remount. Toggles/version bumps don't
   // change this, so they don't clobber the table's optimistic patches.
   const installedIdentitySignal = useMemo(
-    () => appMods.map((m) => m.folder_name ?? m.name).sort().join(' '),
+    // NUL-join (\u0000): an unambiguous separator that can't appear in a mod
+    // name, so the signal changes only when the set of installed identities
+    // does. Written as an escape, not a literal NUL byte — a raw NUL made the
+    // whole file read as binary to ripgrep/grep.
+    () => appMods.map((m) => m.folder_name ?? m.name).sort().join('\u0000'),
     [appMods],
   );
 
@@ -850,23 +854,23 @@ export function LibraryTable({
                       event.dataTransfer.getData('text/plain'),
                       10,
                     );
-                if (Number.isFinite(from) && from !== index) {
-                  // Optimistic local reorder, then commit.
-                  setLoadOrderDraft((prev) => {
-                    if (
-                      from < 0
-                      || from >= prev.length
-                      || index < 0
-                      || index >= prev.length
-                    ) {
-                      return prev;
-                    }
-                    const next = [...prev];
-                    const [moved] = next.splice(from, 1);
-                    next.splice(index, 0, moved);
-                    commitLoadOrder(next);
-                    return next;
-                  });
+                if (
+                  Number.isFinite(from)
+                  && from !== index
+                  && from >= 0
+                  && from < loadOrderDraft.length
+                  && index >= 0
+                  && index < loadOrderDraft.length
+                ) {
+                  // Optimistic local reorder, then commit. Build `next` OUTSIDE
+                  // any setState updater so the commit side-effect runs exactly
+                  // once — a side-effect inside an updater double-fires under
+                  // React StrictMode in dev.
+                  const next = [...loadOrderDraft];
+                  const [moved] = next.splice(from, 1);
+                  next.splice(index, 0, moved);
+                  setLoadOrderDraft(next);
+                  commitLoadOrder(next);
                 }
                 setDraggedIndex(null);
                 setDragOverIndex(null);

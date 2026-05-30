@@ -1388,8 +1388,13 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
         onClose={() => setPublishTarget(null)}
         onShared={(result) => {
           // Optimistically patch share info so the row flips Share→Re-share
-          // immediately even before the reload below settles.
-          setShareInfoMap((prev) => ({ ...prev, [publishTarget!.profile.name]: result }));
+          // immediately even before the reload below settles. Capture the name
+          // defensively: if publishTarget was cleared (modal closed) before the
+          // share resolved, skip the patch rather than deref null.
+          const sharedName = publishTarget?.profile.name;
+          if (sharedName) {
+            setShareInfoMap((prev) => ({ ...prev, [sharedName]: result }));
+          }
           // Share/Re-share enriches the saved profile manifest with bundle
           // URLs and listing state. Reload the profile list so the row shows
           // the persisted manifest immediately instead of waiting for a

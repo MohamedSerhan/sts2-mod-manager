@@ -434,7 +434,7 @@ describe('<ModsView>', () => {
       expect(screen.getByText(/0 installed/)).toBeInTheDocument();
     });
     await openAddMenu(user);
-    await user.click(screen.getByRole('menuitem', { name: /Open folder/ }));
+    await user.click(screen.getByRole('menuitem', { name: /Open mods folder/ }));
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'open_mods_folder')).toBe(true);
     });
@@ -1844,7 +1844,7 @@ describe('<ModsView>', () => {
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
     await openAddMenu(user);
-    await user.click(screen.getByRole('menuitem', { name: /Open folder/ }));
+    await user.click(screen.getByRole('menuitem', { name: /Open mods folder/ }));
     await waitFor(() => {
       expect(screen.getByText('no path')).toBeInTheDocument();
     });
@@ -1858,7 +1858,7 @@ describe('<ModsView>', () => {
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
     await openAddMenu(user);
-    await user.click(screen.getByRole('menuitem', { name: /Open folder/ }));
+    await user.click(screen.getByRole('menuitem', { name: /Open mods folder/ }));
     await waitFor(() => {
       expect(screen.getByText('plain-string-reason')).toBeInTheDocument();
     });

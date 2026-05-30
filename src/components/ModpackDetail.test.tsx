@@ -204,7 +204,7 @@ describe('<ModpackDetail>', () => {
     await openAddMods(user);
     expect(screen.getByRole('menuitem', { name: /Quick add URL/i })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: /Import mod/i })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: /Open folder/i })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /Open mods folder/i })).toBeInTheDocument();
     // Auto-detect sources is NOT an install action — it lives in the header
     // "Advanced actions" kebab, not this dropdown.
     expect(screen.queryByRole('menuitem', { name: /Auto-detect sources/i })).toBeNull();

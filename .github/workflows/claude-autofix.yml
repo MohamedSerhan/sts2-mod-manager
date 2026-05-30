@@ -40,35 +40,52 @@ jobs:
         with:
           fetch-depth: 0
       - name: Run Claude (implement fix + open PR)
+        id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: |
             --allowedTools Edit,Read,Write,Bash
-            --max-turns 40
+            --max-turns 60
           prompt: |
             A maintainer labeled issue #${{ github.event.issue.number }} with `auto-fix`,
             greenlighting an automated fix. Repository: ${{ github.repository }}.
 
-            Do the following:
-            1. Read issue #${{ github.event.issue.number }} — its title, body, and any prior
-               `@claude` investigation comment — to understand the bug or request.
-            2. Investigate the codebase and implement a fix on a NEW branch named EXACTLY
-               `auto-fix/${{ github.event.issue.number }}` (no suffix or slug — a later
-               workflow step locates the PR by this exact branch name). Branch off the
-               default branch.
-            3. Run the relevant tests (`npm test` runs the frontend + Rust suites; for a
-               Rust-only change `cargo test --manifest-path=src-tauri/Cargo.toml`). Iterate
-               until they pass. CI will also run the full suite on the PR.
-            4. Open a pull request targeting `main` whose body STARTS with
-               `Fixes #${{ github.event.issue.number }}`, summarizes the change, and explains
-               how to test it via the dev build. Do NOT apply any labels — a workflow step
-               applies them after you finish.
+            STEP 0 — GAUGE THE SCOPE FIRST. Read issue #${{ github.event.issue.number }} —
+            its title, body, and any prior `@claude` investigation/triage comment. Then judge
+            honestly: is this a CONTAINED change you can fully implement AND test in a single
+            focused pass, or is it LARGE / open-ended (touches several modules, a feature
+            spanning Rust + UI + i18n, a broad refactor, or anything you cannot confidently
+            finish and verify in one pass)?
 
-            If you CANNOT produce a confident fix, do NOT open a PR — instead post a comment
-            on the issue explaining precisely what blocks the fix.
+            • If it is LARGE: do NOT attempt the whole implementation — you will run out of
+              steps and produce nothing useful. Instead post ONE comment on the issue with a
+              concrete implementation PLAN: the files to touch, the approach, and a checklist
+              of the independent pieces the work breaks into. State plainly that the change is
+              too large for a single automated pass and is ready for a maintainer to split up
+              or drive. Then STOP — do not open a PR. You are done.
+
+            • If it is CONTAINED, proceed:
+              1. Investigate the codebase and implement the fix on a NEW branch named EXACTLY
+                 `auto-fix/${{ github.event.issue.number }}` (no suffix or slug — a later
+                 workflow step locates the PR by this exact branch name). Branch off the
+                 default branch.
+              2. Run the relevant tests (`npm test` runs the frontend + Rust suites; for a
+                 Rust-only change `cargo test --manifest-path=src-tauri/Cargo.toml`). Iterate
+                 until they pass. CI will also run the full suite on the PR.
+              3. Open a pull request targeting `main` whose body STARTS with
+                 `Fixes #${{ github.event.issue.number }}`, summarizes the change, and explains
+                 how to test it via the dev build. Do NOT apply any labels — a workflow step
+                 applies them after you finish.
+
+            NEVER finish having silently done nothing. Every run must end in exactly one of:
+            a PR opened (contained fix), or a comment posted on the issue (a plan for a
+            too-large change, or — if you cannot produce a confident fix — a precise
+            explanation of what blocks it).
 
       - name: Apply dev-build + auto-fix labels (PAT so the build triggers)
+        id: label
+        if: always()
         env:
           # Apply the labels with a PAT, not the default GITHUB_TOKEN: a label added by
           # GITHUB_TOKEN does NOT trigger the build workflow (anti-recursion). Applying
@@ -80,12 +97,35 @@ jobs:
         run: |
           PR=$(gh pr list --repo "$REPO" --head "auto-fix/${ISSUE}" --state open \
                  --json number --jq '.[0].number // empty')
+          echo "pr=$PR" >> "$GITHUB_OUTPUT"
           if [ -z "$PR" ]; then
-            echo "No PR on branch auto-fix/${ISSUE} (Claude may have declined to fix). Nothing to label."
+            echo "No PR on branch auto-fix/${ISSUE} (Claude declined, posted a plan, or errored). Nothing to label."
             exit 0
           fi
           gh pr edit "$PR" --repo "$REPO" --add-label dev-build --add-label auto-fix
           echo "Labeled PR #$PR with dev-build + auto-fix."
+
+      - name: Report back if the bot errored without opening a PR
+        # Never fail silently. If Claude errored (e.g. hit the step cap) and opened no PR,
+        # leave a comment so the maintainer isn't left staring at a red run with no context.
+        # When Claude finishes cleanly without a PR it has already commented (a plan for a
+        # too-large task, or the blocker), so this only fires on an actual error.
+        if: ${{ always() && steps.claude.outcome == 'failure' && steps.label.outputs.pr == '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue comment "$ISSUE" --repo "$REPO" --body "$(printf '%s\n' \
+            "🤖 The auto-fix bot couldn't complete this one automatically — it errored or ran out of steps before opening a PR." \
+            "" \
+            "This usually means the change is too large or open-ended for a single automated pass. A maintainer can split it into smaller issues or drive it manually." \
+            "" \
+            "Run log: ${RUN_URL}" \
+            "" \
+            "_Re-apply the \`auto-fix\` label to retry._")"
+          echo "Posted a no-PR failure comment on issue #${ISSUE}."
 
   revise:
     # Only `@claude` comments on a PR that carries the `auto-fix` label.

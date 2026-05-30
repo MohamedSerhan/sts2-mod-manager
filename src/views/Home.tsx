@@ -17,6 +17,7 @@ import {
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { useClipboard } from '../hooks/useClipboard';
+import { useConfirm } from '../components/ConfirmDialog';
 import { SubUpdateDetail } from '../components/SubUpdateDetail';
 import { WhatsNewCard } from '../components/WhatsNewCard';
 import { AboutCard } from '../components/AboutCard';
@@ -27,7 +28,7 @@ import {
   getShareInfo,
   listProfiles,
 } from '../hooks/useTauri';
-import { buildShareMessage, buildShareLink } from '../lib/shareImport';
+import { buildShareMessage, buildShareLink, importShareCodeSmart } from '../lib/shareImport';
 import type { ShareResult, Profile } from '../types';
 import { PublishModal } from '../components/PublishModal';
 import type { SubscriptionUpdate, Subscription } from '../types';
@@ -157,7 +158,11 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
   const { t } = useTranslation();
   const { gameInfo, mods, refreshAll, activeProfile, refreshSubUpdates } = useApp();
   const toast = useToast();
+  const confirm = useConfirm();
   const [subUpdates, setSubUpdates] = useState<SubscriptionUpdate[]>([]);
+  // Empty-state Quick-Add — paste a friend's share code right on Home.
+  const [importCode, setImportCode] = useState('');
+  const [importingCode, setImportingCode] = useState(false);
   const [applyingSub, setApplyingSub] = useState<string | null>(null);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [, setChecking] = useState(false);
@@ -255,6 +260,50 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e);
       toast.error(t('home.toast.couldntLoadProfile', { error: errMsg }));
+    }
+  }
+
+  // Import a pasted share code from the empty state — the same smart router
+  // as the Modpacks Quick-Add and deep links. On success refreshAll flips Home
+  // to the active-modpack hero (or a toast confirms what happened).
+  async function handleImportCode() {
+    const code = importCode.trim();
+    if (!code) return;
+    try {
+      setImportingCode(true);
+      const subs = await getSubscriptions().catch(() => []);
+      const outcome = await importShareCodeSmart(code, {
+        confirm,
+        subscriptions: subs,
+        activeProfile,
+        subUpdates,
+        t,
+      });
+      if (outcome.kind === 'cancelled') return;
+      setImportCode('');
+      await refreshAll();
+      refreshSubUpdates();
+      if (outcome.kind === 'installed') {
+        toast.success(
+          t('profiles.toast.importedModpack', { name: outcome.profile.name, count: outcome.profile.mods.length }),
+        );
+      } else if (outcome.kind === 'activated') {
+        toast.success(t('profiles.toast.activated', { name: outcome.profileName }));
+      } else if (outcome.kind === 'reapplied') {
+        const parts: string[] = [];
+        if (outcome.result.downloaded > 0) parts.push(t('common.parts.downloaded', { count: outcome.result.downloaded }));
+        if (outcome.result.failed_downloads.length > 0) parts.push(t('common.parts.failed', { count: outcome.result.failed_downloads.length }));
+        if (outcome.result.missing_mods.length > 0) parts.push(t('common.parts.stillMissing', { count: outcome.result.missing_mods.length }));
+        toast.info(parts.length ? t('profiles.toast.reappliedWithDetails', { name: outcome.profileName, details: parts.join(', ') }) : t('profiles.toast.reapplied', { name: outcome.profileName }));
+      } else if (outcome.kind === 'synced') {
+        toast.success(t('profiles.toast.syncedUpToDate', { name: outcome.profileName }));
+      } else if (outcome.kind === 'already-active') {
+        toast.info(t('profiles.toast.alreadyActive', { name: outcome.profileName }));
+      }
+    } catch (e) {
+      toast.error(t('profiles.toast.importFailed', { error: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setImportingCode(false);
     }
   }
 
@@ -395,6 +444,36 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
         <div className="gf-hero gf-hero-empty">
           <h1 className="gf-hero-empty-title">{t('home.heroEmptyTitle')}</h1>
           <p className="gf-hero-empty-body">{t('home.heroEmptyBody')}</p>
+          {/* Got a friend's code? Paste it right here — same smart import as
+              the Modpacks Quick-Add, so newcomers don't have to navigate away
+              first. */}
+          <div className="gf-quickadd" style={{ marginTop: 18, marginBottom: 14, maxWidth: 480 }}>
+            <div className="gf-quickadd-eyebrow">{t('modpacks.quickAdd.label')}</div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 11 }}>
+              <input
+                className="gf-input-hero"
+                aria-label={t('modpacks.quickAdd.label')}
+                placeholder={t('modpacks.quickAdd.placeholder')}
+                value={importCode}
+                onChange={(e) => setImportCode(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleImportCode()}
+                disabled={importingCode}
+              />
+              <button
+                type="button"
+                className="gf-btn-2"
+                onClick={handleImportCode}
+                disabled={importingCode || !importCode.trim()}
+              >
+                {importingCode ? (
+                  <RefreshCw size={14} className="animate-spin" />
+                ) : (
+                  <Plus size={14} />
+                )}
+                {t('modpacks.quickAdd.addBtn')}
+              </button>
+            </div>
+          </div>
           <div className="gf-hero-empty-ctas">
             <button
               type="button"

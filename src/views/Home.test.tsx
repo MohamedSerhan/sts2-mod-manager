@@ -7,12 +7,13 @@
  *   - No active modpack → empty state with ONE primary CTA ("Open
  *                         Modpacks").
  *
- * Quick-Add code paste, Other Packs list, About card, Pending Updates
- * banner, and the 3-CTA empty-state pattern all left Home. They're
- * exercised on the surfaces they moved to:
- *   - Quick-Add        → Profiles.test.tsx (Modpacks toolbar)
+ * Other Packs list, About card, Pending Updates banner, and the 3-CTA
+ * empty-state pattern all left Home. The empty state keeps a single inline
+ * share-code Quick-Add (paste a friend's code without leaving Home); the
+ * active hero has none. Surfaces that moved elsewhere:
  *   - Other Packs      → Profiles.test.tsx (Yours tab)
  *   - About card       → Settings.test.tsx (General tab)
+ *   - Modpacks toolbar Quick-Add → Profiles.test.tsx
  *
  * Intentionally-uncovered branches (≤ 10 % of total, all defensive):
  *   - `checkSubs` showToast-true success-toast branch. Only fires when
@@ -32,6 +33,15 @@ import userEvent from '@testing-library/user-event';
 import { HomeView } from './Home';
 import { AllProviders } from '../__test__/providers';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
+import { importShareCodeSmart } from '../lib/shareImport';
+
+// Mock ONLY the smart-import router so the empty-state Quick-Add's outcome
+// branches can be driven directly; buildShareLink/buildShareMessage stay real
+// (the active hero's share-code chip uses them).
+vi.mock('../lib/shareImport', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/shareImport')>();
+  return { ...actual, importShareCodeSmart: vi.fn() };
+});
 
 // jsdom 27+ exposes a real (read-only getter) Clipboard on Navigator —
 // a plain defineProperty on the instance is shadowed by the prototype
@@ -57,6 +67,7 @@ function installClipboard(fn: (text: string) => Promise<void>) {
 }
 beforeEach(() => {
   installClipboard(async () => {});
+  vi.mocked(importShareCodeSmart).mockReset();
 });
 
 function Wrap(props: Partial<React.ComponentProps<typeof HomeView>> = {}) {
@@ -113,20 +124,64 @@ describe('<HomeView> single-block launcher shape (v7)', () => {
     expect(onGoToProfiles).toHaveBeenCalledTimes(1);
   });
 
-  it('does NOT render a Quick-Add share-code input on Home (it moved to Modpacks)', async () => {
+  it('empty-state hero offers an inline share-code Quick-Add (paste a code on Home)', async () => {
+    registerInvokeHandler('get_active_profile', () => null);
     render(<Wrap />);
-    // The old Home Quick-Add input had a `username/AA5A-315D-61AE`
-    // placeholder. Wait for *something* to mount, then assert no such
-    // input exists anywhere on Home.
-    await waitFor(() => {
-      expect(
-        document.querySelector('.gf-hero'),
-      ).toBeInTheDocument();
-    });
+    // Newcomers can paste a friend's code right here instead of navigating to
+    // Modpacks first — it routes through the same smart import.
+    expect(
+      await screen.findByPlaceholderText(/username\/AA5A-315D-61AE/i),
+    ).toBeInTheDocument();
+    expect(document.querySelector('.gf-quickadd')).not.toBeNull();
+  });
+
+  it('does NOT show the Quick-Add once a modpack is active (the launcher hero replaces the empty state)', async () => {
+    registerInvokeHandler('get_active_profile', () => 'My Pack');
+    render(<Wrap />);
+    await screen.findByText('My Pack');
+    expect(document.querySelector('.gf-quickadd')).toBeNull();
     expect(screen.queryByPlaceholderText(/username\/AA5A-315D-61AE/i)).toBeNull();
-    // And no "Add Pack" button.
-    const addBtns = screen.queryAllByRole('button', { name: /Add Pack/i });
-    expect(addBtns).toHaveLength(0);
+  });
+
+  const ADDED_CODE = 'jess/AA5A-315D-61AE';
+  async function typeCodeAndAdd() {
+    registerInvokeHandler('get_active_profile', () => null);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    const input = (await screen.findByPlaceholderText(/username\/AA5A-315D-61AE/i)) as HTMLInputElement;
+    await user.type(input, ADDED_CODE);
+    await user.click(screen.getByRole('button', { name: /^Add$/i }));
+    return { user, input };
+  }
+
+  it.each([
+    ['installed', { kind: 'installed', profile: { name: 'JessPack', mods: [{}, {}] } }],
+    ['activated', { kind: 'activated', profileName: 'JessPack' }],
+    ['reapplied with details', { kind: 'reapplied', profileName: 'JessPack', result: { downloaded: 1, failed_downloads: ['x'], missing_mods: ['y'] } }],
+    ['reapplied no changes', { kind: 'reapplied', profileName: 'JessPack', result: { downloaded: 0, failed_downloads: [], missing_mods: [] } }],
+    ['synced', { kind: 'synced', profileName: 'JessPack' }],
+    ['already-active', { kind: 'already-active', profileName: 'JessPack' }],
+  ])('empty-state Quick-Add imports a pasted code (%s) and clears the field', async (_label, outcome) => {
+    vi.mocked(importShareCodeSmart).mockResolvedValue(outcome as never);
+    const { input } = await typeCodeAndAdd();
+    expect(importShareCodeSmart).toHaveBeenCalledWith(
+      ADDED_CODE,
+      expect.objectContaining({ confirm: expect.anything(), t: expect.anything() }),
+    );
+    await waitFor(() => expect(input.value).toBe(''));
+  });
+
+  it('empty-state Quick-Add keeps the typed code when the import is cancelled', async () => {
+    vi.mocked(importShareCodeSmart).mockResolvedValue({ kind: 'cancelled' } as never);
+    const { input } = await typeCodeAndAdd();
+    await waitFor(() => expect(importShareCodeSmart).toHaveBeenCalled());
+    expect(input.value).toBe(ADDED_CODE);
+  });
+
+  it('empty-state Quick-Add surfaces an error toast when the import throws', async () => {
+    vi.mocked(importShareCodeSmart).mockRejectedValue(new Error('bad code'));
+    await typeCodeAndAdd();
+    expect(await screen.findByText(/bad code/i)).toBeInTheDocument();
   });
 
   it('does NOT render an "Other Packs" / "Your other packs" section on Home', async () => {
@@ -174,10 +229,10 @@ describe('<HomeView> single-block launcher shape (v7)', () => {
     await waitFor(() => {
       expect(document.querySelector('.gf-hero')).toBeInTheDocument();
     });
-    // Exactly one .gf-hero on the page (no secondary cards underneath).
+    // Exactly one .gf-hero on the page (no secondary cards underneath). The
+    // empty-state hero's inline share-code Quick-Add lives *inside* this hero,
+    // so it doesn't add a second main block.
     expect(document.querySelectorAll('.gf-hero')).toHaveLength(1);
-    // And no Quick-Add panel.
-    expect(document.querySelectorAll('.gf-quickadd')).toHaveLength(0);
   });
 });
 

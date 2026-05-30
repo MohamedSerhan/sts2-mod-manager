@@ -474,89 +474,74 @@ function AppInner() {
     return () => window.removeEventListener('keydown', handler);
   }, [showOnboarding, gameRunning, launching]);
 
-  // Drag-and-drop zip import
+  // Drag-and-drop archive import. Tauri v2 handles OS file drops natively
+  // (dragDropEnabled defaults to true), which SUPPRESSES the webview's HTML5
+  // drag events — so the old document-level dragover/drop handlers never fired
+  // in the real app (only in a plain browser). Listen to Tauri's own
+  // window-level drag events instead: the drop event hands us absolute file
+  // PATHS directly (no fragile File.path access), and because the events are
+  // window-level there's no per-element flicker to defend against.
   useEffect(() => {
-    // Depth counter so the overlay doesn't flicker off as the cursor crosses
-    // child elements. dragenter/dragleave bubble and arrive in matched pairs:
-    // entering a child fires its dragenter (depth++) before the parent's
-    // dragleave (depth--), so depth stays > 0 while the drag is anywhere over
-    // the window and only reaches 0 when it truly leaves. The old code hid on
-    // every dragleave, so over a content-heavy view (the Mod Library / modpack
-    // mod list, which is a stack of rows) the overlay flickered and never
-    // showed — the very views where drag-to-install is most useful.
-    let depth = 0;
-    const isFileDrag = (e: DragEvent) =>
-      Array.from(e.dataTransfer?.types ?? []).includes('Files');
-    function handleDragEnter(e: DragEvent) {
-      depth += 1;
-      if (isFileDrag(e)) setDragOver(true);
-    }
-    function handleDragOver(e: DragEvent) {
-      // Required so the browser accepts the subsequent drop.
-      e.preventDefault();
-    }
-    function handleDragLeave() {
-      depth = Math.max(0, depth - 1);
-      if (depth === 0) setDragOver(false);
-    }
-    async function handleDrop(e: DragEvent) {
-      e.preventDefault();
-      depth = 0;
-      setDragOver(false);
-      const files = e.dataTransfer?.files;
-      if (!files || files.length === 0) return;
+    const unlisteners: Array<() => void> = [];
+    let disposed = false;
+    const track = (p: Promise<() => void>) => {
+      p.then((fn) => { if (disposed) fn(); else unlisteners.push(fn); }).catch(() => {
+        /* not inside a Tauri webview (e.g. plain-browser unit tests) */
+      });
+    };
 
-      for (const file of Array.from(files)) {
-        const lower = file.name.toLowerCase();
+    async function handleDroppedPaths(paths: string[]) {
+      for (const filePath of paths) {
+        const name = filePath.split(/[\\/]/).pop() || filePath;
+        const lower = name.toLowerCase();
         const isSupportedArchive =
           lower.endsWith('.zip') || lower.endsWith('.7z') || lower.endsWith('.rar');
-        if (isSupportedArchive) {
-          try {
-            // @ts-expect-error -- Tauri exposes file.path on dropped files
-            const filePath = file.path as string;
-            if (filePath) {
-              const mod = await installModFromFile(filePath);
-              // If a modpack detail view is open, the dropped mod joins
-              // that pack (and, on the active pack, loads in-game) — the
-              // same auto-add the modpack toolbar's Quick add / Import do.
-              const pack = viewedPackRef.current;
-              if (pack) {
-                try {
-                  await setProfileModMembership(pack, mod.name, mod.folder_name ?? null, mod.mod_id ?? null, true);
-                  // Only enable when it isn't already active — toggleMod
-                  // errors on an already-active mod (looks in mods_disabled).
-                  if (pack === activeProfileRef.current && !mod.enabled) {
-                    await toggleMod(mod.name, mod.folder_name ?? null, true);
-                  }
-                  toast.success(t('app.toast.installedModToPack', { name: mod.name, pack }));
-                } catch {
-                  // Membership failed — the mod is still installed on disk.
-                  toast.success(t('app.toast.installedMod', { name: mod.name }));
-                }
-              } else {
-                toast.success(t('app.toast.installedMod', { name: mod.name }));
+        if (!isSupportedArchive) {
+          toast.error(t('app.toast.unsupportedFile', { name }));
+          continue;
+        }
+        try {
+          const mod = await installModFromFile(filePath);
+          // If a modpack detail view is open, the dropped mod joins that pack
+          // (and, on the active pack, loads in-game) — the same auto-add the
+          // modpack toolbar's Quick add / Import do.
+          const pack = viewedPackRef.current;
+          if (pack) {
+            try {
+              await setProfileModMembership(pack, mod.name, mod.folder_name ?? null, mod.mod_id ?? null, true);
+              // Only enable when it isn't already active — toggleMod errors on
+              // an already-active mod (it looks in mods_disabled).
+              if (pack === activeProfileRef.current && !mod.enabled) {
+                await toggleMod(mod.name, mod.folder_name ?? null, true);
               }
-              await refreshAll();
+              toast.success(t('app.toast.installedModToPack', { name: mod.name, pack }));
+            } catch {
+              // Membership failed — the mod is still installed on disk.
+              toast.success(t('app.toast.installedMod', { name: mod.name }));
             }
-          } catch (err) {
-            const errMsg = err instanceof Error ? err.message : String(err);
-            toast.error(t('app.toast.installZipFailed', { file: file.name, error: errMsg }));
+          } else {
+            toast.success(t('app.toast.installedMod', { name: mod.name }));
           }
-        } else {
-          toast.error(t('app.toast.unsupportedFile', { name: file.name }));
+          await refreshAll();
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          toast.error(t('app.toast.installZipFailed', { file: name, error: errMsg }));
         }
       }
     }
 
-    document.addEventListener('dragenter', handleDragEnter);
-    document.addEventListener('dragover', handleDragOver);
-    document.addEventListener('dragleave', handleDragLeave);
-    document.addEventListener('drop', handleDrop);
+    track(listen('tauri://drag-enter', () => setDragOver(true)));
+    track(listen('tauri://drag-leave', () => setDragOver(false)));
+    track(
+      listen<{ paths: string[] }>('tauri://drag-drop', (event) => {
+        setDragOver(false);
+        void handleDroppedPaths(event.payload?.paths ?? []);
+      }),
+    );
+
     return () => {
-      document.removeEventListener('dragenter', handleDragEnter);
-      document.removeEventListener('dragover', handleDragOver);
-      document.removeEventListener('dragleave', handleDragLeave);
-      document.removeEventListener('drop', handleDrop);
+      disposed = true;
+      unlisteners.forEach((fn) => fn());
     };
   }, [refreshAll, toast]);
 

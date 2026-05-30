@@ -367,9 +367,13 @@ describe('<App>', () => {
   it('drag-over → drag-leave does not show dropzone after leave', async () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    // The dropzone shows only while dragOver is true; without a dragstart
-    // event firing, it should not be present.
-    expect(screen.queryByText('Drop to install')).toBeNull();
+    // Native Tauri drag-enter shows the overlay; drag-leave must hide it.
+    await fireTauriEvent('tauri://drag-enter', { paths: ['C:/x.zip'] });
+    await waitFor(() => { expect(screen.getByText('Drop to install')).toBeInTheDocument(); });
+    await fireTauriEvent('tauri://drag-leave', {});
+    await waitFor(() => {
+      expect(screen.queryByText('Drop to install')).toBeNull();
+    });
   });
 
   it('renders active-profile pill in the top bar', async () => {
@@ -416,16 +420,11 @@ describe('<App>', () => {
     expect(getInvokeCalls().some((c) => c.cmd === 'launch_game')).toBe(false);
   });
 
-  it('Drag-over with Files type shows the drop overlay', async () => {
+  it('Drag-enter shows the drop overlay', async () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    // The overlay shows on dragenter (depth-counted), not dragover.
-    const evt = new Event('dragenter', { bubbles: true, cancelable: true });
-    Object.defineProperty(evt, 'dataTransfer', {
-      value: { types: ['Files'] },
-      configurable: true,
-    });
-    document.dispatchEvent(evt);
+    // The overlay shows on Tauri's window-level drag-enter event.
+    await fireTauriEvent('tauri://drag-enter', { paths: ['C:/x.zip'] });
     await waitFor(() => {
       expect(screen.queryByText('Drop to install')).toBeInTheDocument();
     });
@@ -460,11 +459,14 @@ describe('<App>', () => {
     await screen.findByRole('heading', { level: 2, name: 'Stable' });
 
     // Drop a zip — the global handler installs it AND joins the viewed pack.
-    const file = { name: 'cool-mod.zip', path: 'C:/downloads/cool-mod.zip' };
-    const drop = new Event('drop', { bubbles: true, cancelable: true });
-    Object.defineProperty(drop, 'dataTransfer', { value: { files: [file] }, configurable: true });
-    document.dispatchEvent(drop);
+    // Tauri hands us absolute file PATHS (not File objects); basename 'Mod.zip'.
+    await fireTauriEvent('tauri://drag-drop', { paths: ['C:/downloads/Mod.zip'] });
 
+    await waitFor(() => {
+      expect(getInvokeCalls().some(
+        (c) => c.cmd === 'install_mod_from_file' && c.args?.path === 'C:/downloads/Mod.zip',
+      )).toBe(true);
+    });
     await waitFor(() => {
       const call = getInvokeCalls().find(
         (c) => c.cmd === 'set_profile_mod_membership' && c.args?.modName === 'Dropped',
@@ -483,14 +485,13 @@ describe('<App>', () => {
     }));
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    // On Home (no modpack open) — drop a zip.
-    const file = { name: 'loose.zip', path: 'C:/loose.zip' };
-    const drop = new Event('drop', { bubbles: true, cancelable: true });
-    Object.defineProperty(drop, 'dataTransfer', { value: { files: [file] }, configurable: true });
-    document.dispatchEvent(drop);
+    // On Home (no modpack open) — drop a zip via Tauri's native event.
+    await fireTauriEvent('tauri://drag-drop', { paths: ['C:/loose.zip'] });
 
     await waitFor(() => {
-      expect(getInvokeCalls().some((c) => c.cmd === 'install_mod_from_file')).toBe(true);
+      expect(getInvokeCalls().some(
+        (c) => c.cmd === 'install_mod_from_file' && c.args?.path === 'C:/loose.zip',
+      )).toBe(true);
     });
     // No pack is being viewed, so it must not touch membership.
     expect(getInvokeCalls().some((c) => c.cmd === 'set_profile_mod_membership')).toBe(false);
@@ -499,35 +500,12 @@ describe('<App>', () => {
   it('Drag-leave hides the drop overlay', async () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    const enter = new Event('dragenter', { bubbles: true, cancelable: true });
-    Object.defineProperty(enter, 'dataTransfer', { value: { types: ['Files'] } });
-    document.dispatchEvent(enter);
+    await fireTauriEvent('tauri://drag-enter', { paths: ['C:/x.zip'] });
     await waitFor(() => { expect(screen.getByText('Drop to install')).toBeInTheDocument(); });
-    document.dispatchEvent(new Event('dragleave', { bubbles: true, cancelable: true }));
+    await fireTauriEvent('tauri://drag-leave', {});
     await waitFor(() => {
       expect(screen.queryByText('Drop to install')).toBeNull();
     });
-  });
-
-  it('Drag overlay stays while crossing child elements (depth counter, no flicker)', async () => {
-    render(<App />);
-    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    const fileEnter = () => {
-      const e = new Event('dragenter', { bubbles: true, cancelable: true });
-      Object.defineProperty(e, 'dataTransfer', { value: { types: ['Files'] } });
-      return e;
-    };
-    // Enter the window, then enter a child (depth 2) before the parent's
-    // dragleave (depth back to 1). Over a content-heavy view this happens
-    // constantly; the overlay must NOT vanish mid-drag.
-    document.dispatchEvent(fileEnter());
-    document.dispatchEvent(fileEnter());
-    document.dispatchEvent(new Event('dragleave', { bubbles: true, cancelable: true }));
-    await waitFor(() => { expect(screen.getByText('Drop to install')).toBeInTheDocument(); });
-    expect(screen.getByText('Drop to install')).toBeInTheDocument();
-    // Only the final dragleave (depth 0) hides it.
-    document.dispatchEvent(new Event('dragleave', { bubbles: true, cancelable: true }));
-    await waitFor(() => { expect(screen.queryByText('Drop to install')).toBeNull(); });
   });
 
   it('HelpDrawer close button closes the drawer (covers App.tsx onClose wiring)', async () => {
@@ -740,17 +718,11 @@ describe('<App>', () => {
     }));
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    // Build a synthetic drop with a File-like object.
-    const drop = new Event('drop', { bubbles: true, cancelable: true });
-    const file = { name: 'mod.zip', path: 'C:/tmp/mod.zip' };
-    Object.defineProperty(drop, 'dataTransfer', {
-      value: { files: [file], types: ['Files'] },
-      configurable: true,
-    });
-    document.dispatchEvent(drop);
+    // Tauri drag-drop hands us an absolute path string.
+    await fireTauriEvent('tauri://drag-drop', { paths: ['C:/super.zip'] });
     await waitFor(() => {
       expect(getInvokeCalls().some(
-        (c) => c.cmd === 'install_mod_from_file' && c.args?.path === 'C:/tmp/mod.zip',
+        (c) => c.cmd === 'install_mod_from_file' && c.args?.path === 'C:/super.zip',
       )).toBe(true);
     });
   });
@@ -758,15 +730,12 @@ describe('<App>', () => {
   it('Drop event with a non-zip file shows an error toast', async () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    const drop = new Event('drop', { bubbles: true, cancelable: true });
-    Object.defineProperty(drop, 'dataTransfer', {
-      value: { files: [{ name: 'mod.tar.gz', path: 'C:/tmp/mod.tar.gz' }], types: ['Files'] },
-      configurable: true,
-    });
-    document.dispatchEvent(drop);
+    await fireTauriEvent('tauri://drag-drop', { paths: ['C:/readme.txt'] });
     await waitFor(() => {
       expect(screen.queryByText(/Unsupported file/)).toBeInTheDocument();
     });
+    // Unsupported extension is skipped before any install attempt.
+    expect(getInvokeCalls().some((c) => c.cmd === 'install_mod_from_file')).toBe(false);
   });
 
   it('Profiles nav badge appears when there are pending pack updates', async () => {
@@ -1480,12 +1449,7 @@ describe('<App>', () => {
     });
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    const drop = new Event('drop', { bubbles: true, cancelable: true });
-    Object.defineProperty(drop, 'dataTransfer', {
-      value: { files: [{ name: 'bad.zip', path: 'C:/tmp/bad.zip' }], types: ['Files'] },
-      configurable: true,
-    });
-    document.dispatchEvent(drop);
+    await fireTauriEvent('tauri://drag-drop', { paths: ['C:/bad.zip'] });
     await waitFor(() => {
       expect(screen.getByText(/Failed to install bad\.zip.*extract failed/)).toBeInTheDocument();
     });
@@ -1494,12 +1458,7 @@ describe('<App>', () => {
   it('Drop event with no files is a no-op', async () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    const drop = new Event('drop', { bubbles: true, cancelable: true });
-    Object.defineProperty(drop, 'dataTransfer', {
-      value: { files: [], types: ['Files'] },
-      configurable: true,
-    });
-    document.dispatchEvent(drop);
+    await fireTauriEvent('tauri://drag-drop', { paths: [] });
     // No error toast, no install call.
     expect(screen.queryByText(/Unsupported|Failed/)).toBeNull();
     expect(getInvokeCalls().some((c) => c.cmd === 'install_mod_from_file')).toBe(false);
@@ -2027,31 +1986,15 @@ describe('<App>', () => {
     document.body.removeChild(div);
   });
 
-  it('drag-over without Files type does NOT show dropzone', async () => {
-    // App.tsx:391 — `if (e.dataTransfer?.types.includes('Files'))` false branch.
-    render(<App />);
-    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    const over = new Event('dragover', { bubbles: true, cancelable: true });
-    Object.defineProperty(over, 'dataTransfer', { value: { types: ['text/plain'] } });
-    document.dispatchEvent(over);
-    // No "Drop to install" overlay.
-    expect(screen.queryByText('Drop to install')).toBeNull();
-  });
-
   it('Drop install error from a non-Error throw stringifies via String() (ternary false branch)', async () => {
-    // App.tsx:416 — `err instanceof Error ? err.message : String(err)`.
+    // App.tsx — `err instanceof Error ? err.message : String(err)`.
     // Throw a non-Error (a plain string) so the false branch fires.
     registerInvokeHandler('install_mod_from_file', () => {
       throw 'plain-string-rejection';
     });
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    const drop = new Event('drop', { bubbles: true, cancelable: true });
-    Object.defineProperty(drop, 'dataTransfer', {
-      value: { files: [{ name: 'x.zip', path: 'C:/tmp/x.zip' }], types: ['Files'] },
-      configurable: true,
-    });
-    document.dispatchEvent(drop);
+    await fireTauriEvent('tauri://drag-drop', { paths: ['C:/x.zip'] });
     await waitFor(() => {
       expect(screen.getByText(/Failed to install x\.zip.*plain-string-rejection/)).toBeInTheDocument();
     });

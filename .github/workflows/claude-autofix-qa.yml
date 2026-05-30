@@ -65,9 +65,10 @@ jobs:
       - name: Compute QA round + enforce the cap
         id: round
         run: |
-          # --slurp so the --jq filter runs once over all pages combined; a per-page --jq
-          # would emit back-to-back arrays (invalid JSON) once comments exceed one page.
-          BODIES=$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate --slurp --jq '[.[][].body]')
+          # gh --slurp combines all pages into one array of page-arrays; system jq then
+          # flattens to a single bodies array. (gh's --slurp can't be combined with --jq,
+          # and a per-page --jq would emit invalid back-to-back arrays past one page.)
+          BODIES=$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate --slurp | jq -c '[.[][].body]')
           ROUND=$(printf '%s' "$BODIES" | node scripts/qa-pipeline.mjs round)
           CAP=$(node scripts/qa-pipeline.mjs cap)
           echo "round=$ROUND" >> "$GITHUB_OUTPUT"

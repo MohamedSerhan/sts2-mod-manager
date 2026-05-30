@@ -476,18 +476,32 @@ function AppInner() {
 
   // Drag-and-drop zip import
   useEffect(() => {
-    function handleDragOver(e: DragEvent) {
-      e.preventDefault();
-      if (e.dataTransfer?.types.includes('Files')) {
-        setDragOver(true);
-      }
+    // Depth counter so the overlay doesn't flicker off as the cursor crosses
+    // child elements. dragenter/dragleave bubble and arrive in matched pairs:
+    // entering a child fires its dragenter (depth++) before the parent's
+    // dragleave (depth--), so depth stays > 0 while the drag is anywhere over
+    // the window and only reaches 0 when it truly leaves. The old code hid on
+    // every dragleave, so over a content-heavy view (the Mod Library / modpack
+    // mod list, which is a stack of rows) the overlay flickered and never
+    // showed — the very views where drag-to-install is most useful.
+    let depth = 0;
+    const isFileDrag = (e: DragEvent) =>
+      Array.from(e.dataTransfer?.types ?? []).includes('Files');
+    function handleDragEnter(e: DragEvent) {
+      depth += 1;
+      if (isFileDrag(e)) setDragOver(true);
     }
-    function handleDragLeave(e: DragEvent) {
+    function handleDragOver(e: DragEvent) {
+      // Required so the browser accepts the subsequent drop.
       e.preventDefault();
-      setDragOver(false);
+    }
+    function handleDragLeave() {
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) setDragOver(false);
     }
     async function handleDrop(e: DragEvent) {
       e.preventDefault();
+      depth = 0;
       setDragOver(false);
       const files = e.dataTransfer?.files;
       if (!files || files.length === 0) return;
@@ -534,10 +548,12 @@ function AppInner() {
       }
     }
 
+    document.addEventListener('dragenter', handleDragEnter);
     document.addEventListener('dragover', handleDragOver);
     document.addEventListener('dragleave', handleDragLeave);
     document.addEventListener('drop', handleDrop);
     return () => {
+      document.removeEventListener('dragenter', handleDragEnter);
       document.removeEventListener('dragover', handleDragOver);
       document.removeEventListener('dragleave', handleDragLeave);
       document.removeEventListener('drop', handleDrop);

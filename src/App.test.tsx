@@ -419,8 +419,8 @@ describe('<App>', () => {
   it('Drag-over with Files type shows the drop overlay', async () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    // Dispatch a synthetic dragover with Files in dataTransfer.types.
-    const evt = new Event('dragover', { bubbles: true, cancelable: true });
+    // The overlay shows on dragenter (depth-counted), not dragover.
+    const evt = new Event('dragenter', { bubbles: true, cancelable: true });
     Object.defineProperty(evt, 'dataTransfer', {
       value: { types: ['Files'] },
       configurable: true,
@@ -499,14 +499,35 @@ describe('<App>', () => {
   it('Drag-leave hides the drop overlay', async () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    const over = new Event('dragover', { bubbles: true, cancelable: true });
-    Object.defineProperty(over, 'dataTransfer', { value: { types: ['Files'] } });
-    document.dispatchEvent(over);
+    const enter = new Event('dragenter', { bubbles: true, cancelable: true });
+    Object.defineProperty(enter, 'dataTransfer', { value: { types: ['Files'] } });
+    document.dispatchEvent(enter);
     await waitFor(() => { expect(screen.getByText('Drop to install')).toBeInTheDocument(); });
     document.dispatchEvent(new Event('dragleave', { bubbles: true, cancelable: true }));
     await waitFor(() => {
       expect(screen.queryByText('Drop to install')).toBeNull();
     });
+  });
+
+  it('Drag overlay stays while crossing child elements (depth counter, no flicker)', async () => {
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    const fileEnter = () => {
+      const e = new Event('dragenter', { bubbles: true, cancelable: true });
+      Object.defineProperty(e, 'dataTransfer', { value: { types: ['Files'] } });
+      return e;
+    };
+    // Enter the window, then enter a child (depth 2) before the parent's
+    // dragleave (depth back to 1). Over a content-heavy view this happens
+    // constantly; the overlay must NOT vanish mid-drag.
+    document.dispatchEvent(fileEnter());
+    document.dispatchEvent(fileEnter());
+    document.dispatchEvent(new Event('dragleave', { bubbles: true, cancelable: true }));
+    await waitFor(() => { expect(screen.getByText('Drop to install')).toBeInTheDocument(); });
+    expect(screen.getByText('Drop to install')).toBeInTheDocument();
+    // Only the final dragleave (depth 0) hides it.
+    document.dispatchEvent(new Event('dragleave', { bubbles: true, cancelable: true }));
+    await waitFor(() => { expect(screen.queryByText('Drop to install')).toBeNull(); });
   });
 
   it('HelpDrawer close button closes the drawer (covers App.tsx onClose wiring)', async () => {

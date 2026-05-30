@@ -349,3 +349,60 @@ gh label create qa-needs-human \
 | **5-round cap** | The loop escalates to `qa-needs-human` rather than running forever. You always get the final word. |
 | **Releases stay manual** | The bot updates the `[Unreleased]` CHANGELOG section as part of its fix work, but it never cuts or publishes a release. `scripts/release.sh` remains your manual step. |
 | **No-`qa` PRs unaffected** | Removing the `qa` label (or never adding it) leaves the PR on the normal manual-merge path with no QA loop and no auto-merge. |
+
+### CI Gate (required checks)
+
+#### What it is
+
+`CI Gate` is a single required status check on `main`.  It is change-aware: the
+checks it runs depend on what files a PR touches.
+
+- **App PRs** (changes under `src/`, `src-tauri/`, `public/`, `package.json`,
+  `Cargo.toml`, etc.) run the full suite:
+  - Vitest unit tests (`npm run test`)
+  - Rust tests (`cargo test`)
+  - A 3-platform build (Windows, macOS, Linux)
+  - A CHANGELOG check — the PR must add a bullet under `[Unreleased]`
+- **Scripts / workflows / docs PRs** (changes limited to `.github/`, `scripts/`,
+  `docs/`, `*.md`) run lighter checks or none, so they stay fast and do not
+  require a full build.
+
+Because `CI Gate` is required on `main`, **nothing merges — the auto-fix bot's
+auto-merge or your own manual merge — until the check is green.**  This is the
+deterministic floor under QA-Claude's judgment: a broken change cannot ship to
+users autonomously, regardless of how the review loop resolves.
+
+#### The `no-changelog` opt-out
+
+App PRs must contain a `[Unreleased]` CHANGELOG bullet.  The auto-fix bot adds
+this automatically for user-facing fixes.
+
+For genuinely internal app changes — refactors, test-only work, build tooling
+that users will never notice — label the PR `no-changelog` to skip just the
+changelog check while leaving all other gates (tests, build) intact.
+
+#### One-time setup
+
+```bash
+# 1. Create the no-changelog opt-out label
+gh label create no-changelog \
+  --color ededed \
+  --description "App change with no user-facing CHANGELOG entry (skips the changelog gate)" \
+  --repo MohamedSerhan/sts2-mod-manager
+
+# 2. Require the CI Gate check on main + disallow direct pushes.
+# UI path (most reliable): Settings -> Branches -> Branch protection rules -> main:
+#   - "Require status checks to pass" -> add "CI Gate"
+#   - "Require a pull request before merging" (so direct pushes can't bypass the gate)
+# Or via API (shape varies by gh/API version; verify in the UI afterward):
+gh api -X PATCH repos/MohamedSerhan/sts2-mod-manager/branches/main/protection/required_status_checks \
+  -f 'strict=true' -f 'checks[][context]=CI Gate'
+```
+
+#### Safety note
+
+Requiring a pull request before merging (disallowing direct pushes to `main`) is
+what makes the gate non-bypassable in normal operation.  Without it, a direct
+push lands on `main` without ever touching `CI Gate`.  An admin can still force-
+push in a genuine emergency — that is the intentional escape hatch — but it
+should be a last resort, not routine practice.

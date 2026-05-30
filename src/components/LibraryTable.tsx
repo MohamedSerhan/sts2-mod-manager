@@ -38,6 +38,7 @@ import {
   membershipDisplayName,
   membershipRowKey,
 } from './LibraryRow';
+import { ModViewToggle, useModListDensity } from './ModViewToggle';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from './ConfirmDialog';
@@ -228,6 +229,8 @@ export function LibraryTable({
   const [visibleLimit, setVisibleLimit] = useState(pageSize);
   const [membershipSaving, setMembershipSaving] = useState<string | null>(null);
   const [storageSaving, setStorageSaving] = useState<string | null>(null);
+  // Comfortable / compact row density (persisted, shared with the modpack view).
+  const [density, setDensity] = useModListDensity();
 
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -687,7 +690,11 @@ export function LibraryTable({
   }
 
   return (
-    <div ref={rootRef} className="gf-profile-library" data-testid="library-table">
+    <div
+      ref={rootRef}
+      className={`gf-profile-library${density === 'compact' ? ' is-compact' : ''}`}
+      data-testid="library-table"
+    >
       <div className="gf-profile-library-toolbar">
         <label className="gf-profile-library-search">
           <Search size={13} />
@@ -705,13 +712,17 @@ export function LibraryTable({
         {/* Modpack view: the caller's actions (+ Add mods / Edit / Load
             order) share the search row, where sort/store-unused sit in the
             All Mods view. */}
-        {packScoped && toolbarActions && (
-          <div className="gf-profile-library-toolbar-actions">{toolbarActions}</div>
+        {packScoped && (
+          <div className="gf-profile-library-toolbar-actions">
+            <ModViewToggle density={density} onChange={setDensity} />
+            {toolbarActions}
+          </div>
         )}
         {/* The sort control is hidden in the dedicated modpack view: the list
             always shows load order there (sorting would fight it). */}
         {!packScoped && (
           <div className="gf-profile-library-toolbar-actions">
+            <ModViewToggle density={density} onChange={setDensity} />
             <label className="gf-sort-control gf-profile-library-sort">
               <span>{t('profiles.library.sort.label')}</span>
               <select

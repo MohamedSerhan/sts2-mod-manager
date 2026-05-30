@@ -140,6 +140,9 @@
     "inModpacks_one": "在 {{count}} 个模组包中",
     "inModpacks_other": "在 {{count}} 个模组包中",
     "inNoModpacks": "不在任何模组包中",
+    "viewLabel": "视图",
+    "viewComfortable": "宽松",
+    "viewCompact": "紧凑",
     "modpackMissing": "此模组包已不存在 — 请尝试刷新列表。"
   },
   "createModpack": {

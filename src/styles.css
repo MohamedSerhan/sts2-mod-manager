@@ -992,6 +992,41 @@ body {
   font-size: 12.5px;
 }
 .gf-profile-library-sort { flex: 0 0 auto; }
+/* ── View density toggle (comfortable / compact) ─────────────────── */
+.gf-view-toggle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  border: 1px solid var(--indigo-line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.gf-view-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 9px;
+  background: transparent;
+  color: var(--ink-dim);
+  border: 0;
+  cursor: pointer;
+  transition: background 0.13s ease, color 0.13s ease;
+}
+.gf-view-toggle-btn:hover { color: var(--ink); }
+.gf-view-toggle-btn.is-active {
+  background: var(--indigo-panel);
+  color: var(--ink);
+}
+/* Compact density: drop the per-row description + tighten the vertical rhythm
+   so more mods fit on screen. The title row + version/folder/modpack meta
+   stay. */
+.gf-profile-library.is-compact .gf-profile-library-row {
+  gap: 4px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.gf-profile-library.is-compact .gf-modrow-meta {
+  display: none;
+}
 .gf-profile-library-toolbar-actions {
   display: inline-flex;
   align-items: center;

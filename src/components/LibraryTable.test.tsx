@@ -125,6 +125,26 @@ describe('<LibraryTable>', () => {
     expect(screen.getAllByText('CardArtEditor').length).toBeGreaterThan(0);
   });
 
+  it('applies the compact density class when compact is the saved view preference', async () => {
+    localStorage.setItem('sts2mm-mod-density', 'compact');
+    registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [
+        {
+          name: 'BaseLib', version: '1.0.0', folder_name: 'BaseLib', mod_id: 'BaseLib',
+          installed_enabled: true,
+          profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+        },
+      ],
+    }));
+    render(<Wrap modpackName="Stable" />);
+    expect(await screen.findByTestId('library-table')).toHaveClass('is-compact');
+    // A View toggle is offered in the toolbar.
+    expect(screen.getByRole('button', { name: /^compact$/i })).toBeInTheDocument();
+    localStorage.removeItem('sts2mm-mod-density');
+  });
+
   it('shows the modpack explainer (drag + switching) when enableReorder is set', async () => {
     registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
     registerInvokeHandler('get_profile_memberships', () => ({

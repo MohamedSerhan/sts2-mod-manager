@@ -140,6 +140,9 @@
     "inModpacks_one": "In {{count}} modpack",
     "inModpacks_other": "In {{count}} modpacks",
     "inNoModpacks": "Not in a modpack",
+    "viewLabel": "View",
+    "viewComfortable": "Comfortable",
+    "viewCompact": "Compact",
     "modpackMissing": "This modpack doesn't exist any more — try refreshing the list."
   },
   "createModpack": {

@@ -1,0 +1,99 @@
+name: Claude auto-fix QA
+
+# The QA-review loop for `qa`-labeled PRs (bot or human-authored). An adversarial
+# QA-Claude audits the PR; on issues it posts `@claude <findings>` (which triggers
+# the revise flow in claude-autofix.yml), looping until it passes or hits the
+# 5-round cap (then it escalates to the maintainer). See the spec.
+on:
+  pull_request:
+    types: [opened, synchronize, labeled]
+
+jobs:
+  qa:
+    # Any `qa` PR — except once it's escalated (`qa-needs-human`), or when the trigger is
+    # QA adding its own `qa-passed` label (skip the redundant self-re-run; a real push
+    # still re-reviews via `synchronize`).
+    if: >-
+      ${{ contains(github.event.pull_request.labels.*.name, 'qa')
+          && !contains(github.event.pull_request.labels.*.name, 'qa-needs-human')
+          && !(github.event.action == 'labeled' && github.event.label.name == 'qa-passed') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+    env:
+      GH_TOKEN: ${{ secrets.DEV_BUILD_LABEL_TOKEN || secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: Compute QA round + enforce the cap
+        id: round
+        run: |
+          # --slurp so the --jq filter runs once over all pages combined; a per-page --jq
+          # would emit back-to-back arrays (invalid JSON) once comments exceed one page.
+          BODIES=$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate --slurp --jq '[.[][].body]')
+          ROUND=$(printf '%s' "$BODIES" | node scripts/qa-pipeline.mjs round)
+          CAP=$(node scripts/qa-pipeline.mjs cap)
+          echo "round=$ROUND" >> "$GITHUB_OUTPUT"
+          echo "cap=$CAP" >> "$GITHUB_OUTPUT"
+          if [ "$ROUND" -gt "$CAP" ]; then
+            echo "over_cap=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "over_cap=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Escalate to human (cap reached)
+        if: ${{ steps.round.outputs.over_cap == 'true' }}
+        run: |
+          gh pr edit "$PR" --repo "$REPO" --add-label qa-needs-human
+          gh pr comment "$PR" --repo "$REPO" --body "$(printf '%s\n' \
+            "QA reached the ${{ steps.round.outputs.cap }}-round cap without converging — escalating to @MohamedSerhan." \
+            "" \
+            "The automated review/revise loop has stopped. The latest QA findings above remain outstanding; please take it from here.")"
+      - name: Run QA review
+        if: ${{ steps.round.outputs.over_cap == 'false' }}
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: |
+            --allowedTools Read,Bash
+            --max-turns 40
+          prompt: |
+            You are an INDEPENDENT QA reviewer for pull request #${{ github.event.pull_request.number }}
+            in ${{ github.repository }}. This is QA round ${{ steps.round.outputs.round }} of a maximum
+            of ${{ steps.round.outputs.cap }}. The PR head branch is
+            `${{ github.event.pull_request.head.ref }}`.
+
+            Review the PR diff and the surrounding code, then audit rigorously:
+            - Does the change actually fix the issue it claims? (read the linked issue + PR body)
+            - Correctness and edge cases; any regressions introduced?
+            - Are there unit tests covering the change, and do they pass? RUN them
+              (`npm test`, or `cargo test --manifest-path=src-tauri/Cargo.toml` for Rust-only).
+            - Does it follow the codebase's patterns? Any obvious security problem?
+            - If the change is user-facing, is there an appropriate `[Unreleased]` CHANGELOG bullet
+              (player-language, no dev-speak)?
+
+            Then ACT (use the `gh` CLI, which is authenticated):
+            - If the PR is solid and ready for the maintainer's final review: run
+              `gh pr edit ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --add-label qa-passed`
+              and post a brief comment:
+              `gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --body "✅ QA passed (round ${{ steps.round.outputs.round }}). @MohamedSerhan ready for your final check."`
+              Do NOT post `@claude`.
+            - If there are REAL problems: post ONE comment that begins with the exact marker
+              `<!-- qa-round -->` on its own line, then `@claude`, then a concise NUMBERED list of the
+              specific problems to fix. Use:
+              `gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --body "<!-- qa-round -->
+              @claude <your numbered findings>"`
+              Do NOT add any label. (This triggers an automated revision.)
+
+            Be decisive: only block on real correctness / missing-test / security issues — each round
+            costs a full CI build. Do not nitpick style. Choose exactly ONE of the two actions above.

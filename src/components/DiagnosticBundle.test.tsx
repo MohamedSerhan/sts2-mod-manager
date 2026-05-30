@@ -51,12 +51,39 @@ function getCopyButton(): HTMLButtonElement {
 }
 
 function getOpenButton(): HTMLButtonElement {
-  // Primary action — "Open bug report on GitHub", or "Working…" mid-flight.
+  // Step-1 primary action — "Open bug report on GitHub", or "Working…"
+  // while the report builds.
   const btn = screen
     .getAllByRole('button')
     .find((b) => /Open bug report|Working/i.test(b.textContent ?? ''));
   expect(btn, 'Open bug report button must be in the DOM').toBeDefined();
   return btn as HTMLButtonElement;
+}
+
+function getUploadButton(): HTMLButtonElement {
+  // Step-2 action, only present after the consent banner appears —
+  // "Upload & open issue", or "Working…" mid-upload.
+  const btn = screen
+    .getAllByRole('button')
+    .find((b) => /Upload & open issue|Working/i.test(b.textContent ?? ''));
+  expect(btn, 'Upload & open issue button must be in the DOM').toBeDefined();
+  return btn as HTMLButtonElement;
+}
+
+// The in-modal consent banner also carries role="alert"; scope to the modal
+// so it isn't confused with the always-present toast live-region (rendered as
+// a sibling of the modal, outside it).
+async function findConsentBanner(): Promise<HTMLElement> {
+  return waitFor(() => {
+    const modal = document.querySelector('.gf-modal');
+    expect(modal, 'modal must be present').not.toBeNull();
+    return within(modal as HTMLElement).getByRole('alert');
+  });
+}
+
+function queryConsentBanner(): HTMLElement | null {
+  const modal = document.querySelector('.gf-modal');
+  return modal ? within(modal as HTMLElement).queryByRole('alert') : null;
 }
 
 describe('<DiagnosticBundle> (Report a bug)', () => {
@@ -253,20 +280,35 @@ describe('<DiagnosticBundle> (Report a bug)', () => {
     expect(await screen.findByText(/no browser/)).toBeInTheDocument();
   });
 
-  it('"Open bug report" uploads the report and links it (no truncation) when the endpoint is configured', async () => {
+  it('uploads + links the report (no truncation) only after the consent step is confirmed', async () => {
     // The maintainer endpoint stores the FULL report and returns a view
     // URL; the issue body then just links it, so nothing is truncated — and
-    // the user needs no token.
+    // the user needs no token. But the upload is irrevocable + public, so it
+    // must wait for a second, deliberate click past the consent banner.
     registerInvokeHandler('read_log_tail', () => 'x'.repeat(12000)); // long → would truncate
     registerInvokeHandler('get_log_path', () => '/x.log');
-    registerInvokeHandler('upload_bug_report', () => 'https://reports.example.dev/r/abc123');
+    const uploadSpy = vi.fn(() => 'https://reports.example.dev/r/abc123');
+    registerInvokeHandler('bug_report_endpoint_host', () => 'reports.example.dev');
+    registerInvokeHandler('upload_bug_report', uploadSpy);
     const user = userEvent.setup();
     render(<Wrap />);
     // A typed description flows into the issue body (redacted) alongside
     // the link — covers the "has description" branch.
     await user.type(screen.getByRole('textbox'), 'crash on launch');
-    await user.click(getOpenButton());
 
+    // Step 1: build + preview + consent banner — NOTHING uploaded yet.
+    await user.click(getOpenButton());
+    expect(await screen.findByDisplayValue(/Bug Report/)).toBeInTheDocument();
+    const consent = await findConsentBanner();
+    expect(consent).toHaveTextContent('reports.example.dev');
+    expect(consent).toHaveTextContent(/90 days/);
+    expect(uploadSpy).not.toHaveBeenCalled();
+    expect(openUrl).not.toHaveBeenCalled();
+
+    // Step 2: the deliberate "Upload & open issue" click is what sends it.
+    await user.click(getUploadButton());
+
+    expect(uploadSpy).toHaveBeenCalledTimes(1);
     expect(openUrl).toHaveBeenCalledTimes(1);
     const url = vi.mocked(openUrl).mock.calls[0][0] as string;
     const body = new URL(url).searchParams.get('body') ?? '';
@@ -280,17 +322,20 @@ describe('<DiagnosticBundle> (Report a bug)', () => {
     });
   });
 
-  it('"Open bug report" falls back to clipboard + a clean paste-me issue when the upload throws', async () => {
-    // Covers the catch around uploadBugReport: a thrown error (vs a null
-    // return) lands on the same lossless fallback — full report to clipboard,
-    // short paste-me issue body.
+  it('a configured upload that throws falls back to clipboard + a clean paste-me issue', async () => {
+    // Covers the catch around uploadBugReport in the consent step: a thrown
+    // error (vs a null return) lands on the same lossless fallback — full
+    // report to clipboard, short paste-me issue body.
     registerInvokeHandler('read_log_tail', () => 'GH body');
     registerInvokeHandler('get_log_path', () => '/x.log');
-    registerInvokeHandler('upload_bug_report', () => { throw new Error('endpoint not configured'); });
+    registerInvokeHandler('bug_report_endpoint_host', () => 'reports.example.dev');
+    registerInvokeHandler('upload_bug_report', () => { throw new Error('endpoint exploded'); });
     const writeText = setClipboard(async () => {});
     const user = userEvent.setup();
     render(<Wrap />);
-    await user.click(getOpenButton());
+    await user.click(getOpenButton());           // build + consent
+    await findConsentBanner();
+    await user.click(getUploadButton());          // consent → upload throws → fallback
 
     await waitFor(() => expect(writeText).toHaveBeenCalled());
     expect(writeText.mock.calls[0][0] as string).toContain('STS2 Mod Manager — Bug Report');
@@ -298,6 +343,74 @@ describe('<DiagnosticBundle> (Report a bug)', () => {
     const body = new URL(url).searchParams.get('body') ?? '';
     expect(body).toContain('clipboard');
     expect(body).not.toContain('--- Log tail');
+  });
+
+  it('the consent step names the host, and "Copy report" there copies without uploading', async () => {
+    const uploadSpy = vi.fn(() => 'https://reports.example.dev/r/zzz');
+    const writeText = setClipboard(async () => {});
+    registerInvokeHandler('read_log_tail', () => 'L');
+    registerInvokeHandler('get_log_path', () => '/x.log');
+    registerInvokeHandler('bug_report_endpoint_host', () => 'reports.example.dev');
+    registerInvokeHandler('upload_bug_report', uploadSpy);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.click(getOpenButton());
+    expect(await findConsentBanner()).toHaveTextContent('reports.example.dev');
+
+    // Bailing to "Copy report" must NOT upload or open anything.
+    await user.click(getCopyButton());
+    await waitFor(() => expect(writeText).toHaveBeenCalled());
+    expect(uploadSpy).not.toHaveBeenCalled();
+    expect(openUrl).not.toHaveBeenCalled();
+  });
+
+  it('editing the description after consent reverts to the build step (no stale upload)', async () => {
+    registerInvokeHandler('read_log_tail', () => 'L');
+    registerInvokeHandler('get_log_path', () => '/x.log');
+    registerInvokeHandler('bug_report_endpoint_host', () => 'reports.example.dev');
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.click(getOpenButton());
+    expect(await findConsentBanner()).toBeInTheDocument();
+
+    // Touching an input that feeds the report drops the consent step…
+    await user.type(screen.getByPlaceholderText(/what did you do/i), '!');
+    await waitFor(() => expect(queryConsentBanner()).toBeNull());
+    // …and the primary action is the build step again, not the uploader.
+    expect(getOpenButton()).toHaveTextContent(/Open bug report/i);
+  });
+
+  it('the upload button shows "Working…" and is disabled mid-upload', async () => {
+    let resolveUpload!: (u: string) => void;
+    registerInvokeHandler('read_log_tail', () => 'L');
+    registerInvokeHandler('get_log_path', () => '/x.log');
+    registerInvokeHandler('bug_report_endpoint_host', () => 'reports.example.dev');
+    registerInvokeHandler('upload_bug_report', () => new Promise<string>((res) => { resolveUpload = res; }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.click(getOpenButton());
+    await findConsentBanner();
+    await user.click(getUploadButton());
+    await waitFor(() => expect(getUploadButton()).toBeDisabled());
+    expect(getUploadButton().textContent).toMatch(/Working/);
+    resolveUpload('https://reports.example.dev/r/ok');
+    await waitFor(() => expect(openUrl).toHaveBeenCalled());
+  });
+
+  it('surfaces a toast when opening the issue rejects after a successful upload', async () => {
+    // Covers confirmUpload's catch: the upload succeeds but launching the
+    // browser fails.
+    registerInvokeHandler('read_log_tail', () => 'L');
+    registerInvokeHandler('get_log_path', () => '/x.log');
+    registerInvokeHandler('bug_report_endpoint_host', () => 'reports.example.dev');
+    registerInvokeHandler('upload_bug_report', () => 'https://reports.example.dev/r/abc');
+    vi.mocked(openUrl).mockRejectedValueOnce(new Error('no browser'));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.click(getOpenButton());
+    await findConsentBanner();
+    await user.click(getUploadButton());
+    expect(await screen.findByText(/no browser/)).toBeInTheDocument();
   });
 
   it('shows the game version / not-detected status from AppContext', async () => {

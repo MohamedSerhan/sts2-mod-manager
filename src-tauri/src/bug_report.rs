@@ -85,6 +85,35 @@ pub async fn upload_bug_report(content: String) -> Result<String, String> {
     parse_upload_response(&body)
 }
 
+/// Pull the host out of an endpoint URL without a URL-parsing crate: drop the
+/// scheme, take up to the first '/', '?' or '#', then drop any `userinfo@`.
+fn endpoint_host(endpoint: &str) -> Option<String> {
+    let endpoint = endpoint.trim();
+    if endpoint.is_empty() {
+        return None;
+    }
+    let after_scheme = endpoint.split("://").nth(1).unwrap_or(endpoint);
+    let authority = after_scheme
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or(after_scheme);
+    let host = authority.rsplit('@').next().unwrap_or(authority);
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
+    }
+}
+
+/// The HOST of the configured upload endpoint (e.g. "reports.example.dev"), or
+/// None when no endpoint is configured for this build (dev / fork builds never
+/// upload). Lets the UI tell the user exactly where a report will be sent — and
+/// whether it will be sent at all — before they consent.
+#[tauri::command]
+pub fn bug_report_endpoint_host() -> Option<String> {
+    BUG_REPORT_ENDPOINT.and_then(endpoint_host)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,5 +129,23 @@ mod tests {
         assert!(parse_upload_response(r#"{"url":""}"#).is_err());
         assert!(parse_upload_response(r#"{"nope":1}"#).is_err());
         assert!(parse_upload_response("not json").is_err());
+    }
+
+    #[test]
+    fn endpoint_host_extracts_host() {
+        assert_eq!(
+            endpoint_host("https://reports.example.dev/ingest"),
+            Some("reports.example.dev".into())
+        );
+        assert_eq!(
+            endpoint_host("https://u:p@h.example.com/x?y#z"),
+            Some("h.example.com".into())
+        );
+        assert_eq!(
+            endpoint_host("reports.example.dev/x"),
+            Some("reports.example.dev".into())
+        );
+        assert_eq!(endpoint_host("   "), None);
+        assert_eq!(endpoint_host(""), None);
     }
 }

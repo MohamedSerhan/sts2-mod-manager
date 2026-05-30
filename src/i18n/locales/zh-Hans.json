@@ -720,6 +720,8 @@
     "redactCheckbox": "隐藏用户目录路径和用户名",
     "copyReport": "复制报告",
     "openBugReport": "在 GitHub 上提交问题",
+    "uploadAndOpen": "上传并打开 issue",
+    "uploadConsent": "这会把下面的报告发送到 {{host}}，并在你的 GitHub issue 中放入一个公开链接。该链接大约会保留 90 天，任何拿到链接的人都能查看报告。想自己手动粘贴？请改用“复制报告”。",
     "working": "处理中…",
     "copiedToast": "问题报告已复制到剪贴板",
     "readyToast": "报告已生成 — 滚动预览并手动复制。",

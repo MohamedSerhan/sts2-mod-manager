@@ -720,6 +720,8 @@
     "redactCheckbox": "Redact home-folder paths and usernames",
     "copyReport": "Copy report",
     "openBugReport": "Open bug report on GitHub",
+    "uploadAndOpen": "Upload & open issue",
+    "uploadConsent": "This sends the report below to {{host}} and puts a public link to it in your GitHub issue. The link stays live for about 90 days and anyone who has it can read the report. Prefer to paste it yourself? Use “Copy report” instead.",
     "working": "Working…",
     "copiedToast": "Bug report copied to clipboard",
     "readyToast": "Report ready — scroll the preview to copy manually.",

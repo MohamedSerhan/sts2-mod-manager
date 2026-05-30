@@ -288,6 +288,12 @@ export async function uploadBugReport(content: string): Promise<string> {
   return invoke('upload_bug_report', { content });
 }
 
+/** Host of the configured bug-report upload endpoint, or null when this build
+ *  has none (dev / fork builds → no upload happens, clipboard fallback). */
+export async function bugReportEndpointHost(): Promise<string | null> {
+  return invoke('bug_report_endpoint_host');
+}
+
 // ── Mod Source Linking ─────────────────────────────────────────────────────
 
 export async function getModSources(): Promise<Record<string, ModSourceEntry>> {

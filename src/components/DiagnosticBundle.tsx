@@ -1,10 +1,17 @@
 import { useState } from 'react';
-import { Bug, Check, Copy, X } from 'lucide-react';
+import { AlertTriangle, Bug, Check, Copy, Upload, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { getVersion } from '@tauri-apps/api/app';
 import { useToast } from '../contexts/ToastContext';
 import { useApp } from '../contexts/AppContext';
-import { readLogTail, getLogPath, openExternalUrl, listProfiles, uploadBugReport } from '../hooks/useTauri';
+import {
+  readLogTail,
+  getLogPath,
+  openExternalUrl,
+  listProfiles,
+  uploadBugReport,
+  bugReportEndpointHost,
+} from '../hooks/useTauri';
 import { buildGitHubIssueUrl } from '../lib/githubLinks';
 
 // 1.7.0 — "Report a bug". Reworked from the old support-bundle: builds a
@@ -16,6 +23,15 @@ import { buildGitHubIssueUrl } from '../lib/githubLinks';
 // home-folder paths, tokens, and the user's own sts2mm-profiles repo /
 // username — is redacted; public mod source links are kept because they
 // help triage.
+//
+// Uploading the full report to the maintainer's endpoint is irrevocable
+// (it becomes a world-readable link that persists ~90 days), so it's a
+// deliberate TWO-STEP flow: the first "Report a bug" click builds and
+// shows the redacted preview, then — only when an upload endpoint is
+// configured for this build — pauses on a consent banner naming the host;
+// a second, explicitly-labelled "Upload & open issue" click is what
+// actually sends it. Builds with no endpoint (dev / forks) skip the
+// upload entirely and take the no-egress clipboard path.
 
 interface Props {
   open: boolean;
@@ -30,6 +46,10 @@ export function DiagnosticBundle({ open, onClose }: Props) {
   const [redactPaths, setRedactPaths] = useState(true);
   const [busy, setBusy] = useState(false);
   const [generated, setGenerated] = useState<string | null>(null);
+  // Host of the upload endpoint, learned at report-build time. When set we
+  // pause on a consent banner (`awaitingConsent`) before any upload happens.
+  const [uploadHost, setUploadHost] = useState<string | null>(null);
+  const [awaitingConsent, setAwaitingConsent] = useState(false);
 
   if (!open) return null;
 
@@ -138,33 +158,81 @@ export function DiagnosticBundle({ open, onClose }: Props) {
     }
   }
 
-  /** Primary action: build the full report, then open a prefilled GitHub
-   *  issue. Best path — upload the FULL report to the maintainer's ingest
-   *  endpoint (no user token) and link it in the issue, so nothing is
-   *  truncated and the user does nothing. Fallback (endpoint not configured
-   *  / upload failed) — copy the full report to the clipboard and prefill a
-   *  truncated issue body. */
-  async function openBugReport() {
+  /** No-egress path: copy the full report to the clipboard and prefill a
+   *  short GitHub issue that asks the reporter to paste it. The full report
+   *  is far larger than a prefilled-issue URL can carry, so we DON'T stuff it
+   *  into the URL — GitHub would truncate the logs (the exact problem we're
+   *  avoiding). Only if the clipboard is unavailable do we fall back to a
+   *  truncated body, so at least partial diagnostics reach the issue. Nothing
+   *  leaves the machine here — used for builds with no upload endpoint, and as
+   *  the fallback when a configured upload fails. */
+  async function fallbackToClipboard(report: string) {
+    const title = t('diagnosticBundle.reportGitHubIssueTitle');
+    const copied = await copyToClipboard(report);
+    if (copied) {
+      const body = [
+        redact(description.trim()) || t('diagnosticBundle.reportNoDescription'),
+        '',
+        t('diagnosticBundle.pasteReportNote'),
+      ].join('\n');
+      await openExternalUrl(buildGitHubIssueUrl(title, body));
+      toast.success(t('diagnosticBundle.openedAndCopiedToast'));
+    } else {
+      await openExternalUrl(buildGitHubIssueUrl(title, report));
+      toast.success(t('diagnosticBundle.openedToast'));
+    }
+  }
+
+  /** Step 1 (primary "Report a bug" button): build the full report and show
+   *  the redacted preview. If this build has an upload endpoint, learn its
+   *  host and PAUSE on a consent banner — the upload (irrevocable, public for
+   *  ~90 days) must be a separate, deliberate click. If there's no endpoint
+   *  (dev / fork builds), nothing can be uploaded, so go straight to the
+   *  no-egress clipboard path. */
+  async function handleReport() {
     if (busy) return;
     setBusy(true);
     try {
       const report = await buildReport();
       setGenerated(report);
-      const title = t('diagnosticBundle.reportGitHubIssueTitle');
+      // Learn the destination fresh at click time so the consent names the
+      // exact host and we never enter consent for a build that can't upload.
+      const host = await bugReportEndpointHost().catch(() => null);
+      if (host) {
+        setUploadHost(host);
+        setAwaitingConsent(true);
+      } else {
+        await fallbackToClipboard(report);
+      }
+    } catch (e) {
+      toast.error(t('diagnosticBundle.buildFailed', { error: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setBusy(false);
+    }
+  }
 
-      // Try the zero-effort path: full report → maintainer endpoint → link.
+  /** Step 2 (only reachable after `handleReport` shows the consent banner):
+   *  the user has read the preview + the "this uploads to <host>, public for
+   *  ~90 days" notice and explicitly chosen to send it. Upload the FULL report
+   *  to the maintainer's endpoint and link it in a prefilled issue, so nothing
+   *  is truncated. If the upload fails, fall back to the clipboard path rather
+   *  than dropping the report. */
+  async function confirmUpload() {
+    // The button is disabled while busy, so no re-entry guard is needed; we
+    // only narrow `generated` (always set once the consent banner shows).
+    if (!generated) return;
+    setBusy(true);
+    try {
+      const title = t('diagnosticBundle.reportGitHubIssueTitle');
       let reportUrl: string | null = null;
       try {
-        reportUrl = await uploadBugReport(report);
+        reportUrl = await uploadBugReport(generated);
       } catch {
-        // Endpoint not configured for this build, or the upload failed —
-        // fall through to the clipboard + truncated-issue path.
         reportUrl = null;
       }
-
       if (reportUrl) {
-        // Issue body carries the user's note + a link to the full report,
-        // so GitHub's URL limit never truncates the diagnostics. Redact the
+        // Issue body carries the user's note + a link to the full report, so
+        // GitHub's URL limit never truncates the diagnostics. Redact the
         // free-text description the same way the report is redacted.
         const body = [
           redact(description.trim()) || t('diagnosticBundle.reportNoDescription'),
@@ -173,34 +241,22 @@ export function DiagnosticBundle({ open, onClose }: Props) {
         ].join('\n');
         await openExternalUrl(buildGitHubIssueUrl(title, body));
         toast.success(t('diagnosticBundle.openedWithReportToast'));
-        return;
-      }
-
-      // Fallback (endpoint not configured / upload failed). The full report
-      // is far larger than a prefilled-issue URL can carry, so DON'T stuff it
-      // into the URL — GitHub would truncate the logs (the exact problem we're
-      // avoiding). Instead copy the full report to the clipboard and prefill a
-      // short body that asks the reporter to paste it: nothing is lost, just
-      // one Ctrl/Cmd+V. Only if the clipboard is unavailable do we fall back to
-      // a truncated body, so at least partial diagnostics reach the issue.
-      const copied = await copyToClipboard(report);
-      if (copied) {
-        const body = [
-          redact(description.trim()) || t('diagnosticBundle.reportNoDescription'),
-          '',
-          t('diagnosticBundle.pasteReportNote'),
-        ].join('\n');
-        await openExternalUrl(buildGitHubIssueUrl(title, body));
-        toast.success(t('diagnosticBundle.openedAndCopiedToast'));
       } else {
-        await openExternalUrl(buildGitHubIssueUrl(title, report));
-        toast.success(t('diagnosticBundle.openedToast'));
+        await fallbackToClipboard(generated);
       }
+      setAwaitingConsent(false);
     } catch (e) {
       toast.error(t('diagnosticBundle.buildFailed', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setBusy(false);
     }
+  }
+
+  /** Any edit to inputs that feed the report invalidates the built preview,
+   *  so drop back out of the consent step — the user must rebuild (and re-see
+   *  the preview) before they can upload stale content. */
+  function invalidatePending() {
+    if (awaitingConsent) setAwaitingConsent(false);
   }
 
   /** Secondary action: build + copy the full report without leaving the app. */
@@ -240,7 +296,10 @@ export function DiagnosticBundle({ open, onClose }: Props) {
             id="gf-bug-describe"
             className="gf-bug-describe"
             value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            onChange={(e) => {
+              setDescription(e.target.value);
+              invalidatePending();
+            }}
             placeholder={t('diagnosticBundle.describePlaceholder')}
             rows={4}
           />
@@ -292,7 +351,10 @@ export function DiagnosticBundle({ open, onClose }: Props) {
             <input
               type="checkbox"
               checked={redactPaths}
-              onChange={(e) => setRedactPaths(e.target.checked)}
+              onChange={(e) => {
+                setRedactPaths(e.target.checked);
+                invalidatePending();
+              }}
             />
             {t('diagnosticBundle.redactCheckbox')}
           </label>
@@ -316,6 +378,15 @@ export function DiagnosticBundle({ open, onClose }: Props) {
               }}
             />
           )}
+
+          {awaitingConsent && (
+            <div className="gf-banner gf-banner-warn" role="alert" style={{ marginTop: 12, marginBottom: 0 }}>
+              <span className="gf-banner-icon"><AlertTriangle size={16} /></span>
+              <span style={{ fontSize: 12.5, lineHeight: 1.5 }}>
+                {t('diagnosticBundle.uploadConsent', { host: uploadHost })}
+              </span>
+            </div>
+          )}
         </div>
         <div className="gf-modal-foot">
           <button className="gf-btn-3" onClick={onClose}>{t('common.close')}</button>
@@ -323,15 +394,27 @@ export function DiagnosticBundle({ open, onClose }: Props) {
           <button className="gf-btn-2" onClick={copyReport} disabled={busy}>
             <Copy size={12} /> {t('diagnosticBundle.copyReport')}
           </button>
-          <button className="gf-btn" onClick={openBugReport} disabled={busy}>
-            {busy ? (
-              t('diagnosticBundle.working')
-            ) : (
-              <>
-                <Bug size={12} /> {t('diagnosticBundle.openBugReport')}
-              </>
-            )}
-          </button>
+          {awaitingConsent ? (
+            <button className="gf-btn" onClick={confirmUpload} disabled={busy}>
+              {busy ? (
+                t('diagnosticBundle.working')
+              ) : (
+                <>
+                  <Upload size={12} /> {t('diagnosticBundle.uploadAndOpen')}
+                </>
+              )}
+            </button>
+          ) : (
+            <button className="gf-btn" onClick={handleReport} disabled={busy}>
+              {busy ? (
+                t('diagnosticBundle.working')
+              ) : (
+                <>
+                  <Bug size={12} /> {t('diagnosticBundle.openBugReport')}
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
     </div>

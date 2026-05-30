@@ -311,6 +311,7 @@ pub fn run() {
             profiles::get_profile_drift,
             profiles::save_profile_drift,
             bug_report::upload_bug_report,
+            bug_report::bug_report_endpoint_host,
             // Curator workflow
             updater::check_for_updates,
             updater::update_mod,

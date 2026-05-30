@@ -19,7 +19,6 @@
     "refresh": "刷新",
     "applying": "应用中...",
     "import": "导入",
-    "importing": "导入中...",
     "publish": "发布",
     "publishing": "发布中…",
     "activate": "激活",
@@ -30,7 +29,6 @@
     "dismiss": "关闭",
     "moreActions": "更多操作",
     "notifications": "通知",
-    "beta": "测试版",
     "refreshing": "正在刷新…",
     "advanced": "高级",
     "whatsThis": "这是什么意思？",
@@ -45,9 +43,7 @@
       "disabledOrphans_other": "已禁用 {{count}} 个多余模组",
       "downloadedNum": "已下载 {{count}} 个",
       "downloadsFailed_one": "{{count}} 个下载失败",
-      "downloadsFailed_other": "{{count}} 个下载失败",
-      "removedOrphans_one": "已移除 {{count}} 个游离模组",
-      "removedOrphans_other": "已移除 {{count}} 个游离模组"
+      "downloadsFailed_other": "{{count}} 个下载失败"
     }
   },
   "confirm": {
@@ -62,22 +58,8 @@
     "openDetailAria": "打开模组包 {{name}}",
     "modCount_one": "{{count}} 个模组",
     "modCount_other": "{{count}} 个模组",
-    "auditSummary": {
-      "updates_one": "有 {{count}} 个更新可用",
-      "updates_other": "有 {{count}} 个更新可用",
-      "missing_one": "{{count}} 个模组缺少来源",
-      "missing_other": "{{count}} 个模组缺少来源",
-      "blocked_one": "{{count}} 个模组因游戏版本被阻止",
-      "blocked_other": "{{count}} 个模组因游戏版本被阻止"
-    },
-    "membership": {
-      "in": "已加入此模组包",
-      "notIn": "未加入此模组包",
-      "includedOff": "已加入但在此模组包中已关闭"
-    },
     "detail": {
       "inPackHeading": "此模组包中的模组",
-      "inPackCount": "此模组包中的模组（{{count}}）",
       "statusCounts": "{{active}} 个激活 / 此模组包共 {{total}} 个模组",
       "runningNow": "正在游戏中运行",
       "addMods": "添加模组",
@@ -85,7 +67,6 @@
       "updatesAvailable_one": "有 {{count}} 个更新",
       "updatesAvailable_other": "有 {{count}} 个更新",
       "inPackOrderNote": "按加载顺序排列（最上面最先加载）。使用「加载顺序」重新排序。",
-      "availableHeading": "从模组库添加",
       "availableCount": "从模组库添加（{{count}}）",
       "availableNoMatch": "没有匹配搜索的模组库模组。",
       "libraryShow": "展开",
@@ -107,13 +88,9 @@
       "removeFromPackTitle": "从整合包中移除此模组",
       "removeFromPackAria": "从此整合包移除 {{mod}}",
       "add": "添加",
-      "emptyInPack": "此模组包中还没有模组——可从下方的模组库添加。",
       "allInPack": "所有已安装的模组都已加入此模组包。",
       "added": "已将 {{mod}} 添加到 {{pack}}",
-      "removed": "已从 {{pack}} 移除 {{mod}}",
-      "addFailed": "无法添加 {{mod}}：{{error}}",
-      "removeFailed": "无法移除 {{mod}}：{{error}}",
-      "advanced": "高级"
+      "addFailed": "无法添加 {{mod}}：{{error}}"
     },
     "edit": {
       "title": "编辑“{{name}}”",
@@ -132,7 +109,6 @@
     }
   },
   "libraryTable": {
-    "membershipCheckbox": "切换 {{mod}} 在 {{modpack}} 中的状态",
     "inPack": "已在整合包中",
     "notInPack": "不在整合包中",
     "inPackTitle": "已在 {{modpack}} 中 — 在 ⋯ 菜单中更改归属",
@@ -269,7 +245,6 @@
       "subtitle": "你关注的以及自己创建的所有模组包"
     },
     "actions": {
-      "addByCode": "添加模组包代码",
       "importJson": "导入模组包 JSON",
       "snapshotCurrent": "快照当前模组包",
       "newProfile": "创建模组包"
@@ -302,7 +277,6 @@
     },
     "drift": {
       "title": "{{name}} 已发生偏离",
-      "desc": "{{details}}",
       "hint": "自清单记录以来。保存更改以更新模组包，或修复以恢复。",
       "followedHint": "自清单记录以来。此模组包为关注的他人作品，无法保存更改——可修复以恢复原版，或复制一份以保留你的改动。",
       "newItems": "{{count}} 个新增",
@@ -315,8 +289,6 @@
       "repairTitle": "重新应用清单并存储多余的启用模组"
     },
     "form": {
-      "codeLabel": "模组包代码（来自好友）",
-      "codePlaceholder": "username/XXXX-XXXX-XXXX",
       "jsonLabel": "粘贴模组包 JSON",
       "jsonPlaceholder": "{\"name\": \"...\", \"mods\": [...]}"
     },
@@ -425,8 +397,6 @@
         "activeFirst": "活跃优先",
         "storedFirst": "已存储优先"
       },
-      "readOnly": "只读",
-      "readOnlyTitle": "关注的模组包为只读。复制该模组包后即可编辑。",
       "empty": {
         "title": "未安装任何模组",
         "hint": "先安装模组，然后使用模组库选择每个模组包包含哪些模组。"
@@ -552,7 +522,6 @@
     "couldntLoad": "无法加载整合包：{{error}}",
     "installed": "已安装：{{name}}",
     "installFailed": "安装失败：{{error}}",
-    "betaTitle": "公开模组浏览器仍在调整中。",
     "installingNamed": "正在安装 {{name}}"
   },
   "modpacks": {
@@ -1010,8 +979,7 @@
       "syncedModpack": "已同步整合包 \"{{name}}\" - 你已是最新版本！"
     },
     "hero": {
-      "title": "分享码",
-      "placeholder": "username/AA5A-315D-61AE"
+      "title": "分享码"
     }
   },
   "help": {
@@ -1197,8 +1165,6 @@
     "enableAll": "全部启用",
     "disableAll": "全部禁用",
     "deleteAll": "全部删除",
-    "noMatch": "未找到匹配的模组",
-    "noMatchSub": "尝试不同的搜索词。",
     "pinned": "已冻结",
     "pinnedTitle": "已冻结 — 更新和整合包变更会跳过此模组的版本和启用/禁用状态",
     "latest": "最新",
@@ -1207,7 +1173,6 @@
     "updateClickTitle": "点击从 v{{current}} 更新至 v{{target}}。与设置 → 审计流程相同。",
     "closeSts2FirstDot": "请先关闭 STS2。",
     "updating": "更新中…",
-    "downloadFromNexus": "从 Nexus 下载",
     "updateBlockedByGameVersion": "更新被游戏版本阻止",
     "snoozed": "已跳过",
     "auditError": "审计错误",
@@ -1232,12 +1197,7 @@
     "updateAllTitle": "更新每个有挂起更新的 GitHub 链接模组。已冻结的模组将被跳过。",
     "updateAllLabel": "更新 {{count}} 个模组",
     "quickAddLabel": "GitHub URL、Nexus URL 或 github:owner/repo",
-    "emptyDescription": "浏览以安装模组，粘贴好友的整合包代码，或将 .zip 文件拖放到此窗口任意位置。",
-    "disambiguatorTitle": "安装了两个名为 \"{{name}}\" 的模组。此模组由 {{identifier}} 标识。",
-    "disambiguatorAuthor": "作者：{{author}}",
-    "disambiguatorFolder": "文件夹：{{folder}}",
     "subtitleDisabledSuffix": "，{{count}} 已禁用",
-    "nexusUpdateTitle": "Nexus 上有 v{{nexusVer}}（你当前为 v{{localVer}}）。点击打开 Nexus 文件页 — 选择 \"Slow Download\" / \"Manual\"，管理器会在 zip 下载到 Downloads 文件夹后自动安装。",
     "snoozedTitle": "更新建议已推迟至 v{{version}}。当有新版本发布时自动过期。",
     "gameVersionBlockedTitle": "存在新版本 (v{{target}}) 但需要更新的杀戮尖塔 2 版本。更新 STS2（或切换测试分支）以获取；在此期间管理器可以安装较旧的兼容版本。",
     "minGameVersionTitle": "此模组的清单声明 min_game_version={{minVer}}。你的 STS2 版本为 v{{yourVer}}。游戏加载器将静默跳过此模组，直到你更新 STS2 或切换测试分支。使用修复（高级 kebab 菜单）回滚到兼容版本。",
@@ -1268,12 +1228,6 @@
     "toast": {
       "updated": "已更新 '{{name}}' 至 v{{version}}",
       "updateFailed": "更新 '{{name}}' 失败：{{error}}",
-      "addedToModpack": "已将「{{mod}}」添加到 {{pack}}",
-      "removedFromModpack": "已从 {{pack}} 中移除「{{mod}}」",
-      "membershipFailed": "更新模组包成员关系失败：{{error}}",
-      "enabled": "{{name}} 已启用",
-      "disabled": "{{name}} 已禁用",
-      "toggleFailed": "切换 {{name}} 失败：{{error}}",
       "unpinned": "已解除冻结 {{name}}",
       "pinned": "已冻结 {{name}} — 更新和整合包变更会跳过它",
       "pinAction": "冻结",
@@ -1307,27 +1261,15 @@
     "allInstalledTitle": "已安装的所有模组",
     "allInstalledSubtitle": "你已安装到本地的所有模组。当前的模组包决定哪些模组会被加载到游戏中。",
     "manageActiveModpackLink": "管理当前模组包 →",
-    "searchPlaceholder": "搜索模组…",
-    "sort": {
-      "label": "排序",
-      "nameAsc": "名称 A-Z",
-      "nameDesc": "名称 Z-A",
-      "enabledFirst": "已启用优先",
-      "disabledFirst": "已禁用优先",
-      "largestFirst": "体积最大优先",
-      "visualOnly": "仅影响显示：此排序不会改变加载顺序。"
-    },
     "tags": {
       "label": "标签",
-      "all": "所有标签",
-      "title": "管理器标签：{{tag}}"
+      "all": "所有标签"
     },
     "audit": {
       "run": "审计模组",
       "running": "检查中…",
       "upToDate": "已是最新"
     },
-    "empty": "未安装任何模组",
     "rollbackNoSource": "'{{name}}' 尚未关联 GitHub 来源 — 回滚需要从 GitHub 获取。请先通过「编辑来源…」添加来源。",
     "rollbackConfirmTitle": "回滚「{{name}}」？",
     "rollbackConfirmBody": "这会删除当前磁盘上的安装，并恢复到兼容的 GitHub 版本。如果当前安装有可用版本，会选择最接近的较旧版；如果版本显示为未知，则重新安装上一个已知良好版本。请先关闭 STS2。",
@@ -1337,8 +1279,6 @@
     "rollbackNeedSource": "请先通过编辑来源关联 GitHub 来源 - 回滚需要从 GitHub 获取。",
     "rollingBack": "回滚中…",
     "rollBackOneVersion": "回滚一个版本",
-    "searchPlaceholder_one": "搜索 {{count}} 个模组",
-    "searchPlaceholder_other": "搜索 {{count}} 个模组",
     "updateAllLabel_one": "更新 {{count}} 个模组",
     "updateAllLabel_other": "更新 {{count}} 个模组",
     "notePrefix": "📝",
@@ -1346,26 +1286,13 @@
     "onDiskFolderTitle": "磁盘上的文件夹：{{folder}}",
     "rowClickEditSources": "点击编辑来源、链接和标签",
     "rowEditSourcesAria": "编辑 {{mod}} 的来源",
-    "row": {
-      "expand": "展开「{{name}}」的详情",
-      "collapse": "收起「{{name}}」的详情",
-      "openFolder": "打开文件夹",
-      "editSources": "编辑来源",
-      "findGithub": "从 Nexus 查找 GitHub"
-    },
     "kebab": {
-      "skipUpdate": "跳过此更新",
-      "unsnooze": "重新显示更新",
       "addToModpack": "添加到「{{pack}}」",
       "addToModpackDesc": "下次切换到 {{pack}} 时将包含此模组。",
       "removeFromModpack": "从「{{pack}}」中移除",
       "removeFromModpackDesc": "从 {{pack}} 的清单中移除此模组。文件仍保留在本地。",
       "deleteFromDisk": "从磁盘删除",
       "deleteFromDiskDesc": "从你的电脑中永久删除此模组的文件。"
-    },
-    "membership": {
-      "addTo": "点击添加到「{{pack}}」",
-      "removeFrom": "点击从「{{pack}}」中移除"
     }
   },
   "devBuilds": {

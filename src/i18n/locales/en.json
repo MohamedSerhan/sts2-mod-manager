@@ -19,7 +19,6 @@
     "refresh": "Refresh",
     "applying": "Applying...",
     "import": "Import",
-    "importing": "Importing...",
     "publish": "Publish",
     "publishing": "Publishing…",
     "activate": "Activate",
@@ -30,7 +29,6 @@
     "dismiss": "Dismiss",
     "moreActions": "More actions",
     "notifications": "Notifications",
-    "beta": "Beta",
     "refreshing": "Refreshing...",
     "advanced": "Advanced",
     "whatsThis": "What does this mean?",
@@ -45,9 +43,7 @@
       "disabledOrphans_other": "disabled {{count}} extra mods",
       "downloadedNum": "downloaded {{count}}",
       "downloadsFailed_one": "{{count}} download failed",
-      "downloadsFailed_other": "{{count}} downloads failed",
-      "removedOrphans_one": "removed {{count}} orphan mod",
-      "removedOrphans_other": "removed {{count}} orphan mods"
+      "downloadsFailed_other": "{{count}} downloads failed"
     }
   },
   "confirm": {
@@ -62,22 +58,8 @@
     "openDetailAria": "Open {{name}} modpack",
     "modCount_one": "{{count}} mod",
     "modCount_other": "{{count}} mods",
-    "auditSummary": {
-      "updates_one": "{{count}} update available",
-      "updates_other": "{{count}} updates available",
-      "missing_one": "{{count}} mod missing source",
-      "missing_other": "{{count}} mods missing source",
-      "blocked_one": "{{count}} mod blocked by game version",
-      "blocked_other": "{{count}} mods blocked by game version"
-    },
-    "membership": {
-      "in": "In this modpack",
-      "notIn": "Not in this modpack",
-      "includedOff": "Included, off in this modpack"
-    },
     "detail": {
       "inPackHeading": "In this modpack",
-      "inPackCount": "In this modpack ({{count}})",
       "statusCounts": "{{active}} active / {{total}} mods in this modpack",
       "runningNow": "running in game now",
       "addMods": "Add mods",
@@ -85,7 +67,6 @@
       "updatesAvailable_one": "{{count}} update available",
       "updatesAvailable_other": "{{count}} updates available",
       "inPackOrderNote": "Listed in load order (top loads first). Use Load order to reorder.",
-      "availableHeading": "Add from Mod Library",
       "availableCount": "Add from Mod Library ({{count}})",
       "availableNoMatch": "No library mods match your search.",
       "libraryShow": "Show",
@@ -107,13 +88,9 @@
       "removeFromPackTitle": "Remove this mod from the modpack",
       "removeFromPackAria": "Remove {{mod}} from this modpack",
       "add": "Add",
-      "emptyInPack": "No mods in this modpack yet — add some from your library below.",
       "allInPack": "Every installed mod is already in this modpack.",
       "added": "Added {{mod}} to {{pack}}",
-      "removed": "Removed {{mod}} from {{pack}}",
-      "addFailed": "Couldn't add {{mod}}: {{error}}",
-      "removeFailed": "Couldn't remove {{mod}}: {{error}}",
-      "advanced": "Advanced"
+      "addFailed": "Couldn't add {{mod}}: {{error}}"
     },
     "edit": {
       "title": "Edit \"{{name}}\"",
@@ -132,7 +109,6 @@
     }
   },
   "libraryTable": {
-    "membershipCheckbox": "Toggle {{mod}} in {{modpack}}",
     "inPack": "In Modpack",
     "notInPack": "Not in Modpack",
     "inPackTitle": "In {{modpack}} — change membership from the ⋯ menu",
@@ -269,7 +245,6 @@
       "subtitle": "All the modpacks you follow, plus your own"
     },
     "actions": {
-      "addByCode": "Add modpack code",
       "importJson": "Import modpack JSON",
       "snapshotCurrent": "Snapshot active modpack",
       "newProfile": "Create modpack"
@@ -302,7 +277,6 @@
     },
     "drift": {
       "title": "{{name}} has drifted",
-      "desc": "{{details}}",
       "hint": "since the manifest. Save changes to update the modpack, or Repair to restore it.",
       "followedHint": "since the manifest. This pack is followed, so you can't save changes to it — Repair to restore the original, or duplicate the pack to keep your edits.",
       "newItems": "{{count}} new",
@@ -315,8 +289,6 @@
       "repairTitle": "Re-apply manifest and store extra active mods"
     },
     "form": {
-      "codeLabel": "Modpack code (from a friend)",
-      "codePlaceholder": "username/XXXX-XXXX-XXXX",
       "jsonLabel": "Paste modpack JSON",
       "jsonPlaceholder": "{\"name\": \"...\", \"mods\": [...]}"
     },
@@ -349,8 +321,6 @@
         "activeFirst": "Active first",
         "storedFirst": "Stored first"
       },
-      "readOnly": "Read-only",
-      "readOnlyTitle": "Followed modpacks are read-only. Duplicate the modpack to edit it.",
       "empty": {
         "title": "No installed mods",
         "hint": "Install mods first, then use the mod library to choose which modpacks include each one."
@@ -552,7 +522,6 @@
     "couldntLoad": "Couldn't load modpack: {{error}}",
     "installed": "Installed: {{name}}",
     "installFailed": "Install failed: {{error}}",
-    "betaTitle": "The public modpack browser is still being tuned.",
     "installingNamed": "Installing {{name}}"
   },
   "modpacks": {
@@ -1010,8 +979,7 @@
       "syncedModpack": "Synced modpack \"{{name}}\" - you're up to date!"
     },
     "hero": {
-      "title": "Share code",
-      "placeholder": "username/AA5A-315D-61AE"
+      "title": "Share code"
     }
   },
   "help": {
@@ -1197,8 +1165,6 @@
     "enableAll": "Enable all",
     "disableAll": "Disable all",
     "deleteAll": "Delete all",
-    "noMatch": "No mods match your filter",
-    "noMatchSub": "Try a different search term.",
     "pinned": "Frozen",
     "pinnedTitle": "Frozen — updates and modpack changes will skip this mod's version and enabled/disabled state",
     "latest": "Latest",
@@ -1207,7 +1173,6 @@
     "updateClickTitle": "Click to update from v{{current}} → v{{target}}. Same pipeline as Settings → Audit.",
     "closeSts2FirstDot": "Close STS2 first.",
     "updating": "Updating…",
-    "downloadFromNexus": "Download from Nexus",
     "updateBlockedByGameVersion": "Update blocked by game version",
     "snoozed": "Skipped",
     "auditError": "Audit error",
@@ -1232,12 +1197,7 @@
     "updateAllTitle": "Update every GitHub-linked mod with a pending update. Frozen mods are skipped.",
     "updateAllLabel": "Update {{count}} mod(s)",
     "quickAddLabel": "GitHub URL, Nexus URL, or github:owner/repo",
-    "emptyDescription": "Browse to install a mod, paste a friend's modpack code, or drop a .zip anywhere on this window.",
-    "disambiguatorTitle": "Two installed mods are named \"{{name}}\". This one is identified by {{identifier}}.",
-    "disambiguatorAuthor": "author: {{author}}",
-    "disambiguatorFolder": "folder: {{folder}}",
     "subtitleDisabledSuffix": ", {{count}} disabled",
-    "nexusUpdateTitle": "Nexus has v{{nexusVer}} (you have v{{localVer}}). Click to open the Nexus Files tab — pick \"Slow Download\" / \"Manual\" and the manager will auto-install the zip when it lands in Downloads.",
     "snoozedTitle": "Update suggestion snoozed at v{{version}}. Auto-expires when a newer release appears.",
     "gameVersionBlockedTitle": "Newer release exists (v{{target}}) but it requires a newer Slay the Spire 2 build. Update STS2 (or switch beta branches) to pick it up; the manager can install an older compatible release in the meantime.",
     "minGameVersionTitle": "This mod's manifest declares min_game_version={{minVer}}. Your STS2 is v{{yourVer}}. The game's loader will silently skip this mod until you update STS2 or switch beta branches. Use Repair (advanced kebab) to roll back to a compatible release.",
@@ -1268,12 +1228,6 @@
     "toast": {
       "updated": "Updated '{{name}}' to v{{version}}",
       "updateFailed": "Update failed for '{{name}}': {{error}}",
-      "addedToModpack": "Added '{{mod}}' to {{pack}}",
-      "removedFromModpack": "Removed '{{mod}}' from {{pack}}",
-      "membershipFailed": "Couldn't update modpack membership: {{error}}",
-      "enabled": "{{name}} enabled",
-      "disabled": "{{name}} disabled",
-      "toggleFailed": "Failed to toggle {{name}}: {{error}}",
       "unpinned": "Unfrozen {{name}}",
       "pinned": "Frozen {{name}} — updates and modpack changes will skip it",
       "pinAction": "freeze",
@@ -1307,27 +1261,15 @@
     "allInstalledTitle": "All installed mods",
     "allInstalledSubtitle": "Every mod installed on your computer. Your active modpack decides which ones load in the game.",
     "manageActiveModpackLink": "Manage active modpack →",
-    "searchPlaceholder": "Search mods…",
-    "sort": {
-      "label": "Sort",
-      "nameAsc": "Name A-Z",
-      "nameDesc": "Name Z-A",
-      "enabledFirst": "Enabled first",
-      "disabledFirst": "Disabled first",
-      "largestFirst": "Largest first",
-      "visualOnly": "Visual only: this sort does not change load order."
-    },
     "tags": {
       "label": "Tag",
-      "all": "All tags",
-      "title": "Manager tag: {{tag}}"
+      "all": "All tags"
     },
     "audit": {
       "run": "Audit mods",
       "running": "Checking…",
       "upToDate": "Up to date"
     },
-    "empty": "No mods installed",
     "rollbackNoSource": "'{{name}}' has no GitHub source linked — rollback fetches from GitHub. Add a source via Edit sources… first.",
     "rollbackConfirmTitle": "Roll back '{{name}}'?",
     "rollbackConfirmBody": "This will delete the current on-disk install and recover a compatible GitHub release. If this install still has a usable version, rollback picks the closest lower release; if the version reads \"unknown\", it reinstalls the last known-good release. Use it when the newest release is broken. Make sure STS2 is closed.",
@@ -1337,8 +1279,6 @@
     "rollbackNeedSource": "Link a GitHub source first via \"Edit sources...\" - rollback fetches from GitHub.",
     "rollingBack": "Rolling back...",
     "rollBackOneVersion": "Roll back one version",
-    "searchPlaceholder_one": "Search {{count}} mod",
-    "searchPlaceholder_other": "Search {{count}} mods",
     "updateAllLabel_one": "Update {{count}} mod",
     "updateAllLabel_other": "Update {{count}} mods",
     "notePrefix": "📝",
@@ -1346,26 +1286,13 @@
     "onDiskFolderTitle": "Folder on disk: {{folder}}",
     "rowClickEditSources": "Click to edit sources, links, and tags",
     "rowEditSourcesAria": "Edit sources for {{mod}}",
-    "row": {
-      "expand": "Show details for {{name}}",
-      "collapse": "Hide details for {{name}}",
-      "openFolder": "Open folder",
-      "editSources": "Edit sources",
-      "findGithub": "Find GitHub from Nexus"
-    },
     "kebab": {
-      "skipUpdate": "Skip this update",
-      "unsnooze": "Show update again",
       "addToModpack": "Add to \"{{pack}}\"",
       "addToModpackDesc": "Include this mod the next time you switch to {{pack}}.",
       "removeFromModpack": "Remove from \"{{pack}}\"",
       "removeFromModpackDesc": "Drop this mod from {{pack}}'s manifest. The files stay installed.",
       "deleteFromDisk": "Delete from disk",
       "deleteFromDiskDesc": "Permanently delete this mod's files from your computer."
-    },
-    "membership": {
-      "addTo": "Click to add to \"{{pack}}\"",
-      "removeFrom": "Click to remove from \"{{pack}}\""
     }
   },
   "devBuilds": {

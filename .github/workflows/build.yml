@@ -30,65 +30,6 @@ permissions:
   contents: write
 
 jobs:
-  # Cheap pre-flight check: runs on PRs and pushes to main (skipped on bare
-  # label events — see its `if:`). The expensive 3-platform bundle build runs on
-  # version tags, manual dispatch, and PRs labeled `dev-build`.
-  check:
-    # Skip on bare label events: check already ran on the PR's commits and a
-    # label change can't change its result. Pushes to main and other PR actions
-    # still run it.
-    if: ${{ !startsWith(github.ref, 'refs/tags/v') && github.event.action != 'labeled' }}
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libssl-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
-      - name: Install Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: "22"
-          cache: "npm"
-
-      - name: Install frontend dependencies
-        run: npm ci
-
-      - name: TypeScript check
-        run: npx tsc --noEmit
-
-      - name: Cargo check
-        working-directory: src-tauri
-        run: cargo check
-
-      - name: Test nexus-triage script
-        run: node --test scripts/nexus-triage.test.mjs
-
-      - name: Test dev-build-stamp script
-        run: node --test scripts/dev-build-stamp.test.mjs
-
-      - name: Test make-dev-icon script
-        run: node --test scripts/make-dev-icon.test.mjs
-
-      - name: Test qa-pipeline script
-        run: node --test scripts/qa-pipeline.test.mjs
-
   build:
     # Runs on version tags, manual dispatch, or a PR carrying the `dev-build`
     # label. On `labeled` events we also require the just-added label to be

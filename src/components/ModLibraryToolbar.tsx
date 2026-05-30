@@ -1,68 +1,40 @@
 /**
- * ModLibraryToolbar — the shared action-button cluster for mod management:
- * Open folder · Import mod · Quick add URL · Auto-detect sources · Audit /
- * Update-all · Refresh.
+ * ModLibraryToolbar — the action cluster for the Mod Library page header: one
+ * prominent "+ Add mods" dropdown (paste URL · import file · auto-detect ·
+ * open folder), the Audit / Update-all state machine, and Refresh.
  *
- * Rendered identically by the All Mods view and the per-modpack view so the
- * two surfaces offer the exact same add/maintain affordances. All behavior
- * comes from the `useModLibrary` hook; this component is pure presentation.
- *
- * It renders ONLY the button cluster (the caller places it — e.g. inside a
- * page header's `.gf-page-actions`). The Quick-add form and Auto-detect
- * modal are separate render helpers on the hook (`renderQuickAddForm` /
- * `renderAutoDetectModal`) so each view can position them in its own body.
+ * The per-modpack view builds its own toolbar around the same shared
+ * <AddModsMenu>, so the two surfaces offer the exact same add affordances.
+ * All behavior comes from the `useModLibrary` hook; this component is pure
+ * presentation. The Quick-add form and Auto-detect modal are separate render
+ * helpers on the hook (`renderQuickAddForm` / `renderAutoDetectModal`) so the
+ * view can position them in its own body.
  */
 import { useTranslation } from 'react-i18next';
-import {
-  ClipboardCheck,
-  Download,
-  FolderOpen,
-  Link,
-  RefreshCw,
-  Search,
-  Upload,
-} from 'lucide-react';
+import { ClipboardCheck, Download, RefreshCw } from 'lucide-react';
 
 import { Button } from './Button';
+import { AddModsMenu } from './AddModsMenu';
 import { countGithubUpdates } from '../lib/auditState';
 import type { ModLibrary } from '../hooks/useModLibrary';
 
 export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
   const { t } = useTranslation();
   const {
-    gameRunning,
     auditResults,
     auditing,
     updatingAll,
     updateAllGithub,
-    showQuickAdd,
-    setShowQuickAdd,
-    setShowAutoDetect,
     refreshing,
-    handleOpenFolder,
-    handleImportFile,
     handleRefresh,
     handleCheckUpdates,
   } = lib;
 
   return (
     <div className="gf-page-actions">
-      <Button variant="secondary" size="sm" onClick={handleOpenFolder}>
-        <FolderOpen size={14} />
-        {t('mods.openFolder')}
-      </Button>
-      <Button variant="secondary" size="sm" onClick={handleImportFile} disabled={gameRunning}>
-        <Upload size={14} />
-        {t('mods.importMod')}
-      </Button>
-      <Button variant="secondary" size="sm" onClick={() => setShowQuickAdd(!showQuickAdd)} disabled={gameRunning}>
-        <Link size={14} />
-        {t('mods.quickAddUrl')}
-      </Button>
-      <Button variant="secondary" size="sm" onClick={() => setShowAutoDetect(true)}>
-        <Search size={14} />
-        {t('mods.autoDetectSources')}
-      </Button>
+      {/* One prominent (yellow) entry point for every way to add a mod —
+          matches the modpack view's "+ Add mods" dropdown. */}
+      <AddModsMenu lib={lib} buttonClassName="gf-btn gf-btn-sm" includeAutoDetect />
       {(() => {
         const ghUpdateCount = auditResults ? countGithubUpdates(auditResults) : 0;
         const ghUpdateNames = auditResults
@@ -123,7 +95,9 @@ export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
           </>
         );
       })()}
-      <Button size="sm" onClick={handleRefresh} disabled={refreshing}>
+      {/* Refresh steps down to a quiet secondary now that Add mods is the
+          page's primary (yellow) action. */}
+      <Button variant="secondary" size="sm" onClick={handleRefresh} disabled={refreshing}>
         <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
         {refreshing ? t('common.refreshing') : t('common.refresh')}
       </Button>

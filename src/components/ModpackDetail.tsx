@@ -39,8 +39,6 @@ import {
   Copy,
   Download,
   Files,
-  FolderOpen,
-  Link,
   ListOrdered,
   Pencil,
   Play,
@@ -49,7 +47,6 @@ import {
   Search,
   Share2,
   Trash2,
-  Upload,
 } from 'lucide-react';
 import { Badge } from './Badge';
 import { Button } from './Button';
@@ -57,6 +54,7 @@ import { Card } from './Card';
 import { HelpHint } from './HelpHint';
 import { KebabDivider, KebabItem, KebabMenu, KebabSection } from './KebabMenu';
 import { EditModpackModal } from './EditModpackModal';
+import { AddModsMenu } from './AddModsMenu';
 import { LibraryTable } from './LibraryTable';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
@@ -318,28 +316,7 @@ export function ModpackDetail({
   // methods are consolidated into the one dropdown to keep the row calm.
   const packToolbarActions = (
     <>
-      <KebabMenu
-        align="right"
-        title={t('modpack.detail.addMods')}
-        buttonClassName="gf-btn gf-btn-2-sm"
-        trigger={
-          <>
-            <Plus size={14} /> {t('modpack.detail.addMods')} <ChevronDown size={13} />
-          </>
-        }
-      >
-        <KebabSection>
-          <KebabItem icon={<Link size={12} />} onClick={() => lib.setShowQuickAdd(true)}>
-            {t('mods.quickAddUrl')}
-          </KebabItem>
-          <KebabItem icon={<Upload size={12} />} onClick={lib.handleImportFile} disabled={lib.gameRunning}>
-            {t('mods.importMod')}
-          </KebabItem>
-          <KebabItem icon={<FolderOpen size={12} />} onClick={lib.handleOpenFolder}>
-            {t('mods.openFolder')}
-          </KebabItem>
-        </KebabSection>
-      </KebabMenu>
+      <AddModsMenu lib={lib} />
       <Button
         variant="secondary"
         size="sm"

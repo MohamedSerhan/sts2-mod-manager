@@ -69,6 +69,16 @@ function expectTextBefore(first: string, second: string): void {
   ).toBe(true);
 }
 
+/**
+ * The four toolbar add-affordances (Quick add URL / Import mod / Auto-detect
+ * sources / Open folder) were consolidated into a single "Add mods ▾" dropdown
+ * (AddModsMenu). The menu auto-closes when an item is clicked, so every
+ * interaction must open it first, then target the action as a `menuitem`.
+ */
+async function openAddMenu(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  await user.click(screen.getByRole('button', { name: /add mods/i }));
+}
+
 describe('<ModsView>', () => {
   it('renders the empty state when no mods are installed', async () => {
     seedMods([]);
@@ -226,14 +236,20 @@ describe('<ModsView>', () => {
     // T17: per-screen Advanced toggle was removed when the per-row
     // drawer absorbed source-pill + Freeze/Delete disclosure. Import
     // mod / Quick add URL stay in the page-head toolbar — they're
-    // primary install affordances, not advanced features.
+    // primary install affordances, not advanced features. They now live
+    // inside the consolidated "Add mods ▾" dropdown.
     seedMods([]);
+    const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => {
       expect(screen.getByText(/0 installed/)).toBeInTheDocument();
     });
-    expect(screen.getByRole('button', { name: /Import mod/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Quick add URL/ })).toBeInTheDocument();
+    // The "Add mods" trigger is always present...
+    expect(screen.getByRole('button', { name: /add mods/i })).toBeInTheDocument();
+    // ...and opening it surfaces both primary install affordances.
+    await openAddMenu(user);
+    expect(screen.getByRole('menuitem', { name: /Import mod/ })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /Quick add URL/ })).toBeInTheDocument();
   });
 
   it('Auto-detect sources toolbar button opens the AutoDetectModal', async () => {
@@ -250,7 +266,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
-    const autoBtn = screen.getByRole('button', { name: /Auto-detect sources/i });
+    await openAddMenu(user);
+    const autoBtn = screen.getByRole('menuitem', { name: /Auto-detect sources/i });
     await user.click(autoBtn);
     // The modal scans on open — assert the command fired and the modal
     // backdrop materialised.
@@ -416,7 +433,8 @@ describe('<ModsView>', () => {
     await waitFor(() => {
       expect(screen.getByText(/0 installed/)).toBeInTheDocument();
     });
-    await user.click(screen.getByRole('button', { name: /Open folder/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Open folder/ }));
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'open_mods_folder')).toBe(true);
     });
@@ -430,7 +448,8 @@ describe('<ModsView>', () => {
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
 
     // Quick Add toggles open
-    await user.click(screen.getByRole('button', { name: /Quick add URL/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/ }));
     const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
     await user.type(input, 'https://github.com/foo/bar');
     await user.click(screen.getByRole('button', { name: 'Add' }));
@@ -1824,7 +1843,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Open folder/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Open folder/ }));
     await waitFor(() => {
       expect(screen.getByText('no path')).toBeInTheDocument();
     });
@@ -1837,7 +1857,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Open folder/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Open folder/ }));
     await waitFor(() => {
       expect(screen.getByText('plain-string-reason')).toBeInTheDocument();
     });
@@ -1898,7 +1919,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Import mod/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Import mod/ }));
     // Wait a tick — no install_mod_from_file should have fired.
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'install_mod_from_file')).toBe(false);
@@ -1913,7 +1935,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Import mod/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Import mod/ }));
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'install_mod_from_file')).toBe(true);
     });
@@ -1928,7 +1951,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Import mod/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Import mod/ }));
     await waitFor(() => {
       expect(screen.getByText(/Import failed: zip corrupt/)).toBeInTheDocument();
     });
@@ -1945,7 +1969,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Quick add URL/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/ }));
     const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
     await user.type(input, 'https://github.com/quick/win');
     await user.click(screen.getByRole('button', { name: 'Add' }));
@@ -1965,7 +1990,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Quick add URL/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/ }));
     const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
     // Full Nexus URL — nexusFilesUrl returns the files-tab URL.
     await user.type(input, 'https://www.nexusmods.com/slaythespire2/mods/42');
@@ -1988,7 +2014,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Quick add URL/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/ }));
     const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
     await user.type(input, 'nexus:slaythespire2/mods/99');
     await user.click(screen.getByRole('button', { name: 'Add' }));
@@ -2008,7 +2035,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Quick add URL/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/ }));
     const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
     // A bare string that doesn't parse as URL and isn't a nexus shorthand.
     await user.type(input, 'totally-not-a-url');
@@ -2028,7 +2056,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Quick add URL/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/ }));
     const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
     await user.type(input, 'https://example.com/some/path');
     await user.click(screen.getByRole('button', { name: 'Add' }));
@@ -2042,7 +2071,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Quick add URL/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/ }));
     const callsBefore = getInvokeCalls().filter((c) => c.cmd === 'quick_add_mod').length;
     await user.click(screen.getByRole('button', { name: 'Add' }));
     // Whitespace-only input → handler returns early.
@@ -2055,7 +2085,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Quick add URL/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/ }));
     const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
     await user.type(input, 'github:foo/bar');
     await user.click(screen.getByRole('button', { name: 'Add' }));
@@ -2073,7 +2104,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Quick add URL/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/ }));
     const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
     await user.type(input, 'github:enter/mod{Enter}');
     await waitFor(() => {
@@ -2086,7 +2118,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Quick add URL/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/ }));
     const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
     expect(input).toBeInTheDocument();
     // The Quick-Add Card renders an X-icon ghost button to close. Locate
@@ -2478,7 +2511,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Quick add URL/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/ }));
     const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
     await user.type(input, 'github:foo/bar');
     await user.click(screen.getByRole('button', { name: 'Add' }));
@@ -2509,7 +2543,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Import mod/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Import mod/ }));
     await waitFor(() => {
       expect(screen.getByText(/Import failed: bare-imp/)).toBeInTheDocument();
     });
@@ -2730,7 +2765,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Quick add URL/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/ }));
     const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
     await user.type(input, 'https://www.nexusmods.com/sts2/mods/50');
     await user.click(screen.getByRole('button', { name: 'Add' }));
@@ -2754,7 +2790,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Quick add URL/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/ }));
     const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
     await user.type(input, 'no-host-here');
     await user.click(screen.getByRole('button', { name: 'Add' }));
@@ -2775,7 +2812,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Quick add URL/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/ }));
     const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
     // Only one path segment ('search') → parts.length=1 → returns null.
     await user.type(input, 'https://www.nexusmods.com/search');

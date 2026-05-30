@@ -1275,6 +1275,7 @@
       "deleteFailed": "删除 {{name}} 失败：{{error}}",
       "installed": "已安装：{{name}}",
       "importFailed": "导入失败：{{error}}",
+      "followedPackNoAdd": "无法向\"{{pack}}\"添加模组——它是关注的模组包。请先复制一份以创建你自己的可编辑副本。",
       "allEnabled": "所有模组已启用",
       "allDisabled": "所有模组已禁用",
       "allFailed": "失败：{{error}}",

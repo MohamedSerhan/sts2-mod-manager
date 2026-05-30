@@ -490,6 +490,50 @@ describe('<ModpackDetail>', () => {
     expect(screen.queryByText(/Quick add failed/i)).toBeNull();
   });
 
+  // ── Followed (subscribed) pack: adds are blocked ──────────────────
+  // A followed pack's manifest isn't ours to edit, so the modpack view
+  // refuses to install "into" it (which would fail server-side and strand
+  // the file in the library) and shows a friendly toast instead. The guard
+  // only fires once get_subscriptions reports the target pack as followed.
+  it('importing into a followed pack is blocked with a friendly message (no install)', async () => {
+    registerInvokeHandler('get_subscriptions', () => [
+      { share_id: 'henry/AAAA', profile_name: 'Henry Pack' },
+    ]);
+    const user = userEvent.setup();
+    render(<Wrap profile={baseProfile({ name: 'Henry Pack' })} onBack={vi.fn()} />);
+    await screen.findByRole('heading', { level: 2, name: 'Henry Pack' });
+
+    await openAddMods(user);
+    await user.click(screen.getByRole('menuitem', { name: /Import mod/i }));
+
+    // The friendly toast appears…
+    expect(await screen.findByText(/followed modpack/i)).toBeInTheDocument();
+    // …and the install never ran (no half-completed add).
+    expect(getInvokeCalls().some((c) => c.cmd === 'install_mod_from_file')).toBe(false);
+  });
+
+  it('quick-adding into a followed pack is blocked with a friendly message (no install)', async () => {
+    registerInvokeHandler('get_subscriptions', () => [
+      { share_id: 'henry/AAAA', profile_name: 'Henry Pack' },
+    ]);
+    const user = userEvent.setup();
+    render(<Wrap profile={baseProfile({ name: 'Henry Pack' })} onBack={vi.fn()} />);
+    await screen.findByRole('heading', { level: 2, name: 'Henry Pack' });
+
+    // Mirror the existing quick-add flow: open Add mods → Quick add URL →
+    // type a github URL → click Add.
+    await openAddMods(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/i }));
+    const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
+    await user.type(input, 'https://github.com/x/y');
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+
+    // The friendly toast appears…
+    expect(await screen.findByText(/followed modpack/i)).toBeInTheDocument();
+    // …and quick_add_mod never ran.
+    expect(getInvokeCalls().some((c) => c.cmd === 'quick_add_mod')).toBe(false);
+  });
+
   it('surfaces an error toast when adding a mod fails', async () => {
     const profile = setupPack({
       available: [modInfo({ name: 'LibMod', folder_name: 'LibMod' })],

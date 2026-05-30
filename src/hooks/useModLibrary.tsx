@@ -42,6 +42,7 @@ import {
   setModDisplayOverrides,
   setModSnooze,
   setModTags,
+  getSubscriptions,
   setProfileModMembership,
   toggleMod,
   findGithubFromNexus,
@@ -180,6 +181,20 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     }
   }
 
+  // A followed (subscribed) pack isn't ours to edit, so installing a mod "into"
+  // it would fail server-side and strand the file in the library. When the
+  // modpack view targets a followed pack we stop BEFORE installing and explain,
+  // instead of half-completing the add.
+  async function targetPackIsFollowed(): Promise<boolean> {
+    if (!targetPack) return false;
+    try {
+      const subs = await getSubscriptions();
+      return subs.some((s) => s.profile_name.toLowerCase() === targetPack.toLowerCase());
+    } catch {
+      return false;
+    }
+  }
+
   async function handleInlineUpdate(mod: ModInfo) {
     const key = mod.folder_name ?? mod.name;
     if (updatingKey) return;
@@ -290,6 +305,10 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
 
   async function handleImportFile() {
     try {
+      if (await targetPackIsFollowed()) {
+        toast.info(t('mods.toast.followedPackNoAdd', { pack: targetPack }));
+        return;
+      }
       const selected = await open({
         multiple: false,
         filters: [{ name: t('mods.importArchiveFilter'), extensions: ['zip', '7z', 'rar'] }],
@@ -308,6 +327,10 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
 
   async function handleQuickAdd() {
     if (!quickAddUrl.trim()) return;
+    if (await targetPackIsFollowed()) {
+      toast.info(t('mods.toast.followedPackNoAdd', { pack: targetPack }));
+      return;
+    }
     const input = quickAddUrl.trim();
     try {
       setQuickAdding(true);

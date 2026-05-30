@@ -475,6 +475,50 @@ describe('<App>', () => {
     });
   }, 10000);
 
+  it('dropping a zip while viewing a FOLLOWED pack is blocked with a friendly message', async () => {
+    // A followed (subscribed) pack's manifest isn't ours to edit, so dropping
+    // a mod "into" it must not install (which would strand the file in the
+    // library) — the global handler shows a friendly toast and stops.
+    registerInvokeHandler('get_active_profile', () => 'Stable');
+    registerInvokeHandler('list_profiles_cmd', () => [
+      { name: 'Stable', mods: [], created_at: '2026-01-01T00:00:00Z', created_by: null, game_version: '0.105.0' },
+    ]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [],
+    }));
+    registerInvokeHandler('install_mod_from_file', () => ({
+      name: 'Dropped', version: '1.0', description: '', enabled: true, files: [],
+      source: null, hash: null, dependencies: [], size_bytes: 0,
+      folder_name: 'Dropped', mod_id: 'Dropped', github_url: null, nexus_url: null,
+      pinned: false, min_game_version: null, author: null, tags: [],
+      display_name: null, display_description: null,
+    }));
+    registerInvokeHandler('set_profile_mod_membership', () => ({
+      name: 'Stable', mods: [], created_at: '2026-01-01T00:00:00Z', created_by: null, game_version: '0.105.0',
+    }));
+    // Mark 'Stable' as a followed pack so the drop guard fires.
+    registerInvokeHandler('get_subscriptions', () => [
+      { share_id: 'x/AAAA', profile_name: 'Stable' },
+    ]);
+
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    // Open the Modpacks tab, then the 'Stable' modpack detail.
+    await user.click(getNavButton('Modpacks'));
+    await user.click(await screen.findByRole('button', { name: /Open Stable modpack/i }));
+    await screen.findByRole('heading', { level: 2, name: 'Stable' });
+
+    // Drop a zip — the followed-pack guard blocks the install and explains.
+    await fireTauriEvent('tauri://drag-drop', { paths: ['C:/downloads/Mod.zip'] });
+
+    // The friendly toast appears…
+    expect(await screen.findByText(/followed modpack/i)).toBeInTheDocument();
+    // …and nothing was installed.
+    expect(getInvokeCalls().some((c) => c.cmd === 'install_mod_from_file')).toBe(false);
+  }, 10000);
+
   it('dropping a zip when NOT viewing a modpack just installs it (no membership change)', async () => {
     registerInvokeHandler('install_mod_from_file', () => ({
       name: 'LooseMod', version: '1.0', description: '', enabled: true, files: [],

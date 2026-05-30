@@ -1275,6 +1275,7 @@
       "deleteFailed": "Failed to delete {{name}}: {{error}}",
       "installed": "Installed: {{name}}",
       "importFailed": "Import failed: {{error}}",
+      "followedPackNoAdd": "Can't add mods to \"{{pack}}\" — it's a followed modpack. Duplicate it first to make your own editable copy.",
       "allEnabled": "All mods enabled",
       "allDisabled": "All mods disabled",
       "allFailed": "Failed: {{error}}",

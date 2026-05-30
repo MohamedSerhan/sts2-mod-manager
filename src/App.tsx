@@ -491,6 +491,23 @@ function AppInner() {
     };
 
     async function handleDroppedPaths(paths: string[]) {
+      // If a modpack detail view is open, the dropped mod joins that pack (and,
+      // on the active pack, loads in-game) — the same auto-add Quick add /
+      // Import do. But a FOLLOWED (subscribed) pack's manifest isn't yours to
+      // edit: don't install "into" it and strand the file in the library —
+      // explain and stop (duplicate the pack to add your own mods).
+      const pack = viewedPackRef.current;
+      if (pack) {
+        try {
+          const subs = await getSubscriptions();
+          if (subs.some((s) => s.profile_name.toLowerCase() === pack.toLowerCase())) {
+            toast.info(t('mods.toast.followedPackNoAdd', { pack }));
+            return;
+          }
+        } catch {
+          /* couldn't check subscriptions — fall through and attempt the install */
+        }
+      }
       for (const filePath of paths) {
         const name = filePath.split(/[\\/]/).pop() || filePath;
         const lower = name.toLowerCase();
@@ -502,10 +519,6 @@ function AppInner() {
         }
         try {
           const mod = await installModFromFile(filePath);
-          // If a modpack detail view is open, the dropped mod joins that pack
-          // (and, on the active pack, loads in-game) — the same auto-add the
-          // modpack toolbar's Quick add / Import do.
-          const pack = viewedPackRef.current;
           if (pack) {
             try {
               await setProfileModMembership(pack, mod.name, mod.folder_name ?? null, mod.mod_id ?? null, true);

@@ -137,6 +137,9 @@
     "notInPack": "Not in Modpack",
     "inPackTitle": "In {{modpack}} — change membership from the ⋯ menu",
     "notInPackTitle": "Not in {{modpack}} — add it from the ⋯ menu",
+    "inModpacks_one": "In {{count}} modpack",
+    "inModpacks_other": "In {{count}} modpacks",
+    "inNoModpacks": "Not in a modpack",
     "modpackMissing": "This modpack doesn't exist any more — try refreshing the list."
   },
   "createModpack": {

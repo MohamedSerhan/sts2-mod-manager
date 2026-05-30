@@ -318,6 +318,45 @@ const baseAudit = (overrides: Partial<ModAuditEntry> = {}): ModAuditEntry => ({
   ...overrides,
 });
 
+describe('<LibraryRow> "In N modpacks" indicator', () => {
+  it('shows "In N modpacks" with the pack names (All Mods view)', () => {
+    renderRow({
+      mod: baseModInfo(),
+      packScoped: false,
+      row: baseMod({
+        profiles: [
+          baseState({ profile_name: 'Alpha', included: true }),
+          baseState({ profile_name: 'Beta', included: true }),
+          baseState({ profile_name: 'Gamma', included: false }),
+        ],
+      }),
+    });
+    const chip = screen.getByText(/In 2 modpacks/i);
+    expect(chip).toBeInTheDocument();
+    // Tooltip lists the modpacks the mod is actually in (not Gamma).
+    expect(chip).toHaveAttribute('title', 'Alpha, Beta');
+  });
+
+  it('shows "Not in a modpack" for an orphan mod', () => {
+    renderRow({
+      mod: baseModInfo(),
+      packScoped: false,
+      row: baseMod({ profiles: [baseState({ profile_name: 'Alpha', included: false })] }),
+    });
+    expect(screen.getByText(/Not in a modpack/i)).toBeInTheDocument();
+  });
+
+  it('hides the count in the pack-scoped modpack view', () => {
+    renderRow({
+      mod: baseModInfo(),
+      packScoped: true,
+      row: baseMod({ profiles: [baseState({ profile_name: 'Alpha', included: true })] }),
+    });
+    expect(screen.queryByText(/In 1 modpack/i)).toBeNull();
+    expect(screen.queryByText(/Not in a modpack/i)).toBeNull();
+  });
+});
+
 describe('<LibraryRow> kebab + audit pills', () => {
   it('clusters source badges + audit pills next to the name (in the title row)', () => {
     const { container } = renderRow({

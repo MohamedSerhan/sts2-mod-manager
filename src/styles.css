@@ -859,6 +859,12 @@ body {
   align-items: center;
   gap: 3px;
 }
+/* "In N modpacks" count — same muted meta treatment as the folder glyph. */
+.gf-meta-modpacks {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
 /* 4.6 — static In-pack / Not-in-pack indicator (read-only status). */
 .gf-row-inpack {
   flex: 0 0 auto;

@@ -30,6 +30,7 @@ import {
   FolderOpen,
   GitBranch,
   GripVertical,
+  Layers,
   Link as LinkIcon,
   RefreshCw,
   RotateCcw,
@@ -256,6 +257,11 @@ export function LibraryRow({
   // the drag handle, the `draggable` attribute, and the rank chip stay
   // hidden there even though rows can be "in pack".
   const reorderable = enableReorder && inPack && inPackIndex >= 0;
+  // "In N modpacks" — how many of the user's modpacks include this mod. Only
+  // meaningful in the All Mods view (the focused membership grid carries every
+  // profile's state); the synthesized no-focus grid leaves profiles empty, so
+  // the indicator hides there and in the pack-scoped modpack view.
+  const includedProfiles = row.profiles.filter((p) => p.included);
   // Audit pill flags. We surface exactly one of: update / blocked /
   // frozen / snoozed at a time, mirroring ModRow's drawer logic, but in
   // an inline chip-row so the user doesn't have to expand anything.
@@ -506,6 +512,21 @@ export function LibraryRow({
                   <FolderOpen size={10} /> {row.folder_name}
                 </span>
               )}
+            {!packScoped && row.profiles.length > 0 && (
+              <span
+                className="gf-meta-modpacks"
+                title={
+                  includedProfiles.length > 0
+                    ? includedProfiles.map((p) => p.profile_name).join(', ')
+                    : t('libraryTable.inNoModpacks')
+                }
+              >
+                <Layers size={10} />{' '}
+                {includedProfiles.length > 0
+                  ? t('libraryTable.inModpacks', { count: includedProfiles.length })
+                  : t('libraryTable.inNoModpacks')}
+              </span>
+            )}
             {reorderable && (
               <span className="gf-load-order-rank-inline">
                 #{inPackIndex + 1}

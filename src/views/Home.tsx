@@ -154,7 +154,7 @@ interface HomeProps {
   onCreateModpack?: () => void;
   onLaunch?: () => void;
 }
-export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfiles, onGoToBrowseModpacks: _onGoToBrowseModpacks, onCreateModpack, onLaunch }: HomeProps) {
+export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfiles, onGoToBrowseModpacks, onCreateModpack, onLaunch }: HomeProps) {
   const { t } = useTranslation();
   const { gameInfo, mods, refreshAll, activeProfile, refreshSubUpdates } = useApp();
   const toast = useToast();
@@ -481,6 +481,13 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
               onClick={() => onGoToProfiles?.()}
             >
               {t('home.heroEmptyCta')}
+            </button>
+            <button
+              type="button"
+              className="gf-btn-2 gf-btn-lg"
+              onClick={() => onGoToBrowseModpacks?.()}
+            >
+              {t('home.heroEmptyBrowse')}
             </button>
           </div>
         </div>

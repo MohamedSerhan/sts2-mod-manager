@@ -977,6 +977,7 @@
     "heroEmptyTitle": "Pick a modpack to play",
     "heroEmptyBody": "Modpacks are saved sets of mods. Choose one from your modpacks page, browse public ones, or create your own.",
     "heroEmptyCta": "Open Modpacks",
+    "heroEmptyBrowse": "Browse modpacks",
     "secondary": {
       "switch": "Switch modpack",
       "create": "Create modpack",

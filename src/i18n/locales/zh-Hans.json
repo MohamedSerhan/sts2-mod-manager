@@ -977,6 +977,7 @@
     "heroEmptyTitle": "挑选一个整合包游玩",
     "heroEmptyBody": "整合包是一组保存好的模组。可以从整合包页面中选择，浏览公开整合包，或者自己创建一个。",
     "heroEmptyCta": "打开整合包",
+    "heroEmptyBrowse": "浏览整合包",
     "secondary": {
       "switch": "切换模组包",
       "create": "创建模组包",

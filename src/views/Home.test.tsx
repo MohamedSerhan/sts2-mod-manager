@@ -97,22 +97,24 @@ describe('<HomeView> single-block launcher shape (v7)', () => {
     ).toBeInTheDocument();
   });
 
-  it('empty-state hero has exactly ONE primary CTA — "Open Modpacks"', async () => {
+  it('empty-state hero has Open Modpacks + Browse modpacks CTAs', async () => {
     registerInvokeHandler('get_active_profile', () => null);
     render(<Wrap />);
-    const cta = await screen.findByRole('button', { name: /^Open Modpacks$/i });
-    expect(cta).toBeInTheDocument();
-    // No competing Paste / Create / Browse CTAs from the old 3-button
-    // empty-state pattern.
-    expect(
-      screen.queryByRole('button', { name: /Paste a friend's code/i }),
-    ).toBeNull();
+    expect(await screen.findByRole('button', { name: /^Open Modpacks$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Browse modpacks$/i })).toBeInTheDocument();
+    // Create-modpack isn't a hero CTA — that lives on the Modpacks page.
     expect(
       screen.queryByRole('button', { name: /^Create modpack$/i }),
     ).toBeNull();
-    expect(
-      screen.queryByRole('button', { name: /^Browse modpacks$/i }),
-    ).toBeNull();
+  });
+
+  it('"Browse modpacks" CTA fires onGoToBrowseModpacks', async () => {
+    registerInvokeHandler('get_active_profile', () => null);
+    const onGoToBrowseModpacks = vi.fn();
+    const user = userEvent.setup();
+    render(<Wrap onGoToBrowseModpacks={onGoToBrowseModpacks} />);
+    await user.click(await screen.findByRole('button', { name: /^Browse modpacks$/i }));
+    expect(onGoToBrowseModpacks).toHaveBeenCalledTimes(1);
   });
 
   it('"Open Modpacks" CTA fires onGoToProfiles', async () => {

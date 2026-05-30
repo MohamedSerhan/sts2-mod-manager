@@ -27,7 +27,7 @@
  *                        "Create and share now" button; the share flow
  *                        itself handles the token + repo setup later.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useApp } from '../contexts/AppContext';
 import {
@@ -37,6 +37,7 @@ import {
   setProfileModMembership,
 } from '../hooks/useTauri';
 import { withTimeout } from '../lib/withTimeout';
+import { useModalA11y } from '../hooks/useModalA11y';
 import { ModMultiSelect } from './ModMultiSelect';
 import type { ModAuditEntry, Profile } from '../types';
 
@@ -78,6 +79,10 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
   const [auditing, setAuditing] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+  // Escape / focus-trap / initial focus. Gated while creating so a stray
+  // Escape can't abort an in-flight write.
+  useModalA11y(modalRef, onClose, !creating);
 
   // Load existing profiles so step 1 can decide whether to show the
   // Clone option. Fire-and-forget — if it fails (file system / IO),
@@ -248,8 +253,14 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
       role="dialog"
       aria-modal="true"
       aria-label={t('createModpack.title')}
+      onClick={creating ? undefined : onClose}
     >
-      <div className="gf-modal gf-create-wizard" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="gf-modal gf-create-wizard"
+        ref={modalRef}
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="gf-modal-head">
           <div>
             <div className="gf-modal-title">{t('createModpack.title')}</div>

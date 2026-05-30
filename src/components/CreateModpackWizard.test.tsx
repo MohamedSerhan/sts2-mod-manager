@@ -799,4 +799,26 @@ describe('<CreateModpackWizard>', () => {
       });
     });
   });
+
+  describe('a11y / dismissal', () => {
+    it('moves focus into the dialog on open and closes on Escape', async () => {
+      seed({ mods: [baseMod({ name: 'A', enabled: true, folder_name: 'a' })] });
+      const onClose = vi.fn();
+      render(<Wrap onClose={onClose} />);
+      await waitForStep1();
+      const dialog = document.querySelector('.gf-create-wizard') as HTMLElement;
+      await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+      fireEvent.keyDown(dialog, { key: 'Escape' });
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('closes when the backdrop is clicked', async () => {
+      seed({ mods: [] });
+      const onClose = vi.fn();
+      const { container } = render(<Wrap onClose={onClose} />);
+      await waitForStep1();
+      fireEvent.click(container.querySelector('.gf-modal-back') as HTMLElement);
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+  });
 });

@@ -108,6 +108,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
                 onClick={() => close(false)}
                 className="gf-btn-3 gf-btn-icon"
                 title={t('common.cancel')}
+                aria-label={t('common.cancel')}
               >
                 <X size={14} />
               </button>

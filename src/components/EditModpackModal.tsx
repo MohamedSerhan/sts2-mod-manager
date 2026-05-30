@@ -8,11 +8,12 @@
  * unload it — same "pack = live loadout" coupling as the rest of the
  * modpack view. On an inactive pack, only membership changes.
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from './Button';
 import { ModMultiSelect } from './ModMultiSelect';
+import { useModalA11y } from '../hooks/useModalA11y';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { setProfileModMembership, toggleMod } from '../hooks/useTauri';
@@ -40,6 +41,10 @@ export function EditModpackModal({ profile, onClose, onSaved }: Props) {
   );
   const [selected, setSelected] = useState<Set<string>>(initialSelected);
   const [saving, setSaving] = useState(false);
+  const modalRef = useRef<HTMLDivElement>(null);
+  // Escape / focus-trap / initial focus. Gated while saving so a stray Escape
+  // can't abort an in-flight membership write.
+  useModalA11y(modalRef, onClose, !saving);
 
   const labels = {
     searchPlaceholder: t('createModpack.step2SearchPlaceholder'),
@@ -98,8 +103,14 @@ export function EditModpackModal({ profile, onClose, onSaved }: Props) {
       role="dialog"
       aria-modal="true"
       aria-label={t('modpack.edit.title', { name: profile.name })}
+      onClick={saving ? undefined : onClose}
     >
-      <div className="gf-modal gf-create-wizard" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="gf-modal gf-create-wizard"
+        ref={modalRef}
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="gf-modal-head">
           <div>
             <div className="gf-modal-title">{t('modpack.edit.title', { name: profile.name })}</div>

@@ -41,6 +41,20 @@ function newId() {
   return crypto.randomUUID().replace(/-/g, '').slice(0, ID_LENGTH);
 }
 
+// Constant-time compare so a wrong `x-app-key` can't be recovered byte-by-byte
+// from response timing. The key length is fixed and not itself a secret, so
+// folding the length difference into the result is fine. Runs over the longer
+// of the two so a short guess can't short-circuit either.
+function constantTimeEqual(a, b) {
+  const enc = new TextEncoder();
+  const ba = enc.encode(a);
+  const bb = enc.encode(b);
+  const n = Math.max(ba.length, bb.length);
+  let diff = ba.length ^ bb.length;
+  for (let i = 0; i < n; i++) diff |= (ba[i] ?? 0) ^ (bb[i] ?? 0);
+  return diff === 0;
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -59,6 +73,9 @@ export default {
         status: 200,
         headers: {
           'content-type': 'text/plain; charset=utf-8',
+          // Reports are attacker-supplied text served from the worker's own
+          // origin — stop browsers MIME-sniffing one into HTML/JS.
+          'x-content-type-options': 'nosniff',
           // Render inline rather than download.
           'content-disposition': 'inline; filename="sts2-bug-report.txt"',
         },
@@ -70,8 +87,8 @@ export default {
       if (!env.REPORTS) {
         return jsonResponse({ error: 'storage not configured' }, 500);
       }
-      // Optional shared-key gate.
-      if (env.APP_KEY && request.headers.get('x-app-key') !== env.APP_KEY) {
+      // Optional shared-key gate (constant-time compare).
+      if (env.APP_KEY && !constantTimeEqual(request.headers.get('x-app-key') ?? '', env.APP_KEY)) {
         return jsonResponse({ error: 'unauthorized' }, 401);
       }
 

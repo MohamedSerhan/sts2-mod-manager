@@ -314,8 +314,9 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
         filters: [{ name: t('mods.importArchiveFilter'), extensions: ['zip', '7z', 'rar'] }],
       });
       if (!selected) return;
-      const path = typeof selected === 'string' ? selected : selected;
-      const mod = await installModFromFile(path);
+      // `open({ multiple: false })` resolves to a single path or null; the
+      // guard above already ruled out null, so this is just the string.
+      const mod = await installModFromFile(selected);
       await addToTargetPack(mod);
       await refreshAll();
       toast.success(t('mods.toast.installed', { name: mod.name }));
@@ -467,7 +468,12 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
         <Button size="sm" onClick={handleQuickAdd} disabled={quickAdding}>
           {quickAdding ? t('mods.adding') : t('mods.add')}
         </Button>
-        <Button variant="ghost" size="sm" onClick={() => setShowQuickAdd(false)}>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setShowQuickAdd(false)}
+          aria-label={t('common.close')}
+        >
           <X size={14} />
         </Button>
       </Card>

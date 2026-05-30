@@ -612,6 +612,42 @@ describe('<DiagnosticBundle> (Report a bug)', () => {
     expect(ta.value).toContain('github.com/author/coolmod');
   });
 
+  it('redacts the sts2mm-profiles owner across raw + API hosts, keeps public mod APIs', async () => {
+    // The username leaks via every host the share flow touches — not just
+    // github.com. Redact the owner on raw content + the REST API too, while
+    // still keeping public mod API/source links for triage.
+    registerInvokeHandler(
+      'read_log_tail',
+      () =>
+        'GET https://raw.githubusercontent.com/alice/sts2mm-profiles/main/manifest.json\n' +
+        'GET https://api.github.com/repos/alice/sts2mm-profiles/contents/x\n' +
+        'GET https://api.github.com/repos/author/coolmod/releases/latest',
+    );
+    registerInvokeHandler('get_log_path', () => '/x.log');
+    render(<Wrap />);
+    fireEvent.click(getCopyButton());
+    const ta = (await screen.findByDisplayValue(/Bug Report/)) as HTMLTextAreaElement;
+    // Owner scrubbed on both the raw-content and API hosts…
+    expect(ta.value).toContain('raw.githubusercontent.com/<redacted>/sts2mm-profiles');
+    expect(ta.value).toContain('api.github.com/repos/<redacted>/sts2mm-profiles');
+    expect(ta.value).not.toContain('alice/sts2mm-profiles');
+    // …but a public mod's API link is untouched.
+    expect(ta.value).toContain('api.github.com/repos/author/coolmod');
+  });
+
+  it('redacts a spaced Windows username as a whole segment, keeping the rest of the path', async () => {
+    registerInvokeHandler('read_log_tail', () => 'wrote C:\\Users\\John Doe\\AppData\\Roaming\\sts2mm.log');
+    registerInvokeHandler('get_log_path', () => 'C:\\Users\\John Doe\\AppData\\Roaming\\sts2mm.log');
+    render(<Wrap />);
+    fireEvent.click(getCopyButton());
+    const ta = (await screen.findByDisplayValue(/Bug Report/)) as HTMLTextAreaElement;
+    // The trailing path is preserved; the whole username (incl. the space) is gone…
+    expect(ta.value).toContain('C:\\Users\\<redacted>\\AppData\\Roaming');
+    expect(ta.value).not.toContain('John Doe');
+    // …not even the first word leaks (the old \s-bounded regex left "John").
+    expect(ta.value).not.toContain('John');
+  });
+
   it('token redaction runs even when redactPaths is OFF', async () => {
     const token = 'ghp_zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz';
     registerInvokeHandler('read_log_tail', () => `Bearer ${token}`);

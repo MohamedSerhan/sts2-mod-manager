@@ -209,4 +209,14 @@ describe('<EditModpackModal>', () => {
     expect(onClose).toHaveBeenCalled();
     expect(getInvokeCalls().some((c) => c.cmd === 'set_profile_mod_membership')).toBe(false);
   });
+
+  it('closes on Escape and moves focus into the dialog', async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(<Wrap profile={baseProfile({ mods: [] })} onClose={onClose} />);
+    const dialog = await screen.findByRole('dialog');
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+    await user.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });

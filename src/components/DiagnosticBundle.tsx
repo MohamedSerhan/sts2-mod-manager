@@ -64,13 +64,20 @@ export function DiagnosticBundle({ open, onClose }: Props) {
         '$1$2=[REDACTED]',
       )
       // The user's own sharing repo (sts2mm-profiles under their account)
-      // exposes their GitHub username — redact the owner. Mod source links
-      // (github.com/author/mod, nexusmods.com/…) are public and kept.
-      .replace(/(github\.com\/)([^/\s]+)(\/sts2mm-profiles)/gi, '$1<redacted>$3');
+      // exposes their GitHub username — redact the owner across every host the
+      // share flow touches: the web repo, raw file content, and the REST API.
+      // Mod source links (github.com/author/mod, nexusmods.com/…) are public
+      // and kept; scoping each pattern to `/sts2mm-profiles` leaves them alone.
+      .replace(/(github\.com\/)([^/\s]+)(\/sts2mm-profiles)/gi, '$1<redacted>$3')
+      .replace(/(raw\.githubusercontent\.com\/)([^/\s]+)(\/sts2mm-profiles)/gi, '$1<redacted>$3')
+      .replace(/(api\.github\.com\/repos\/)([^/\s]+)(\/sts2mm-profiles)/gi, '$1<redacted>$3');
 
     if (!redactPaths) return out;
     out = out
-      .replace(/([A-Za-z]:\\Users\\)([^\\\s]+)/g, '$1<redacted>')
+      // Match the whole username up to the next path separator (NOT the next
+      // space) so a spaced Windows account like "C:\Users\John Doe\…" is fully
+      // redacted; bounding on the trailing "\" stops it eating following prose.
+      .replace(/([A-Za-z]:\\Users\\)([^\\\r\n]+)(\\)/g, '$1<redacted>$3')
       .replace(/(\/Users\/)([^/\s]+)/g, '$1<redacted>')
       .replace(/(\/home\/)([^/\s]+)/g, '$1<redacted>');
     return out;

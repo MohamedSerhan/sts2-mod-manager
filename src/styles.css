@@ -1019,9 +1019,12 @@ body {
    so more mods fit on screen. The title row + version/folder/modpack meta
    stay. */
 .gf-profile-library.is-compact .gf-profile-library-row {
-  gap: 4px;
-  padding-top: 6px;
-  padding-bottom: 6px;
+  /* Compact still needs room for the 2-line "Active in game" status caption and
+     for an open source editor — denser than Comfortable, but not so tight the
+     status reads as cramped. */
+  gap: 10px;
+  padding-top: 9px;
+  padding-bottom: 9px;
 }
 .gf-profile-library.is-compact .gf-modrow-meta {
   display: none;

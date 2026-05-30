@@ -30,7 +30,7 @@ pub(crate) fn hash_file(path: &Path) -> Option<String> {
     let data = fs::read(path).ok()?;
     let mut hasher = Sha256::new();
     hasher.update(&data);
-    Some(format!("{:x}", hasher.finalize()))
+    Some(hex::encode(hasher.finalize()))
 }
 
 /// Calculate total size of files in a list relative to a base directory.

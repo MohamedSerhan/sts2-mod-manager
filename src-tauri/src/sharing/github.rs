@@ -569,7 +569,7 @@ pub(super) async fn upload_mod_bundle_via_release(
     // that the listing API doesn't surface, so even a fresh POST 422'd.
     let mut hasher = Sha256::new();
     hasher.update(zip_data);
-    let local_hash = format!("{:x}", hasher.finalize());
+    let local_hash = hex::encode(hasher.finalize());
 
     let asset_name = release_asset_name(mod_name, version, &local_hash);
     // GitHub strips non-ASCII chars from the asset filename it stores
@@ -1092,7 +1092,7 @@ pub(super) mod release_upload_tests {
         use sha2::{Digest, Sha256};
         let mut h = Sha256::new();
         h.update(bytes);
-        format!("{:x}", h.finalize())
+        hex::encode(h.finalize())
     }
 
     #[tokio::test]
@@ -2392,7 +2392,7 @@ mod github_api_stress_tests {
     fn sha256_hex(bytes: &[u8]) -> String {
         let mut h = Sha256::new();
         h.update(bytes);
-        format!("{:x}", h.finalize())
+        hex::encode(h.finalize())
     }
 
     struct EnvVarGuard {

@@ -694,7 +694,7 @@ pub fn read_user_edited_configs(
         // (user edit), preserve.
         let mut hasher = Sha256::new();
         hasher.update(&bytes);
-        let cur_hash = format!("{:x}", hasher.finalize());
+        let cur_hash = hex::encode(hasher.finalize());
         match snapshot.get(&rel) {
             Some(prev) if prev == &cur_hash => {
                 // Unchanged — let the update overwrite freely so the user

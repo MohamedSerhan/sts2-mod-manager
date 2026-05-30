@@ -362,6 +362,7 @@
       "toastStored": "{{mod}} stored (kept installed, moved out of the game folder)",
       "toastActivated": "Activated {{mod}} in the game folder",
       "toastActivatedAndAdded": "Activated {{mod}} and added it to {{pack}}",
+      "toastActivatedFollowed": "Activated {{mod}} in the game folder. \"{{pack}}\" is a followed modpack, so it can't be edited — duplicate it to add mods to your own copy.",
       "toastStorageFailed": "Failed to move {{mod}}: {{error}}",
       "enableNotInPack": {
         "title": "Enable {{mod}}?",

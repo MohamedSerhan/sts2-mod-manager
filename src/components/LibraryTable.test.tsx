@@ -433,6 +433,43 @@ describe('<LibraryTable>', () => {
     expect(screen.queryByRole('button', { name: /^Enable only$/i })).toBeNull();
   });
 
+  it('enable not-in-pack with a FOLLOWED (non-editable) active pack: no prompt, explains via toast', async () => {
+    // A followed pack can't be edited, so enabling a not-in-pack mod can't add
+    // it. Instead of the prompt (or a silent enable), an explanatory toast
+    // fires and membership is left untouched.
+    registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Followed' })]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Followed', editable: false }],
+      mods: [
+        {
+          name: 'Loner',
+          version: '1.0',
+          folder_name: 'Loner',
+          mod_id: 'Loner',
+          installed_enabled: false,
+          profiles: [{ profile_name: 'Followed', included: false, enabled: false, editable: false }],
+        },
+      ],
+    }));
+    registerInvokeHandler('toggle_mod', () => undefined);
+    const modInfoByKey = new Map([
+      ['Loner', mkModInfo({ name: 'Loner', folder_name: 'Loner', mod_id: 'Loner', enabled: false })],
+    ]);
+    const user = userEvent.setup();
+    render(<Wrap modpackName="Followed" modInfoByKey={modInfoByKey} />);
+    await user.click(
+      await screen.findByRole('switch', { name: /toggle whether Loner is active in game/i }),
+    );
+    // No add-to-pack prompt for a followed pack.
+    expect(screen.queryByRole('button', { name: /^Enable only$/i })).toBeNull();
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'toggle_mod' && c.args?.enable === true)).toBe(true);
+    });
+    // Explains why it wasn't added; membership stays untouched.
+    expect(await screen.findByText(/followed modpack, so it can't be edited/i)).toBeInTheDocument();
+    expect(getInvokeCalls().some((c) => c.cmd === 'set_profile_mod_membership')).toBe(false);
+  });
+
   it('drag reordering an in-pack mod calls set_profile_load_order', async () => {
     registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
     registerInvokeHandler('get_profile_memberships', () => ({

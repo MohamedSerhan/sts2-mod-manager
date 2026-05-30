@@ -536,6 +536,12 @@ export function LibraryTable({
       alsoAddToPack = result.choice === 'enableAndAdd';
     }
 
+    // Enabling a mod that isn't in the active pack, when that pack is a
+    // followed / non-editable one, can't add it (you don't own its manifest).
+    // Flag it so the toast explains instead of silently enabling.
+    const enabledOutsideFollowedPack =
+      nextEnabled && modpackName != null && state != null && !state.included && !state.editable;
+
     const key = libraryStorageKey(row);
     try {
       setStorageSaving(key);
@@ -552,16 +558,19 @@ export function LibraryTable({
         patchRowMembership(membershipRowKey(row), true);
       }
       await refreshAll();
-      toastCtx.success(
-        !nextEnabled
-          ? t('profiles.library.toastStored', { mod: displayName })
-          : alsoAddToPack
-          ? t('profiles.library.toastActivatedAndAdded', {
-              mod: displayName,
-              pack: modpackName,
-            })
-          : t('profiles.library.toastActivated', { mod: displayName }),
-      );
+      if (!nextEnabled) {
+        toastCtx.success(t('profiles.library.toastStored', { mod: displayName }));
+      } else if (alsoAddToPack) {
+        toastCtx.success(
+          t('profiles.library.toastActivatedAndAdded', { mod: displayName, pack: modpackName }),
+        );
+      } else if (enabledOutsideFollowedPack) {
+        toastCtx.info(
+          t('profiles.library.toastActivatedFollowed', { mod: displayName, pack: modpackName }),
+        );
+      } else {
+        toastCtx.success(t('profiles.library.toastActivated', { mod: displayName }));
+      }
       onMembershipChanged?.();
     } catch (e) {
       toastCtx.error(

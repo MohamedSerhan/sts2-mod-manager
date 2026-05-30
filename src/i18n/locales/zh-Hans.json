@@ -438,6 +438,7 @@
       "toastStored": "{{mod}} 已存储（保留安装，已移出游戏文件夹）",
       "toastActivated": "已将 {{mod}} 激活到游戏文件夹",
       "toastActivatedAndAdded": "已激活 {{mod}} 并将其添加到 {{pack}}",
+      "toastActivatedFollowed": "已将 {{mod}} 激活到游戏文件夹。「{{pack}}」是关注的模组包，无法编辑 — 请复制它以将模组添加到你自己的副本中。",
       "toastStorageFailed": "移动 {{mod}} 失败：{{error}}",
       "enableNotInPack": {
         "title": "启用 {{mod}}？",

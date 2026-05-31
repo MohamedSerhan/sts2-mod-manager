@@ -408,3 +408,13 @@ what makes the gate non-bypassable in normal operation.  Without it, a direct
 push lands on `main` without ever touching `CI Gate`.  An admin can still force-
 push in a genuine emergency — that is the intentional escape hatch — but it
 should be a last resort, not routine practice.
+
+#### Edge cases
+
+- **Fork PRs:** `app-build` and `smoke` need repo secrets (the Tauri signing key); a
+  fork PR runs without secrets, so those jobs fail and `CI Gate` goes red. That's by
+  design — this project merges only maintainer/bot-authored (same-repo) PRs; a fork
+  contribution is reviewed and re-landed by you manually, not auto-merged.
+- **Release-cut PRs:** a PR that drains `## [Unreleased]` into a new versioned section
+  AND touches app code will trip the changelog check (head bullet count drops). Label
+  such a PR `no-changelog` — cutting a release isn't a user-facing app change.

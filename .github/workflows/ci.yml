@@ -1,4 +1,4 @@
-name: CI Gate
+name: CI
 
 # Change-aware required gate. The single `CI Gate` check (set required in branch
 # protection) passes only if every check RELEVANT to the change succeeded; a
@@ -171,7 +171,9 @@ jobs:
           cache: "npm"
       - run: npm ci
       - name: Install tauri-driver
-        run: cargo install tauri-driver --version "^0.1"
+        # 2.0.6 is the version validated against current WebView2 — 0.1.x is broken
+        # (WebView2 147+ schema change; see qa/runner/smoke.mjs). --locked for determinism.
+        run: cargo install tauri-driver --version 2.0.6 --locked
       - name: Download matching msedgedriver (reads the runner's WebView2 version)
         run: node qa/runner/scripts/download-msedgedriver.mjs
       - name: Build app (qa-cassette feature, --no-bundle => no signing needed)

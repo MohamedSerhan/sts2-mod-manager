@@ -18,6 +18,8 @@ jobs:
     # Only when the just-added label is `auto-fix`.
     if: ${{ github.event_name == 'issues' && github.event.label.name == 'auto-fix' }}
     runs-on: ubuntu-latest
+    env:
+      FANOUT_MAX_PIECES: "5"   # max parallel sub-task pieces for a LARGE issue
     permissions:
       contents: write
       pull-requests: write
@@ -45,8 +47,8 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: |
-            --allowedTools Edit,Read,Write,Bash
-            --max-turns 60
+            --allowedTools Edit,Read,Write,Bash,Task
+            --max-turns 100
           prompt: |
             A maintainer labeled issue #${{ github.event.issue.number }} with `auto-fix`,
             greenlighting an automated fix. Repository: ${{ github.repository }}.
@@ -58,12 +60,42 @@ jobs:
             spanning Rust + UI + i18n, a broad refactor, or anything you cannot confidently
             finish and verify in one pass)?
 
-            • If it is LARGE: do NOT attempt the whole implementation — you will run out of
-              steps and produce nothing useful. Instead post ONE comment on the issue with a
-              concrete implementation PLAN: the files to touch, the approach, and a checklist
-              of the independent pieces the work breaks into. State plainly that the change is
-              too large for a single automated pass and is ready for a maintainer to split up
-              or drive. Then STOP — do not open a PR. You are done.
+            • If it is LARGE — do NOT try to implement it all in this one context
+              (you will run out of turns). Instead, FAN OUT:
+
+              1. Decompose the work into AT MOST ${{ env.FANOUT_MAX_PIECES }}
+                 INDEPENDENT pieces, each owning a DISJOINT set of files (ideally its
+                 own new modules + tests). Never assign the same file to two pieces.
+                 Reserve shared "glue" files (a router, a types file, an index /
+                 registry, settings wiring) for YOURSELF — no piece may edit them.
+                 If the work will not partition into <= ${{ env.FANOUT_MAX_PIECES }}
+                 disjoint pieces, take the most independent pieces up to that cap and
+                 record the rest as remaining work.
+              2. Post ONE issue comment with the plan: each piece, its file scope, and
+                 the glue you will wire yourself.
+              3. Create the branch `auto-fix/${{ github.event.issue.number }}` off the
+                 default branch (this EXACT name — a later step finds the PR by it).
+              4. Spawn one subagent per piece using the Task tool, issuing the Task
+                 calls together so the pieces run in parallel. Give each subagent
+                 EXACTLY its piece: the goal, its disjoint file scope, and "implement
+                 it AND write tests (frontend: vitest; Rust: cargo test), touch nothing
+                 outside your files, and report what you changed." Each subagent has its
+                 own context + turn budget — that is how this fits where one linear pass
+                 would not. (If the runtime can only run them one at a time, that is
+                 fine — do them sequentially; the capability is unchanged.)
+              5. INTEGRATION PASS (you, after every subagent returns): edit the glue
+                 files to wire the pieces together, then run the full suite (`npm test`
+                 runs frontend + Rust) and fix any integration breakage until it passes.
+              6. Open ONE pull request on `auto-fix/${{ github.event.issue.number }}`
+                 exactly as the contained path would: the body STARTS with
+                 `Fixes #${{ github.event.issue.number }}`, summarizes each piece, notes
+                 whether you added a changelog entry, and — if any piece was blocked or
+                 deferred — includes a "Remaining work" checklist. Do NOT apply labels.
+
+              If a subagent fails or returns incomplete, retry it once or finish that
+              piece yourself — never silently drop a piece. If the work is genuinely too
+              tangled to split into disjoint pieces safely, fall back to the old
+              behavior: post the plan as an issue comment and STOP (no PR).
 
             • If it is CONTAINED, proceed:
               1. Investigate the codebase and implement the fix on a NEW branch named EXACTLY

@@ -45,12 +45,15 @@ jobs:
         if: ${{ steps.gate.outputs.eligible == 'true' }}
         id: ci
         run: |
-          # `gh pr checks` exits non-zero if any check is failing/pending (gh >= 2.29).
-          if gh pr checks "$PR" --repo "$REPO"; then
+          # Require the change-aware CI Gate specifically to have SUCCEEDED.
+          STATE=$(gh pr checks "$PR" --repo "$REPO" --json name,state \
+                    --jq '[.[] | select(.name == "CI Gate")][0].state // "MISSING"')
+          echo "CI Gate state: $STATE"
+          if [ "$STATE" = "SUCCESS" ]; then
             echo "green=true" >> "$GITHUB_OUTPUT"
           else
             echo "green=false" >> "$GITHUB_OUTPUT"
-            gh pr comment "$PR" --repo "$REPO" --body "Approved + QA-passed, but CI isn't green yet — holding the merge until checks pass. Re-approve (or it'll merge once green if you re-trigger)."
+            gh pr comment "$PR" --repo "$REPO" --body "Approved + QA-passed, but the CI Gate isn't green yet (state: $STATE) — holding the merge until it passes. Re-approve once it's green."
           fi
       - name: Merge
         if: ${{ steps.gate.outputs.eligible == 'true' && steps.ci.outputs.green == 'true' }}

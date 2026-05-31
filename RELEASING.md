@@ -235,7 +235,7 @@ PR branch), then merge when satisfied.
 
 When an `auto-fix` issue is too large for a single pass, the bot fans out: it
 decomposes the work into up to `FANOUT_MAX_PIECES` (default 5) independent pieces,
-implements them with parallel subagents, reconciles them onto `auto-fix/<issue>`,
+implements them with parallel subagents in a shared workspace, commits them onto `auto-fix/<issue>`,
 and opens ONE integrated PR. That PR goes through the same `qa` → your approval →
 CI Gate → merge path as any other auto-fix PR — nothing merges or releases without
 your approval. Tune the cap via the `FANOUT_MAX_PIECES` env in `claude-autofix.yml`.

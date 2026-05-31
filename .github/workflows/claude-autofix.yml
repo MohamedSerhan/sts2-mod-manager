@@ -78,14 +78,24 @@ jobs:
               4. Spawn one subagent per piece using the Task tool, issuing the Task
                  calls together so the pieces run in parallel. Give each subagent
                  EXACTLY its piece: the goal, its disjoint file scope, and "implement
-                 it AND write tests (frontend: vitest; Rust: cargo test), touch nothing
-                 outside your files, and report what you changed." Each subagent has its
-                 own context + turn budget — that is how this fits where one linear pass
-                 would not. (If the runtime can only run them one at a time, that is
-                 fine — do them sequentially; the capability is unchanged.)
+                 it AND write tests (frontend: vitest; Rust: cargo test), edit ONLY your
+                 files, run NO git commands (no add/commit/checkout/push), and report
+                 what you changed." Subagents edit the shared working tree only — YOU
+                 (the orchestrator) own all git and commit their work yourself. Each
+                 subagent has its own context + turn budget — that is how this fits where
+                 one linear pass would not. (If the runtime can only run them one at a
+                 time, that is fine — do them sequentially; the capability is unchanged.)
               5. INTEGRATION PASS (you, after every subagent returns): edit the glue
-                 files to wire the pieces together, then run the full suite (`npm test`
-                 runs frontend + Rust) and fix any integration breakage until it passes.
+                 files to wire the pieces together. If the change is user-facing, add ONE
+                 concise player-language bullet to the `[Unreleased]` section of
+                 CHANGELOG.md under the right heading (Added/Changed/Fixed/Security),
+                 following the CHANGELOG "Writing rules" (no file paths, function names,
+                 or dev-speak; one short active-voice sentence); skip the changelog for
+                 internal-only changes. Then run the full suite (`npm test` runs frontend
+                 + Rust) and fix any integration breakage until it passes. Finally COMMIT
+                 ALL changes — every subagent's edits plus your glue and changelog edits —
+                 to `auto-fix/${{ github.event.issue.number }}` (the subagents committed
+                 nothing).
               6. Open ONE pull request on `auto-fix/${{ github.event.issue.number }}`
                  exactly as the contained path would: the body STARTS with
                  `Fixes #${{ github.event.issue.number }}`, summarizes each piece, notes

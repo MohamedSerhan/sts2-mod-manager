@@ -6,6 +6,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 
 const GAME_PATH_FILE: &str = "game_path.txt";
+const NEXUS_DOWNLOAD_DIR_FILE: &str = "nexus_download_dir.txt";
 
 /// How the user wants to start Slay the Spire 2 from the Launch button and
 /// the `Ctrl/⌘ L` shortcut.
@@ -117,6 +118,10 @@ pub struct AppStateInner {
     /// How the Launch button and `Ctrl/⌘ L` should start STS2. Persisted
     /// in `<config>/launch_mode.txt`. Default `Steam`. See `LaunchMode`.
     pub launch_mode: LaunchMode,
+    /// User-configured folder to watch for Nexus mod downloads. When `None`
+    /// the watcher falls back to the OS default Downloads folder. Persisted
+    /// in `<config>/nexus_download_dir.txt`.
+    pub nexus_download_dir: Option<PathBuf>,
     /// In-memory cache for `fetch_modpack_browser_page`. Keyed by page
     /// number. TTL is enforced in the command, not here.
     pub modpack_browser_cache: std::collections::HashMap<u32, CachedBrowserPage>,
@@ -209,6 +214,7 @@ impl AppStateInner {
             game_version: None,
             pending_deep_link: None,
             launch_mode: LaunchMode::default(),
+            nexus_download_dir: None,
             modpack_browser_cache: std::collections::HashMap::new(),
         }
     }
@@ -290,6 +296,24 @@ pub(crate) fn load_persisted_game_path(config_path: &Path) -> Option<PathBuf> {
     }
 }
 
+pub(crate) fn persist_nexus_download_dir(config_path: &Path, dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(config_path)?;
+    std::fs::write(
+        config_path.join(NEXUS_DOWNLOAD_DIR_FILE),
+        dir.to_string_lossy().as_ref(),
+    )
+}
+
+pub(crate) fn load_persisted_nexus_download_dir(config_path: &Path) -> Option<PathBuf> {
+    let raw = std::fs::read_to_string(config_path.join(NEXUS_DOWNLOAD_DIR_FILE)).ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(trimmed))
+    }
+}
+
 pub(crate) fn restore_persisted_game_path<F>(state: &mut AppStateInner, validate: F) -> bool
 where
     F: Fn(&Path) -> bool,
@@ -355,6 +379,7 @@ mod game_path_persistence_tests {
             game_version: None,
             pending_deep_link: None,
             launch_mode: LaunchMode::default(),
+            nexus_download_dir: None,
             modpack_browser_cache: std::collections::HashMap::new(),
         };
 
@@ -367,5 +392,33 @@ mod game_path_persistence_tests {
             state.disabled_mods_path.as_deref(),
             Some(expected_disabled.as_path())
         );
+    }
+}
+
+#[cfg(test)]
+mod nexus_download_dir_persistence_tests {
+    use super::*;
+
+    #[test]
+    fn persisted_nexus_download_dir_round_trips() {
+        let config = tempfile::tempdir().unwrap();
+        let dir = PathBuf::from("/custom/downloads");
+
+        persist_nexus_download_dir(config.path(), &dir).unwrap();
+
+        assert_eq!(load_persisted_nexus_download_dir(config.path()), Some(dir));
+    }
+
+    #[test]
+    fn missing_nexus_download_dir_file_returns_none() {
+        let config = tempfile::tempdir().unwrap();
+        assert_eq!(load_persisted_nexus_download_dir(config.path()), None);
+    }
+
+    #[test]
+    fn blank_nexus_download_dir_file_returns_none() {
+        let config = tempfile::tempdir().unwrap();
+        std::fs::write(config.path().join(NEXUS_DOWNLOAD_DIR_FILE), "  \n  ").unwrap();
+        assert_eq!(load_persisted_nexus_download_dir(config.path()), None);
     }
 }

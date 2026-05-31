@@ -1,0 +1,26 @@
+{
+  "planPath": "docs/superpowers/plans/2026-05-31-autofix-fanout.md",
+  "tasks": [
+    {
+      "id": 22,
+      "subject": "Task 1: Spike — confirm parallel Task subagents in claude-code-action",
+      "status": "pending",
+      "description": "**Goal:** Empirically confirm whether claude-code-action runs Task subagents in parallel over a shared workspace, before investing in the orchestrator prompt. Only total failure of the Task tool is blocking; parallel-vs-sequential just tunes Task 2 wording.\n\n**Files:**\n- Create (throwaway scratch branch only, never merged): .github/workflows/_fanout-spike.yml\n\n**Acceptance Criteria:**\n- [ ] Spike runs to completion on scratch branch autofix-fanout-spike (push-triggered, no main involvement)\n- [ ] Log shows 3 Task subagents + scratch/sub-1.txt, sub-2.txt, sub-3.txt created\n- [ ] Finding recorded: parallel or sequential\n- [ ] Scratch branch + workflow deleted afterward (no residue)\n\n**Verify:** gh run list --branch autofix-fanout-spike --workflow=_fanout-spike.yml shows one completed/success run.\n\n```json:metadata\n{\"files\": [\".github/workflows/_fanout-spike.yml\"], \"verifyCommand\": \"gh run list --branch autofix-fanout-spike --workflow=_fanout-spike.yml --json conclusion\", \"acceptanceCriteria\": [\"spike run completes on scratch branch\", \"logs show 3 Task subagents + 3 files created\", \"parallel-vs-sequential finding recorded\", \"scratch branch + workflow deleted\"]}\n```"
+    },
+    {
+      "id": 23,
+      "subject": "Task 2: Implement fanout in claude-autofix.yml initiate",
+      "status": "pending",
+      "blockedBy": [22],
+      "description": "**Goal:** Replace the LARGE branch of initiate's prompt with decompose -> parallel-subagents -> integrate -> one-PR; enable Task; bump turns; add the N cap. CONTAINED path byte-identical.\n\n**Files:**\n- Modify: .github/workflows/claude-autofix.yml (initiate job: claude_args, prompt LARGE branch, new job env FANOUT_MAX_PIECES)\n- Modify: RELEASING.md (short fanout note)\n\n**Acceptance Criteria:**\n- [ ] initiate gains env FANOUT_MAX_PIECES set to 5\n- [ ] --allowedTools includes Task (Edit,Read,Write,Bash,Task)\n- [ ] --max-turns raised 60 -> 100\n- [ ] LARGE branch fans out per spec (decompose <= N disjoint-scope pieces, post plan, create auto-fix/<issue>, spawn subagent per piece via Task, integration pass + npm test to green, open ONE PR; retry-once/never-drop; too-tangled -> plan+STOP)\n- [ ] CONTAINED branch + label step + error-report step + revise job unchanged\n- [ ] RELEASING.md documents fanout (one integrated PR, still needs approval)\n\n**Verify:** actionlint .github/workflows/claude-autofix.yml (and CI workflow-lint green on the PR); manual read confirms LARGE fans out + CONTAINED unchanged.\n\n```json:metadata\n{\"files\": [\".github/workflows/claude-autofix.yml\", \"RELEASING.md\"], \"verifyCommand\": \"actionlint .github/workflows/claude-autofix.yml\", \"acceptanceCriteria\": [\"FANOUT_MAX_PIECES env added\", \"Task in allowedTools\", \"max-turns 60->100\", \"LARGE branch fans out per spec\", \"CONTAINED + downstream unchanged\", \"RELEASING.md fanout note\"]}\n```"
+    },
+    {
+      "id": 24,
+      "subject": "Task 3: End-to-end validation on a real large issue (USER GATE)",
+      "status": "pending",
+      "blockedBy": [23],
+      "description": "**Goal:** Prove the whole fanout path works on a real large issue: auto-detect -> fan out into multiple pieces -> one integrated PR -> QA loop -> maintainer approval -> CI Gate -> merge, with no release to users.\n\n> **USER-ORDERED GATE — NON-SKIPPABLE.** Requested by the user in the current conversation. MUST NOT be closed by walking around it, declaring it verified inline, or substituting a cheaper check. Close only after every acceptanceCriteria item is re-validated independently with output captured.\n\n**Files:** none (operational validation against the live workflow).\n\n**Acceptance Criteria:**\n- [ ] Large issue labeled auto-fix (candidate: configurable Nexus download-folder behind #55)\n- [ ] Run FANNED OUT: piece-plan issue comment + multiple Task subagents in the run log (not single-pass)\n- [ ] Exactly one PR on auto-fix/<issue>, pieces integrated, full suite green\n- [ ] Through gate: qa -> QA loop -> maintainer approval -> CI Gate green -> merged\n- [ ] No release: latest GitHub release tag unchanged after merge\n\n**Verify:** gh pr view <pr> --json state,mergedAt shows MERGED; gh release view --json tagName unchanged from before the run.\n\n```json:metadata\n{\"files\": [], \"verifyCommand\": \"gh pr view PR --json state,mergedAt && gh release view --json tagName\", \"acceptanceCriteria\": [\"large issue labeled auto-fix\", \"run fanned out: plan comment + multiple subagents\", \"one integrated PR, suite green\", \"through gate: qa->approval->CI Gate->merged\", \"no release: release tag unchanged\"], \"userGate\": true, \"tags\": [\"user-gate\"], \"requireEvidenceTokens\": [[\"fanout\", \"fan-out\", \"subagents\"], [\"merged\", \"no-release\"]]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-05-31T00:00:00Z"
+}

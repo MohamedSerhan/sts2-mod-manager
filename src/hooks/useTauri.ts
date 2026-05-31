@@ -60,6 +60,22 @@ export async function setLaunchMode(mode: LaunchMode): Promise<LaunchMode> {
   return invoke('set_launch_mode', { mode });
 }
 
+// ── Nexus Download Folder ──────────────────────────────────────────────────
+
+/** Return the user-configured Nexus download watch folder, or null for the OS default. */
+export async function getNexusDownloadDir(): Promise<string | null> {
+  return invoke('get_nexus_download_dir');
+}
+
+/**
+ * Set the folder the downloads watcher monitors for Nexus mod archives.
+ * Pass an empty string to reset to the OS default Downloads folder.
+ * The change takes effect after restarting the app.
+ */
+export async function setNexusDownloadDir(path: string): Promise<string | null> {
+  return invoke('set_nexus_download_dir', { path });
+}
+
 // ── Mod Management ─────────────────────────────────────────────────────────
 
 export async function getInstalledMods(): Promise<ModInfo[]> {

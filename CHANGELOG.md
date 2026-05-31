@@ -27,6 +27,8 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ### Added
 
+- You can now choose which folder the app watches for Nexus mod downloads in Settings → General. The change takes effect after restarting the app.
+
 ### Changed
 
 - Reporting a bug now shows you the full report and asks you to confirm before anything is uploaded or linked publicly.

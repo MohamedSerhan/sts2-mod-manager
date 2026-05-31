@@ -158,17 +158,32 @@ approach which was 100% Cloudflare-blocked from CI IP ranges.
 ### Local runtime via Task Scheduler
 
 `scripts/run-nexus-triage-local.bat` is the Windows runner:
-1. Sets the `NEXUSMODS_*` env vars (hard-coded for mod 856)
-2. Pulls `gh auth token` for `GITHUB_TOKEN`
-3. Honors the `scripts/nexus-triage.disabled` killswitch
-4. Updates the repo to `main` + pulls latest
-5. Runs `node scripts/nexus-triage.mjs`
-6. Commits and pushes the updated state file
-7. Logs each run to `.nexus-triage-runs/YYYY-MM-DD.log` (gitignored)
+1. Prepends the `.nexus-triage-venv\Scripts` venv to `PATH` (see One-time setup)
+2. Sets the `NEXUSMODS_*` env vars (hard-coded for mod 856)
+3. Pulls `gh auth token` for `GITHUB_TOKEN`
+4. Honors the `scripts/nexus-triage.disabled` killswitch
+5. Updates the repo to `main` + pulls latest
+6. Preflights `python -c "import curl_cffi"` — bails loudly if the venv is missing/broken
+7. Runs `node scripts/nexus-triage.mjs`
+8. Commits and pushes the updated state file
+9. Logs each run to `.nexus-triage-runs/YYYY-MM-DD.log` (gitignored), and exits with
+   the script's real exit code so a failed run shows as non-zero in Task Scheduler
 
 #### One-time setup
 
-1. `python -m pip install --user curl_cffi` (the Python TLS-impersonate shim)
+1. Create the dedicated venv the runner uses (holds `curl_cffi`, the Python
+   TLS-impersonate shim). **Do not `pip install --user`** — Task Scheduler logons
+   do not add the per-user site-packages to `sys.path`, so a `--user` install is
+   invisible to the scheduled run and every triage dies with
+   `ModuleNotFoundError: No module named 'curl_cffi'` — silently, since the runner
+   used to `exit /b 0` regardless (this is exactly what broke 2026-05-28→05-31).
+   From the repo root:
+   ```
+   python -m venv .nexus-triage-venv
+   .nexus-triage-venv\Scripts\python -m pip install curl_cffi
+   ```
+   The runner prepends `.nexus-triage-venv\Scripts` to `PATH` so the `python` it
+   spawns resolves here; `.nexus-triage-venv/` is gitignored.
 2. `gh auth status` — make sure you're logged in
 3. **Task Scheduler → Create Task…** (already created as "Nexus Triage" on
    2026-05-27 — these are the settings if you ever need to recreate it):
@@ -230,6 +245,15 @@ Claude updates the branch in-place.  Repeat as many times as needed.
 **Review and merge** — PRs are **never auto-merged**.  Inspect the diff,
 check that the `check` job passed (it runs automatically on every push to the
 PR branch), then merge when satisfied.
+
+### Auto-fix fanout (large issues)
+
+When an `auto-fix` issue is too large for a single pass, the bot fans out: it
+decomposes the work into up to `FANOUT_MAX_PIECES` (default 5) independent pieces,
+implements them with parallel subagents in a shared workspace, commits them onto `auto-fix/<issue>`,
+and opens ONE integrated PR. That PR goes through the same `qa` → your approval →
+CI Gate → merge path as any other auto-fix PR — nothing merges or releases without
+your approval. Tune the cap via the `FANOUT_MAX_PIECES` env in `claude-autofix.yml`.
 
 ### One-time setup
 

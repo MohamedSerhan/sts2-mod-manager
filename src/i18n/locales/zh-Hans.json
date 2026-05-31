@@ -1071,7 +1071,17 @@
       "launchModeSetSteam": "启动模式已设为 Steam",
       "launchModeSetDirect": "启动模式已设为直接启动",
       "failedUpdateLaunchMode": "更新启动模式失败：{{error}}",
-      "launchModeAria": "启动模式"
+      "launchModeAria": "启动模式",
+      "nexusDownloadDir": "Nexus 下载监控文件夹",
+      "nexusDownloadDirDesc": "应用将监控此文件夹中的 Nexus 模组压缩包并自动安装。重启应用后生效。",
+      "nexusDownloadDirDefault": "系统默认下载文件夹",
+      "nexusDownloadDirCustom": "自定义：{{path}}",
+      "nexusDownloadDirBrowse": "浏览",
+      "nexusDownloadDirReset": "重置为默认",
+      "nexusDownloadDirSaved": "下载监控文件夹已更新，重启应用后生效。",
+      "nexusDownloadDirReset2": "下载监控文件夹已重置为系统默认，重启应用后生效。",
+      "nexusDownloadDirError": "无法设置下载文件夹：{{error}}",
+      "nexusDownloadDirSelect": "选择 Nexus 下载文件夹"
     },
     "language": {
       "label": "语言",

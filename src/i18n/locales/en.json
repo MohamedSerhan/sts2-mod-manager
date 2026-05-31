@@ -1071,7 +1071,17 @@
       "launchModeSetSteam": "Launch mode set to Steam",
       "launchModeSetDirect": "Launch mode set to Direct",
       "failedUpdateLaunchMode": "Failed to update launch mode: {{error}}",
-      "launchModeAria": "Launch mode"
+      "launchModeAria": "Launch mode",
+      "nexusDownloadDir": "Nexus Download Watch Folder",
+      "nexusDownloadDirDesc": "The app watches this folder for Nexus mod archives and auto-installs them. Takes effect after restarting the app.",
+      "nexusDownloadDirDefault": "OS default Downloads folder",
+      "nexusDownloadDirCustom": "Custom: {{path}}",
+      "nexusDownloadDirBrowse": "Browse",
+      "nexusDownloadDirReset": "Reset to default",
+      "nexusDownloadDirSaved": "Download watch folder updated. Restart the app for the change to take effect.",
+      "nexusDownloadDirReset2": "Download watch folder reset to OS default. Restart the app for the change to take effect.",
+      "nexusDownloadDirError": "Could not set download folder: {{error}}",
+      "nexusDownloadDirSelect": "Select Nexus download folder"
     },
     "language": {
       "label": "Language",

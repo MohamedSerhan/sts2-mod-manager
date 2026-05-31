@@ -9,7 +9,12 @@ REM Polling has to run from a residential IP. This wrapper sets up env vars,
 REM runs the script, and commits/pushes state changes from your machine.
 REM
 REM One-time setup:
-REM   1. python -m pip install --user curl_cffi
+REM   1. Create the dedicated venv this runner uses. Do NOT use `pip install --user`:
+REM      Task Scheduler logons do not add the per-user site-packages to sys.path, so a
+REM      --user curl_cffi is invisible here and every run dies with ModuleNotFoundError.
+REM      From the repo root:
+REM        python -m venv .nexus-triage-venv
+REM        .nexus-triage-venv\Scripts\python -m pip install curl_cffi
 REM   2. Open Task Scheduler -> Create Task...
 REM      - Trigger: Daily at 10:00 (or whatever cadence you prefer)
 REM      - Action: Start a program -> this .bat file
@@ -22,6 +27,10 @@ setlocal
 
 REM --- Repo + tooling paths ---
 set REPO=%~dp0..
+REM Prepend the dedicated venv's Scripts so the bare `python` that nexus-triage.mjs
+REM spawns resolves to it. A --user install is NOT loaded under Task Scheduler.
+set VENV=%REPO%\.nexus-triage-venv
+set PATH=%VENV%\Scripts;%PATH%
 set LOG_DIR=%REPO%\.nexus-triage-runs
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 for /f "tokens=2 delims==" %%I in ('wmic os get localdatetime /value 2^>nul') do set DT=%%I
@@ -53,6 +62,13 @@ cd /d "%REPO%" || (echo cd failed >> "%LOG%" & exit /b 1)
 git checkout main >> "%LOG%" 2>&1
 git pull --rebase >> "%LOG%" 2>&1
 
+REM --- Preflight: curl_cffi must import in the venv python the script will spawn ---
+python -c "import curl_cffi" >> "%LOG%" 2>&1
+if errorlevel 1 (
+  echo [%date% %time%] FATAL: import curl_cffi failed for "%VENV%\Scripts\python.exe" -- recreate the venv: python -m venv .nexus-triage-venv then .nexus-triage-venv\Scripts\python -m pip install curl_cffi >> "%LOG%"
+  exit /b 1
+)
+
 REM --- Run the triage script ---
 node scripts\nexus-triage.mjs >> "%LOG%" 2>&1
 set EXIT=%ERRORLEVEL%
@@ -70,4 +86,7 @@ if errorlevel 1 (
 )
 
 echo [%date% %time%] done >> "%LOG%"
-exit /b 0
+
+REM Propagate the triage script's exit code so a failed run shows up as a non-zero
+REM LastTaskResult in Task Scheduler instead of being masked as success.
+exit /b %EXIT%

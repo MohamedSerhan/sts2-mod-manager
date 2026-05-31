@@ -255,19 +255,6 @@ body {
 .gf-activity-name { font-size: 13px; font-weight: 600; color: var(--ink); }
 .gf-activity-summary { font-size: 11.5px; color: var(--ink-mute); margin-top: 2px; }
 
-.gf-assignment-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 14px;
-}
-.gf-section-sub {
-  color: var(--ink-mute);
-  font-size: 12.5px;
-  margin-top: -4px;
-}
-
 /* 1.7.0 T16 — modpack list as clickable cards. Replaces the legacy
    row layout where each modpack had inline kebab + Share + Switch
    buttons. Now clicking a card opens its detail view (Paradox-style
@@ -411,11 +398,6 @@ body {
   gap: 6px;
   flex: 0 0 auto;
 }
-.gf-modpack-detail-audit {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
 /* Status sub-line — sits just below the header divider with a little breathing
    room, then leaves a clear break before the "In this modpack" section below. */
 .gf-modpack-detail-status {
@@ -463,12 +445,6 @@ body {
   font-size: 12px;
   font-weight: 700;
   flex: 0 0 auto;
-}
-/* Shared mod-library toolbar row inside the modpack detail view. Right-
-   aligns the action cluster (same buttons as All Mods) below the header. */
-.gf-modpack-detail-toolbar {
-  display: flex;
-  justify-content: flex-end;
 }
 .gf-modpack-detail-search {
   display: flex;
@@ -590,29 +566,6 @@ body {
   flex: 0 0 auto;
 }
 
-/* Advanced — a clearly-divided section, not a buried collapsible. */
-.gf-modpack-detail-advanced-section {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 6px;
-  padding-top: 14px;
-  border-top: 1px solid var(--indigo-line);
-}
-.gf-modpack-detail-advanced-heading {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: var(--ink-mute);
-  margin: 0;
-}
-.gf-modpack-detail-advanced-panel {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
 /* Shared AdvancedSection — disclosure for power-user actions. */
 .gf-advanced {
   border-top: 1px solid var(--indigo-line);
@@ -661,21 +614,6 @@ body {
   border-radius: 999px;
   border: 1px solid transparent;
   letter-spacing: 0.02em;
-}
-.gf-chip-update {
-  background: oklch(0.30 0.06 240 / 0.30);
-  color: oklch(0.85 0.10 240);
-  border-color: oklch(0.55 0.10 240 / 0.40);
-}
-.gf-chip-warn {
-  background: oklch(0.30 0.06 70 / 0.30);
-  color: oklch(0.85 0.10 70);
-  border-color: oklch(0.55 0.10 70 / 0.40);
-}
-.gf-chip-danger {
-  background: oklch(0.30 0.10 25 / 0.30);
-  color: oklch(0.80 0.13 25);
-  border-color: oklch(0.55 0.13 25 / 0.40);
 }
 
 /* Inline load-order rank inside LibraryTable rows. */
@@ -832,13 +770,6 @@ body {
   align-items: center;
   gap: 6px;
   min-width: 0;
-}
-.gf-row-tags { flex: 0 0 auto; }
-/* 4.2 — tag chips to the right of the mod name. */
-.gf-row-tags {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 4px;
 }
 .gf-row-tag {
   font-size: 9.5px;
@@ -1169,53 +1100,6 @@ body {
   display: inline-flex;
   gap: 4px;
 }
-.gf-profile-memberships {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
-  min-width: 0;
-}
-.gf-profile-membership {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 30px;
-  max-width: 100%;
-  padding: 5px 8px;
-  border: 1px solid var(--indigo-line);
-  border-radius: 6px;
-  background: oklch(0.18 0.035 280);
-  color: var(--ink-mute);
-  font-size: 12px;
-  cursor: pointer;
-}
-.gf-profile-membership.active {
-  border-color: var(--gf-line);
-  color: var(--ink);
-  background: var(--gf-tint);
-}
-.gf-profile-membership:has(input:disabled) {
-  cursor: not-allowed;
-  opacity: 0.72;
-}
-.gf-profile-membership input {
-  width: 14px;
-  height: 14px;
-  accent-color: var(--gf);
-  flex: 0 0 auto;
-}
-.gf-profile-membership-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.gf-profile-membership-note {
-  color: var(--ink-dim);
-  font-size: 10.5px;
-  white-space: nowrap;
-}
 @media (max-width: 760px) {
   .gf-profile-library-launch { align-items: flex-start; }
   /* Stack the row (status / identity / actions) so nothing is squeezed
@@ -1431,12 +1315,7 @@ body {
 .gf-pack-row:hover, .gf-backup:hover, .gf-set-row:hover {
   border-color: oklch(0.34 0.06 280);
 }
-.gf-card-active {
-  background: linear-gradient(180deg, oklch(0.24 0.05 280), oklch(0.20 0.04 280));
-  border: 1px solid var(--gf-line);
-}
 
-/* ── Body & main ──────────────────────────────────────────────────── */
 /* Home page footer — sits below the hero so the launcher doesn't feel
    empty. Pushes itself to the bottom of the flex column and dims the
    AboutCard a touch so it reads as quiet attribution, not a primary CTA. */
@@ -1461,31 +1340,6 @@ body {
 .gf-home-footer .gf-card {
   background: transparent;
   border: 1px solid var(--indigo-line);
-}
-
-/* Library row's membership chip — wraps the existing Badge in a clickable
-   button so users can add/remove from the active modpack without opening
-   the kebab. Click bubbles a stopPropagation so it doesn't also expand
-   the row drawer. */
-.gf-membership-chip {
-  background: none;
-  border: 0;
-  padding: 0;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-}
-.gf-membership-chip:disabled {
-  cursor: progress;
-  opacity: 0.7;
-}
-.gf-membership-chip:hover:not(:disabled) {
-  opacity: 0.85;
-}
-.gf-membership-chip:focus-visible {
-  outline: 2px solid var(--accent, #7aa2f7);
-  outline-offset: 2px;
-  border-radius: 4px;
 }
 
 .gf-body {
@@ -1548,27 +1402,6 @@ body {
   vertical-align: 1px;
 }
 
-/* ── Search ───────────────────────────────────────────────────────── */
-.gf-search {
-  display: flex; align-items: center; gap: 8px;
-  background: var(--indigo-side);
-  border: 1px solid var(--indigo-line);
-  border-radius: 6px;
-  padding: 7px 11px;
-  flex: 1;
-  max-width: 320px;
-}
-.gf-search input {
-  flex: 1;
-  background: transparent;
-  border: none;
-  outline: none;
-  color: var(--ink);
-  font-size: 13px;
-  font-family: inherit;
-}
-.gf-search input::placeholder { color: var(--ink-dim); }
-
 .gf-toolbar {
   display: flex; align-items: center; gap: 10px;
   margin-bottom: 14px;
@@ -1592,7 +1425,7 @@ body {
   border-radius: 6px;
   padding: 0 28px 0 10px;
   outline: none;
-  /* Dark native option popup (see .gf-wizard-sort-select for rationale). */
+  /* Render the native <option> popup dark to match the dropdown. */
   color-scheme: dark;
 }
 .gf-sort-control select:focus { border-color: var(--gf-line); }
@@ -1600,13 +1433,6 @@ body {
   background-color: var(--indigo-panel);
   color: var(--ink);
 }
-.gf-sort-note {
-  max-width: 360px;
-  color: var(--ink-dim);
-  font-size: 11.5px;
-  line-height: 1.35;
-}
-.gf-tab-beta { margin-left: 6px; }
 
 /* ── Inputs ───────────────────────────────────────────────────────── */
 .gf-input {
@@ -1669,17 +1495,6 @@ body {
 .gf-toggle.on::after { transform: translateX(14px); background: var(--gf); }
 .gf-toggle:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.gf-mod-body { flex: 1; min-width: 0; }
-.gf-mod-name { font-size: 13.5px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.gf-mod-ver {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  color: var(--ink-dim);
-  font-weight: 500;
-}
-.gf-mod-desc { font-size: 12px; color: var(--ink-mute); margin-top: 2px; }
-.gf-mod-actions { display: flex; gap: 4px; align-items: center; }
-
 /* ── Pills ────────────────────────────────────────────────────────── */
 .gf-pill {
   font-size: 9.5px;
@@ -1728,18 +1543,6 @@ body {
 .gf-pill-warn { background: oklch(0.78 0.16 60 / 0.18); color: oklch(0.86 0.13 75); border: 1px solid oklch(0.78 0.16 60 / 0.28); }
 .gf-pill-beta { background: oklch(0.70 0.14 85 / 0.16); color: oklch(0.86 0.13 82); border: 1px solid oklch(0.70 0.14 85 / 0.28); }
 .gf-pill-toolbar { padding: 6px 10px; font-size: 13px; }
-.gf-mod-tag { background: oklch(0.45 0.08 250 / 0.18); color: oklch(0.82 0.08 250); border: 1px solid oklch(0.55 0.08 250 / 0.25); text-transform: none; }
-
-/* 1.7.0 — per-row chip strip in the Mods view. Separates the "storage"
-   chip (active in game vs stored on disk) from the "membership" chip
-   (in / not in / included-off in the active modpack) so the two states
-   read independently. */
-.gf-mod-row-chips {
-  display: flex;
-  gap: 6px;
-  margin-top: 4px;
-  flex-wrap: wrap;
-}
 
 /* 1.7.0 T17 — Library row simplification. The row is a click-to-expand
    accordion: collapsed = name + version + chips + kebab, expanded =
@@ -1754,67 +1557,7 @@ body {
   transition: border-color 120ms ease;
 }
 .gf-modrow:hover { border-color: oklch(0.55 0.05 250 / 0.5); }
-.gf-modrow-expanded { border-color: oklch(0.6 0.06 250 / 0.6); }
 .gf-modrow.gf-mod-pinned { border-left: 2px solid var(--gf); }
-.gf-modrow-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 0;
-}
-.gf-modrow-main {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  padding: 11px 14px;
-  background: none;
-  border: none;
-  color: inherit;
-  cursor: pointer;
-  text-align: left;
-  font: inherit;
-  min-width: 0;
-}
-.gf-modrow-main:hover { background: oklch(0.30 0.04 250 / 0.35); }
-.gf-modrow-main:focus-visible {
-  outline: 2px solid var(--gf);
-  outline-offset: -2px;
-}
-.gf-modrow-info { flex: 1; min-width: 0; }
-.gf-modrow-title-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  min-width: 0;
-}
-.gf-modrow-name {
-  font-weight: 500;
-  font-size: 14px;
-  color: var(--ink);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
-}
-.gf-modrow-rawname {
-  font-size: 10px;
-  color: var(--ink-dim);
-  font-weight: 400;
-}
-.gf-modrow-disambig {
-  font-size: 12px;
-  color: var(--ink-dim);
-}
-.gf-modrow-version {
-  font-size: 12px;
-  color: var(--ink-dim);
-}
-.gf-modrow-kebab {
-  padding-right: 10px;
-  display: flex;
-  align-items: center;
-}
 .gf-modrow-meta {
   /* Description/note sit in the identity column — align flush-left with
      the title + version line above (no extra indent). */
@@ -1837,70 +1580,6 @@ body {
   margin: 2px 0 0 0;
   white-space: normal;
   line-height: 1.4;
-}
-.gf-modrow-drawer {
-  padding: 12px 14px 14px 14px;
-  background: oklch(0.20 0.02 250 / 0.45);
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  border-top: 1px solid var(--indigo-line);
-}
-.gf-modrow-drawer-sources {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-.gf-modrow-drawer-audit {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-.gf-modrow-drawer-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.gf-modrow-size {
-  font-size: 11px;
-  color: var(--ink-dim);
-}
-
-/* ── Browse grid ──────────────────────────────────────────────────── */
-.gf-browse-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 12px;
-}
-.gf-browse-card {
-  background: var(--indigo-panel);
-  border: 1px solid var(--indigo-line);
-  border-radius: 10px;
-  overflow: hidden;
-  display: flex; flex-direction: column;
-}
-.gf-browse-thumb {
-  height: 96px;
-  background: linear-gradient(135deg, oklch(0.28 0.05 280), oklch(0.20 0.04 280));
-  border-bottom: 1px solid var(--indigo-line);
-}
-.gf-browse-body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
-.gf-browse-title { font-size: 13.5px; font-weight: 600; }
-.gf-browse-meta { font-size: 11.5px; color: var(--ink-dim); }
-.gf-browse-desc { font-size: 12px; color: var(--ink-mute); line-height: 1.5; flex: 1; }
-.gf-browse-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; }
-
-/* ── Settings rows ────────────────────────────────────────────────── */
-.gf-set-row {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 14px 16px;
-  background: var(--indigo-panel);
-  border: 1px solid var(--indigo-line);
-  border-radius: 8px;
-  margin-bottom: 6px;
-  gap: 16px;
 }
 .gf-set-label { font-size: 13.5px; font-weight: 600; color: var(--ink); }
 .gf-set-desc { font-size: 12px; color: var(--ink-mute); margin-top: 2px; }
@@ -1982,84 +1661,6 @@ body {
   left: 8px; right: 8px; bottom: -1px;
   height: 2px;
   background: var(--gf);
-}
-
-/* ── Audit panel ──────────────────────────────────────────────────── */
-.gf-audit {
-  border: 1px solid var(--indigo-line);
-  border-radius: 10px;
-  overflow: hidden;
-  background: var(--indigo-panel);
-}
-.gf-audit-row {
-  display: grid;
-  grid-template-columns: 24px 1.5fr 0.7fr 0.7fr 1.7fr 90px;
-  align-items: center;
-  gap: 14px;
-  padding: 9px 14px;
-  font-size: 12.5px;
-  border-bottom: 1px solid var(--indigo-line);
-}
-.gf-audit-row:last-child { border-bottom: 0; }
-.gf-audit-head {
-  background: oklch(0.21 0.025 270);
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
-  color: var(--ink-dim);
-}
-.gf-audit-name { font-weight: 600; color: var(--ink); }
-.gf-audit-mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; color: var(--ink-mute); font-variant-numeric: tabular-nums; }
-.gf-audit-update-text { color: var(--gf); font-weight: 600; }
-.gf-audit-gone-text { color: var(--danger); }
-.gf-audit-led {
-  display: inline-block;
-  width: 8px; height: 8px; border-radius: 50%;
-  background: var(--ok);
-}
-.gf-audit-led-ok { background: var(--ok); box-shadow: 0 0 5px var(--ok); }
-.gf-audit-led-update { background: var(--gf); box-shadow: 0 0 5px var(--gf); }
-/* "gone" = GitHub has a release tagged but it ships no installable assets.
-   That's a soft problem (the user can't auto-update from this source)
-   but it isn't an error — reserve red for actual fetch failures. */
-.gf-audit-led-warn { background: oklch(0.78 0.16 60); box-shadow: 0 0 5px oklch(0.78 0.16 60); }
-.gf-audit-led-gone { background: var(--danger); box-shadow: 0 0 5px var(--danger); }
-.gf-audit-asset {
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 10.5px;
-  color: var(--ink-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.gf-audit-foot {
-  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
-  padding: 12px 14px;
-  margin-top: 12px;
-  border: 1px solid var(--indigo-line);
-  border-radius: 8px;
-  background: oklch(0.20 0.025 270 / 0.5);
-  font-size: 11.5px;
-  color: var(--ink-mute);
-}
-.gf-audit-foot-stat { display: flex; align-items: center; gap: 7px; }
-
-/* ── Onboarding overlay ───────────────────────────────────────────── */
-.gf-onb {
-  position: absolute; inset: 0;
-  background: oklch(0.10 0.02 285 / 0.78);
-  backdrop-filter: blur(10px);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 40;
-}
-.gf-onb-card {
-  width: 540px;
-  background: var(--indigo-panel);
-  border: 1px solid var(--indigo-line);
-  border-radius: 14px;
-  padding: 28px;
-  box-shadow: 0 30px 80px oklch(0 0 0 / 0.4);
 }
 
 /* ── Hero (single-hero home) ──────────────────────────────────────── */
@@ -2324,60 +1925,6 @@ body {
   outline-offset: 2px;
 }
 
-/* ── Section heading ──────────────────────────────────────────────── */
-.gf-section-head {
-  display: flex; justify-content: space-between; align-items: baseline;
-  margin: 22px 0 10px;
-}
-.gf-section-eyebrow {
-  font-size: 11px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0.12em;
-  color: var(--ink-dim);
-}
-
-/* ── Pack rows on home ────────────────────────────────────────────── */
-.gf-pack-row {
-  display: flex; align-items: center; gap: 12px;
-  padding: 11px 14px;
-  background: var(--indigo-panel);
-  border: 1px solid var(--indigo-line);
-  border-radius: 8px;
-  margin-bottom: 6px;
-}
-.gf-pack-avatar {
-  width: 32px; height: 32px;
-  border-radius: 7px;
-  background: oklch(0.30 0.05 280);
-  color: oklch(0.85 0.04 280);
-  display: grid; place-items: center;
-  font-size: 11px; font-weight: 700;
-  flex-shrink: 0;
-}
-.gf-pack-avatar-active { background: var(--gf); color: var(--gf-ink); }
-
-/* ── Status dots ─────────────────────────────────────────────────── */
-.gf-dot {
-  width: 6px; height: 6px;
-  border-radius: 999px;
-  display: inline-block;
-}
-.gf-dot-ok { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
-.gf-dot-warn { background: var(--gf); box-shadow: 0 0 6px var(--gf); }
-.gf-dot-mute { background: var(--ink-dim); }
-.gf-dot-danger { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
-
-/* ── Empty / dashed cards ─────────────────────────────────────────── */
-.gf-empty-card {
-  background: transparent;
-  border: 1px dashed var(--indigo-line);
-  border-radius: 10px;
-  padding: 24px;
-  display: flex; flex-direction: column; gap: 6px;
-  align-items: center; justify-content: center;
-  color: var(--ink-mute);
-  text-align: center;
-}
-
 /* Lucide icon size override inside gf-buttons (sized by fontSize/gap) */
 .gf-btn svg, .gf-btn-2 svg, .gf-btn-3 svg { flex-shrink: 0; }
 
@@ -2416,37 +1963,6 @@ body {
   padding-top: 6px;
   border-top: 1px solid var(--indigo-line);
 }
-
-/* ── Batch 2: Mods kebab + source editor + advanced toggle ───────────── */
-.gf-pin-dot {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 14px; height: 14px; color: var(--gf);
-  margin-right: 2px;
-}
-
-.gf-adv-toggle {
-  display: inline-flex; align-items: center; gap: 7px;
-  padding: 4px 9px 4px 4px;
-  border: 1px solid var(--indigo-line); border-radius: 999px;
-  cursor: pointer; user-select: none;
-  background: transparent;
-  font-family: inherit;
-}
-.gf-adv-toggle:hover { background: var(--indigo-elev); }
-.gf-adv-toggle-track {
-  width: 26px; height: 14px; border-radius: 999px;
-  background: oklch(0.30 0.03 270); position: relative;
-  transition: background .15s;
-}
-.gf-adv-toggle-dot {
-  position: absolute; top: 2px; left: 2px;
-  width: 10px; height: 10px; border-radius: 50%;
-  background: var(--ink-mute); transition: all .15s;
-}
-.gf-adv-toggle.on .gf-adv-toggle-track { background: var(--gf); }
-.gf-adv-toggle.on .gf-adv-toggle-dot { left: 14px; background: var(--gf-ink); }
-.gf-adv-toggle-label { font-size: 11.5px; color: var(--ink-mute); font-weight: 500; letter-spacing: 0.2px; }
-.gf-adv-toggle.on .gf-adv-toggle-label { color: var(--ink); }
 
 .gf-kebab {
   position: absolute; top: 100%; right: 0; margin-top: 4px;
@@ -2658,35 +2174,11 @@ body {
 .gf-cl-rem .gf-cl-tag { background: oklch(0.55 0.16 25 / 0.18); color: oklch(0.75 0.13 25); }
 .gf-cl-tog .gf-cl-tag { background: var(--indigo-line); color: var(--ink-mute); }
 
-.gf-mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; background: var(--indigo-line); padding: 1px 5px; border-radius: 3px; color: var(--ink-mute); font-size: 11px; }
-.gf-seg { display: flex; background: var(--indigo-side); border: 1px solid var(--indigo-line); border-radius: 6px; padding: 2px; }
-.gf-seg-btn {
-  background: transparent; border: 0; padding: 5px 11px;
-  font-size: 11.5px; color: var(--ink-mute); cursor: pointer; border-radius: 4px;
-  font-family: inherit;
-}
-.gf-seg-btn.active { background: var(--gf); color: var(--gf-ink); font-weight: 600; }
-
-/* Browse GH card */
-.gf-browse-gh { display: flex; flex-direction: column; }
-.gf-browse-gh-head {
-  display: flex; align-items: center; gap: 8px;
-  padding: 10px 14px;
-  background: oklch(0.18 0.02 270);
-  border-bottom: 1px solid var(--indigo-line);
-}
-
 /* Browse mod detail */
 .gf-detail { background: var(--indigo-deep); height: 100%; overflow-y: auto; }
 .gf-detail-hero { height: 160px; }
-.gf-detail-body { padding: 18px 22px; }
 .gf-detail-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
-.gf-detail-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--indigo-line); margin-bottom: 14px; }
 .gf-detail-content { font-size: 12.5px; color: var(--ink-mute); }
-.gf-detail-req { display: flex; align-items: center; gap: 9px; padding: 5px 0; font-size: 12px; }
-.gf-detail-req-status { width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; }
-.gf-detail-req-status.ok { background: oklch(0.74 0.11 165 / 0.2); color: var(--ok); }
-.gf-detail-req-status.warn { background: oklch(0.60 0.16 60 / 0.2); color: oklch(0.85 0.12 70); }
 
 /* Drag-drop overlay */
 .gf-dropzone {
@@ -2712,19 +2204,6 @@ body {
 }
 .gf-dropzone-title { font-size: 17px; font-weight: 600; color: var(--ink); }
 .gf-dropzone-sub { font-size: 12.5px; color: var(--ink-mute); margin-top: 6px; }
-
-/* Load order */
-.gf-loadorder { display: flex; flex-direction: column; gap: 4px; }
-.gf-lo-row {
-  display: flex; align-items: center; gap: 10px;
-  padding: 9px 12px; border-radius: 7px;
-  background: var(--indigo-panel); border: 1px solid var(--indigo-line);
-  font-size: 12.5px;
-}
-.gf-lo-grip { color: var(--ink-dim); cursor: grab; font-size: 14px; letter-spacing: -2px; }
-.gf-lo-num { font-family: ui-monospace, monospace; color: var(--ink-dim); font-size: 11px; min-width: 18px; }
-.gf-lo-name { color: var(--ink); font-weight: 600; }
-.gf-lo-note { font-size: 11px; color: var(--ink-dim); font-style: italic; }
 
 /* Auto-detect modal */
 .gf-detect-stats { display: flex; gap: 8px; margin-bottom: 12px; }
@@ -2779,11 +2258,6 @@ body {
 @keyframes gf-spin { to { transform: rotate(360deg); } }
 .gf-loading-msg { font-size: 14px; font-weight: 600; color: var(--ink); }
 .gf-loading-sub { font-size: 12px; color: var(--ink-mute); margin-top: 4px; }
-.gf-loading-bar {
-  height: 4px; background: var(--indigo-side); border-radius: 999px;
-  overflow: hidden; margin-top: 14px;
-}
-.gf-loading-bar-fill { height: 100%; background: var(--gf); border-radius: 999px; transition: width .25s; }
 .gf-loading-step { font-size: 11px; color: var(--ink-dim); margin-top: 8px; font-family: ui-monospace, monospace; }
 
 /* Toasts */
@@ -2803,66 +2277,10 @@ body {
 }
 .gf-toast button { pointer-events: auto; }
 .gf-toast-ico { font-size: 14px; width: 18px; text-align: center; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; }
-.gf-toast-sub { font-size: 11.5px; color: var(--ink-mute); margin-top: 2px; }
 .gf-toast-success { border-left: 3px solid var(--ok); }
 .gf-toast-info { border-left: 3px solid oklch(0.55 0.13 250); }
 .gf-toast-error { border-left: 3px solid oklch(0.65 0.18 25); }
-.gf-toast-warn { border-left: 3px solid oklch(0.85 0.12 70); }
-/* Batch 4 — restore/update/conflict/launch/logs/onboarding/confirm/validation/deps/shortcuts */
-
-/* Diff list (restore preview) */
-.gf-diff { border: 1px solid var(--indigo-line); border-radius: 9px; overflow: hidden; }
-.gf-diff-row {
-  display: grid; grid-template-columns: 22px 1fr 130px 110px;
-  align-items: center; gap: 10px;
-  padding: 9px 12px; font-size: 12.5px;
-  border-bottom: 1px solid var(--indigo-line);
-}
-.gf-diff-row:last-child { border-bottom: none; }
-.gf-diff-row .name { font-weight: 500; color: var(--ink); }
-.gf-diff-row .ver { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; font-size: 11.5px; color: var(--ink-mute); text-align: right; }
-.gf-diff-tag { font-size: 10.5px; font-weight: 600; padding: 2px 7px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.04em; text-align: center; }
-.gf-diff-add { background: oklch(0.62 0.14 145 / 0.18); color: oklch(0.85 0.14 145); }
-.gf-diff-rm  { background: oklch(0.65 0.18 25 / 0.18); color: oklch(0.82 0.16 25); }
-.gf-diff-up  { background: oklch(0.55 0.13 250 / 0.18); color: oklch(0.82 0.13 250); }
-.gf-diff-keep { background: oklch(0.40 0.02 260 / 0.4); color: var(--ink-mute); }
-.gf-diff-icon { font-size: 13px; opacity: 0.85; }
-.gf-diff-ico-add { color: oklch(0.78 0.14 145); }
-.gf-diff-ico-rm { color: oklch(0.78 0.16 25); }
-.gf-diff-ico-up { color: oklch(0.78 0.13 250); }
-.gf-diff-summary { display: flex; gap: 14px; padding: 10px 12px; background: var(--indigo-deep); border-bottom: 1px solid var(--indigo-line); font-size: 11.5px; color: var(--ink-mute); }
-.gf-diff-summary b { color: var(--ink); font-weight: 600; }
-
-/* Update-all progress list */
-.gf-prog-list { display: flex; flex-direction: column; gap: 0; border: 1px solid var(--indigo-line); border-radius: 9px; overflow: hidden; }
-.gf-prog-row {
-  display: grid; grid-template-columns: 26px 1fr 90px 90px;
-  align-items: center; gap: 10px;
-  padding: 11px 13px; border-bottom: 1px solid var(--indigo-line);
-  font-size: 12.5px;
-}
-.gf-prog-row:last-child { border-bottom: none; }
-.gf-prog-row .name { font-weight: 500; color: var(--ink); }
-.gf-prog-row .name .sub { font-size: 11px; color: var(--ink-mute); margin-top: 2px; font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; }
-.gf-prog-row .stat { font-size: 11.5px; color: var(--ink-mute); font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; }
-.gf-prog-bar { height: 5px; background: var(--indigo-deep); border-radius: 3px; overflow: hidden; position: relative; }
-.gf-prog-bar > span { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg, var(--gold) 0%, var(--gold-2) 100%); border-radius: 3px; }
-.gf-prog-row.done .gf-prog-bar > span { background: var(--ok); }
-.gf-prog-row.fail .gf-prog-bar > span { background: oklch(0.65 0.18 25); }
-.gf-prog-row.fail .stat { color: oklch(0.82 0.16 25); }
-.gf-prog-row.done .stat { color: var(--ok); }
-.gf-prog-ico { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; }
-.gf-prog-ico.queue { background: var(--indigo-deep); color: var(--ink-mute); }
-.gf-prog-ico.run { background: oklch(0.55 0.13 250 / 0.2); color: oklch(0.82 0.13 250); animation: gfspin 1.2s linear infinite; }
-.gf-prog-ico.done { background: oklch(0.62 0.14 145 / 0.2); color: var(--ok); }
-.gf-prog-ico.fail { background: oklch(0.65 0.18 25 / 0.2); color: oklch(0.82 0.16 25); }
 @keyframes gfspin { to { transform: rotate(360deg); } }
-.gf-prog-summary {
-  display: flex; align-items: center; gap: 12px; padding: 10px 13px;
-  background: var(--indigo-deep); border-bottom: 1px solid var(--indigo-line);
-  font-size: 12px; color: var(--ink-mute);
-}
-.gf-prog-summary b { color: var(--ink); font-weight: 600; }
 
 /* Onboarding wizard chrome */
 .gf-wiz-back { position: absolute; inset: 0; z-index: 50; background: oklch(0.10 0.02 270 / 0.85); display: grid; place-items: center; }
@@ -2872,10 +2290,6 @@ body {
   border-radius: 14px; box-shadow: 0 30px 80px rgba(0,0,0,0.5);
   display: flex; flex-direction: column;
 }
-.gf-wiz-rail { display: flex; gap: 6px; padding: 16px 20px 0; }
-.gf-wiz-step { flex: 1; height: 4px; background: var(--indigo-deep); border-radius: 2px; }
-.gf-wiz-step.active { background: var(--gold); }
-.gf-wiz-step.done { background: var(--ok); }
 .gf-wiz-head { padding: 16px 24px 4px; }
 .gf-wiz-head-row {
   display: flex;
@@ -2998,7 +2412,6 @@ body {
 /* Game-launch states */
 .gf-launch-back { position: absolute; inset: 0; z-index: 60; background: oklch(0.06 0.02 270 / 0.92); display: grid; place-items: center; }
 .gf-launch-card { text-align: center; max-width: 460px; padding: 24px; }
-.gf-launch-art { font-size: 56px; margin-bottom: 14px; }
 .gf-launch-t { font-size: 22px; font-weight: 700; color: var(--ink); margin-bottom: 6px; }
 .gf-launch-s { font-size: 13px; color: var(--ink-mute); margin-bottom: 18px; }
 .gf-launch-spinner {
@@ -3007,25 +2420,7 @@ body {
   border-top-color: var(--gold);
   margin: 0 auto 14px; animation: gfspin 0.9s linear infinite;
 }
-.gf-running-pill {
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 12px; margin: 0 12px 8px; border-radius: 8px;
-  background: oklch(0.62 0.14 145 / 0.12); border: 1px solid oklch(0.62 0.14 145 / 0.4);
-  font-size: 12px; color: var(--ink);
-}
-.gf-running-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); animation: gfblink 1.4s ease-in-out infinite; }
 @keyframes gfblink { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
-
-/* Dependency tree */
-.gf-dep-tree { font-size: 12.5px; }
-.gf-dep-node { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 6px; }
-.gf-dep-node.required { background: oklch(0.55 0.13 250 / 0.08); }
-.gf-dep-children { margin-left: 22px; border-left: 1px dashed var(--indigo-line); padding-left: 12px; }
-.gf-dep-tag { font-size: 10px; padding: 1px 6px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.04em; }
-.gf-dep-tag.req { background: oklch(0.55 0.13 250 / 0.2); color: oklch(0.82 0.13 250); }
-.gf-dep-tag.have { background: oklch(0.62 0.14 145 / 0.18); color: var(--ok); }
-.gf-dep-tag.miss { background: oklch(0.65 0.18 25 / 0.18); color: oklch(0.82 0.16 25); }
-
 
 /* Diagnostic bundle list */
 .gf-diag-list { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; background: var(--indigo-deep); border: 1px solid var(--indigo-line); border-radius: 9px; }
@@ -3061,9 +2456,6 @@ body {
   color: var(--ink-dim);
   margin-bottom: 7px;
 }
-
-/* Audit empty (scoped — gf-empty-pad uses larger glyph art) */
-.gf-empty-pad { padding: 60px 20px; text-align: center; }
 .gf-empty-pad .gf-empty-art { font-size: 48px; margin-bottom: 12px; opacity: 0.6; width: auto; height: auto; background: transparent; border: 0; display: inline-grid; }
 .gf-empty-pad .gf-empty-t { font-size: 16px; font-weight: 600; color: var(--ink); margin-bottom: 6px; }
 .gf-empty-pad .gf-empty-s { font-size: 12.5px; color: var(--ink-mute); max-width: 360px; margin: 0 auto 14px; }
@@ -3142,7 +2534,6 @@ body {
   to { transform: rotate(360deg); }
 }
 
-/* ── Help view (1.7 modpack UX) ───────────────────────────────────── */
 /* Container is .gf-help-view (NOT .gf-help — that's already taken by
    the inline form-help text class up around line 2129). */
 .gf-help-view {
@@ -3164,18 +2555,6 @@ body {
   --help-accent: var(--gf);
   --help-accent-soft: oklch(0.78 0.13 80 / 0.16);
   border-left: 3px solid var(--help-accent);
-}
-.gf-help-card-player {
-  --help-accent: var(--gf);
-  --help-accent-soft: oklch(0.78 0.13 80 / 0.16);
-}
-.gf-help-card-creator {
-  --help-accent: var(--ok);
-  --help-accent-soft: oklch(0.74 0.11 165 / 0.16);
-}
-.gf-help-card-faq {
-  --help-accent: oklch(0.72 0.12 250);
-  --help-accent-soft: oklch(0.72 0.12 250 / 0.16);
 }
 
 .gf-help-section-head {

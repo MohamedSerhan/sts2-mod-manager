@@ -22,7 +22,7 @@
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { createWriteStream, existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync } from 'node:fs';
+import { copyFileSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -77,7 +77,9 @@ async function main() {
       rmSync(DRIVER_PATH);
     }
     mkdirSync(RUNNER_DIR, { recursive: true });
-    renameSync(exe, DRIVER_PATH);
+    // copy, not rename: on Windows CI the temp dir (C:) and the checkout (D:) are
+    // different drives, so renameSync fails with EXDEV. The temp dir is cleaned below.
+    copyFileSync(exe, DRIVER_PATH);
     console.log(`Installed ${DRIVER_PATH}`);
     console.log(`Verifying: ${currentDriverVersion()}`);
   } finally {

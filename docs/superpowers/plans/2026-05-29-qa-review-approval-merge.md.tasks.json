@@ -1,0 +1,109 @@
+{
+  "planPath": "docs/superpowers/plans/2026-05-29-qa-review-approval-merge.md",
+  "spec": "docs/superpowers/specs/2026-05-29-qa-review-approval-merge-design.md",
+  "subProject": "C+ (QA-review loop + approval-gated auto-merge)",
+  "generated": "2026-05-29",
+  "lastUpdated": "2026-05-30",
+  "worktree": "qa-merge (branch claude/qa-merge, off main c0962c1; gate runs post-merge)",
+  "tasks": [
+    {
+      "planTask": 1,
+      "nativeId": "39",
+      "status": "completed",
+      "subject": "qa-pipeline.mjs — round-count + merge-eligibility helpers",
+      "files": ["scripts/qa-pipeline.mjs", "scripts/qa-pipeline.test.mjs", ".github/workflows/build.yml"],
+      "verifyCommand": "node --test scripts/qa-pipeline.test.mjs",
+      "acceptanceCriteria": [
+        "nextQaRound counts qa-round markers + 1",
+        "isMergeEligible true only for approved+MohamedSerhan+qa+qa-passed; false for the 4 disqualifiers; accepts string or {name} labels",
+        "CLI cap=5, round from stdin JSON, merge-eligible from GITHUB_EVENT_PATH exit 0/1",
+        "module importable; tests pass; wired into CI check"
+      ],
+      "blockedBy": []
+    },
+    {
+      "planTask": 2,
+      "nativeId": "40",
+      "status": "completed",
+      "subject": "Extend claude-autofix.yml — upfront tests+changelog, qa label, revise gate",
+      "files": [".github/workflows/claude-autofix.yml"],
+      "verifyCommand": "python -c \"import yaml; yaml.safe_load(open('.github/workflows/claude-autofix.yml')); print('OK')\"",
+      "acceptanceCriteria": [
+        "initiate prompt adds unit tests + user-facing-only [Unreleased] changelog bullet",
+        "post-step applies qa + dev-build + auto-fix",
+        "revise gate triggers on auto-fix OR qa (both event shapes)",
+        "YAML valid; actor-auth + structure unchanged"
+      ],
+      "blockedBy": []
+    },
+    {
+      "planTask": 3,
+      "nativeId": "41",
+      "status": "completed",
+      "subject": "claude-autofix-qa.yml — the QA-review loop",
+      "files": [".github/workflows/claude-autofix-qa.yml"],
+      "verifyCommand": "python -c \"import yaml; yaml.safe_load(open('.github/workflows/claude-autofix-qa.yml')); print('OK')\"",
+      "acceptanceCriteria": [
+        "pull_request [opened,synchronize,labeled], gated qa & !qa-needs-human",
+        "round via qa-pipeline; over cap(5) -> qa-needs-human + escalation, no reviewer run",
+        "QA agent passes (qa-passed+ping) or posts <!-- qa-round --> @claude findings",
+        "perms contents:read+PR/issues:write; triggering token",
+        "YAML parses"
+      ],
+      "blockedBy": ["39"]
+    },
+    {
+      "planTask": 4,
+      "nativeId": "42",
+      "status": "completed",
+      "subject": "claude-autofix-merge.yml — merge on the maintainer's approval",
+      "files": [".github/workflows/claude-autofix-merge.yml"],
+      "verifyCommand": "python -c \"import yaml; yaml.safe_load(open('.github/workflows/claude-autofix-merge.yml')); print('OK')\"",
+      "acceptanceCriteria": [
+        "on pull_request_review[submitted]; if: approved && reviewer==MohamedSerhan",
+        "gate step runs qa-pipeline merge-eligible (approved+maintainer+qa+qa-passed)",
+        "CI-green check via gh pr checks before merge; not-green/not-eligible -> holding comment, no merge",
+        "merges via gh pr merge --merge; perms contents+PR write; YAML parses"
+      ],
+      "blockedBy": ["39"]
+    },
+    {
+      "planTask": 5,
+      "nativeId": "43",
+      "status": "completed",
+      "subject": "Operator runbook (RELEASING.md) for QA + approval-merge",
+      "files": ["RELEASING.md"],
+      "verifyCommand": "grep -q \"qa-passed\" RELEASING.md && echo OK",
+      "acceptanceCriteria": [
+        "documents qa label → QA loop + auto-revise + 5-round cap, your-approval-only merge when CI green",
+        "states qa PRs incl. your own are auto-revised",
+        "documents creating qa/qa-passed/qa-needs-human labels",
+        "notes releases stay manual"
+      ],
+      "blockedBy": []
+    },
+    {
+      "planTask": 6,
+      "nativeId": "44",
+      "status": "pending",
+      "subject": "QA + approval-merge end-to-end verification (USER GATE)",
+      "userGate": true,
+      "tags": ["user-gate"],
+      "requireEvidenceTokens": [
+        ["qa-round", "qa-passed", "revision", "MERGED", "ping"],
+        ["holding", "qa-needs-human", "not merged", "did not merge", "OPEN"]
+      ],
+      "files": [],
+      "verifyCommand": "(operational, post-merge) PR shows qa-round->revision->qa-passed; gh pr view <N> --json state MERGED only after MohamedSerhan approval; non-maintainer approval leaves OPEN",
+      "acceptanceCriteria": [
+        "qa/qa-passed/qa-needs-human labels exist",
+        "throwaway qa PR: findings -> revise -> qa-passed + ping",
+        "MohamedSerhan approval merges (qa+qa-passed+CI green)",
+        "non-MohamedSerhan approval doesn't merge; not-qa-passed/CI-red doesn't merge (holding comment)",
+        "5-round cap -> qa-needs-human + no auto-merge",
+        "maintainer's own qa PR is auto-revised"
+      ],
+      "blockedBy": ["39", "40", "41", "42", "43"]
+    }
+  ]
+}

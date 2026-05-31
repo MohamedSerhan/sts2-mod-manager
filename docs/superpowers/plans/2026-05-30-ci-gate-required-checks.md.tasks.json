@@ -1,0 +1,67 @@
+{
+  "planPath": "docs/superpowers/plans/2026-05-30-ci-gate-required-checks.md",
+  "spec": "docs/superpowers/specs/2026-05-30-ci-gate-required-checks-design.md",
+  "subProject": "CI Gate (change-aware required checks)",
+  "generated": "2026-05-30",
+  "lastUpdated": "2026-05-30",
+  "worktree": "ci-gate-hardening (branch claude/ci-gate-hardening, off main; gate verified post-merge)",
+  "tasks": [
+    {
+      "planTask": 1,
+      "nativeId": "8",
+      "status": "completed",
+      "subject": "CI-1: ci-changes.mjs — change classifier + changelog counter",
+      "files": ["scripts/ci-changes.mjs", "scripts/ci-changes.test.mjs"],
+      "verifyCommand": "node --test scripts/ci-changes.test.mjs",
+      "blockedBy": []
+    },
+    {
+      "planTask": 2,
+      "nativeId": "9",
+      "status": "completed",
+      "subject": "CI-2: ci.yml — change-aware CI Gate workflow",
+      "files": [".github/workflows/ci.yml"],
+      "verifyCommand": "python -c \"import yaml; yaml.safe_load(open('.github/workflows/ci.yml')); print('OK')\"",
+      "blockedBy": ["8"]
+    },
+    {
+      "planTask": 3,
+      "nativeId": "10",
+      "status": "completed",
+      "subject": "CI-3: auto-merge requires CI Gate == SUCCESS",
+      "files": [".github/workflows/claude-autofix-merge.yml"],
+      "verifyCommand": "python -c \"import yaml; yaml.safe_load(open('.github/workflows/claude-autofix-merge.yml')); print('OK')\"",
+      "blockedBy": ["9"]
+    },
+    {
+      "planTask": 4,
+      "nativeId": "11",
+      "status": "completed",
+      "subject": "CI-4: remove redundant check job from build.yml",
+      "files": [".github/workflows/build.yml"],
+      "verifyCommand": "python -c \"import yaml; d=yaml.safe_load(open('.github/workflows/build.yml')); assert 'check' not in d['jobs']; print('OK')\"",
+      "blockedBy": ["9"]
+    },
+    {
+      "planTask": 5,
+      "nativeId": "12",
+      "status": "completed",
+      "subject": "CI-5: RELEASING.md runbook + one-time setup",
+      "files": ["RELEASING.md"],
+      "verifyCommand": "grep -q \"CI Gate\" RELEASING.md && grep -q \"no-changelog\" RELEASING.md && echo OK",
+      "blockedBy": []
+    },
+    {
+      "planTask": 6,
+      "nativeId": "13",
+      "status": "pending",
+      "subject": "CI-6: CI Gate end-to-end verification (USER GATE)",
+      "userGate": true,
+      "tags": ["user-gate"],
+      "requireEvidenceTokens": [["green", "passed", "mergeable", "skipped"], ["RED", "failed", "blocked", "held"]],
+      "files": [],
+      "verifyCommand": "(operational, post-merge) gh pr checks <N> shows only relevant jobs; forced-failing PR shows CI Gate failing + merge refused; clean PR mergeable",
+      "blockedBy": ["8", "9", "10", "11", "12"]
+    }
+  ]
+}

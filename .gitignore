@@ -63,6 +63,10 @@ coverage/
 # Per-day rolling logs; not meaningful in history.
 .nexus-triage-runs/
 
+# Local Nexus triage venv (created per the One-time setup in that .bat). Holds
+# curl_cffi for the Python shim; large and machine-specific, never committed.
+.nexus-triage-venv/
+
 # Python bytecode cache (from the curl_cffi shim scripts/_nexus_fetch.py).
 __pycache__/
 *.pyc

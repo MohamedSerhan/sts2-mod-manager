@@ -99,6 +99,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Allow the auto-fix bot's own revision pushes to re-trigger this review
+          # (a bot-initiated `synchronize` is the entire point of the QA loop). Safe:
+          # this job is read-only / verdict-only — no privileged token, and the label
+          # + merge actions run in separate steps gated solely on the verdict file.
+          allowed_bots: "*"
           claude_args: |
             --allowedTools Read,Write,Bash
             --max-turns 40

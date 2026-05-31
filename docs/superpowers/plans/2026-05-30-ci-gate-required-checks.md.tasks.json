@@ -9,7 +9,7 @@
     {
       "planTask": 1,
       "nativeId": "8",
-      "status": "pending",
+      "status": "completed",
       "subject": "CI-1: ci-changes.mjs — change classifier + changelog counter",
       "files": ["scripts/ci-changes.mjs", "scripts/ci-changes.test.mjs"],
       "verifyCommand": "node --test scripts/ci-changes.test.mjs",
@@ -18,7 +18,7 @@
     {
       "planTask": 2,
       "nativeId": "9",
-      "status": "pending",
+      "status": "completed",
       "subject": "CI-2: ci.yml — change-aware CI Gate workflow",
       "files": [".github/workflows/ci.yml"],
       "verifyCommand": "python -c \"import yaml; yaml.safe_load(open('.github/workflows/ci.yml')); print('OK')\"",
@@ -27,7 +27,7 @@
     {
       "planTask": 3,
       "nativeId": "10",
-      "status": "pending",
+      "status": "completed",
       "subject": "CI-3: auto-merge requires CI Gate == SUCCESS",
       "files": [".github/workflows/claude-autofix-merge.yml"],
       "verifyCommand": "python -c \"import yaml; yaml.safe_load(open('.github/workflows/claude-autofix-merge.yml')); print('OK')\"",
@@ -36,7 +36,7 @@
     {
       "planTask": 4,
       "nativeId": "11",
-      "status": "pending",
+      "status": "completed",
       "subject": "CI-4: remove redundant check job from build.yml",
       "files": [".github/workflows/build.yml"],
       "verifyCommand": "python -c \"import yaml; d=yaml.safe_load(open('.github/workflows/build.yml')); assert 'check' not in d['jobs']; print('OK')\"",
@@ -45,7 +45,7 @@
     {
       "planTask": 5,
       "nativeId": "12",
-      "status": "pending",
+      "status": "completed",
       "subject": "CI-5: RELEASING.md runbook + one-time setup",
       "files": ["RELEASING.md"],
       "verifyCommand": "grep -q \"CI Gate\" RELEASING.md && grep -q \"no-changelog\" RELEASING.md && echo OK",

@@ -46,6 +46,29 @@ export function unreleasedBulletCount(changelogText) {
   return count;
 }
 
+/** Suggest a semver bump from the CHANGELOG `[Unreleased]` section.
+ *  `Removed` or a `BREAKING` marker -> 'major'; `Added`/`Changed`/`Deprecated`
+ *  -> 'minor'; only `Fixed`/`Security` -> 'patch'. Returns null when the
+ *  `[Unreleased]` section has no bullet content. */
+export function suggestedBump(changelogText) {
+  const lines = (typeof changelogText === 'string' ? changelogText : '').split(/\r?\n/);
+  let inSection = false;
+  let heading = null;
+  const filled = new Set();
+  let breaking = false;
+  for (const line of lines) {
+    if (/^##\s+\[/.test(line)) { inSection = /^##\s+\[Unreleased\]/i.test(line); heading = null; continue; }
+    if (!inSection) continue;
+    if (/^###\s+/.test(line)) { heading = line.replace(/^###\s+/, '').trim().toLowerCase(); continue; }
+    if (/\bBREAKING\b/i.test(line)) breaking = true;
+    if (heading && /^\s*[-*]\s+\S/.test(line)) filled.add(heading);
+  }
+  if (filled.size === 0 && !breaking) return null;
+  if (breaking || filled.has('removed')) return 'major';
+  if (filled.has('added') || filled.has('changed') || filled.has('deprecated')) return 'minor';
+  return 'patch';
+}
+
 function readStdin() { try { return readFileSync(0, 'utf-8'); } catch { return ''; } }
 
 const isMain = fileURLToPath(import.meta.url) === process.argv[1];
@@ -60,8 +83,11 @@ if (isMain) {
     console.log(`qa=${qa}`);
   } else if (cmd === 'unreleased-count') {
     console.log(unreleasedBulletCount(readStdin()));
+  } else if (cmd === 'suggested-bump') {
+    const b = suggestedBump(readStdin());
+    if (b) console.log(b);
   } else {
-    console.error('usage: ci-changes.mjs classify|unreleased-count');
+    console.error('usage: ci-changes.mjs classify|unreleased-count|suggested-bump');
     process.exit(2);
   }
 }

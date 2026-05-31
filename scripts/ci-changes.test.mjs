@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyPaths, unreleasedBulletCount } from './ci-changes.mjs';
+import { classifyPaths, unreleasedBulletCount, suggestedBump } from './ci-changes.mjs';
 
 test('classifyPaths buckets app/scripts/workflows', () => {
   assert.deepEqual(classifyPaths(['src/App.tsx']), { app: true, scripts: false, workflows: false, qa: false });
@@ -64,4 +64,27 @@ test('unreleasedBulletCount = 0 for empty/no-section/no-bullets', () => {
 test('unreleasedBulletCount handles * bullets and CRLF', () => {
   assert.equal(unreleasedBulletCount('## [Unreleased]\n* A thing\n'), 1);
   assert.equal(unreleasedBulletCount('## [Unreleased]\r\n- thing\r\n'), 1);
+});
+
+test('suggestedBump: Added -> minor', () => {
+  assert.equal(suggestedBump('## [Unreleased]\n### Added\n- A thing\n'), 'minor');
+});
+test('suggestedBump: only Fixed -> patch', () => {
+  assert.equal(suggestedBump('## [Unreleased]\n### Fixed\n- A fix\n'), 'patch');
+});
+test('suggestedBump: Removed -> major', () => {
+  assert.equal(suggestedBump('## [Unreleased]\n### Removed\n- Dropped X\n'), 'major');
+});
+test('suggestedBump: BREAKING marker -> major', () => {
+  assert.equal(suggestedBump('## [Unreleased]\n### Changed\n- BREAKING: changed Y\n'), 'major');
+});
+test('suggestedBump: Added + Fixed -> minor', () => {
+  assert.equal(suggestedBump('## [Unreleased]\n### Added\n- A\n### Fixed\n- B\n'), 'minor');
+});
+test('suggestedBump: Security only -> patch', () => {
+  assert.equal(suggestedBump('## [Unreleased]\n### Security\n- Patched Z\n'), 'patch');
+});
+test('suggestedBump: empty/no bullets -> null', () => {
+  assert.equal(suggestedBump('## [Unreleased]\n### Added\n'), null);
+  assert.equal(suggestedBump(''), null);
 });

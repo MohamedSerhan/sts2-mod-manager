@@ -1,0 +1,38 @@
+{
+  "planPath": "docs/superpowers/plans/2026-05-31-release-trigger.md",
+  "tasks": [
+    {
+      "id": 1,
+      "subject": "Task 1: suggestedBump helper + tests in ci-changes.mjs",
+      "status": "pending",
+      "description": "**Goal:** Pure function (+ CLI) mapping a CHANGELOG [Unreleased] section to a suggested semver bump.\n\n**Files:**\n- Modify: scripts/ci-changes.mjs (add suggestedBump export + suggested-bump CLI)\n- Modify: scripts/ci-changes.test.mjs (add tests)\n\n**Acceptance Criteria:**\n- [ ] suggestedBump: Removed/BREAKING -> major; Added/Changed/Deprecated -> minor; only Fixed/Security -> patch; no [Unreleased] bullets -> null\n- [ ] CLI `node scripts/ci-changes.mjs suggested-bump < CHANGELOG.md` prints the bump (nothing when null)\n- [ ] new + existing tests pass\n\n**Verify:** node --test scripts/ci-changes.test.mjs\n\n**Steps:** TDD (7 tests), implement suggestedBump after unreleasedBulletCount, add the suggested-bump CLI branch, green, commit. Full code in plan Task 1.\n\n```json:metadata\n{\"files\": [\"scripts/ci-changes.mjs\", \"scripts/ci-changes.test.mjs\"], \"verifyCommand\": \"node --test scripts/ci-changes.test.mjs\", \"acceptanceCriteria\": [\"suggestedBump heuristic correct (major/minor/patch/null)\", \"suggested-bump CLI prints bump\", \"new + existing tests pass\"]}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: release.yml — guided release workflow (picker)",
+      "status": "pending",
+      "description": "**Goal:** A workflow_dispatch workflow with a patch/minor/major dropdown that runs scripts/release.sh.\n\n**Files:**\n- Create: .github/workflows/release.yml\n\n**Acceptance Criteria:**\n- [ ] workflow_dispatch with a bump choice input (patch/minor/major)\n- [ ] Checks out main with the PAT (DEV_BUILD_LABEL_TOKEN) so the tag push triggers build.yml\n- [ ] Runs npm ci, sets up Node + Rust, runs SKIP_QA=1 ./scripts/release.sh <bump>\n- [ ] actionlint passes\n\n**Verify:** actionlint .github/workflows/release.yml. HARD SAFETY: do NOT run the workflow — it cuts a real release; validate by actionlint + inspection ONLY. Full YAML in plan Task 2.\n\n```json:metadata\n{\"files\": [\".github/workflows/release.yml\"], \"verifyCommand\": \"actionlint .github/workflows/release.yml\", \"acceptanceCriteria\": [\"workflow_dispatch bump choice\", \"checkout main with PAT\", \"npm ci + SKIP_QA release.sh\", \"actionlint passes\", \"NOT run as a test\"]}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: release-suggester.yml — the PR comment",
+      "status": "pending",
+      "blockedBy": [1],
+      "description": "**Goal:** On any PR that adds a new user-facing CHANGELOG [Unreleased] bullet, post/update one marked comment with the suggested bump + the Release-workflow URL.\n\n**Files:**\n- Create: .github/workflows/release-suggester.yml\n\n**Acceptance Criteria:**\n- [ ] pull_request (opened/synchronize/reopened) to main; permissions contents: read, pull-requests: write\n- [ ] head vs base unreleased-count; head added a bullet -> release-worthy\n- [ ] post/update ONE <!-- release-suggester --> comment with suggested bump + release.yml URL; remove if no longer worthy\n- [ ] actionlint passes\n\n**Verify:** actionlint .github/workflows/release-suggester.yml (live behavior validated in Task 5). Reuses Task 1's helper. Full YAML in plan Task 3.\n\n```json:metadata\n{\"files\": [\".github/workflows/release-suggester.yml\"], \"verifyCommand\": \"actionlint .github/workflows/release-suggester.yml\", \"acceptanceCriteria\": [\"pull_request + pull-requests: write\", \"head>base unreleased-count detection\", \"marked comment post/update/remove with bump + URL\", \"actionlint passes\"]}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 4: RELEASING.md — release-worthiness definition",
+      "status": "pending",
+      "description": "**Goal:** A short section codifying what release-worthy means, the single source of truth the suggester links to.\n\n**Files:**\n- Modify: RELEASING.md\n\n**Acceptance Criteria:**\n- [ ] A What's release-worthy section: user-facing (adds a CHANGELOG [Unreleased] bullet) = release-worthy; internal-only is not\n\n**Verify:** Read RELEASING.md; the section is present and matches the suggester rule. Full text in plan Task 4.\n\n```json:metadata\n{\"files\": [\"RELEASING.md\"], \"verifyCommand\": \"grep -qi release-worthy RELEASING.md\", \"acceptanceCriteria\": [\"Whats release-worthy section present\", \"matches suggester rule (user-facing = [Unreleased] bullet)\"]}\n```"
+    },
+    {
+      "id": 5,
+      "subject": "Task 5: Validate live (suggester) + land the feature",
+      "status": "pending",
+      "blockedBy": [1, 2, 3, 4],
+      "description": "**Goal:** Prove the suggester comments correctly on a real PR, confirm release.yml by inspection (NOT by running it), then land the feature on main.\n\n**Files:** none (operational).\n\n**Acceptance Criteria:**\n- [ ] On a PR adding a user-facing [Unreleased] bullet, the suggester posts the marked comment with the correct bump + the release.yml Run URL\n- [ ] On a PR with no new [Unreleased] bullet (or no-changelog), no comment\n- [ ] release.yml confirmed via actionlint + inspection — NOT run (running it cuts a real release)\n- [ ] Feature PR CI-green and merged by maintainer admin-merge; merging does NOT trigger a release\n\n**Verify:** gh pr view <pr> --json comments shows the marked comment with the right bump; gh release view --json tagName stays v1.6.1 throughout.\n\n```json:metadata\n{\"files\": [], \"verifyCommand\": \"gh pr view PR --json comments && gh release view --json tagName\", \"acceptanceCriteria\": [\"suggester comments correctly (right bump + URL)\", \"no comment on internal-only PR\", \"release.yml NOT run; release tag unchanged\", \"feature merged, no release fired\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-05-31T19:00:00Z"
+}

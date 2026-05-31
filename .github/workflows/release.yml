@@ -1,0 +1,42 @@
+name: Release
+# Manual, guided release. Pick the semver bump; this wraps scripts/release.sh,
+# which enforces the CHANGELOG gate, bumps all version files, tags v<next>, and
+# pushes -> build.yml's publish pipeline fires on the v* tag.
+#
+# SKIP_QA=1: everything on main already passed the required CI Gate (3-platform
+# build + smoke + tests) at merge, and the Windows smoke can't run here. The
+# changelog/dev-speak + i18n gates in release.sh still run (they are outside SKIP_QA).
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Release type"
+        required: true
+        type: choice
+        options: [patch, minor, major]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main (PAT so the tag push triggers build.yml)
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.DEV_BUILD_LABEL_TOKEN }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+      - name: Cut release
+        env:
+          SKIP_QA: "1"
+        run: ./scripts/release.sh "${{ inputs.bump }}"

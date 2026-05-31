@@ -116,8 +116,9 @@ jobs:
             Review the PR diff and the surrounding code, then audit rigorously:
             - Does the change actually fix the issue it claims? (read the linked issue + PR body)
             - Correctness and edge cases; any regressions introduced?
-            - Are there unit tests covering the change, and do they pass? RUN them
-              (`npm test`, or `cargo test --manifest-path=src-tauri/Cargo.toml` for Rust-only).
+            - Are there unit tests covering the change, and do they pass? You MUST
+              actually RUN them (`npm test`, or `cargo test --manifest-path=src-tauri/Cargo.toml`
+              for Rust-only) — never assume — and cite which suites you ran + their result.
             - Does it follow the codebase's patterns? Any obvious security problem?
             - If the change is user-facing, is there an appropriate `[Unreleased]` CHANGELOG bullet
               (player-language, no dev-speak)?
@@ -131,7 +132,7 @@ jobs:
 
             Your ONLY output is a file named `qa-verdict.json` in the repository root, written as
             your final action, containing EXACTLY one JSON object and nothing else:
-              {"verdict":"pass","summary":"<one line on why it is solid>"}
+              {"verdict":"pass","summary":"<one line on why it is solid, naming the tests you ran + their result, e.g. 'cargo test: 48 passed; vitest: 121 passed'>"}
             OR
               {"verdict":"fail","findings":"<a concise numbered list of the specific, REAL problems to fix>"}
             Use "pass" ONLY if the change is correct, adequately tested, and ready for the

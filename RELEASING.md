@@ -2,6 +2,18 @@
 
 Maintainer-only notes for cutting a release of STS2 Mod Manager.
 
+## What's release-worthy
+
+A change is **release-worthy** iff it is **user-facing** — i.e. it adds a
+`CHANGELOG.md` `[Unreleased]` bullet under Added / Changed / Fixed / Security
+(or Removed / Deprecated). Internal-only changes (CI, build, tests, refactors,
+docs, chore) are **not** release-worthy and don't, on their own, warrant a release.
+
+The release-suggester bot applies exactly this rule: it comments on a PR only
+when the PR adds a new `[Unreleased]` bullet, and the "Run the Release workflow"
+link it posts is how you ship — when you're ready, it releases everything queued
+in `[Unreleased]` at once.
+
 ## Release flow
 
 1. Bump the version in `package.json` and `src-tauri/tauri.conf.json` (they must match).

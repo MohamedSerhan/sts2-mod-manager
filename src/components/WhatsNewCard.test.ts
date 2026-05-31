@@ -86,4 +86,41 @@ describe('parseSimpleMarkdown', () => {
       { kind: 'bullets', items: ['Visible fix.'] },
     ]);
   });
+
+  it('keeps a subhead followed by a non-empty paragraph (covers blockHasVisibleContent para branch)', () => {
+    // dropEmptySections iterates forward from a subhead until it finds
+    // either the next subhead or a block with visible content. A `para`
+    // block with visible text counts as content — without this branch
+    // covered, sections with paragraph-only bodies would silently drop.
+    const md = `### Highlights\n\nA short release summary in prose.\n\n### Next\n\n- bullet\n`;
+    expect(blocks(md)).toEqual<Block[]>([
+      { kind: 'subhead', text: 'Highlights' },
+      { kind: 'para', text: 'A short release summary in prose.' },
+      { kind: 'subhead', text: 'Next' },
+      { kind: 'bullets', items: ['bullet'] },
+    ]);
+  });
+
+  it('drops a subhead immediately followed by an empty subhead chain (covers the next-subhead exit branch)', () => {
+    // Two empty subheads in a row — dropEmptySections must walk forward
+    // from the first, hit the second subhead, and return false (drop).
+    const md = `### EmptyOne\n\n### EmptyTwo\n\n- still-here\n`;
+    expect(blocks(md)).toEqual<Block[]>([
+      { kind: 'subhead', text: 'EmptyTwo' },
+      { kind: 'bullets', items: ['still-here'] },
+    ]);
+  });
+
+  it('drops a subhead whose only following block is an empty-text paragraph', () => {
+    // A para block with empty trimmed text fails blockHasVisibleContent
+    // and the loop falls through to `return false`. The parser itself
+    // filters truly empty paras out via `if (text) out.push(...)`, but
+    // we still need the branch covered for whitespace-shaped inputs.
+    // Trailing subhead with no real content after it gets dropped.
+    const md = `### Real\n\n- one\n\n### Trailing\n`;
+    expect(blocks(md)).toEqual<Block[]>([
+      { kind: 'subhead', text: 'Real' },
+      { kind: 'bullets', items: ['one'] },
+    ]);
+  });
 });

@@ -20,6 +20,10 @@ interface KebabMenuProps {
   align?: 'left' | 'right';
   title?: string;
   buttonClassName?: string;
+  /** Custom trigger content. When provided, it replaces the default ⋯
+   *  icon — lets the same popover power a labeled dropdown like
+   *  "+ Add mods ▾". */
+  trigger?: ReactNode;
 }
 
 export function KebabMenu({
@@ -28,6 +32,7 @@ export function KebabMenu({
   align = 'right',
   title,
   buttonClassName,
+  trigger,
 }: KebabMenuProps) {
   const { t } = useTranslation();
   const resolvedTitle = title ?? t('common.moreActions');
@@ -67,7 +72,7 @@ export function KebabMenu({
         aria-haspopup="menu"
         aria-expanded={open}
       >
-        <MoreHorizontal size={14} />
+        {trigger ?? <MoreHorizontal size={14} />}
       </button>
       {open && (
         <div

@@ -3,7 +3,7 @@ import { useTranslation, Trans } from 'react-i18next';
 import { RefreshCw, Search, Plus } from 'lucide-react';
 
 import { fetchModpackBrowserPage } from '../hooks/useTauri';
-import { Badge } from '../components/Badge';
+import { withTimeout } from '../lib/withTimeout';
 import { BrowseModpackDetail } from '../components/BrowseModpackDetail';
 import type { BrowserCard, BrowserPage } from '../types';
 
@@ -50,6 +50,12 @@ function isRateLimit(err: unknown): boolean {
   return /\b429\b/.test(m) || /rate limit/i.test(m);
 }
 
+/** Hard ceiling on how long we'll show skeletons before giving up. The
+ *  backend bounds itself too (per-request + overall timeouts), so this is
+ *  a frontend safety net: without it, any backend stall left the view
+ *  stuck on skeletons forever with no error and no way to retry. */
+const BROWSER_LOAD_TIMEOUT_MS = 45_000;
+
 export function BrowseModpacksView({ onGoToProfiles }: Props = {}) {
   const { t } = useTranslation();
   const [page, setPage] = useState<BrowserPage | null>(null);
@@ -57,13 +63,18 @@ export function BrowseModpacksView({ onGoToProfiles }: Props = {}) {
   const [rateLimited, setRateLimited] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<BrowserCard | null>(null);
+  const [query, setQuery] = useState('');
 
   async function load(force = false) {
     setLoading(true);
     setRateLimited(false);
     setError(null);
     try {
-      const result = await fetchModpackBrowserPage(1, force);
+      const result = await withTimeout(
+        fetchModpackBrowserPage(1, force),
+        BROWSER_LOAD_TIMEOUT_MS,
+        t('browseModpacks.timedOut'),
+      );
       setPage(result);
     } catch (e) {
       if (isRateLimit(e)) {
@@ -81,13 +92,22 @@ export function BrowseModpacksView({ onGoToProfiles }: Props = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Client-side filter over the loaded cards (name + author). The list is
+  // already deduped; the search just narrows it.
+  const allCards = page ? dedupeBrowserCards(page.cards) : [];
+  const q = query.trim().toLowerCase();
+  const visibleCards = q
+    ? allCards.filter(
+        (c) => c.name.toLowerCase().includes(q) || c.owner.toLowerCase().includes(q),
+      )
+    : allCards;
+
   return (
     <>
       <div className="gf-view">
       <div className="gf-view-head">
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
           <h2 className="gf-view-title">{t('browseModpacks.title')}</h2>
-          <Badge variant="beta" title={t('browseModpacks.betaTitle')}>{t('common.beta')}</Badge>
         </div>
         <button
           className="gf-btn-3"
@@ -109,12 +129,28 @@ export function BrowseModpacksView({ onGoToProfiles }: Props = {}) {
       )}
 
       {rateLimited && (
-        <div className="gf-banner gf-banner-warn">
-          {t('browseModpacks.rateLimited')}
+        <div
+          className="gf-banner gf-banner-warn"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}
+        >
+          <span>{t('browseModpacks.rateLimited')}</span>
+          <button className="gf-btn-3" onClick={() => load(true)} disabled={loading}>
+            <RefreshCw size={14} className={loading ? 'gf-spin' : undefined} /> {t('browseModpacks.tryAgain')}
+          </button>
         </div>
       )}
 
-      {error && <div className="gf-banner gf-banner-error">{error}</div>}
+      {error && (
+        <div
+          className="gf-banner gf-banner-error"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}
+        >
+          <span>{error}</span>
+          <button className="gf-btn-3" onClick={() => load(true)} disabled={loading}>
+            <RefreshCw size={14} className={loading ? 'gf-spin' : undefined} /> {t('browseModpacks.tryAgain')}
+          </button>
+        </div>
+      )}
 
       {loading && !page && (
         <div className="gf-card-list">
@@ -138,7 +174,7 @@ export function BrowseModpacksView({ onGoToProfiles }: Props = {}) {
         </div>
       )}
 
-      {page && page.cards.length > 0 && (
+      {page && allCards.length > 0 && (
         <>
           <div
             style={{
@@ -165,20 +201,40 @@ export function BrowseModpacksView({ onGoToProfiles }: Props = {}) {
               </button>
             )}
           </div>
-          <div className="gf-card-list">
-            {dedupeBrowserCards(page.cards).map((c) => (
-              <button
-                key={`${c.owner}/${c.code}`}
-                className="gf-card gf-card-clickable"
-                onClick={() => setSelected(c)}
-              >
-                <div className="gf-card-title">{c.name}</div>
-                <div className="gf-card-sub">
-                  @{c.owner} · {t('browseModpacks.modCount', { count: c.mod_count })} · {t('browseModpacks.updated', { time: relativeTime(c.updated_at, t) })}
-                </div>
-              </button>
-            ))}
-          </div>
+          {/* flex:none — this shared search class is `flex: 1 1 280px`, which
+              is right inside the row toolbar it was built for but stretches
+              vertically here (Browse lays its children out in a column),
+              ballooning the bar. Pin it to its natural height. */}
+          <label className="gf-profile-library-search" style={{ marginBottom: 12, flex: 'none' }}>
+            <Search size={13} />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={t('browseModpacks.searchPlaceholder')}
+              aria-label={t('browseModpacks.searchPlaceholder')}
+            />
+          </label>
+          {visibleCards.length === 0 ? (
+            <div className="gf-empty">
+              <Search size={28} />
+              <div className="gf-empty-title">{t('browseModpacks.noMatches')}</div>
+            </div>
+          ) : (
+            <div className="gf-card-list">
+              {visibleCards.map((c) => (
+                <button
+                  key={`${c.owner}/${c.code}`}
+                  className="gf-card gf-card-clickable"
+                  onClick={() => setSelected(c)}
+                >
+                  <div className="gf-card-title">{c.name}</div>
+                  <div className="gf-card-sub">
+                    @{c.owner} · {t('browseModpacks.modCount', { count: c.mod_count })} · {t('browseModpacks.updated', { time: relativeTime(c.updated_at, t) })}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
         </>
       )}
       </div>

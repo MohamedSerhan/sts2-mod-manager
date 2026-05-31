@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { WhatsNewCard } from './WhatsNewCard';
 import { setMockAppVersion } from '../__test__/setup';
+import i18n from '../i18n';
 
 /**
  * Tests the component side of WhatsNewCard (the parser is tested
@@ -92,5 +93,68 @@ describe('<WhatsNewCard>', () => {
     const strong = container.querySelector('.gf-whatsnew-strong');
     expect(strong).not.toBeNull();
     expect(strong).toHaveTextContent('Browse Modpacks.');
+  });
+
+  it('survives localStorage.getItem throwing (covers the catch around the dismissed-seen lookup)', async () => {
+    // Some browsers / OS profiles disable localStorage entirely. The
+    // useEffect lookup is wrapped in try/catch and falls back to
+    // `setDismissed(false)` so the card still renders. We force the
+    // throw by stubbing getItem just for this test.
+    setMockAppVersion('1.3.4');
+    const origGet = window.localStorage.getItem;
+    window.localStorage.getItem = vi.fn(() => {
+      throw new Error('SecurityError: localStorage disabled');
+    });
+    try {
+      render(<WhatsNewCard />);
+      // Card still renders the current entry — the catch swallowed the
+      // throw and reset dismissed→false so the card stays visible.
+      await waitFor(() => {
+        expect(screen.getByText(/What's new in v1\.3\.4/)).toBeInTheDocument();
+      });
+    } finally {
+      window.localStorage.getItem = origGet;
+    }
+  });
+});
+
+describe('<WhatsNewCard> non-English locale notice', () => {
+  afterEach(async () => {
+    // Each non-English test bumps i18n.language; reset to en so later
+    // suites that assume the default locale don't start in zh-Hans.
+    await i18n.changeLanguage('en');
+  });
+
+  it('shows the locale notice when the active language is not English', async () => {
+    setMockAppVersion('1.3.4');
+    await i18n.changeLanguage('zh-Hans');
+    render(<WhatsNewCard />);
+    await waitFor(() => {
+      // The locale notice copy is keyed off whatsNew.localeNotice — in
+      // zh-Hans it mentions the maintainer's English-only release notes.
+      // We assert the report-button text, which is the unique trigger
+      // for the openExternalUrl branch.
+      const reportBtn = screen.getByRole('button', { name: /反馈翻译错误|Report a translation mistake/i });
+      expect(reportBtn).toBeInTheDocument();
+    });
+  });
+
+  it('locale-notice "Report a translation issue" button opens the GitHub issue URL', async () => {
+    setMockAppVersion('1.3.4');
+    await i18n.changeLanguage('zh-Hans');
+    const opener = await import('@tauri-apps/plugin-opener');
+    vi.mocked(opener.openUrl).mockClear();
+    const user = userEvent.setup();
+    render(<WhatsNewCard />);
+    const reportBtn = await waitFor(() => {
+      const btn = screen.getByRole('button', { name: /反馈翻译错误|Report a translation mistake/i });
+      return btn;
+    });
+    await user.click(reportBtn);
+    await waitFor(() => {
+      expect(opener.openUrl).toHaveBeenCalledWith(
+        'https://github.com/MohamedSerhan/sts2-mod-manager/issues/new?labels=translation',
+      );
+    });
   });
 });

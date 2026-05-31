@@ -241,6 +241,14 @@ export async function getProfileDrift(name: string): Promise<ProfileDrift> {
   return invoke('get_profile_drift', { name });
 }
 
+/** Save the drift: reconcile the manifest to the current loadout by applying
+ *  only the diff (add enabled extras, drop missing mods, sync toggled/version
+ *  for present mods). Unlike snapshotProfile, this preserves the pack's
+ *  curated set rather than absorbing the whole install. */
+export async function saveProfileDrift(name: string): Promise<Profile> {
+  return invoke('save_profile_drift', { name });
+}
+
 // ── Curator Workflow ───────────────────────────────────────────────────────
 
 export async function checkForUpdates(): Promise<ModUpdate[]> {
@@ -286,6 +294,20 @@ export async function auditModVersions(only?: string[]): Promise<ModAuditEntry[]
 
 export async function quickAddMod(url: string): Promise<QuickAddResult> {
   return invoke('quick_add_mod', { url });
+}
+
+/** Upload a bug report to the maintainer's ingest endpoint and return its
+ *  view URL. Requires NO user token. Rejects when the endpoint isn't
+ *  configured for this build or the upload fails, so the caller can fall
+ *  back to clipboard + a truncated issue. */
+export async function uploadBugReport(content: string): Promise<string> {
+  return invoke('upload_bug_report', { content });
+}
+
+/** Host of the configured bug-report upload endpoint, or null when this build
+ *  has none (dev / fork builds → no upload happens, clipboard fallback). */
+export async function bugReportEndpointHost(): Promise<string | null> {
+  return invoke('bug_report_endpoint_host');
 }
 
 // ── Mod Source Linking ─────────────────────────────────────────────────────
@@ -526,4 +548,28 @@ export async function openLogFile(): Promise<boolean> {
 /** Return the last N lines of the in-app log (newest at end). */
 export async function readLogTail(lines: number = 500): Promise<string> {
   return invoke('read_log_tail', { lines });
+}
+
+// ── Dev builds (dev-build-only Settings panel) ───────────────────────────────
+
+export interface DevBuildAsset { name: string; url: string; platform: string; }
+export interface DevBuild {
+  pr: number;
+  sha: string;
+  title: string;
+  published_at: string;
+  windows_installer_url: string | null;
+  manifest_url: string | null;
+  assets: DevBuildAsset[];
+}
+
+/** List the open PRs that currently have a dev-build prerelease. */
+export async function listDevBuilds(): Promise<DevBuild[]> {
+  return invoke('list_dev_builds');
+}
+
+/** Point the (Dev) slot at the dev build published at `manifestUrl` and
+ *  trigger the updater to switch to it. */
+export async function switchDevBuild(manifestUrl: string): Promise<void> {
+  return invoke('switch_dev_build', { manifestUrl });
 }

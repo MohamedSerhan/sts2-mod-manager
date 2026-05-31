@@ -52,6 +52,47 @@ describe('<ConfirmProvider> + useConfirm', () => {
     expect(getResolved()).toEqual({ confirmed: true, checked: false });
   });
 
+  it('renders choice buttons and resolves with the picked choice', async () => {
+    const { Trigger, getResolved } = makeHarness();
+    const user = userEvent.setup();
+    render(
+      <ConfirmProvider>
+        <Trigger
+          optsFactory={() => ({
+            title: 'Enable mod?',
+            choices: [
+              { value: 'enableAndAdd', label: 'Enable & add', variant: 'primary' },
+              { value: 'enableOnly', label: 'Enable only', variant: 'secondary' },
+            ],
+          })}
+        />
+      </ConfirmProvider>,
+    );
+    await user.click(screen.getByText('open'));
+    expect(screen.getByRole('button', { name: 'Enable & add' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Enable only' }));
+    expect(getResolved()).toEqual({ confirmed: true, checked: false, choice: 'enableOnly' });
+  });
+
+  it('a choices dialog still resolves false when the cancel button is clicked', async () => {
+    const { Trigger, getResolved } = makeHarness();
+    const user = userEvent.setup();
+    render(
+      <ConfirmProvider>
+        <Trigger
+          optsFactory={() => ({
+            title: 'Enable mod?',
+            cancelLabel: 'Keep stored',
+            choices: [{ value: 'go', label: 'Enable', variant: 'primary' }],
+          })}
+        />
+      </ConfirmProvider>,
+    );
+    await user.click(screen.getByText('open'));
+    await user.click(screen.getByRole('button', { name: 'Keep stored' }));
+    expect(getResolved()).toBe(false);
+  });
+
   it('resolves to false on Cancel', async () => {
     const { Trigger, getResolved } = makeHarness();
     const user = userEvent.setup();

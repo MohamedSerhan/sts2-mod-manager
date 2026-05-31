@@ -3,6 +3,8 @@
 //! `public == Some(true)`. The curator's own packs are included —
 //! seeing your published pack in the list is part of the reward.
 
+use std::time::Duration;
+
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
@@ -91,7 +93,17 @@ struct ContentsListEntry {
     kind: String,        // "file" | "dir"
 }
 
-const PER_PAGE: u32 = 30;
+// GitHub search caps per_page at 100; use the max to minimise the number of
+// search requests. The browser walks EVERY result page (see the loop in
+// fetch_modpack_browser_page) so it scales as the curator list grows — not
+// just the first page.
+const PER_PAGE: u32 = 100;
+
+// Backstop on how many search pages we walk per refresh (100 curators each),
+// so a runaway/abusive search index can't loop forever. 20 pages = 2000
+// curators — far beyond today's count, and the per-owner fan-out + overall
+// timeout bound things well before this in practice.
+const MAX_SEARCH_PAGES: u32 = 20;
 
 /// Search GitHub for repos literally named `sts2mm-profiles`. Returns
 /// `(items, has_next_page)`. The caller decides how to fan out from there.
@@ -162,6 +174,13 @@ use futures::stream::{FuturesUnordered, StreamExt};
 
 const CACHE_TTL_SECS: i64 = 60 * 60; // 1h
 const CONCURRENCY: usize = 8;
+/// Overall ceiling for one live fetch (search → per-owner listing →
+/// manifest bodies). Each HTTP call already has its own 60s timeout, but a
+/// page with many owners can chain those into minutes; this caps the whole
+/// operation so the command always returns promptly. On timeout we serve
+/// stale cache if we have it, else a clear error — the browser never sits
+/// on skeletons forever.
+const BROWSER_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Fetch a single manifest from one curator's repo. Returns `None` if
 /// the file 404s or fails to parse — the caller silently drops them.
@@ -206,10 +225,92 @@ pub async fn fetch_modpack_browser_page(
 
     let client = crate::sharing::build_client(token.as_deref().unwrap_or(""));
 
-    let search_result = search_profiles_repos(&client, page).await;
-    let (owners, has_next_page) = match search_result {
+    // Live fetch: GitHub search → per-owner manifest listing → manifest
+    // bodies. Wrapped in an overall timeout below so a slow/unreachable
+    // GitHub can't pin the command (and the UI) open indefinitely. Returns
+    // (cards, more_pages_exist, owners_was_empty) on success.
+    //
+    // `owners_was_empty` is captured before the fan-out moves `owners`; the
+    // caller uses it to tell "GitHub had nothing" (legitimate empty) apart
+    // from "fan-out was rate-limited mid-page" (don't clobber prior cache).
+    let fetch_fresh = async {
+        // Walk every search-result page (PER_PAGE=100 each) so the browser
+        // scales with the curator list instead of stopping at the first page.
+        // `page` (the command arg) is now only the cache slot — the search
+        // always starts from page 1. `more_pages_exist` is set only if we hit
+        // the MAX_SEARCH_PAGES backstop with more results still pending.
+        let mut owners: Vec<(String, String)> = Vec::new();
+        let mut more_pages_exist = false;
+        let mut search_page = 1u32;
+        loop {
+            let (page_owners, has_next) = search_profiles_repos(&client, search_page).await?;
+            let page_was_empty = page_owners.is_empty();
+            owners.extend(page_owners);
+            if page_was_empty || !has_next {
+                break;
+            }
+            if search_page >= MAX_SEARCH_PAGES {
+                more_pages_exist = true;
+                break;
+            }
+            search_page += 1;
+        }
+        let owners_was_empty = owners.is_empty();
+
+        let mut list_tasks = FuturesUnordered::new();
+        for (owner, repo) in owners {
+            let client = client.clone();
+            list_tasks.push(async move {
+                let files = list_manifest_filenames(&client, &owner, &repo).await.unwrap_or_default();
+                (owner, files)
+            });
+        }
+        let mut owner_files: Vec<(String, Vec<String>)> = Vec::new();
+        while let Some(t) = list_tasks.next().await {
+            owner_files.push(t);
+        }
+
+        let mut all_manifest_tasks: Vec<(String, String)> = Vec::new();
+        for (owner, files) in owner_files {
+            for f in files {
+                all_manifest_tasks.push((owner.clone(), f));
+            }
+        }
+
+        let mut raw: Vec<RawManifest> = Vec::new();
+        let mut iter = all_manifest_tasks.into_iter();
+        let mut inflight = FuturesUnordered::new();
+        for _ in 0..CONCURRENCY {
+            if let Some((o, f)) = iter.next() {
+                inflight.push(fetch_one_manifest(o, f, token.clone()));
+            }
+        }
+        while let Some(result) = inflight.next().await {
+            if let Some(r) = result {
+                raw.push(r);
+            }
+            if let Some((o, f)) = iter.next() {
+                inflight.push(fetch_one_manifest(o, f, token.clone()));
+            }
+        }
+
+        let cards = filter_to_browser_cards(raw);
+        Ok::<(Vec<BrowserCard>, bool, bool), String>((cards, more_pages_exist, owners_was_empty))
+    };
+
+    let fetched = match tokio::time::timeout(BROWSER_FETCH_TIMEOUT, fetch_fresh).await {
+        Ok(inner) => inner,
+        Err(_elapsed) => Err(format!(
+            "GitHub took too long to respond (over {}s)",
+            BROWSER_FETCH_TIMEOUT.as_secs(),
+        )),
+    };
+
+    let (cards, has_next_page, owners_was_empty) = match fetched {
         Ok(t) => t,
         Err(e) => {
+            // Search error or overall timeout: serve the last good cache
+            // (flagged stale) if we have one, rather than showing nothing.
             if let Some(c) = cached {
                 return Ok(BrowserPage {
                     cards: c.cards,
@@ -222,50 +323,6 @@ pub async fn fetch_modpack_browser_page(
             return Err(e);
         }
     };
-
-    // Captured before the fan-out moves `owners`; used after the filter
-    // step to distinguish "GitHub had nothing" (legitimate empty) from
-    // "fan-out was rate-limited mid-page" (don't clobber prior cache).
-    let owners_was_empty = owners.is_empty();
-
-    let mut list_tasks = FuturesUnordered::new();
-    for (owner, repo) in owners {
-        let client = client.clone();
-        list_tasks.push(async move {
-            let files = list_manifest_filenames(&client, &owner, &repo).await.unwrap_or_default();
-            (owner, files)
-        });
-    }
-    let mut owner_files: Vec<(String, Vec<String>)> = Vec::new();
-    while let Some(t) = list_tasks.next().await {
-        owner_files.push(t);
-    }
-
-    let mut all_manifest_tasks: Vec<(String, String)> = Vec::new();
-    for (owner, files) in owner_files {
-        for f in files {
-            all_manifest_tasks.push((owner.clone(), f));
-        }
-    }
-
-    let mut raw: Vec<RawManifest> = Vec::new();
-    let mut iter = all_manifest_tasks.into_iter();
-    let mut inflight = FuturesUnordered::new();
-    for _ in 0..CONCURRENCY {
-        if let Some((o, f)) = iter.next() {
-            inflight.push(fetch_one_manifest(o, f, token.clone()));
-        }
-    }
-    while let Some(result) = inflight.next().await {
-        if let Some(r) = result {
-            raw.push(r);
-        }
-        if let Some((o, f)) = iter.next() {
-            inflight.push(fetch_one_manifest(o, f, token.clone()));
-        }
-    }
-
-    let cards = filter_to_browser_cards(raw);
 
     // If the fan-out produced an empty result despite GitHub search returning
     // owners, it's almost certainly a partial rate-limit storm. Don't clobber

@@ -1,18 +1,15 @@
-import { useState, useEffect, useRef, type MouseEvent } from 'react';
+import { useState, useEffect, useRef, useCallback, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { getVersion } from '@tauri-apps/api/app';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   Home,
   Package,
-  Search,
-  Boxes,
   Layers,
   Settings,
   Play,
-  GraduationCap,
+  HelpCircle,
   ExternalLink,
   AlertTriangle,
   ChevronDown,
@@ -28,35 +25,41 @@ import { cn } from './lib/utils';
 import { ToastProvider, useToast } from './contexts/ToastContext';
 import { AppProvider, useApp } from './contexts/AppContext';
 import { ConfirmProvider, useConfirm } from './components/ConfirmDialog';
-import { Badge } from './components/Badge';
 import { importShareCodeSmart } from './lib/shareImport';
 import { getSubscriptions } from './hooks/useTauri';
 import { OnboardingOverlay } from './components/OnboardingOverlay';
 import { LaunchSpinner } from './components/LaunchSpinner';
 import { ProfileSwitcher } from './components/ProfileSwitcher';
+import { HelpDrawer } from './components/HelpDrawer';
 import { HomeView } from './views/Home';
 import { ModsView } from './views/Mods';
-import { BrowseView } from './views/Browse';
-import { BrowseModpacksView } from './views/BrowseModpacks';
 import { ProfilesView } from './views/Profiles';
 import { SettingsView } from './views/Settings';
-import { TutorialView } from './views/Tutorial';
-import { launchGame, launchVanilla, installModFromFile, openExternalUrl } from './hooks/useTauri';
+import { launchGame, launchVanilla, installModFromFile, openExternalUrl, setProfileModMembership, toggleMod } from './hooks/useTauri';
 
-type View = 'home' | 'profiles' | 'mods' | 'browse-mods' | 'browse-modpacks' | 'tutorial' | 'settings';
+// View IDs include legacy ones ('browse-mods', 'browse-modpacks')
+// so internal handlers + deep-links that pre-date the 1.7.0 IA
+// collapse still resolve to a sensible surface — the view router
+// below maps them onto the new Library/Modpacks tabs. The sidebar
+// itself only exposes the four canonical ids. Help moved entirely
+// to the topbar drawer + Settings tab.
+type View = 'home' | 'profiles' | 'mods' | 'browse-mods' | 'browse-modpacks' | 'settings';
 type ResizeDirection = 'East' | 'North' | 'NorthEast' | 'NorthWest' | 'South' | 'SouthEast' | 'SouthWest' | 'West';
 
-// v5 IA — 4 main nav items, Tutorial+Settings in the foot. Backups absorbed
-// into Settings as a tab. Dashboard cut (was redundant with Home).
+// 1.7.0 IA — sidebar collapsed from 7 items to 4 total: Home /
+// Modpacks / Library / Settings. The three top items live in NAV and
+// the Settings entry lives in FOOT_NAV (pinned to the bottom of the
+// sidebar). Browse Mods is now a tab inside Library (formerly Mods).
+// Browse Modpacks is now a tab inside Modpacks. Help moved out of the
+// sidebar entirely — a `?` icon in the topbar opens a slide-out
+// HelpDrawer, and the same content also lives as a Settings tab. The
+// user's central note: each sidebar item should map to ONE thing.
 const NAV: { id: View; label: string; icon: typeof Home }[] = [
   { id: 'home',     label: 'Home',     icon: Home },
-  { id: 'profiles', label: 'Profiles', icon: Layers },
-  { id: 'mods',     label: 'Mods',     icon: Package },
-  { id: 'browse-mods',     label: 'Browse Mods',     icon: Search },
-  { id: 'browse-modpacks', label: 'Browse Modpacks', icon: Boxes },
+  { id: 'profiles', label: 'Modpacks', icon: Layers },
+  { id: 'mods',     label: 'Mod Library', icon: Package },
 ];
 const FOOT_NAV: { id: View; label: string; icon: typeof Home }[] = [
-  { id: 'tutorial', label: 'Tutorial', icon: GraduationCap },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
@@ -94,22 +97,31 @@ function AppInner() {
   const [appUpdate, setAppUpdate] = useState<Update | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
   const [updateInstalling, setUpdateInstalling] = useState(false);
-  const [appVersion, setAppVersion] = useState('');
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showProfileSwitcher, setShowProfileSwitcher] = useState(false);
-  const [openModLibrarySignal, setOpenModLibrarySignal] = useState(0);
-  // Bumped whenever something elsewhere in the UI wants Home's share-code
-  // input to grab focus + pulse (e.g. clicking "Add pack" in the profile
-  // switcher). Each bump triggers a one-shot effect in Home; the value
-  // itself is meaningless, only the change matters.
-  const [focusCodeBarSignal, setFocusCodeBarSignal] = useState(0);
+  // 1.7.0 T16 — bumped by sibling surfaces (Mods view "Manage active
+  // modpack →" link) when they want Modpacks to open the active
+  // modpack's detail view on entry. Replaces the legacy
+  // openModLibrarySignal which targeted the removed standalone Mod
+  // Library workspace.
+  const [openActiveModpackSignal, setOpenActiveModpackSignal] = useState(0);
+  const [showHelpDrawer, setShowHelpDrawer] = useState(false);
+  // Bumped whenever a sibling view (ProfileSwitcher's "Add pack",
+  // onboarding's paste-code action) wants the Modpacks toolbar's
+  // Quick-Add input to focus + pulse. The bump triggers a one-shot
+  // effect inside ProfilesView. Replaces the 1.7-v6 `focusCodeBarSignal`
+  // pump that targeted Home's now-removed Quick-Add card.
+  const [focusModpacksCodeBarSignal, setFocusModpacksCodeBarSignal] = useState(0);
+  // 1.7.0 T8 — incremented when the branched onboarding's creator-
+  // path final CTA fires. ProfilesView observes the bump and opens
+  // the guided CreateModpackWizard. Same one-shot signal pattern as
+  // the focus pump above.
+  const [openCreateWizardSignal, setOpenCreateWizardSignal] = useState(0);
   const [launching, setLaunching] = useState<null | 'modded' | 'vanilla'>(null);
   const [isDev, setIsDev] = useState(false);
   useEffect(() => {
     isDevBuild().then(setIsDev).catch(() => {});
   }, []);
-
-  useEffect(() => { getVersion().then(setAppVersion).catch(() => {}); }, []);
 
   // First-launch onboarding wizard (v5 batch 4). Shown once unless dismissed.
   useEffect(() => {
@@ -119,9 +131,15 @@ function AppInner() {
     setShowOnboarding(true);
   }, []);
 
-  function dismissOnboarding() {
+  // `persist` defaults true (the normal "done / not interested" dismissal).
+  // The detect-game step passes false when no game is found yet, so a no-game
+  // first-run user — who can otherwise only Skip — still sees onboarding again
+  // next launch (e.g. once they've installed STS2) instead of being locked out.
+  function dismissOnboarding(persist = true) {
     setShowOnboarding(false);
-    try { localStorage.setItem('sts2mm-onboarded', 'true'); } catch {}
+    if (persist) {
+      try { localStorage.setItem('sts2mm-onboarded', 'true'); } catch {}
+    }
   }
 
   // Build the "preserved N config files" toast message. Includes up to
@@ -132,6 +150,18 @@ function AppInner() {
     const shown = files.slice(0, 3).join(', ');
     const base = t('app.toast.preservedConfigs', { count: n, mod: modName, files: shown });
     const tail = n > 3 ? t('app.toast.preservedConfigs_more', { count: n - 3 }) : '';
+    return `${base}${tail}`;
+  };
+
+  // "Couldn't re-apply N config files" — same shape as the preserved toast, but
+  // a warning: the update overwrote these and the restore failed, so the user
+  // has to redo those edits. (Rust leaves the baseline untouched so a later
+  // update can still recover them.)
+  const formatLostConfigsMessage = (modName: string, files: string[]): string => {
+    const n = files.length;
+    const shown = files.slice(0, 3).join(', ');
+    const base = t('app.toast.lostConfigs', { count: n, mod: modName, files: shown });
+    const tail = n > 3 ? t('app.toast.lostConfigs_more', { count: n - 3 }) : '';
     return `${base}${tail}`;
   };
 
@@ -172,6 +202,17 @@ function AppInner() {
         toast.info(formatPreservedConfigsMessage(mod_name, files));
       },
     );
+    // Emitted when an update could NOT re-apply user-edited configs (restore
+    // failed after extraction). A warning, not a quiet info — those edits are
+    // gone and need redoing.
+    const unlistenLost = listen<{ mod_name: string; files: string[] }>(
+      'mod-configs-lost',
+      (event) => {
+        const { mod_name, files } = event.payload;
+        if (files.length === 0) return;
+        toast.error(formatLostConfigsMessage(mod_name, files));
+      },
+    );
     // Modpack apply / subscription update emits this when one or more
     // mods in the pack require a newer game version than the user's
     // STS2 ships. We've already deleted the offending files (the install
@@ -193,6 +234,7 @@ function AppInner() {
       unlisten2.then(f => f());
       unlisten3.then(f => f());
       unlistenPreserve.then(f => f());
+      unlistenLost.then(f => f());
     };
   }, []);
 
@@ -215,6 +257,16 @@ function AppInner() {
   const subUpdatesRef = useRef(subUpdates);
   useEffect(() => { activeProfileRef.current = activeProfile; }, [activeProfile]);
   useEffect(() => { subUpdatesRef.current = subUpdates; }, [subUpdates]);
+
+  // The modpack the user is currently viewing in ProfilesView (null when
+  // they're on a list/other view). A zip dropped while viewing a pack
+  // auto-joins it — same "added through the modpack view → in the pack"
+  // behavior as Quick add / Import. A ref so the global drop handler reads
+  // the latest without re-binding its listeners.
+  const viewedPackRef = useRef<string | null>(null);
+  const handleViewedModpackChange = useCallback((name: string | null) => {
+    viewedPackRef.current = name;
+  }, []);
 
   // De-dupe ref: a URL can arrive via two paths (cold-start buffer
   // drain AND the live `sts2mm-open-url` event) within milliseconds of
@@ -452,54 +504,90 @@ function AppInner() {
     return () => window.removeEventListener('keydown', handler);
   }, [showOnboarding, gameRunning, launching]);
 
-  // Drag-and-drop zip import
+  // Drag-and-drop archive import. Tauri v2 handles OS file drops natively
+  // (dragDropEnabled defaults to true), which SUPPRESSES the webview's HTML5
+  // drag events — so the old document-level dragover/drop handlers never fired
+  // in the real app (only in a plain browser). Listen to Tauri's own
+  // window-level drag events instead: the drop event hands us absolute file
+  // PATHS directly (no fragile File.path access), and because the events are
+  // window-level there's no per-element flicker to defend against.
   useEffect(() => {
-    function handleDragOver(e: DragEvent) {
-      e.preventDefault();
-      if (e.dataTransfer?.types.includes('Files')) {
-        setDragOver(true);
-      }
-    }
-    function handleDragLeave(e: DragEvent) {
-      e.preventDefault();
-      setDragOver(false);
-    }
-    async function handleDrop(e: DragEvent) {
-      e.preventDefault();
-      setDragOver(false);
-      const files = e.dataTransfer?.files;
-      if (!files || files.length === 0) return;
+    const unlisteners: Array<() => void> = [];
+    let disposed = false;
+    const track = (p: Promise<() => void>) => {
+      p.then((fn) => { if (disposed) fn(); else unlisteners.push(fn); }).catch(() => {
+        /* not inside a Tauri webview (e.g. plain-browser unit tests) */
+      });
+    };
 
-      for (const file of Array.from(files)) {
-        const lower = file.name.toLowerCase();
+    async function handleDroppedPaths(paths: string[]) {
+      // If a modpack detail view is open, the dropped mod joins that pack (and,
+      // on the active pack, loads in-game) — the same auto-add Quick add /
+      // Import do. But a FOLLOWED (subscribed) pack's manifest isn't yours to
+      // edit: don't install "into" it and strand the file in the library —
+      // explain and stop (duplicate the pack to add your own mods).
+      const pack = viewedPackRef.current;
+      if (pack) {
+        try {
+          const subs = await getSubscriptions();
+          if (subs.some((s) => s.profile_name.toLowerCase() === pack.toLowerCase())) {
+            toast.info(t('mods.toast.followedPackNoAdd', { pack }));
+            return;
+          }
+        } catch {
+          /* couldn't check subscriptions — fall through and attempt the install */
+        }
+      }
+      for (const filePath of paths) {
+        const name = filePath.split(/[\\/]/).pop() || filePath;
+        const lower = name.toLowerCase();
         const isSupportedArchive =
           lower.endsWith('.zip') || lower.endsWith('.7z') || lower.endsWith('.rar');
-        if (isSupportedArchive) {
-          try {
-            // @ts-expect-error -- Tauri exposes file.path on dropped files
-            const filePath = file.path as string;
-            if (filePath) {
-              const mod = await installModFromFile(filePath);
+        if (!isSupportedArchive) {
+          toast.error(t('app.toast.unsupportedFile', { name }));
+          continue;
+        }
+        try {
+          const mod = await installModFromFile(filePath);
+          if (pack) {
+            try {
+              // Enable it in the live game folder FIRST when dropping into the
+              // active pack: toggle_mod guards on the game running (and can
+              // fail the move) while the membership write doesn't — toggling
+              // first keeps disk + manifest in sync. (Only when it isn't
+              // already active; toggle_mod errors on an already-active mod.)
+              if (pack === activeProfileRef.current && !mod.enabled) {
+                await toggleMod(mod.name, mod.folder_name ?? null, true);
+              }
+              await setProfileModMembership(pack, mod.name, mod.folder_name ?? null, mod.mod_id ?? null, true);
+              toast.success(t('app.toast.installedModToPack', { name: mod.name, pack }));
+            } catch {
+              // Membership failed — the mod is still installed on disk.
               toast.success(t('app.toast.installedMod', { name: mod.name }));
-              await refreshAll();
             }
-          } catch (err) {
-            const errMsg = err instanceof Error ? err.message : String(err);
-            toast.error(t('app.toast.installZipFailed', { file: file.name, error: errMsg }));
+          } else {
+            toast.success(t('app.toast.installedMod', { name: mod.name }));
           }
-        } else {
-          toast.error(t('app.toast.unsupportedFile', { name: file.name }));
+          await refreshAll();
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          toast.error(t('app.toast.installZipFailed', { file: name, error: errMsg }));
         }
       }
     }
 
-    document.addEventListener('dragover', handleDragOver);
-    document.addEventListener('dragleave', handleDragLeave);
-    document.addEventListener('drop', handleDrop);
+    track(listen('tauri://drag-enter', () => setDragOver(true)));
+    track(listen('tauri://drag-leave', () => setDragOver(false)));
+    track(
+      listen<{ paths: string[] }>('tauri://drag-drop', (event) => {
+        setDragOver(false);
+        void handleDroppedPaths(event.payload?.paths ?? []);
+      }),
+    );
+
     return () => {
-      document.removeEventListener('dragover', handleDragOver);
-      document.removeEventListener('dragleave', handleDragLeave);
-      document.removeEventListener('drop', handleDrop);
+      disposed = true;
+      unlisteners.forEach((fn) => fn());
     };
   }, [refreshAll, toast]);
 
@@ -559,7 +647,7 @@ function AppInner() {
         <div className="gf-titlebar-app" data-tauri-drag-region>
           <div className="gf-titlebar-mark" data-tauri-drag-region>✦</div>
           <span className="gf-titlebar-title" data-tauri-drag-region>{t('app.windowTitle')}</span>
-          {isDev && <span className="gf-titlebar-dev" title="Development build">{t('app.devBadge')}</span>}
+          {isDev && <span className="gf-titlebar-dev" title={t('app.devBuildTitle')}>{t('app.devBadge')}</span>}
         </div>
         <div className="gf-titlebar-controls">
           <button className="gf-titlebar-btn" title={t('app.minimize')} onClick={handleTitlebarMin}>
@@ -597,29 +685,25 @@ function AppInner() {
           </div>
         )}
 
-        {/* Sidebar — 4 main nav, foot has Tutorial+Settings, status block, version */}
+        {/* Sidebar — Home / Modpacks / Library nav with Settings in the foot.
+            The brand mark + app name lives in the custom titlebar; the
+            mod-count / game-detected state lives in the topbar profile
+            chip + Settings → General. No need to repeat them here. */}
         <nav className="gf-sidebar">
-          <div className="gf-brand">
-            <div className="gf-brand-mark">✦</div>
-            <span className="gf-brand-title">
-              <span className="gf-brand-game">{t('app.brandName')}</span>
-              <span className="gf-brand-tag">{t('app.brandTagline')}</span>
-            </span>
-          </div>
-
           {NAV.map(({ id, icon: Icon }) => {
             // Profiles gets a count badge when followed packs have
             // pending updates — same data the Home view's "update
             // available" cards consume, lifted to AppContext so the
             // sidebar can read it from anywhere.
             const badge = id === 'profiles' && subUpdates.length > 0 ? subUpdates.length : null;
-            const navLabels: Record<View, string> = {
+            // Per-id sidebar label. Only the four canonical ids appear
+            // in NAV (home / profiles / mods / settings); the legacy
+            // ids are routed through the JSX below but never appear
+            // in the sidebar so we don't translate them here.
+            const navLabels: Partial<Record<View, string>> = {
               home: t('nav.home'),
               profiles: t('nav.profiles'),
               mods: t('nav.mods'),
-              'browse-mods': t('nav.browseMods'),
-              'browse-modpacks': t('nav.browseModpacks'),
-              tutorial: t('nav.tutorial'),
               settings: t('nav.settings'),
             };
             return (
@@ -630,16 +714,6 @@ function AppInner() {
               >
                 <Icon size={14} className="gf-nav-icon" />
                 <span className="gf-nav-label">{navLabels[id]}</span>
-                {id === 'browse-modpacks' && (
-                  <Badge
-                    variant="beta"
-                    className="gf-nav-beta"
-                    title={t('browseModpacks.betaTitle')}
-                    ariaHidden
-                  >
-                    {t('common.beta')}
-                  </Badge>
-                )}
                 {badge !== null && (
                   <span className="gf-nav-badge" title={badge === 1 ? t('app.packUpdateTooltip_one', { badge }) : t('app.packUpdateTooltip_other', { badge })}>
                     {badge}
@@ -651,13 +725,9 @@ function AppInner() {
 
           <div className="gf-side-foot">
             {FOOT_NAV.map(({ id, icon: Icon }) => {
-              const footLabels: Record<View, string> = {
-                home: t('nav.home'),
-                profiles: t('nav.profiles'),
-                mods: t('nav.mods'),
-                'browse-mods': t('nav.browseMods'),
-                'browse-modpacks': t('nav.browseModpacks'),
-                tutorial: t('nav.tutorial'),
+              // After the 1.7.0 IA collapse the only foot-nav entry is
+              // Settings. The map shape stays in case we add more later.
+              const footLabels: Partial<Record<View, string>> = {
                 settings: t('nav.settings'),
               };
               return (
@@ -671,22 +741,6 @@ function AppInner() {
                 </button>
               );
             })}
-
-            {/* Status block */}
-            <div className="gf-side-status">
-              <div className="gf-side-stat-row">
-                <span className={cn('gf-side-stat-dot', !gameInfo?.valid && 'err')} />
-                <span className="gf-side-stat-label">
-                  {gameInfo?.valid ? t('app.sts2Detected') : t('app.gameNotFound')}
-                </span>
-              </div>
-              {gameInfo?.valid && (
-                <div className="gf-side-stat-meta">
-                  {t('app.modCount', { enabled: enabledCount, total: totalCount })}
-                </div>
-              )}
-              {appVersion && <div className="gf-side-version">v{appVersion}</div>}
-            </div>
           </div>
         </nav>
 
@@ -694,7 +748,7 @@ function AppInner() {
         <div className="flex-1 min-w-0 flex flex-col">
           {/* Top bar — profile chip + Vanilla + Launch */}
           <div className="gf-top">
-            <div style={{ position: 'relative' }}>
+            <div className="gf-top-chip" style={{ position: 'relative' }}>
               <button
                 className="gf-prof"
                 onClick={() => setShowProfileSwitcher((v) => !v)}
@@ -722,15 +776,58 @@ function AppInner() {
                 <ProfileSwitcher
                   onClose={() => setShowProfileSwitcher(false)}
                   onAddPack={() => {
-                    setActiveView('home');
-                    setFocusCodeBarSignal((n) => n + 1);
+                    // Quick-Add lives on Modpacks now (1.7 v7). Route
+                    // there and pulse the toolbar input so the user sees
+                    // where to type.
+                    setActiveView('profiles');
+                    setFocusModpacksCodeBarSignal((n) => n + 1);
                   }}
                   onManageAll={() => setActiveView('profiles')}
                 />
               )}
             </div>
 
-            <div className="flex gap-1.5">
+            {/* STS2 detection status — shown on every screen so the user
+                can tell at a glance whether the game folder is wired up
+                (the previous at-a-glance signal was a sidebar status block
+                that got dropped in the 1.7.0 consolidation). Clicking jumps
+                to Settings, where the game path is configured. On a narrow
+                topbar the launch controls drop to their own row below this
+                status (see the @container rule in styles.css), so the
+                status ends up directly above the launch button. */}
+            <button
+              onClick={() => setActiveView('settings')}
+              title={
+                gameInfo?.valid
+                  ? t('topbar.gameDetectedTitle', { path: gameInfo.game_path })
+                  : t('topbar.gameNotFoundTitle')
+              }
+              className={cn('gf-game-status', gameInfo?.valid ? 'is-ok' : 'is-warn')}
+            >
+              {gameInfo?.valid ? (
+                <span className="gf-game-status-dot" aria-hidden />
+              ) : (
+                <AlertTriangle size={13} aria-hidden />
+              )}
+              <span className="gf-game-status-label">
+                {gameInfo?.valid ? t('topbar.gameDetected') : t('topbar.gameNotFound')}
+              </span>
+            </button>
+            {/* Launch controls (help + vanilla + modded launch) grouped so
+                they wrap together onto a row below the STS2 status when the
+                topbar gets narrow. */}
+            <div className="gf-top-launch">
+              {/* 1.7.0 — Help moved out of the sidebar. The `?` button
+                  opens a slide-out HelpDrawer (right side) that renders
+                  the same content the Settings → Help tab shows. */}
+              <button
+                onClick={() => setShowHelpDrawer(true)}
+                title={t('topbar.help')}
+                aria-label={t('topbar.help')}
+                className="gf-btn-3 gf-btn-icon"
+              >
+                <HelpCircle size={16} />
+              </button>
               <button
                 onClick={handleLaunchVanilla}
                 disabled={gameRunning}
@@ -826,39 +923,75 @@ function AppInner() {
                 onGoToSettings={() => setActiveView('settings')}
                 onGoToMods={() => setActiveView('mods')}
                 onGoToProfiles={() => setActiveView('profiles')}
-                onSwitchPack={() => setShowProfileSwitcher(true)}
+                onGoToBrowseModpacks={() => setActiveView('browse-modpacks')}
+                onCreateModpack={() => {
+                  // Route to Modpacks + pump the Create-wizard signal so
+                  // ProfilesView opens the guided wizard on entry (same
+                  // one-shot pattern the creator-onboarding CTA uses).
+                  setActiveView('profiles');
+                  setOpenCreateWizardSignal((n) => n + 1);
+                }}
                 onLaunch={handleLaunchGame}
-                focusCodeBarSignal={focusCodeBarSignal}
               />
             )}
-            {activeView === 'profiles' && (
+            {/* Modpacks view. The legacy 'browse-modpacks' view-id
+                redirects here with the Browse tab pre-selected so old
+                handlers / deep-links keep working without rewiring. */}
+            {(activeView === 'profiles' || activeView === 'browse-modpacks') && (
               <ProfilesView
                 onGoToSettings={() => setActiveView('settings')}
-                openModLibrarySignal={openModLibrarySignal}
+                openActiveModpackSignal={openActiveModpackSignal}
+                initialTab={activeView === 'browse-modpacks' ? 'browse' : 'yours'}
+                focusQuickAddSignal={focusModpacksCodeBarSignal}
+                openCreateWizardSignal={openCreateWizardSignal}
+                onCreateWizardConsumed={() => setOpenCreateWizardSignal(0)}
+                onViewedModpackChange={handleViewedModpackChange}
               />
             )}
-            {activeView === 'mods' && (
+            {/* Library view. The legacy 'browse-mods' view-id
+                redirects here with the Browse tab pre-selected so the
+                Nexus "open settings" handler etc. keep working. */}
+            {(activeView === 'mods' || activeView === 'browse-mods') && (
               <ModsView
-                onOpenModLibrary={() => {
-                  setOpenModLibrarySignal((signal) => signal + 1);
+                onManageActiveModpack={() => {
+                  // T16 — bumps the Modpacks "open active modpack
+                  // detail view" signal and routes the user there.
+                  // ProfilesView observes the bump and opens
+                  // selectedModpack = activeProfile on next render.
+                  setOpenActiveModpackSignal((signal) => signal + 1);
                   setActiveView('profiles');
                 }}
+                onGoToSettings={() => setActiveView('settings')}
+                initialTab={activeView === 'browse-mods' ? 'browse' : 'installed'}
               />
             )}
-            {activeView === 'browse-mods' && <BrowseView onGoToSettings={() => setActiveView('settings')} />}
-            {activeView === 'browse-modpacks' && (
-              <BrowseModpacksView onGoToProfiles={() => setActiveView('profiles')} />
-            )}
-            {activeView === 'tutorial' && <TutorialView onGoToSettings={() => setActiveView('settings')} />}
             {activeView === 'settings' && <SettingsView />}
 
-            {/* First-launch onboarding wizard (v5 batch 4) */}
+            {/* 1.7.0 T8 — branched first-launch onboarding. The flow
+                asks the user ONE question (Play vs Make/Share) then
+                teaches the relevant path through the new IA. GitHub
+                token + Nexus API key are NOT mentioned in onboarding —
+                share-time GitHub setup lives inside ShareSetupPanel,
+                and Nexus key entry happens on the first manual
+                Nexus install. */}
             {showOnboarding && (
               <OnboardingOverlay
                 gameInfo={gameInfo}
-                onSkip={dismissOnboarding}
-                onComplete={dismissOnboarding}
-                onAddCode={() => setActiveView('home')}
+                onSkip={() => dismissOnboarding(true)}
+                onComplete={() => dismissOnboarding(true)}
+                onDismissWithoutPersist={() => dismissOnboarding(false)}
+                onCreateModpack={() => {
+                  // Creator-path final CTA. Close + route to Modpacks
+                  // + pump the Create-wizard signal so ProfilesView
+                  // opens the guided wizard on entry.
+                  dismissOnboarding();
+                  setActiveView('profiles');
+                  setOpenCreateWizardSignal((n) => n + 1);
+                }}
+                onGoToHome={() => {
+                  dismissOnboarding();
+                  setActiveView('home');
+                }}
                 refreshGame={refreshAll}
               />
             )}
@@ -870,6 +1003,9 @@ function AppInner() {
                 onCancel={() => setLaunching(null)}
               />
             )}
+
+            {/* Slide-out Help drawer, opened from the topbar `?`. */}
+            <HelpDrawer open={showHelpDrawer} onClose={() => setShowHelpDrawer(false)} />
           </main>
         </div>
       </div>

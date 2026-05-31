@@ -31,6 +31,10 @@
 
 /* v5 raw tokens — used by the .gf-* utility classes below */
 :root {
+  /* Render every native control (select popups, scrollbars, date pickers)
+     in dark mode so OS-drawn widgets like <select> option lists aren't a
+     light popup with near-invisible text. */
+  color-scheme: dark;
   --gf:        oklch(0.78 0.13 80);
   --gf-hov:    oklch(0.83 0.13 80);
   --gf-ink:    oklch(0.18 0.04 285);
@@ -152,38 +156,6 @@ body {
   display: flex; flex-direction: column;
   padding: 14px 10px;
 }
-.gf-brand {
-  display: flex; align-items: center; gap: 9px;
-  padding: 6px 10px 16px;
-  letter-spacing: -0.005em;
-  color: var(--ink);
-}
-.gf-brand-mark {
-  width: 26px; height: 26px;
-  border-radius: 6px;
-  background: var(--gf); color: var(--gf-ink);
-  display: grid; place-items: center;
-  font-size: 13px; font-weight: 800;
-  flex-shrink: 0;
-}
-.gf-brand-title {
-  display: flex; flex-direction: column;
-  line-height: 1.15;
-  min-width: 0;
-}
-.gf-brand-game {
-  font-weight: 700; font-size: 13.5px;
-  color: var(--ink);
-  white-space: nowrap;
-}
-.gf-brand-tag {
-  font-weight: 500; font-size: 10.5px;
-  color: var(--ink-mute);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  margin-top: 1px;
-}
 .gf-nav {
   position: relative;
   display: flex; align-items: center; gap: 10px;
@@ -283,23 +255,382 @@ body {
 .gf-activity-name { font-size: 13px; font-weight: 600; color: var(--ink); }
 .gf-activity-summary { font-size: 11.5px; color: var(--ink-mute); margin-top: 2px; }
 
-.gf-assignment-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+/* 1.7.0 T16 — modpack list as clickable cards. Replaces the legacy
+   row layout where each modpack had inline kebab + Share + Switch
+   buttons. Now clicking a card opens its detail view (Paradox-style
+   drilldown). Card buttons are <button type="button"> with no extra
+   styling so screen readers + keyboard navigation just work. */
+.gf-modpack-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 12px;
-  margin-bottom: 14px;
+  padding: 0;
 }
-.gf-section-sub {
+.gf-modpack-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  background: var(--indigo-panel);
+  border: 1px solid var(--indigo-line);
+  border-radius: 8px;
+  padding: 14px 16px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--ink);
+  font: inherit;
+  transition: border-color 0.15s, background 0.15s, transform 0.12s;
+}
+.gf-modpack-card:hover {
+  border-color: var(--accent, var(--ok));
+  transform: translateY(-1px);
+}
+.gf-modpack-card:focus-visible {
+  outline: 2px solid var(--accent, var(--ok));
+  outline-offset: 2px;
+}
+.gf-modpack-card.is-active {
+  border-left: 4px solid var(--ok);
+}
+.gf-modpack-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.gf-modpack-card-name {
+  font-weight: 600;
+  font-size: 14.5px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gf-modpack-card-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
   color: var(--ink-mute);
-  font-size: 12.5px;
-  margin-top: -4px;
+}
+.gf-modpack-card-badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-height: 18px;
+}
+.gf-modpack-card-drift {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--warn, #f59e0b);
+}
+/* T16 review fix — Copy chips on shared modpack cards. Compact ghost
+   icon-buttons that sit beside the share badge so users can copy the
+   share code / install link / paste-ready message directly from the
+   list without opening detail + Share modal. stopPropagation on
+   click keeps the parent card's click-to-open behavior intact. */
+.gf-modpack-card-copy-chips {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
+}
+.gf-modpack-card-copy-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--indigo-line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-mute);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.gf-modpack-card-copy-chip:hover {
+  color: var(--ink);
+  border-color: var(--accent, var(--ok));
+  background: oklch(0.22 0.04 250);
+}
+.gf-modpack-card-copy-chip:focus-visible {
+  outline: 2px solid var(--accent, var(--ok));
+  outline-offset: 1px;
 }
 
-.gf-profile-special-actions {
+/* 1.7.0 T16 — modpack detail (inline drilldown) */
+.gf-modpack-detail {
   display: flex;
-  margin: -2px 0 14px;
+  flex-direction: column;
+  gap: 14px;
 }
+.gf-modpack-detail-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--indigo-line);
+}
+.gf-modpack-detail-back {
+  flex: 0 0 auto;
+}
+.gf-modpack-detail-title-row {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.gf-modpack-detail-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gf-modpack-detail-head-actions {
+  display: inline-flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+/* Status sub-line — sits just below the header divider with a little breathing
+   room, then leaves a clear break before the "In this modpack" section below. */
+.gf-modpack-detail-status {
+  margin-top: -4px;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--ink-mute);
+}
+.gf-modpack-detail-running {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ok);
+  font-weight: 600;
+}
+.gf-modpack-detail-running::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 6px var(--ok);
+}
+/* Section title + count badge cluster (left of the updates pill). */
+.gf-modpack-detail-section-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.gf-modpack-detail-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 10px;
+  background: var(--gf-tint);
+  color: var(--gf);
+  font-size: 12px;
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+.gf-modpack-detail-search {
+  display: flex;
+}
+/* Collapsible "Add from your library" header — a full-width clickable
+   row that clearly reads as expandable (chevron + Show/Hide hint). */
+.gf-modpack-detail-library-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--indigo-elev);
+  border: 1px solid var(--indigo-line);
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--ink);
+  text-align: left;
+  transition: background 0.15s, border-color 0.15s;
+}
+.gf-modpack-detail-library-toggle:hover {
+  background: oklch(0.28 0.05 280);
+  border-color: var(--gf-line);
+}
+.gf-modpack-detail-library-chevron {
+  flex-shrink: 0;
+  transition: transform 0.18s ease;
+  transform: rotate(-90deg);
+  color: var(--ink-mute);
+}
+.gf-modpack-detail-library-chevron.is-open {
+  transform: rotate(0deg);
+}
+.gf-modpack-detail-library-hint {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gf);
+}
+.gf-modpack-detail-search .gf-input {
+  width: 100%;
+}
+
+/* Two-section body: "In this modpack" + "Add from your library". */
+.gf-modpack-detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gf-modpack-detail-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.gf-modpack-detail-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0;
+  display: flex;
+  align-items: center;
+}
+.gf-modpack-detail-section-note {
+  font-size: 12px;
+  color: var(--ink-dim);
+  margin: 2px 0 10px;
+  line-height: 1.45;
+}
+.gf-modpack-detail-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gf-modpack-detail-empty {
+  font-size: 12.5px;
+  color: var(--ink-mute);
+  margin: 0;
+  padding: 6px 2px;
+}
+
+/* Inline mod row — Card-ish but tightened to the Library density.
+   Name/version/source-badges on the left, a low-key action on the
+   right. No drag handle, no checkbox: reordering lives in the Load
+   Order modal and membership is the Add/Remove button. */
+.gf-modpack-mod-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+}
+.gf-modpack-mod-row-info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.gf-modpack-mod-row-name {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gf-modpack-mod-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--ink-mute);
+}
+.gf-modpack-mod-row-remove,
+.gf-modpack-mod-row-add {
+  flex: 0 0 auto;
+}
+
+/* Shared AdvancedSection — disclosure for power-user actions. */
+.gf-advanced {
+  border-top: 1px solid var(--indigo-line);
+  margin-top: 12px;
+}
+.gf-advanced-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 14px;
+  background: none;
+  border: none;
+  color: var(--ink-mute);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+}
+.gf-advanced-header:hover,
+.gf-advanced-header:focus-visible {
+  color: var(--ink);
+  outline: none;
+}
+.gf-advanced-caret {
+  transition: transform 0.15s;
+}
+.gf-advanced-caret.open {
+  transform: rotate(90deg);
+}
+.gf-advanced-body {
+  padding: 0 14px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Generic chip-style audit summary indicators */
+.gf-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  letter-spacing: 0.02em;
+}
+
+/* Inline load-order rank inside LibraryTable rows. */
+.gf-load-order-rank-inline {
+  font-variant-numeric: tabular-nums;
+  color: var(--ok);
+  font-weight: 600;
+}
+/* 4.1 — green left border reflects ACTIVE-in-game state, not membership.
+   Off (no accent) when the mod is stored. */
+.gf-profile-library-row.is-active {
+  border-left: 3px solid var(--ok);
+}
+.gf-profile-library-row.drag-over {
+  background: oklch(0.22 0.06 250);
+}
+
 .gf-profile-library-launch {
   display: flex;
   align-items: center;
@@ -357,10 +688,22 @@ body {
 }
 
 .gf-profile-library-row {
-  display: grid;
-  grid-template-columns: minmax(220px, 0.8fr) minmax(280px, 1.2fr);
-  gap: 16px;
-  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* Paradox-style density: tighter vertical rhythm than the default
+     Card p-5 (20px). Overrides the utility padding so a long mod list
+     scans as a compact list, not a stack of fat cards. */
+  padding: 11px 14px;
+  /* Smooth the clickable-row hover + active-border changes. */
+  transition: background 0.13s ease, border-color 0.13s ease;
+}
+/* 4.4 — the whole row is a click target that opens Edit sources. */
+.gf-profile-library-row.is-clickable { cursor: pointer; }
+.gf-profile-library-row.is-clickable:hover { background: oklch(0.22 0.05 280); }
+.gf-profile-library-row.is-clickable:focus-visible {
+  outline: 2px solid var(--gf);
+  outline-offset: -2px;
 }
 .gf-profile-library-main {
   min-width: 0;
@@ -369,10 +712,158 @@ body {
   justify-content: space-between;
   gap: 10px;
 }
-.gf-profile-library-storage-actions {
+.gf-profile-library-row-actions {
   flex: 0 0 auto;
   display: inline-flex;
+  align-items: center;
+  gap: 10px;
 }
+/* 4.1 — leftmost active/stored status cell: the switch over a tiny
+   caption that flips between "Active in game" / "Stored". */
+.gf-row-status {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  width: 58px;
+}
+.gf-row-status-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-dim);
+  text-align: center;
+  line-height: 1.15;
+}
+/* identity column grows to fill the space between the status cell and
+   the right-hand action cluster. */
+.gf-profile-library-identity {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.gf-profile-library-titlerow {
+  display: flex;
+  align-items: center;
+  /* Tags + source badges + audit pills cluster to the RIGHT of the name.
+     The whole row wraps when there's a lot, rather than overflowing. */
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+/* Title shrinks (and ellipsizes) so the tag/badge cluster stays beside it. */
+.gf-profile-library-titlerow .gf-profile-library-title {
+  flex: 0 1 auto;
+  min-width: 2.5em;
+}
+.gf-profile-library-rawname {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--ink-dim);
+  flex: 0 0 auto;
+}
+/* The cluster of tags + source badges + audit pills, right of the name. */
+.gf-row-tagcluster {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.gf-row-tag {
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--ink-mute);
+  background: oklch(0.28 0.04 280);
+  border: 1px solid var(--indigo-line);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+/* 4.5 — on-disk folder name with a glyph so it reads distinctly from
+   the version string. */
+.gf-meta-folder {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+/* "In N modpacks" count — same muted meta treatment as the folder glyph. */
+.gf-meta-modpacks {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+/* 4.6 — static In-pack / Not-in-pack indicator (read-only status). */
+.gf-row-inpack {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 9px;
+  border-radius: 6px;
+  color: var(--ink-dim);
+  background: oklch(0.24 0.03 280);
+  border: 1px solid var(--indigo-line);
+  white-space: nowrap;
+}
+.gf-row-inpack.is-in {
+  color: var(--ok);
+  background: oklch(0.74 0.11 165 / 0.12);
+  border-color: oklch(0.74 0.11 165 / 0.35);
+}
+/* Visible delete button — sits just left of the kebab. Reads as a quiet
+   icon button until hover, which turns it danger-red. */
+.gf-row-delete {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid var(--indigo-line);
+  background: transparent;
+  color: var(--ink-mute);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.gf-row-delete:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: oklch(0.65 0.18 25 / 0.5);
+  background: oklch(0.65 0.18 25 / 0.12);
+}
+.gf-row-delete:disabled { opacity: 0.4; cursor: not-allowed; }
+/* Modpack view: the visible row action is "Remove from pack" (membership,
+   not disk-delete). A labeled button, quiet until hover. */
+.gf-row-remove {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 11px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid var(--indigo-line);
+  background: transparent;
+  color: var(--ink-mute);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.gf-row-remove:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: oklch(0.65 0.18 25 / 0.5);
+  background: oklch(0.65 0.18 25 / 0.12);
+}
+.gf-row-remove:disabled { opacity: 0.4; cursor: not-allowed; }
 .gf-profile-library-title {
   font-size: 13.5px;
   font-weight: 700;
@@ -431,6 +922,44 @@ body {
   font-size: 12.5px;
 }
 .gf-profile-library-sort { flex: 0 0 auto; }
+/* ── View density toggle (comfortable / compact) ─────────────────── */
+.gf-view-toggle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  border: 1px solid var(--indigo-line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.gf-view-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 9px;
+  background: transparent;
+  color: var(--ink-dim);
+  border: 0;
+  cursor: pointer;
+  transition: background 0.13s ease, color 0.13s ease;
+}
+.gf-view-toggle-btn:hover { color: var(--ink); }
+.gf-view-toggle-btn.is-active {
+  background: var(--indigo-panel);
+  color: var(--ink);
+}
+/* Compact density: drop the per-row description + tighten the vertical rhythm
+   so more mods fit on screen. The title row + version/folder/modpack meta
+   stay. */
+.gf-profile-library.is-compact .gf-profile-library-row {
+  /* Compact still needs room for the 2-line "Active in game" status caption and
+     for an open source editor — denser than Comfortable, but not so tight the
+     status reads as cramped. */
+  gap: 10px;
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+.gf-profile-library.is-compact .gf-modrow-meta {
+  display: none;
+}
 .gf-profile-library-toolbar-actions {
   display: inline-flex;
   align-items: center;
@@ -447,8 +976,6 @@ body {
   line-height: 1.45;
   padding: 8px 10px;
 }
-.gf-profile-library-storage.active { color: var(--ok); }
-.gf-profile-library-storage.stored { color: var(--ink-dim); }
 .gf-profile-library-footer {
   display: flex;
   align-items: center;
@@ -459,15 +986,23 @@ body {
   font-size: 12px;
 }
 .gf-load-order-modal {
-  width: min(560px, calc(100vw - 28px));
-  max-height: min(760px, calc(100vh - 32px));
+  width: min(760px, calc(100vw - 28px));
+  max-height: min(860px, calc(100vh - 24px));
   overflow: hidden;
 }
+/* The body is the flex container; only the list inside scrolls — so the
+   modal shows a single scrollbar instead of one on the body AND one on
+   the list. */
 .gf-load-order-modal .gf-modal-body {
   min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background: var(--indigo-panel);
 }
 .gf-load-order-note {
+  flex: 0 0 auto;
   border: 1px solid var(--indigo-line);
   background: oklch(0.18 0.035 280 / 0.72);
   border-radius: 7px;
@@ -477,13 +1012,20 @@ body {
   font-size: 12px;
   line-height: 1.45;
 }
+.gf-load-order-search {
+  flex: 0 0 auto;
+  margin-bottom: 12px;
+}
 .gf-load-order-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-height: min(56vh, 520px);
+  gap: 9px;
+  /* Single scroll region — grows to fill the body, capped by the modal
+     height. No fixed max-height (which produced the second scrollbar). */
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
-  padding: 8px;
+  padding: 10px;
   border: 1px solid var(--indigo-line);
   border-radius: 8px;
   background: var(--indigo-deep);
@@ -492,16 +1034,26 @@ body {
   display: grid;
   grid-template-columns: 20px 34px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
-  min-height: 48px;
-  padding: 8px 10px;
+  gap: 12px;
+  min-height: 54px;
+  padding: 11px 13px;
   border: 1px solid var(--indigo-line);
   border-radius: 7px;
   background: var(--indigo-side);
 }
+/* Search highlight — the matched row gets a gold ring; the list is never
+   filtered so the row stays in its real position. */
+.gf-load-order-row.match {
+  border-color: var(--gf);
+  box-shadow: 0 0 0 1px var(--gf) inset;
+}
 .gf-load-order-row.drag-over {
   border-color: var(--gf-line);
   background: var(--indigo-elev);
+}
+.gf-load-order-row.dragging {
+  opacity: 0.55;
+  border-color: var(--gf-line);
 }
 .gf-load-order-drag {
   display: inline-flex;
@@ -509,8 +1061,12 @@ body {
   justify-content: center;
   color: var(--ink-dim);
   cursor: grab;
+  /* Pointer-drag handle: block touch-scroll + text selection so the
+     drag gesture is clean. */
+  touch-action: none;
+  user-select: none;
 }
-.gf-load-order-row:active .gf-load-order-drag { cursor: grabbing; }
+.gf-load-order-drag:active { cursor: grabbing; }
 .gf-load-order-rank {
   width: 28px;
   height: 28px;
@@ -544,97 +1100,52 @@ body {
   display: inline-flex;
   gap: 4px;
 }
-.gf-profile-memberships {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
-  min-width: 0;
-}
-.gf-profile-membership {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 30px;
-  max-width: 100%;
-  padding: 5px 8px;
-  border: 1px solid var(--indigo-line);
-  border-radius: 6px;
-  background: oklch(0.18 0.035 280);
-  color: var(--ink-mute);
-  font-size: 12px;
-  cursor: pointer;
-}
-.gf-profile-membership.active {
-  border-color: var(--gf-line);
-  color: var(--ink);
-  background: var(--gf-tint);
-}
-.gf-profile-membership:has(input:disabled) {
-  cursor: not-allowed;
-  opacity: 0.72;
-}
-.gf-profile-membership input {
-  width: 14px;
-  height: 14px;
-  accent-color: var(--gf);
-  flex: 0 0 auto;
-}
-.gf-profile-membership-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.gf-profile-membership-note {
-  color: var(--ink-dim);
-  font-size: 10.5px;
-  white-space: nowrap;
-}
 @media (max-width: 760px) {
-  .gf-profile-library-row { grid-template-columns: 1fr; }
   .gf-profile-library-launch { align-items: flex-start; }
-  .gf-profile-library-main { align-items: flex-start; flex-direction: column; }
-  .gf-profile-memberships { justify-content: flex-start; }
+  /* Stack the row (status / identity / actions) so nothing is squeezed
+     to one word per line on a narrow window. */
+  .gf-profile-library-main { align-items: stretch; flex-direction: column; gap: 8px; }
+  .gf-row-status { flex-direction: row; width: auto; gap: 8px; }
+  .gf-profile-library-row-actions { flex-wrap: wrap; }
   .gf-profile-library-toolbar { align-items: stretch; flex-direction: column; }
   .gf-profile-library-toolbar-actions { align-items: flex-start; flex-wrap: wrap; justify-content: flex-start; }
   .gf-profile-library-sort { align-self: flex-start; }
 }
 .gf-side-foot { margin-top: auto; padding-top: 12px; display: flex; flex-direction: column; gap: 1px; }
 
-/* Sidebar status block */
-.gf-side-status {
-  margin-top: 10px;
-  padding: 10px 12px;
-  border-top: 1px solid var(--indigo-line);
-  background: oklch(0.20 0.025 270 / 0.5);
-  box-sizing: border-box;
-}
-.gf-side-stat-row { display: flex; align-items: center; gap: 8px; }
-.gf-side-stat-dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: var(--ok);
-  box-shadow: 0 0 6px var(--ok);
-}
-.gf-side-stat-dot.err { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
-.gf-side-stat-label { font-size: 11.5px; color: var(--ink-mute); font-weight: 500; }
-.gf-side-stat-meta { font-size: 11px; color: var(--ink-dim); margin-top: 4px; padding-left: 16px; }
-.gf-side-version {
-  font-size: 10.5px;
-  color: var(--ink-dim);
-  margin-top: 8px;
-  padding-left: 16px;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.3px;
-}
-
 /* ── Top bar ─────────────────────────────────────────────────────── */
 .gf-top {
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center;
+  /* Chip on the left, status + launch controls clustered on the right
+     (the chip's auto right-margin eats the free space). They wrap onto
+     their own rows rather than overflowing on a narrow window. */
+  flex-wrap: wrap;
+  gap: 10px;
   padding: 11px 22px;
   background: var(--indigo-top);
   border-bottom: 1px solid var(--indigo-line);
   flex-shrink: 0;
+  /* Query container so the launch controls reflow against the topbar's
+     own width rather than the viewport (the sidebar eats ~230px, so a
+     viewport breakpoint would fire at the wrong time). */
+  container-type: inline-size;
+  container-name: topbar;
+}
+/* Push everything after the modpack chip to the right edge. This keeps the
+   status + launch cluster right-aligned (replacing the old
+   justify-content:space-between, which would have stranded the status pill
+   in the middle once the cluster was flattened). */
+.gf-top-chip { margin-right: auto; }
+/* Launch controls grouped (help + vanilla + modded launch) so they wrap as
+   one unit; flex-end keeps them right-aligned when they take a full row. */
+.gf-top-launch { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
+/* Narrow topbar: drop the launch controls to their own full-width row,
+   which leaves the STS2 status sitting directly above the launch button.
+   flex-basis:100% resolves against .gf-top's definite width, so there's no
+   shrink-wrap ambiguity. Tune this breakpoint if the split should kick in
+   at a different topbar width. */
+@container topbar (max-width: 960px) {
+  .gf-top-launch { flex-basis: 100%; }
 }
 .gf-prof {
   display: flex; align-items: center; gap: 10px;
@@ -663,6 +1174,39 @@ body {
 }
 .gf-prof-name { font-size: 12.5px; font-weight: 600; }
 .gf-prof-meta { font-size: 11.5px; opacity: 0.6; margin-left: 6px; }
+/* STS2 detection status pill in the topbar. .is-ok = detected (green
+   dot + green text, subtle tint); .is-warn = not found (amber + warning
+   triangle, drawn to catch the eye so the user opens Settings and sets
+   the game folder). Clicking either state routes to Settings. */
+.gf-game-status {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 11px;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 12px; font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--indigo-line);
+  background: transparent;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.gf-game-status-label { white-space: nowrap; }
+.gf-game-status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.gf-game-status.is-ok {
+  color: var(--ok);
+  border-color: oklch(0.74 0.11 165 / 0.35);
+  background: oklch(0.74 0.11 165 / 0.10);
+}
+.gf-game-status.is-ok .gf-game-status-dot {
+  background: var(--ok);
+  box-shadow: 0 0 6px var(--ok);
+}
+.gf-game-status.is-ok:hover { background: oklch(0.74 0.11 165 / 0.18); }
+.gf-game-status.is-warn {
+  color: var(--warn);
+  border-color: oklch(0.78 0.13 75 / 0.40);
+  background: oklch(0.78 0.13 75 / 0.12);
+}
+.gf-game-status.is-warn:hover { background: oklch(0.78 0.13 75 / 0.20); }
 
 /* ── Buttons (gold flat = primary, slate = secondary, ghost = tertiary) ── */
 .gf-btn {
@@ -771,12 +1315,33 @@ body {
 .gf-pack-row:hover, .gf-backup:hover, .gf-set-row:hover {
   border-color: oklch(0.34 0.06 280);
 }
-.gf-card-active {
-  background: linear-gradient(180deg, oklch(0.24 0.05 280), oklch(0.20 0.04 280));
-  border: 1px solid var(--gf-line);
+
+/* Home page footer — sits below the hero so the launcher doesn't feel
+   empty. Pushes itself to the bottom of the flex column and dims the
+   AboutCard a touch so it reads as quiet attribution, not a primary CTA. */
+/* Home secondary surface — readiness line + secondary actions that fill
+   the space between the hero and the footer. */
+.gf-home-secondary {
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.gf-home-secondary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.gf-home-footer {
+  margin-top: auto;
+  padding-top: 32px;
+  opacity: 0.92;
+}
+.gf-home-footer .gf-card {
+  background: transparent;
+  border: 1px solid var(--indigo-line);
 }
 
-/* ── Body & main ──────────────────────────────────────────────────── */
 .gf-body {
   /* min-height: 100% so the body always fills the visible area of <main>
      even when its content is short. Without this, gf-body sizes to its
@@ -791,12 +1356,22 @@ body {
 }
 .gf-page-head {
   display: flex; justify-content: space-between; align-items: flex-end;
+  /* Wrap so a wide action cluster drops below the title instead of
+     squeezing the heading column down to one word per line. */
+  flex-wrap: wrap;
   margin-bottom: 18px;
   gap: 18px;
 }
+/* The title/description column keeps a sane minimum and grows to fill —
+   without this it has no flex basis and collapses next to the buttons. */
+.gf-page-head > :first-child { flex: 1 1 300px; min-width: 0; }
 .gf-page-title { font-size: 22px; font-weight: 600; letter-spacing: -0.015em; margin: 0; color: var(--ink); }
 .gf-page-sub { font-size: 13px; color: var(--ink-mute); margin-top: 4px; }
-.gf-page-actions { display: flex; gap: 8px; flex-shrink: 0; }
+/* Action cluster. min-width:0 (and no flex-shrink:0) lets it shrink below
+   its single-row content width so the inner flex-wrap actually kicks in
+   instead of overflowing the viewport; flex-end keeps the wrapped rows
+   right-aligned, matching their resting position on a wide screen. */
+.gf-page-actions { display: flex; gap: 8px; flex-wrap: wrap; min-width: 0; justify-content: flex-end; }
 
 /* ── Tabs ─────────────────────────────────────────────────────────── */
 .gf-tabs {
@@ -827,27 +1402,6 @@ body {
   vertical-align: 1px;
 }
 
-/* ── Search ───────────────────────────────────────────────────────── */
-.gf-search {
-  display: flex; align-items: center; gap: 8px;
-  background: var(--indigo-side);
-  border: 1px solid var(--indigo-line);
-  border-radius: 6px;
-  padding: 7px 11px;
-  flex: 1;
-  max-width: 320px;
-}
-.gf-search input {
-  flex: 1;
-  background: transparent;
-  border: none;
-  outline: none;
-  color: var(--ink);
-  font-size: 13px;
-  font-family: inherit;
-}
-.gf-search input::placeholder { color: var(--ink-dim); }
-
 .gf-toolbar {
   display: flex; align-items: center; gap: 10px;
   margin-bottom: 14px;
@@ -871,19 +1425,14 @@ body {
   border-radius: 6px;
   padding: 0 28px 0 10px;
   outline: none;
+  /* Render the native <option> popup dark to match the dropdown. */
+  color-scheme: dark;
 }
 .gf-sort-control select:focus { border-color: var(--gf-line); }
 .gf-sort-control select option {
   background-color: var(--indigo-panel);
   color: var(--ink);
 }
-.gf-sort-note {
-  max-width: 360px;
-  color: var(--ink-dim);
-  font-size: 11.5px;
-  line-height: 1.35;
-}
-.gf-tab-beta { margin-left: 6px; }
 
 /* ── Inputs ───────────────────────────────────────────────────────── */
 .gf-input {
@@ -946,17 +1495,6 @@ body {
 .gf-toggle.on::after { transform: translateX(14px); background: var(--gf); }
 .gf-toggle:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.gf-mod-body { flex: 1; min-width: 0; }
-.gf-mod-name { font-size: 13.5px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.gf-mod-ver {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  color: var(--ink-dim);
-  font-weight: 500;
-}
-.gf-mod-desc { font-size: 12px; color: var(--ink-mute); margin-top: 2px; }
-.gf-mod-actions { display: flex; gap: 4px; align-items: center; }
-
 /* ── Pills ────────────────────────────────────────────────────────── */
 .gf-pill {
   font-size: 9.5px;
@@ -968,50 +1506,80 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  transition: filter 0.12s ease, transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
 }
 .gf-pill-github { background: oklch(0.30 0.04 280); color: var(--ink-mute); }
 .gf-pill-nexus { background: oklch(0.55 0.16 50 / 0.18); color: oklch(0.78 0.13 55); }
 .gf-pill-update { background: var(--gf-tint); color: var(--gf); border: 1px solid var(--gf-line); }
-.gf-pill-active { background: var(--gf-tint); color: var(--gf); border: 1px solid var(--gf-line); }
+/* The update pill is a button — make it read as clickable. */
+.gf-pill-update { cursor: pointer; }
+.gf-pill-update:hover:not(:disabled) {
+  background: oklch(0.78 0.13 80 / 0.30);
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+.gf-pill-update:active:not(:disabled) { transform: translateY(0); }
+.gf-pill-update:disabled { opacity: 0.55; cursor: not-allowed; }
+/* Source-badge links (GitHub / Nexus / custom) — clickable, so they lift +
+   brighten on hover and carry a focus ring for keyboard users. */
+.gf-source-link {
+  display: inline-flex;
+  border-radius: 4px;
+  transition: transform 0.12s ease, filter 0.12s ease;
+}
+.gf-source-link:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.14);
+}
+.gf-source-link:focus-visible {
+  outline: 2px solid var(--gf);
+  outline-offset: 2px;
+}
+.gf-source-link .gf-pill { cursor: pointer; }
+/* "Active" means active-in-game everywhere — render it in the --ok green
+   (matching the modpack-detail ACTIVE badge), not the gold update tint. */
+.gf-pill-active { background: oklch(0.74 0.11 165 / 0.18); color: var(--ok); border: 1px solid oklch(0.74 0.11 165 / 0.30); }
 .gf-pill-ok { background: oklch(0.74 0.11 165 / 0.18); color: var(--ok); }
 .gf-pill-warn { background: oklch(0.78 0.16 60 / 0.18); color: oklch(0.86 0.13 75); border: 1px solid oklch(0.78 0.16 60 / 0.28); }
 .gf-pill-beta { background: oklch(0.70 0.14 85 / 0.16); color: oklch(0.86 0.13 82); border: 1px solid oklch(0.70 0.14 85 / 0.28); }
 .gf-pill-toolbar { padding: 6px 10px; font-size: 13px; }
-.gf-mod-tag { background: oklch(0.45 0.08 250 / 0.18); color: oklch(0.82 0.08 250); border: 1px solid oklch(0.55 0.08 250 / 0.25); text-transform: none; }
 
-/* ── Browse grid ──────────────────────────────────────────────────── */
-.gf-browse-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 12px;
-}
-.gf-browse-card {
-  background: var(--indigo-panel);
-  border: 1px solid var(--indigo-line);
-  border-radius: 10px;
-  overflow: hidden;
-  display: flex; flex-direction: column;
-}
-.gf-browse-thumb {
-  height: 96px;
-  background: linear-gradient(135deg, oklch(0.28 0.05 280), oklch(0.20 0.04 280));
-  border-bottom: 1px solid var(--indigo-line);
-}
-.gf-browse-body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
-.gf-browse-title { font-size: 13.5px; font-weight: 600; }
-.gf-browse-meta { font-size: 11.5px; color: var(--ink-dim); }
-.gf-browse-desc { font-size: 12px; color: var(--ink-mute); line-height: 1.5; flex: 1; }
-.gf-browse-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; }
-
-/* ── Settings rows ────────────────────────────────────────────────── */
-.gf-set-row {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 14px 16px;
-  background: var(--indigo-panel);
+/* 1.7.0 T17 — Library row simplification. The row is a click-to-expand
+   accordion: collapsed = name + version + chips + kebab, expanded =
+   adds an inline drawer with source pills, audit details, and per-mod
+   actions. The main button covers everything except the kebab so
+   clicks anywhere except the kebab toggle the drawer. */
+.gf-modrow {
   border: 1px solid var(--indigo-line);
   border-radius: 8px;
-  margin-bottom: 6px;
-  gap: 16px;
+  background: var(--indigo-panel);
+  overflow: hidden;
+  transition: border-color 120ms ease;
+}
+.gf-modrow:hover { border-color: oklch(0.55 0.05 250 / 0.5); }
+.gf-modrow.gf-mod-pinned { border-left: 2px solid var(--gf); }
+.gf-modrow-meta {
+  /* Description/note sit in the identity column — align flush-left with
+     the title + version line above (no extra indent). */
+  margin-top: 4px;
+}
+.gf-modrow-desc {
+  font-size: 12px;
+  color: var(--ink-dim);
+  margin: 0;
+  /* Full description. The view switcher's Compact mode hides .gf-modrow-meta
+     for density, so Comfortable shows the whole thing — wrap onto as many
+     lines as it needs instead of clamping to one with an ellipsis. */
+  white-space: normal;
+  line-height: 1.45;
+}
+.gf-modrow-note {
+  font-size: 11px;
+  color: var(--ink-dim);
+  font-style: italic;
+  margin: 2px 0 0 0;
+  white-space: normal;
+  line-height: 1.4;
 }
 .gf-set-label { font-size: 13.5px; font-weight: 600; color: var(--ink); }
 .gf-set-desc { font-size: 12px; color: var(--ink-mute); margin-top: 2px; }
@@ -1095,84 +1663,6 @@ body {
   background: var(--gf);
 }
 
-/* ── Audit panel ──────────────────────────────────────────────────── */
-.gf-audit {
-  border: 1px solid var(--indigo-line);
-  border-radius: 10px;
-  overflow: hidden;
-  background: var(--indigo-panel);
-}
-.gf-audit-row {
-  display: grid;
-  grid-template-columns: 24px 1.5fr 0.7fr 0.7fr 1.7fr 90px;
-  align-items: center;
-  gap: 14px;
-  padding: 9px 14px;
-  font-size: 12.5px;
-  border-bottom: 1px solid var(--indigo-line);
-}
-.gf-audit-row:last-child { border-bottom: 0; }
-.gf-audit-head {
-  background: oklch(0.21 0.025 270);
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
-  color: var(--ink-dim);
-}
-.gf-audit-name { font-weight: 600; color: var(--ink); }
-.gf-audit-mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; color: var(--ink-mute); font-variant-numeric: tabular-nums; }
-.gf-audit-update-text { color: var(--gf); font-weight: 600; }
-.gf-audit-gone-text { color: var(--danger); }
-.gf-audit-led {
-  display: inline-block;
-  width: 8px; height: 8px; border-radius: 50%;
-  background: var(--ok);
-}
-.gf-audit-led-ok { background: var(--ok); box-shadow: 0 0 5px var(--ok); }
-.gf-audit-led-update { background: var(--gf); box-shadow: 0 0 5px var(--gf); }
-/* "gone" = GitHub has a release tagged but it ships no installable assets.
-   That's a soft problem (the user can't auto-update from this source)
-   but it isn't an error — reserve red for actual fetch failures. */
-.gf-audit-led-warn { background: oklch(0.78 0.16 60); box-shadow: 0 0 5px oklch(0.78 0.16 60); }
-.gf-audit-led-gone { background: var(--danger); box-shadow: 0 0 5px var(--danger); }
-.gf-audit-asset {
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 10.5px;
-  color: var(--ink-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.gf-audit-foot {
-  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
-  padding: 12px 14px;
-  margin-top: 12px;
-  border: 1px solid var(--indigo-line);
-  border-radius: 8px;
-  background: oklch(0.20 0.025 270 / 0.5);
-  font-size: 11.5px;
-  color: var(--ink-mute);
-}
-.gf-audit-foot-stat { display: flex; align-items: center; gap: 7px; }
-
-/* ── Onboarding overlay ───────────────────────────────────────────── */
-.gf-onb {
-  position: absolute; inset: 0;
-  background: oklch(0.10 0.02 285 / 0.78);
-  backdrop-filter: blur(10px);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 40;
-}
-.gf-onb-card {
-  width: 540px;
-  background: var(--indigo-panel);
-  border: 1px solid var(--indigo-line);
-  border-radius: 14px;
-  padding: 28px;
-  box-shadow: 0 30px 80px oklch(0 0 0 / 0.4);
-}
-
 /* ── Hero (single-hero home) ──────────────────────────────────────── */
 .gf-hero {
   background: linear-gradient(180deg, oklch(0.22 0.05 280), oklch(0.18 0.04 280));
@@ -1203,7 +1693,47 @@ body {
   gap: 4px;
   flex-wrap: wrap;
 }
-.gf-hero-shortcut-tip .gf-kbd { margin: 0 1px; }
+
+/* Launcher-first hero (1.7) ───────────────────────────────────────────
+   Active state: name + meta on the left, one prominent Play button on
+   the right. Wraps on narrow widths so Play sits below the meta block.
+   Empty state: stacked friendly copy with three big CTAs underneath. */
+.gf-hero-active-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.gf-hero-active-meta { flex: 1 1 240px; min-width: 0; }
+.gf-hero-pills { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.gf-hero-play { font-size: 15px; padding: 12px 26px; flex-shrink: 0; }
+
+.gf-hero-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+.gf-hero-empty-title {
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  margin: 0;
+}
+.gf-hero-empty-body {
+  font-size: 14px;
+  color: var(--ink-mute);
+  margin: 0 0 8px 0;
+  max-width: 64ch;
+}
+.gf-hero-empty-ctas {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
 
 /* Prominent share-code chip in the hero — click to copy, with a paired
    "copy as message" sub-action for one-liner sharing in Discord/etc.
@@ -1395,60 +1925,6 @@ body {
   outline-offset: 2px;
 }
 
-/* ── Section heading ──────────────────────────────────────────────── */
-.gf-section-head {
-  display: flex; justify-content: space-between; align-items: baseline;
-  margin: 22px 0 10px;
-}
-.gf-section-eyebrow {
-  font-size: 11px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0.12em;
-  color: var(--ink-dim);
-}
-
-/* ── Pack rows on home ────────────────────────────────────────────── */
-.gf-pack-row {
-  display: flex; align-items: center; gap: 12px;
-  padding: 11px 14px;
-  background: var(--indigo-panel);
-  border: 1px solid var(--indigo-line);
-  border-radius: 8px;
-  margin-bottom: 6px;
-}
-.gf-pack-avatar {
-  width: 32px; height: 32px;
-  border-radius: 7px;
-  background: oklch(0.30 0.05 280);
-  color: oklch(0.85 0.04 280);
-  display: grid; place-items: center;
-  font-size: 11px; font-weight: 700;
-  flex-shrink: 0;
-}
-.gf-pack-avatar-active { background: var(--gf); color: var(--gf-ink); }
-
-/* ── Status dots ─────────────────────────────────────────────────── */
-.gf-dot {
-  width: 6px; height: 6px;
-  border-radius: 999px;
-  display: inline-block;
-}
-.gf-dot-ok { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
-.gf-dot-warn { background: var(--gf); box-shadow: 0 0 6px var(--gf); }
-.gf-dot-mute { background: var(--ink-dim); }
-.gf-dot-danger { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
-
-/* ── Empty / dashed cards ─────────────────────────────────────────── */
-.gf-empty-card {
-  background: transparent;
-  border: 1px dashed var(--indigo-line);
-  border-radius: 10px;
-  padding: 24px;
-  display: flex; flex-direction: column; gap: 6px;
-  align-items: center; justify-content: center;
-  color: var(--ink-mute);
-  text-align: center;
-}
-
 /* Lucide icon size override inside gf-buttons (sized by fontSize/gap) */
 .gf-btn svg, .gf-btn-2 svg, .gf-btn-3 svg { flex-shrink: 0; }
 
@@ -1487,37 +1963,6 @@ body {
   padding-top: 6px;
   border-top: 1px solid var(--indigo-line);
 }
-
-/* ── Batch 2: Mods kebab + source editor + advanced toggle ───────────── */
-.gf-pin-dot {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 14px; height: 14px; color: var(--gf);
-  margin-right: 2px;
-}
-
-.gf-adv-toggle {
-  display: inline-flex; align-items: center; gap: 7px;
-  padding: 4px 9px 4px 4px;
-  border: 1px solid var(--indigo-line); border-radius: 999px;
-  cursor: pointer; user-select: none;
-  background: transparent;
-  font-family: inherit;
-}
-.gf-adv-toggle:hover { background: var(--indigo-elev); }
-.gf-adv-toggle-track {
-  width: 26px; height: 14px; border-radius: 999px;
-  background: oklch(0.30 0.03 270); position: relative;
-  transition: background .15s;
-}
-.gf-adv-toggle-dot {
-  position: absolute; top: 2px; left: 2px;
-  width: 10px; height: 10px; border-radius: 50%;
-  background: var(--ink-mute); transition: all .15s;
-}
-.gf-adv-toggle.on .gf-adv-toggle-track { background: var(--gf); }
-.gf-adv-toggle.on .gf-adv-toggle-dot { left: 14px; background: var(--gf-ink); }
-.gf-adv-toggle-label { font-size: 11.5px; color: var(--ink-mute); font-weight: 500; letter-spacing: 0.2px; }
-.gf-adv-toggle.on .gf-adv-toggle-label { color: var(--ink); }
 
 .gf-kebab {
   position: absolute; top: 100%; right: 0; margin-top: 4px;
@@ -1729,43 +2174,11 @@ body {
 .gf-cl-rem .gf-cl-tag { background: oklch(0.55 0.16 25 / 0.18); color: oklch(0.75 0.13 25); }
 .gf-cl-tog .gf-cl-tag { background: var(--indigo-line); color: var(--ink-mute); }
 
-/* Conflict resolver */
-.gf-conflict { display: flex; flex-direction: column; gap: 6px; }
-.gf-conflict-row {
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 12px; border-radius: 7px;
-  background: oklch(0.20 0.025 270 / 0.5);
-  border: 1px solid var(--indigo-line);
-}
-.gf-mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; background: var(--indigo-line); padding: 1px 5px; border-radius: 3px; color: var(--ink-mute); font-size: 11px; }
-.gf-seg { display: flex; background: var(--indigo-side); border: 1px solid var(--indigo-line); border-radius: 6px; padding: 2px; }
-.gf-seg-btn {
-  background: transparent; border: 0; padding: 5px 11px;
-  font-size: 11.5px; color: var(--ink-mute); cursor: pointer; border-radius: 4px;
-  font-family: inherit;
-}
-.gf-seg-btn.active { background: var(--gf); color: var(--gf-ink); font-weight: 600; }
-
-/* Browse GH card */
-.gf-browse-gh { display: flex; flex-direction: column; }
-.gf-browse-gh-head {
-  display: flex; align-items: center; gap: 8px;
-  padding: 10px 14px;
-  background: oklch(0.18 0.02 270);
-  border-bottom: 1px solid var(--indigo-line);
-}
-
 /* Browse mod detail */
 .gf-detail { background: var(--indigo-deep); height: 100%; overflow-y: auto; }
 .gf-detail-hero { height: 160px; }
-.gf-detail-body { padding: 18px 22px; }
 .gf-detail-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
-.gf-detail-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--indigo-line); margin-bottom: 14px; }
 .gf-detail-content { font-size: 12.5px; color: var(--ink-mute); }
-.gf-detail-req { display: flex; align-items: center; gap: 9px; padding: 5px 0; font-size: 12px; }
-.gf-detail-req-status { width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; }
-.gf-detail-req-status.ok { background: oklch(0.74 0.11 165 / 0.2); color: var(--ok); }
-.gf-detail-req-status.warn { background: oklch(0.60 0.16 60 / 0.2); color: oklch(0.85 0.12 70); }
 
 /* Drag-drop overlay */
 .gf-dropzone {
@@ -1791,153 +2204,6 @@ body {
 }
 .gf-dropzone-title { font-size: 17px; font-weight: 600; color: var(--ink); }
 .gf-dropzone-sub { font-size: 12.5px; color: var(--ink-mute); margin-top: 6px; }
-
-/* Tutorial */
-.gf-tut-step {
-  display: flex; gap: 12px; padding: 12px 14px;
-  background: var(--indigo-panel); border: 1px solid var(--indigo-line);
-  border-radius: 9px;
-}
-.gf-tut-num {
-  width: 28px; height: 28px; border-radius: 7px; flex-shrink: 0;
-  background: var(--gf); color: var(--gf-ink);
-  display: grid; place-items: center; font-weight: 700; font-size: 13px;
-}
-.gf-tut-t { font-size: 13px; font-weight: 600; color: var(--ink); }
-.gf-tut-b { font-size: 12px; color: var(--ink-mute); margin-top: 3px; }
-
-/* Tutorial hero — the friend-modpack quick start surfaced first. */
-.gf-tut-hero {
-  background: linear-gradient(135deg, oklch(0.22 0.04 280) 0%, oklch(0.20 0.025 270) 100%);
-  border: 1px solid var(--indigo-line);
-  border-radius: 14px;
-  padding: 22px 26px;
-  position: relative;
-  overflow: hidden;
-}
-.gf-tut-hero::before {
-  /* Subtle yellow accent ribbon along the top */
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 3px;
-  background: linear-gradient(90deg, var(--gf) 0%, oklch(0.78 0.16 78 / 0) 100%);
-}
-.gf-tut-hero-eyebrow {
-  font-size: 10.5px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0.12em;
-  color: var(--gf);
-}
-.gf-tut-hero-title {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--ink);
-  margin-top: 6px;
-  margin-bottom: 18px;
-}
-.gf-tut-hero-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
-}
-@media (max-width: 880px) {
-  .gf-tut-hero-grid { grid-template-columns: 1fr; }
-}
-.gf-tut-hero-card {
-  background: oklch(0.18 0.03 270 / 0.6);
-  border: 1px solid var(--indigo-line);
-  border-radius: 10px;
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.gf-tut-hero-card-head {
-  display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 4px;
-}
-.gf-tut-hero-card-num {
-  width: 26px; height: 26px; border-radius: 7px;
-  background: var(--gf); color: var(--gf-ink);
-  display: grid; place-items: center;
-  font-weight: 700; font-size: 13px;
-}
-.gf-tut-hero-card-ico { color: var(--ink-mute); opacity: 0.85; }
-.gf-tut-hero-card-title {
-  font-size: 14.5px; font-weight: 600; color: var(--ink);
-  margin: 0;
-}
-.gf-tut-hero-card-body {
-  font-size: 12.5px; color: var(--ink-mute);
-  line-height: 1.5;
-  margin: 0;
-}
-
-/* Cheat-sheet grid expands to use the available width on big screens. */
-.gf-tut-cheat-grid {
-  display: grid;
-  gap: 10px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-@media (min-width: 1080px) {
-  .gf-tut-cheat-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-}
-@media (min-width: 800px) and (max-width: 1079px) {
-  .gf-tut-cheat-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-}
-
-.gf-tut-kbd-row {
-  margin: 14px 0 18px;
-  padding: 12px;
-  border: 1px solid var(--indigo-line);
-  border-radius: 8px;
-  background: oklch(0.20 0.025 270 / 0.5);
-  font-size: 12px;
-  color: var(--ink-mute);
-}
-
-/* Collapsed full-reference toggle. */
-.gf-tut-reference-toggle {
-  width: 100%;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  background: transparent;
-  border: 1px dashed var(--indigo-line);
-  border-radius: 9px;
-  color: var(--ink-mute);
-  padding: 11px 14px;
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-}
-.gf-tut-reference-toggle:hover {
-  background: oklch(0.22 0.04 280 / 0.5);
-  color: var(--ink);
-  border-color: oklch(0.34 0.06 280);
-}
-.gf-tut-reference { margin-top: 14px; }
-.gf-kbd {
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 11px; padding: 2px 6px;
-  background: var(--indigo-line); border: 1px solid var(--indigo-elev);
-  border-radius: 4px; color: var(--ink); margin: 0 2px;
-}
-
-/* Load order */
-.gf-loadorder { display: flex; flex-direction: column; gap: 4px; }
-.gf-lo-row {
-  display: flex; align-items: center; gap: 10px;
-  padding: 9px 12px; border-radius: 7px;
-  background: var(--indigo-panel); border: 1px solid var(--indigo-line);
-  font-size: 12.5px;
-}
-.gf-lo-grip { color: var(--ink-dim); cursor: grab; font-size: 14px; letter-spacing: -2px; }
-.gf-lo-num { font-family: ui-monospace, monospace; color: var(--ink-dim); font-size: 11px; min-width: 18px; }
-.gf-lo-name { color: var(--ink); font-weight: 600; }
-.gf-lo-note { font-size: 11px; color: var(--ink-dim); font-style: italic; }
 
 /* Auto-detect modal */
 .gf-detect-stats { display: flex; gap: 8px; margin-bottom: 12px; }
@@ -1992,11 +2258,6 @@ body {
 @keyframes gf-spin { to { transform: rotate(360deg); } }
 .gf-loading-msg { font-size: 14px; font-weight: 600; color: var(--ink); }
 .gf-loading-sub { font-size: 12px; color: var(--ink-mute); margin-top: 4px; }
-.gf-loading-bar {
-  height: 4px; background: var(--indigo-side); border-radius: 999px;
-  overflow: hidden; margin-top: 14px;
-}
-.gf-loading-bar-fill { height: 100%; background: var(--gf); border-radius: 999px; transition: width .25s; }
 .gf-loading-step { font-size: 11px; color: var(--ink-dim); margin-top: 8px; font-family: ui-monospace, monospace; }
 
 /* Toasts */
@@ -2016,66 +2277,10 @@ body {
 }
 .gf-toast button { pointer-events: auto; }
 .gf-toast-ico { font-size: 14px; width: 18px; text-align: center; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; }
-.gf-toast-sub { font-size: 11.5px; color: var(--ink-mute); margin-top: 2px; }
 .gf-toast-success { border-left: 3px solid var(--ok); }
 .gf-toast-info { border-left: 3px solid oklch(0.55 0.13 250); }
 .gf-toast-error { border-left: 3px solid oklch(0.65 0.18 25); }
-.gf-toast-warn { border-left: 3px solid oklch(0.85 0.12 70); }
-/* Batch 4 — restore/update/conflict/launch/logs/onboarding/confirm/validation/deps/shortcuts */
-
-/* Diff list (restore preview) */
-.gf-diff { border: 1px solid var(--indigo-line); border-radius: 9px; overflow: hidden; }
-.gf-diff-row {
-  display: grid; grid-template-columns: 22px 1fr 130px 110px;
-  align-items: center; gap: 10px;
-  padding: 9px 12px; font-size: 12.5px;
-  border-bottom: 1px solid var(--indigo-line);
-}
-.gf-diff-row:last-child { border-bottom: none; }
-.gf-diff-row .name { font-weight: 500; color: var(--ink); }
-.gf-diff-row .ver { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; font-size: 11.5px; color: var(--ink-mute); text-align: right; }
-.gf-diff-tag { font-size: 10.5px; font-weight: 600; padding: 2px 7px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.04em; text-align: center; }
-.gf-diff-add { background: oklch(0.62 0.14 145 / 0.18); color: oklch(0.85 0.14 145); }
-.gf-diff-rm  { background: oklch(0.65 0.18 25 / 0.18); color: oklch(0.82 0.16 25); }
-.gf-diff-up  { background: oklch(0.55 0.13 250 / 0.18); color: oklch(0.82 0.13 250); }
-.gf-diff-keep { background: oklch(0.40 0.02 260 / 0.4); color: var(--ink-mute); }
-.gf-diff-icon { font-size: 13px; opacity: 0.85; }
-.gf-diff-ico-add { color: oklch(0.78 0.14 145); }
-.gf-diff-ico-rm { color: oklch(0.78 0.16 25); }
-.gf-diff-ico-up { color: oklch(0.78 0.13 250); }
-.gf-diff-summary { display: flex; gap: 14px; padding: 10px 12px; background: var(--indigo-deep); border-bottom: 1px solid var(--indigo-line); font-size: 11.5px; color: var(--ink-mute); }
-.gf-diff-summary b { color: var(--ink); font-weight: 600; }
-
-/* Update-all progress list */
-.gf-prog-list { display: flex; flex-direction: column; gap: 0; border: 1px solid var(--indigo-line); border-radius: 9px; overflow: hidden; }
-.gf-prog-row {
-  display: grid; grid-template-columns: 26px 1fr 90px 90px;
-  align-items: center; gap: 10px;
-  padding: 11px 13px; border-bottom: 1px solid var(--indigo-line);
-  font-size: 12.5px;
-}
-.gf-prog-row:last-child { border-bottom: none; }
-.gf-prog-row .name { font-weight: 500; color: var(--ink); }
-.gf-prog-row .name .sub { font-size: 11px; color: var(--ink-mute); margin-top: 2px; font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; }
-.gf-prog-row .stat { font-size: 11.5px; color: var(--ink-mute); font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; }
-.gf-prog-bar { height: 5px; background: var(--indigo-deep); border-radius: 3px; overflow: hidden; position: relative; }
-.gf-prog-bar > span { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg, var(--gold) 0%, var(--gold-2) 100%); border-radius: 3px; }
-.gf-prog-row.done .gf-prog-bar > span { background: var(--ok); }
-.gf-prog-row.fail .gf-prog-bar > span { background: oklch(0.65 0.18 25); }
-.gf-prog-row.fail .stat { color: oklch(0.82 0.16 25); }
-.gf-prog-row.done .stat { color: var(--ok); }
-.gf-prog-ico { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; }
-.gf-prog-ico.queue { background: var(--indigo-deep); color: var(--ink-mute); }
-.gf-prog-ico.run { background: oklch(0.55 0.13 250 / 0.2); color: oklch(0.82 0.13 250); animation: gfspin 1.2s linear infinite; }
-.gf-prog-ico.done { background: oklch(0.62 0.14 145 / 0.2); color: var(--ok); }
-.gf-prog-ico.fail { background: oklch(0.65 0.18 25 / 0.2); color: oklch(0.82 0.16 25); }
 @keyframes gfspin { to { transform: rotate(360deg); } }
-.gf-prog-summary {
-  display: flex; align-items: center; gap: 12px; padding: 10px 13px;
-  background: var(--indigo-deep); border-bottom: 1px solid var(--indigo-line);
-  font-size: 12px; color: var(--ink-mute);
-}
-.gf-prog-summary b { color: var(--ink); font-weight: 600; }
 
 /* Onboarding wizard chrome */
 .gf-wiz-back { position: absolute; inset: 0; z-index: 50; background: oklch(0.10 0.02 270 / 0.85); display: grid; place-items: center; }
@@ -2085,10 +2290,6 @@ body {
   border-radius: 14px; box-shadow: 0 30px 80px rgba(0,0,0,0.5);
   display: flex; flex-direction: column;
 }
-.gf-wiz-rail { display: flex; gap: 6px; padding: 16px 20px 0; }
-.gf-wiz-step { flex: 1; height: 4px; background: var(--indigo-deep); border-radius: 2px; }
-.gf-wiz-step.active { background: var(--gold); }
-.gf-wiz-step.done { background: var(--ok); }
 .gf-wiz-head { padding: 16px 24px 4px; }
 .gf-wiz-head-row {
   display: flex;
@@ -2119,6 +2320,16 @@ body {
 .gf-input-row .gf-set-input { flex: 1; }
 .gf-set-input.is-ok { border-color: oklch(0.62 0.14 145 / 0.6); }
 .gf-set-input.is-err { border-color: oklch(0.65 0.18 25 / 0.6); }
+/* Render native control chrome dark so <select> popups show light,
+   readable <option> text instead of the OS default (light popup + faint
+   text) — same reason .gf-sort-control select sets this. */
+.gf-set-input { color-scheme: dark; }
+/* Belt-and-suspenders for browsers that honor option styling: dark popup
+   rows with readable text (matches .gf-sort-control select option). */
+.gf-set-input option {
+  background-color: var(--indigo-panel);
+  color: var(--ink);
+}
 .gf-help { font-size: 11.5px; margin-top: 6px; display: flex; align-items: center; gap: 6px; }
 .gf-help.ok { color: var(--ok); }
 .gf-help.err { color: oklch(0.82 0.16 25); }
@@ -2201,7 +2412,6 @@ body {
 /* Game-launch states */
 .gf-launch-back { position: absolute; inset: 0; z-index: 60; background: oklch(0.06 0.02 270 / 0.92); display: grid; place-items: center; }
 .gf-launch-card { text-align: center; max-width: 460px; padding: 24px; }
-.gf-launch-art { font-size: 56px; margin-bottom: 14px; }
 .gf-launch-t { font-size: 22px; font-weight: 700; color: var(--ink); margin-bottom: 6px; }
 .gf-launch-s { font-size: 13px; color: var(--ink-mute); margin-bottom: 18px; }
 .gf-launch-spinner {
@@ -2210,43 +2420,42 @@ body {
   border-top-color: var(--gold);
   margin: 0 auto 14px; animation: gfspin 0.9s linear infinite;
 }
-.gf-running-pill {
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 12px; margin: 0 12px 8px; border-radius: 8px;
-  background: oklch(0.62 0.14 145 / 0.12); border: 1px solid oklch(0.62 0.14 145 / 0.4);
-  font-size: 12px; color: var(--ink);
-}
-.gf-running-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); animation: gfblink 1.4s ease-in-out infinite; }
 @keyframes gfblink { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
-
-/* Dependency tree */
-.gf-dep-tree { font-size: 12.5px; }
-.gf-dep-node { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 6px; }
-.gf-dep-node.required { background: oklch(0.55 0.13 250 / 0.08); }
-.gf-dep-children { margin-left: 22px; border-left: 1px dashed var(--indigo-line); padding-left: 12px; }
-.gf-dep-tag { font-size: 10px; padding: 1px 6px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.04em; }
-.gf-dep-tag.req { background: oklch(0.55 0.13 250 / 0.2); color: oklch(0.82 0.13 250); }
-.gf-dep-tag.have { background: oklch(0.62 0.14 145 / 0.18); color: var(--ok); }
-.gf-dep-tag.miss { background: oklch(0.65 0.18 25 / 0.18); color: oklch(0.82 0.16 25); }
-
-/* Conflict picker (per-file) */
-.gf-conflict-row {
-  display: grid; grid-template-columns: 1fr auto;
-  gap: 12px; padding: 12px;
-  border: 1px solid var(--indigo-line); border-radius: 9px;
-  margin-bottom: 8px;
-}
-.gf-conflict-name { font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 4px; }
-.gf-conflict-vers { font-size: 11.5px; color: var(--ink-mute); font-family: ui-monospace, monospace; }
-.gf-conflict-actions { display: flex; gap: 4px; }
 
 /* Diagnostic bundle list */
 .gf-diag-list { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; background: var(--indigo-deep); border: 1px solid var(--indigo-line); border-radius: 9px; }
 .gf-diag-item { display: flex; align-items: center; gap: 10px; font-size: 12px; padding: 4px 0; color: var(--ink-mute); }
 .gf-diag-item .check { color: var(--ok); }
-
-/* Audit empty (scoped — gf-empty-pad uses larger glyph art) */
-.gf-empty-pad { padding: 60px 20px; text-align: center; }
+/* "Report a bug" describe field + the "attached automatically" note. */
+.gf-bug-describe-label {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+.gf-bug-describe {
+  width: 100%;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink);
+  background: var(--indigo-deep);
+  border: 1px solid var(--indigo-line);
+  border-radius: 7px;
+  padding: 9px 11px;
+  resize: vertical;
+  margin-bottom: 14px;
+}
+.gf-bug-describe:focus { border-color: var(--gf-line, var(--gf)); outline: none; }
+.gf-diag-attached-note {
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-dim);
+  margin-bottom: 7px;
+}
 .gf-empty-pad .gf-empty-art { font-size: 48px; margin-bottom: 12px; opacity: 0.6; width: auto; height: auto; background: transparent; border: 0; display: inline-grid; }
 .gf-empty-pad .gf-empty-t { font-size: 16px; font-weight: 600; color: var(--ink); margin-bottom: 6px; }
 .gf-empty-pad .gf-empty-s { font-size: 12.5px; color: var(--ink-mute); max-width: 360px; margin: 0 auto 14px; }
@@ -2323,6 +2532,490 @@ body {
 .gf-spin { animation: gf-spin 1s linear infinite; }
 @keyframes gf-spin {
   to { transform: rotate(360deg); }
+}
+
+/* Container is .gf-help-view (NOT .gf-help — that's already taken by
+   the inline form-help text class up around line 2129). */
+.gf-help-view {
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.gf-help-header h1 { margin: 0 0 4px 0; }
+.gf-help-subtitle { opacity: 0.7; margin: 0; color: var(--ink-mute); }
+
+/* ── Help section cards ───────────────────────────────────────────────
+ * Each section (Playing / Making / FAQ) is color-coded so the three
+ * groups read as distinct at a glance instead of one flat wall. The
+ * per-section accent is set on .gf-help-card-<accent> and consumed by
+ * the icon chip, the left border, and the step-number badges via the
+ * --help-accent / --help-accent-soft custom props. */
+.gf-help-card {
+  --help-accent: var(--gf);
+  --help-accent-soft: oklch(0.78 0.13 80 / 0.16);
+  border-left: 3px solid var(--help-accent);
+}
+
+.gf-help-section-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 12px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--indigo-line);
+}
+.gf-help-section-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.gf-help-section-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: var(--help-accent-soft);
+  color: var(--help-accent);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+/* Numbered step list — gold/green accent badges instead of raw <ol>
+   markers so the quick-starts feel like a checklist. */
+.gf-help-steps {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+  counter-reset: gf-help-step;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.gf-help-steps li {
+  counter-increment: gf-help-step;
+  position: relative;
+  padding-left: 34px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+}
+.gf-help-steps li::before {
+  content: counter(gf-help-step);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--help-accent-soft);
+  color: var(--help-accent);
+  display: grid;
+  place-items: center;
+  font-size: 11.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.gf-faq { display: flex; flex-direction: column; }
+.gf-faq-item {
+  border-bottom: 1px solid var(--indigo-line);
+  padding: 2px 0;
+}
+.gf-faq-item:last-child { border-bottom: none; }
+.gf-faq-q {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 550;
+  cursor: pointer;
+  text-align: left;
+  padding: 11px 0;
+}
+.gf-faq-q:hover { color: var(--help-accent); }
+.gf-faq-q svg { transition: transform 0.15s; flex-shrink: 0; color: var(--help-accent); }
+.gf-faq-q .rot-r { transform: rotate(-90deg); }
+.gf-faq-item.open .gf-faq-q { color: var(--help-accent); }
+.gf-faq-answer {
+  padding: 2px 0 12px 22px;
+  color: var(--ink-mute);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+/* ── CreateModpackWizard ──────────────────────────────────────────────
+ * 4-step "create a modpack" guided dialog. Re-uses the existing
+ * .gf-modal-back / .gf-modal shell so the backdrop, blur, animation,
+ * and header/foot padding all match other dialogs (PublishModal etc.).
+ */
+.gf-create-wizard { width: min(640px, 95vw); max-height: 85vh; }
+.gf-create-wizard-step-indicator {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-mute);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  background: var(--indigo-elev);
+  border-radius: 999px;
+}
+
+/* ── Share Setup panel (inline GitHub setup inside PublishModal) ────
+ * Replaces the old red "Go to Settings" warning block. The panel sits
+ * inside .gf-modal-body and explains in plain language why GitHub is
+ * needed, then lets the curator paste a token without leaving the
+ * share flow. */
+.gf-share-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+.gf-share-setup-title {
+  margin: 0 0 4px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.gf-share-setup p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-mute);
+}
+.gf-share-setup-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+.gf-share-setup-field label {
+  font-size: 11.5px;
+  color: var(--ink-mute);
+  font-weight: 500;
+}
+.gf-share-setup-field input {
+  background: var(--indigo-side);
+  border: 1px solid var(--indigo-line);
+  color: var(--ink);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  outline: none;
+}
+.gf-share-setup-field input:focus { border-color: var(--gf-line); }
+.gf-share-setup-error {
+  color: oklch(0.82 0.16 25);
+  font-size: 12.5px;
+  padding: 8px 12px;
+  background: oklch(0.55 0.13 25 / 0.10);
+  border: 1px solid oklch(0.55 0.13 25 / 0.35);
+  border-radius: 7px;
+}
+.gf-share-setup-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.gf-create-wizard-strategy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gf-create-wizard-strategy-option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--indigo-line);
+  background: var(--indigo-panel);
+  border-radius: 8px;
+  text-align: left;
+  cursor: pointer;
+  color: var(--ink);
+  font-family: inherit;
+  transition: border-color 0.15s, background 0.15s;
+}
+.gf-create-wizard-strategy-option:hover {
+  border-color: var(--gf-line, var(--indigo-line));
+  background: var(--indigo-elev);
+}
+.gf-create-wizard-strategy-option.is-active {
+  border-color: var(--gf-line, var(--indigo-line));
+  background: var(--indigo-elev);
+}
+.gf-create-wizard-strategy-title { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.gf-create-wizard-strategy-desc { font-size: 12px; color: var(--ink-mute); line-height: 1.45; }
+.gf-create-wizard-clone-pick { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+
+.gf-create-wizard-choose { display: flex; flex-direction: column; gap: 10px; }
+.gf-create-wizard-choose-controls { display: flex; gap: 10px; align-items: flex-end; }
+.gf-create-wizard-choose-controls .gf-set-input { flex: 1; }
+.gf-create-wizard-sort { display: flex; flex-direction: column; gap: 3px; }
+.gf-create-wizard-choose-actions {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-top: 2px;
+}
+.gf-create-wizard-selected-count {
+  font-size: 12px; color: var(--ink-mute);
+}
+.gf-create-wizard-list {
+  display: flex; flex-direction: column;
+  max-height: 320px; overflow-y: auto;
+  border: 1px solid var(--indigo-line);
+  border-radius: 8px;
+  background: oklch(0.20 0.025 270 / 0.5);
+}
+.gf-create-wizard-list-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 12px;
+  font-size: 12.5px; color: var(--ink);
+  border-bottom: 1px solid var(--indigo-line);
+  cursor: pointer;
+}
+.gf-create-wizard-list-row:last-child { border-bottom: 0; }
+.gf-create-wizard-list-row:hover { background: var(--indigo-elev); }
+.gf-create-wizard-list-name { flex: 1; }
+.gf-create-wizard-list-meta {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11.5px; color: var(--ink-dim);
+}
+.gf-create-wizard-empty {
+  padding: 24px 12px; text-align: center; color: var(--ink-mute); font-size: 12.5px;
+}
+
+.gf-create-wizard-health-loading {
+  padding: 24px 12px; color: var(--ink-mute); font-size: 13px; text-align: center;
+}
+.gf-create-wizard-health-list {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.gf-create-wizard-health-list li {
+  padding: 10px 14px;
+  background: oklch(0.20 0.025 270 / 0.5);
+  border: 1px solid var(--indigo-line);
+  border-radius: 8px;
+  font-size: 13px; color: var(--ink);
+}
+
+.gf-create-wizard-finish { display: flex; flex-direction: column; gap: 12px; }
+.gf-create-wizard-share-hint {
+  font-size: 12px; color: var(--ink-mute); line-height: 1.5;
+  padding: 8px 12px;
+  background: oklch(0.20 0.025 270 / 0.4);
+  border-radius: 6px;
+}
+.gf-create-wizard-error {
+  font-size: 12.5px; color: oklch(0.82 0.16 25);
+  padding: 8px 12px;
+  background: oklch(0.55 0.13 25 / 0.10);
+  border: 1px solid oklch(0.55 0.13 25 / 0.35);
+  border-radius: 7px;
+}
+
+/* ── Side-out drawer (1.7.0) ─────────────────────────────────────────
+ * Used by HelpDrawer (topbar `?`). Backdrop covers the whole viewport
+ * so a click anywhere outside the drawer closes it; the drawer panel
+ * lives on the right edge. Z-index sits above the .gf-modal-back layer
+ * (50) but below the toast stack so toasts stay visible if a drawer
+ * action triggers one. */
+.gf-drawer-backdrop {
+  position: fixed; inset: 0;
+  background: oklch(0.10 0.02 270 / 0.6);
+  backdrop-filter: blur(4px);
+  z-index: 200;
+  animation: gf-fade-in 0.18s ease-out;
+}
+.gf-drawer {
+  position: fixed; top: 0; bottom: 0;
+  width: 440px; max-width: 90vw;
+  background: var(--indigo-panel);
+  border-left: 1px solid var(--indigo-line);
+  box-shadow: -8px 0 24px rgba(0,0,0,0.3);
+  display: flex; flex-direction: column;
+  animation: gf-drawer-slide-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.gf-drawer-right { right: 0; }
+@keyframes gf-drawer-slide-in {
+  from { transform: translateX(100%); opacity: 0.4; }
+  to   { transform: translateX(0); opacity: 1; }
+}
+.gf-drawer-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--indigo-line);
+  background: var(--indigo-side);
+}
+.gf-drawer-header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.gf-drawer-body {
+  padding: 16px;
+  flex: 1;
+  overflow-y: auto;
+  /* Stack the Help cards with breathing room so the three color-coded
+     sections read as distinct groups. */
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ── Missing-bundles publish recovery panel ───────────────────────────
+ * Rendered inline inside PublishModal when share/reshare rejects with
+ * "missing bundles for N mod(s): …". Replaces the raw error toast with
+ * a recovery surface: per-mod status, repair button, auto-retry on
+ * full success, Open-folder fallback for failed repairs. */
+.gf-missing-bundles {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.gf-missing-bundles-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  background: oklch(0.55 0.13 25 / 0.10);
+  border: 1px solid oklch(0.55 0.13 25 / 0.35);
+  border-radius: 7px;
+}
+.gf-missing-bundles-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: oklch(0.78 0.13 25);
+}
+.gf-missing-bundles-title {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.gf-missing-bundles-body {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--ink-mute);
+  line-height: 1.45;
+}
+.gf-missing-bundles-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.gf-missing-bundles-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: oklch(0.20 0.025 270 / 0.5);
+  border: 1px solid var(--indigo-line);
+  border-radius: 6px;
+  font-size: 12.5px;
+}
+.gf-missing-bundles-item.status-success { border-color: oklch(0.74 0.11 165 / 0.4); }
+.gf-missing-bundles-item.status-failed  { border-color: oklch(0.55 0.16 25 / 0.45); }
+.gf-missing-bundles-name {
+  flex: 1;
+  min-width: 0;
+  color: var(--ink);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gf-missing-bundles-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--ink-mute);
+  font-variant-numeric: tabular-nums;
+}
+.gf-missing-bundles-status.status-pending { color: var(--ink-dim); }
+.gf-missing-bundles-status.status-repairing { color: var(--gf); }
+.gf-missing-bundles-status.status-success { color: var(--ok); }
+.gf-missing-bundles-status.status-failed { color: oklch(0.75 0.13 25); }
+.gf-missing-bundles-status-icon { flex-shrink: 0; }
+.gf-missing-bundles-folder {
+  padding: 4px 8px;
+  font-size: 11px;
+}
+.gf-missing-bundles-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 4px;
+}
+
+/* ── Inline help hints ─────────────────────────────────────────────
+   Small "?" icon next to a label that opens a short popover sourced
+   from the FAQ. The icon stays muted until hover/open so it doesn't
+   compete with the primary copy. The popover is positioned just below
+   the icon and has its own elevation so it sits above sibling content. */
+.gf-help-hint {
+  position: relative;
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 4px;
+}
+.gf-help-hint-btn {
+  background: none;
+  border: none;
+  padding: 2px;
+  cursor: pointer;
+  opacity: 0.55;
+  color: inherit;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+.gf-help-hint-btn:hover,
+.gf-help-hint.open .gf-help-hint-btn {
+  opacity: 1;
+  background: oklch(0.22 0.04 280);
+}
+.gf-help-hint-btn:focus-visible {
+  outline: 2px solid var(--gf);
+  outline-offset: 2px;
+}
+.gf-help-hint-popover {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 6px;
+  background: var(--bg-card, #1a1d22);
+  border: 1px solid var(--indigo-line, rgba(255, 255, 255, 0.1));
+  border-radius: 6px;
+  padding: 10px 12px;
+  max-width: 320px;
+  min-width: 220px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink);
+  z-index: 100;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.32);
+  text-align: left;
 }
 
 /* Dev Builds panel (sub-project E). */

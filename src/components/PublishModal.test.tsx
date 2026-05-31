@@ -155,15 +155,22 @@ describe('<PublishModal>', () => {
     expect(screen.queryByText(/disabled \(/)).toBeNull();
   });
 
-  it('shows the GitHub-token-missing pre-flight warning when no token is set', async () => {
+  it('renders the inline ShareSetupPanel when no GitHub token is set', async () => {
     tokenIsSet(false);
     render(<Wrap />);
+    // The old red "GitHub token required" warning block is gone — the
+    // modal now renders the ShareSetupPanel inline with a plain-language
+    // explanation, the token field, and a "Configure later" escape hatch.
     await waitFor(() => {
-      expect(screen.getByText('GitHub token required')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Set up sharing' })).toBeInTheDocument();
     });
-    // Publish button must be disabled in the blocked state.
+    // Token field is present so the curator can paste without leaving.
+    expect(screen.getByLabelText('Paste your token here')).toBeInTheDocument();
+    // The publish button stays disabled while no token has been saved.
     const publishBtn = screen.getByRole('button', { name: /Publish/ });
     expect(publishBtn).toBeDisabled();
+    // Old block's "GitHub token required" copy must not surface anymore.
+    expect(screen.queryByText('GitHub token required')).toBeNull();
   });
 
   it('publish button is disabled while token status is still loading (null)', async () => {
@@ -174,13 +181,15 @@ describe('<PublishModal>', () => {
     expect(publishBtn).toBeDisabled();
   });
 
-  it('treats get_api_key_status rejection as token-missing (block + warning)', async () => {
+  it('treats get_api_key_status rejection as token-missing (renders ShareSetupPanel)', async () => {
     registerInvokeHandler('get_api_key_status', () => {
       throw new Error('boom');
     });
     render(<Wrap />);
+    // Status-fetch failure should land the user in the same setup panel,
+    // not in a stuck loading state with a disabled Publish button.
     await waitFor(() => {
-      expect(screen.getByText('GitHub token required')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Set up sharing' })).toBeInTheDocument();
     });
   });
 
@@ -242,28 +251,63 @@ describe('<PublishModal>', () => {
     });
   });
 
-  it('Open Settings → Accounts CTA fires onGoToSettings and closes modal', async () => {
+  it('"Configure later in Settings" still routes to Settings and closes the modal', async () => {
     tokenIsSet(false);
     const onGoToSettings = vi.fn();
     const onClose = vi.fn();
     const user = userEvent.setup();
     render(<Wrap onGoToSettings={onGoToSettings} onClose={onClose} />);
-    const goBtn = await screen.findByRole('button', { name: /Open Settings/ });
+    const goBtn = await screen.findByRole('button', { name: /Configure later in Settings/ });
     await user.click(goBtn);
     expect(onGoToSettings).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('does NOT render Open Settings CTA when onGoToSettings is undefined', async () => {
+  it('"Configure later in Settings" still closes when onGoToSettings is undefined', async () => {
+    // Parents that don't wire a Settings router still get a graceful close —
+    // the panel's button no longer requires the optional callback.
     tokenIsSet(false);
-    // Force undefined explicitly.
+    const onClose = vi.fn();
+    const user = userEvent.setup();
     render(
       <AllProviders>
-        <PublishModal open profile={profile} onClose={() => {}} />
+        <PublishModal open profile={profile} onClose={onClose} />
       </AllProviders>,
     );
-    await screen.findByText('GitHub token required');
-    expect(screen.queryByRole('button', { name: /Open Settings/ })).toBeNull();
+    const goBtn = await screen.findByRole('button', { name: /Configure later in Settings/ });
+    await user.click(goBtn);
+    // No callback to call → the modal just closes. No throw.
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('Save token transitions to the publish flow without closing', async () => {
+    // Token starts missing, then set_github_token flips backend state to
+    // "set". After save, the modal must re-check status and reveal the
+    // pre-flight render (pack name + Publish button) without closing.
+    let backendTokenSet = false;
+    registerInvokeHandler('get_api_key_status', () => ({
+      nexus_api_key_set: false,
+      github_token_set: backendTokenSet,
+    }));
+    registerInvokeHandler('set_github_token', () => {
+      backendTokenSet = true;
+      return true;
+    });
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    render(<Wrap onClose={onClose} />);
+    // Wait for the ShareSetupPanel to mount.
+    const tokenInput = await screen.findByLabelText('Paste your token here');
+    await user.type(tokenInput, 'ghp_validtoken');
+    const saveBtn = screen.getByRole('button', { name: 'Save and continue' });
+    await user.click(saveBtn);
+    // Transition: the setup panel goes away and the normal pre-flight
+    // render (with the pack name field) takes over. Modal must not close.
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { name: 'Set up sharing' })).toBeNull();
+    });
+    expect(await screen.findByText(/Publish My Pack/)).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('Cancel button closes the modal (footer)', async () => {
@@ -321,8 +365,8 @@ describe('<PublishModal>', () => {
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'share_profile')).toBe(true);
     });
-    // Success state: title flips to "Profile published" and share code is visible.
-    await waitForModalTitle('Profile published');
+    // Success state: title flips to "Modpack published" and share code is visible.
+    await waitForModalTitle('Modpack published');
     expect(screen.getByText(`${shareOk.owner}/${shareOk.code}`)).toBeInTheDocument();
     expect(onShared).toHaveBeenCalledWith(shareOk);
     // Done button surfaces in the footer (not Publish).
@@ -356,7 +400,7 @@ describe('<PublishModal>', () => {
     const publishBtn = await screen.findByRole('button', { name: /Publish/ });
     await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
     await user.click(publishBtn);
-    await waitForModalTitle('Profile published');
+    await waitForModalTitle('Modpack published');
     // Inline warning panel AND toast both contain the failure summary.
     // The panel splits the count and list across separate elements; the
     // toast is a single string. Assert each variant ≥ 1.
@@ -379,7 +423,7 @@ describe('<PublishModal>', () => {
     const publishBtn = await screen.findByRole('button', { name: /Publish/ });
     await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
     await user.click(publishBtn);
-    await waitForModalTitle('Profile published');
+    await waitForModalTitle('Modpack published');
     // Toast (single string) confirms the singular wording with no +more.
     const toastEl = await screen.findByText(/1 mod failed to upload: SoloMod/);
     expect(toastEl.textContent).not.toMatch(/\+\d+ more/);
@@ -399,7 +443,7 @@ describe('<PublishModal>', () => {
     const publishBtn = await screen.findByRole('button', { name: /Publish/ });
     await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
     await user.click(publishBtn);
-    await waitForModalTitle('Profile published');
+    await waitForModalTitle('Modpack published');
     // "+2 more" suffix in both panel and toast.
     const matches = screen.getAllByText(/m1, m2, m3, m4, m5, \+2 more/);
     expect(matches.length).toBeGreaterThanOrEqual(2);
@@ -438,6 +482,218 @@ describe('<PublishModal>', () => {
     });
   });
 
+  // ── Missing-bundles inline recovery (Solo bug) ───────────────────
+
+  /**
+   * Build the exact Rust error string the sharing module produces when
+   * one or more mods are missing their bundled zip. Mirrors
+   * `src-tauri/src/sharing.rs` so the parser stays in lockstep with the
+   * source format.
+   */
+  function missingBundlesError(profileName: string, mods: string[]): string {
+    return (
+      `Could not publish profile '${profileName}': missing bundles for ` +
+      `${mods.length} mod(s): ${mods.join(', ')}. ` +
+      'Restore or reinstall these mods, then share again so the manifest can repair them later.'
+    );
+  }
+
+  it('missing-bundles error: renders inline panel instead of toast', async () => {
+    tokenIsSet(true);
+    registerInvokeHandler('share_profile', () => {
+      throw new Error(
+        missingBundlesError('My Pack', ['ModA', 'ModB', 'ModC']),
+      );
+    });
+    const user = userEvent.setup();
+    render(<Wrap />);
+    const publishBtn = await screen.findByRole('button', { name: /Publish/ });
+    await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
+    await user.click(publishBtn);
+    // Inline panel renders with the parsed mod list.
+    await screen.findByRole('heading', {
+      name: /Some mods need repair before sharing/i,
+    });
+    expect(screen.getByText('ModA')).toBeInTheDocument();
+    expect(screen.getByText('ModB')).toBeInTheDocument();
+    expect(screen.getByText('ModC')).toBeInTheDocument();
+    // Crucially, the raw-error toast must NOT appear — the panel
+    // replaces it. Pull every "Failed to publish:" element and assert
+    // none of them is present.
+    expect(screen.queryByText(/Failed to publish:/)).toBeNull();
+  });
+
+  it('missing-bundles panel: Repair → success auto-retries the publish', async () => {
+    tokenIsSet(true);
+    let publishCalls = 0;
+    registerInvokeHandler('share_profile', () => {
+      publishCalls++;
+      if (publishCalls === 1) {
+        throw new Error(missingBundlesError('My Pack', ['BrokenA', 'BrokenB']));
+      }
+      return shareOk;
+    });
+    registerInvokeHandler('repair_mod', async (args) => ({
+      name: String(args?.name ?? ''),
+      version: '1.0',
+      enabled: true,
+      files: [],
+      source: null,
+      hash: null,
+      dependencies: [],
+      size_bytes: 0,
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    const publishBtn = await screen.findByRole('button', { name: /Publish/ });
+    await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
+    await user.click(publishBtn);
+    await screen.findByRole('heading', {
+      name: /Some mods need repair before sharing/i,
+    });
+    await user.click(screen.getByRole('button', { name: /Repair these mods/i }));
+    // Auto-retry kicks in once both repairs succeed → publish lands the
+    // success state with the share code.
+    await waitForModalTitle('Modpack published');
+    expect(publishCalls).toBe(2);
+    // Both repairs were attempted.
+    const repairCalls = getInvokeCalls().filter((c) => c.cmd === 'repair_mod');
+    expect(repairCalls.length).toBe(2);
+  });
+
+  it('missing-bundles panel: Cancel closes the modal', async () => {
+    tokenIsSet(true);
+    registerInvokeHandler('share_profile', () => {
+      throw new Error(missingBundlesError('My Pack', ['X']));
+    });
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    render(<Wrap onClose={onClose} />);
+    const publishBtn = await screen.findByRole('button', { name: /Publish/ });
+    await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
+    await user.click(publishBtn);
+    await screen.findByRole('heading', {
+      name: /Some mods need repair before sharing/i,
+    });
+    // Use the panel's Cancel button — the modal footer is hidden while
+    // the panel owns the action surface, so there's only one Cancel.
+    await user.click(screen.getByRole('button', { name: /Cancel/i }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('missing-bundles panel: re-share path also gets the inline recovery UX', async () => {
+    tokenIsSet(true);
+    let publishCalls = 0;
+    registerInvokeHandler('reshare_profile', () => {
+      publishCalls++;
+      if (publishCalls === 1) {
+        throw new Error(missingBundlesError('My Pack', ['Solo尖塔铭者卡图强化']));
+      }
+      return shareOk;
+    });
+    registerInvokeHandler('repair_mod', async (args) => ({
+      name: String(args?.name ?? ''),
+      version: '1.0',
+      enabled: true,
+      files: [],
+      source: null,
+      hash: null,
+      dependencies: [],
+      size_bytes: 0,
+    }));
+    const user = userEvent.setup();
+    render(<Wrap isReshare />);
+    const pushBtn = await screen.findByRole('button', { name: /Push update/ });
+    await waitFor(() => { expect(pushBtn).not.toBeDisabled(); });
+    await user.click(pushBtn);
+    await screen.findByRole('heading', {
+      name: /Some mods need repair before sharing/i,
+    });
+    // Chinese mod name from Solo's actual bug report renders unmangled.
+    expect(screen.getByText('Solo尖塔铭者卡图强化')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Repair these mods/i }));
+    await waitForModalTitle('Update pushed');
+    // Auto-retry called reshare_profile a second time, not share_profile.
+    const reshareCalls = getInvokeCalls().filter(
+      (c) => c.cmd === 'reshare_profile',
+    );
+    expect(reshareCalls.length).toBe(2);
+    expect(
+      getInvokeCalls().some((c) => c.cmd === 'share_profile'),
+    ).toBe(false);
+  });
+
+  it('missing-bundles panel: partial repair failure keeps panel open without auto-retry', async () => {
+    tokenIsSet(true);
+    let publishCalls = 0;
+    registerInvokeHandler('share_profile', () => {
+      publishCalls++;
+      throw new Error(missingBundlesError('My Pack', ['Good', 'Bad']));
+    });
+    registerInvokeHandler('repair_mod', (args) => {
+      if (args?.name === 'Bad') throw new Error('locked file');
+      return {
+        name: String(args?.name ?? ''),
+        version: '1.0',
+        enabled: true,
+        files: [],
+        source: null,
+        hash: null,
+        dependencies: [],
+        size_bytes: 0,
+      };
+    });
+    const user = userEvent.setup();
+    render(<Wrap />);
+    const publishBtn = await screen.findByRole('button', { name: /Publish/ });
+    await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
+    await user.click(publishBtn);
+    await screen.findByRole('heading', {
+      name: /Some mods need repair before sharing/i,
+    });
+    await user.click(screen.getByRole('button', { name: /Repair these mods/i }));
+    // Wait for the failure marker to appear.
+    await waitFor(() => {
+      expect(screen.getByText(/Failed/i)).toBeInTheDocument();
+    });
+    // Publish should still be at count 1 — auto-retry must not fire
+    // when one mod failed (it would just produce the same error).
+    expect(publishCalls).toBe(1);
+    // Modal title should still say "Publish My Pack" — we never reached
+    // the success state.
+    expect(screen.queryByText(/Modpack published/)).toBeNull();
+    // "Open mod folder" link surfaces for the failed mod.
+    expect(
+      screen.getByRole('button', { name: /Open mod folder/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('non-missing-bundles publish error still surfaces the toast (existing path)', async () => {
+    // Regression guard: ensures the new pattern matcher doesn't swallow
+    // generic publish errors. Network/GitHub failures must still go
+    // through the toast like they did before.
+    tokenIsSet(true);
+    registerInvokeHandler('share_profile', () => {
+      throw new Error('GitHub API rate limit exceeded (60/hour)');
+    });
+    const user = userEvent.setup();
+    render(<Wrap />);
+    const publishBtn = await screen.findByRole('button', { name: /Publish/ });
+    await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
+    await user.click(publishBtn);
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Failed to publish: GitHub API rate limit/),
+      ).toBeInTheDocument();
+    });
+    // The inline panel must NOT appear — this isn't a missing-bundles error.
+    expect(
+      screen.queryByRole('heading', {
+        name: /Some mods need repair before sharing/i,
+      }),
+    ).toBeNull();
+  });
+
   it('shows "Publishing…" busy footer while share_profile is pending', async () => {
     tokenIsSet(true);
     let resolveShare!: (v: typeof shareOk) => void;
@@ -455,7 +711,7 @@ describe('<PublishModal>', () => {
     // Header close button is disabled while busy.
     expect(screen.getByTitle('Close')).toBeDisabled();
     resolveShare(shareOk);
-    await waitForModalTitle('Profile published');
+    await waitForModalTitle('Modpack published');
   });
 
   it('share-progress listener: bundling event renders mod counter + progress bar', async () => {
@@ -501,7 +757,7 @@ describe('<PublishModal>', () => {
       expect(screen.queryByText(/Bundling mod 3 of 10/)).toBeNull();
     });
     resolveShare(shareOk);
-    await waitForModalTitle('Profile published');
+    await waitForModalTitle('Modpack published');
   });
 
   it('share-progress listener: uploading-manifest stage shows manifest copy', async () => {
@@ -530,9 +786,9 @@ describe('<PublishModal>', () => {
         mod_name: null,
       },
     });
-    await screen.findByText(/Uploading profile manifest/);
+    await screen.findByText(/Uploading modpack manifest/);
     resolveShare(shareOk);
-    await waitForModalTitle('Profile published');
+    await waitForModalTitle('Modpack published');
   });
 
   it('does not close on backdrop click while busy', async () => {
@@ -553,7 +809,7 @@ describe('<PublishModal>', () => {
     fireEvent.click(backdrop);
     expect(onClose).not.toHaveBeenCalled();
     resolveShare(shareOk);
-    await waitForModalTitle('Profile published');
+    await waitForModalTitle('Modpack published');
   });
 
   // ── Success state copy buttons (lines 335-351) ────────────────────
@@ -577,7 +833,7 @@ describe('<PublishModal>', () => {
     const publishBtn = await screen.findByRole('button', { name: /Publish/ });
     await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
     await user.click(publishBtn);
-    await waitForModalTitle('Profile published');
+    await waitForModalTitle('Modpack published');
     return user;
   }
 
@@ -667,7 +923,7 @@ describe('<PublishModal>', () => {
     const publishBtn = await screen.findByRole('button', { name: /Publish/ });
     await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
     await user.click(publishBtn);
-    await waitForModalTitle('Profile published');
+    await waitForModalTitle('Modpack published');
     expect(screen.queryByRole('button', { name: /Open my profiles repo/ })).toBeNull();
   });
 
@@ -680,7 +936,7 @@ describe('<PublishModal>', () => {
     const publishBtn = await screen.findByRole('button', { name: /Publish/ });
     await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
     await user.click(publishBtn);
-    await waitForModalTitle('Profile published');
+    await waitForModalTitle('Modpack published');
     await user.click(screen.getByRole('button', { name: 'Done' }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
@@ -830,7 +1086,7 @@ describe('<PublishModal>', () => {
       await user.click(radios[1]);
     }
     await user.click(publishBtn);
-    await waitForModalTitle('Profile published');
+    await waitForModalTitle('Modpack published');
     return user;
   }
 

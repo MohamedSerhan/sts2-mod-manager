@@ -14,6 +14,7 @@ describe('canonicalShareCode', () => {
     ['JESS/aa5a-315d-61ae',                      'jess/aa5a315d61ae'],
     ['sts2mm://import/jess/AA5A-315D-61AE',      'jess/aa5a315d61ae'],
     ['sts2mm://install/JESS/AA5A-315D-61AE',     'jess/aa5a315d61ae'],
+    ['sts2mm://load/jess/AA5A-315D-61AE',        'jess/aa5a315d61ae'],
   ])('canonicalizes %s', (input, expected) => {
     expect(canonicalShareCode(input)).toBe(expected);
   });
@@ -35,6 +36,25 @@ describe('canonicalShareCode', () => {
 
   it('trims whitespace', () => {
     expect(canonicalShareCode('  jess/AA5A-315D-61AE  ')).toBe('jess/aa5a315d61ae');
+  });
+
+  // Deep-link action whitelist: previously the regex `^[a-z]+\//i` would
+  // strip ANY alphabetic prefix, meaning a crafted `sts2mm://foo/owner/CODE`
+  // would silently become a share-code attempt. Tightening to the known
+  // verbs (import|install|load) makes unrecognized actions fall through to
+  // the "didn't recognize this code" branch.
+  it('does NOT strip unknown action prefixes (`foo/`)', () => {
+    // `sts2mm://foo/jess/AA5A-315D-61AE` — with the old permissive regex,
+    // `foo/` would be stripped and this would canonicalize to
+    // `jess/aa5a315d61ae`. With the whitelist, `foo` survives as the
+    // owner and the rest (which contains a slash) lands in the code.
+    // The exact canonical value isn't load-bearing; what matters is that
+    // it is NOT equal to the legitimate `jess/aa5a315d61ae` code.
+    const out = canonicalShareCode('sts2mm://foo/jess/AA5A-315D-61AE');
+    expect(out).not.toBe('jess/aa5a315d61ae');
+    // Owner half should be `foo`, not `jess` — proves the verb-strip
+    // didn't run.
+    expect(out?.startsWith('foo/')).toBe(true);
   });
 });
 

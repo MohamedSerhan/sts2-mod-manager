@@ -25,7 +25,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/hero-home.png?v=1" alt="STS2 Mod Manager Home view — active profile hero with Launch and share-code Quick Add" width="900" />
+  <img src="docs/screenshots/hero-home.png?v=1" alt="STS2 Mod Manager Home view — active modpack hero with Launch and a share-code chip" width="900" />
 </p>
 
 ---
@@ -59,8 +59,11 @@ exist elsewhere:
   versions; a curator's modpack update can still toggle your pinned
   mods. This one prevents that.
 - **No account, no telemetry.** Open source, MIT, ships standalone.
-  Network calls go to GitHub releases and (optionally) the Nexus API.
-  Nothing else leaves the app.
+  Network calls go to GitHub releases and (optionally) the Nexus API. The
+  only other outbound traffic is opt-in: if you hit **Report a bug**, a
+  redacted diagnostic report (tokens, file paths, and your username stripped)
+  is uploaded so it can be linked in a GitHub issue — nothing leaves the app
+  unless you choose to send it.
 
 ---
 
@@ -72,27 +75,29 @@ the game-version, mod-source, and share pipelines all read what the game and
 mods ship today rather than baking in current values. PRs welcome; the codebase
 is small enough that most additions are straightforward.
 
-If you hit a bug, the **Home footer → Generate support bundle** button
-copies a redacted text report (recent logs, mod list, profile state) to your
-clipboard for pasting into a GitHub issue.
+If you hit a bug, the **Home footer → Report a bug** button builds a redacted
+report (recent logs, mod list, active modpack + load order, app and game
+version) and opens a prefilled GitHub issue. On official release builds the
+full report is uploaded and linked automatically — no token, nothing
+truncated; otherwise the full report is copied to your clipboard to paste in.
 
 ---
 
 ## Features
 
-### Profiles & sharing
-- **Profile import — code or link.** Paste a friend's `username/CODE` share
-  code on Home, or click an `sts2mm://import/username/CODE` link they sent
-  you. The app installs the pack: bundled mods and GitHub releases pull
-  automatically; Nexus-only mods that weren't bundled surface as pending
-  so you know what to grab.
+### Modpacks & sharing
+- **Modpack import — code or link.** Paste a friend's `username/CODE` share
+  code into the **Modpacks** page (Quick-Add), or click an
+  `sts2mm://import/username/CODE` link they sent you. The app installs the
+  pack: bundled mods and GitHub releases pull automatically; Nexus-only mods
+  that weren't bundled surface as pending so you know what to grab.
 - **Smart link handling.** A click on a share link routes through the same
   logic as paste: brand-new pack installs after a confirm; pack you
   already have asks to switch or apply a pending update; pack you're
   already on shows a friendly "you're up to date" toast.
 - **Same-code re-share.** Re-publishing a profile reuses the same share code —
   followers see "update available" instead of having to follow a new code.
-- **Profile switcher.** Top-bar profile chip → popover with every pack;
+- **Modpack switcher.** Top-bar modpack chip → popover with every pack;
   one click to activate.
 - **Drift detection.** If your mods on disk diverge from the active profile's
   manifest, you get a banner with a one-click Repair (re-applies the manifest).
@@ -183,8 +188,8 @@ manager project repo can't be acted on from here.
   Added only.
 - **One-click install for GitHub cards.** Nexus cards open the mod's Files
   page in your browser — see the Nexus note below.
-- **Browse Modpacks.** Sidebar → Browse Modpacks shows public modpacks
-  people have opted into listing. Each pack is one click to install
+- **Browse Modpacks.** The **Browse** tab on the Modpacks page shows public
+  modpacks people have opted into listing. Each pack is one click to install
   (same smart-import flow as paste-a-code). Your own packs default to
   unlisted — when you Share or Re-share, the Publish dialog has a
   Visibility option — Friends only (default) or Public. You can flip
@@ -213,14 +218,17 @@ manager project repo can't be acted on from here.
   so you can roll forward again if the restored state isn't what you wanted.
 
 ### Audit
-- **Settings → Audit** runs a scan that compares each installed mod against
-  its source. Color-coded LEDs show up-to-date / has-update / no-compatible-release.
+- **Check for updates** scans each installed mod against its source and shows
+  up-to-date / has-update / no-compatible-release. Run it from **Mod Library**
+  for every mod, or from a modpack's detail page to check just that pack's
+  mods.
 - **Per-row pin toggle** to lock a mod at its current version even when the
   source publishes updates.
 
 ### App polish
-- **First-run onboarding wizard** — three gated steps: detect game install,
-  connect optional accounts, pick a starter profile.
+- **First-run onboarding** — a branched welcome asks whether you want to play
+  modpacks others made or make your own, then walks the matching path: detect
+  the game install, connect optional accounts, and pick a first modpack.
 - **Custom titlebar** with min / max / close controls.
 - **In-app log viewer** with filter chips (Info / Warn / Error / Debug),
   free-text search, and "Send to support" that opens a GitHub issue prefilled
@@ -314,28 +322,36 @@ link won't open the app — paste the code into Home instead.
 ## Quick start
 
 1. Install (see Download above).
-2. On first launch, the **onboarding wizard** runs. Steps:
+2. On first launch, the **onboarding** runs. It first asks whether you want to
+   play modpacks others made or make your own, then walks you through:
    1. **Find Slay the Spire 2** — auto-detected from Steam, or pick the
       install folder manually.
    2. **Connect accounts (optional)** — paste a Nexus API key for Nexus
       browsing; sign in to GitHub for higher API limits. You can skip both.
-   3. **Pick your first profile** — start vanilla, follow a friend's code, or
+   3. **Pick your first modpack** — start vanilla, follow a friend's code, or
       import a JSON.
 3. Hit the **Launch STS2** button in the top bar. An auto-backup runs first.
 
 That's it. Day-to-day usage from there:
 
-- Friend sends you a code? Paste it on Home and hit **Add Pack**.
+- Friend sends you a code? Open the **Modpacks** page and paste it into
+  Quick-Add.
 - Friend sends you an `sts2mm://import/...` link? Just click it — the app
   opens and routes you through the right action (install, switch, sync, or
   "you're already on it").
-- Modpack out of date? Profiles → **Update all** on the active pack.
+- Following someone's pack and they pushed an update? Home shows a **Sync**
+  button (with **View changes**) on the active pack, and the **Modpacks**
+  sidebar item carries a badge for any other followed pack with a pending
+  update.
+- Want newer GitHub releases for your own mods? Open the modpack and run its
+  updates check — pinned mods are skipped.
 - Something broke after a launch? Settings → Backups → **Restore** the most
   recent.
-- Want to publish your own pack? Profiles → **Share** (paper-plane icon on
-  the row). The app gives you back both the share code and a paste-ready
-  message with the `sts2mm://` link so you can drop it into Discord and
-  friends with the manager installed can click straight through.
+- Want to publish your own pack? Open it in **Modpacks** and hit **Share**
+  (or **Share this pack** on Home). The app gives you back both the share
+  code and a paste-ready message with the `sts2mm://` link so you can drop it
+  into Discord and friends with the manager installed can click straight
+  through.
 
 ---
 
@@ -362,14 +378,17 @@ and exposed to TS via [src/hooks/useTauri.ts](src/hooks/useTauri.ts).
 ```
 src/
   App.tsx                 # chrome (titlebar, sidebar, top bar, banners)
-  views/                  # Home / Profiles / Mods / Browse Mods / Browse Modpacks / Settings / Tutorial
+  views/                  # Home / Profiles / Mods / Browse / BrowseModpacks / Settings / Help
+                          # (user-facing: Profiles = Modpacks, Mods = Mod Library;
+                          #  Help also opens as a top-bar drawer — HelpDrawer)
   components/             # Button, Card, Toggle, Badge, Input,
                           # ConfirmDialog, OnboardingOverlay,
                           # ProfileSwitcher, KebabMenu, PublishModal,
                           # AutoDetectModal, QuickAddModal, BrowseDetail,
                           # SourceEditor, LogsViewer, DiagnosticBundle,
                           # LaunchSpinner, AboutCard, SubUpdateDetail,
-                          # LanguageSelect
+                          # LanguageSelect, LibraryTable, LibraryRow,
+                          # HelpDrawer, HelpHint, WhatsNewCard
   contexts/               # ToastContext, AppContext
   hooks/useTauri.ts       # all Tauri command bindings (one place)
   i18n/                   # i18next init, language detection/routing,

@@ -1,4 +1,5 @@
 mod backup;
+mod bug_report;
 mod download;
 mod downloads_watcher;
 mod error;
@@ -318,6 +319,9 @@ pub fn run() {
             profiles::export_profile_cmd,
             profiles::import_profile_cmd,
             profiles::get_profile_drift,
+            profiles::save_profile_drift,
+            bug_report::upload_bug_report,
+            bug_report::bug_report_endpoint_host,
             // Curator workflow
             updater::check_for_updates,
             updater::update_mod,
@@ -357,7 +361,7 @@ pub fn run() {
             sharing::set_modpack_listing,
             sharing::get_share_info,
             sharing::fetch_shared_profile_cmd,
-            sharing::install_shared_profile,
+            sharing::install::install_shared_profile,
             modpack_browser::fetch_modpack_browser_page,
             // Deep link
             consume_pending_deep_link,

@@ -807,8 +807,29 @@ pub(super) fn scan_mods_inner(dir: &Path, enabled: bool) -> Vec<ModInfo> {
                 }
                 // If that didn't find anything and we have a single child folder
                 // with the same name (recovery from over-nested zips), try that.
+                let mut found = false;
                 if let Some(child) = single_same_named_child(&path) {
-                    try_load_mod_from(&child, dir, enabled, &mut found_names, &mut mods);
+                    found = try_load_mod_from(&child, dir, enabled, &mut found_names, &mut mods);
+                }
+                if !found {
+                    // Multi-mod container: the folder itself contains no mod
+                    // files but wraps several sub-mod directories (e.g.
+                    // AliceDefectVisualPack/ holding four separate mods).
+                    // Try each immediate subdirectory as an independent mod.
+                    if let Ok(sub_entries) = fs::read_dir(&path) {
+                        for sub_entry in sub_entries.flatten() {
+                            let sub_path = sub_entry.path();
+                            if sub_path.is_dir() {
+                                try_load_mod_from(
+                                    &sub_path,
+                                    dir,
+                                    enabled,
+                                    &mut found_names,
+                                    &mut mods,
+                                );
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1144,6 +1165,69 @@ mod pck_only_scan_tests {
             "JSON + PCK pair must produce exactly one entry"
         );
         assert_eq!(results[0].version, "1.0.0", "JSON manifest version must win");
+    }
+
+    /// A multi-mod container folder (e.g. AliceDefectVisualPack) that wraps
+    /// several sub-mod directories must surface every contained mod individually.
+    /// Reproduces the "Alice Defect Visual Pack sub-mods invisible" report.
+    #[test]
+    fn multi_mod_container_folder_all_submods_detected() {
+        let tmp = TempDir::new().unwrap();
+        let mods_dir = tmp.path();
+
+        // Two mods with .dll + .pck, one PCK-only voice pack, one DLL-only voice mod
+        write_bytes(
+            &mods_dir
+                .join("AliceDefectPack")
+                .join("Mod1")
+                .join("Mod1.dll"),
+            b"",
+        );
+        write_bytes(
+            &mods_dir
+                .join("AliceDefectPack")
+                .join("Mod1")
+                .join("Mod1.pck"),
+            b"GDPC",
+        );
+        write_bytes(
+            &mods_dir
+                .join("AliceDefectPack")
+                .join("Mod2")
+                .join("Mod2.dll"),
+            b"",
+        );
+        write_bytes(
+            &mods_dir
+                .join("AliceDefectPack")
+                .join("Mod2")
+                .join("Mod2.pck"),
+            b"GDPC",
+        );
+        write_bytes(
+            &mods_dir
+                .join("AliceDefectPack")
+                .join("VoicePack")
+                .join("VoicePack.pck"),
+            b"GDPC",
+        );
+        write_bytes(
+            &mods_dir
+                .join("AliceDefectPack")
+                .join("VoiceMod")
+                .join("VoiceMod.dll"),
+            b"",
+        );
+
+        let results = scan_mods_inner(mods_dir, true);
+        assert_eq!(
+            results.len(),
+            4,
+            "All 4 sub-mods inside a container folder must be detected"
+        );
+        let mut names: Vec<&str> = results.iter().map(|m| m.name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(names, vec!["Mod1", "Mod2", "VoiceMod", "VoicePack"]);
     }
 
     /// pck_only_mod must not panic or return garbage for an empty file.

@@ -23,6 +23,7 @@ jobs:
       app: ${{ steps.classify.outputs.app }}
       scripts: ${{ steps.classify.outputs.scripts }}
       workflows: ${{ steps.classify.outputs.workflows }}
+      qa: ${{ steps.classify.outputs.qa }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -37,7 +38,7 @@ jobs:
             CHANGED=$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}")
           else
             # workflow_dispatch: run everything.
-            CHANGED=$(printf 'src/x\nsrc-tauri/x\nscripts/x\n.github/workflows/x\n')
+            CHANGED=$(printf 'src/x\nsrc-tauri/x\nscripts/x\n.github/workflows/x\nqa/x\n')
           fi
           printf '%s\n' "$CHANGED" | node scripts/ci-changes.mjs classify >> "$GITHUB_OUTPUT"
           echo "--- buckets ---"; printf '%s\n' "$CHANGED" | node scripts/ci-changes.mjs classify
@@ -157,7 +158,7 @@ jobs:
   # GitHub/Nexus responses). Windows-only because it targets WebView2/Edge.
   smoke:
     needs: changes
-    if: ${{ needs.changes.outputs.app == 'true' }}
+    if: ${{ needs.changes.outputs.app == 'true' || needs.changes.outputs.qa == 'true' }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5

@@ -3,21 +3,21 @@ import assert from 'node:assert/strict';
 import { classifyPaths, unreleasedBulletCount } from './ci-changes.mjs';
 
 test('classifyPaths buckets app/scripts/workflows', () => {
-  assert.deepEqual(classifyPaths(['src/App.tsx']), { app: true, scripts: false, workflows: false });
-  assert.deepEqual(classifyPaths(['src-tauri/src/lib.rs']), { app: true, scripts: false, workflows: false });
-  assert.deepEqual(classifyPaths(['src-tauri/Cargo.toml']), { app: true, scripts: false, workflows: false });
-  assert.deepEqual(classifyPaths(['package-lock.json']), { app: true, scripts: false, workflows: false });
-  assert.deepEqual(classifyPaths(['scripts/foo.mjs']), { app: false, scripts: true, workflows: false });
-  assert.deepEqual(classifyPaths(['.github/workflows/ci.yml']), { app: false, scripts: false, workflows: true });
-  assert.deepEqual(classifyPaths(['README.md', 'docs/x.md', '.claude/y']), { app: false, scripts: false, workflows: false });
+  assert.deepEqual(classifyPaths(['src/App.tsx']), { app: true, scripts: false, workflows: false, qa: false });
+  assert.deepEqual(classifyPaths(['src-tauri/src/lib.rs']), { app: true, scripts: false, workflows: false, qa: false });
+  assert.deepEqual(classifyPaths(['src-tauri/Cargo.toml']), { app: true, scripts: false, workflows: false, qa: false });
+  assert.deepEqual(classifyPaths(['package-lock.json']), { app: true, scripts: false, workflows: false, qa: false });
+  assert.deepEqual(classifyPaths(['scripts/foo.mjs']), { app: false, scripts: true, workflows: false, qa: false });
+  assert.deepEqual(classifyPaths(['.github/workflows/ci.yml']), { app: false, scripts: false, workflows: true, qa: false });
+  assert.deepEqual(classifyPaths(['README.md', 'docs/x.md', '.claude/y']), { app: false, scripts: false, workflows: false, qa: false });
 });
 
 test('classifyPaths ignores src-tauri/target, handles mixed + empty/null', () => {
-  assert.deepEqual(classifyPaths(['src-tauri/target/release/x']), { app: false, scripts: false, workflows: false });
-  assert.deepEqual(classifyPaths(['src/a.ts', 'scripts/b.mjs']), { app: true, scripts: true, workflows: false });
-  assert.deepEqual(classifyPaths([]), { app: false, scripts: false, workflows: false });
-  assert.deepEqual(classifyPaths(null), { app: false, scripts: false, workflows: false });
-  assert.deepEqual(classifyPaths([null, 42, 'src/a.ts']), { app: true, scripts: false, workflows: false });
+  assert.deepEqual(classifyPaths(['src-tauri/target/release/x']), { app: false, scripts: false, workflows: false, qa: false });
+  assert.deepEqual(classifyPaths(['src/a.ts', 'scripts/b.mjs']), { app: true, scripts: true, workflows: false, qa: false });
+  assert.deepEqual(classifyPaths([]), { app: false, scripts: false, workflows: false, qa: false });
+  assert.deepEqual(classifyPaths(null), { app: false, scripts: false, workflows: false, qa: false });
+  assert.deepEqual(classifyPaths([null, 42, 'src/a.ts']), { app: true, scripts: false, workflows: false, qa: false });
 });
 
 test('classifyPaths flags root build/test config + public as app, not qa/registry', () => {
@@ -27,6 +27,15 @@ test('classifyPaths flags root build/test config + public as app, not qa/registr
   for (const p of ['qa/runner/x.mjs', 'registry/registry.json', 'AGENTS.md', 'README.md']) {
     assert.equal(classifyPaths([p]).app, false, `${p} should NOT be app`);
   }
+});
+
+test('classifyPaths flags qa/ as the qa bucket (triggers smoke), not app/scripts', () => {
+  const r = classifyPaths(['qa/runner/smoke.mjs']);
+  assert.equal(r.qa, true, 'qa/ is the qa bucket');
+  assert.equal(r.app, false, 'qa/ is not app');
+  assert.equal(r.scripts, false, 'qa/ is not scripts (that is top-level scripts/)');
+  assert.equal(classifyPaths(['scripts/x.mjs']).qa, false);
+  assert.equal(classifyPaths(['src/a.ts']).qa, false);
 });
 
 test('unreleasedBulletCount counts bullets under [Unreleased] only', () => {

@@ -1,0 +1,72 @@
+name: Release suggester
+# When a PR adds a user-facing CHANGELOG [Unreleased] entry, comment the suggested
+# bump + a link to the Release workflow. Suggest-only — this never cuts a release.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+permissions:
+  contents: read
+  pull-requests: write
+concurrency:
+  group: release-suggester-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  suggest:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number }}
+      MARKER: "<!-- release-suggester -->"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: Decide release-worthiness + bump
+        id: decide
+        run: |
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_COUNT=$(node scripts/ci-changes.mjs unreleased-count < CHANGELOG.md)
+          BASE_COUNT=$(git show "$BASE_SHA:CHANGELOG.md" 2>/dev/null | node scripts/ci-changes.mjs unreleased-count || echo 0)
+          echo "base=$BASE_COUNT head=$HEAD_COUNT"
+          if [ "$HEAD_COUNT" -gt "$BASE_COUNT" ]; then
+            BUMP=$(node scripts/ci-changes.mjs suggested-bump < CHANGELOG.md)
+            echo "worthy=true" >> "$GITHUB_OUTPUT"
+            echo "bump=${BUMP:-minor}" >> "$GITHUB_OUTPUT"
+          else
+            echo "worthy=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Find existing marked comment
+        id: find
+        run: |
+          ID=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+                 --jq "[.[] | select(.body | startswith(\"$MARKER\"))][0].id // empty")
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+      - name: Post or update suggestion
+        if: ${{ steps.decide.outputs.worthy == 'true' }}
+        run: |
+          RUN_URL="${{ github.server_url }}/$REPO/actions/workflows/release.yml"
+          DEF_URL="${{ github.server_url }}/$REPO/blob/main/RELEASING.md"
+          BODY=$(printf '%s\n' \
+            "$MARKER" \
+            "🚀 **Release-worthy** — this PR adds a user-facing change ([what counts]($DEF_URL))." \
+            "" \
+            "Suggested bump: **${{ steps.decide.outputs.bump }}**." \
+            "" \
+            "Once it merges, ship it (plus anything else queued on \`main\`) → **[Run the Release workflow]($RUN_URL)**, pick the bump, and Run.")
+          if [ -n "${{ steps.find.outputs.id }}" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/${{ steps.find.outputs.id }}" -f body="$BODY" >/dev/null
+            echo "Updated existing comment."
+          else
+            gh pr comment "$PR" --repo "$REPO" --body "$BODY"
+            echo "Posted new comment."
+          fi
+      - name: Remove stale suggestion
+        if: ${{ steps.decide.outputs.worthy == 'false' && steps.find.outputs.id != '' }}
+        run: |
+          gh api -X DELETE "repos/$REPO/issues/comments/${{ steps.find.outputs.id }}" >/dev/null
+          echo "Removed stale suggestion."

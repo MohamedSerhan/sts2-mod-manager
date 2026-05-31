@@ -79,7 +79,9 @@ jobs:
           cache: "npm"
       - run: npm ci
       - name: Frontend tests (vitest)
-        run: npm test
+        # qa:unit = `vitest run` only. (`npm test` would ALSO run cargo test,
+        # which the test-rust job already covers — avoid the duplicate.)
+        run: npm run qa:unit
 
   test-rust:
     needs: changes

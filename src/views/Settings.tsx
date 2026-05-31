@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { GITHUB_TOKEN_TEMPLATE_URL } from '../lib/githubLinks';
 import { open } from '@tauri-apps/plugin-dialog';
+import { downloadDir } from '@tauri-apps/api/path';
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { Card } from '../components/Card';
@@ -64,6 +65,11 @@ export function SettingsView() {
   const [launchMode, setLaunchModeValue] = useState<LaunchMode>('steam');
   const [savingLaunchMode, setSavingLaunchMode] = useState(false);
   const [nexusDownloadDir, setNexusDownloadDirValue] = useState<string | null>(null);
+  // The OS default Downloads folder, resolved once on mount. Shown in the
+  // read-only path box when no custom folder is set, so the box always names
+  // the folder actually being watched — the backend watcher falls back to this
+  // same directory (dirs::download_dir()) when nexus_download_dir is unset.
+  const [defaultDownloadDir, setDefaultDownloadDir] = useState<string | null>(null);
 
   // ── Accounts ────────────────────────────────────────
   const [nexusKey, setNexusKey] = useState('');
@@ -109,6 +115,9 @@ export function SettingsView() {
   }, []);
   useEffect(() => {
     getNexusDownloadDir().then(setNexusDownloadDirValue).catch(() => {});
+  }, []);
+  useEffect(() => {
+    downloadDir().then(setDefaultDownloadDir).catch(() => {});
   }, []);
 
   // The `mod-auto-installed` event handler that auto-refreshes audit rows
@@ -520,7 +529,7 @@ export function SettingsView() {
                   <input
                     className="gf-set-input"
                     readOnly
-                    value={nexusDownloadDir ?? ''}
+                    value={nexusDownloadDir ?? defaultDownloadDir ?? ''}
                     placeholder={t('settings.general.nexusDownloadDirDefault')}
                     style={{ flex: 1, cursor: 'default' }}
                   />
@@ -536,7 +545,7 @@ export function SettingsView() {
                 <div className="gf-help muted">
                   <span>
                     {nexusDownloadDir
-                      ? t('settings.general.nexusDownloadDirCustom', { path: nexusDownloadDir })
+                      ? t('settings.general.nexusDownloadDirCustom')
                       : t('settings.general.nexusDownloadDirDefault')}
                   </span>
                 </div>

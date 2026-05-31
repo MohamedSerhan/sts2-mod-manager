@@ -1075,7 +1075,7 @@
       "nexusDownloadDir": "Nexus 下载监控文件夹",
       "nexusDownloadDirDesc": "应用将监控此文件夹中的 Nexus 模组压缩包并自动安装。重启应用后生效。",
       "nexusDownloadDirDefault": "系统默认下载文件夹",
-      "nexusDownloadDirCustom": "自定义：{{path}}",
+      "nexusDownloadDirCustom": "自定义下载文件夹",
       "nexusDownloadDirBrowse": "浏览",
       "nexusDownloadDirReset": "重置为默认",
       "nexusDownloadDirSaved": "下载监控文件夹已更新，重启应用后生效。",

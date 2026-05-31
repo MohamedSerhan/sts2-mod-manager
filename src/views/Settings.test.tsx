@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { check as checkUpdate } from '@tauri-apps/plugin-updater';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import { downloadDir as pathDownloadDir } from '@tauri-apps/api/path';
 
 import { SettingsView } from './Settings';
 import { AllProviders } from '../__test__/providers';
@@ -1276,5 +1277,41 @@ describe('<SettingsView>', () => {
     await waitFor(() => {
       expect(screen.queryByText(/dir access denied/)).toBeInTheDocument();
     });
+  });
+
+  it('names the resolved OS default folder (not an empty box) when no custom path is set', async () => {
+    registerInvokeHandler('get_nexus_download_dir', () => null);
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText(/Nexus Download Watch Folder/i)).toBeInTheDocument(); });
+    // The read-only box shows the actual watched folder — the OS default
+    // Downloads dir (mocked to /os/Downloads) — instead of sitting empty.
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('/os/Downloads')).toBeInTheDocument();
+    });
+    // The caption labels it as the default rather than repeating the path.
+    expect(screen.getByText('OS default Downloads folder')).toBeInTheDocument();
+    expect(screen.queryByText('Custom download folder')).not.toBeInTheDocument();
+  });
+
+  it('shows the custom path and a "Custom download folder" caption once one is set', async () => {
+    registerInvokeHandler('get_nexus_download_dir', () => '/custom/dl');
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText(/Nexus Download Watch Folder/i)).toBeInTheDocument(); });
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('/custom/dl')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Custom download folder')).toBeInTheDocument();
+    // The default caption is gone — the two no longer read identically.
+    expect(screen.queryByText('OS default Downloads folder')).not.toBeInTheDocument();
+  });
+
+  it('leaves the box empty (placeholder only) if the OS default folder cannot be resolved', async () => {
+    vi.mocked(pathDownloadDir).mockResolvedValueOnce(null as never);
+    registerInvokeHandler('get_nexus_download_dir', () => null);
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText(/Nexus Download Watch Folder/i)).toBeInTheDocument(); });
+    // No custom path and no resolvable default → empty box, placeholder shows.
+    const input = screen.getByPlaceholderText('OS default Downloads folder');
+    expect(input).toHaveValue('');
   });
 });

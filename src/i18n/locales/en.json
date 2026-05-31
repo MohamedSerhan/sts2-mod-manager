@@ -1075,7 +1075,7 @@
       "nexusDownloadDir": "Nexus Download Watch Folder",
       "nexusDownloadDirDesc": "The app watches this folder for Nexus mod archives and auto-installs them. Takes effect after restarting the app.",
       "nexusDownloadDirDefault": "OS default Downloads folder",
-      "nexusDownloadDirCustom": "Custom: {{path}}",
+      "nexusDownloadDirCustom": "Custom download folder",
       "nexusDownloadDirBrowse": "Browse",
       "nexusDownloadDirReset": "Reset to default",
       "nexusDownloadDirSaved": "Download watch folder updated. Restart the app for the change to take effect.",

@@ -360,9 +360,10 @@ checks it runs depend on what files a PR touches.
 - **App PRs** (changes under `src/`, `src-tauri/`, `public/`, `index.html`, the
   build/test config — `vite.config.ts`, `vitest.config.ts`, `tsconfig*.json` — or
   the manifests `package.json` / `src-tauri/Cargo.toml`) run the full suite:
-  - Vitest unit tests (`npm run test`)
-  - Rust tests (`cargo test`)
-  - A 3-platform build (Windows, macOS, Linux)
+  - Frontend unit tests — `npm run qa:unit` (vitest)
+  - Rust unit + integration tests — `cargo test` (`qa:rust`)
+  - A 3-platform build (Windows / macOS / Linux) — confirms it bundles everywhere
+  - A WebDriver UI smoke test — Windows, deterministic cassette (`qa:smoke:cassette`)
   - A CHANGELOG check — the PR must add a bullet under `[Unreleased]`
 - **Scripts / workflows / docs PRs** (changes limited to `.github/`, `scripts/`,
   `docs/`, `*.md`) run lighter checks or none, so they stay fast and do not

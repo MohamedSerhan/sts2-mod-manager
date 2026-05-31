@@ -152,6 +152,33 @@ jobs:
           includeUpdaterJson: false
           args: ${{ matrix.args }}
 
+  # Tier-2 UI smoke: WebDriver (tauri-driver -> msedgedriver -> WebView2) drives
+  # the built Windows app through a deterministic cassette (offline, recorded
+  # GitHub/Nexus responses). Windows-only because it targets WebView2/Edge.
+  smoke:
+    needs: changes
+    if: ${{ needs.changes.outputs.app == 'true' }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: Install tauri-driver
+        run: cargo install tauri-driver --version "^0.1"
+      - name: Download matching msedgedriver (reads the runner's WebView2 version)
+        run: node qa/runner/scripts/download-msedgedriver.mjs
+      - name: Build app (qa-cassette feature, --no-bundle => no signing needed)
+        run: npm run qa:smoke:build
+      - name: WebDriver smoke (deterministic cassette)
+        run: npm run qa:smoke:cassette
+
   script-tests:
     needs: changes
     if: ${{ needs.changes.outputs.scripts == 'true' }}
@@ -204,7 +231,7 @@ jobs:
 
   ci-gate:
     name: CI Gate
-    needs: [changes, compile, test-frontend, test-rust, app-build, script-tests, workflow-lint, changelog]
+    needs: [changes, compile, test-frontend, test-rust, app-build, smoke, script-tests, workflow-lint, changelog]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -217,6 +244,7 @@ jobs:
           check "test-frontend" "${{ needs.test-frontend.result }}"
           check "test-rust"     "${{ needs.test-rust.result }}"
           check "app-build"     "${{ needs.app-build.result }}"
+          check "smoke"         "${{ needs.smoke.result }}"
           check "script-tests"  "${{ needs.script-tests.result }}"
           check "workflow-lint" "${{ needs.workflow-lint.result }}"
           check "changelog"     "${{ needs.changelog.result }}"

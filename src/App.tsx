@@ -551,12 +551,15 @@ function AppInner() {
           const mod = await installModFromFile(filePath);
           if (pack) {
             try {
-              await setProfileModMembership(pack, mod.name, mod.folder_name ?? null, mod.mod_id ?? null, true);
-              // Only enable when it isn't already active — toggleMod errors on
-              // an already-active mod (it looks in mods_disabled).
+              // Enable it in the live game folder FIRST when dropping into the
+              // active pack: toggle_mod guards on the game running (and can
+              // fail the move) while the membership write doesn't — toggling
+              // first keeps disk + manifest in sync. (Only when it isn't
+              // already active; toggle_mod errors on an already-active mod.)
               if (pack === activeProfileRef.current && !mod.enabled) {
                 await toggleMod(mod.name, mod.folder_name ?? null, true);
               }
+              await setProfileModMembership(pack, mod.name, mod.folder_name ?? null, mod.mod_id ?? null, true);
               toast.success(t('app.toast.installedModToPack', { name: mod.name, pack }));
             } catch {
               // Membership failed — the mod is still installed on disk.
@@ -644,7 +647,7 @@ function AppInner() {
         <div className="gf-titlebar-app" data-tauri-drag-region>
           <div className="gf-titlebar-mark" data-tauri-drag-region>✦</div>
           <span className="gf-titlebar-title" data-tauri-drag-region>{t('app.windowTitle')}</span>
-          {isDev && <span className="gf-titlebar-dev" title="Development build">{t('app.devBadge')}</span>}
+          {isDev && <span className="gf-titlebar-dev" title={t('app.devBuildTitle')}>{t('app.devBadge')}</span>}
         </div>
         <div className="gf-titlebar-controls">
           <button className="gf-titlebar-btn" title={t('app.minimize')} onClick={handleTitlebarMin}>

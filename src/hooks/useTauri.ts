@@ -533,3 +533,27 @@ export async function openLogFile(): Promise<boolean> {
 export async function readLogTail(lines: number = 500): Promise<string> {
   return invoke('read_log_tail', { lines });
 }
+
+// ── Dev builds (dev-build-only Settings panel) ───────────────────────────────
+
+export interface DevBuildAsset { name: string; url: string; platform: string; }
+export interface DevBuild {
+  pr: number;
+  sha: string;
+  title: string;
+  published_at: string;
+  windows_installer_url: string | null;
+  manifest_url: string | null;
+  assets: DevBuildAsset[];
+}
+
+/** List the open PRs that currently have a dev-build prerelease. */
+export async function listDevBuilds(): Promise<DevBuild[]> {
+  return invoke('list_dev_builds');
+}
+
+/** Point the (Dev) slot at the dev build published at `manifestUrl` and
+ *  trigger the updater to switch to it. */
+export async function switchDevBuild(manifestUrl: string): Promise<void> {
+  return invoke('switch_dev_build', { manifestUrl });
+}

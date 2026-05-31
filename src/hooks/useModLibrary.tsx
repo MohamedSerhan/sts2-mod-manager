@@ -169,6 +169,13 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
    *  flip it on when it's actually stored. */
   async function addToTargetPack(mod: ModInfo) {
     if (!targetPack) return;
+    // Flip it ON in the live game folder FIRST when the target is the active
+    // pack: toggle_mod guards on the game running (and can fail the move) while
+    // the membership write doesn't — toggling first keeps disk + manifest in
+    // sync instead of recording a membership the live folder never received.
+    if (activeProfile === targetPack && !mod.enabled) {
+      await toggleMod(mod.name, mod.folder_name ?? null, true);
+    }
     await setProfileModMembership(
       targetPack,
       mod.name,
@@ -176,9 +183,6 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
       mod.mod_id ?? null,
       true,
     );
-    if (activeProfile === targetPack && !mod.enabled) {
-      await toggleMod(mod.name, mod.folder_name ?? null, true);
-    }
   }
 
   // A followed (subscribed) pack isn't ours to edit, so installing a mod "into"

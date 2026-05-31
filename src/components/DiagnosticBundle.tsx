@@ -139,7 +139,7 @@ export function DiagnosticBundle({ open, onClose }: Props) {
       }),
       '',
       t('diagnosticBundle.reportActiveProfileSection'),
-      t('diagnosticBundle.reportProfileName', { name: activeProfile || 'Vanilla' }),
+      t('diagnosticBundle.reportProfileName', { name: activeProfile || t('common.vanilla') }),
       ...(loadOrderLines.length
         ? ['', t('diagnosticBundle.reportLoadOrderSection'), ...loadOrderLines]
         : []),
@@ -147,7 +147,7 @@ export function DiagnosticBundle({ open, onClose }: Props) {
       t('diagnosticBundle.reportInstalledModsSection'),
       ...mods.map(
         (m) =>
-          `  ${m.enabled ? '✓' : '✗'} ${m.name} ${m.version}${m.pinned ? ' [frozen]' : ''}${m.github_url ? ` <${m.github_url}>` : ''}${m.nexus_url ? ` <${m.nexus_url}>` : ''}`,
+          `  ${m.enabled ? '✓' : '✗'} ${m.name} ${m.version}${m.pinned ? ` ${t('diagnosticBundle.reportFrozenMarker')}` : ''}${m.github_url ? ` <${m.github_url}>` : ''}${m.nexus_url ? ` <${m.nexus_url}>` : ''}`,
       ),
       '',
       t('diagnosticBundle.reportLogTailSection'),

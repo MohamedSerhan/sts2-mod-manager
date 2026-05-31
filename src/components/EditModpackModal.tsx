@@ -75,13 +75,18 @@ export function EditModpackModal({ profile, onClose, onSaved }: Props) {
 
     setSaving(true);
     try {
+      // Toggle the live mods/ folder BEFORE writing the manifest: toggle_mod
+      // guards on the game running (and can fail the file move) while the
+      // membership write doesn't. Doing the guarded step first keeps the two
+      // in sync — a running game aborts the whole change instead of stranding
+      // a manifest edit with no matching disk move.
       for (const m of toAdd) {
-        await setProfileModMembership(profile.name, m.name, m.folder_name ?? null, m.mod_id ?? null, true);
         if (isActive) await toggleMod(m.name, m.folder_name ?? null, true);
+        await setProfileModMembership(profile.name, m.name, m.folder_name ?? null, m.mod_id ?? null, true);
       }
       for (const m of toRemove) {
-        await setProfileModMembership(profile.name, m.name, m.folder_name ?? null, m.mod_id ?? null, false);
         if (isActive) await toggleMod(m.name, m.folder_name ?? null, false);
+        await setProfileModMembership(profile.name, m.name, m.folder_name ?? null, m.mod_id ?? null, false);
       }
       toast.success(
         t('modpack.edit.saved', { added: toAdd.length, removed: toRemove.length, name: profile.name }),

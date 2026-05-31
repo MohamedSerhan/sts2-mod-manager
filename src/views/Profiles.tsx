@@ -1267,7 +1267,14 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
                 className={`gf-modpack-card ${isActive ? 'is-active' : ''}`}
                 onClick={() => setSelectedModpack(profile.name)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
+                  // Only the card itself should activate on Enter/Space. A
+                  // keydown from a focused inner Copy chip bubbles here too;
+                  // without this guard, Enter/Space on a chip would also open
+                  // the modpack detail.
+                  if (
+                    e.target === e.currentTarget &&
+                    (e.key === 'Enter' || e.key === ' ')
+                  ) {
                     e.preventDefault();
                     setSelectedModpack(profile.name);
                   }

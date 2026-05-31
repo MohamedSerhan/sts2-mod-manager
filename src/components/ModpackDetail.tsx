@@ -252,6 +252,14 @@ export function ModpackDetail({
     if (busyKeys.has(key)) return;
     setBusy(key, true);
     try {
+      // Flip the mod ON in the game folder FIRST when this is the active
+      // pack: toggle_mod guards on the game running (and can fail the move)
+      // while the membership write doesn't. Doing the guarded step first keeps
+      // disk and manifest in sync instead of recording a membership the live
+      // mods/ folder never received.
+      if (isActive) {
+        await toggleMod(mod.name, mod.folder_name ?? null, true);
+      }
       await setProfileModMembership(
         profile.name,
         mod.name,
@@ -259,12 +267,6 @@ export function ModpackDetail({
         mod.mod_id ?? null,
         true,
       );
-      // Membership alone doesn't move files — when this is the active
-      // pack, also flip the mod ON in the game folder so the change
-      // takes effect immediately.
-      if (isActive) {
-        await toggleMod(mod.name, mod.folder_name ?? null, true);
-      }
       await refreshAfterMutation();
       toast.success(
         t('modpack.detail.added', {

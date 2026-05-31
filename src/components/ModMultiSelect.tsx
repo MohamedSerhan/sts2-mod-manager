@@ -11,9 +11,14 @@
  * so the component stays caller-agnostic (the wizard and the edit modal pass
  * their own i18n strings).
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import type { ModInfo } from '../types';
+
+// Cap the initial render so a 100+ mod library doesn't paint hundreds of
+// checkbox rows at once; a "Show more" footer pages in the rest on demand.
+const PAGE_SIZE = 50;
 
 export type ModMultiSelectSort = 'name' | 'size' | 'enabled';
 
@@ -39,11 +44,14 @@ export interface ModMultiSelectProps {
 }
 
 export function ModMultiSelect({ mods, selected, onChange, labels }: ModMultiSelectProps) {
+  const { t } = useTranslation();
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<ModMultiSelectSort>('name');
+  const [visibleLimit, setVisibleLimit] = useState(PAGE_SIZE);
 
-  // Visible list — search filter (case-insensitive, by name) then sort.
-  const visibleMods = useMemo(() => {
+  // Filtered list — search filter (case-insensitive, by name) then sort.
+  // This is the FULL match set; the render is paged below via `shownMods`.
+  const filteredMods = useMemo(() => {
     const lower = search.trim().toLowerCase();
     const list = lower
       ? mods.filter((m) => m.name.toLowerCase().includes(lower))
@@ -58,6 +66,15 @@ export function ModMultiSelect({ mods, selected, onChange, labels }: ModMultiSel
     return list;
   }, [mods, search, sort]);
 
+  // Reset paging whenever the match set changes out from under us, so the
+  // footer never reads "Showing 50 of 200" against a freshly-filtered list.
+  useEffect(() => {
+    setVisibleLimit(PAGE_SIZE);
+  }, [search, sort]);
+
+  // Only the first `visibleLimit` matches are actually rendered.
+  const shownMods = filteredMods.slice(0, visibleLimit);
+
   function toggle(modKey: string) {
     const next = new Set(selected);
     if (next.has(modKey)) next.delete(modKey);
@@ -65,12 +82,13 @@ export function ModMultiSelect({ mods, selected, onChange, labels }: ModMultiSel
     onChange(next);
   }
 
-  // Bulk select/deselect over the currently-visible (filtered) rows.
-  const allVisibleSelected =
-    visibleMods.length > 0 && visibleMods.every((m) => selected.has(m.folder_name ?? m.name));
-  function toggleSelectAllVisible() {
+  // Bulk select/deselect over the full filtered set (every search match,
+  // not just the rows currently paged into view).
+  const allFilteredSelected =
+    filteredMods.length > 0 && filteredMods.every((m) => selected.has(m.folder_name ?? m.name));
+  function toggleSelectAllFiltered() {
     const next = new Set(selected);
-    const keys = visibleMods.map((m) => m.folder_name ?? m.name);
+    const keys = filteredMods.map((m) => m.folder_name ?? m.name);
     const everyChecked = keys.length > 0 && keys.every((k) => next.has(k));
     if (everyChecked) keys.forEach((k) => next.delete(k));
     else keys.forEach((k) => next.add(k));
@@ -109,9 +127,9 @@ export function ModMultiSelect({ mods, selected, onChange, labels }: ModMultiSel
           <button
             type="button"
             className="gf-link-button"
-            onClick={toggleSelectAllVisible}
+            onClick={toggleSelectAllFiltered}
           >
-            {allVisibleSelected ? labels.deselectAll : labels.selectAll}
+            {allFilteredSelected ? labels.deselectAll : labels.selectAll}
           </button>
         )}
       </div>
@@ -119,7 +137,7 @@ export function ModMultiSelect({ mods, selected, onChange, labels }: ModMultiSel
         {mods.length === 0 && (
           <div className="gf-create-wizard-empty">{labels.noMods}</div>
         )}
-        {visibleMods.map((mod) => {
+        {shownMods.map((mod) => {
           const key = mod.folder_name ?? mod.name;
           const checked = selected.has(key);
           return (
@@ -136,6 +154,25 @@ export function ModMultiSelect({ mods, selected, onChange, labels }: ModMultiSel
           );
         })}
       </div>
+      {filteredMods.length > shownMods.length && (
+        <div className="gf-create-wizard-choose-actions">
+          <span className="gf-create-wizard-selected-count" aria-live="polite">
+            {t('profiles.library.showing', {
+              shown: shownMods.length,
+              total: filteredMods.length,
+            })}
+          </span>
+          <button
+            type="button"
+            className="gf-link-button"
+            onClick={() => setVisibleLimit((limit) => limit + PAGE_SIZE)}
+          >
+            {t('profiles.library.showMore', {
+              count: Math.min(PAGE_SIZE, filteredMods.length - shownMods.length),
+            })}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

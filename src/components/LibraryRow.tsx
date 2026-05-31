@@ -300,7 +300,14 @@ export function LibraryRow({
       onKeyDown={
         mod
           ? (event) => {
-              if (event.key === 'Enter' || event.key === ' ') {
+              // Only the row itself should activate on Enter/Space. A keydown
+              // from a focused child control (toggle, kebab, source link)
+              // bubbles up here too; without this guard it would fire the
+              // row's Edit-sources action alongside the child's own.
+              if (
+                event.target === event.currentTarget &&
+                (event.key === 'Enter' || event.key === ' ')
+              ) {
                 event.preventDefault();
                 onEditSources();
               }

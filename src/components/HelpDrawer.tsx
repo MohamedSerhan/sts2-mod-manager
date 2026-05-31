@@ -1,8 +1,9 @@
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
 
 import { HelpContent } from '../views/Help';
+import { useModalA11y } from '../hooks/useModalA11y';
 
 interface Props {
   open: boolean;
@@ -14,34 +15,31 @@ interface Props {
  * Wired up from the topbar `?` icon in App.tsx. Closes on Escape,
  * backdrop click, or the explicit close (X) button.
  *
- * The drawer renders nothing when `open` is false so the keydown
- * listener only activates while visible — no risk of a stray Escape
- * elsewhere closing a not-shown drawer and triggering side-effects.
+ * The inner panel is mounted only while `open`, so its focus management
+ * (initial focus, Tab focus-trap, Escape-to-close) attaches exactly when
+ * the drawer is shown and tears down when it closes — the same lifecycle
+ * the create/edit-modpack modals rely on via useModalA11y.
  */
 export function HelpDrawer({ open, onClose }: Props) {
-  const { t } = useTranslation();
-  // Stable handler ref so the Escape listener only re-binds when
-  // `open` flips, not on every parent re-render that ships a fresh
-  // inline `onClose` closure.
-  const onCloseRef = useRef(onClose);
-  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
-
-  useEffect(() => {
-    if (!open) return;
-    function handleEsc(e: KeyboardEvent) {
-      if (e.key === 'Escape') onCloseRef.current();
-    }
-    document.addEventListener('keydown', handleEsc);
-    return () => document.removeEventListener('keydown', handleEsc);
-  }, [open]);
-
   if (!open) return null;
+  return <HelpDrawerPanel onClose={onClose} />;
+}
+
+function HelpDrawerPanel({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation();
+  const panelRef = useRef<HTMLElement>(null);
+  // Move focus into the drawer on open, trap Tab inside it, and close on
+  // Escape — the shared modal a11y the rest of the app's dialogs use.
+  useModalA11y(panelRef, onClose);
 
   return (
     <div className="gf-drawer-backdrop" onClick={onClose}>
       <aside
+        ref={panelRef}
+        tabIndex={-1}
         className="gf-drawer gf-drawer-right"
         role="dialog"
+        aria-modal="true"
         aria-label={t('topbar.help')}
         onClick={(e) => e.stopPropagation()}
       >

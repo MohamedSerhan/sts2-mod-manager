@@ -30,11 +30,16 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 ### Changed
 
 - Reporting a bug now shows you the full report and asks you to confirm before anything is uploaded or linked publicly.
+- The mod picker for modpacks now loads large libraries in pages, staying responsive even with hundreds of mods.
 
 ### Fixed
 
 - If you haven't installed Slay the Spire 2 yet, the welcome guide no longer disappears for good — skip it for now and it comes back next launch.
 - When a mod update can't restore config files you'd edited, the manager now names exactly which ones to redo instead of dropping them quietly.
+- Changing a mod in your active modpack now keeps the modpack and your loaded mods in step, even when the game is running or a file can't be moved.
+- Pressing Enter or Space on a button inside a mod row or modpack card no longer also opens that row or card.
+- The Help panel now keeps keyboard focus inside it while open and closes on Escape, like the app's other dialogs.
+- The bug report's active-modpack name and the development-build label now follow your chosen language instead of always showing English.
 
 ### Security
 

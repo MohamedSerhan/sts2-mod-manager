@@ -498,6 +498,20 @@ export function LibraryTable({
     try {
       pinScroll();
       setMembershipSaving(key);
+      // When the modpack view treats the pack as the live loadout, mirror the
+      // membership change onto the active game folder. Do the disk toggle
+      // FIRST: toggle_mod guards on the game running (and can fail the move)
+      // while the membership write doesn't — toggling first keeps the two in
+      // sync, so a running game aborts before the manifest is touched. Only
+      // for the *active* pack and only when disk state needs to change.
+      const mirrorsToDisk =
+        coupleActiveStorage
+        && modpackName === activeProfile
+        && row.installed_enabled !== nextIncluded;
+      if (mirrorsToDisk) {
+        await toggleMod(row.name, row.folder_name, nextIncluded);
+        patchRowStorage(membershipRowKey(row), nextIncluded);
+      }
       await setProfileModMembership(
         modpackName,
         row.name,
@@ -506,19 +520,7 @@ export function LibraryTable({
         nextIncluded,
       );
       patchRowMembership(membershipRowKey(row), nextIncluded);
-      // When the modpack view treats the pack as the live loadout, mirror
-      // the membership change onto the active game folder: adding enables,
-      // removing disables. Only for the *active* pack (others aren't live)
-      // and only when disk state actually needs to change.
-      if (
-        coupleActiveStorage
-        && modpackName === activeProfile
-        && row.installed_enabled !== nextIncluded
-      ) {
-        await toggleMod(row.name, row.folder_name, nextIncluded);
-        patchRowStorage(membershipRowKey(row), nextIncluded);
-        await refreshAll();
-      }
+      if (mirrorsToDisk) await refreshAll();
       toastCtx.success(
         nextIncluded
           ? t('profiles.library.toastAdded', {

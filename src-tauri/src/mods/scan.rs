@@ -449,6 +449,64 @@ pub(crate) fn parse_manifest(manifest_path: &Path, base_dir: &Path, enabled: boo
     })
 }
 
+/// Create a ModInfo for a PCK-only mod (no JSON manifest, no DLL).
+///
+/// Skin/asset/voice mods in STS2 are often pure Godot resource packs (.pck)
+/// with no C# assembly. The engine loads them directly, so they need no
+/// .dll — but without this constructor the scanner would silently skip them.
+pub(super) fn pck_only_mod(pck_path: &Path, base_dir: &Path, enabled: bool) -> ModInfo {
+    let name = pck_path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
+    let folder_name = if pck_path.parent() == Some(base_dir) {
+        Some(name.clone())
+    } else {
+        pck_path
+            .parent()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().to_string())
+    };
+
+    let file_name = if let Ok(rel) = pck_path.strip_prefix(base_dir) {
+        rel.to_string_lossy().to_string()
+    } else {
+        pck_path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string()
+    };
+
+    let size_bytes = pck_path.metadata().map(|m| m.len()).unwrap_or(0);
+
+    ModInfo {
+        name,
+        version: "unknown".to_string(),
+        description: String::new(),
+        enabled,
+        files: vec![file_name],
+        source: None,
+        hash: hash_file(pck_path),
+        dependencies: Vec::new(),
+        size_bytes,
+        folder_name,
+        mod_id: None,
+        github_url: None,
+        nexus_url: None,
+        pinned: false,
+        min_game_version: None,
+        author: None,
+        note: None,
+        custom_url: None,
+        tags: vec![],
+        display_name: None,
+        display_description: None,
+    }
+}
+
 /// Create a ModInfo for a DLL-only mod (no JSON manifest).
 pub(super) fn dll_only_mod(dll_path: &Path, base_dir: &Path, enabled: bool) -> ModInfo {
     let name = dll_path
@@ -584,6 +642,20 @@ fn try_load_mod_from(
         let sub_path = sub_entry.path();
         if sub_path.is_file() && sub_path.extension().and_then(|e| e.to_str()) == Some("dll") {
             let info = dll_only_mod(&sub_path, base_dir, enabled);
+            found_names.insert(normalize_name(&info.name));
+            if let Some(folder) = info.folder_name.as_deref() {
+                found_names.insert(normalize_name(folder));
+            }
+            upsert_mod_dedup(mods, info, &sub_path.display().to_string());
+            return true;
+        }
+    }
+
+    // PCK-only fallback: skin/asset/voice mods ship as a .pck with no .dll/.json
+    for sub_entry in &entries {
+        let sub_path = sub_entry.path();
+        if sub_path.is_file() && sub_path.extension().and_then(|e| e.to_str()) == Some("pck") {
+            let info = pck_only_mod(&sub_path, base_dir, enabled);
             found_names.insert(normalize_name(&info.name));
             if let Some(folder) = info.folder_name.as_deref() {
                 found_names.insert(normalize_name(folder));
@@ -755,6 +827,28 @@ pub(super) fn scan_mods_inner(dir: &Path, enabled: bool) -> Vec<ModInfo> {
                 let stem_norm = normalize_name(&stem);
                 if !found_names.contains(&stem_norm) {
                     let info = dll_only_mod(&path, dir, enabled);
+                    found_names.insert(stem_norm);
+                    upsert_mod_dedup(&mut mods, info, &path.display().to_string());
+                }
+            }
+        }
+    }
+
+    // PASS 4: PCK-only fallback for top-level .pck files with no matching .json or .dll
+    // Skin/asset/voice mods ship as a standalone .pck (Godot resource pack) with
+    // no C# assembly — they are invisible to PASSes 1–3.
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("pck") {
+                let stem = path
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                let stem_norm = normalize_name(&stem);
+                if !found_names.contains(&stem_norm) {
+                    let info = pck_only_mod(&path, dir, enabled);
                     found_names.insert(stem_norm);
                     upsert_mod_dedup(&mut mods, info, &path.display().to_string());
                 }
@@ -986,5 +1080,82 @@ mod dedup_identity_tests {
             vec!["AutoPath", "BaseLib", "Zulu Active"],
             "get_installed_mods should not look alphabetized only until disabled rows are appended"
         );
+    }
+}
+
+#[cfg(test)]
+mod pck_only_scan_tests {
+    use super::{pck_only_mod, scan_mods_inner};
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn write_bytes(path: &std::path::Path, bytes: &[u8]) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, bytes).unwrap();
+    }
+
+    /// A top-level .pck with no .dll or .json must appear in the scan results.
+    /// Reproduces the "anaertailin skin mod not shown in Mod Library" case.
+    #[test]
+    fn top_level_pck_only_mod_is_detected() {
+        let tmp = TempDir::new().unwrap();
+        let mods_dir = tmp.path();
+
+        write_bytes(&mods_dir.join("SkinMod.pck"), b"GDPC");
+
+        let results = scan_mods_inner(mods_dir, true);
+        assert_eq!(results.len(), 1, "PCK-only top-level mod must be detected");
+        assert_eq!(results[0].name, "SkinMod");
+        assert!(results[0].enabled);
+        assert_eq!(results[0].version, "unknown");
+    }
+
+    /// A subdirectory containing only a .pck must also be detected.
+    #[test]
+    fn subdir_pck_only_mod_is_detected() {
+        let tmp = TempDir::new().unwrap();
+        let mods_dir = tmp.path();
+
+        write_bytes(
+            &mods_dir.join("AliceDefectPack").join("AliceDefectPack.pck"),
+            b"GDPC",
+        );
+
+        let results = scan_mods_inner(mods_dir, true);
+        assert_eq!(results.len(), 1, "PCK-only subdir mod must be detected");
+        assert_eq!(results[0].name, "AliceDefectPack");
+    }
+
+    /// A .pck already covered by a co-located .json manifest must not be
+    /// double-counted by PASS 4 (the PCK-only fallback pass).
+    #[test]
+    fn json_manifest_pck_not_double_counted() {
+        let tmp = TempDir::new().unwrap();
+        let mods_dir = tmp.path();
+
+        let json = r#"{"name":"CardMod","version":"1.0.0","description":""}"#;
+        write_bytes(&mods_dir.join("CardMod.json"), json.as_bytes());
+        write_bytes(&mods_dir.join("CardMod.pck"), b"GDPC");
+
+        let results = scan_mods_inner(mods_dir, true);
+        assert_eq!(
+            results.len(),
+            1,
+            "JSON + PCK pair must produce exactly one entry"
+        );
+        assert_eq!(results[0].version, "1.0.0", "JSON manifest version must win");
+    }
+
+    /// pck_only_mod must not panic or return garbage for an empty file.
+    #[test]
+    fn pck_only_mod_handles_empty_file() {
+        let tmp = TempDir::new().unwrap();
+        let pck = tmp.path().join("EmptyMod.pck");
+        write_bytes(&pck, b"");
+
+        let info = pck_only_mod(&pck, tmp.path(), true);
+        assert_eq!(info.name, "EmptyMod");
+        assert_eq!(info.version, "unknown");
+        assert!(!info.files.is_empty());
     }
 }

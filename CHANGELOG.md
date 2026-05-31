@@ -42,6 +42,7 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 - Pressing Enter or Space on a button inside a mod row or modpack card no longer also opens that row or card.
 - The Help panel now keeps keyboard focus inside it while open and closes on Escape, like the app's other dialogs.
 - The bug report's active-modpack name and the development-build label now follow your chosen language instead of always showing English.
+- Skin, asset, and voice mods that ship as a resource-pack file with no code now appear in the Mod Library and install correctly from Nexus.
 
 ### Security
 

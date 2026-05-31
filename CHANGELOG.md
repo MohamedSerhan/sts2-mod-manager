@@ -25,31 +25,6 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ## [Unreleased]
 
-### Added
-
-- You can now choose which folder the app watches for Nexus mod downloads in Settings → General. The change takes effect after restarting the app.
-
-### Changed
-
-- Reporting a bug now shows you the full report and asks you to confirm before anything is uploaded or linked publicly.
-- The mod picker for modpacks now loads large libraries in pages, staying responsive even with hundreds of mods.
-
-### Fixed
-
-- If you haven't installed Slay the Spire 2 yet, the welcome guide no longer disappears for good — skip it for now and it comes back next launch.
-- When a mod update can't restore config files you'd edited, the manager now names exactly which ones to redo instead of dropping them quietly.
-- Changing a mod in your active modpack now keeps the modpack and your loaded mods in step, even when the game is running or a file can't be moved.
-- Pressing Enter or Space on a button inside a mod row or modpack card no longer also opens that row or card.
-- The Help panel now keeps keyboard focus inside it while open and closes on Escape, like the app's other dialogs.
-- The bug report's active-modpack name and the development-build label now follow your chosen language instead of always showing English.
-- Skin, asset, and voice mods that ship as a resource-pack file with no code now appear in the Mod Library and install correctly from Nexus.
-
-### Security
-
----
-
-## [1.7.0] - 2026-05-29
-
 A UX simplification release. The app feels like a launcher first: pick a modpack, click Play. Power-user tools are still there, just behind progressive disclosure so they don't compete with the normal flow.
 
 ### Added
@@ -61,7 +36,8 @@ A UX simplification release. The app feels like a launcher first: pick a modpack
 - Each modpack now opens to its own detail page for managing that one pack: the mod list, a one-line status showing how many mods are active versus stored (and whether the game is running), an updates check scoped to just that modpack, a share button, and an "Add mods" menu to paste a URL, import a .zip, or open the mods folder. An "Edit" button adds or removes mods in bulk using the same picker as the Create wizard, and dragging a mod .zip onto the page adds it to that modpack.
 - Sharing a modpack now sets up GitHub inside the share flow with a plain-language explanation, instead of sending you to Settings first.
 - When a share fails because some mods can't be bundled, the app now offers to repair those mods inline and retry the share automatically.
-- "Report a bug" replaces the old support-bundle export: it builds a redacted report — app and game version, your installed mods, the active modpack's load order, and recent logs — and opens a prefilled GitHub issue. The full report is attached automatically so nothing important is cut off, and you never need a token.
+- "Report a bug" replaces the old support-bundle export: it builds a redacted report — app and game version, your installed mods, the active modpack's load order, and recent logs — and opens a prefilled GitHub issue. The full report is attached automatically so nothing important is cut off, and you never need a token. You see the full report and confirm it before anything is uploaded or linked publicly.
+- You can now choose which folder the app watches for Nexus mod downloads in Settings → General. The change takes effect after restarting the app.
 
 ### Changed
 
@@ -77,6 +53,8 @@ A UX simplification release. The app feels like a launcher first: pick a modpack
 - Inside a modpack, removing a mod is now "Remove from pack" — it stays in your library — while deleting it from disk moved into the mod's menu. Checking for updates there audits only that modpack's mods.
 - Auto-detect sources (matching installed mods to their GitHub pages) moved into each modpack's Advanced menu and now scans stored mods too.
 - Buttons always show a label instead of a bare icon, a mod's tags and badges sit beside its name where there's more room, and the leftover "beta" tags were removed.
+- The mod picker for modpacks now loads large libraries in pages, staying responsive even with hundreds of mods.
+- The Installed / Browse switch sits at the top of the Mod Library and Modpacks pages, where it reads as the primary view toggle.
 
 ### Fixed
 
@@ -89,6 +67,13 @@ A UX simplification release. The app feels like a launcher first: pick a modpack
 - Saving a modpack's drift applies only what differs from disk rather than re-snapshotting the whole install.
 - Browse Modpacks no longer loads forever when the source is slow or unreachable, and newly added mods appear in a modpack's list right after a refresh.
 - Narrow windows no longer squeeze the top bar off-screen or break headings onto one word per line.
+- If you haven't installed Slay the Spire 2 yet, the welcome guide no longer disappears for good — skip it for now and it comes back next launch.
+- When a mod update can't restore config files you'd edited, the manager now names exactly which ones to redo instead of dropping them quietly.
+- Changing a mod in your active modpack now keeps the modpack and your loaded mods in step, even when the game is running or a file can't be moved.
+- Pressing Enter or Space on a button inside a mod row or modpack card no longer also opens that row or card.
+- The Help panel now keeps keyboard focus inside it while open and closes on Escape, like the app's other dialogs.
+- The bug report's active-modpack name and the development-build label now follow your chosen language instead of always showing English.
+- Skin, asset, and voice mods that ship as a resource-pack file with no code now appear in the Mod Library and install correctly from Nexus.
 
 ### Security
 

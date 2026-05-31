@@ -1,0 +1,68 @@
+name: Auto-fix conflict watcher
+
+# A conflicting PR has its `pull_request` workflows HELD by GitHub ("awaiting conflict
+# resolution"), so the QA loop never sees it — and any `qa-passed` from before the
+# conflict appeared keeps lying that it's ready. This watcher fires regardless of
+# mergeability: it finds open `auto-fix` PRs that conflict with `main`, clears the
+# stale `qa-passed`, and routes the bot to resolve them via the existing `@claude`
+# revise flow (which is comment-triggered, so it DOES run on a conflicting PR — it
+# checks out the head branch directly, not the unavailable merge ref). After
+# MAX_ATTEMPTS unresolved tries it escalates to the maintainer instead of looping.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "23,53 * * * *"   # safety net for conflicts that no push to main triggered
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: conflict-watcher
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    env:
+      # PAT so the routed `@claude` comment triggers the revise workflow (a
+      # GITHUB_TOKEN-authored comment would not, by anti-recursion).
+      GH_TOKEN: ${{ secrets.DEV_BUILD_LABEL_TOKEN || secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+      MARKER: "<!-- conflict-watcher -->"
+      MAX_ATTEMPTS: "3"
+    steps:
+      - name: Route conflicting auto-fix PRs to the bot
+        run: |
+          set -euo pipefail
+          PRS=$(gh pr list --repo "$REPO" --state open --label auto-fix \
+                  --json number,mergeable,labels \
+                  --jq '.[] | select(.mergeable == "CONFLICTING")
+                            | select([.labels[].name] | index("qa-needs-human") | not)
+                            | .number')
+          if [ -z "$PRS" ]; then echo "No conflicting auto-fix PRs."; exit 0; fi
+          while IFS= read -r PR; do
+            [ -z "$PR" ] && continue
+            echo "PR #$PR is conflicting"
+            # All comments, flattened across pages (gh --slurp can't combine with --jq).
+            COMMENTS=$(gh api "repos/$REPO/issues/$PR/comments" --paginate --slurp | jq -c '[.[][]]')
+            ATTEMPTS=$(printf '%s' "$COMMENTS" | jq '[.[] | select(.body | startswith(env.MARKER))] | length')
+            LAST_IS_OURS=$(printf '%s' "$COMMENTS" | jq -r 'if (length==0) then "false" else (.[-1].body | startswith(env.MARKER)) end')
+            # A conflict invalidates any prior QA sign-off.
+            gh pr edit "$PR" --repo "$REPO" --remove-label qa-passed 2>/dev/null || true
+            if [ "$ATTEMPTS" -ge "$MAX_ATTEMPTS" ]; then
+              gh pr edit "$PR" --repo "$REPO" --add-label qa-needs-human 2>/dev/null || true
+              gh pr comment "$PR" --repo "$REPO" --body "$(printf '%s\n%s\n' "$MARKER" "conflict-watcher: the bot could not auto-resolve this merge conflict after $MAX_ATTEMPTS attempts. @MohamedSerhan please resolve it manually.")"
+              echo "  escalated to human"
+              continue
+            fi
+            if [ "$LAST_IS_OURS" = "true" ]; then
+              echo "  already routed; waiting on the bot"
+              continue
+            fi
+            gh pr comment "$PR" --repo "$REPO" --body "$(printf '%s\n%s\n' "$MARKER" "@claude This PR conflicts with \`main\` and cannot be merged. Merge \`origin/main\` into this branch and resolve the conflict(s) — for CHANGELOG.md, keep ALL \`[Unreleased]\` bullets from both sides (drop none) — then push. Conflict-resolution only; change nothing else.")"
+            echo "  routed to the bot"
+          done <<< "$PRS"

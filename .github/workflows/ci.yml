@@ -1,0 +1,260 @@
+name: CI
+
+# Change-aware required gate. The single `CI Gate` check (set required in branch
+# protection) passes only if every check RELEVANT to the change succeeded; a
+# correctly-skipped job counts as not-applicable. See the spec.
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      app: ${{ steps.classify.outputs.app }}
+      scripts: ${{ steps.classify.outputs.scripts }}
+      workflows: ${{ steps.classify.outputs.workflows }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: Classify changed files
+        id: classify
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CHANGED=$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}")
+          else
+            # workflow_dispatch: run everything.
+            CHANGED=$(printf 'src/x\nsrc-tauri/x\nscripts/x\n.github/workflows/x\n')
+          fi
+          printf '%s\n' "$CHANGED" | node scripts/ci-changes.mjs classify >> "$GITHUB_OUTPUT"
+          echo "--- buckets ---"; printf '%s\n' "$CHANGED" | node scripts/ci-changes.mjs classify
+
+  compile:
+    needs: changes
+    if: ${{ needs.changes.outputs.app == 'true' || needs.changes.outputs.scripts == 'true' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: TypeScript check
+        run: npx tsc --noEmit
+      - name: Cargo check
+        working-directory: src-tauri
+        run: cargo check
+
+  test-frontend:
+    needs: changes
+    if: ${{ needs.changes.outputs.app == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: Frontend tests (vitest)
+        # qa:unit = `vitest run` only. (`npm test` would ALSO run cargo test,
+        # which the test-rust job already covers — avoid the duplicate.)
+        run: npm run qa:unit
+
+  test-rust:
+    needs: changes
+    if: ${{ needs.changes.outputs.app == 'true' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Rust tests
+        run: cargo test --manifest-path=src-tauri/Cargo.toml
+
+  app-build:
+    needs: changes
+    if: ${{ needs.changes.outputs.app == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: ""
+          - platform: macos-latest
+            args: "--target universal-apple-darwin"
+          - platform: ubuntu-22.04
+            args: ""
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install system dependencies (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev squashfs-tools
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Add Rust targets (macOS universal)
+        if: matrix.platform == 'macos-latest'
+        run: |
+          rustup target add aarch64-apple-darwin
+          rustup target add x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ci-gate-${{ matrix.platform }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: Build (verify it bundles on this platform)
+        # Build-only: empty tagName => no release, no upload (includeUpdaterJson off).
+        # The signing key IS required: tauri.conf.json sets
+        # bundle.createUpdaterArtifacts: true, so the build errors without it. We still
+        # publish nothing — this just lets the bundle build so we can verify it compiles.
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ""
+          releaseName: ""
+          includeUpdaterJson: false
+          args: ${{ matrix.args }}
+
+  # Tier-2 UI smoke: WebDriver (tauri-driver -> msedgedriver -> WebView2) drives
+  # the built Windows app through a deterministic cassette (offline, recorded
+  # GitHub/Nexus responses). Windows-only because it targets WebView2/Edge.
+  smoke:
+    needs: changes
+    if: ${{ needs.changes.outputs.app == 'true' }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: Install tauri-driver
+        # 2.0.6 is the version validated against current WebView2 — 0.1.x is broken
+        # (WebView2 147+ schema change; see qa/runner/smoke.mjs). --locked for determinism.
+        run: cargo install tauri-driver --version 2.0.6 --locked
+      - name: Download matching msedgedriver (reads the runner's WebView2 version)
+        run: node qa/runner/scripts/download-msedgedriver.mjs
+      - name: Build app (qa-cassette feature, --no-bundle => no signing needed)
+        run: npm run qa:smoke:build
+      - name: WebDriver smoke (deterministic cassette)
+        run: npm run qa:smoke:cassette
+
+  script-tests:
+    needs: changes
+    if: ${{ needs.changes.outputs.scripts == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: Script unit tests
+        run: |
+          node --test scripts/nexus-triage.test.mjs
+          node --test scripts/dev-build-stamp.test.mjs
+          node --test scripts/make-dev-icon.test.mjs
+          node --test scripts/qa-pipeline.test.mjs
+          node --test scripts/ci-changes.test.mjs
+
+  workflow-lint:
+    needs: changes
+    if: ${{ needs.changes.outputs.workflows == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: YAML parse all workflows
+        run: |
+          python -c "import yaml,glob; [yaml.safe_load(open(f)) for f in glob.glob('.github/workflows/*.yml')]; print('YAML OK')"
+      - name: actionlint
+        uses: raven-actions/actionlint@v2
+        env:
+          # SC2016 (single-quoted $ won't expand) is a chronic false-positive on our
+          # run blocks that embed node -e / python -c / jq with intentional single quotes.
+          SHELLCHECK_OPTS: --exclude=SC2016
+
+  changelog:
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.app == 'true' && !contains(github.event.pull_request.labels.*.name, 'no-changelog') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: Require a new [Unreleased] CHANGELOG entry
+        run: |
+          BASE_COUNT=$(git show "${{ github.event.pull_request.base.sha }}:CHANGELOG.md" 2>/dev/null | node scripts/ci-changes.mjs unreleased-count || echo 0)
+          HEAD_COUNT=$(node scripts/ci-changes.mjs unreleased-count < CHANGELOG.md)
+          echo "[Unreleased] bullets — base: $BASE_COUNT, head: $HEAD_COUNT"
+          if [ "$HEAD_COUNT" -le "$BASE_COUNT" ]; then
+            echo "::error::App code changed but no new CHANGELOG [Unreleased] bullet was added. Add a player-language entry, or label the PR 'no-changelog' for internal-only changes."
+            exit 1
+          fi
+
+  ci-gate:
+    name: CI Gate
+    needs: [changes, compile, test-frontend, test-rust, app-build, smoke, script-tests, workflow-lint, changelog]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify every relevant check passed
+        run: |
+          fail=0
+          check() { echo "$1: $2"; if [ "$2" = "failure" ] || [ "$2" = "cancelled" ]; then fail=1; fi; }
+          check "changes"       "${{ needs.changes.result }}"
+          check "compile"       "${{ needs.compile.result }}"
+          check "test-frontend" "${{ needs.test-frontend.result }}"
+          check "test-rust"     "${{ needs.test-rust.result }}"
+          check "app-build"     "${{ needs.app-build.result }}"
+          check "smoke"         "${{ needs.smoke.result }}"
+          check "script-tests"  "${{ needs.script-tests.result }}"
+          check "workflow-lint" "${{ needs.workflow-lint.result }}"
+          check "changelog"     "${{ needs.changelog.result }}"
+          if [ "$fail" = "1" ]; then echo "::error::CI Gate failed — a relevant check did not pass."; exit 1; fi
+          echo "CI Gate passed (skipped jobs were not relevant to this change)."

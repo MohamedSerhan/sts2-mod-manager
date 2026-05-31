@@ -10,6 +10,7 @@ import {
   RotateCcw,
   Trash2,
   Play,
+  Download,
 } from 'lucide-react';
 import { GITHUB_TOKEN_TEMPLATE_URL } from '../lib/githubLinks';
 import { open } from '@tauri-apps/plugin-dialog';

@@ -190,6 +190,8 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
+          cache: "npm"
+      - run: npm ci
       - name: Script unit tests
         run: |
           node --test scripts/nexus-triage.test.mjs
@@ -209,6 +211,10 @@ jobs:
           python -c "import yaml,glob; [yaml.safe_load(open(f)) for f in glob.glob('.github/workflows/*.yml')]; print('YAML OK')"
       - name: actionlint
         uses: raven-actions/actionlint@v2
+        env:
+          # SC2016 (single-quoted $ won't expand) is a chronic false-positive on our
+          # run blocks that embed node -e / python -c / jq with intentional single quotes.
+          SHELLCHECK_OPTS: --exclude=SC2016
 
   changelog:
     needs: changes

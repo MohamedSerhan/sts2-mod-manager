@@ -15,10 +15,8 @@ jobs:
         (github.event.issue && contains(github.event.issue.body, '@claude')) ||
         (github.event.comment && contains(github.event.comment.body, '@claude'))
       )
-      && !contains(github.event.issue.labels.*.name, 'auto-fix')
-      && !contains(github.event.pull_request.labels.*.name, 'auto-fix')
-      && !contains(github.event.issue.labels.*.name, 'qa')
-      && !contains(github.event.pull_request.labels.*.name, 'qa')
+      && !(github.event.issue.pull_request && contains(github.event.issue.labels.*.name, 'auto-fix'))
+      && !(github.event.issue.pull_request && contains(github.event.issue.labels.*.name, 'qa'))
     runs-on: ubuntu-latest
     permissions:
       contents: read

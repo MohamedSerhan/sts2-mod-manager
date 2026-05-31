@@ -25,31 +25,6 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ## [Unreleased]
 
-### Added
-
-- You can now choose which folder the app watches for Nexus mod downloads in Settings → General. The change takes effect after restarting the app.
-
-### Changed
-
-- Reporting a bug now shows you the full report and asks you to confirm before anything is uploaded or linked publicly.
-- The mod picker for modpacks now loads large libraries in pages, staying responsive even with hundreds of mods.
-
-### Fixed
-
-- Mods installed from an imported or subscribed modpack now correctly show their GitHub or Nexus source links instead of appearing as unlinked.
-- If you haven't installed Slay the Spire 2 yet, the welcome guide no longer disappears for good — skip it for now and it comes back next launch.
-- When a mod update can't restore config files you'd edited, the manager now names exactly which ones to redo instead of dropping them quietly.
-- Changing a mod in your active modpack now keeps the modpack and your loaded mods in step, even when the game is running or a file can't be moved.
-- Pressing Enter or Space on a button inside a mod row or modpack card no longer also opens that row or card.
-- The Help panel now keeps keyboard focus inside it while open and closes on Escape, like the app's other dialogs.
-- The bug report's active-modpack name and the development-build label now follow your chosen language instead of always showing English.
-
-### Security
-
----
-
-## [1.7.0] - 2026-05-29
-
 A UX simplification release. The app feels like a launcher first: pick a modpack, click Play. Power-user tools are still there, just behind progressive disclosure so they don't compete with the normal flow.
 
 ### Added
@@ -98,6 +73,7 @@ A UX simplification release. The app feels like a launcher first: pick a modpack
 - Pressing Enter or Space on a button inside a mod row or modpack card no longer also opens that row or card.
 - The Help panel now keeps keyboard focus inside it while open and closes on Escape, like the app's other dialogs.
 - The bug report's active-modpack name and the development-build label now follow your chosen language instead of always showing English.
+- Mods installed from an imported or subscribed modpack now correctly show their GitHub or Nexus source links instead of appearing as unlinked.
 
 ### Security
 

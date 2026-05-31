@@ -21,7 +21,6 @@ import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../components/ConfirmDialog';
 import { LogsViewer } from '../components/LogsViewer';
-import { DiagnosticBundle } from '../components/DiagnosticBundle';
 import { LanguageSelect } from '../components/LanguageSelect';
 import { AboutCard } from '../components/AboutCard';
 import { DevBuildsCard } from '../components/DevBuildsCard';
@@ -74,9 +73,6 @@ export function SettingsView() {
 
   // ── Updates (Advanced) ──────────────────────────────
   const [checkingUpdate, setCheckingUpdate] = useState(false);
-
-  // ── Diagnostic bundle modal ─────────────────────────
-  const [showDiag, setShowDiag] = useState(false);
 
   // ── Dev-builds gate ─────────────────────────────────
   const [showDevBuilds, setShowDevBuilds] = useState(false);
@@ -697,8 +693,6 @@ export function SettingsView() {
         )}
 
       </div>
-
-      <DiagnosticBundle open={showDiag} onClose={() => setShowDiag(false)} />
     </div>
   );
 }

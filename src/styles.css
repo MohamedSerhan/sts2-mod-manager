@@ -2092,7 +2092,6 @@ body {
   gap: 4px;
   flex-wrap: wrap;
 }
-.gf-hero-shortcut-tip .gf-kbd { margin: 0 1px; }
 
 /* Launcher-first hero (1.7) ───────────────────────────────────────────
    Active state: name + meta on the left, one prominent Play button on
@@ -2659,14 +2658,6 @@ body {
 .gf-cl-rem .gf-cl-tag { background: oklch(0.55 0.16 25 / 0.18); color: oklch(0.75 0.13 25); }
 .gf-cl-tog .gf-cl-tag { background: var(--indigo-line); color: var(--ink-mute); }
 
-/* Conflict resolver */
-.gf-conflict { display: flex; flex-direction: column; gap: 6px; }
-.gf-conflict-row {
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 12px; border-radius: 7px;
-  background: oklch(0.20 0.025 270 / 0.5);
-  border: 1px solid var(--indigo-line);
-}
 .gf-mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; background: var(--indigo-line); padding: 1px 5px; border-radius: 3px; color: var(--ink-mute); font-size: 11px; }
 .gf-seg { display: flex; background: var(--indigo-side); border: 1px solid var(--indigo-line); border-radius: 6px; padding: 2px; }
 .gf-seg-btn {
@@ -2721,13 +2712,6 @@ body {
 }
 .gf-dropzone-title { font-size: 17px; font-weight: 600; color: var(--ink); }
 .gf-dropzone-sub { font-size: 12.5px; color: var(--ink-mute); margin-top: 6px; }
-
-.gf-kbd {
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 11px; padding: 2px 6px;
-  background: var(--indigo-line); border: 1px solid var(--indigo-elev);
-  border-radius: 4px; color: var(--ink); margin: 0 2px;
-}
 
 /* Load order */
 .gf-loadorder { display: flex; flex-direction: column; gap: 4px; }
@@ -3042,16 +3026,6 @@ body {
 .gf-dep-tag.have { background: oklch(0.62 0.14 145 / 0.18); color: var(--ok); }
 .gf-dep-tag.miss { background: oklch(0.65 0.18 25 / 0.18); color: oklch(0.82 0.16 25); }
 
-/* Conflict picker (per-file) */
-.gf-conflict-row {
-  display: grid; grid-template-columns: 1fr auto;
-  gap: 12px; padding: 12px;
-  border: 1px solid var(--indigo-line); border-radius: 9px;
-  margin-bottom: 8px;
-}
-.gf-conflict-name { font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 4px; }
-.gf-conflict-vers { font-size: 11.5px; color: var(--ink-mute); font-family: ui-monospace, monospace; }
-.gf-conflict-actions { display: flex; gap: 4px; }
 
 /* Diagnostic bundle list */
 .gf-diag-list { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; background: var(--indigo-deep); border: 1px solid var(--indigo-line); border-radius: 9px; }

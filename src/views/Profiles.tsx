@@ -906,6 +906,28 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
         </div>
       )}
 
+      {/* 1.7.0 — outer Installed/Browse tab strip. Kept at the very top of
+          the page so it reads as the primary view switcher (it swaps the
+          whole page between your modpacks and the browser), consistent with
+          the Mod Library page. Hidden inside the detail view (the detail's
+          own back button drives navigation). */}
+      {selectedModpack === null && (
+        <div className="gf-tabs" style={{ marginBottom: 14 }}>
+          <button
+            className={`gf-tab ${outerTab === 'yours' ? 'active' : ''}`}
+            onClick={() => setOuterTab('yours')}
+          >
+            {t('modpacks.tabs.yours')}
+          </button>
+          <button
+            className={`gf-tab ${outerTab === 'browse' ? 'active' : ''}`}
+            onClick={() => setOuterTab('browse')}
+          >
+            {t('modpacks.tabs.browse')}
+          </button>
+        </div>
+      )}
+
       {/* Header — hidden on the Browse tab because BrowseModpacksView
           renders its own view-head and stacking two would crowd the
           page. Also hidden on the detail view so the per-modpack back
@@ -995,25 +1017,6 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
               {t('modpacks.quickAdd.addBtn')}
             </Button>
           </div>
-        </div>
-      )}
-
-      {/* 1.7.0 — outer Yours/Browse tab strip. Hidden inside detail
-          view (the detail's own back button drives navigation). */}
-      {selectedModpack === null && (
-        <div className="gf-tabs" style={{ marginBottom: 14 }}>
-          <button
-            className={`gf-tab ${outerTab === 'yours' ? 'active' : ''}`}
-            onClick={() => setOuterTab('yours')}
-          >
-            {t('modpacks.tabs.yours')}
-          </button>
-          <button
-            className={`gf-tab ${outerTab === 'browse' ? 'active' : ''}`}
-            onClick={() => setOuterTab('browse')}
-          >
-            {t('modpacks.tabs.browse')}
-          </button>
         </div>
       )}
 

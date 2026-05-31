@@ -133,6 +133,25 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
 
   return (
     <div className="gf-body">
+      {/* 1.7.0 — outer Installed/Browse tab strip. Kept at the very top of
+          the page so it reads as the primary view switcher (it swaps the
+          whole page between the installed library and the mod browser),
+          consistent across the Mod Library and Modpacks pages. */}
+      <div className="gf-tabs" style={{ marginBottom: 14 }}>
+        <button
+          className={`gf-tab ${outerTab === 'installed' ? 'active' : ''}`}
+          onClick={() => setOuterTab('installed')}
+        >
+          {t('library.tabs.installed')}
+        </button>
+        <button
+          className={`gf-tab ${outerTab === 'browse' ? 'active' : ''}`}
+          onClick={() => setOuterTab('browse')}
+        >
+          {t('library.tabs.browse')}
+        </button>
+      </div>
+
       {/* Header — only on the Installed tab. The Browse tab's
           BrowseView component renders its own page-head, so we'd
           stack two headers if this stayed unconditional. */}
@@ -162,22 +181,6 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
         <ModLibraryToolbar lib={lib} />
       </div>
       )}
-
-      {/* 1.7.0 — outer Installed/Browse tab strip. */}
-      <div className="gf-tabs" style={{ marginBottom: 14 }}>
-        <button
-          className={`gf-tab ${outerTab === 'installed' ? 'active' : ''}`}
-          onClick={() => setOuterTab('installed')}
-        >
-          {t('library.tabs.installed')}
-        </button>
-        <button
-          className={`gf-tab ${outerTab === 'browse' ? 'active' : ''}`}
-          onClick={() => setOuterTab('browse')}
-        >
-          {t('library.tabs.browse')}
-        </button>
-      </div>
 
       {outerTab === 'browse' && <BrowseView onGoToSettings={onGoToSettings} />}
 

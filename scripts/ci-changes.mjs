@@ -29,6 +29,7 @@ export function classifyPaths(paths) {
     app: list.some((p) => APP_PATTERNS.some((re) => re.test(p))),
     scripts: list.some((p) => /^scripts\//.test(p)),
     workflows: list.some((p) => /^\.github\/workflows\//.test(p)),
+    qa: list.some((p) => /^qa\//.test(p)),
   };
 }
 
@@ -52,10 +53,11 @@ if (isMain) {
   const cmd = process.argv[2];
   if (cmd === 'classify') {
     const paths = readStdin().split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-    const { app, scripts, workflows } = classifyPaths(paths);
+    const { app, scripts, workflows, qa } = classifyPaths(paths);
     console.log(`app=${app}`);
     console.log(`scripts=${scripts}`);
     console.log(`workflows=${workflows}`);
+    console.log(`qa=${qa}`);
   } else if (cmd === 'unreleased-count') {
     console.log(unreleasedBulletCount(readStdin()));
   } else {

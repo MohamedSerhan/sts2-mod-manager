@@ -218,6 +218,14 @@ pub fn run() {
         }
     }
 
+    // Restore the user-configured Nexus download watch folder, if set.
+    if let Ok(mut s) = app_state.lock() {
+        if let Some(dir) = state::load_persisted_nexus_download_dir(&s.config_path.clone()) {
+            log::info!("Restored Nexus download dir from config: {}", dir.display());
+            s.nexus_download_dir = Some(dir);
+        }
+    }
+
     let mut builder = tauri::Builder::default();
 
     // Single-instance has to be the FIRST plugin so its launch-args
@@ -267,6 +275,8 @@ pub fn run() {
             game::launch_vanilla,
             game::get_launch_mode,
             game::set_launch_mode,
+            game::get_nexus_download_dir,
+            game::set_nexus_download_dir,
             game::set_github_token,
             game::get_api_key_status,
             game::get_active_profile,

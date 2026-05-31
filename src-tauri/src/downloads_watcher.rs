@@ -31,11 +31,26 @@ pub struct ModAutoInstallFailed {
     pub error: String,
 }
 
-/// Start watching the user's Downloads folder for new .zip files.
+/// Determine which directory the watcher should monitor.
+///
+/// Returns the user-configured `nexus_download_dir` from state when set;
+/// falls back to the OS default Downloads directory otherwise.
+pub(crate) fn resolve_watch_dir(state: &AppState) -> Option<PathBuf> {
+    let configured = state
+        .lock()
+        .ok()
+        .and_then(|s| s.nexus_download_dir.clone());
+    if let Some(dir) = configured {
+        return Some(dir);
+    }
+    dirs::download_dir()
+}
+
+/// Start watching the configured (or default) Downloads folder for new mod archives.
 /// Runs in a background thread for the lifetime of the app.
 pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
     std::thread::spawn(move || {
-        let downloads_dir = match dirs::download_dir() {
+        let downloads_dir = match resolve_watch_dir(&state) {
             Some(d) => d,
             None => {
                 log::warn!("Could not determine Downloads directory; watcher disabled.");
@@ -870,6 +885,32 @@ fn looks_like_mod_zip(path: &Path) -> bool {
         // isn't a known archive extension.
         "7z" | "rar" => true,
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod watcher_dir_tests {
+    use super::resolve_watch_dir;
+    use crate::state::create_app_state;
+    use std::path::PathBuf;
+
+    #[test]
+    fn resolve_watch_dir_prefers_nexus_download_dir_over_os_default() {
+        let state = create_app_state();
+        let custom = PathBuf::from("/custom/nexus/downloads");
+        {
+            let mut s = state.lock().unwrap();
+            s.nexus_download_dir = Some(custom.clone());
+        }
+        assert_eq!(resolve_watch_dir(&state), Some(custom));
+    }
+
+    #[test]
+    fn resolve_watch_dir_falls_back_to_os_default_when_not_configured() {
+        let state = create_app_state();
+        // nexus_download_dir is None by default in a fresh AppStateInner
+        let result = resolve_watch_dir(&state);
+        assert_eq!(result, dirs::download_dir());
     }
 }
 

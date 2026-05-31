@@ -2324,4 +2324,76 @@ describe('<SettingsView>', () => {
     await waitFor(() => expect(screen.getByText(/Check for updates/i)).toBeInTheDocument());
     expect(screen.queryByText('Dev Builds')).not.toBeInTheDocument();
   });
+
+  // ── Nexus Download Watch Folder card ─────────────────────────────
+
+  it('General tab calls get_nexus_download_dir on mount', async () => {
+    registerInvokeHandler('get_nexus_download_dir', () => null);
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'get_nexus_download_dir')).toBe(true);
+    });
+  });
+
+  it('Nexus Download Dir Reset button is hidden when no custom path is set', async () => {
+    registerInvokeHandler('get_nexus_download_dir', () => null);
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText(/Nexus Download Watch Folder/i)).toBeInTheDocument(); });
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'get_nexus_download_dir')).toBe(true);
+    });
+    const allBtns = screen.getAllByRole('button');
+    expect(allBtns.some((b) => /Reset to default/i.test(b.textContent ?? ''))).toBe(false);
+  });
+
+  it('Nexus Download Dir Browse button calls set_nexus_download_dir with chosen path', async () => {
+    const openMock = vi.mocked(openDialog);
+    openMock.mockResolvedValueOnce('/custom/downloads' as never);
+    registerInvokeHandler('get_nexus_download_dir', () => null);
+    registerInvokeHandler('set_nexus_download_dir', () => '/custom/downloads');
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText(/Nexus Download Watch Folder/i)).toBeInTheDocument(); });
+    // The General tab has two Browse buttons: index 0 = Game Path, index 1 = Nexus dir.
+    const browseBtns = screen.getAllByRole('button').filter((b) => /^Browse$/.test(b.textContent?.trim() ?? ''));
+    expect(browseBtns.length).toBeGreaterThanOrEqual(2);
+    await user.click(browseBtns[1]);
+    await waitFor(() => {
+      expect(getInvokeCalls().some(
+        (c) => c.cmd === 'set_nexus_download_dir' && c.args?.path === '/custom/downloads',
+      )).toBe(true);
+    });
+  });
+
+  it('Nexus Download Dir Reset button appears and calls set_nexus_download_dir with empty string', async () => {
+    registerInvokeHandler('get_nexus_download_dir', () => '/custom/downloads');
+    registerInvokeHandler('set_nexus_download_dir', () => null);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Reset to default/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /Reset to default/i }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some(
+        (c) => c.cmd === 'set_nexus_download_dir' && c.args?.path === '',
+      )).toBe(true);
+    });
+  });
+
+  it('Nexus Download Dir Browse error surfaces an error toast', async () => {
+    const openMock = vi.mocked(openDialog);
+    openMock.mockResolvedValueOnce('/bad/path' as never);
+    registerInvokeHandler('get_nexus_download_dir', () => null);
+    registerInvokeHandler('set_nexus_download_dir', () => { throw new Error('dir access denied'); });
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText(/Nexus Download Watch Folder/i)).toBeInTheDocument(); });
+    const browseBtns = screen.getAllByRole('button').filter((b) => /^Browse$/.test(b.textContent?.trim() ?? ''));
+    await user.click(browseBtns[1]);
+    await waitFor(() => {
+      expect(screen.queryByText(/dir access denied/)).toBeInTheDocument();
+    });
+  });
 });

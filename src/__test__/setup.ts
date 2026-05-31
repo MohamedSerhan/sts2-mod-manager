@@ -153,6 +153,7 @@ function registerSafeDefaults(): void {
     github_token_set: false,
   }));
   invokeHandlers.set('get_launch_mode', () => 'steam');
+  invokeHandlers.set('get_nexus_download_dir', () => null);
   invokeHandlers.set('list_backups_cmd', () => []);
   invokeHandlers.set('detect_game_path', () => ({
     game_path: null,

@@ -55,6 +55,8 @@ import {
   deleteBackup,
   getLaunchMode,
   setLaunchMode,
+  getNexusDownloadDir,
+  setNexusDownloadDir,
 } from '../hooks/useTauri';
 import type { LaunchMode } from '../hooks/useTauri';
 import type { BackupInfo, ModAuditEntry } from '../types';
@@ -78,6 +80,7 @@ export function SettingsView() {
   const [gamePath, setGamePathValue] = useState('');
   const [launchMode, setLaunchModeValue] = useState<LaunchMode>('steam');
   const [savingLaunchMode, setSavingLaunchMode] = useState(false);
+  const [nexusDownloadDir, setNexusDownloadDirValue] = useState<string | null>(null);
 
   // ── Accounts ────────────────────────────────────────
   const [nexusKey, setNexusKey] = useState('');
@@ -130,6 +133,9 @@ export function SettingsView() {
   }, []);
   useEffect(() => {
     getLaunchMode().then(setLaunchModeValue).catch(() => {});
+  }, []);
+  useEffect(() => {
+    getNexusDownloadDir().then(setNexusDownloadDirValue).catch(() => {});
   }, []);
 
   // The `mod-auto-installed` event handler that auto-refreshes audit rows
@@ -267,6 +273,33 @@ export function SettingsView() {
       toast.error(t('settings.general.failedUpdateLaunchMode', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setSavingLaunchMode(false);
+    }
+  }
+
+  async function handleBrowseNexusDownloadDir() {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: t('settings.general.nexusDownloadDirSelect'),
+      });
+      if (!selected) return;
+      const picked = typeof selected === 'string' ? selected : String(selected);
+      const result = await setNexusDownloadDir(picked);
+      setNexusDownloadDirValue(result);
+      toast.success(t('settings.general.nexusDownloadDirSaved'));
+    } catch (e) {
+      toast.error(t('settings.general.nexusDownloadDirError', { error: e instanceof Error ? e.message : String(e) }));
+    }
+  }
+
+  async function handleResetNexusDownloadDir() {
+    try {
+      await setNexusDownloadDir('');
+      setNexusDownloadDirValue(null);
+      toast.success(t('settings.general.nexusDownloadDirReset2'));
+    } catch (e) {
+      toast.error(t('settings.general.nexusDownloadDirError', { error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
@@ -536,6 +569,42 @@ export function SettingsView() {
                     </label>
                   );
                 })}
+              </div>
+            </Card>
+
+            <Card className="space-y-4" style={{ marginTop: 8 }}>
+              <h3 className="text-base font-semibold text-text flex items-center gap-2">
+                <Download size={16} />
+                {t('settings.general.nexusDownloadDir')}
+              </h3>
+              <div className="gf-set-desc" style={{ marginTop: -6 }}>
+                {t('settings.general.nexusDownloadDirDesc')}
+              </div>
+              <div className="gf-field" style={{ margin: 0 }}>
+                <div className="gf-input-row">
+                  <input
+                    className="gf-set-input"
+                    readOnly
+                    value={nexusDownloadDir ?? ''}
+                    placeholder={t('settings.general.nexusDownloadDirDefault')}
+                    style={{ flex: 1, cursor: 'default' }}
+                  />
+                  <Button variant="secondary" size="sm" onClick={handleBrowseNexusDownloadDir}>
+                    {t('settings.general.nexusDownloadDirBrowse')}
+                  </Button>
+                  {nexusDownloadDir && (
+                    <Button variant="secondary" size="sm" onClick={handleResetNexusDownloadDir}>
+                      {t('settings.general.nexusDownloadDirReset')}
+                    </Button>
+                  )}
+                </div>
+                <div className="gf-help muted">
+                  <span>
+                    {nexusDownloadDir
+                      ? t('settings.general.nexusDownloadDirCustom', { path: nexusDownloadDir })
+                      : t('settings.general.nexusDownloadDirDefault')}
+                  </span>
+                </div>
               </div>
             </Card>
 

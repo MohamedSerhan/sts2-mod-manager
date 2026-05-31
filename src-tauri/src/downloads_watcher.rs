@@ -31,15 +31,24 @@ pub struct ModAutoInstallFailed {
     pub error: String,
 }
 
-/// Start watching the user's Downloads folder for new .zip files.
+/// Start watching the configured (or default) Downloads folder for new mod archives.
 /// Runs in a background thread for the lifetime of the app.
 pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
     std::thread::spawn(move || {
-        let downloads_dir = match dirs::download_dir() {
-            Some(d) => d,
-            None => {
-                log::warn!("Could not determine Downloads directory; watcher disabled.");
-                return;
+        let downloads_dir = {
+            let configured = state
+                .lock()
+                .ok()
+                .and_then(|s| s.nexus_download_dir.clone());
+            match configured {
+                Some(dir) => dir,
+                None => match dirs::download_dir() {
+                    Some(d) => d,
+                    None => {
+                        log::warn!("Could not determine Downloads directory; watcher disabled.");
+                        return;
+                    }
+                },
             }
         };
 

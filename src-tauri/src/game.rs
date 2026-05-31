@@ -1103,6 +1103,77 @@ pub fn set_launch_mode(
     Ok(mode)
 }
 
+/// Return the user-configured Nexus download watch folder, or `null` when
+/// the OS default Downloads directory is used.
+#[tauri::command]
+pub fn get_nexus_download_dir(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Option<String>, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    Ok(s.nexus_download_dir
+        .as_ref()
+        .map(|p| p.to_string_lossy().to_string()))
+}
+
+/// Set the folder the downloads watcher monitors for Nexus mod archives.
+///
+/// Validates that the path exists and is a readable directory before
+/// persisting. The new value takes effect after restarting the app (the
+/// watcher thread reads the setting once at startup). Pass an empty string
+/// to reset to the OS default Downloads folder.
+#[tauri::command]
+pub fn set_nexus_download_dir(
+    path: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Option<String>, String> {
+    if path.trim().is_empty() {
+        // Reset to OS default.
+        let mut s = state.lock().map_err(|e| e.to_string())?;
+        let config_path = s.config_path.clone();
+        s.nexus_download_dir = None;
+        let file = config_path.join("nexus_download_dir.txt");
+        let _ = std::fs::remove_file(&file);
+        log::info!("Nexus download dir reset to OS default.");
+        return Ok(None);
+    }
+
+    let dir = std::path::PathBuf::from(path.trim());
+
+    // Validate: must exist and be a directory.
+    match std::fs::metadata(&dir) {
+        Ok(meta) if meta.is_dir() => {}
+        Ok(_) => {
+            return Err(format!(
+                "\"{}\" is not a directory.",
+                dir.display()
+            ));
+        }
+        Err(e) => {
+            return Err(format!(
+                "Cannot access \"{}\": {}",
+                dir.display(),
+                e
+            ));
+        }
+    }
+
+    // Quick readability check.
+    if std::fs::read_dir(&dir).is_err() {
+        return Err(format!(
+            "\"{}\" exists but is not readable.",
+            dir.display()
+        ));
+    }
+
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let config_path = s.config_path.clone();
+    crate::state::persist_nexus_download_dir(&config_path, &dir)
+        .map_err(|e| format!("Could not save download dir: {}", e))?;
+    s.nexus_download_dir = Some(dir.clone());
+    log::info!("Nexus download dir set to: {}", dir.display());
+    Ok(Some(dir.to_string_lossy().to_string()))
+}
+
 /// Move all files/dirs from disabled back to mods (restore from vanilla).
 fn restore_all_from_disabled(disabled_path: &std::path::Path, mods_path: &std::path::Path) {
     let _ = std::fs::create_dir_all(mods_path);

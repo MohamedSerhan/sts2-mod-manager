@@ -29,7 +29,12 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ### Changed
 
+- Reporting a bug now shows you the full report and asks you to confirm before anything is uploaded or linked publicly.
+
 ### Fixed
+
+- If you haven't installed Slay the Spire 2 yet, the welcome guide no longer disappears for good — skip it for now and it comes back next launch.
+- When a mod update can't restore config files you'd edited, the manager now names exactly which ones to redo instead of dropping them quietly.
 
 ### Security
 

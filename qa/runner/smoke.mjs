@@ -399,7 +399,7 @@ async function dismissOnboardingIfPresent(driver) {
 async function specModsNavReachable(driver) {
   const mods = await waitForElement(
     driver,
-    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Mods']"),
+    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Mod Library']"),
     'Sidebar Mods nav button',
   );
   await mods.click();
@@ -461,7 +461,7 @@ async function specWhatsNewCardRenders(driver) {
 async function specToggleMovesQaTestModToDisabled(driver) {
   const mods = await waitForElement(
     driver,
-    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Mods']"),
+    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Mod Library']"),
     'Sidebar Mods nav button',
   );
   await mods.click();
@@ -520,7 +520,7 @@ async function specToggleMovesQaTestModToDisabled(driver) {
 async function specFreezeSuppressesPendingUpdate(driver) {
   const mods = await waitForElement(
     driver,
-    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Mods']"),
+    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Mod Library']"),
     'Sidebar Mods nav button',
   );
   await mods.click();
@@ -600,7 +600,7 @@ async function specFreezeSuppressesPendingUpdate(driver) {
 async function specDeleteUpToDateMod(driver) {
   const mods = await waitForElement(
     driver,
-    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Mods']"),
+    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Mod Library']"),
     'Sidebar Mods nav button',
   );
   await mods.click();
@@ -672,7 +672,7 @@ async function specDeleteUpToDateMod(driver) {
 async function specCreateProfile(driver) {
   const nav = await waitForElement(
     driver,
-    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Profiles']"),
+    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Modpacks']"),
     'Sidebar Profiles nav button',
   );
   await nav.click();
@@ -993,7 +993,7 @@ async function specDisabledLibraryExtrasArePreserved(driver) {
 async function navToProfiles(driver) {
   const nav = await waitForElement(
     driver,
-    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Profiles']"),
+    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Modpacks']"),
     'Sidebar Profiles nav button',
   );
   await nav.click();
@@ -1002,7 +1002,7 @@ async function navToProfiles(driver) {
 async function navToMods(driver) {
   const nav = await waitForElement(
     driver,
-    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Mods']"),
+    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Mod Library']"),
     'Sidebar Mods nav button',
   );
   await nav.click();
@@ -1196,7 +1196,7 @@ async function specSettingsAuditTabLoads(driver) {
 async function specAuditAgainstCassettesShowsOnePending(driver) {
   const mods = await waitForElement(
     driver,
-    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Mods']"),
+    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Mod Library']"),
     'Sidebar Mods nav button',
   );
   await mods.click();

@@ -381,25 +381,36 @@ async function specMainWindowRenders(driver) {
  * running any other spec; if it's not present, this is a no-op.
  */
 async function dismissOnboardingIfPresent(driver) {
-  const rails = await driver.findElements(By.css('.gf-wiz-rail'));
-  if (rails.length === 0) return;
-  // "Skip setup" is the bottom-left button on every step of the wizard.
+  // Onboarding shows on first launch and can render a beat after the window
+  // does (it waits on the async game probe), so wait briefly for it rather
+  // than snapshotting once. The dismiss button reads "Skip setup" when a game
+  // is detected, but "Set up later" when none is (1.7.0 makes that case
+  // non-persisting) — the smoke fixture isn't Steam-registered, so it's the
+  // latter. Handle both. It's a centered modal: it only intercepts clicks on
+  // the content area, which is why a stuck overlay surfaces later, not here.
+  let appeared = true;
+  try {
+    await driver.wait(until.elementLocated(By.css('.gf-wiz-back')), 8_000);
+  } catch {
+    appeared = false;
+  }
+  if (!appeared) return;
   const skip = await driver.findElement(
-    By.xpath("//button[normalize-space(.)='Skip setup']"),
+    By.xpath("//button[normalize-space(.)='Skip setup' or normalize-space(.)='Set up later']"),
   );
   await skip.click();
   // Wait for the overlay to detach.
   await driver.wait(
-    async () => (await driver.findElements(By.css('.gf-wiz-rail'))).length === 0,
+    async () => (await driver.findElements(By.css('.gf-wiz-back'))).length === 0,
     5_000,
-    'Onboarding overlay did not dismiss after Skip setup click',
+    'Onboarding overlay did not dismiss after Skip/Set-up-later click',
   );
 }
 
 async function specModsNavReachable(driver) {
   const mods = await waitForElement(
     driver,
-    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Mods']"),
+    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Mod Library']"),
     'Sidebar Mods nav button',
   );
   await mods.click();
@@ -461,7 +472,7 @@ async function specWhatsNewCardRenders(driver) {
 async function specToggleMovesQaTestModToDisabled(driver) {
   const mods = await waitForElement(
     driver,
-    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Mods']"),
+    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Mod Library']"),
     'Sidebar Mods nav button',
   );
   await mods.click();
@@ -520,7 +531,7 @@ async function specToggleMovesQaTestModToDisabled(driver) {
 async function specFreezeSuppressesPendingUpdate(driver) {
   const mods = await waitForElement(
     driver,
-    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Mods']"),
+    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Mod Library']"),
     'Sidebar Mods nav button',
   );
   await mods.click();
@@ -561,7 +572,7 @@ async function specFreezeSuppressesPendingUpdate(driver) {
   // wait 30s for "Up to date" while the dialog blocked everything.
   const auditBtn = await waitForElement(
     driver,
-    By.css("button[aria-label='Re-audit']"),
+    By.css("button[title='Re-audit']"),
     're-audit (ghost ↻) button',
   );
   await auditBtn.click();
@@ -600,7 +611,7 @@ async function specFreezeSuppressesPendingUpdate(driver) {
 async function specDeleteUpToDateMod(driver) {
   const mods = await waitForElement(
     driver,
-    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Mods']"),
+    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Mod Library']"),
     'Sidebar Mods nav button',
   );
   await mods.click();
@@ -610,21 +621,14 @@ async function specDeleteUpToDateMod(driver) {
     'UpToDateMod row',
   );
 
-  const kebab = await waitForElement(
+  // 1.7.0: delete is a dedicated trash button on each Mod Library row (the
+  // kebab holds Freeze/Edit/etc.). Its aria-label is "Remove <mod>".
+  const trash = await waitForElement(
     driver,
-    By.xpath(
-      "//*[normalize-space(text())='UpToDateMod']/ancestor::*[.//button[@title='Mod actions']][1]//button[@title='Mod actions']",
-    ),
-    'UpToDateMod kebab button',
+    By.xpath("//button[@aria-label='Remove UpToDateMod']"),
+    'UpToDateMod delete (trash) button',
   );
-  await kebab.click();
-
-  const removeItem = await waitForElement(
-    driver,
-    By.xpath("//button[@role='menuitem'][contains(., 'Remove mod')]"),
-    '"Remove mod…" menu item',
-  );
-  await removeItem.click();
+  await trash.click();
 
   // Confirm modal: title contains "Delete", primary action button
   // text is "Delete". Click it.
@@ -670,49 +674,12 @@ async function specDeleteUpToDateMod(driver) {
  * path spec proving the create handler doesn't blow up.
  */
 async function specCreateProfile(driver) {
-  const nav = await waitForElement(
-    driver,
-    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Profiles']"),
-    'Sidebar Profiles nav button',
-  );
-  await nav.click();
-
-  const newBtn = await waitForElement(
-    driver,
-    By.xpath("//button[contains(., 'New profile')]"),
-    '"New profile" button',
-  );
-  await newBtn.click();
-
-  // Form input — labeled "Profile Name" via a sibling <label>. Find by
-  // placeholder which is stable.
-  const input = await waitForElement(
-    driver,
-    By.css("input[placeholder='My Profile']"),
-    'Profile-name input',
-  );
-  // The smoke harness uses a unique name so re-runs against the same
-  // STS2_CONFIG_DIR (e.g. when a dev sticks a static one in) don't
-  // collide. The fixture config dir is fresh per run, but the unique
-  // suffix also rules out caching weirdness.
+  // 1.7.0: creation is the guided Create-modpack wizard (Modpacks tab →
+  // Create modpack → Start empty → Next → Continue anyway → name → Create).
+  // A unique name keeps re-runs against a sticky STS2_CONFIG_DIR from
+  // colliding.
   const profileName = `QA Smoke ${Date.now().toString(36)}`;
-  await input.sendKeys(profileName);
-
-  const createBtn = await waitForElement(
-    driver,
-    By.xpath("//button[normalize-space(.)='Create']"),
-    'Create-profile submit button',
-  );
-  await createBtn.click();
-
-  // Card appears in the list. We don't depend on it becoming ACTIVE —
-  // handleCreate doesn't auto-switch. (Switching is a separate spec.)
-  await waitForElement(
-    driver,
-    By.xpath(`//*[contains(@class, 'gf-card') or self::h3][normalize-space(text())='${profileName}']`),
-    `Profile card for "${profileName}"`,
-    8_000,
-  );
+  await createProfileNamed(driver, profileName);
 }
 
 /**
@@ -993,16 +960,25 @@ async function specDisabledLibraryExtrasArePreserved(driver) {
 async function navToProfiles(driver) {
   const nav = await waitForElement(
     driver,
-    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Profiles']"),
-    'Sidebar Profiles nav button',
+    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Modpacks']"),
+    'Sidebar Modpacks nav button',
   );
   await nav.click();
+  // The nav keeps any open modpack detail mounted; back out to the card list
+  // so the cards + the "Create modpack" entry are reachable.
+  const back = await driver.findElements(
+    By.xpath("//button[normalize-space(.)='Back to modpacks']"),
+  );
+  if (back.length > 0) {
+    await back[0].click();
+    await delay(200);
+  }
 }
 
 async function navToMods(driver) {
   const nav = await waitForElement(
     driver,
-    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Mods']"),
+    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Mod Library']"),
     'Sidebar Mods nav button',
   );
   await nav.click();
@@ -1026,80 +1002,108 @@ async function waitForToastsToClear(driver) {
 }
 
 /**
- * Click "New profile" → type name → Create. Assumes we're already on
- * the Profiles view. Waits for the resulting card to render.
+ * Create a modpack through the 1.7.0 guided wizard: Modpacks tab →
+ * "Create modpack" → "Start empty" (auto-advances) → Next → Continue
+ * anyway → name → Create modpack. Waits for the new modpack to appear.
  */
 async function createProfileNamed(driver, profileName) {
-  const newBtn = await waitForElement(
+  await navToProfiles(driver);
+  const entry = await waitForElement(
     driver,
-    By.xpath("//button[contains(., 'New profile')]"),
-    '"New profile" button',
+    By.xpath("//button[contains(., 'Create modpack')]"),
+    '"Create modpack" entry button',
   );
-  await newBtn.click();
+  await entry.click();
+  // Step 1 — snapshot the current active mods (clicking a tile advances).
+  // "From active" (vs "empty") keeps the new pack matching the on-disk
+  // enabled set, so it doesn't read as drift against the live install — the
+  // same contract the old inline "New profile" snapshot had.
+  const strategy = await waitForElement(
+    driver,
+    By.xpath("//button[contains(@class,'gf-create-wizard-strategy-option')][contains(., 'Start from my active mods')]"),
+    'wizard "Start from my active mods" strategy tile',
+  );
+  await strategy.click();
+  // Step 2 (choose mods) → Next.
+  const next = await waitForElement(
+    driver,
+    By.xpath("//*[contains(@class,'gf-create-wizard')]//button[normalize-space(.)='Next']"),
+    'wizard "Next" button',
+  );
+  await next.click();
+  // Step 3 (health) → Continue anyway.
+  const cont = await waitForElement(
+    driver,
+    By.xpath("//*[contains(@class,'gf-create-wizard')]//button[contains(., 'Continue anyway')]"),
+    'wizard "Continue anyway" button',
+  );
+  await cont.click();
+  // Step 4 — name + Create modpack (scoped to the wizard foot so it isn't
+  // confused with the entry button still behind the modal).
   const input = await waitForElement(
     driver,
-    By.css("input[placeholder='My Profile']"),
-    'Profile-name input',
+    By.css('#gf-create-wizard-name'),
+    'wizard modpack-name input',
   );
   await input.sendKeys(profileName);
   const createBtn = await waitForElement(
     driver,
-    By.xpath("//button[normalize-space(.)='Create']"),
-    'Create-profile submit button',
+    By.xpath(
+      "//*[contains(@class,'gf-create-wizard')]//div[contains(@class,'gf-modal-foot')]//button[normalize-space(.)='Create modpack']",
+    ),
+    'wizard "Create modpack" submit',
   );
   await createBtn.click();
+  // The new modpack renders (as a card on the list, or the detail title).
   await waitForElement(
     driver,
-    By.xpath(`//h3[contains(normalize-space(.), '${profileName}')]`),
-    `Profile card for "${profileName}"`,
-    8_000,
+    By.xpath(`//*[normalize-space(text())='${profileName}']`),
+    `modpack "${profileName}" after create`,
+    10_000,
   );
 }
 
 /**
- * Activate the named profile by clicking its "Switch to" button, then
- * wait for the ACTIVE badge to appear on that same card. The badge is
- * rendered inside the profile's <h3> next to the name (Profiles.tsx
- * line ~663), and only one card has it at a time — so waiting on
- * "ACTIVE badge on this row" disambiguates from any pre-existing
- * active profile elsewhere in the list.
- *
- * Also waits for the switching overlay (`gf-loading-card`) to
- * disappear before returning so the next interaction doesn't race a
- * still-disabled button.
+ * Activate the named modpack. 1.7.0 moved switching into the modpack
+ * DETAIL view: open the card, click "Switch to", then wait for the ACTIVE
+ * badge in the detail header (only the active modpack shows it).
  */
 async function activateProfile(driver, profileName) {
-  // Scope: row is a `gf-card` (Card component) whose h3 contains the
-  // profile name. From there, find the "Switch to" button.
-  const switchBtnXpath =
-    `//*[contains(@class,'gf-card')][.//h3[contains(normalize-space(.), '${profileName}')]]` +
-    `//button[normalize-space(.)='Switch to' or contains(., 'Switch to')]`;
+  await navToProfiles(driver);
+  const card = await waitForElement(
+    driver,
+    By.xpath(`//*[contains(@class,'gf-modpack-card-name') and normalize-space(.)='${profileName}']`),
+    `modpack card "${profileName}"`,
+  );
+  await card.click();
   const switchBtn = await waitForElement(
     driver,
-    By.xpath(switchBtnXpath),
-    `"Switch to" button for profile "${profileName}"`,
+    By.xpath(
+      "//*[contains(@class,'gf-modpack-detail-head-actions')]//button[contains(., 'Switch to')]",
+    ),
+    `"Switch to" button in detail for "${profileName}"`,
   );
   await switchBtn.click();
-
-  // Switching overlay (gf-loading-card) appears while the backend
-  // applies the manifest. Wait for it to detach before checking the
-  // active badge — its presence also disables all profile buttons.
-  await driver.wait(
-    async () => (await driver.findElements(By.css('.gf-loading-card'))).length === 0,
-    30_000,
-    `Profile switch to "${profileName}" never settled (loading overlay stuck)`,
-  );
-
-  // ACTIVE badge must be on THIS profile's card, not just somewhere on
-  // the page. Scope under the row whose h3 has the name.
+  // Switching away from a modpack that has unsaved on-disk drift pops a
+  // "Switch away?" confirm — proceed through it when present.
+  try {
+    const confirm = await driver.wait(
+      until.elementLocated(By.xpath("//button[normalize-space(.)='Switch anyway']")),
+      3_000,
+    );
+    await confirm.click();
+  } catch {
+    /* clean switch — no confirm dialog */
+  }
+  // The switch applies mods to the game folder; when it settles the header
+  // flips to the ACTIVE badge (and the Switch button disappears).
   await waitForElement(
     driver,
     By.xpath(
-      `//*[contains(@class,'gf-card')][.//h3[contains(normalize-space(.), '${profileName}')]]` +
-        `//*[normalize-space(text())='ACTIVE']`,
+      "//*[contains(@class,'gf-modpack-detail-title-row')]//*[normalize-space(.)='ACTIVE']",
     ),
-    `ACTIVE badge on profile "${profileName}"`,
-    10_000,
+    `ACTIVE badge for "${profileName}"`,
+    30_000,
   );
 }
 
@@ -1140,41 +1144,28 @@ async function captureFailureArtifacts(driver, error) {
 
 /* ── Main ───────────────────────────────────────────────────────── */
 
-async function specSettingsAuditTabLoads(driver) {
-  // The audit-state lift to AppContext means Settings + Mods consume
-  // the same data. Navigate to Settings and verify the Audit tab is
-  // clickable + the table area renders. This proves the refactor
-  // didn't break Settings — if AppContext destructure or unused-import
-  // cleanup left a hole, the tab strip would crash on render.
+async function specSettingsLoads(driver) {
+  // 1.7.0 moved the audit out of Settings — it lives in the Mod Library
+  // toolbar now (covered by the audit specs above). Settings keeps
+  // general / accounts / backups / advanced. This still proves Settings
+  // mounts and its tab strip renders without crashing after the AppContext
+  // audit-state lift — a bad destructure would blow up the strip on render.
   const settings = await waitForElement(
     driver,
     By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Settings']"),
     'Sidebar Settings nav button',
   );
   await settings.click();
-  // Tab strip is in a `gf-tabs` container with buttons for each tab.
-  // Audit tab has text "Audit".
-  const auditTab = await waitForElement(
+  // The settings tab strip renders…
+  await waitForElement(driver, By.css('.gf-tabs-settings'), 'Settings tab strip');
+  // …and switching to another tab doesn't crash the panel.
+  const backupsTab = await waitForElement(
     driver,
-    By.xpath("//button[contains(@class, 'gf-tab') and contains(., 'Audit')]"),
-    'Settings → Audit tab button',
+    By.xpath("//button[contains(@class, 'gf-tab') and contains(., 'Backups')]"),
+    'Settings → Backups tab button',
   );
-  await auditTab.click();
-  // After clicking, the audit empty-state OR table must render. Both
-  // share the `gf-empty-pad` (empty state when no audit yet) or
-  // an audit row container.
-  await driver.wait(
-    async () => {
-      const empty = await driver.findElements(By.css('.gf-empty-pad'));
-      const rows = await driver.findElements(By.css('.gf-audit-led'));
-      const runBtn = await driver.findElements(
-        By.xpath("//button[contains(., 'Run audit') or contains(., 'Re-audit')]"),
-      );
-      return empty.length > 0 || rows.length > 0 || runBtn.length > 0;
-    },
-    8_000,
-    'Settings → Audit tab body never rendered (run button, rows, or empty state)',
-  );
+  await backupsTab.click();
+  await delay(300);
 }
 
 /**
@@ -1196,7 +1187,7 @@ async function specSettingsAuditTabLoads(driver) {
 async function specAuditAgainstCassettesShowsOnePending(driver) {
   const mods = await waitForElement(
     driver,
-    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Mods']"),
+    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Mod Library']"),
     'Sidebar Mods nav button',
   );
   await mods.click();
@@ -1314,22 +1305,9 @@ async function specRepairWalkback(driver) {
     'WalkbackMod row (post-seed re-scan)',
   );
 
-  // Step 2: enable Advanced mode so the kebab Recovery section renders.
-  // The toggle is a `gf-adv-toggle` button labelled "Advanced". If it's
-  // already on (a developer's localStorage might persist it across runs),
-  // clicking would turn it OFF and hide Repair — guard against that by
-  // checking the `on` class first.
-  const advToggle = await waitForElement(
-    driver,
-    By.css('button.gf-adv-toggle'),
-    'Advanced-mode toggle',
-  );
-  const advClass = await advToggle.getAttribute('class');
-  if (!advClass.includes(' on')) {
-    await advToggle.click();
-  }
-
-  // Step 3: open WalkbackMod kebab → "Repair this mod" → confirm.
+  // 1.7.0 dropped the Advanced-mode gate — recovery actions (Repair,
+  // Rollback) live in the kebab directly now. Open WalkbackMod's kebab →
+  // "Repair this mod" → confirm.
   const kebab = await waitForElement(
     driver,
     By.xpath(
@@ -1490,8 +1468,8 @@ async function specSkippedModAbsentFromSnapshot(driver) {
   // the same `snapshotProfile` command.)
   const snapshotBtn = await waitForElement(
     driver,
-    By.xpath("//button[normalize-space(.)='Snapshot current' or contains(., 'Snapshot current')]"),
-    'Profiles "Snapshot current" button',
+    By.xpath("//button[contains(., 'Snapshot active modpack')]"),
+    'Profiles "Snapshot active modpack" button',
   );
   await snapshotBtn.click();
 
@@ -1562,7 +1540,7 @@ const BASE_SPECS = [
   ['Mods nav reachable + audit button present', specModsNavReachable],
   ['audit button is clickable at rest', specAuditButtonClickable],
   ["WhatsNewCard renders or is dismissed", specWhatsNewCardRenders],
-  ['Settings Audit tab loads after refactor', specSettingsAuditTabLoads],
+  ['Settings mounts + tab strip renders (audit moved to Mod Library)', specSettingsLoads],
 ];
 
 const CASSETTE_SPECS = [

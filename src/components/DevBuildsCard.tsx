@@ -1,23 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { invoke } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { Search } from 'lucide-react';
 import { Card } from './Card';
 import { Button } from './Button';
 import { useToast } from '../contexts/ToastContext';
-
-interface DevBuildAsset { name: string; url: string; platform: string; }
-interface DevBuild {
-  pr: number;
-  sha: string;
-  title: string;
-  published_at: string;
-  windows_installer_url: string | null; // returned by the backend; not used here (switching gates on manifest_url). Kept for interface completeness / a potential direct-download fallback.
-  manifest_url: string | null;
-  assets: DevBuildAsset[];
-}
+import { listDevBuilds, switchDevBuild, type DevBuild } from '../hooks/useTauri';
 
 /** Dev-build-only panel: list open PRs' dev builds and one-click switch the
  *  (Dev) slot between them. Rendered by Settings only on dev builds. */
@@ -36,7 +25,7 @@ export function DevBuildsCard() {
     setLoading(true);
     setError(null);
     try {
-      setBuilds(await invoke<DevBuild[]>('list_dev_builds'));
+      setBuilds(await listDevBuilds());
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -70,7 +59,7 @@ export function DevBuildsCard() {
     if (!b.manifest_url || switchingPr !== null) return;
     setSwitchingPr(b.pr);
     try {
-      await invoke('switch_dev_build', { manifestUrl: b.manifest_url });
+      await switchDevBuild(b.manifest_url);
       toast.success(t('devBuilds.switching', { pr: b.pr }));
     } catch (e) {
       toast.error(t('devBuilds.switchFailed', { error: e instanceof Error ? e.message : String(e) }));

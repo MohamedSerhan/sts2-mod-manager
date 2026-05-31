@@ -97,6 +97,13 @@ vi.mock('@tauri-apps/plugin-updater', () => ({
   check: vi.fn(async () => null),
 }));
 
+vi.mock('@tauri-apps/api/path', () => ({
+  // Settings shows this as the default Nexus download watch folder when the
+  // user hasn't picked a custom one. A fixed value keeps the rendered path
+  // deterministic across tests.
+  downloadDir: vi.fn(async () => '/os/Downloads'),
+}));
+
 const DEFAULT_APP_VERSION = '1.3.4';
 let mockAppVersion = DEFAULT_APP_VERSION;
 

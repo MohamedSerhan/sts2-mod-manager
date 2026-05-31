@@ -72,7 +72,7 @@ describe('<App>', () => {
     );
     // Default: pretend the user has already dismissed onboarding. The
     // few tests that exercise the wizard explicitly `removeItem` this
-    // key before rendering. With this default, the `Skip setup` button
+    // key before rendering. With this default, the onboarding overlay
     // is NOT in the tree on render, so tests can deterministically skip
     // the `if (skip) await user.click(skip)` dance.
     try { localStorage.setItem('sts2mm-onboarded', 'true'); } catch {}
@@ -88,7 +88,7 @@ describe('<App>', () => {
 
   /** Get a sidebar nav button by its label. The sidebar nav uses
    *  `.gf-nav` on every nav button, which lets us disambiguate from
-   *  the onboarding overlay's "Settings" / "Tutorial" mentions. */
+   *  the onboarding overlay's "Settings" / "Help" mentions. */
   function getNavButton(label: string): HTMLButtonElement {
     const buttons = screen.getAllByRole('button', { name: label });
     const nav = buttons.find((b) => b.className.includes('gf-nav'));
@@ -96,36 +96,53 @@ describe('<App>', () => {
     return nav as HTMLButtonElement;
   }
 
-  it('renders the sidebar nav buttons', async () => {
+  it('renders the four sidebar nav items (1.7.0 IA collapse)', async () => {
+    // 1.7.0 — sidebar shrunk from 7 items to 4. Browse Mods became a
+    // tab inside Library; Browse Modpacks became a tab inside Modpacks;
+    // Help moved to the topbar `?` icon (HelpDrawer) + Settings → Help
+    // tab. The sidebar now reads Home / Modpacks / Library / Settings.
     render(<App />);
     await waitFor(() => {
       expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument();
     });
     expect(getNavButton('Home')).toBeInTheDocument();
-    expect(getNavButton('Profiles')).toBeInTheDocument();
-    expect(getNavButton('Mods')).toBeInTheDocument();
-    expect(getNavButton('Browse Mods')).toBeInTheDocument();
-    const modpacksNav = getNavButton('Browse Modpacks');
-    expect(modpacksNav).toBeInTheDocument();
-    expect(within(modpacksNav).getByText('Beta')).toBeInTheDocument();
-    expect(getNavButton('Tutorial')).toBeInTheDocument();
+    expect(getNavButton('Modpacks')).toBeInTheDocument();
+    expect(getNavButton('Mod Library')).toBeInTheDocument();
     expect(getNavButton('Settings')).toBeInTheDocument();
+    // Browse Mods / Browse Modpacks / Help should NOT be sidebar
+    // buttons any more. Use queryAllByRole + filter to assert absence
+    // without throwing for the missing names.
+    const sidebarNavs = screen.getAllByRole('button').filter((b) =>
+      b.className.includes('gf-nav'),
+    );
+    const labels = sidebarNavs.map((b) => b.textContent?.trim() ?? '');
+    expect(labels).not.toContain('Browse Mods');
+    expect(labels).not.toContain('Browse Modpacks');
+    // "Help" can appear on the topbar `?` button (aria-label) but
+    // must not appear as a sidebar nav entry.
+    expect(labels.find((l) => /^Help$/.test(l))).toBeUndefined();
+    // Topbar `?` icon — open the drawer.
+    expect(screen.getByRole('button', { name: /^Help$/i })).toBeInTheDocument();
   });
 
-  it('clicking Mods nav swaps the body to the Mods view', async () => {
+  it('clicking Library nav swaps the body to the Library (Installed) view', async () => {
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    // Dismiss the onboarding overlay if it shows up
-    // (Onboarding overlay is suppressed by default in beforeEach so we
-    //  don't need a Skip-setup click.)
-    await user.click(getNavButton('Mods'));
+    // Sidebar item renamed Mods → Library in 1.7.0; default tab is
+    // Installed, which shows the existing "All installed mods" page.
+    await user.click(getNavButton('Mod Library'));
     await waitFor(() => {
-      expect(screen.getByText(/Your mods/i)).toBeInTheDocument();
+      expect(screen.getByText(/All installed mods/i)).toBeInTheDocument();
     });
   });
 
-  it('Mods tab Mod Library bridge opens the profile assignment workspace', async () => {
+  it('Mods tab Manage-active-modpack link opens the active modpack detail view', async () => {
+    // T16 + review fix — the toolbar "Mod Library" button was removed
+    // (its label described the now-dead cross-profile workspace). The
+    // page header retains a clearer "Manage active modpack →" link
+    // wired to the same handler; clicking it lands on the active
+    // modpack's detail view (where its mod editor lives).
     registerInvokeHandler('get_installed_mods', () => [{
       name: 'BaseLib',
       version: '1.0.0',
@@ -147,6 +164,7 @@ describe('<App>', () => {
       display_name: null,
       display_description: null,
     }]);
+    registerInvokeHandler('get_active_profile', () => 'Stable');
     registerInvokeHandler('list_profiles_cmd', () => [{
       name: 'Stable',
       mods: [],
@@ -171,15 +189,30 @@ describe('<App>', () => {
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    await user.click(getNavButton('Mods'));
-    await waitFor(() => { expect(screen.getByText(/Your mods/i)).toBeInTheDocument(); });
+    await user.click(getNavButton('Mod Library'));
+    await waitFor(() => { expect(screen.getByText(/All installed mods/i)).toBeInTheDocument(); });
 
-    await user.click(screen.getByRole('button', { name: /Mod Library/i }));
+    // Click the page-header "Manage active modpack →" link — this
+    // is the only bridge into the modpack detail view from the Mods
+    // page (the toolbar duplicate was removed in the T16 review fix).
+    const link = await screen.findByRole('button', { name: /manage active modpack/i });
+    await user.click(link);
 
-    expect(await screen.findByRole('heading', { name: /Mod Library/i })).toBeInTheDocument();
-    expect((await screen.findAllByText('BaseLib')).length).toBeGreaterThan(0);
-    expect(screen.getByRole('checkbox', { name: 'Stable' })).not.toBeChecked();
-  });
+    // Land directly on the active modpack's detail view: H2 with the
+    // modpack name + Back-to-list button.
+    expect(
+      await screen.findByRole('heading', { level: 2, name: 'Stable' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Back to modpacks/i })).toBeInTheDocument();
+    // BaseLib isn't in this pack, so it lives in the (collapsed-by-default)
+    // "Add from your Library" section. Expand it to confirm the mod is
+    // reachable from the detail view.
+    const available = await screen.findByTestId('modpack-detail-available');
+    await user.click(
+      within(available).getByRole('button', { name: /Add from Mod Library/i }),
+    );
+    expect((await within(available).findAllByText('BaseLib')).length).toBeGreaterThan(0);
+  }, 10000);
 
   it('clicking Settings nav swaps to the Settings view', async () => {
     const user = userEvent.setup();
@@ -193,29 +226,38 @@ describe('<App>', () => {
     });
   });
 
-  it('clicking Browse Mods swaps to the Browse view', async () => {
+  it('Library → Browse tab shows the public mod browser', async () => {
+    // 1.7.0 — Browse Mods is no longer its own sidebar entry. It now
+    // lives as a tab inside the Library view. Navigate Library → click
+    // the Browse tab → assert the GitHub sub-tab button is present.
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    // (Onboarding overlay is suppressed by default in beforeEach so we
-    //  don't need a Skip-setup click.)
-    await user.click(getNavButton('Browse Mods'));
+    await user.click(getNavButton('Mod Library'));
+    await user.click(screen.getByRole('button', { name: /^Browse$/i }));
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /GitHub/i })).toBeInTheDocument();
     });
   });
 
-  it('clicking Browse Modpacks swaps to the modpack browser', async () => {
+  it('Modpacks → Browse tab shows the public modpack browser', async () => {
+    // 1.7.0 — Browse Modpacks is now a tab inside Modpacks, not a
+    // top-level sidebar entry.
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    await user.click(getNavButton('Browse Modpacks'));
+    await user.click(getNavButton('Modpacks'));
+    await user.click(screen.getByRole('button', { name: /^Browse$/i }));
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Browse Modpacks' })).toBeInTheDocument();
     });
   });
 
-  it('Browse Modpacks empty-state Profiles button routes to Profiles', async () => {
+  it('Browse Modpacks empty-state CTA returns user to the Yours tab', async () => {
+    // Before 1.7.0 the BrowseModpacks empty-state button routed to
+    // the standalone Profiles view. Now it stays inside Modpacks and
+    // flips the outer tab back to Yours — same intent, no nav round
+    // trip.
     registerInvokeHandler('fetch_modpack_browser_page', () => ({
       cards: [],
       page: 1,
@@ -226,12 +268,13 @@ describe('<App>', () => {
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    await user.click(getNavButton('Browse Modpacks'));
+    await user.click(getNavButton('Modpacks'));
+    await user.click(screen.getByRole('button', { name: /^Browse$/i }));
 
-    await user.click(await screen.findByRole('button', { name: /Go to Profiles/i }));
+    await user.click(await screen.findByRole('button', { name: /Go to Modpacks/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/Your packs/i)).toBeInTheDocument();
+      expect(screen.getByText(/All the modpacks you follow/i)).toBeInTheDocument();
     });
   });
 
@@ -241,9 +284,9 @@ describe('<App>', () => {
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     // (Onboarding overlay is suppressed by default in beforeEach so we
     //  don't need a Skip-setup click.)
-    await user.click(getNavButton('Profiles'));
+    await user.click(getNavButton('Modpacks'));
     await waitFor(() => {
-      expect(screen.getByText(/Your packs/i)).toBeInTheDocument();
+      expect(screen.getByText(/All the modpacks you follow/i)).toBeInTheDocument();
     });
   });
 
@@ -253,12 +296,14 @@ describe('<App>', () => {
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     // (Onboarding overlay is suppressed by default in beforeEach so we
     //  don't need a Skip-setup click.)
-    await user.click(getNavButton('Mods'));
-    await waitFor(() => { expect(screen.getByText(/Your mods/i)).toBeInTheDocument(); });
+    await user.click(getNavButton('Mod Library'));
+    await waitFor(() => { expect(screen.getByText(/All installed mods/i)).toBeInTheDocument(); });
     await user.click(getNavButton('Home'));
-    // Home view shows the share-code input.
+    // 1.7 v7 — Home is the single-block launcher. With no active modpack
+    // the empty-state hero shows the "Pick a modpack to play" title.
+    // (The old share-code placeholder lives on the Modpacks toolbar now.)
     await waitFor(() => {
-      expect(screen.getByPlaceholderText(/username\/AA5A-315D-61AE/i)).toBeInTheDocument();
+      expect(screen.getByText(/Pick a modpack to play/i)).toBeInTheDocument();
     });
   });
 
@@ -309,20 +354,26 @@ describe('<App>', () => {
     expect(screen.queryByTitle('Maximize')).toBeTruthy();
   });
 
-  it('renders the brand title in the sidebar', async () => {
+  it('renders the app title in the custom titlebar', async () => {
+    // The brand mark + name lives in the titlebar (the standard window
+    // chrome location). The 1.7.0 cleanup removed the duplicate
+    // "Slay the Spire 2 / MOD MANAGER" sidebar block.
     render(<App />);
     await waitFor(() => {
-      expect(screen.getByText('Slay the Spire 2')).toBeInTheDocument();
+      expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument();
     });
-    expect(screen.getAllByText(/Mod Manager/).length).toBeGreaterThan(0);
   });
 
   it('drag-over → drag-leave does not show dropzone after leave', async () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    // The dropzone shows only while dragOver is true; without a dragstart
-    // event firing, it should not be present.
-    expect(screen.queryByText('Drop to install')).toBeNull();
+    // Native Tauri drag-enter shows the overlay; drag-leave must hide it.
+    await fireTauriEvent('tauri://drag-enter', { paths: ['C:/x.zip'] });
+    await waitFor(() => { expect(screen.getByText('Drop to install')).toBeInTheDocument(); });
+    await fireTauriEvent('tauri://drag-leave', {});
+    await waitFor(() => {
+      expect(screen.queryByText('Drop to install')).toBeNull();
+    });
   });
 
   it('renders active-profile pill in the top bar', async () => {
@@ -353,12 +404,14 @@ describe('<App>', () => {
 
   it('Ctrl+L while typing in an input does NOT launch', async () => {
     registerInvokeHandler('launch_game', () => true);
+    const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    // (Onboarding overlay is suppressed by default in beforeEach so we
-    //  don't need a Skip-setup click.)
-    // Focus the share-code input (a text input).
-    const input = screen.getByPlaceholderText(/username\/AA5A-315D-61AE/i) as HTMLInputElement;
+    // 1.7 v7 — the share-code input moved from Home to the Modpacks
+    // toolbar. Navigate there so we have a text input on screen to
+    // focus.
+    await user.click(getNavButton('Modpacks'));
+    const input = await screen.findByLabelText(/Add a modpack by code/i) as HTMLInputElement;
     input.focus();
     // Dispatch keydown from the input target — the App's keyboard handler
     // is on `window`, so the event must bubble.
@@ -367,44 +420,176 @@ describe('<App>', () => {
     expect(getInvokeCalls().some((c) => c.cmd === 'launch_game')).toBe(false);
   });
 
-  it('Drag-over with Files type shows the drop overlay', async () => {
+  it('Drag-enter shows the drop overlay', async () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    // Dispatch a synthetic dragover with Files in dataTransfer.types.
-    const evt = new Event('dragover', { bubbles: true, cancelable: true });
-    Object.defineProperty(evt, 'dataTransfer', {
-      value: { types: ['Files'] },
-      configurable: true,
-    });
-    document.dispatchEvent(evt);
+    // The overlay shows on Tauri's window-level drag-enter event.
+    await fireTauriEvent('tauri://drag-enter', { paths: ['C:/x.zip'] });
     await waitFor(() => {
       expect(screen.queryByText('Drop to install')).toBeInTheDocument();
     });
   });
 
+  it('dropping a zip while viewing a modpack adds the installed mod to that pack', async () => {
+    registerInvokeHandler('get_active_profile', () => 'Stable');
+    registerInvokeHandler('list_profiles_cmd', () => [
+      { name: 'Stable', mods: [], created_at: '2026-01-01T00:00:00Z', created_by: null, game_version: '0.105.0' },
+    ]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [],
+    }));
+    registerInvokeHandler('install_mod_from_file', () => ({
+      name: 'Dropped', version: '1.0', description: '', enabled: true, files: [],
+      source: null, hash: null, dependencies: [], size_bytes: 0,
+      folder_name: 'Dropped', mod_id: 'Dropped', github_url: null, nexus_url: null,
+      pinned: false, min_game_version: null, author: null, tags: [],
+      display_name: null, display_description: null,
+    }));
+    registerInvokeHandler('set_profile_mod_membership', () => ({
+      name: 'Stable', mods: [], created_at: '2026-01-01T00:00:00Z', created_by: null, game_version: '0.105.0',
+    }));
+
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    // Open the Modpacks tab, then the 'Stable' modpack detail.
+    await user.click(getNavButton('Modpacks'));
+    await user.click(await screen.findByRole('button', { name: /Open Stable modpack/i }));
+    await screen.findByRole('heading', { level: 2, name: 'Stable' });
+
+    // Drop a zip — the global handler installs it AND joins the viewed pack.
+    // Tauri hands us absolute file PATHS (not File objects); basename 'Mod.zip'.
+    await fireTauriEvent('tauri://drag-drop', { paths: ['C:/downloads/Mod.zip'] });
+
+    await waitFor(() => {
+      expect(getInvokeCalls().some(
+        (c) => c.cmd === 'install_mod_from_file' && c.args?.path === 'C:/downloads/Mod.zip',
+      )).toBe(true);
+    });
+    await waitFor(() => {
+      const call = getInvokeCalls().find(
+        (c) => c.cmd === 'set_profile_mod_membership' && c.args?.modName === 'Dropped',
+      );
+      expect(call?.args).toMatchObject({ profileName: 'Stable', included: true });
+    });
+  }, 10000);
+
+  it('dropping a zip while viewing a FOLLOWED pack is blocked with a friendly message', async () => {
+    // A followed (subscribed) pack's manifest isn't ours to edit, so dropping
+    // a mod "into" it must not install (which would strand the file in the
+    // library) — the global handler shows a friendly toast and stops.
+    registerInvokeHandler('get_active_profile', () => 'Stable');
+    registerInvokeHandler('list_profiles_cmd', () => [
+      { name: 'Stable', mods: [], created_at: '2026-01-01T00:00:00Z', created_by: null, game_version: '0.105.0' },
+    ]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [],
+    }));
+    registerInvokeHandler('install_mod_from_file', () => ({
+      name: 'Dropped', version: '1.0', description: '', enabled: true, files: [],
+      source: null, hash: null, dependencies: [], size_bytes: 0,
+      folder_name: 'Dropped', mod_id: 'Dropped', github_url: null, nexus_url: null,
+      pinned: false, min_game_version: null, author: null, tags: [],
+      display_name: null, display_description: null,
+    }));
+    registerInvokeHandler('set_profile_mod_membership', () => ({
+      name: 'Stable', mods: [], created_at: '2026-01-01T00:00:00Z', created_by: null, game_version: '0.105.0',
+    }));
+    // Mark 'Stable' as a followed pack so the drop guard fires.
+    registerInvokeHandler('get_subscriptions', () => [
+      { share_id: 'x/AAAA', profile_name: 'Stable' },
+    ]);
+
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    // Open the Modpacks tab, then the 'Stable' modpack detail.
+    await user.click(getNavButton('Modpacks'));
+    await user.click(await screen.findByRole('button', { name: /Open Stable modpack/i }));
+    await screen.findByRole('heading', { level: 2, name: 'Stable' });
+
+    // Drop a zip — the followed-pack guard blocks the install and explains.
+    await fireTauriEvent('tauri://drag-drop', { paths: ['C:/downloads/Mod.zip'] });
+
+    // The friendly toast appears…
+    expect(await screen.findByText(/followed modpack/i)).toBeInTheDocument();
+    // …and nothing was installed.
+    expect(getInvokeCalls().some((c) => c.cmd === 'install_mod_from_file')).toBe(false);
+  }, 10000);
+
+  it('dropping a zip when NOT viewing a modpack just installs it (no membership change)', async () => {
+    registerInvokeHandler('install_mod_from_file', () => ({
+      name: 'LooseMod', version: '1.0', description: '', enabled: true, files: [],
+      source: null, hash: null, dependencies: [], size_bytes: 0,
+      folder_name: 'LooseMod', mod_id: 'LooseMod', github_url: null, nexus_url: null,
+      pinned: false, min_game_version: null, author: null, tags: [],
+      display_name: null, display_description: null,
+    }));
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    // On Home (no modpack open) — drop a zip via Tauri's native event.
+    await fireTauriEvent('tauri://drag-drop', { paths: ['C:/loose.zip'] });
+
+    await waitFor(() => {
+      expect(getInvokeCalls().some(
+        (c) => c.cmd === 'install_mod_from_file' && c.args?.path === 'C:/loose.zip',
+      )).toBe(true);
+    });
+    // No pack is being viewed, so it must not touch membership.
+    expect(getInvokeCalls().some((c) => c.cmd === 'set_profile_mod_membership')).toBe(false);
+  });
+
   it('Drag-leave hides the drop overlay', async () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    const over = new Event('dragover', { bubbles: true, cancelable: true });
-    Object.defineProperty(over, 'dataTransfer', { value: { types: ['Files'] } });
-    document.dispatchEvent(over);
+    await fireTauriEvent('tauri://drag-enter', { paths: ['C:/x.zip'] });
     await waitFor(() => { expect(screen.getByText('Drop to install')).toBeInTheDocument(); });
-    document.dispatchEvent(new Event('dragleave', { bubbles: true, cancelable: true }));
+    await fireTauriEvent('tauri://drag-leave', {});
     await waitFor(() => {
       expect(screen.queryByText('Drop to install')).toBeNull();
     });
   });
 
-  it('clicking Tutorial swaps to the Tutorial view', async () => {
+  it('HelpDrawer close button closes the drawer (covers App.tsx onClose wiring)', async () => {
+    // After opening the drawer via the topbar `?` icon, the close
+    // button inside the drawer must fire setShowHelpDrawer(false) — the
+    // arrow declared inline at App.tsx:912.
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    // (Onboarding overlay is suppressed by default in beforeEach so we
-    //  don't need a Skip-setup click.)
-    await user.click(getNavButton('Tutorial'));
+    await user.click(screen.getByRole('button', { name: /^Help$/i }));
+    const drawer = await screen.findByRole('dialog', { name: /^Help$/i });
+    expect(drawer).toBeInTheDocument();
+    // The HelpDrawer's close button has aria-label "Close" (lives
+    // inside the drawer head). Click it.
+    const closeBtn = within(drawer).getByRole('button', { name: /^Close$/i });
+    await user.click(closeBtn);
+    // Drawer leaves the DOM.
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /Tutorial/i })).toBeInTheDocument();
+      expect(screen.queryByRole('dialog', { name: /^Help$/i })).toBeNull();
     });
+  });
+
+  it('topbar ? icon opens the HelpDrawer (1.7.0: Help left the sidebar)', async () => {
+    // 1.7.0 — Help is no longer a sidebar entry. Clicking the topbar
+    // `?` icon opens a slide-out drawer that renders the same
+    // <HelpContent /> the Settings → Help tab uses. The drawer is a
+    // role=dialog aria-label="Help".
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    // Drawer should not be open initially.
+    expect(screen.queryByRole('dialog', { name: /^Help$/i })).not.toBeInTheDocument();
+    // Topbar `?` button is labeled "Help" via aria-label.
+    const helpBtn = screen.getByRole('button', { name: /^Help$/i });
+    await user.click(helpBtn);
+    // Drawer opens with the heading + FAQ content.
+    expect(await screen.findByRole('dialog', { name: /^Help$/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /what is a modpack/i }),
+    ).toBeInTheDocument();
   });
 
   it('Launch button text includes the active profile name when set', async () => {
@@ -479,21 +664,21 @@ describe('<App>', () => {
     localStorage.removeItem('sts2mm-onboarded');
     render(<App />);
     await waitFor(() => {
-      // The onboarding step copy mentions "Slay the Spire 2 install" or similar.
-      expect(screen.queryByRole('button', { name: /Skip setup/i })).toBeInTheDocument();
+      // No game is detected in tests, so the dismiss button reads "Set up later".
+      expect(screen.queryByRole('button', { name: /Set up later/i })).toBeInTheDocument();
     });
   });
 
-  it('Onboarding overlay can be dismissed via Skip setup', async () => {
+  it('Onboarding overlay can be dismissed via Set up later (no game detected)', async () => {
     localStorage.removeItem('sts2mm-onboarded');
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /Skip setup/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Set up later/i })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole('button', { name: /Skip setup/i }));
+    await user.click(screen.getByRole('button', { name: /Set up later/i }));
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /Skip setup/i })).toBeNull();
+      expect(screen.queryByRole('button', { name: /Set up later/i })).toBeNull();
     });
   });
 
@@ -577,17 +762,11 @@ describe('<App>', () => {
     }));
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    // Build a synthetic drop with a File-like object.
-    const drop = new Event('drop', { bubbles: true, cancelable: true });
-    const file = { name: 'mod.zip', path: 'C:/tmp/mod.zip' };
-    Object.defineProperty(drop, 'dataTransfer', {
-      value: { files: [file], types: ['Files'] },
-      configurable: true,
-    });
-    document.dispatchEvent(drop);
+    // Tauri drag-drop hands us an absolute path string.
+    await fireTauriEvent('tauri://drag-drop', { paths: ['C:/super.zip'] });
     await waitFor(() => {
       expect(getInvokeCalls().some(
-        (c) => c.cmd === 'install_mod_from_file' && c.args?.path === 'C:/tmp/mod.zip',
+        (c) => c.cmd === 'install_mod_from_file' && c.args?.path === 'C:/super.zip',
       )).toBe(true);
     });
   });
@@ -595,15 +774,12 @@ describe('<App>', () => {
   it('Drop event with a non-zip file shows an error toast', async () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    const drop = new Event('drop', { bubbles: true, cancelable: true });
-    Object.defineProperty(drop, 'dataTransfer', {
-      value: { files: [{ name: 'mod.tar.gz', path: 'C:/tmp/mod.tar.gz' }], types: ['Files'] },
-      configurable: true,
-    });
-    document.dispatchEvent(drop);
+    await fireTauriEvent('tauri://drag-drop', { paths: ['C:/readme.txt'] });
     await waitFor(() => {
       expect(screen.queryByText(/Unsupported file/)).toBeInTheDocument();
     });
+    // Unsupported extension is skipped before any install attempt.
+    expect(getInvokeCalls().some((c) => c.cmd === 'install_mod_from_file')).toBe(false);
   });
 
   it('Profiles nav badge appears when there are pending pack updates', async () => {
@@ -613,8 +789,13 @@ describe('<App>', () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     await waitFor(() => {
+      // The Profiles nav button (id='profiles') now labels as "Modpacks".
+      // Disambiguate from "Browse Modpacks" via exact label match on the
+      // nav-label span text.
       const profilesNav = screen.getAllByRole('button').find(
-        (b) => b.className.includes('gf-nav') && /Profiles/.test(b.textContent ?? ''),
+        (b) =>
+          b.className.includes('gf-nav') &&
+          b.querySelector('.gf-nav-label')?.textContent === 'Modpacks',
       );
       expect(profilesNav?.textContent).toContain('1');
     });
@@ -678,6 +859,94 @@ describe('<App>', () => {
     });
   });
 
+  it('mod-auto-installed event with preserved_configs fires the preserved-configs toast inline', async () => {
+    // The watcher path inlines the preserved-configs list onto the
+    // auto-installed event so it doesn't need a separate event round-
+    // trip. Three files exercises the "shown list + and N more" path
+    // when count > 3, but here we use 2 to exercise the
+    // formatPreservedConfigsMessage `n <= 3` branch (no tail).
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    await fireTauriEvent('mod-auto-installed', {
+      mod_name: 'ConfigKeeper',
+      file_name: 'ck.zip',
+      replaced: null,
+      preserved_configs: ['settings.json', 'keymap.json'],
+    });
+    await waitFor(() => {
+      // Two i18n keys: app.toast.autoInstalled + app.toast.preservedConfigs.
+      // The second emits a separate toast with the mod name + file list.
+      expect(screen.getByText(/Preserved.*settings\.json.*keymap\.json/i)).toBeInTheDocument();
+    });
+  });
+
+  it('mod-auto-installed event with 5 preserved_configs shows the "and N more" tail', async () => {
+    // Exercises formatPreservedConfigsMessage when n > 3 — the file
+    // list shows the first three names and appends a tail with the
+    // remaining count.
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    await fireTauriEvent('mod-auto-installed', {
+      mod_name: 'BigConfig',
+      file_name: 'big.zip',
+      replaced: null,
+      preserved_configs: ['a.json', 'b.json', 'c.json', 'd.json', 'e.json'],
+    });
+    await waitFor(() => {
+      // Tail formats as "(and 2 more)" or similar i18n string.
+      expect(screen.getByText(/and 2 more/i)).toBeInTheDocument();
+    });
+  });
+
+  it('mod-configs-preserved event fires the preserved-configs toast', async () => {
+    // Standalone event for update_mod / repair_mod paths — separate
+    // from the watcher's inlined preserved_configs field.
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    await fireTauriEvent('mod-configs-preserved', {
+      mod_name: 'UpdatedMod',
+      files: ['settings.json'],
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/Preserved.*settings\.json/i)).toBeInTheDocument();
+    });
+  });
+
+  it('mod-configs-lost event fires a warning toast naming the lost configs', async () => {
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    await fireTauriEvent('mod-configs-lost', {
+      mod_name: 'UpdatedMod',
+      files: ['settings.json', 'keymap.json'],
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/re-apply.*settings\.json/i)).toBeInTheDocument();
+    });
+  });
+
+  it('mod-configs-lost with empty files array fires no toast (early return)', async () => {
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    await fireTauriEvent('mod-configs-lost', { mod_name: 'NoLossMod', files: [] });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByText(/re-apply/i)).toBeNull();
+  });
+
+  it('mod-configs-preserved with empty files array fires no toast (early return)', async () => {
+    // Defensive early return in the handler — files.length === 0 means
+    // there's nothing to surface. Exercise the guard so the early-exit
+    // branch is covered.
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    await fireTauriEvent('mod-configs-preserved', {
+      mod_name: 'NoConfigsMod',
+      files: [],
+    });
+    // No "Preserved" toast for this mod.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByText(/Preserved.*NoConfigsMod/i)).toBeNull();
+  });
+
   // ── Top-bar profile chip / ProfileSwitcher ────────────────────────
   it('clicking the profile chip opens the ProfileSwitcher popover', async () => {
     registerInvokeHandler('get_active_profile', () => 'MyPack');
@@ -693,8 +962,9 @@ describe('<App>', () => {
     const chip = document.querySelector('button.gf-prof') as HTMLButtonElement | null;
     expect(chip).toBeTruthy();
     await user.click(chip!);
-    // ProfileSwitcher reveals an "Add a pack" / "Manage all" foot button.
-    const switcher = await screen.findByText(/Switch active pack/i);
+    // ProfileSwitcher's "Add modpack" / "Manage all" foot button is the
+    // unambiguous signal the popover mounted.
+    const switcher = await screen.findByRole('button', { name: /Add modpack/i });
     expect(switcher).toBeInTheDocument();
   });
 
@@ -709,19 +979,50 @@ describe('<App>', () => {
     // (Onboarding overlay is suppressed by default in beforeEach so we
     //  don't need a Skip-setup click.)
     // Navigate to a non-home view first so we can observe the switch.
-    await user.click(getNavButton('Mods'));
-    await waitFor(() => { expect(screen.getByText(/Your mods/i)).toBeInTheDocument(); });
-    // Open switcher, click Add pack.
+    await user.click(getNavButton('Mod Library'));
+    await waitFor(() => { expect(screen.getByText(/All installed mods/i)).toBeInTheDocument(); });
+    // Open switcher, click Add modpack.
     const chip = document.querySelector('button.gf-prof') as HTMLButtonElement | null;
     expect(chip).toBeTruthy();
     await user.click(chip!);
-    await screen.findByText(/Switch active pack/i);
-    // The "Add pack" foot button lives in .gf-pop-foot.
-    const addBtn = await screen.findByText(/Add pack/i);
+    // The "Add modpack" foot button lives in .gf-pop-foot.
+    const addBtn = await screen.findByRole('button', { name: /Add modpack/i });
     await user.click(addBtn);
     // Home view should be active — its placeholder is visible.
     await waitFor(() => {
       expect(screen.getByPlaceholderText(/username\/AA5A-315D-61AE/i)).toBeInTheDocument();
+    });
+  });
+
+  it('ProfileSwitcher "Add pack" focuses the Modpacks Quick-Add input (full pipeline)', async () => {
+    // The companion test above asserts the view-routing half of the
+    // wiring. This one closes the focus-pipeline gap flagged in the
+    // 1.7.0 Task 15 review: App.tsx bumps `focusModpacksCodeBarSignal`
+    // → ProfilesView's effect calls `input.focus()` inside
+    // `requestAnimationFrame`. The Profiles unit suite covers the
+    // signal-in-isolation case (Profiles.test.tsx: "focusQuickAddSignal
+    // bump focuses the toolbar input"); this end-to-end test verifies
+    // the App shell actually wires the callback through.
+    registerInvokeHandler('get_active_profile', () => 'MyPack');
+    registerInvokeHandler('list_profiles_cmd', () => [
+      { name: 'MyPack', mods: [], created_at: '2026-01-01' },
+    ]);
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    // Start on Library so the switch to Modpacks is observable.
+    await user.click(getNavButton('Mod Library'));
+    await waitFor(() => { expect(screen.getByText(/All installed mods/i)).toBeInTheDocument(); });
+    const chip = document.querySelector('button.gf-prof') as HTMLButtonElement | null;
+    expect(chip).toBeTruthy();
+    await user.click(chip!);
+    const addBtn = await screen.findByRole('button', { name: /Add modpack/i });
+    await user.click(addBtn);
+    // The focus is applied inside `requestAnimationFrame` (Profiles.tsx
+    // useEffect), so use waitFor to give the rAF callback time to fire.
+    const input = await screen.findByLabelText(/Add a modpack by code/i);
+    await waitFor(() => {
+      expect(document.activeElement).toBe(input);
     });
   });
 
@@ -738,11 +1039,11 @@ describe('<App>', () => {
     const chip = document.querySelector('button.gf-prof') as HTMLButtonElement | null;
     expect(chip).toBeTruthy();
     await user.click(chip!);
-    await screen.findByText(/Switch active pack/i);
-    const manageBtn = await screen.findByText(/Manage all/i);
+    // "Manage all" foot button is unambiguous once the popover mounts.
+    const manageBtn = await screen.findByRole('button', { name: /Manage all/i });
     await user.click(manageBtn);
     await waitFor(() => {
-      expect(screen.getByText(/Your packs/i)).toBeInTheDocument();
+      expect(screen.getByText(/All the modpacks you follow/i)).toBeInTheDocument();
     });
   });
 
@@ -979,6 +1280,34 @@ describe('<App>', () => {
     expect(close).toBeInTheDocument();
   });
 
+  it('Minimize button logs capability errors without crashing (handleTitlebarMin catch)', async () => {
+    const user = userEvent.setup();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockWindow.minimize.mockRejectedValueOnce(new Error('no capability'));
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    const min = screen.getByTitle('Minimize');
+    await user.click(min);
+    await waitFor(() => {
+      expect(warnSpy).toHaveBeenCalledWith('minimize failed:', expect.any(Error));
+    });
+    warnSpy.mockRestore();
+  });
+
+  it('Close button logs capability errors without crashing (handleTitlebarClose catch)', async () => {
+    const user = userEvent.setup();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockWindow.close.mockRejectedValueOnce(new Error('no capability'));
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    const close = screen.getByTitle('Close');
+    await user.click(close);
+    await waitFor(() => {
+      expect(warnSpy).toHaveBeenCalledWith('close failed:', expect.any(Error));
+    });
+    warnSpy.mockRestore();
+  });
+
   it('Minimize button click is handled without crashing', async () => {
     const user = userEvent.setup();
     render(<App />);
@@ -1166,14 +1495,14 @@ describe('<App>', () => {
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     // (Onboarding overlay is suppressed by default in beforeEach so we
     //  don't need a Skip-setup click.)
-    // Navigate to Mods so we can prove the deep-link bounces us back to Home.
-    await user.click(getNavButton('Mods'));
-    await waitFor(() => { expect(screen.getByText(/Your mods/i)).toBeInTheDocument(); });
+    // Navigate to Library so we can prove the deep-link bounces us back to Home.
+    await user.click(getNavButton('Mod Library'));
+    await waitFor(() => { expect(screen.getByText(/All installed mods/i)).toBeInTheDocument(); });
     await fireTauriEvent('sts2mm-open-url', 'sts2mm://import/alice/AA5A-315D-61AE');
-    // After route() fires, view should have switched to home — the
-    // share-code placeholder is the canonical Home signal.
+    // After route() fires, view should have switched to Home — assert
+    // the empty-state hero title (1.7 v7 single-block launcher).
     await waitFor(() => {
-      expect(screen.getByPlaceholderText(/username\/AA5A-315D-61AE/i)).toBeInTheDocument();
+      expect(screen.getByText(/Pick a modpack to play/i)).toBeInTheDocument();
     });
   });
 
@@ -1184,12 +1513,7 @@ describe('<App>', () => {
     });
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    const drop = new Event('drop', { bubbles: true, cancelable: true });
-    Object.defineProperty(drop, 'dataTransfer', {
-      value: { files: [{ name: 'bad.zip', path: 'C:/tmp/bad.zip' }], types: ['Files'] },
-      configurable: true,
-    });
-    document.dispatchEvent(drop);
+    await fireTauriEvent('tauri://drag-drop', { paths: ['C:/bad.zip'] });
     await waitFor(() => {
       expect(screen.getByText(/Failed to install bad\.zip.*extract failed/)).toBeInTheDocument();
     });
@@ -1198,12 +1522,7 @@ describe('<App>', () => {
   it('Drop event with no files is a no-op', async () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    const drop = new Event('drop', { bubbles: true, cancelable: true });
-    Object.defineProperty(drop, 'dataTransfer', {
-      value: { files: [], types: ['Files'] },
-      configurable: true,
-    });
-    document.dispatchEvent(drop);
+    await fireTauriEvent('tauri://drag-drop', { paths: [] });
     // No error toast, no install call.
     expect(screen.queryByText(/Unsupported|Failed/)).toBeNull();
     expect(getInvokeCalls().some((c) => c.cmd === 'install_mod_from_file')).toBe(false);
@@ -1246,7 +1565,11 @@ describe('<App>', () => {
 
   // ── View-callback wiring (covers the inline `() => setActiveView(...)`
   // arrow callbacks passed into HomeView / ProfilesView / BrowseView /
-  // TutorialView / OnboardingOverlay / LaunchSpinner) ─────────────────
+  // OnboardingOverlay / LaunchSpinner) ─────────────────────────────────
+  // Note: HelpView (1.7) is self-contained and no longer surfaces an
+  // inline Settings deep-link, so there's no Help -> Settings wiring
+  // test here. The onGoToSettings prop remains for future contextual
+  // links but is currently unused.
   it("Home's Settings shortcut (game-not-detected banner) routes to Settings", async () => {
     // Default mock: `valid: false`, so HomeView renders the
     // "Game not detected" banner with a "Settings" button wired to
@@ -1270,73 +1593,45 @@ describe('<App>', () => {
     });
   });
 
-  it("Home's 'Manage mods' button routes to Mods view", async () => {
-    // The Hero "Manage mods" button (Home.tsx:548) calls onGoToMods,
-    // which is the inline `() => setActiveView('mods')` arrow at
-    // App.tsx:683.
+  // (Removed: the Hero "Manage mods" button was deleted in the 1.7
+  // launcher-first redesign — the hero now centers on Play with only
+  // Switch / Sync / Share / Repair as secondary actions. The sidebar
+  // "Mods" nav covers `setActiveView('mods')` already, and that wiring
+  // is exercised by every test below that calls getNavButton('Mods').)
+
+  it("Topbar profile chip opens the ProfileSwitcher", async () => {
+    // 1.7.0 cleanup: the Home hero's "Switch modpack" button was a
+    // duplicate of the always-visible topbar profile chip. Both
+    // opened the same ProfileSwitcher popover; the chip is the
+    // canonical place because it's visible from every view.
+    registerInvokeHandler('get_active_profile', () => 'CurrentPack');
+    registerInvokeHandler('list_profiles_cmd', () => [
+      { name: 'CurrentPack', mods: [], created_at: '2026-01-01' },
+    ]);
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    const manageMods = await screen.findByRole('button', { name: /Manage mods/i });
-    await user.click(manageMods);
-    await waitFor(() => {
-      expect(screen.getByText(/Your mods/i)).toBeInTheDocument();
-    });
+    const profileChip = await screen.findByTitle(/Switch modpack/i);
+    await user.click(profileChip);
+    // ProfileSwitcher's "Add modpack" foot button is the unambiguous
+    // signal the popover mounted.
+    await screen.findByRole('button', { name: /Add modpack/i });
   });
 
-  it("Home's hero 'Switch pack' button opens the ProfileSwitcher", async () => {
-    // Home hero button "Switch to a different pack" (Home.tsx:557)
-    // wires to onSwitchPack → setShowProfileSwitcher(true) (App.tsx:685).
-    const user = userEvent.setup();
-    render(<App />);
-    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    // The exact label varies — find by title attribute.
-    const switchPack = await screen.findByTitle(/Switch to a different pack/i);
-    await user.click(switchPack);
-    // ProfileSwitcher's header.
-    await screen.findByText(/Switch active pack/i);
-  });
-
-  it("TutorialView -> Settings inline link uses the App's setActiveView callback", async () => {
-    // The Tutorial view's UserGuide has an inline "Settings" deep-link
-    // button (Tutorial.tsx:234) that calls onGoToSettings →
-    // setActiveView('settings') inline at App.tsx:693. The link lives
-    // inside the "Full reference" collapsible (collapsed by default).
-    const user = userEvent.setup();
-    render(<App />);
-    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    await user.click(getNavButton('Tutorial'));
-    // Expand the full reference so the inline Settings link is in the DOM.
-    const expandRef = await screen.findByRole('button', { name: /Full reference/i });
-    await user.click(expandRef);
-    // Find the inline Settings button by class (disambiguates from
-    // sidebar nav and the FriendHero "Settings" mention).
-    const inlineSettings = await waitFor(() => {
-      const btns = Array.from(document.querySelectorAll(
-        'button.text-primary',
-      )) as HTMLButtonElement[];
-      const found = btns.find((b) => /^Settings$/i.test(b.textContent?.trim() ?? ''));
-      if (!found) throw new Error('inline Settings button not yet rendered');
-      return found;
-    });
-    await user.click(inlineSettings);
-    await waitFor(() => {
-      expect(screen.getByText('Game Path')).toBeInTheDocument();
-    });
-  });
-
-  it("Browse view 'Open Settings' button (Nexus key missing) routes to Settings", async () => {
+  it("Library → Browse tab 'Open Settings' button (Nexus key missing) routes to Settings", async () => {
     // Force nexus_get_trending to reject with the special "Nexus API
     // key not set" sentinel so Browse renders its "Open Settings"
-    // deep-link button. That button calls onGoToSettings →
-    // setActiveView('settings') inline at App.tsx:692.
+    // deep-link button. The Browse view's onGoToSettings prop is now
+    // forwarded from ModsView (which itself receives it from App).
     registerInvokeHandler('nexus_get_trending', () => {
       throw new Error('Nexus API key not set');
     });
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    await user.click(getNavButton('Browse Mods'));
+    // 1.7.0: Browse Mods is a tab inside Library, not its own sidebar entry.
+    await user.click(getNavButton('Mod Library'));
+    await user.click(screen.getByRole('button', { name: /^Browse$/i }));
     // Default Browse tab is github; switch to Nexus Trending so the
     // effect fires and surfaces the key-missing banner.
     const trendingTab = await screen.findByRole('button', { name: /Nexus Trending/i });
@@ -1348,33 +1643,91 @@ describe('<App>', () => {
     });
   });
 
-  it('Onboarding "Follow a friend" routes to Home + bumps focusCodeBarSignal', async () => {
-    // Walk the onboarding wizard from step 1 to step 3 and pick the
-    // "Follow a friend (paste code)" option, which calls onComplete()
-    // then onAddCode() — the latter is App.tsx:702's inline
-    // setActiveView('home') arrow.
+  it('Onboarding player-path "Got it" CTA routes to Home (covers App.tsx onGoToHome arrow)', async () => {
+    // The player-path branch ends on a "Got it" CTA which calls
+    // finishPlayer → onGoToHome. App.tsx wires that to dismissOnboarding
+    // + setActiveView('home') so the user lands on the Play surface.
+    registerInvokeHandler('detect_game_path', () => ({
+      game_path: 'C:/STS2',
+      mods_path: null,
+      disabled_mods_path: null,
+      mods_count: 0,
+      disabled_count: 0,
+      valid: true,
+      game_version: '0.105.0',
+    }));
     localStorage.removeItem('sts2mm-onboarded');
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /Skip setup/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Set up later/i })).toBeInTheDocument();
     });
-    // Step 1 → 2. The primary action is "Next".
-    const next1 = await screen.findByRole('button', { name: /^Next$/i });
-    await user.click(next1);
-    // Step 2 → 3. With no nexus key + no GH token saved the button
-    // label is "Skip for now" rather than "Next".
-    const next2 = await screen.findByRole('button', { name: /Skip for now|^Next$/i });
-    await user.click(next2);
-    // Step 3 — pick the "Follow a friend" choice.
-    const follow = await screen.findByRole('button', { name: /Follow a friend/i });
-    await user.click(follow);
-    // After onComplete + onAddCode, the onboarding is dismissed AND the
-    // Home view's share-code placeholder is in the DOM.
+    // Step 1 — detect game.
+    await user.click(await screen.findByRole('button', { name: /Try again/i }));
+    const continueBtn = await screen.findByRole('button', { name: /^Continue$/i });
+    await waitFor(() => expect(continueBtn).not.toBeDisabled());
+    await user.click(continueBtn);
+    // Audience step — pick the player path.
+    await user.click(await screen.findByRole('button', { name: /Play modpacks others made/i }));
+    // Player card 1 → Next → player card 2.
+    await user.click(await screen.findByRole('button', { name: /^Next$/i }));
+    // Final CTA — "Got it" fires finishPlayer → onGoToHome.
+    await user.click(await screen.findByRole('button', { name: /^Got it$/i }));
+    // Overlay drops out and the Home view is active (its Launch button
+    // is unique to Home).
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: /Skip setup/i })).toBeNull();
     });
-    expect(screen.getByPlaceholderText(/username\/AA5A-315D-61AE/i)).toBeInTheDocument();
+  });
+
+  it('Onboarding creator-path "Create my first modpack" routes to Modpacks + opens Create wizard', async () => {
+    // 1.7.0 T8 — branched onboarding flow. The legacy "Follow a friend"
+    // choice on step 3 is gone; the new step 2 asks the audience-
+    // segmentation question ("Play modpacks others made" vs "Make or
+    // share modpacks") and routes to a two-card teaching path. The
+    // creator path's final CTA calls onCreateModpack which bumps
+    // openCreateWizardSignal so ProfilesView opens its guided wizard.
+    registerInvokeHandler('detect_game_path', () => ({
+      game_path: 'C:/STS2',
+      mods_path: null,
+      disabled_mods_path: null,
+      mods_count: 0,
+      disabled_count: 0,
+      valid: true,
+      game_version: '0.105.0',
+    }));
+    localStorage.removeItem('sts2mm-onboarded');
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /Set up later/i })).toBeInTheDocument();
+    });
+    // Step 1 — game's not yet detected by default, so click Try again
+    // to use the registered detect_game_path mock above.
+    const tryAgain = await screen.findByRole('button', { name: /Try again/i });
+    await user.click(tryAgain);
+    // Now the "Continue" button is enabled.
+    const continueBtn = await screen.findByRole('button', { name: /^Continue$/i });
+    await waitFor(() => expect(continueBtn).not.toBeDisabled());
+    await user.click(continueBtn);
+    // Audience step — pick the creator path.
+    const creatorBtn = await screen.findByRole('button', { name: /Make or share modpacks/i });
+    await user.click(creatorBtn);
+    // Creator card 1 → Next → creator card 2.
+    await user.click(await screen.findByRole('button', { name: /^Next$/i }));
+    // Final CTA — closes onboarding and opens the Create wizard on the
+    // Modpacks page.
+    await user.click(await screen.findByRole('button', { name: /Create my first modpack/i }));
+    // Overlay is gone.
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /Skip setup/i })).toBeNull();
+    });
+    // CreateModpackWizard mounted — its step-1 heading is "Start" and
+    // it surfaces a "Cancel" button. We use the Cancel button as the
+    // unambiguous signal the wizard is present.
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^Cancel$/i })).toBeInTheDocument();
+    });
   });
 
   it("LaunchSpinner's 'Hide' button calls onCancel and dismisses the spinner", async () => {
@@ -1501,7 +1854,7 @@ describe('<App>', () => {
     registerInvokeHandler('launch_game', () => true);
     render(<App />);
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /Skip setup/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Set up later/i })).toBeInTheDocument();
     });
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', ctrlKey: true }));
     // launch_game was NOT invoked.
@@ -1559,13 +1912,14 @@ describe('<App>', () => {
     });
   });
 
-  it('ProfilesView PublishModal "Open Settings → Accounts" routes to Settings', async () => {
+  it('ProfilesView PublishModal "Configure later in Settings" routes to Settings', async () => {
     // Trigger flow:
     //   1. Mount with a profile that's not yet shared and github_token_set = false.
     //   2. Navigate to Profiles, click the Share button on the profile row.
-    //   3. PublishModal renders the "GitHub token required" block with the
-    //      "Open Settings → Accounts" button.
-    //   4. Clicking it calls onGoToSettings which is App.tsx:690's inline
+    //   3. PublishModal renders the inline ShareSetupPanel (replaces the
+    //      old red "GitHub token required" block) with a
+    //      "Configure later in Settings" escape-hatch button.
+    //   4. Clicking it calls onGoToSettings which is App.tsx's inline
     //      `() => setActiveView('settings')` arrow.
     registerInvokeHandler('get_api_key_status', () => ({
       nexus_api_key_set: false,
@@ -1578,57 +1932,48 @@ describe('<App>', () => {
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    await user.click(getNavButton('Profiles'));
+    await user.click(getNavButton('Modpacks'));
     await waitFor(() => { expect(screen.getByText('MyPack')).toBeInTheDocument(); });
+    // T16 — Share button lives in the modpack's detail view header now.
+    // Click the card first to open detail, then click Share.
+    await user.click(screen.getByRole('button', { name: /Open MyPack modpack/i }));
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { level: 2, name: 'MyPack' })).toBeInTheDocument();
+    });
     const shareBtn = screen.getAllByRole('button').find(
       (b) => /^Share$/.test(b.textContent?.trim() ?? ''),
     ) as HTMLButtonElement | undefined;
     expect(shareBtn).toBeDefined();
     await user.click(shareBtn!);
-    // PublishModal renders the "Open Settings → Accounts" button when
-    // tokenSet === false.
-    const openSettingsBtn = await screen.findByRole('button', {
-      name: /Open Settings.*Accounts/i,
+    // ShareSetupPanel renders the "Configure later in Settings" button
+    // when tokenSet === false — same end behavior as the old CTA.
+    const configureLaterBtn = await screen.findByRole('button', {
+      name: /Configure later in Settings/i,
     });
-    await user.click(openSettingsBtn);
+    await user.click(configureLaterBtn);
     // App routed to Settings view.
     await waitFor(() => {
       expect(screen.getByText('Game Path')).toBeInTheDocument();
     });
   });
 
-  it("Home's 'View all in Profiles' link routes to Profiles (otherSubs path)", async () => {
-    // The Home view's "Your other packs" section renders a "View all in
-    // Profiles" inline link (Home.tsx:644) that calls
-    // `() => onGoToProfiles?.()` → setActiveView('profiles') inline at
-    // App.tsx:684. The section only appears when otherSubs.length > 0.
-    registerInvokeHandler('get_active_profile', () => 'main-pack');
-    registerInvokeHandler('get_subscriptions', () => [
-      {
-        share_id: 'alice/AAAA-BBBB-CCCC',
-        profile_name: 'other-pack',
-        subscribed_at: '2026-01-01',
-        last_synced_at: '2026-01-02',
-        auto_update: true,
-        last_audit_kind: null,
-        last_audit_summary: null,
-        last_audit_at: null,
-        snoozed_at: null,
-        snoozed_versions_json: null,
-      },
-    ]);
-    registerInvokeHandler('list_profiles_cmd', () => [
-      { name: 'main-pack', mods: [], created_at: '2026-01-01' },
-      { name: 'other-pack', mods: [], created_at: '2026-01-01' },
-    ]);
+  it("Home's empty-state CTA routes to Profiles (1.7 v7 single-block launcher)", async () => {
+    // The 1.7 v7 Home is a single-block launcher. The "Your other packs"
+    // inline section + "View all in Profiles" link were removed; their
+    // replacement is the empty-state hero's "Open Modpacks" CTA which
+    // calls `onGoToProfiles?.()` → setActiveView('profiles'). Verify
+    // that route here.
+    registerInvokeHandler('get_active_profile', () => null);
+    registerInvokeHandler('get_subscriptions', () => []);
+    registerInvokeHandler('list_profiles_cmd', () => []);
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    // Wait for the otherSubs section heading.
-    const viewAll = await screen.findByRole('button', { name: /View all in Profiles/i });
-    await user.click(viewAll);
+    // Empty-state hero shows the "Open Modpacks" primary CTA.
+    const openModpacks = await screen.findByRole('button', { name: /^Open Modpacks$/i });
+    await user.click(openModpacks);
     await waitFor(() => {
-      expect(screen.getByText(/Your packs/i)).toBeInTheDocument();
+      expect(screen.getByText(/All the modpacks you follow/i)).toBeInTheDocument();
     });
   });
 
@@ -1705,31 +2050,15 @@ describe('<App>', () => {
     document.body.removeChild(div);
   });
 
-  it('drag-over without Files type does NOT show dropzone', async () => {
-    // App.tsx:391 — `if (e.dataTransfer?.types.includes('Files'))` false branch.
-    render(<App />);
-    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    const over = new Event('dragover', { bubbles: true, cancelable: true });
-    Object.defineProperty(over, 'dataTransfer', { value: { types: ['text/plain'] } });
-    document.dispatchEvent(over);
-    // No "Drop to install" overlay.
-    expect(screen.queryByText('Drop to install')).toBeNull();
-  });
-
   it('Drop install error from a non-Error throw stringifies via String() (ternary false branch)', async () => {
-    // App.tsx:416 — `err instanceof Error ? err.message : String(err)`.
+    // App.tsx — `err instanceof Error ? err.message : String(err)`.
     // Throw a non-Error (a plain string) so the false branch fires.
     registerInvokeHandler('install_mod_from_file', () => {
       throw 'plain-string-rejection';
     });
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    const drop = new Event('drop', { bubbles: true, cancelable: true });
-    Object.defineProperty(drop, 'dataTransfer', {
-      value: { files: [{ name: 'x.zip', path: 'C:/tmp/x.zip' }], types: ['Files'] },
-      configurable: true,
-    });
-    document.dispatchEvent(drop);
+    await fireTauriEvent('tauri://drag-drop', { paths: ['C:/x.zip'] });
     await waitFor(() => {
       expect(screen.getByText(/Failed to install x\.zip.*plain-string-rejection/)).toBeInTheDocument();
     });
@@ -1813,16 +2142,23 @@ describe('<App>', () => {
     // length=0 (default), the badge span is NOT rendered.
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    // The Profiles nav button now labels as "Modpacks". Disambiguate
+    // from "Browse Modpacks" via exact .gf-nav-label match.
     const profilesNav = screen.getAllByRole('button').find(
-      (b) => b.className.includes('gf-nav') && /Profiles/.test(b.textContent ?? ''),
+      (b) =>
+        b.className.includes('gf-nav') &&
+        b.querySelector('.gf-nav-label')?.textContent === 'Modpacks',
     );
     expect(profilesNav).toBeDefined();
     // No gf-nav-badge span inside.
     expect(profilesNav!.querySelector('.gf-nav-badge')).toBeNull();
   });
 
-  it('gameInfo.valid=true renders "STS2 detected" label + mods count line', async () => {
-    // App.tsx:536/539 — `gameInfo?.valid` true branches.
+  it('gameInfo.valid=true renders the mod-count line + an "STS2 detected" topbar status', async () => {
+    // Mod count surfaces in the topbar profile chip; that's the
+    // canonical place (it changes live with mod state). Detection state
+    // is ALSO surfaced as an at-a-glance topbar pill (restored 1.7.0
+    // after users said there was no easy way to tell if STS2 was found).
     registerInvokeHandler('get_game_info', () => ({
       game_path: 'C:/Games/STS2',
       mods_path: 'C:/Games/STS2/Mods',
@@ -1835,11 +2171,27 @@ describe('<App>', () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     await waitFor(() => {
-      expect(screen.getByText('STS2 detected')).toBeInTheDocument();
+      expect(screen.getByText(/0 active \/ 0 mods/)).toBeInTheDocument();
     });
-    // Mods count line ("0 active / 0 mods") appears in two places when
-    // valid; we just need at least one to confirm the branch fired.
-    expect(screen.queryAllByText(/0 active \/ 0 mods/).length).toBeGreaterThan(0);
+    expect(
+      screen.getByRole('button', { name: /STS2 detected/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('topbar shows "STS2 not found" and routes to Settings when the game is undetected', async () => {
+    // Default safe-mock get_game_info returns valid:false. The warning
+    // pill must surface so the user knows to set the game folder, and
+    // clicking it jumps straight to Settings.
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    const status = screen.getByRole('button', { name: /STS2 not found/i });
+    expect(status).toBeInTheDocument();
+    await user.click(status);
+    // Settings view is now active — the Game Path field renders there.
+    await waitFor(() => {
+      expect(screen.getByText('Game Path')).toBeInTheDocument();
+    });
   });
 
   it('profileInitials fallback ("VA") renders when activeProfile yields empty initials', async () => {

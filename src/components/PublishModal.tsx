@@ -5,7 +5,10 @@ import { listen } from '@tauri-apps/api/event';
 import type { Profile, ShareResult } from '../types';
 import { shareProfile, reshareProfile, getApiKeyStatus, setModpackListing, openExternalUrl } from '../hooks/useTauri';
 import { useToast } from '../contexts/ToastContext';
+import { useClipboard } from '../hooks/useClipboard';
 import { buildShareMessage, buildShareLink } from '../lib/shareImport';
+import { ShareSetupPanel } from './ShareSetupPanel';
+import { MissingBundlesPanel, parseMissingBundlesError } from './MissingBundlesPanel';
 
 // Publish-current modal. Three states:
 //   1) Pre-flight    — show what's included AND any blockers (missing
@@ -39,12 +42,27 @@ interface ShareProgress {
 export function PublishModal({ open, profile, isReshare, onClose, onShared, onGoToSettings }: Props) {
   const toast = useToast();
   const { t } = useTranslation();
+  // Shared clipboard hook. PublishModal historically suppressed the
+  // success toast (the modal itself shows a clear "Copied" inline
+  // state, so an extra toast was overkill) — we preserve that by
+  // passing `successMessage: null` in handleCopy below. Reset is
+  // slightly longer here (1800ms) because the modal stays open and
+  // the user reads the inline state more carefully than a transient
+  // chip on a list row.
+  const { copy, copied } = useClipboard({ resetMs: 1800 });
   const [busy, setBusy] = useState(false);
   const [shared, setShared] = useState<ShareResult | null>(null);
-  const [copied, setCopied] = useState<'code' | 'link' | 'msg' | null>(null);
   const [tokenSet, setTokenSet] = useState<boolean | null>(null);
   const [progress, setProgress] = useState<ShareProgress | null>(null);
   const [visibility, setVisibility] = useState<'private' | 'public'>('private');
+  /**
+   * Inline-repair state. Populated when the Rust publish command rejects
+   * with the "missing bundles for N mod(s): …" pattern (see Solo's bug
+   * report). Renders <MissingBundlesPanel> instead of toasting a raw
+   * error string — the curator can repair the bad bundles in-modal and
+   * the publish auto-retries.
+   */
+  const [missingBundles, setMissingBundles] = useState<string[] | null>(null);
 
   // Refresh token status whenever the modal opens so we don't show stale
   // "token missing" state if the curator just set it in Settings.
@@ -53,6 +71,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
       setShared(null);
       setProgress(null);
       setBusy(false);
+      setMissingBundles(null);
       return;
     }
     let cancelled = false;
@@ -134,7 +153,18 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
         toast.success(isReshare ? t('publish.updatePushedToast') : t('publish.profilePublishedToast'));
       }
     } catch (e) {
-      toast.error(t('publish.publishFailed', { error: e instanceof Error ? e.message : String(e) }));
+      const msg = e instanceof Error ? e.message : String(e);
+      // Solo bug repro: when the Rust side rejects with "missing bundles
+      // for N mod(s): …", swap the raw-error toast for an in-modal
+      // recovery panel that repairs the bundles and auto-retries the
+      // publish. Other publish failures (network, GitHub API, token)
+      // fall through to the normal toast.
+      const parsed = parseMissingBundlesError(msg);
+      if (parsed && parsed.mods.length > 0) {
+        setMissingBundles(parsed.mods);
+      } else {
+        toast.error(t('publish.publishFailed', { error: msg }));
+      }
     } finally {
       setBusy(false);
       setProgress(null);
@@ -150,19 +180,21 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
       kind === 'code' ? codeStr
       : kind === 'link' ? buildShareLink(codeStr)
       : buildShareMessage(profile.name, codeStr, t);
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(kind);
-      setTimeout(() => setCopied(null), 1800);
-    } catch {
-      toast.error(t('publish.couldntCopy'));
-    }
+    // PublishModal historically did NOT toast on success — the inline
+    // "Copied" state on the button itself is feedback enough, and a
+    // toast on top of an already-open modal felt noisy. The hook
+    // honours that via `successMessage: null`.
+    await copy(text, kind, {
+      successMessage: null,
+      failureMessage: 'publish.couldntCopy',
+    });
   }
 
   function handleDone() {
     setShared(null);
     setBusy(false);
     setProgress(null);
+    setMissingBundles(null);
     onClose();
   }
 
@@ -206,48 +238,52 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
         </div>
 
         <div className="gf-modal-body">
-          {/* Pre-flight: token missing — block the publish click and
-              point the user at Settings instead of letting them hit
-              a raw error toast. */}
-          {blockedByMissingToken && (
-            <div
-              style={{
-                background: 'oklch(0.55 0.13 25 / 0.10)',
-                border: '1px solid oklch(0.55 0.13 25 / 0.35)',
-                borderRadius: 8,
-                padding: '12px 14px',
-                marginBottom: 14,
-                display: 'flex',
-                gap: 10,
-                alignItems: 'flex-start',
+          {/* Solo bug recovery: when the Rust publish rejected with
+              "missing bundles for N mod(s)", the user used to see only a
+              raw error toast and was left guessing what "Restore or
+              reinstall these mods" meant. The inline panel below lists
+              the affected mods with per-mod status, repairs them
+              sequentially via `repair_mod`, and auto-retries the publish
+              on full success. */}
+          {missingBundles && missingBundles.length > 0 && (
+            <MissingBundlesPanel
+              modNames={missingBundles}
+              onRetryPublish={async () => {
+                setMissingBundles(null);
+                await handlePublish();
               }}
-            >
-              <AlertTriangle size={16} style={{ color: 'oklch(0.78 0.16 25)', marginTop: 1, flexShrink: 0 }} />
-              <div style={{ flex: 1, fontSize: 12.5, lineHeight: 1.55 }}>
-                <div style={{ fontWeight: 600, color: 'var(--ink)', marginBottom: 4 }}>
-                  {t('publish.tokenRequired')}
-                </div>
-                <div style={{ color: 'var(--ink-mute)' }}>
-                  <Trans i18nKey="publish.tokenExplanation">
-                    <code />
-                    <code />
-                    <code />
-                  </Trans>
-                </div>
-                {onGoToSettings && (
-                  <button
-                    className="gf-btn-2 gf-btn-2-sm"
-                    style={{ marginTop: 10 }}
-                    onClick={() => { onGoToSettings(); handleDone(); }}
-                  >
-                    {t('publish.openSettings')}
-                  </button>
-                )}
-              </div>
-            </div>
+              onCancel={handleDone}
+            />
           )}
 
-          {!shared && !blockedByMissingToken && !busy && (
+          {/* Pre-flight: token missing — show the inline ShareSetupPanel
+              right inside the share modal. It explains in plain language
+              WHY GitHub is needed and lets the curator paste a token +
+              save without leaving the share flow. After a successful save,
+              `onSaved` re-checks the token status; the modal naturally
+              transitions to the normal publish-ready render. Curators who
+              would still prefer to manage the token from Settings can
+              click "Configure later in Settings". */}
+          {!missingBundles && blockedByMissingToken && (
+            <ShareSetupPanel
+              onSaved={async () => {
+                try {
+                  const status = await getApiKeyStatus();
+                  setTokenSet(status.github_token_set);
+                } catch {
+                  // Ignore — the user can retry. The panel keeps its own
+                  // inline error state when set_github_token itself fails;
+                  // a status re-check failure here is rare and recoverable.
+                }
+              }}
+              onConfigureLater={() => {
+                onGoToSettings?.();
+                handleDone();
+              }}
+            />
+          )}
+
+          {!shared && !blockedByMissingToken && !busy && !missingBundles && (
             <>
               <div className="gf-field">
                 <label className="gf-field-label">{t('publish.packName')}</label>
@@ -528,6 +564,11 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
           )}
         </div>
 
+        {/* While the MissingBundlesPanel owns the action surface (Repair /
+            Cancel), the normal modal footer must stay out of the way —
+            otherwise the curator sees two Cancel buttons and confusing
+            disabled-state interactions. */}
+        {!missingBundles && (
         <div className="gf-modal-foot">
           {!shared && !busy ? (
             <>
@@ -553,6 +594,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
             </>
           )}
         </div>
+        )}
       </div>
     </div>
   );

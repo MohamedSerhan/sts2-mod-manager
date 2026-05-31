@@ -1,7 +1,14 @@
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, Result};
 use crate::state::AppState;
+
+/// Total request timeout for the Nexus API client.
+const HTTP_TOTAL_TIMEOUT: Duration = Duration::from_secs(60);
+/// Connect timeout for the Nexus API client.
+const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 // ── NXM Link Parsing ────────────────────────────────────────────────────────
 
@@ -142,6 +149,8 @@ impl NexusClient {
 
         let client = reqwest::Client::builder()
             .default_headers(headers)
+            .timeout(HTTP_TOTAL_TIMEOUT)
+            .connect_timeout(HTTP_CONNECT_TIMEOUT)
             .build()
             .unwrap_or_default();
 

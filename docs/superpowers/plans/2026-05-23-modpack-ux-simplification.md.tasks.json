@@ -1,0 +1,89 @@
+{
+  "planPath": "docs/superpowers/plans/2026-05-23-modpack-ux-simplification.md",
+  "tasks": [
+    {
+      "id": 1,
+      "subject": "Task 1: Vocabulary keys + top-level rename",
+      "status": "completed",
+      "description": "**Goal:** Add the new Modpack vocabulary to both locales, switch sidebar nav, topbar profile chip, and globally-visible Profile-language strings (toasts, confirm dialogs, share-import dialogs) to the new vocabulary. No layout changes.\n\n**Files:** src/i18n/locales/en.json, src/i18n/locales/zh-Hans.json, src/App.tsx, src/components/ProfileSwitcher.tsx, src/components/QuickAddModal.tsx, src/views/Home.test.tsx, src/components/ProfileSwitcher.test.tsx, src/components/QuickAddModal.test.tsx\n\n**Verify:** npx vitest run src/views/Home.test.tsx src/components/ProfileSwitcher.test.tsx src/components/QuickAddModal.test.tsx src/i18n/locales/parity.test.ts\n\n```json:metadata\n{\"files\": [\"src/i18n/locales/en.json\", \"src/i18n/locales/zh-Hans.json\", \"src/App.tsx\", \"src/components/ProfileSwitcher.tsx\", \"src/components/QuickAddModal.tsx\"], \"verifyCommand\": \"npx vitest run src/views/Home.test.tsx src/components/ProfileSwitcher.test.tsx src/components/QuickAddModal.test.tsx src/i18n/locales/parity.test.ts\", \"acceptanceCriteria\": [\"Sidebar shows Modpacks and Help labels\", \"Topbar shows Active modpack eyebrow\", \"ProfileSwitcher uses modpack vocabulary\", \"QuickAddModal uses modpack vocabulary\", \"Confirm dialogs say modpack not profile\", \"qa:i18n passes\", \"targeted vitest passes\", \"no Rust/TS identifier renames\"]}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: Mods view — All Installed Mods reframing",
+      "status": "completed",
+      "blockedBy": [1],
+      "description": "**Goal:** Make Mods view unambiguously read as 'all installed mods'. Add membership context chips (in this modpack / stored / not in this modpack) so Solo's confusion case reads cleanly.\n\n**Files:** src/views/Mods.tsx, src/views/Mods.test.tsx, src/i18n/locales/en.json, src/i18n/locales/zh-Hans.json, src/styles.css\n\n**Verify:** npx vitest run src/views/Mods.test.tsx\n\n```json:metadata\n{\"files\": [\"src/views/Mods.tsx\", \"src/views/Mods.test.tsx\", \"src/i18n/locales/en.json\", \"src/i18n/locales/zh-Hans.json\", \"src/styles.css\"], \"verifyCommand\": \"npx vitest run src/views/Mods.test.tsx\", \"acceptanceCriteria\": [\"Page heading is All installed mods\", \"Subtitle explains scope vs active modpack\", \"Each row shows storage chip (Active in game or Stored)\", \"Each row shows membership chip when active modpack exists\", \"Solo's case (stored on disk but in active modpack) reads cleanly\", \"No behavior regression in toggle handlers\", \"4 new state-combination tests pass\"]}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: Modpacks view — membership + stored wording",
+      "status": "completed",
+      "blockedBy": [1],
+      "description": "**Goal:** Replace user-facing Profiles/Profile/Disable-in-game wording in Profiles.tsx with Modpacks/Modpack/Active-in-game/Stored/In-this-modpack. Mod Library workspace becomes canonical membership editor.\n\n**Files:** src/views/Profiles.tsx, src/views/Profiles.test.tsx, src/i18n/locales/en.json, src/i18n/locales/zh-Hans.json\n\n**Verify:** npx vitest run src/views/Profiles.test.tsx\n\n```json:metadata\n{\"files\": [\"src/views/Profiles.tsx\", \"src/views/Profiles.test.tsx\", \"src/i18n/locales/en.json\", \"src/i18n/locales/zh-Hans.json\"], \"verifyCommand\": \"npx vitest run src/views/Profiles.test.tsx\", \"acceptanceCriteria\": [\"Page heading reads Modpacks\", \"Action buttons use modpack vocabulary\", \"Mod Library subtitle present and explains membership\", \"Membership labels use 'In this modpack' wording\", \"Storage labels use Active in game/Stored not Disable in game\", \"Toast messages use modpack wording\", \"Profiles.test.tsx green after assertion updates\", \"No backend identifier renames\"]}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 4: Home view — launcher-first reorganization",
+      "status": "pending",
+      "blockedBy": [1, 6],
+      "description": "**Goal:** Home reads like a simple launcher: prominent active modpack hero with obvious next action (Play if exists, Add modpack if none). Empty state guides toward paste/create/browse.\n\n**Files:** src/views/Home.tsx, src/views/Home.test.tsx, src/i18n/locales/en.json, src/i18n/locales/zh-Hans.json\n\n**Verify:** npx vitest run src/views/Home.test.tsx\n\n```json:metadata\n{\"files\": [\"src/views/Home.tsx\", \"src/views/Home.test.tsx\", \"src/i18n/locales/en.json\", \"src/i18n/locales/zh-Hans.json\"], \"verifyCommand\": \"npx vitest run src/views/Home.test.tsx\", \"acceptanceCriteria\": [\"Empty-state hero shows Paste/Create/Browse CTAs when no active modpack\", \"Active-state hero shows prominent Play button\", \"Sync pill appears in hero when active modpack has updates\", \"Share pill hides when modpack already shared\", \"Other packs list collapses when 0 packs\", \"Pending updates moved from banner to hero pill\", \"Tests cover all hero states\"]}\n```"
+    },
+    {
+      "id": 5,
+      "subject": "Task 5: Help view + FAQ",
+      "status": "pending",
+      "blockedBy": [1],
+      "description": "**Goal:** Rename Tutorial.tsx → Help.tsx. Restructure as Player quick start, Creator quick start, FAQ (8 topics from spec). Help copy structured so HelpHint components can pull from same source.\n\n**Files:** src/views/Help.tsx (new), src/views/Help.test.tsx (new), src/views/Tutorial.tsx (delete), src/views/Tutorial.test.tsx (delete), src/App.tsx, src/i18n/locales/en.json, src/i18n/locales/zh-Hans.json, src/styles.css\n\n**Verify:** npx vitest run src/views/Help.test.tsx src/i18n/locales/parity.test.ts\n\n```json:metadata\n{\"files\": [\"src/views/Help.tsx\", \"src/views/Help.test.tsx\", \"src/App.tsx\", \"src/i18n/locales/en.json\", \"src/i18n/locales/zh-Hans.json\", \"src/styles.css\"], \"verifyCommand\": \"npx vitest run src/views/Help.test.tsx src/i18n/locales/parity.test.ts\", \"acceptanceCriteria\": [\"Help view renders Player + Creator + FAQ sections\", \"8 FAQ items present matching spec list\", \"FAQ items expand/collapse via click\", \"Player quick start has 4 steps\", \"Creator quick start has 5 steps\", \"All copy via i18n (no hardcoded English)\", \"Tutorial.tsx/Tutorial.test.tsx deleted\", \"App.tsx routes 'tutorial' view id to HelpView\"]}\n```"
+    },
+    {
+      "id": 6,
+      "subject": "Task 6: Create Modpack guided wizard",
+      "status": "pending",
+      "blockedBy": [1],
+      "description": "**Goal:** Replace bare 'name your profile' empty form with multi-step wizard: Start → Choose Mods → Check Health → Finish. No GitHub required. 'Share now' optional last step.\n\n**Files:** src/components/CreateModpackWizard.tsx (new), src/components/CreateModpackWizard.test.tsx (new), src/views/Home.tsx, src/views/Profiles.tsx, src/i18n/locales/en.json, src/i18n/locales/zh-Hans.json\n\n**Verify:** npx vitest run src/components/CreateModpackWizard.test.tsx src/views/Home.test.tsx src/views/Profiles.test.tsx\n\n```json:metadata\n{\"files\": [\"src/components/CreateModpackWizard.tsx\", \"src/components/CreateModpackWizard.test.tsx\", \"src/views/Home.tsx\", \"src/views/Profiles.tsx\", \"src/i18n/locales/en.json\", \"src/i18n/locales/zh-Hans.json\"], \"verifyCommand\": \"npx vitest run src/components/CreateModpackWizard.test.tsx src/views/Home.test.tsx src/views/Profiles.test.tsx\", \"acceptanceCriteria\": [\"Wizard opens as modal\", \"Step 1 offers 3 strategies (from-active default, empty, clone if available)\", \"Step 2 lets user pick mods with search/sort\", \"Step 3 runs audit and summarizes health\", \"Step 4 creates modpack locally without GitHub\", \"Share-now branch opens PublishModal after creation\", \"Cancel exits at any step\", \"Back navigates to previous step\", \"Empty name refused\", \"GitHub never mentioned unless Share-now clicked\", \"Profiles.tsx inline new-profile form removed\"]}\n```"
+    },
+    {
+      "id": 7,
+      "subject": "Task 7: Share setup explains GitHub inline",
+      "status": "pending",
+      "blockedBy": [1],
+      "description": "**Goal:** Replace PublishModal's hard 'Go to Settings' block with inline ShareSetupPanel that explains GitHub in plain language and lets the user paste a token without leaving the share flow.\n\n**Files:** src/components/ShareSetupPanel.tsx (new), src/components/ShareSetupPanel.test.tsx (new), src/components/PublishModal.tsx, src/components/PublishModal.test.tsx, src/i18n/locales/en.json, src/i18n/locales/zh-Hans.json, src/styles.css\n\n**Verify:** npx vitest run src/components/ShareSetupPanel.test.tsx src/components/PublishModal.test.tsx\n\n```json:metadata\n{\"files\": [\"src/components/ShareSetupPanel.tsx\", \"src/components/ShareSetupPanel.test.tsx\", \"src/components/PublishModal.tsx\", \"src/components/PublishModal.test.tsx\", \"src/i18n/locales/en.json\", \"src/i18n/locales/zh-Hans.json\", \"src/styles.css\"], \"verifyCommand\": \"npx vitest run src/components/ShareSetupPanel.test.tsx src/components/PublishModal.test.tsx\", \"acceptanceCriteria\": [\"PublishModal shows ShareSetupPanel inline when token missing (not hard block)\", \"Panel has plain-language explanation (3 lines)\", \"Panel links to scoped token URL\", \"Save token transitions to publish flow inline\", \"Save failure shows inline retry message\", \"Escape hatch to Settings still available\", \"GitHub mention only in share flow, not in create wizard or settings tab\"]}\n```"
+    },
+    {
+      "id": 8,
+      "subject": "Task 8: First-run onboarding redesign",
+      "status": "pending",
+      "blockedBy": [1, 6],
+      "description": "**Goal:** Replace linear 3-step onboarding with branched flow asking user intent (play vs make/share), then teaching relevant path. GitHub deferred to share time; Nexus deferred to first manual install.\n\n**Files:** src/components/OnboardingOverlay.tsx, src/components/OnboardingOverlay.test.tsx, src/App.tsx, src/i18n/locales/en.json, src/i18n/locales/zh-Hans.json\n\n**Verify:** npx vitest run src/components/OnboardingOverlay.test.tsx\n\n```json:metadata\n{\"files\": [\"src/components/OnboardingOverlay.tsx\", \"src/components/OnboardingOverlay.test.tsx\", \"src/App.tsx\", \"src/i18n/locales/en.json\", \"src/i18n/locales/zh-Hans.json\"], \"verifyCommand\": \"npx vitest run src/components/OnboardingOverlay.test.tsx\", \"acceptanceCriteria\": [\"Step 1 game detection preserved\", \"Step 2 asks player vs creator intent\", \"Player path shows explanation + paste/browse/skip actions\", \"Creator path shows explanation + Create wizard action\", \"GitHub token input NOT in onboarding\", \"Nexus API key input NOT in onboarding\", \"Skip closes overlay and persists localStorage\", \"Back navigates correctly between steps\", \"Tests cover both branches + skip + back\"]}\n```"
+    },
+    {
+      "id": 9,
+      "subject": "Task 9: Advanced disclosure",
+      "status": "pending",
+      "blockedBy": [2, 3],
+      "description": "**Goal:** Move power-user actions (rollback, repair, source editing, JSON import/export, bulk destructive, raw folder ops) into collapsible Advanced sections so they don't compete with the happy path.\n\n**Files:** src/components/AdvancedSection.tsx (new), src/components/AdvancedSection.test.tsx (new), src/views/Mods.tsx, src/views/Mods.test.tsx, src/views/Profiles.tsx, src/views/Profiles.test.tsx, src/views/Settings.tsx, src/styles.css, src/i18n/locales/en.json, src/i18n/locales/zh-Hans.json\n\n**Verify:** npx vitest run src/components/AdvancedSection.test.tsx src/views/Mods.test.tsx src/views/Profiles.test.tsx src/views/Settings.test.tsx\n\n```json:metadata\n{\"files\": [\"src/components/AdvancedSection.tsx\", \"src/components/AdvancedSection.test.tsx\", \"src/views/Mods.tsx\", \"src/views/Profiles.tsx\", \"src/views/Settings.tsx\", \"src/styles.css\", \"src/i18n/locales/en.json\", \"src/i18n/locales/zh-Hans.json\"], \"verifyCommand\": \"npx vitest run src/components/AdvancedSection.test.tsx src/views/Mods.test.tsx src/views/Profiles.test.tsx src/views/Settings.test.tsx\", \"acceptanceCriteria\": [\"AdvancedSection toggles + persists in localStorage\", \"Mods.tsx wraps rollback/repair/source-editing/nexus-find under Advanced\", \"Profiles.tsx wraps import-json/duplicate/export-json/load-order under Advanced\", \"Settings.tsx Advanced tab consistent\", \"Tests pass after opening Advanced before clicking nested actions\"]}\n```"
+    },
+    {
+      "id": 10,
+      "subject": "Task 10: Contextual help hints + consistency pass",
+      "status": "pending",
+      "blockedBy": [2, 3, 4, 5, 6, 7, 8],
+      "description": "**Goal:** Add inline HelpHint '?' icons next to confusing UI elements; normalize button variants, kebab placement, empty-state markup, toast styling.\n\n**Files:** src/components/HelpHint.tsx (new), src/components/HelpHint.test.tsx (new), src/views/Home.tsx, src/views/Mods.tsx, src/views/Profiles.tsx, src/components/PublishModal.tsx, src/components/CreateModpackWizard.tsx, src/styles.css, src/i18n/locales/en.json, src/i18n/locales/zh-Hans.json\n\n**Verify:** npx vitest run\n\n```json:metadata\n{\"files\": [\"src/components/HelpHint.tsx\", \"src/components/HelpHint.test.tsx\", \"src/views/Home.tsx\", \"src/views/Mods.tsx\", \"src/views/Profiles.tsx\", \"src/components/PublishModal.tsx\", \"src/components/CreateModpackWizard.tsx\", \"src/styles.css\", \"src/i18n/locales/en.json\", \"src/i18n/locales/zh-Hans.json\"], \"verifyCommand\": \"npx vitest run\", \"acceptanceCriteria\": [\"HelpHint renders + opens + closes + uses i18n\", \"HelpHint placed at 5 documented spots\", \"Empty-state markup unified to .gf-empty pattern\", \"Button variants normalized (no inline-style variant buttons)\", \"Full vitest passes\"]}\n```"
+    },
+    {
+      "id": 11,
+      "subject": "Task 11: zh-Hans translation parity sweep",
+      "status": "pending",
+      "blockedBy": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      "description": "**Goal:** Ensure every new or modified English string from Tasks 1–10 has a proper Simplified Chinese translation. Run parity test to confirm structural and value differentiation holds.\n\n**Files:** src/i18n/locales/zh-Hans.json, src/i18n/locales/parity.test.ts (maybe)\n\n**Verify:** npm run qa:i18n\n\n```json:metadata\n{\"files\": [\"src/i18n/locales/zh-Hans.json\", \"src/i18n/locales/parity.test.ts\"], \"verifyCommand\": \"npm run qa:i18n\", \"acceptanceCriteria\": [\"Structural key parity en <-> zh-Hans\", \"All zh values differ from en (except SAME_AS_ENGLISH_ALLOWED)\", \"qa:i18n passes\", \"Sample of new keys reads as natural Chinese\"]}\n```"
+    },
+    {
+      "id": 12,
+      "subject": "Task 12: Quality gates + responsive smoke + version bump",
+      "status": "pending",
+      "blockedBy": [11],
+      "description": "**Goal:** Run full QA gauntlet, confirm coverage thresholds (ratchet branches to 91 if achievable), manual responsive smoke at three window widths, bump version to 1.7.0.\n\n**USER-ORDERED GATE — NON-SKIPPABLE.**\n\n**Files:** package.json, src-tauri/Cargo.toml, src-tauri/tauri.conf.json, CHANGELOG.md, vitest.config.ts\n\n**Verify:** npx tsc --noEmit && cargo check --manifest-path=src-tauri/Cargo.toml && npx vitest run && npm run qa:i18n && cargo test --manifest-path=src-tauri/Cargo.toml && npm run qa:coverage\n\n```json:metadata\n{\"files\": [\"package.json\", \"src-tauri/Cargo.toml\", \"src-tauri/tauri.conf.json\", \"CHANGELOG.md\", \"vitest.config.ts\"], \"verifyCommand\": \"npx tsc --noEmit && cargo check --manifest-path=src-tauri/Cargo.toml && npx vitest run && npm run qa:i18n && cargo test --manifest-path=src-tauri/Cargo.toml && npm run qa:coverage\", \"acceptanceCriteria\": [\"tsc --noEmit exits 0\", \"cargo check exits 0\", \"vitest run passes 100%\", \"qa:coverage meets thresholds (lines>=96, funcs>=96, branches>=90, statements>=96)\", \"cargo test exits 0\", \"qa:i18n exits 0\", \"no if(btn){click(btn)} antipatterns in new/modified tests\", \"manual responsive smoke captured at wide/medium/narrow widths\", \"all three version files read 1.7.0\"], \"userGate\": true, \"tags\": [\"user-gate\"], \"requireEvidenceTokens\": [[\"tsc-pass\"], [\"vitest-pass\"], [\"coverage-pass\"], [\"cargo-test-pass\"], [\"i18n-parity-pass\"], [\"responsive-smoke-captured\"]]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-05-24T16:20:00Z"
+}

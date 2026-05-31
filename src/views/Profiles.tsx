@@ -1,51 +1,43 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Plus,
   Camera,
-  Play,
+  Copy,
   Download,
-  Trash2,
+  Link as LinkIcon,
+  MessageSquare,
   Upload,
   Layers,
-  Share2,
   RefreshCw,
-  Copy,
-  Check,
-  Key,
-  Files,
   AlertTriangle,
-  MessageSquare,
-  Link as LinkIcon,
   Save,
-  ListOrdered,
-  ListChecks,
   ArrowUp,
   ArrowDown,
   GripVertical,
-  Search,
 } from 'lucide-react';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { Badge } from '../components/Badge';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
+import { useClipboard } from '../hooks/useClipboard';
 import { useConfirm } from '../components/ConfirmDialog';
-import { KebabMenu, KebabSection, KebabDivider, KebabItem } from '../components/KebabMenu';
+import { ModpackDetail } from '../components/ModpackDetail';
 import { PublishModal } from '../components/PublishModal';
+import { CreateModpackWizard } from '../components/CreateModpackWizard';
+import { HelpHint } from '../components/HelpHint';
+import { BrowseModpacksView } from './BrowseModpacks';
 import {
   listProfiles,
-  createProfile,
   switchProfile,
   repairProfile,
   snapshotProfile,
+  saveProfileDrift,
   deleteProfile,
   duplicateProfile,
   exportProfile,
   importProfile,
-  getProfileMemberships,
-  setProfileModMembership,
-  toggleMod,
   setProfileLoadOrder,
   getShareInfo,
   getProfileDrift,
@@ -53,14 +45,9 @@ import {
   applySubscriptionUpdate,
   getSubscriptions,
 } from '../hooks/useTauri';
-import { importShareCodeSmart, buildShareMessage, buildShareLink } from '../lib/shareImport';
+import { importShareCodeSmart, buildShareLink, buildShareMessage } from '../lib/shareImport';
 import type { ProfileDrift } from '../hooks/useTauri';
-import type { LoadOrderSettingsStatus, Profile, ProfileMembershipGrid, ProfileMembershipMod, ProfileMembershipState, ShareResult } from '../types';
-
-const LIBRARY_PAGE_SIZE = 100;
-const LIBRARY_BULK_STORAGE_KEY = '__bulk_storage__';
-
-type LibrarySortMode = 'nameAsc' | 'nameDesc' | 'activeFirst' | 'storedFirst' | 'profilesMost';
+import type { LoadOrderSettingsStatus, Profile, ShareResult, Subscription } from '../types';
 
 interface ProfilesViewProps {
   /** Navigates to Settings → Accounts. Passed down to PublishModal's
@@ -68,88 +55,132 @@ interface ProfilesViewProps {
    *  one-click route to the token field instead of having to discover
    *  it themselves. */
   onGoToSettings?: () => void;
-  /** Incremented by the App shell when another view wants to open the
-   *  Mod Library workspace directly. */
-  openModLibrarySignal?: number;
+  /** 1.7.0 T16 — bumped by the App shell when a sibling surface
+   *  (the Mods "Manage active modpack →" link) wants Modpacks to open
+   *  the active modpack's detail view on entry. Replaces the legacy
+   *  openModLibrarySignal pump which opened a now-removed standalone
+   *  workspace. The signal value itself is meaningless; only the
+   *  change is observed. */
+  openActiveModpackSignal?: number;
+  /** 1.7.0 — initial outer-tab selection. 'browse' lands users on the
+   *  Browse-modpacks tab (the absorbed top-level view); 'yours' is
+   *  the default and shows the user's followed/published modpacks.
+   *  Provided so the App shell can honor the legacy
+   *  'browse-modpacks' view-id as a redirect. */
+  initialTab?: 'yours' | 'browse';
+  /** 1.7.0 v7 — incremented by the App shell when a sibling surface
+   *  (ProfileSwitcher's "Add pack", onboarding's "Follow a friend")
+   *  wants the toolbar Quick-Add input to grab focus + pulse. Each
+   *  bump triggers a one-shot effect; the value itself is
+   *  meaningless, only the change matters. */
+  focusQuickAddSignal?: number;
+  /** 1.7.0 T8 — incremented by the App shell when the new branched
+   *  onboarding's creator-path CTA fires. Each bump opens the guided
+   *  CreateModpackWizard. Same one-shot signal pattern as the focus
+   *  variant; the value itself is meaningless, only the change
+   *  matters. */
+  openCreateWizardSignal?: number;
+  /** Called once the create-wizard signal has been consumed so the App
+   *  can reset it to 0 — otherwise the monotonic counter stays >0 and the
+   *  wizard re-opens every time this view remounts (e.g. on every nav
+   *  back to the Modpacks tab). */
+  onCreateWizardConsumed?: () => void;
+  /** Reports which modpack the user is currently viewing in detail (null
+   *  when on the list or another tab). App uses it to auto-add a
+   *  drag-dropped zip to the pack being viewed. */
+  onViewedModpackChange?: (name: string | null) => void;
 }
 
-function membershipKey(row: ProfileMembershipMod, profileName: string): string {
-  return `${row.folder_name ?? row.mod_id ?? row.name}::${profileName}`;
-}
+export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, initialTab = 'yours', focusQuickAddSignal, openCreateWizardSignal, onCreateWizardConsumed, onViewedModpackChange }: ProfilesViewProps = {}) {
+  // 1.7.0 outer Yours/Browse tabs. 'yours' renders the user's
+  // followed/published modpack list (the legacy Profiles content);
+  // 'browse' renders the public modpack browser (formerly its own
+  // sidebar entry). The inner 'following'/'published' filter still
+  // lives below as the `tab` state — they're distinct concerns.
+  const [outerTab, setOuterTab] = useState<'yours' | 'browse'>(initialTab);
+  // If App re-renders us with a new initialTab (e.g. user navigates
+  // to 'browse-modpacks' from a deep-link after we're already
+  // mounted), reflect it. We use a ref-style effect rather than
+  // making outerTab fully controlled because the user can still
+  // click between tabs locally.
+  useEffect(() => {
+    setOuterTab(initialTab);
+  }, [initialTab]);
 
-function membershipRowKey(row: ProfileMembershipMod): string {
-  return row.folder_name ?? row.mod_id ?? row.name;
-}
+  // 1.7.0 v7 — react to the App-owned focus signal by scrolling the
+  // Quick-Add row into view, focusing the input, and pulsing the row
+  // briefly so the user sees the paste-zone. Skip the very first
+  // render (signal=0 or undefined).
+  useEffect(() => {
+    if (!focusQuickAddSignal) return;
+    // Ensure we're on the Yours tab — the Quick-Add row lives in the
+    // Yours toolbar above the tabs, and we don't want to silently hide
+    // the focus pump if the user happens to be on Browse.
+    setOuterTab('yours');
+    const row = quickAddRowRef.current;
+    if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const input = quickAddInputRef.current;
+    if (input) {
+      // Wait one frame so the scroll starts before focus steals it back.
+      requestAnimationFrame(() => input.focus({ preventScroll: true }));
+    }
+    setQuickAddPulse(true);
+    const timer = window.setTimeout(() => setQuickAddPulse(false), 1400);
+    return () => window.clearTimeout(timer);
+  }, [focusQuickAddSignal]);
 
-function membershipDisplayName(row: ProfileMembershipMod): string {
-  return row.display_name?.trim() || row.name;
-}
-
-function membershipProfileCount(row: ProfileMembershipMod): number {
-  return row.profiles.filter((profile) => profile.included).length;
-}
-
-function libraryStorageKey(row: ProfileMembershipMod): string {
-  return `storage::${membershipRowKey(row)}`;
-}
-
-function unusedActiveLibraryRows(rows: ProfileMembershipMod[]): ProfileMembershipMod[] {
-  return rows.filter((row) => row.installed_enabled && membershipProfileCount(row) === 0);
-}
-
-function compareMembershipDisplayName(a: ProfileMembershipMod, b: ProfileMembershipMod): number {
-  const byName = membershipDisplayName(a).localeCompare(membershipDisplayName(b), undefined, {
-    sensitivity: 'base',
-    numeric: true,
-  });
-  if (byName !== 0) return byName;
-  return membershipRowKey(a).localeCompare(membershipRowKey(b), undefined, {
-    sensitivity: 'base',
-    numeric: true,
-  });
-}
-
-function membershipStateLabelKey(state: ProfileMembershipState): string {
-  if (!state.included) return 'profiles.library.notInProfile';
-  return state.enabled ? 'profiles.library.inProfile' : 'profiles.library.disabledInProfile';
-}
-
-export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: ProfilesViewProps = {}) {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [newName, setNewName] = useState('');
-  const [showCreate, setShowCreate] = useState(false);
+  const [showCreateWizard, setShowCreateWizard] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [importJson, setImportJson] = useState('');
-  const [showImportCode, setShowImportCode] = useState(false);
   const [importCode, setImportCode] = useState('');
   const [importingCode, setImportingCode] = useState(false);
-  const [copiedProfileCode, setCopiedProfileCode] = useState<string | null>(null);
+  // 1.7.0 v7 — always-visible Quick-Add row above the tabs. Same import
+  // pipeline as the toggle-able panel above; we keep both because the
+  // toolbar button is the discoverable "Add modpack code" affordance
+  // for users who want a labelled panel, while the inline row is the
+  // one-paste fast-path. Both call handleImportFromCode (which already
+  // routes via importShareCodeSmart + confirm pipeline).
+  const quickAddInputRef = useRef<HTMLInputElement | null>(null);
+  const quickAddRowRef = useRef<HTMLDivElement | null>(null);
+  const [quickAddPulse, setQuickAddPulse] = useState(false);
   const [shareInfoMap, setShareInfoMap] = useState<Record<string, ShareResult>>({});
+  // Followed (subscribed) packs aren't yours to edit — tracked so the drift
+  // banner offers Repair but not Save changes for them.
+  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [publishTarget, setPublishTarget] = useState<{ profile: Profile; isReshare: boolean } | null>(null);
   const [driftMap, setDriftMap] = useState<Record<string, ProfileDrift>>({});
   const [switchingProfile, setSwitchingProfile] = useState<string | null>(null);
   const [savingProfile, setSavingProfile] = useState<string | null>(null);
-  // v5 batch 3 - profile list filters and a separate assignment workspace.
+  // 1.7.0 T16 — detail-view selection. When set, the modpack list
+  // area becomes a focused detail view for this pack (header + audit
+  // chips + LibraryTable + Advanced). Cleared by the back button.
+  const [selectedModpack, setSelectedModpack] = useState<string | null>(null);
+  // v5 batch 3 - profile list filters.
   const [tab, setTab] = useState<'following' | 'published'>('following');
-  const [showModAssignments, setShowModAssignments] = useState(false);
-  const [membershipGrid, setMembershipGrid] = useState<ProfileMembershipGrid | null>(null);
-  const [membershipLoading, setMembershipLoading] = useState(false);
-  const [membershipError, setMembershipError] = useState<string | null>(null);
-  const [membershipSaving, setMembershipSaving] = useState<string | null>(null);
-  const [libraryFilter, setLibraryFilter] = useState('');
-  const [librarySort, setLibrarySort] = useState<LibrarySortMode>('nameAsc');
-  const [libraryVisibleLimit, setLibraryVisibleLimit] = useState(LIBRARY_PAGE_SIZE);
-  const [libraryStorageSaving, setLibraryStorageSaving] = useState<string | null>(null);
   const [loadOrderProfile, setLoadOrderProfile] = useState<Profile | null>(null);
   const [loadOrderDraft, setLoadOrderDraft] = useState<Profile['mods']>([]);
   const [loadOrderSaving, setLoadOrderSaving] = useState(false);
   const [draggedLoadOrderIndex, setDraggedLoadOrderIndex] = useState<number | null>(null);
   const [dragOverLoadOrderIndex, setDragOverLoadOrderIndex] = useState<number | null>(null);
+  // Load-order search. Because load order matters, searching must NOT
+  // filter the list — it scrolls to + highlights the first match while
+  // every row stays visible in its real position.
+  const [loadOrderQuery, setLoadOrderQuery] = useState('');
+  // Ref to the scrollable load-order list so pointer-drag can hit-test
+  // rows by clientY. HTML5 drag-and-drop is unusable here because Tauri's
+  // OS-level file drop (enabled for drag-to-install) swallows the
+  // webview's drag events — so reordering uses pointer events instead.
+  const loadOrderListRef = useRef<HTMLDivElement>(null);
   const { t, i18n } = useTranslation();
-  const { mods, refreshAll, setActiveProfile, activeProfile, subUpdates, refreshSubUpdates } = useApp();
+  const { refreshAll, setActiveProfile, activeProfile, subUpdates, refreshSubUpdates } = useApp();
   const toastCtx = useToast();
+  // Shared clipboard hook — same one Home + PublishModal use, so a
+  // wording change for "Couldn't copy" propagates everywhere without
+  // hunting through three separate try/catch blocks.
+  const clipboard = useClipboard();
   const confirm = useConfirm();
   const [applyingSubId, setApplyingSubId] = useState<string | null>(null);
 
@@ -168,6 +199,38 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
     }
   }
 
+  /**
+   * Copy a share artifact (raw code, install link, or paste-ready
+   * message) to the clipboard from a shared modpack card chip.
+   *
+   * Review fix (T16): the old per-row Copy buttons were lost in the
+   * card restructure — users who just wanted to forward a friend the
+   * code had to click into detail → Share/Re-share → wait for the
+   * publish modal → copy. Restoring inline chips on the card keeps the
+   * fast-path one click away. Same `clipboard.writeText` shape +
+   * toast as PublishModal.handleCopy.
+   */
+  async function handleCardCopy(
+    profileName: string,
+    kind: 'code' | 'link' | 'msg',
+  ): Promise<void> {
+    const info = shareInfoMap[profileName];
+    if (!info) return;
+    const codeStr = `${info.owner}/${info.code}`;
+    const text
+      = kind === 'code' ? codeStr
+      : kind === 'link' ? buildShareLink(codeStr)
+      : buildShareMessage(profileName, codeStr, t);
+    const label =
+      kind === 'code' ? t('profiles.toast.shareCodeCopied')
+      : kind === 'link' ? t('profiles.toast.installLinkCopied')
+      : t('profiles.toast.shareMessageCopied');
+    await clipboard.copy(text, kind, {
+      successMessage: label,
+      failureMessage: 'profiles.toast.cantCopyToClipboard',
+    });
+  }
+
   useEffect(() => {
     loadProfiles();
   }, []);
@@ -184,7 +247,12 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
    * and the UI updates immediately instead of leaving the user staring at
    * a stale "out of sync" banner until they navigate away and back.
    */
+  // Bumped on each refresh so a slower in-flight call can detect it was
+  // superseded and skip applying its (now stale) results.
+  const refreshGenRef = useRef(0);
   const refreshShareAndDrift = useCallback(async () => {
+    const gen = ++refreshGenRef.current;
+
     const shareMap: Record<string, ShareResult> = {};
     for (const p of profiles) {
       try {
@@ -192,8 +260,9 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
         if (info) shareMap[p.name] = info;
       } catch { /* no share info */ }
     }
-    setShareInfoMap(shareMap);
-
+    // Track followed packs so the drift banner offers Repair (restore the
+    // author's manifest) but never Save changes for them.
+    const subs = await getSubscriptions().catch(() => []);
     const driftEntries: Record<string, ProfileDrift> = {};
     if (activeProfile) {
       try {
@@ -201,6 +270,13 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
         if (drift.has_drift) driftEntries[activeProfile] = drift;
       } catch { /* ignore */ }
     }
+
+    // A newer call started while we were awaiting — let it own the state so a
+    // stale result can't clobber a fresher one (concurrent triggers: the mount
+    // effect + Share / Re-share / Update-from-drift actions all fire this).
+    if (gen !== refreshGenRef.current) return;
+    setShareInfoMap(shareMap);
+    setSubscriptions(subs);
     setDriftMap(driftEntries);
   }, [profiles, activeProfile]);
 
@@ -209,68 +285,88 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
     refreshShareAndDrift();
   }, [profiles, activeProfile, refreshShareAndDrift]);
 
-  const loadMemberships = useCallback(async () => {
-    try {
-      setMembershipLoading(true);
-      setMembershipError(null);
-      const grid = await getProfileMemberships();
-      setMembershipGrid(grid);
-    } catch (e) {
-      setMembershipError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setMembershipLoading(false);
-    }
-  }, []);
+  // The active pack is a followed one when it shows up in our subscriptions.
+  // A followed manifest isn't ours to write, so the drift banner drops its
+  // "Save changes" button for it (the backend rejects the write either way).
+  const activeIsSubscribed =
+    !!activeProfile
+    && subscriptions.some((s) => s.profile_name.toLowerCase() === activeProfile.toLowerCase());
 
+  // 1.7.0 T16 — open the active modpack's detail view when a sibling
+  // surface pumps the signal (Mods view's "Manage active modpack →"
+  // link). If there's no active modpack, fall through to the list.
   useEffect(() => {
-    if (showModAssignments) {
-      loadMemberships();
+    if (openActiveModpackSignal > 0 && activeProfile) {
+      setSelectedModpack(activeProfile);
+      setShowImport(false);
     }
-  }, [showModAssignments, loadMemberships]);
+  }, [openActiveModpackSignal, activeProfile]);
 
+  // 1.7.0 T8 — open the guided Create-modpack wizard when the App
+  // shell pumps the signal (branched onboarding's creator-path CTA).
+  // Skip the first render (signal=0 or undefined). Also drops the
+  // user onto the Yours tab + closes any competing inline panels so
+  // the wizard isn't fighting for screen space.
   useEffect(() => {
-    setLibraryVisibleLimit(LIBRARY_PAGE_SIZE);
-  }, [libraryFilter, librarySort, showModAssignments]);
-
-  useEffect(() => {
-    if (openModLibrarySignal > 0) {
-      openModAssignments();
-    }
-  }, [openModLibrarySignal]);
-
-  function openModAssignments() {
-    setShowModAssignments(true);
-    setShowCreate(false);
+    if (!openCreateWizardSignal) return;
+    setOuterTab('yours');
     setShowImport(false);
-    setShowImportCode(false);
-  }
+    setShowCreateWizard(true);
+    // Reset the App-level signal so a later remount of this view (e.g.
+    // navigating away and back to Modpacks) doesn't re-open the wizard.
+    onCreateWizardConsumed?.();
+  }, [openCreateWizardSignal, onCreateWizardConsumed]);
 
-  function closeModAssignments() {
-    setShowModAssignments(false);
-  }
+  // Report the currently-viewed modpack up to App so a drag-dropped zip
+  // can auto-join it. Clear on unmount (leaving the Modpacks view).
+  useEffect(() => {
+    onViewedModpackChange?.(selectedModpack);
+    return () => onViewedModpackChange?.(null);
+  }, [selectedModpack, onViewedModpackChange]);
 
-  async function loadProfiles() {
+  // T16 review fix — orphan-modpack guard. If the open detail view's
+  // modpack disappears (deleted while detail is open, or signal bumped
+  // before profiles finished loading), bounce back to the list. This
+  // MUST live in an effect, not inline in render, or React StrictMode
+  // (and 19+ in general) will warn about setState during render.
+  useEffect(() => {
+    if (
+      selectedModpack !== null
+      && profiles.length > 0
+      && !profiles.find((p) => p.name === selectedModpack)
+    ) {
+      setSelectedModpack(null);
+    }
+  }, [profiles, selectedModpack]);
+
+  async function loadProfiles(opts?: { silent?: boolean }) {
     try {
-      setLoading(true);
+      // A silent reload skips the full-screen loading flag so an open
+      // ModpackDetail isn't unmounted/remounted (which resets its scroll
+      // position) on a background refresh after an add/remove. The
+      // initial mount + explicit retries still show the skeleton.
+      if (!opts?.silent) setLoading(true);
       setError(null);
       const list = await listProfiles();
       setProfiles(list);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
     }
   }
 
   function openLoadOrderEditor(profile: Profile) {
     setLoadOrderProfile(profile);
     setLoadOrderDraft([...profile.mods]);
+    setLoadOrderQuery('');
   }
 
   function closeLoadOrderEditor() {
     if (loadOrderSaving) return;
     setLoadOrderProfile(null);
     setLoadOrderDraft([]);
+    setLoadOrderQuery('');
   }
 
   function moveLoadOrderItem(index: number, delta: -1 | 1) {
@@ -300,6 +396,43 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
       return next;
     });
   }
+
+  /** Which row index the pointer is currently over, by hit-testing the
+   *  rendered rows against clientY. Used by the pointer-drag reorder. */
+  function loadOrderDropIndex(clientY: number): number | null {
+    const list = loadOrderListRef.current;
+    if (!list) return null;
+    const rows = Array.from(
+      list.querySelectorAll<HTMLElement>('.gf-load-order-row'),
+    );
+    for (let i = 0; i < rows.length; i++) {
+      const rect = rows[i].getBoundingClientRect();
+      if (clientY < rect.top + rect.height / 2) return i;
+    }
+    return rows.length > 0 ? rows.length - 1 : null;
+  }
+
+  // First row matching the load-order search (by name or on-disk folder).
+  // -1 when the box is empty or nothing matches.
+  const loadOrderMatchIndex = useMemo(() => {
+    const q = loadOrderQuery.trim().toLowerCase();
+    if (!q) return -1;
+    return loadOrderDraft.findIndex(
+      (m) =>
+        m.name.toLowerCase().includes(q)
+        || (m.folder_name?.toLowerCase().includes(q) ?? false),
+    );
+  }, [loadOrderQuery, loadOrderDraft]);
+
+  // Scroll the matched row into view as the user types — the list itself
+  // is never filtered, so order stays intact.
+  useEffect(() => {
+    if (loadOrderMatchIndex < 0) return;
+    const list = loadOrderListRef.current;
+    if (!list) return;
+    const rows = list.querySelectorAll<HTMLElement>('.gf-load-order-row');
+    rows[loadOrderMatchIndex]?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [loadOrderMatchIndex]);
 
   function loadOrderToastKey(status: LoadOrderSettingsStatus): string {
     switch (status) {
@@ -356,139 +489,14 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
     }
   }
 
-  async function handleToggleMembership(row: ProfileMembershipMod, state: ProfileMembershipState) {
-    if (!state.editable || membershipSaving || libraryStorageSaving) return;
-    const nextIncluded = !state.included;
-    const key = membershipKey(row, state.profile_name);
-    try {
-      setMembershipSaving(key);
-      const updatedProfile = await setProfileModMembership(
-        state.profile_name,
-        row.name,
-        row.folder_name,
-        row.mod_id,
-        nextIncluded,
-      );
-      setProfiles((prev) => prev.map((profile) => (
-        profile.name === updatedProfile.name ? updatedProfile : profile
-      )));
-      setMembershipGrid((prev) => {
-        if (!prev) return prev;
-        const targetKey = membershipRowKey(row);
-        return {
-          ...prev,
-          mods: prev.mods.map((mod) => {
-            if (membershipRowKey(mod) !== targetKey) return mod;
-            return {
-              ...mod,
-              profiles: mod.profiles.map((profileState) => (
-                profileState.profile_name === state.profile_name
-                  ? {
-                      ...profileState,
-                      included: nextIncluded,
-                      enabled: nextIncluded ? row.installed_enabled : false,
-                    }
-                  : profileState
-              )),
-            };
-          }),
-        };
-      });
-      toastCtx.success(
-        nextIncluded
-          ? t('profiles.library.toastAdded', { mod: membershipDisplayName(row), profile: state.profile_name })
-          : t('profiles.library.toastRemoved', { mod: membershipDisplayName(row), profile: state.profile_name }),
-      );
-    } catch (e) {
-      toastCtx.error(t('profiles.library.toastFailed', { error: e instanceof Error ? e.message : String(e) }));
-    } finally {
-      setMembershipSaving(null);
-    }
-  }
-
-  function markLibraryRowsStored(rowKeys: Set<string>, installedEnabled: boolean) {
-    setMembershipGrid((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        mods: prev.mods.map((mod) => (
-          rowKeys.has(membershipRowKey(mod))
-            ? { ...mod, installed_enabled: installedEnabled }
-            : mod
-        )),
-      };
-    });
-  }
-
-  async function handleToggleLibraryStorage(row: ProfileMembershipMod) {
-    if (libraryStorageSaving || membershipSaving) return;
-    const nextEnabled = !row.installed_enabled;
-    const key = libraryStorageKey(row);
-    try {
-      setLibraryStorageSaving(key);
-      await toggleMod(row.name, row.folder_name, nextEnabled);
-      markLibraryRowsStored(new Set([membershipRowKey(row)]), nextEnabled);
-      await refreshAll();
-      await refreshShareAndDrift();
-      toastCtx.success(
-        nextEnabled
-          ? t('profiles.library.toastActivated', { mod: membershipDisplayName(row) })
-          : t('profiles.library.toastStored', { mod: membershipDisplayName(row) }),
-      );
-    } catch (e) {
-      toastCtx.error(t('profiles.library.toastStorageFailed', {
-        mod: membershipDisplayName(row),
-        error: e instanceof Error ? e.message : String(e),
-      }));
-    } finally {
-      setLibraryStorageSaving(null);
-    }
-  }
-
-  async function handleStoreUnusedActiveMods(rows: ProfileMembershipMod[]) {
-    if (rows.length === 0 || libraryStorageSaving || membershipSaving) return;
-    const storedKeys = new Set<string>();
-    const failedNames: string[] = [];
-    try {
-      setLibraryStorageSaving(LIBRARY_BULK_STORAGE_KEY);
-      for (const row of rows) {
-        try {
-          await toggleMod(row.name, row.folder_name, false);
-          storedKeys.add(membershipRowKey(row));
-        } catch {
-          failedNames.push(membershipDisplayName(row));
-        }
-      }
-      if (storedKeys.size > 0) {
-        markLibraryRowsStored(storedKeys, false);
-        await refreshAll();
-        await refreshShareAndDrift();
-      }
-      if (failedNames.length > 0) {
-        toastCtx.error(t('profiles.library.toastBulkStorageFailed', {
-          stored: storedKeys.size,
-          total: rows.length,
-          mods: failedNames.slice(0, 3).join(', '),
-        }));
-      } else {
-        toastCtx.success(t('profiles.library.toastBulkStored', { count: storedKeys.size }));
-      }
-    } finally {
-      setLibraryStorageSaving(null);
-    }
-  }
-
-  async function handleCreate() {
-    if (!newName.trim()) return;
-    try {
-      const profile = await createProfile(newName.trim());
-      setProfiles((prev) => [...prev, profile]);
-      setNewName('');
-      setShowCreate(false);
-      toastCtx.success(t('profiles.toast.created', { name: profile.name }));
-    } catch (e) {
-      toastCtx.error(t('profiles.toast.createFailed', { error: e instanceof Error ? e.message : String(e) }));
-    }
+  /** 1.7.0 T16 — refresh hook fired by LibraryTable after a
+   *  membership / storage mutation. We re-pull the profile list so
+   *  the parent's drift map + share map see the updated manifests. */
+  async function handleLibraryChanged() {
+    // Silent so the open ModpackDetail keeps its scroll position while
+    // the manifest re-pulls after an add/remove.
+    await loadProfiles({ silent: true });
+    refreshShareAndDrift();
   }
 
   async function handleSnapshot() {
@@ -608,7 +616,12 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
     if (savingProfile) return;
     try {
       setSavingProfile(name);
-      const profile = await snapshotProfile(name);
+      // Apply only the drift diff — NOT a full re-snapshot. snapshotProfile
+      // would pull every enabled + disabled mod on disk into the pack,
+      // flooding a curated pack with the whole library. saveProfileDrift
+      // adds just the enabled extras, drops missing mods, and syncs
+      // toggled/version for mods still present.
+      const profile = await saveProfileDrift(name);
       setProfiles((prev) => {
         const exists = prev.some((p) => p.name === profile.name);
         return exists
@@ -637,8 +650,15 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
   async function handleExport(name: string) {
     try {
       const json = await exportProfile(name);
-      await navigator.clipboard.writeText(json);
-      toastCtx.success(t('profiles.toast.exported'));
+      // Use the shared hook for the clipboard write so the failure
+      // wording stays consistent with the rest of the app. The
+      // distinct export-failure message (when `exportProfile` itself
+      // rejects) stays as a separate toast — the export step failing
+      // is a different problem from the clipboard write failing.
+      await clipboard.copy(json, 'export', {
+        successMessage: t('profiles.toast.exported'),
+        failureMessage: 'profiles.toast.cantCopyToClipboard',
+      });
     } catch (e) {
       toastCtx.error(t('profiles.toast.exportFailed', { error: e instanceof Error ? e.message : String(e) }));
     }
@@ -710,7 +730,6 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
       if (outcome.kind === 'cancelled') return;
 
       setImportCode('');
-      setShowImportCode(false);
       await refreshAll();
       refreshSubUpdates();
 
@@ -739,40 +758,6 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
     }
   }
 
-  const filteredLibraryRows = useMemo(() => {
-    if (!membershipGrid) return [];
-    const query = libraryFilter.trim().toLowerCase();
-    const rows = query
-      ? membershipGrid.mods.filter((row) => {
-          const haystack = [
-            row.name,
-            row.display_name ?? '',
-            row.folder_name ?? '',
-            row.mod_id ?? '',
-            row.version,
-          ].join(' ').toLowerCase();
-          return haystack.includes(query);
-        })
-      : membershipGrid.mods;
-    const sorted = [...rows];
-    sorted.sort((a, b) => {
-      if (librarySort === 'nameDesc') return compareMembershipDisplayName(b, a);
-      if (librarySort === 'activeFirst') {
-        return Number(b.installed_enabled) - Number(a.installed_enabled) || compareMembershipDisplayName(a, b);
-      }
-      if (librarySort === 'storedFirst') {
-        return Number(a.installed_enabled) - Number(b.installed_enabled) || compareMembershipDisplayName(a, b);
-      }
-      if (librarySort === 'profilesMost') {
-        return membershipProfileCount(b) - membershipProfileCount(a) || compareMembershipDisplayName(a, b);
-      }
-      return compareMembershipDisplayName(a, b);
-    });
-    return sorted;
-  }, [membershipGrid, libraryFilter, librarySort]);
-
-  const visibleLibraryRows = filteredLibraryRows.slice(0, libraryVisibleLimit);
-
   function renderLoadOrderModal() {
     if (!loadOrderProfile) return null;
     return (
@@ -791,45 +776,64 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
           </div>
           <div className="gf-modal-body">
             <div className="gf-load-order-note">{t('profiles.loadOrder.note')}</div>
+            {loadOrderDraft.length > 0 && (
+              <input
+                type="search"
+                className="gf-input gf-load-order-search"
+                value={loadOrderQuery}
+                onChange={(e) => setLoadOrderQuery(e.target.value)}
+                placeholder={t('profiles.loadOrder.searchPlaceholder')}
+                aria-label={t('profiles.loadOrder.searchLabel')}
+              />
+            )}
             {loadOrderDraft.length === 0 ? (
               <div className="gf-empty-sub">{t('profiles.loadOrder.empty')}</div>
             ) : (
-              <div className="gf-load-order-list" role="list">
+              <div className="gf-load-order-list" role="list" ref={loadOrderListRef}>
                 {loadOrderDraft.map((mod, index) => (
                   <div
-                    className={`gf-load-order-row ${dragOverLoadOrderIndex === index ? 'drag-over' : ''}`}
+                    className={`gf-load-order-row${dragOverLoadOrderIndex === index ? ' drag-over' : ''}${draggedLoadOrderIndex === index ? ' dragging' : ''}${loadOrderMatchIndex === index ? ' match' : ''}`}
                     key={`${mod.folder_name ?? mod.mod_id ?? mod.name}-${index}`}
                     role="listitem"
-                    draggable={!loadOrderSaving}
                     aria-label={t('profiles.loadOrder.rowLabel', { name: mod.name, position: index + 1 })}
-                    onDragStart={(event) => {
-                      if (loadOrderSaving) return;
-                      setDraggedLoadOrderIndex(index);
-                      event.dataTransfer.effectAllowed = 'move';
-                      event.dataTransfer.setData('text/plain', String(index));
-                    }}
-                    onDragOver={(event) => {
-                      if (loadOrderSaving) return;
-                      event.preventDefault();
-                      event.dataTransfer.dropEffect = 'move';
-                      setDragOverLoadOrderIndex(index);
-                    }}
-                    onDragLeave={() => {
-                      if (dragOverLoadOrderIndex === index) setDragOverLoadOrderIndex(null);
-                    }}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      const from = draggedLoadOrderIndex ?? Number.parseInt(event.dataTransfer.getData('text/plain'), 10);
-                      if (Number.isFinite(from)) moveLoadOrderItemTo(from, index);
-                      setDraggedLoadOrderIndex(null);
-                      setDragOverLoadOrderIndex(null);
-                    }}
-                    onDragEnd={() => {
-                      setDraggedLoadOrderIndex(null);
-                      setDragOverLoadOrderIndex(null);
-                    }}
                   >
-                    <div className="gf-load-order-drag" title={t('profiles.loadOrder.dragHandle')}>
+                    {/* Pointer-drag handle. Uses pointer events + capture
+                        (not HTML5 DnD, which Tauri's native file-drop
+                        breaks) and hit-tests rows by clientY to reorder. */}
+                    <div
+                      className="gf-load-order-drag"
+                      title={t('profiles.loadOrder.dragHandle')}
+                      aria-label={t('profiles.loadOrder.dragHandle')}
+                      onPointerDown={(event) => {
+                        if (loadOrderSaving) return;
+                        event.preventDefault();
+                        setDraggedLoadOrderIndex(index);
+                        setDragOverLoadOrderIndex(index);
+                        try {
+                          event.currentTarget.setPointerCapture(event.pointerId);
+                        } catch {
+                          /* setPointerCapture unsupported (e.g. jsdom) — fine */
+                        }
+                      }}
+                      onPointerMove={(event) => {
+                        if (draggedLoadOrderIndex === null) return;
+                        const to = loadOrderDropIndex(event.clientY);
+                        if (to !== null) setDragOverLoadOrderIndex(to);
+                      }}
+                      onPointerUp={(event) => {
+                        if (draggedLoadOrderIndex !== null) {
+                          const to = dragOverLoadOrderIndex ?? draggedLoadOrderIndex;
+                          moveLoadOrderItemTo(draggedLoadOrderIndex, to);
+                        }
+                        setDraggedLoadOrderIndex(null);
+                        setDragOverLoadOrderIndex(null);
+                        try {
+                          event.currentTarget.releasePointerCapture(event.pointerId);
+                        } catch {
+                          /* capture may already be gone — harmless */
+                        }
+                      }}
+                    >
                       <GripVertical size={14} />
                     </div>
                     <div className="gf-load-order-rank">{index + 1}</div>
@@ -882,216 +886,6 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
     );
   }
 
-  function renderModLibrary() {
-    if (membershipLoading) {
-      return (
-        <div className="flex items-center justify-center py-16 text-text-dim">
-          <p className="text-sm">{t('profiles.library.loading')}</p>
-        </div>
-      );
-    }
-
-    if (membershipError) {
-      return (
-        <Card className="text-center py-8">
-          <p className="text-danger text-sm">{membershipError}</p>
-          <Button
-            variant="secondary"
-            size="sm"
-            className="mt-3"
-            onClick={loadMemberships}
-          >
-            {t('common.retry')}
-          </Button>
-        </Card>
-      );
-    }
-
-    if (!membershipGrid) {
-      return (
-        <div className="flex items-center justify-center py-16 text-text-dim">
-          <p className="text-sm">{t('profiles.library.loading')}</p>
-        </div>
-      );
-    }
-
-    const grid = membershipGrid;
-    const unusedActiveRows = unusedActiveLibraryRows(grid.mods);
-    if (grid.mods.length === 0) {
-      return (
-        <div className="gf-empty">
-          <div className="gf-empty-art"><Layers size={28} /></div>
-          <div className="gf-empty-title">{t('profiles.library.empty.title')}</div>
-          <div className="gf-empty-sub">{t('profiles.library.empty.hint')}</div>
-        </div>
-      );
-    }
-
-    return (
-      <div className="gf-profile-library">
-        <div className="gf-profile-library-toolbar">
-          <label className="gf-profile-library-search">
-            <Search size={13} />
-            <input
-              value={libraryFilter}
-              onChange={(event) => setLibraryFilter(event.target.value)}
-              placeholder={t('profiles.library.searchPlaceholder', { count: grid.mods.length })}
-              aria-label={t('profiles.library.searchLabel')}
-            />
-          </label>
-          <div className="gf-profile-library-toolbar-actions">
-            <Button
-              variant="secondary"
-              size="sm"
-              disabled={unusedActiveRows.length === 0 || libraryStorageSaving !== null || membershipSaving !== null}
-              onClick={() => handleStoreUnusedActiveMods(unusedActiveRows)}
-              aria-label={
-                unusedActiveRows.length === 0
-                  ? t('profiles.library.bulkStoreNone')
-                  : t('profiles.library.bulkStoreUnused', { count: unusedActiveRows.length })
-              }
-            >
-              {libraryStorageSaving === LIBRARY_BULK_STORAGE_KEY ? (
-                <RefreshCw size={13} className="animate-spin" />
-              ) : (
-                <Download size={13} />
-              )}
-              {unusedActiveRows.length === 0
-                ? t('profiles.library.bulkStoreNone')
-                : t('profiles.library.bulkStoreUnused', { count: unusedActiveRows.length })}
-            </Button>
-            <label className="gf-sort-control gf-profile-library-sort">
-              <span>{t('profiles.library.sort.label')}</span>
-              <select
-                value={librarySort}
-                onChange={(event) => setLibrarySort(event.target.value as LibrarySortMode)}
-                aria-label={t('profiles.library.sort.label')}
-              >
-                <option value="nameAsc">{t('profiles.library.sort.nameAsc')}</option>
-                <option value="nameDesc">{t('profiles.library.sort.nameDesc')}</option>
-                <option value="activeFirst">{t('profiles.library.sort.activeFirst')}</option>
-                <option value="storedFirst">{t('profiles.library.sort.storedFirst')}</option>
-                <option value="profilesMost">{t('profiles.library.sort.profilesMost')}</option>
-              </select>
-            </label>
-          </div>
-        </div>
-        <div className="gf-profile-library-help">{t('profiles.library.storageHelp')}</div>
-        {filteredLibraryRows.length === 0 ? (
-          <div className="gf-empty">
-            <div className="gf-empty-title">{t('profiles.library.noMatches.title')}</div>
-            <div className="gf-empty-sub">{t('profiles.library.noMatches.hint')}</div>
-          </div>
-        ) : visibleLibraryRows.map((row) => (
-          <Card
-            key={membershipRowKey(row)}
-            className="gf-profile-library-row"
-          >
-            <div className="gf-profile-library-main">
-              <div className="min-w-0">
-                <h3 className="gf-profile-library-title">
-                  {row.display_name?.trim() || row.name}
-                  {row.display_name && (
-                    <span className="ml-1.5 text-[10px] font-normal text-text-dim">
-                      {row.name}
-                    </span>
-                  )}
-                </h3>
-                <div className="gf-profile-library-meta">
-                  <span>{row.version}</span>
-                  {row.folder_name && <span>{row.folder_name}</span>}
-                  <span className={`gf-profile-library-storage ${row.installed_enabled ? 'active' : 'stored'}`}>
-                    {row.installed_enabled
-                      ? t('profiles.library.storageActive')
-                      : t('profiles.library.storageDisabled')}
-                  </span>
-                  <span>{t('profiles.library.profileUseCount', { count: membershipProfileCount(row) })}</span>
-                </div>
-              </div>
-              <div className="gf-profile-library-storage-actions">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => handleToggleLibraryStorage(row)}
-                  disabled={libraryStorageSaving !== null || membershipSaving !== null}
-                  aria-label={
-                    row.installed_enabled
-                      ? t('profiles.library.storeAria', { mod: membershipDisplayName(row) })
-                      : t('profiles.library.activateAria', { mod: membershipDisplayName(row) })
-                  }
-                  title={
-                    row.installed_enabled
-                      ? t('profiles.library.storeAria', { mod: membershipDisplayName(row) })
-                      : t('profiles.library.activateAria', { mod: membershipDisplayName(row) })
-                  }
-                >
-                  {libraryStorageSaving === libraryStorageKey(row) ? (
-                    <RefreshCw size={13} className="animate-spin" />
-                  ) : row.installed_enabled ? (
-                    <Download size={13} />
-                  ) : (
-                    <Play size={13} />
-                  )}
-                  {row.installed_enabled
-                    ? t('profiles.library.storeAction')
-                    : t('profiles.library.activateAction')}
-                </Button>
-              </div>
-            </div>
-            <div className="gf-profile-memberships">
-              {row.profiles.length === 0 ? (
-                <span className="gf-profile-library-muted">{t('profiles.library.noProfiles')}</span>
-              ) : row.profiles.map((state) => {
-                const key = membershipKey(row, state.profile_name);
-                const saving = membershipSaving === key;
-                return (
-                  <label
-                    key={state.profile_name}
-                    className={`gf-profile-membership ${state.included ? 'active' : ''}`}
-                    title={!state.editable ? t('profiles.library.readOnlyTitle') : undefined}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={state.included}
-                      disabled={!state.editable || membershipSaving !== null || libraryStorageSaving !== null}
-                      onChange={() => handleToggleMembership(row, state)}
-                      aria-label={state.profile_name}
-                    />
-                    <span className="gf-profile-membership-name">{state.profile_name}</span>
-                    <span className="gf-profile-membership-note">{t(membershipStateLabelKey(state))}</span>
-                    {!state.editable && (
-                      <span className="gf-profile-membership-note">{t('profiles.library.readOnly')}</span>
-                    )}
-                    {saving && <RefreshCw size={12} className="animate-spin" />}
-                  </label>
-                );
-              })}
-            </div>
-          </Card>
-        ))}
-        {filteredLibraryRows.length > visibleLibraryRows.length && (
-          <div className="gf-profile-library-footer">
-            <span>
-              {t('profiles.library.showing', {
-                shown: visibleLibraryRows.length,
-                total: filteredLibraryRows.length,
-              })}
-            </span>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setLibraryVisibleLimit((limit) => limit + LIBRARY_PAGE_SIZE)}
-            >
-              {t('profiles.library.showMore', {
-                count: Math.min(LIBRARY_PAGE_SIZE, filteredLibraryRows.length - visibleLibraryRows.length),
-              })}
-            </Button>
-          </div>
-        )}
-      </div>
-    );
-  }
-
   return (
     <div className="gf-body">
       {renderLoadOrderModal()}
@@ -1112,36 +906,52 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
         </div>
       )}
 
-      {/* Header */}
+      {/* 1.7.0 — outer Installed/Browse tab strip. Kept at the very top of
+          the page so it reads as the primary view switcher (it swaps the
+          whole page between your modpacks and the browser), consistent with
+          the Mod Library page. Hidden inside the detail view (the detail's
+          own back button drives navigation). */}
+      {selectedModpack === null && (
+        <div className="gf-tabs" style={{ marginBottom: 14 }}>
+          <button
+            className={`gf-tab ${outerTab === 'yours' ? 'active' : ''}`}
+            onClick={() => setOuterTab('yours')}
+          >
+            {t('modpacks.tabs.yours')}
+          </button>
+          <button
+            className={`gf-tab ${outerTab === 'browse' ? 'active' : ''}`}
+            onClick={() => setOuterTab('browse')}
+          >
+            {t('modpacks.tabs.browse')}
+          </button>
+        </div>
+      )}
+
+      {/* Header — hidden on the Browse tab because BrowseModpacksView
+          renders its own view-head and stacking two would crowd the
+          page. Also hidden on the detail view so the per-modpack back
+          button + title can take focus without a competing page head. */}
+      {outerTab === 'yours' && selectedModpack === null && (
       <div className="gf-page-head">
         <div>
-          <h1 className="gf-page-title">{t('profiles.page.title')}</h1>
+          <h1 className="gf-page-title">
+            {t('profiles.page.title')}
+            <HelpHint helpKey="modpackWhat" />
+          </h1>
           <p className="gf-page-sub">
             {t('profiles.page.subtitle')}
           </p>
         </div>
         <div className="gf-page-actions">
-          {!showModAssignments && (
-            <>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => {
-              setShowImportCode(!showImportCode);
-              setShowImport(false);
-              setShowCreate(false);
-            }}
-          >
-            <Key size={14} />
-            {t('profiles.actions.addByCode')}
-          </Button>
+          {/* The page-action buttons are modpack-management actions
+              (create / import / snapshot). They only make sense on
+              the Yours tab — the Browse tab is read-only. */}
           <Button
             variant="secondary"
             size="sm"
             onClick={() => {
               setShowImport(!showImport);
-              setShowImportCode(false);
-              setShowCreate(false);
             }}
           >
             <Upload size={14} />
@@ -1152,32 +962,111 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
             {t('profiles.actions.snapshotCurrent')}
           </Button>
           <Button size="sm" onClick={() => {
-            setShowCreate(!showCreate);
+            // Open the guided wizard. Close any inline panels that
+            // would otherwise compete for vertical space behind the
+            // modal.
+            setShowCreateWizard(true);
             setShowImport(false);
-            setShowImportCode(false);
           }}>
             <Plus size={14} />
             {t('profiles.actions.newProfile')}
           </Button>
-            </>
-          )}
         </div>
       </div>
+      )}
 
-      {showModAssignments ? (
-        <>
-          <div className="gf-assignment-head">
-            <div>
-              <h2 className="gf-section-title">{t('profiles.assignments.title')}</h2>
-              <p className="gf-section-sub">{t('profiles.assignments.subtitle')}</p>
-            </div>
-            <Button variant="secondary" size="sm" onClick={closeModAssignments}>
-              {t('profiles.assignments.back')}
+      {/* 1.7.0 v7 — always-visible Quick-Add code paste row.
+          Relocated from Home (which is now the single-block launcher).
+          The Modpacks toolbar already owns Create / Import-JSON /
+          Snapshot, so Quick-Add lives here next to those affordances.
+          Shown on the Yours tab — the Browse tab is for public packs
+          which install via the row CTAs, not via a typed code.
+          The toggle-able "Add modpack code" panel above remains for
+          users who arrive via the button; both call the same
+          handleImportFromCode pipeline.
+          T16 — stays visible on the list view; hidden inside detail
+          view so the detail header isn't competing for focus. */}
+      {outerTab === 'yours' && selectedModpack === null && (
+        <div
+          ref={quickAddRowRef}
+          className={`gf-quickadd${quickAddPulse ? ' gf-quickadd-pulse' : ''}`}
+          style={{ marginTop: 0, marginBottom: 14 }}
+        >
+          <div className="gf-quickadd-eyebrow">{t('modpacks.quickAdd.label')}</div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 11 }}>
+            <input
+              ref={quickAddInputRef}
+              className="gf-input-hero"
+              aria-label={t('modpacks.quickAdd.label')}
+              placeholder={t('modpacks.quickAdd.placeholder')}
+              value={importCode}
+              onChange={(e) => setImportCode(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleImportFromCode()}
+              disabled={importingCode}
+            />
+            <Button
+              size="sm"
+              onClick={handleImportFromCode}
+              disabled={importingCode || !importCode.trim()}
+            >
+              {importingCode ? (
+                <RefreshCw size={14} className="animate-spin" />
+              ) : (
+                <Plus size={14} />
+              )}
+              {t('modpacks.quickAdd.addBtn')}
             </Button>
           </div>
-          {renderModLibrary()}
-        </>
-      ) : (
+        </div>
+      )}
+
+      {/* Browse tab — public modpack browser absorbed from the old
+          top-level sidebar entry. Wires the curator's "switch to your
+          modpacks" CTA back to our Yours tab so the user stays inside
+          the Modpacks surface. */}
+      {selectedModpack === null && outerTab === 'browse' && (
+        <BrowseModpacksView onGoToProfiles={() => setOuterTab('yours')} />
+      )}
+
+      {/* T16 — detail-view branch. When a modpack is selected the
+          list area is replaced by ModpackDetail (Paradox-style
+          drilldown). Reachable only from the Yours tab; clicking
+          Back returns to the list. The orphan-modpack bounce-back
+          (profile deleted while detail open) is handled by a
+          useEffect above — render here is pure. */}
+      {outerTab === 'yours' && selectedModpack !== null && !loading && (() => {
+        const profile = profiles.find((p) => p.name === selectedModpack);
+        // The effect above clears selectedModpack on the next tick when
+        // the profile disappears; until that runs we render nothing so
+        // we don't flash a stale view.
+        if (!profile) return null;
+        return (
+          <ModpackDetail
+            profile={profile}
+            shareInfo={shareInfoMap[profile.name] ?? null}
+            drift={driftMap[profile.name] ?? null}
+            switchingProfile={switchingProfile}
+            onBack={() => setSelectedModpack(null)}
+            onSwitch={handleSwitch}
+            onShare={(p) =>
+              setPublishTarget({ profile: p, isReshare: !!shareInfoMap[p.name] })
+            }
+            onDelete={async (name) => {
+              await handleDelete(name);
+              // Bounce back to the list if we just deleted the open pack.
+              if (name === selectedModpack) setSelectedModpack(null);
+            }}
+            onDuplicate={handleDuplicate}
+            onExportJson={handleExport}
+            onSnapshot={() => handleSnapshot()}
+            onOpenLoadOrder={openLoadOrderEditor}
+            onRepairDrift={handleRepairDrift}
+            onLibraryChanged={handleLibraryChanged}
+          />
+        );
+      })()}
+
+      {outerTab === 'yours' && selectedModpack === null && (
         <>
       {/* Profile list filters (v5 batch 3) */}
       <div className="gf-tabs gf-tabs-settings" style={{ marginBottom: 14 }}>
@@ -1194,22 +1083,6 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
         >
           {t('profiles.tabs.publishedByYou')}
           <span className="gf-tab-count">{Object.keys(shareInfoMap).length}</span>
-        </button>
-      </div>
-
-      <div className="gf-profile-special-actions">
-        <button className="gf-profile-library-launch" onClick={openModAssignments}>
-          <span className="gf-profile-library-launch-icon">
-            <ListChecks size={18} />
-          </span>
-          <span className="gf-profile-library-launch-copy">
-            <span className="gf-profile-library-launch-title">
-              {t('profiles.assignments.open')}
-              <Badge variant="beta" className="gf-tab-beta" ariaHidden>{t('common.beta')}</Badge>
-              <span className="gf-tab-count">{membershipGrid?.mods.length ?? mods.length}</span>
-            </span>
-            <span className="gf-profile-library-launch-desc">{t('profiles.assignments.description')}</span>
-          </span>
         </button>
       </div>
 
@@ -1271,23 +1144,26 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
                 driftMap[activeProfile].toggled.length && t('profiles.drift.toggledItems', { count: driftMap[activeProfile].toggled.length }),
                 (driftMap[activeProfile].version_changed?.length ?? 0) && t('profiles.drift.versionChanged', { count: driftMap[activeProfile].version_changed.length }),
               ].filter(Boolean).join(' · ') || t('profiles.drift.outOfSyncFallback')}
-              {' '}{t('profiles.drift.hint')}
+              {' '}{t(activeIsSubscribed ? 'profiles.drift.followedHint' : 'profiles.drift.hint')}
             </div>
           </div>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => handleSaveDrift(activeProfile)}
-            title={t('profiles.drift.saveChanges')}
-            disabled={savingProfile !== null}
-          >
-            {savingProfile === activeProfile ? (
-              <RefreshCw size={12} className="animate-spin" />
-            ) : (
-              <Save size={12} />
-            )}
-            {t('profiles.drift.saveChanges')}
-          </Button>
+          {/* Followed packs are read-only — no Save changes (only Repair). */}
+          {!activeIsSubscribed && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => handleSaveDrift(activeProfile)}
+              title={t('profiles.drift.saveChanges')}
+              disabled={savingProfile !== null}
+            >
+              {savingProfile === activeProfile ? (
+                <RefreshCw size={12} className="animate-spin" />
+              ) : (
+                <Save size={12} />
+              )}
+              {t('profiles.drift.saveChanges')}
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -1298,74 +1174,6 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
             {t('profiles.drift.repair')}
           </Button>
         </div>
-      )}
-
-      {/* Import Code Form */}
-      {showImportCode && (
-        <Card className="flex gap-2 items-end">
-          <div className="flex-1">
-            <label className="text-xs text-text-muted block mb-1">
-              {t('profiles.form.codeLabel')}
-            </label>
-            <input
-              type="text"
-              value={importCode}
-              onChange={(e) => setImportCode(e.target.value)}
-              placeholder={t('profiles.form.codePlaceholder')}
-              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-text font-mono tracking-wider placeholder:text-text-dim focus:outline-none focus:ring-2 focus:ring-primary/50"
-              onKeyDown={(e) => e.key === 'Enter' && handleImportFromCode()}
-              disabled={importingCode}
-            />
-          </div>
-          <Button
-            size="sm"
-            onClick={handleImportFromCode}
-            disabled={importingCode}
-          >
-            {importingCode ? (
-              <RefreshCw size={14} className="animate-spin" />
-            ) : (
-              <Download size={14} />
-            )}
-            {importingCode ? t('common.importing') : t('common.import')}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowImportCode(false)}
-          >
-            {t('common.cancel')}
-          </Button>
-        </Card>
-      )}
-
-      {/* Create Profile Form */}
-      {showCreate && (
-        <Card className="flex gap-2 items-end">
-          <div className="flex-1">
-            <label className="text-xs text-text-muted block mb-1">
-              {t('profiles.form.nameLabel')}
-            </label>
-            <input
-              type="text"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder={t('profiles.form.namePlaceholder')}
-              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-text placeholder:text-text-dim focus:outline-none focus:ring-2 focus:ring-primary/50"
-              onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
-            />
-          </div>
-          <Button size="sm" onClick={handleCreate}>
-            {t('common.create')}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowCreate(false)}
-          >
-            {t('common.cancel')}
-          </Button>
-        </Card>
       )}
 
       {/* Import Profile JSON Form */}
@@ -1408,7 +1216,7 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
             variant="secondary"
             size="sm"
             className="mt-3"
-            onClick={loadProfiles}
+            onClick={() => loadProfiles()}
           >
             {t('common.retry')}
           </Button>
@@ -1435,232 +1243,160 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
           );
         }
         return (
-        <div className="space-y-2">
-          {visible.map((profile) => (
-            <Card
-              key={profile.name}
-              className={`flex items-center justify-between hover:bg-surface-hover transition-colors ${activeProfile === profile.name ? 'border-green-500/50 bg-green-500/5' : ''}`}
-            >
-              <div className="min-w-0">
-                <h3 className="text-sm font-semibold text-text flex items-center gap-2">
-                  {profile.name}
-                  {activeProfile === profile.name && (
-                    <span className="text-[10px] font-normal bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded">{t('profiles.card.active')}</span>
+        // T16 — list view: clickable cards in a responsive grid.
+        // Click a card to open its detail (Paradox-style drilldown).
+        // Per-card action buttons (Share, Activate, kebab, etc.) are
+        // gone from the list; they live inside the detail view now.
+        // Active state, share state, drift, and pending-update hints
+        // remain as compact card meta so the user can scan at a glance.
+        <div className="gf-modpack-cards">
+          {visible.map((profile) => {
+            const isActive = activeProfile === profile.name;
+            const isShared = !!shareInfoMap[profile.name];
+            const hasDrift = !!driftMap[profile.name];
+            const hasUpdate = subUpdates.some(
+              (u) => u.profile_name === profile.name,
+            );
+            // T16 review fix — shared cards now host inline Copy chips
+            // (share code / install link / share message). Because nested
+            // <button> isn't valid HTML, the card itself is a div with
+            // role="button" + keyboard handlers; the chips are real
+            // buttons that stopPropagation so they don't navigate.
+            return (
+              <div
+                key={profile.name}
+                role="button"
+                tabIndex={0}
+                className={`gf-modpack-card ${isActive ? 'is-active' : ''}`}
+                onClick={() => setSelectedModpack(profile.name)}
+                onKeyDown={(e) => {
+                  // Only the card itself should activate on Enter/Space. A
+                  // keydown from a focused inner Copy chip bubbles here too;
+                  // without this guard, Enter/Space on a chip would also open
+                  // the modpack detail.
+                  if (
+                    e.target === e.currentTarget &&
+                    (e.key === 'Enter' || e.key === ' ')
+                  ) {
+                    e.preventDefault();
+                    setSelectedModpack(profile.name);
+                  }
+                }}
+                aria-label={t('modpack.openDetailAria', { name: profile.name })}
+              >
+                <div className="gf-modpack-card-header">
+                  <div className="gf-modpack-card-name">{profile.name}</div>
+                  {isActive && (
+                    <Badge variant="ok" ariaHidden>
+                      {t('profiles.card.active')}
+                    </Badge>
                   )}
-                </h3>
-                <div className="flex items-center gap-3 mt-1 text-xs text-text-dim">
-                  <span>
-                    {t('profiles.card.enabled', { count: profile.mods.filter(m => m.enabled).length })}
-                    {profile.mods.filter(m => !m.enabled).length > 0 && (
-                      <>, {t('profiles.card.disabled', { count: profile.mods.filter(m => !m.enabled).length })}</>
-                    )}
-                  </span>
+                </div>
+                <div className="gf-modpack-card-meta">
+                  <span>{t('modpack.modCount', { count: profile.mods.length })}</span>
                   {profile.game_version && <span>{profile.game_version}</span>}
                   <span>
                     {new Date(profile.created_at).toLocaleDateString(i18n.language)}
                   </span>
                   {profile.created_by && (
-                    <span className="text-primary">{t('profiles.card.by', { name: profile.created_by })}</span>
+                    <span className="text-primary">
+                      {t('profiles.card.by', { name: profile.created_by })}
+                    </span>
                   )}
                 </div>
-                {shareInfoMap[profile.name] && (
-                  <div className="flex items-center gap-1.5 mt-1.5">
-                    <code className="text-xs font-mono text-primary bg-primary/10 px-2 py-0.5 rounded select-all">
-                      {shareInfoMap[profile.name].owner}/{shareInfoMap[profile.name].code}
-                    </code>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const code = `${shareInfoMap[profile.name].owner}/${shareInfoMap[profile.name].code}`;
-                        navigator.clipboard.writeText(code).then(() => {
-                          setCopiedProfileCode(profile.name);
-                          setTimeout(() => setCopiedProfileCode(null), 2000);
-                        }).catch(() => {});
-                      }}
-                      className="text-text-dim hover:text-text transition-colors"
-                      title={t('profiles.kebab.copyShareCode')}
+                <div className="gf-modpack-card-badges">
+                  {hasUpdate && (
+                    <Badge variant="update" ariaHidden>
+                      {t('home.syncPillReady')}
+                    </Badge>
+                  )}
+                  {isShared && (
+                    <Badge variant="github" ariaHidden>
+                      {t('modpack.shared')}
+                    </Badge>
+                  )}
+                  {hasDrift && (
+                    <span
+                      className="gf-modpack-card-drift"
+                      title={t('profiles.card.outOfSync')}
                     >
-                      {copiedProfileCode === profile.name ? <Check size={12} /> : <Copy size={12} />}
-                    </button>
-                    {/* Copy install link — Discord-clickable HTTPS URL. */}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const code = `${shareInfoMap[profile.name].owner}/${shareInfoMap[profile.name].code}`;
-                        navigator.clipboard.writeText(buildShareLink(code))
-                          .then(() => toastCtx.success(t('profiles.toast.installLinkCopied')))
-                          .catch(() => toastCtx.error(t('profiles.toast.cantCopyToClipboard')));
-                      }}
-                      className="text-text-dim hover:text-text transition-colors"
-                      title={t('profiles.kebab.copyInstallLinkTitle')}
-                    >
-                      <LinkIcon size={12} />
-                    </button>
-                    {/* Copy full share message — intro + link + raw code. */}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const code = `${shareInfoMap[profile.name].owner}/${shareInfoMap[profile.name].code}`;
-                        const message = buildShareMessage(profile.name, code, t);
-                        navigator.clipboard.writeText(message)
-                          .then(() => toastCtx.success(t('profiles.toast.shareMessageCopied')))
-                          .catch(() => toastCtx.error(t('profiles.toast.cantCopyToClipboard')));
-                      }}
-                      className="text-text-dim hover:text-text transition-colors"
-                      title={t('profiles.kebab.copyShareMessage')}
-                    >
-                      <MessageSquare size={12} />
-                    </button>
-                  </div>
-                )}
-                {driftMap[profile.name] && (
-                  <div
-                    className="flex items-start gap-2 mt-1.5 text-xs text-amber-400 bg-amber-500/10 rounded px-2 py-1"
-                    title={
-                      (driftMap[profile.name].version_changed ?? [])
-                        .map((v) => `${v.name}: ${v.profile_version} → ${v.disk_version}`)
-                        .join('\n') || undefined
-                    }
-                  >
-                    <AlertTriangle size={12} className="flex-shrink-0 mt-0.5" />
-                    <span>
+                      <AlertTriangle size={11} />
                       {t('profiles.card.outOfSync')}
-                      {driftMap[profile.name].added.length > 0 && (
-                        <> &middot; {driftMap[profile.name].added.length > 1 ? t('profiles.card.newMods', { count: driftMap[profile.name].added.length }) : t('profiles.card.newMod', { count: driftMap[profile.name].added.length })}</>
-                      )}
-                      {driftMap[profile.name].removed.length > 0 && (
-                        <> &middot; {t('profiles.card.removed', { count: driftMap[profile.name].removed.length })}</>
-                      )}
-                      {driftMap[profile.name].toggled.length > 0 && (
-                        <> &middot; {t('profiles.card.toggled', { count: driftMap[profile.name].toggled.length })}</>
-                      )}
-                      {(driftMap[profile.name].version_changed?.length ?? 0) > 0 && (
-                        <> &middot; {driftMap[profile.name].version_changed.length > 1 ? t('profiles.card.versionChanged_other', { count: driftMap[profile.name].version_changed.length }) : t('profiles.card.versionChanged_one', { count: driftMap[profile.name].version_changed.length })}</>
-                      )}
-                      {shareInfoMap[profile.name] && (
-                        <> &mdash; {t('profiles.card.reShareHint')}</>
-                      )}
                     </span>
-                  </div>
-                )}
+                  )}
+                  {isShared && (
+                    <div
+                      className="gf-modpack-card-copy-chips"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        type="button"
+                        className="gf-modpack-card-copy-chip"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCardCopy(profile.name, 'code');
+                        }}
+                        title={t('profiles.kebab.copyShareCode')}
+                        aria-label={t('profiles.kebab.copyShareCode')}
+                      >
+                        <Copy size={12} aria-hidden />
+                      </button>
+                      <button
+                        type="button"
+                        className="gf-modpack-card-copy-chip"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCardCopy(profile.name, 'link');
+                        }}
+                        title={t('profiles.kebab.copyShareLink')}
+                        aria-label={t('profiles.kebab.copyShareLink')}
+                      >
+                        <LinkIcon size={12} aria-hidden />
+                      </button>
+                      <button
+                        type="button"
+                        className="gf-modpack-card-copy-chip"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCardCopy(profile.name, 'msg');
+                        }}
+                        title={t('profiles.kebab.copyShareMessageLabel')}
+                        aria-label={t('profiles.kebab.copyShareMessageLabel')}
+                      >
+                        <MessageSquare size={12} aria-hidden />
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="flex items-center gap-1">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => openLoadOrderEditor(profile)}
-                  title={t('profiles.loadOrder.buttonTitle', { name: profile.name })}
-                  aria-label={t('profiles.loadOrder.buttonTitle', { name: profile.name })}
-                  disabled={profile.mods.length === 0}
-                >
-                  <ListOrdered size={14} />
-                  {t('profiles.loadOrder.button')}
-                </Button>
-                {activeProfile === profile.name ? (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleSwitch(profile.name)}
-                    title={t('profiles.card.restore')}
-                    disabled={switchingProfile !== null}
-                  >
-                    {switchingProfile === profile.name ? (
-                      <RefreshCw size={14} className="animate-spin" />
-                    ) : (
-                      <RefreshCw size={14} />
-                    )}
-                  </Button>
-                ) : (
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={() => handleSwitch(profile.name)}
-                    title={t('profiles.card.activateProfile')}
-                    disabled={switchingProfile !== null}
-                  >
-                    {switchingProfile === profile.name ? (
-                      <RefreshCw size={14} className="animate-spin" />
-                    ) : (
-                      <><Play size={14} fill="currentColor" /> {t('profiles.card.switchTo')}</>
-                    )}
-                  </Button>
-                )}
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setPublishTarget({ profile, isReshare: !!shareInfoMap[profile.name] })}
-                  title={shareInfoMap[profile.name] ? t('profiles.card.reShareTitle') : t('profiles.card.shareTitle')}
-                >
-                  <Share2 size={14} />
-                  {shareInfoMap[profile.name] ? t('profiles.card.reShare') : t('profiles.card.share')}
-                </Button>
-                <KebabMenu title={t('profiles.card.moreActions')}>
-                  <KebabSection>
-                    <KebabItem icon={<Camera size={12} />} onClick={() => handleSnapshot()}>
-                      {t('profiles.kebab.snapshotFromCurrent')}
-                    </KebabItem>
-                    <KebabItem icon={<Files size={12} />} onClick={() => handleDuplicate(profile.name)}>
-                      {t('profiles.kebab.duplicate')}
-                    </KebabItem>
-                  </KebabSection>
-                  <KebabDivider />
-                  <KebabSection>
-                    <KebabItem icon={<Download size={12} />} onClick={() => handleExport(profile.name)}>
-                      {t('profiles.kebab.exportJson')}
-                    </KebabItem>
-                    {shareInfoMap[profile.name] && (
-                      <>
-                        <KebabItem
-                          icon={<Copy size={12} />}
-                          onClick={() => {
-                            const code = `${shareInfoMap[profile.name].owner}/${shareInfoMap[profile.name].code}`;
-                            navigator.clipboard.writeText(code).then(() => toastCtx.success(t('profiles.toast.shareCodeCopied')));
-                          }}
-                        >
-                          {t('profiles.kebab.copyShareCode')}
-                        </KebabItem>
-                        <KebabItem
-                          icon={<LinkIcon size={12} />}
-                          onClick={() => {
-                            const code = `${shareInfoMap[profile.name].owner}/${shareInfoMap[profile.name].code}`;
-                            navigator.clipboard.writeText(buildShareLink(code))
-                              .then(() => toastCtx.success(t('profiles.toast.installLinkCopied')))
-                              .catch(() => toastCtx.error(t('profiles.toast.cantCopyToClipboard')));
-                          }}
-                        >
-                          {t('profiles.kebab.copyShareLink')}
-                        </KebabItem>
-                        <KebabItem
-                          icon={<MessageSquare size={12} />}
-                          onClick={() => {
-                            const code = `${shareInfoMap[profile.name].owner}/${shareInfoMap[profile.name].code}`;
-                            const message = buildShareMessage(profile.name, code, t);
-                            navigator.clipboard.writeText(message)
-                              .then(() => toastCtx.success(t('profiles.toast.shareMessageCopied')))
-                              .catch(() => toastCtx.error(t('profiles.toast.cantCopyToClipboard')));
-                          }}
-                        >
-                          {t('profiles.kebab.copyShareMessageLabel')}
-                        </KebabItem>
-                      </>
-                    )}
-                  </KebabSection>
-                  <KebabDivider />
-                  <KebabItem
-                    danger
-                    icon={<Trash2 size={12} />}
-                    onClick={() => handleDelete(profile.name)}
-                  >
-                    {t('profiles.kebab.deleteProfile')}
-                  </KebabItem>
-                </KebabMenu>
-              </div>
-            </Card>
-          ))}
+            );
+          })}
         </div>
         );
       })()}
         </>
+      )}
+
+      {showCreateWizard && (
+        <CreateModpackWizard
+          onClose={() => setShowCreateWizard(false)}
+          onCreated={async ({ name, sharedNow }) => {
+            // Close the wizard immediately so it doesn't sit on top of
+            // the new pack's row, then refresh so the new manifest shows
+            // up. If the user picked "Create and share now", hand off to
+            // PublishModal once the list has the new row available.
+            setShowCreateWizard(false);
+            toastCtx.success(t('profiles.toast.created', { name }));
+            await loadProfiles();
+            if (sharedNow) {
+              const fresh = await listProfiles().catch(() => [] as Profile[]);
+              const profile = fresh.find((p) => p.name === name);
+              if (profile) {
+                setPublishTarget({ profile, isReshare: false });
+              }
+            }
+          }}
+        />
       )}
 
       <PublishModal
@@ -1671,8 +1407,13 @@ export function ProfilesView({ onGoToSettings, openModLibrarySignal = 0 }: Profi
         onClose={() => setPublishTarget(null)}
         onShared={(result) => {
           // Optimistically patch share info so the row flips Share→Re-share
-          // immediately even before the reload below settles.
-          setShareInfoMap((prev) => ({ ...prev, [publishTarget!.profile.name]: result }));
+          // immediately even before the reload below settles. Capture the name
+          // defensively: if publishTarget was cleared (modal closed) before the
+          // share resolved, skip the patch rather than deref null.
+          const sharedName = publishTarget?.profile.name;
+          if (sharedName) {
+            setShareInfoMap((prev) => ({ ...prev, [sharedName]: result }));
+          }
           // Share/Re-share enriches the saved profile manifest with bundle
           // URLs and listing state. Reload the profile list so the row shows
           // the persisted manifest immediately instead of waiting for a

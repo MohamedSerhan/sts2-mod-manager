@@ -48,7 +48,7 @@ describe('<ProfileSwitcher>', () => {
     registerInvokeHandler('list_profiles_cmd', () => []);
     render(<Wrap />);
     await waitFor(() => {
-      expect(screen.getByText(/No profiles yet/i)).toBeInTheDocument();
+      expect(screen.getByText(/No modpacks yet/i)).toBeInTheDocument();
     });
   });
 
@@ -115,7 +115,7 @@ describe('<ProfileSwitcher>', () => {
     });
     render(<Wrap />);
     await waitFor(() => {
-      expect(screen.getByText(/No profiles yet/i)).toBeInTheDocument();
+      expect(screen.getByText(/No modpacks yet/i)).toBeInTheDocument();
     });
   });
 
@@ -232,14 +232,14 @@ describe('<ProfileSwitcher>', () => {
     const user = userEvent.setup();
     render(<Wrap onClose={onClose} onAddPack={onAddPack} onManageAll={onManageAll} />);
     await waitFor(() => {
-      expect(screen.getByText(/Add pack/)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Add modpack/i })).toBeInTheDocument();
     });
-    await user.click(screen.getByText(/Add pack/));
+    await user.click(screen.getByRole('button', { name: /Add modpack/i }));
     expect(onAddPack).toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();
 
     onClose.mockClear();
-    await user.click(screen.getByText(/Manage all/));
+    await user.click(screen.getByRole('button', { name: /Manage all/i }));
     expect(onManageAll).toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();
   });

@@ -21,7 +21,7 @@ interface AppContextType {
    *  pills without forcing the user to dig into Settings to discover them. */
   auditResults: ModAuditEntry[] | null;
   auditing: boolean;
-  runAudit: () => Promise<void>;
+  runAudit: (only?: string[]) => Promise<void>;
   refreshAuditEntries: (names: string[]) => Promise<void>;
   refreshGameInfo: () => Promise<void>;
   refreshMods: () => Promise<void>;
@@ -195,10 +195,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
    *  mod). Result is cached in context so Settings and Mods can share it
    *  without refetching. Errors surface as a toast and leave the prior
    *  results in place. */
-  const runAudit = useCallback(async () => {
+  const runAudit = useCallback(async (only?: string[]) => {
     try {
       setAuditing(true);
-      const results = await auditModVersions();
+      // `only` scopes the audit to specific mods (the modpack view audits
+      // just its pack's mods); omitted = audit everything (All Mods view).
+      const results = await auditModVersions(only && only.length > 0 ? only : undefined);
       setAuditResults(results);
     } catch (e) {
       toast.error(t('app.auditFailed', { error: e instanceof Error ? e.message : String(e) }));

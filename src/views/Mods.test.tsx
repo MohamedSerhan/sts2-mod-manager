@@ -16,10 +16,20 @@ import type { ModInfo } from '../types';
  * copy, audit-result-driven button label transitions, etc.
  */
 
-function Wrap(props: { advancedMode?: boolean; onOpenModLibrary?: () => void } = {}) {
+function Wrap(props: {
+  advancedMode?: boolean;
+  onManageActiveModpack?: () => void;
+  onGoToSettings?: () => void;
+  initialTab?: 'installed' | 'browse';
+} = {}) {
   return (
     <AllProviders>
-      <ModsView advancedMode={props.advancedMode} onOpenModLibrary={props.onOpenModLibrary} />
+      <ModsView
+        advancedMode={props.advancedMode}
+        onManageActiveModpack={props.onManageActiveModpack}
+        onGoToSettings={props.onGoToSettings}
+        initialTab={props.initialTab}
+      />
     </AllProviders>
   );
 }
@@ -59,12 +69,54 @@ function expectTextBefore(first: string, second: string): void {
   ).toBe(true);
 }
 
+/**
+ * The four toolbar add-affordances (Quick add URL / Import mod / Auto-detect
+ * sources / Open folder) were consolidated into a single "Add mods ▾" dropdown
+ * (AddModsMenu). The menu auto-closes when an item is clicked, so every
+ * interaction must open it first, then target the action as a `menuitem`.
+ */
+async function openAddMenu(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  await user.click(screen.getByRole('button', { name: /add mods/i }));
+}
+
 describe('<ModsView>', () => {
   it('renders the empty state when no mods are installed', async () => {
     seedMods([]);
     render(<Wrap />);
     await waitFor(() => {
       expect(screen.getByText(/0 installed/)).toBeInTheDocument();
+    });
+  });
+
+  // ── 1.7.0 outer Installed/Browse tabs ─────────────────────────────
+  it('outer tab strip: Installed is the default; switching to Browse renders BrowseView', async () => {
+    // 1.7.0 — Browse Mods is now a tab inside this view. Default tab
+    // is Installed (existing All-installed-mods page). The Browse tab
+    // surfaces the GitHub sub-tab as a structural marker.
+    seedMods([]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => {
+      expect(screen.getByText(/All installed mods/i)).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /^Browse$/i }));
+    // BrowseView's GitHub source sub-tab proves we switched.
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /GitHub/i })).toBeInTheDocument();
+    });
+    // Switch back — the All-installed-mods header reappears.
+    await user.click(screen.getByRole('button', { name: /^Installed$/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/All installed mods/i)).toBeInTheDocument();
+    });
+  });
+
+  it('initialTab=browse opens straight on the Browse tab', async () => {
+    // Backward-compat path: legacy view-id 'browse-mods' is routed
+    // by App.tsx to this view with initialTab='browse'.
+    render(<Wrap initialTab="browse" />);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /GitHub/i })).toBeInTheDocument();
     });
   });
 
@@ -82,24 +134,29 @@ describe('<ModsView>', () => {
     expect(screen.getByText(/2 installed.*1 active.*1 disabled/i)).toBeInTheDocument();
   });
 
-  it('offers a Mod Library bridge so users can assign installed mods to profiles from Mods', async () => {
+  it('offers a Manage-active-modpack page-header link (toolbar duplicate removed)', async () => {
+    // T16 review fix — the toolbar "Mod Library" button was removed.
+    // Its label described the dead cross-profile workspace and the
+    // page header already exposes the same handler via a non-misleading
+    // "Manage active modpack →" link. Pin both: (a) the toolbar no
+    // longer has a "Mod Library" affordance, (b) the page-header link
+    // still wires the handler.
     seedMods([baseMod({ name: 'BaseLib', folder_name: 'BaseLib' })]);
-    const onOpenModLibrary = vi.fn();
+    const onManageActiveModpack = vi.fn();
     const user = userEvent.setup();
-    render(<Wrap onOpenModLibrary={onOpenModLibrary} />);
+    render(<Wrap onManageActiveModpack={onManageActiveModpack} />);
 
     await waitFor(() => {
       expect(screen.getByText('BaseLib')).toBeInTheDocument();
     });
-    const bridge = screen.getByRole('button', { name: /Mod Library/i });
-    expect(within(bridge).getByText('Beta')).toBeInTheDocument();
-    expect(bridge).toHaveAttribute(
-      'title',
-      expect.stringMatching(/profiles include each installed mod/i),
-    );
+    // No toolbar button labeled "Mod Library" — the toolbar duplicate
+    // is gone. (The page-header link is named "Manage active modpack",
+    // not "Mod Library", so this query stays unique.)
+    expect(screen.queryByRole('button', { name: /^Mod Library/i })).toBeNull();
 
-    await user.click(bridge);
-    expect(onOpenModLibrary).toHaveBeenCalledTimes(1);
+    const link = screen.getByRole('button', { name: /manage active modpack/i });
+    await user.click(link);
+    expect(onManageActiveModpack).toHaveBeenCalledTimes(1);
   });
 
   it('search filter narrows the visible rows', async () => {
@@ -114,7 +171,7 @@ describe('<ModsView>', () => {
       expect(screen.getByText('BaseLib')).toBeInTheDocument();
     });
     // Search by "auto" → only AutoPath remains
-    const search = screen.getByPlaceholderText(/Search 3 mods/);
+    const search = screen.getByPlaceholderText(/Search 3 library mods?/);
     await user.type(search, 'auto');
     await waitFor(() => {
       expect(screen.queryByText('BaseLib')).toBeNull();
@@ -144,16 +201,18 @@ describe('<ModsView>', () => {
   });
 
   it('sort dropdown supports common mod-library orders', async () => {
+    // Post-1.7.0 T18 unification: the Library view uses LibraryTable's
+    // own sort dropdown. Sort modes shifted from
+    // enabledFirst/disabledFirst/largestFirst to activeFirst/storedFirst
+    // and inPackFirst (which only renders when modpackName is set).
     seedMods([
-      baseMod({ name: 'ZuluPatch', folder_name: 'ZuluPatch', enabled: true, size_bytes: 1024 }),
-      baseMod({ name: 'BaseLib', folder_name: 'BaseLib', enabled: false, size_bytes: 2048 }),
-      baseMod({ name: 'AutoPath', folder_name: 'AutoPath', enabled: true, size_bytes: 4096 }),
+      baseMod({ name: 'ZuluPatch', folder_name: 'ZuluPatch', enabled: true }),
+      baseMod({ name: 'BaseLib', folder_name: 'BaseLib', enabled: false }),
+      baseMod({ name: 'AutoPath', folder_name: 'AutoPath', enabled: true }),
     ]);
     const user = userEvent.setup();
     render(<Wrap />);
-    await waitFor(() => {
-      expect(screen.getByText('AutoPath')).toBeInTheDocument();
-    });
+    await screen.findAllByText('AutoPath');
 
     const sort = screen.getByRole('combobox', { name: /Sort/i });
     expectTextBefore('AutoPath', 'BaseLib');
@@ -163,72 +222,59 @@ describe('<ModsView>', () => {
     expectTextBefore('ZuluPatch', 'BaseLib');
     expectTextBefore('BaseLib', 'AutoPath');
 
-    await user.selectOptions(sort, 'enabledFirst');
+    await user.selectOptions(sort, 'activeFirst');
+    // Both AutoPath and ZuluPatch are active; BaseLib is stored. Active
+    // ones appear first, sorted alphabetically.
     expectTextBefore('AutoPath', 'ZuluPatch');
     expectTextBefore('ZuluPatch', 'BaseLib');
 
-    await user.selectOptions(sort, 'disabledFirst');
+    await user.selectOptions(sort, 'storedFirst');
     expectTextBefore('BaseLib', 'AutoPath');
-
-    await user.selectOptions(sort, 'largestFirst');
-    expectTextBefore('AutoPath', 'BaseLib');
-    expectTextBefore('BaseLib', 'ZuluPatch');
   });
 
-  it('sorts display-name ties by stable mod identity', async () => {
-    seedMods([
-      baseMod({
-        name: 'raw-zeta',
-        display_name: 'Readable',
-        folder_name: null,
-        mod_id: 'zeta',
-        size_bytes: 2048,
-      }),
-      baseMod({
-        name: 'raw-alpha',
-        display_name: 'Readable',
-        folder_name: null,
-        mod_id: 'alpha',
-        size_bytes: 2048,
-      }),
-    ]);
-    const user = userEvent.setup();
-    render(<Wrap />);
-    await waitFor(() => {
-      expect(screen.getByText('raw-zeta')).toBeInTheDocument();
-    });
-
-    await user.selectOptions(screen.getByRole('combobox', { name: /Sort/i }), 'largestFirst');
-
-    expectTextBefore('raw-alpha', 'raw-zeta');
-  });
-
-  it('makes clear that Mods tab sorting is visual and not load order', async () => {
-    seedMods([
-      baseMod({ name: 'BaseLib', folder_name: 'BaseLib' }),
-    ]);
-    render(<Wrap />);
-    await waitFor(() => {
-      expect(screen.getByText('BaseLib')).toBeInTheDocument();
-    });
-
-    expect(screen.getByText(/visual only/i)).toBeInTheDocument();
-    expect(screen.getByText(/does not change load order/i)).toBeInTheDocument();
-  });
-
-  it('advanced-mode toggle reveals "Import mod" + "Quick add URL" buttons', async () => {
+  it('Import mod + Quick add URL buttons are always visible (T17 removed the advanced gate)', async () => {
+    // T17: per-screen Advanced toggle was removed when the per-row
+    // drawer absorbed source-pill + Freeze/Delete disclosure. Import
+    // mod / Quick add URL stay in the page-head toolbar — they're
+    // primary install affordances, not advanced features. They now live
+    // inside the consolidated "Add mods ▾" dropdown.
     seedMods([]);
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => {
       expect(screen.getByText(/0 installed/)).toBeInTheDocument();
     });
-    expect(screen.queryByRole('button', { name: /Import mod/ })).toBeNull();
-    expect(screen.queryByRole('button', { name: /Quick add URL/ })).toBeNull();
+    // The "Add mods" trigger is always present...
+    expect(screen.getByRole('button', { name: /add mods/i })).toBeInTheDocument();
+    // ...and opening it surfaces both primary install affordances.
+    await openAddMenu(user);
+    expect(screen.getByRole('menuitem', { name: /Import mod/ })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /Quick add URL/ })).toBeInTheDocument();
+  });
 
-    await user.click(screen.getByText('Advanced'));
-    expect(screen.getByRole('button', { name: /Import mod/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Quick add URL/ })).toBeInTheDocument();
+  it('Auto-detect sources toolbar button opens the AutoDetectModal', async () => {
+    // The bulk "Auto-detect sources" action (scan unlinked mods for their
+    // GitHub repos) was relocated here from the old Settings → Audit tab.
+    // Clicking it mounts AutoDetectModal, which immediately scans via
+    // auto_detect_sources on open.
+    seedMods([baseMod({ name: 'BaseLib', folder_name: 'BaseLib' })]);
+    registerInvokeHandler('auto_detect_sources', () => ({
+      matched: [],
+      unmatched: [],
+      skipped_already_linked: 0,
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
+    await openAddMenu(user);
+    const autoBtn = screen.getByRole('menuitem', { name: /Auto-detect sources/i });
+    await user.click(autoBtn);
+    // The modal scans on open — assert the command fired and the modal
+    // backdrop materialised.
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'auto_detect_sources')).toBe(true);
+    });
+    expect(document.querySelectorAll('.gf-modal-back').length).toBeGreaterThan(0);
   });
 
   it('Audit mods button transitions to "Update 1 mod" when audit returns one pending GitHub update', async () => {
@@ -260,7 +306,7 @@ describe('<ModsView>', () => {
     });
   });
 
-  it('marks the Mods-page audit action as beta without changing its button name', async () => {
+  it('the Mods-page audit action has no Beta tag', async () => {
     seedMods([]);
     render(<Wrap />);
     await waitFor(() => {
@@ -268,7 +314,7 @@ describe('<ModsView>', () => {
     });
 
     const auditButton = screen.getByRole('button', { name: 'Audit mods' });
-    expect(within(auditButton).getByText('Beta')).toBeInTheDocument();
+    expect(within(auditButton).queryByText('Beta')).toBeNull();
   });
 
   it('Audit mods button shows "Up to date" pill + Re-audit button when audit returns zero GitHub updates', async () => {
@@ -339,6 +385,47 @@ describe('<ModsView>', () => {
     });
   });
 
+  it('Refresh surfaces a newly-installed mod in focus mode without a remount', async () => {
+    // Regression: with an active modpack the table renders from the
+    // membership grid, which was fetched once and never re-pulled on
+    // refresh — so a freshly-installed mod only appeared after switching
+    // tabs. The table must re-fetch the grid when the installed set grows.
+    registerInvokeHandler('get_active_profile', () => 'TestPack');
+    registerInvokeHandler('list_profiles_cmd', () => [
+      { name: 'TestPack', mods: [], created_at: '2026-01-01T00:00:00Z', created_by: null, game_version: null },
+    ]);
+    let installedCount = 1;
+    const mkRow = (name: string) => ({
+      name,
+      version: '1.0.0',
+      folder_name: name,
+      mod_id: name,
+      installed_enabled: true,
+      profiles: [{ profile_name: 'TestPack', included: true, enabled: true, editable: true }],
+    });
+    registerInvokeHandler('get_installed_mods', () =>
+      (installedCount === 1 ? ['OldMod'] : ['OldMod', 'FreshMod']).map((n) =>
+        baseMod({ name: n, folder_name: n }),
+      ),
+    );
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'TestPack', editable: true }],
+      mods: (installedCount === 1 ? ['OldMod'] : ['OldMod', 'FreshMod']).map(mkRow),
+    }));
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getAllByText('OldMod').length).toBeGreaterThan(0); });
+    expect(screen.queryByText('FreshMod')).toBeNull();
+
+    // Simulate an install landing on disk, then hit Refresh.
+    installedCount = 2;
+    await user.click(screen.getByRole('button', { name: /Refresh/ }));
+
+    // The new mod shows up without unmounting/remounting the table.
+    await waitFor(() => { expect(screen.getAllByText('FreshMod').length).toBeGreaterThan(0); });
+  });
+
   it('Open folder triggers open_mods_folder', async () => {
     seedMods([]);
     const user = userEvent.setup();
@@ -346,7 +433,8 @@ describe('<ModsView>', () => {
     await waitFor(() => {
       expect(screen.getByText(/0 installed/)).toBeInTheDocument();
     });
-    await user.click(screen.getByRole('button', { name: /Open folder/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Open mods folder/ }));
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'open_mods_folder')).toBe(true);
     });
@@ -360,7 +448,8 @@ describe('<ModsView>', () => {
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
 
     // Quick Add toggles open
-    await user.click(screen.getByRole('button', { name: /Quick add URL/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/ }));
     const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
     await user.type(input, 'https://github.com/foo/bar');
     await user.click(screen.getByRole('button', { name: 'Add' }));
@@ -384,13 +473,18 @@ describe('<ModsView>', () => {
     expect(deleteAllBtn!).toBeDisabled();
   });
 
-  it('clicking the row toggle invokes toggle_mod', async () => {
+  it('row Active/stored switch invokes toggle_mod (storage control lives on the row)', async () => {
+    // 1.7.0: the verbose kebab "Disable in game" entry was retired in
+    // favour of a compact switch on the row itself — users kept asking
+    // "where did the enable/disable toggles go?". ON = active in the
+    // game folder; flipping OFF stores the mod (toggle_mod enable=false).
     seedMods([baseMod({ name: 'BaseLib', folder_name: 'BaseLib', enabled: true })]);
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
-    const toggle = screen.getByRole('switch');
-    await user.click(toggle);
+    const sw = screen.getByRole('switch', { name: /toggle whether BaseLib is active in game/i });
+    expect(sw).toHaveAttribute('aria-checked', 'true');
+    await user.click(sw);
     await waitFor(() => {
       expect(getInvokeCalls().some(
         (c) => c.cmd === 'toggle_mod' && c.args?.name === 'BaseLib' && c.args?.enable === false,
@@ -426,43 +520,29 @@ describe('<ModsView>', () => {
     expect(screen.getByText(/Type/)).toBeInTheDocument();
   });
 
-  it('kebab → Remove mod opens the destructive confirm', async () => {
+  it('Delete (trash) button opens the destructive confirm', async () => {
     seedMods([baseMod({ name: 'AutoPath', folder_name: 'AutoPath' })]);
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('AutoPath')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    await user.click(screen.getByRole('menuitem', { name: /Remove mod/ }));
+    await user.click(screen.getByRole('button', { name: /Remove AutoPath/i }));
     // Confirm modal shows
     await waitFor(() => {
       expect(screen.getByText(/Delete "AutoPath"/)).toBeInTheDocument();
     });
   });
 
-  it('advanced mode promotes Remove mod to a standalone top-level button (no kebab click needed)', async () => {
+  it('Delete is a visible trash button left of the kebab (not buried in it)', async () => {
+    // Delete is a frequent action, so it's a visible button on the row
+    // (left of the kebab) rather than a kebab item.
     seedMods([baseMod({ name: 'AutoPath', folder_name: 'AutoPath' })]);
     const user = userEvent.setup();
-    render(<Wrap advancedMode />);
+    render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('AutoPath')).toBeInTheDocument(); });
-    // Standalone button is directly visible — NOT a menuitem — so the user
-    // can click Remove without first opening the kebab.
-    const removeBtn = screen.getByRole('button', { name: /Remove mod/ });
-    expect(removeBtn).toBeInTheDocument();
-    await user.click(removeBtn);
-    await waitFor(() => {
-      expect(screen.getByText(/Delete "AutoPath"/)).toBeInTheDocument();
-    });
-  });
-
-  it('advanced mode does NOT duplicate Remove mod inside the kebab', async () => {
-    seedMods([baseMod({ name: 'AutoPath', folder_name: 'AutoPath' })]);
-    const user = userEvent.setup();
-    render(<Wrap advancedMode />);
-    await waitFor(() => { expect(screen.getByText('AutoPath')).toBeInTheDocument(); });
+    expect(screen.getByRole('button', { name: /Remove AutoPath/i })).toBeInTheDocument();
+    // ...and it's no longer inside the kebab.
     await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    // In advanced mode the kebab no longer carries a duplicate Remove
-    // entry — the top-level button is the single source of truth.
-    expect(screen.queryByRole('menuitem', { name: /Remove mod/ })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: /Remove mod/i })).toBeNull();
   });
 
   it('kebab → Freeze / Unfreeze toggles via pin_mod / unpin_mod', async () => {
@@ -480,33 +560,39 @@ describe('<ModsView>', () => {
     });
   });
 
-  it('rows linked for auto-updates count appears in advanced mode', async () => {
+  it('the "linked for auto-updates" subtitle suffix is gone (T17 removed it with the advanced toggle)', async () => {
+    // T17 removed the per-screen Advanced toggle and the `· N linked for
+    // auto-updates` suffix that depended on it. The subtitle now stays
+    // focused on the actionable totals (installed / active / disabled).
     seedMods([
       baseMod({ name: 'A', github_url: 'https://github.com/a/b' }),
       baseMod({ name: 'B', nexus_url: 'https://nexusmods.com/x/mods/1' }),
       baseMod({ name: 'C' }),
     ]);
-    render(<Wrap advancedMode />);
+    render(<Wrap />);
     await waitFor(() => {
       expect(screen.getByText(/3 installed/)).toBeInTheDocument();
     });
-    expect(screen.getByText(/2 linked for auto-updates/)).toBeInTheDocument();
+    expect(screen.queryByText(/linked for auto-updates/)).toBeNull();
   });
 
-  it('rows show an author subtitle when two mods share a display name', async () => {
-    // Two same-named mods → user-visible author/folder disambiguator.
+  it('rows show a folder disambiguator when two mods share a display name', async () => {
+    // Post-1.7.0 T18 unification: LibraryRow uses folder_name (not
+    // author) as the inline disambiguator. The folder name is always
+    // shown when it differs from the mod name, which is also when two
+    // same-named mods land in the library.
     seedMods([
       baseMod({ name: 'CardArtEditor', folder_name: 'CardArtEditor-v1', author: 'Alice' }),
       baseMod({ name: 'CardArtEditor', folder_name: 'CardArtEditor-v2', author: 'Bob' }),
     ]);
     render(<Wrap />);
     await waitFor(() => {
-      // Two rows with the same name.
-      expect(screen.getAllByText('CardArtEditor')).toHaveLength(2);
+      // Two rows with the same display name.
+      expect(screen.getAllByText('CardArtEditor').length).toBeGreaterThanOrEqual(2);
     });
-    // Author subtitles surface so they're distinguishable.
-    expect(screen.getByText(/Alice/)).toBeInTheDocument();
-    expect(screen.getByText(/Bob/)).toBeInTheDocument();
+    // Folder-name disambiguators surface so the rows are distinguishable.
+    expect(screen.getByText(/CardArtEditor-v1/)).toBeInTheDocument();
+    expect(screen.getByText(/CardArtEditor-v2/)).toBeInTheDocument();
   });
 
   it('Refresh shows a "Refreshing…" label while in flight', async () => {
@@ -542,26 +628,21 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('OnlyThing')).toBeInTheDocument(); });
-    await user.type(screen.getByPlaceholderText(/Search 1 mod/), 'nothing-matches');
+    await user.type(screen.getByPlaceholderText(/Search 1 library mod/), 'nothing-matches');
     await waitFor(() => { expect(screen.queryByText('OnlyThing')).toBeNull(); });
   });
 
-  it('mods linked via GitHub show a GH badge', async () => {
+  it('mods linked via GitHub surface a GitHub badge inline on the row', async () => {
+    // Post-1.7.0 T18 unification: source pills live alongside the
+    // storage button on the row (always visible). No drawer to expand.
     seedMods([baseMod({ github_url: 'https://github.com/x/y', source: 'github:x/y' })]);
-    // GH badges only render in advanced mode (Mods.tsx:804). Pre-fix, this
-    // test passed by accident on localStorage state leaked from an earlier
-    // test that clicked the Advanced toggle. After the setup-level
-    // localStorage.clear(), advanced has to be requested explicitly.
-    render(<Wrap advancedMode />);
-    await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
-    // The Badge component renders 'GitHub' or 'GH' for github sources.
-    // Look for the pill class. Easier: search for any element containing
-    // /github/i within the row.
+    render(<Wrap />);
+    await screen.findAllByText('BaseLib');
     const tokens = screen.queryAllByText(/github/i);
     expect(tokens.length).toBeGreaterThan(0);
   });
 
-  it('Update-available pill renders for a mod with a pending compatible update', async () => {
+  it('Update-available pill surfaces inline on the row after audit', async () => {
     seedMods([baseMod({ name: 'AutoPath', folder_name: 'AutoPath', github_url: 'https://github.com/x/y' })]);
     registerInvokeHandler('audit_mod_versions', () => [{
       mod_name: 'AutoPath',
@@ -581,7 +662,7 @@ describe('<ModsView>', () => {
     }]);
     const user = userEvent.setup();
     render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('AutoPath')).toBeInTheDocument(); });
+    await screen.findAllByText('AutoPath');
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
     await waitFor(() => {
       expect(screen.getByText(/Update available → v3\.2\.0/)).toBeInTheDocument();
@@ -607,10 +688,10 @@ describe('<ModsView>', () => {
     registerInvokeHandler('update_mod', () => baseMod({ name: 'AutoPath', folder_name: 'AutoPath', version: '3.2.0' }));
     const user = userEvent.setup();
     render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('AutoPath')).toBeInTheDocument(); });
+    await screen.findAllByText('AutoPath');
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
-    const pill = await screen.findByText(/Update available → v3\.2\.0/);
-    await user.click(pill);
+    const updateBtn = await screen.findByRole('button', { name: /Update available → v3\.2\.0/ });
+    await user.click(updateBtn);
     await waitFor(() => {
       expect(getInvokeCalls().some(
         (c) => c.cmd === 'update_mod' && c.args?.name === 'AutoPath',
@@ -618,13 +699,10 @@ describe('<ModsView>', () => {
     });
   });
 
-  it('"Download from Nexus" pill renders when nexus_update_available=true and nexus_url is set', async () => {
-    // Standardized with Settings → Audit: any audit row flagged
-    // nexus_update_available must surface a Download-from-Nexus pill
-    // on the Mods row too. Previously the Mods page only rendered a
-    // GitHub-update pill (which required `mod.github_url`), so Nexus-
-    // only mods like BaseLib showed up as updateable in Settings but
-    // had no actionable affordance on Mods.
+  it('"Download from Nexus" surfaces inside the drawer when audit reports a Nexus-only update', async () => {
+    // T17: the Nexus-update affordance moved into the row drawer. It's
+    // now a Button (not an <a>) that opens the Nexus URL through
+    // openExternalUrl; the test asserts that openUrl gets the nexus URL.
     seedMods([
       baseMod({
         name: 'BaseLib',
@@ -649,18 +727,29 @@ describe('<ModsView>', () => {
       nexus_update_available: true,
       update_source: 'nexus',
     }]);
+    const opener = await import('@tauri-apps/plugin-opener');
+    (opener.openUrl as ReturnType<typeof vi.fn>).mockClear();
     const user = userEvent.setup();
     render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
+    await screen.findAllByText('BaseLib');
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
-    const pill = await screen.findByText(/Download from Nexus/);
-    // Must link to the Files tab — same URL shape Settings uses.
-    const anchor = pill.closest('a');
-    expect(anchor).not.toBeNull();
-    expect(anchor!.getAttribute('href')).toContain('?tab=files');
+    // The "Download from Nexus" button used to live inside an expand
+    // drawer; post-1.7.0 T18 unification it's reachable via the kebab
+    // "View on Nexus" action which feeds the same openUrl handler.
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    await user.click(screen.getByRole('menuitem', { name: /view on nexus/i }));
+    await waitFor(() => {
+      expect(opener.openUrl).toHaveBeenCalledWith(
+        'https://www.nexusmods.com/slaythespire2/mods/42',
+      );
+    });
   });
 
-  it('Nexus pill is suppressed when audit row is snoozed', async () => {
+  it('snoozed mods show the Skipped pill inline (Nexus URL still reachable via kebab)', async () => {
+    // Post-1.7.0 T18 unification: the old drawer-pattern Nexus download
+    // button is gone. Snoozed mods now show the "Skipped" pill inline
+    // on the row; the Nexus URL is still reachable via the kebab "View
+    // on Nexus" action.
     seedMods([
       baseMod({
         name: 'BaseLib',
@@ -687,55 +776,12 @@ describe('<ModsView>', () => {
     }]);
     const user = userEvent.setup();
     render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
+    await screen.findAllByText('BaseLib');
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
-    // Skipped-update pill renders elsewhere (the dim "Skipped" tag), but the
-    // actionable Download-from-Nexus button must stay off until the user
-    // unsnoozes via the kebab — same gate the GitHub pill uses.
     await screen.findByText(/Skipped/);
-    expect(screen.queryByText(/Download from Nexus/)).toBeNull();
   });
 
-  it('Nexus pill falls back to manual ?tab=files when the URL is non-standard', async () => {
-    // nexusFilesUrl() returns null for any host that isn't nexusmods.com.
-    // The pill href falls back to a literal `${url}?tab=files` concat so
-    // unusual entries (mirrored hosts, old mod_sources rows) still get a
-    // working click-through instead of silently disappearing.
-    const odd = 'https://nexusmods.example/sts2/mods/42';
-    seedMods([
-      baseMod({
-        name: 'BaseLib',
-        folder_name: 'BaseLib',
-        nexus_url: odd,
-        github_url: null,
-      }),
-    ]);
-    registerInvokeHandler('audit_mod_versions', () => [{
-      mod_name: 'BaseLib',
-      folder_name: 'BaseLib',
-      installed_version: '3.1.2',
-      needs_update: true,
-      asset_names: [],
-      releases_scanned: 0,
-      latest_has_assets: false,
-      github_auto_detected: false,
-      pinned: false,
-      nexus_url: odd,
-      nexus_version: '3.2.0',
-      nexus_update_available: true,
-      update_source: 'nexus',
-    }]);
-    const user = userEvent.setup();
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Audit mods' }));
-    const pill = await screen.findByText(/Download from Nexus/);
-    const anchor = pill.closest('a');
-    expect(anchor).not.toBeNull();
-    expect(anchor!.getAttribute('href')).toBe(`${odd}?tab=files`);
-  });
-
-  it('Nexus pill is suppressed when audit row is pinned or snoozed', async () => {
+  it('pinned mods show the Frozen pill inline (Nexus URL still reachable via kebab)', async () => {
     seedMods([
       baseMod({
         name: 'BaseLib',
@@ -762,17 +808,12 @@ describe('<ModsView>', () => {
     }]);
     const user = userEvent.setup();
     render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
+    await screen.findAllByText('BaseLib');
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
-    // Audit ran (other state may render), but Download-from-Nexus pill
-    // is gated off for pinned mods — matching the GitHub pill's
-    // behaviour and avoiding "you should update this … wait but I pinned it".
-    await waitFor(() => {
-      expect(screen.queryByText(/Download from Nexus/)).toBeNull();
-    });
+    expect(screen.getByText('Frozen')).toBeInTheDocument();
   });
 
-  it('"Update blocked by game version" badge renders when latest_release_blocked_by_game_version=true', async () => {
+  it('"Update blocked by game version" pill surfaces inline after audit', async () => {
     seedMods([baseMod({ name: 'BumpyMod', folder_name: 'BumpyMod', github_url: 'https://github.com/x/y' })]);
     registerInvokeHandler('audit_mod_versions', () => [{
       mod_name: 'BumpyMod',
@@ -791,14 +832,14 @@ describe('<ModsView>', () => {
     }]);
     const user = userEvent.setup();
     render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('BumpyMod')).toBeInTheDocument(); });
+    await screen.findAllByText('BumpyMod');
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
     await waitFor(() => {
       expect(screen.getByText(/Update blocked by game version/)).toBeInTheDocument();
     });
   });
 
-  it('Audit-error badge renders when an audit row carries an error string', async () => {
+  it('Audit-error pill surfaces inline when an audit row carries an error string', async () => {
     seedMods([baseMod({ name: 'ErrorMod', folder_name: 'ErrorMod', github_url: 'https://github.com/x/y' })]);
     registerInvokeHandler('audit_mod_versions', () => [{
       mod_name: 'ErrorMod',
@@ -815,21 +856,21 @@ describe('<ModsView>', () => {
     }]);
     const user = userEvent.setup();
     render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('ErrorMod')).toBeInTheDocument(); });
+    await screen.findAllByText('ErrorMod');
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
     await waitFor(() => {
       expect(screen.getByText(/Audit error/)).toBeInTheDocument();
     });
   });
 
-  it('Frozen badge renders next to a frozen mod', async () => {
+  it('Frozen pill surfaces inline for a frozen mod', async () => {
     seedMods([baseMod({ name: 'PinnedMod', folder_name: 'PinnedMod', pinned: true })]);
     render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('PinnedMod')).toBeInTheDocument(); });
+    await screen.findAllByText('PinnedMod');
     expect(screen.getByText('Frozen')).toBeInTheDocument();
   });
 
-  it('min-game-version warning shows when mod requires a newer game', async () => {
+  it('min-game-version warning surfaces inline when the game is too old', async () => {
     registerInvokeHandler('get_game_info', () => ({
       game_path: 'C:/STS2',
       mods_path: 'C:/STS2/mods',
@@ -841,15 +882,8 @@ describe('<ModsView>', () => {
     }));
     seedMods([baseMod({ name: 'NeedsNew', folder_name: 'NeedsNew', min_game_version: '0.110.0' })]);
     render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('NeedsNew')).toBeInTheDocument(); });
+    await screen.findAllByText('NeedsNew');
     expect(screen.getByText(/needs game ≥ v0\.110\.0/)).toBeInTheDocument();
-  });
-
-  it('mod size renders formatted when size_bytes > 0', async () => {
-    seedMods([baseMod({ size_bytes: 1536 })]);
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
-    expect(screen.getByText(/1\.5 KB/)).toBeInTheDocument();
   });
 
   it('Copy version kebab item does not crash even without a clipboard API', async () => {
@@ -903,12 +937,12 @@ describe('<ModsView>', () => {
     await waitFor(() => { expect(screen.getByText('RitsuLib')).toBeInTheDocument(); });
     await user.click(screen.getByRole('button', { name: 'Mod actions' }));
     const rollbackItem = screen.getByRole('menuitem', { name: /Roll back one version/ });
-    expect(within(rollbackItem).getByText('Beta')).toBeInTheDocument();
+    expect(within(rollbackItem).queryByText('Beta')).toBeNull();
     await user.click(rollbackItem);
     await waitFor(() => {
       expect(screen.getByText(/Roll back 'RitsuLib'/)).toBeInTheDocument();
     });
-    expect(screen.getByText(/Rollback is a beta recovery feature/i)).toBeInTheDocument();
+    expect(screen.getByText(/Rollback preserves mod configs/i)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Roll back now' }));
     await waitFor(() => {
       expect(getInvokeCalls().some(
@@ -1014,20 +1048,40 @@ describe('<ModsView>', () => {
     });
   });
 
-  it('GitHub badge link points at the mod\'s github_url', async () => {
+  it('clicking a mod row toggles its inline source editor open, then closed', async () => {
+    // 1.7.x — the row body is a click target that opens Edit-sources, and
+    // clicking it again must close it (toggle), not re-open the same panel.
+    seedMods([baseMod({ name: 'ToggleMod', folder_name: 'ToggleMod' })]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('ToggleMod')).toBeInTheDocument(); });
+
+    const row = screen.getByTestId('library-row');
+    // First click opens the editor.
+    await user.click(row);
+    await waitFor(() => {
+      expect(screen.getByText('Sources for ToggleMod')).toBeInTheDocument();
+    });
+    // Clicking the row again toggles it closed.
+    await user.click(row);
+    await waitFor(() => {
+      expect(screen.queryByText('Sources for ToggleMod')).toBeNull();
+    });
+  });
+
+  it('GitHub badge link on the row points at the mod\'s github_url', async () => {
     seedMods([baseMod({ github_url: 'https://github.com/foo/bar' })]);
-    render(<Wrap advancedMode />);
-    await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
-    // The Badge wraps in an <a>. Find the anchor with the github_url.
+    render(<Wrap />);
+    await screen.findAllByText('BaseLib');
     const link = document.querySelector('a[href="https://github.com/foo/bar"]')!;
     expect(link).toBeTruthy();
     expect(link.getAttribute('target')).toBe('_blank');
   });
 
-  it('Nexus badge link points at the mod\'s nexus_url', async () => {
+  it('Nexus badge link on the row points at the mod\'s nexus_url', async () => {
     seedMods([baseMod({ nexus_url: 'https://www.nexusmods.com/sts2/mods/103' })]);
-    render(<Wrap advancedMode />);
-    await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
+    render(<Wrap />);
+    await screen.findAllByText('BaseLib');
     const link = document.querySelector('a[href="https://www.nexusmods.com/sts2/mods/103"]')!;
     expect(link).toBeTruthy();
   });
@@ -1084,10 +1138,19 @@ describe('<ModsView>', () => {
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
-    await screen.findByText(/Update available/i);
+    // T17: audit fires correctly but the inline pill is gone. Wait for
+    // the audit to finish landing by polling for the recorded call.
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'audit_mod_versions')).toBe(true);
+    });
 
     await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    await user.click(screen.getByRole('menuitem', { name: /Skip this update/i }));
+    // KebabItem name includes label + description ("Skip this update
+    // until a newer release appears..."). Scope by the label span.
+    const labels = await screen.findAllByText(/^Skip this update$/);
+    const labelEl = labels.find((el) => el.className.includes('gf-kebab-label'));
+    expect(labelEl).toBeDefined();
+    await user.click(labelEl!.closest('button')!);
 
     await waitFor(() => {
       expect(getInvokeCalls()).toContainEqual(expect.objectContaining({
@@ -1123,7 +1186,9 @@ describe('<ModsView>', () => {
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
-    await screen.findByText(/Skipped/i);
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'audit_mod_versions')).toBe(true);
+    });
 
     await user.click(screen.getByRole('button', { name: 'Mod actions' }));
     await user.click(screen.getByRole('menuitem', { name: /Show update again/i }));
@@ -1144,17 +1209,17 @@ describe('<ModsView>', () => {
     expect(screen.getByRole('button', { name: /^Refresh$/ })).toBeInTheDocument();
   });
 
-  it('Unlinked badge renders in advanced mode for mods without a source', async () => {
+  it('Unlinked badge surfaces inline for mods without a source', async () => {
     seedMods([baseMod({ name: 'OrphanMod', folder_name: 'OrphanMod', source: null })]);
-    render(<Wrap advancedMode />);
-    await waitFor(() => { expect(screen.getByText('OrphanMod')).toBeInTheDocument(); });
+    render(<Wrap />);
+    await screen.findAllByText('OrphanMod');
     expect(screen.getByText(/Unlinked/i)).toBeInTheDocument();
   });
 
-  it('Local badge renders for mods with a source but no github/nexus URL', async () => {
+  it('Local badge surfaces inline for mods with a source but no github/nexus URL', async () => {
     seedMods([baseMod({ source: 'manual', github_url: null, nexus_url: null })]);
-    render(<Wrap advancedMode />);
-    await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
+    render(<Wrap />);
+    await screen.findAllByText('BaseLib');
     expect(screen.getByText(/Local/)).toBeInTheDocument();
   });
 
@@ -1168,7 +1233,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('Apple')).toBeInTheDocument(); });
-    await user.type(screen.getByPlaceholderText(/Search 2 mods/), 'ana');
+    await user.type(screen.getByPlaceholderText(/Search 2 library mods?/), 'ana');
     await waitFor(() => {
       expect(screen.queryByText('Apple')).toBeNull();
     });
@@ -1215,7 +1280,7 @@ describe('<ModsView>', () => {
     expect(screen.getByText('manifest-gibberish')).toBeInTheDocument();
     expect(screen.getByText('Human-maintained description')).toBeInTheDocument();
 
-    await user.type(screen.getByPlaceholderText(/Search 1 mod/), 'readable');
+    await user.type(screen.getByPlaceholderText(/Search 1 library mod/), 'readable');
     expect(screen.getByText('Readable Name')).toBeInTheDocument();
   });
 
@@ -1528,7 +1593,7 @@ describe('<ModsView>', () => {
     });
   });
 
-  it('renders a "Latest" pill next to mods whose audit row is up-to-date', async () => {
+  it('renders a "Latest" pill inside the drawer of mods whose audit row is up-to-date', async () => {
     seedMods([
       baseMod({ name: 'CurrentMod', folder_name: 'CurrentMod', version: '2.0.0', github_url: 'https://github.com/foo/current' }),
       baseMod({ name: 'OldMod', folder_name: 'OldMod', version: '1.0.0', github_url: 'https://github.com/foo/old' }),
@@ -1560,13 +1625,17 @@ describe('<ModsView>', () => {
     ]);
     const user = userEvent.setup();
     render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('CurrentMod')).toBeInTheDocument(); });
+    await screen.findAllByText('CurrentMod');
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
-    // Wait for audit to land — the per-row Update pill on OldMod is a reliable signal.
-    await screen.findByText(/Update available → v2\.0\.0/);
-    // The Latest pill should appear exactly once — on CurrentMod.
-    const latestPills = screen.getAllByText('Latest');
-    expect(latestPills).toHaveLength(1);
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'audit_mod_versions')).toBe(true);
+    });
+    // Post-1.7.0 T18: Latest pill renders inline on the row. OldMod
+    // (still needs update) shows "Update available" instead, so only
+    // one Latest pill on the page.
+    await waitFor(() => {
+      expect(screen.getAllByText('Latest')).toHaveLength(1);
+    });
   });
 
   it('Delete-all confirm with typed phrase fires delete_all_mods', async () => {
@@ -1592,15 +1661,20 @@ describe('<ModsView>', () => {
 
   // ── Error / failure paths ────────────────────────────────────────
 
-  it('toggle_mod failure surfaces a toast', async () => {
+  it('toggle_mod failure surfaces a toast (row switch path)', async () => {
+    // LibraryTable owns the toggle_mod call and its own toast wording
+    // ("Failed to move {{mod}}: …"). The control is the row's
+    // Active/stored switch (the kebab item was retired in 1.7.0).
     seedMods([baseMod({ enabled: true })]);
     registerInvokeHandler('toggle_mod', () => { throw new Error('disk full'); });
     const user = userEvent.setup();
     render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('switch'));
+    await screen.findAllByText('BaseLib');
+    await user.click(
+      screen.getByRole('switch', { name: /toggle whether BaseLib is active in game/i }),
+    );
     await waitFor(() => {
-      expect(screen.getByText(/Failed to toggle BaseLib.*disk full/)).toBeInTheDocument();
+      expect(screen.getByText(/Failed to move BaseLib.*disk full/)).toBeInTheDocument();
     });
   });
 
@@ -1667,8 +1741,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('DelFail')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    await user.click(screen.getByRole('menuitem', { name: /Remove mod/ }));
+    await user.click(screen.getByRole('button', { name: /^Remove /i }));
     await waitFor(() => { expect(screen.getByText(/Delete "DelFail"/)).toBeInTheDocument(); });
     // ConfirmDialog renders TWO buttons with accessible name "Delete":
     //   - the destructive confirm in modal-foot
@@ -1690,8 +1763,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('KeepMe')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    await user.click(screen.getByRole('menuitem', { name: /Remove mod/ }));
+    await user.click(screen.getByRole('button', { name: /^Remove /i }));
     await waitFor(() => { expect(screen.getByText(/Delete "KeepMe"/)).toBeInTheDocument(); });
     // The modal Cancel button lives in .gf-modal-foot (left-most button).
     const cancelBtn = document.querySelector(
@@ -1771,7 +1843,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Open folder/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Open mods folder/ }));
     await waitFor(() => {
       expect(screen.getByText('no path')).toBeInTheDocument();
     });
@@ -1784,7 +1857,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Open folder/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Open mods folder/ }));
     await waitFor(() => {
       expect(screen.getByText('plain-string-reason')).toBeInTheDocument();
     });
@@ -1845,7 +1919,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Import mod/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Import mod/ }));
     // Wait a tick — no install_mod_from_file should have fired.
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'install_mod_from_file')).toBe(false);
@@ -1860,7 +1935,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Import mod/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Import mod/ }));
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'install_mod_from_file')).toBe(true);
     });
@@ -1875,7 +1951,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Import mod/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Import mod/ }));
     await waitFor(() => {
       expect(screen.getByText(/Import failed: zip corrupt/)).toBeInTheDocument();
     });
@@ -1892,7 +1969,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Quick add URL/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/ }));
     const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
     await user.type(input, 'https://github.com/quick/win');
     await user.click(screen.getByRole('button', { name: 'Add' }));
@@ -1912,7 +1990,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Quick add URL/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/ }));
     const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
     // Full Nexus URL — nexusFilesUrl returns the files-tab URL.
     await user.type(input, 'https://www.nexusmods.com/slaythespire2/mods/42');
@@ -1935,7 +2014,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Quick add URL/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/ }));
     const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
     await user.type(input, 'nexus:slaythespire2/mods/99');
     await user.click(screen.getByRole('button', { name: 'Add' }));
@@ -1955,7 +2035,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Quick add URL/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/ }));
     const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
     // A bare string that doesn't parse as URL and isn't a nexus shorthand.
     await user.type(input, 'totally-not-a-url');
@@ -1975,7 +2056,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Quick add URL/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/ }));
     const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
     await user.type(input, 'https://example.com/some/path');
     await user.click(screen.getByRole('button', { name: 'Add' }));
@@ -1989,7 +2071,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Quick add URL/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/ }));
     const callsBefore = getInvokeCalls().filter((c) => c.cmd === 'quick_add_mod').length;
     await user.click(screen.getByRole('button', { name: 'Add' }));
     // Whitespace-only input → handler returns early.
@@ -2002,7 +2085,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Quick add URL/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/ }));
     const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
     await user.type(input, 'github:foo/bar');
     await user.click(screen.getByRole('button', { name: 'Add' }));
@@ -2020,7 +2104,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Quick add URL/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/ }));
     const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
     await user.type(input, 'github:enter/mod{Enter}');
     await waitFor(() => {
@@ -2033,7 +2118,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Quick add URL/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/ }));
     const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
     expect(input).toBeInTheDocument();
     // The Quick-Add Card renders an X-icon ghost button to close. Locate
@@ -2106,13 +2192,19 @@ describe('<ModsView>', () => {
     seedMods([baseMod({ name: 'OnlyNex', folder_name: 'OnlyNex', github_url: null, nexus_url: 'https://www.nexusmods.com/sts2/mods/7' })]);
     registerInvokeHandler('find_github_from_nexus', () => 'foo/bar');
     const user = userEvent.setup();
-    render(<Wrap advancedMode />);
+    render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('OnlyNex')).toBeInTheDocument(); });
     await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    const items = screen.getAllByRole('menuitem', { name: /Edit sources/ });
-    await user.click(items[0]);
+    const labels = screen.getAllByText(/^Edit sources/);
+    const labelEl = labels.find((el) => el.className.includes('gf-kebab-label'));
+    expect(labelEl).toBeDefined();
+    await user.click(labelEl!.closest('button')!);
     await waitFor(() => { expect(screen.getByText('Sources for OnlyNex')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Find GitHub/ }));
+    // Scope the Find GitHub button click to the source editor (the
+    // drawer also surfaces a "Find GitHub from Nexus" action button
+    // when nexus is linked but github is not).
+    const editor = screen.getByText('Sources for OnlyNex').closest('.gf-src-edit') as HTMLElement;
+    await user.click(within(editor).getByRole('button', { name: /Find GitHub/ }));
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'find_github_from_nexus')).toBe(true);
     });
@@ -2123,12 +2215,16 @@ describe('<ModsView>', () => {
     seedMods([baseMod({ name: 'NoFind', folder_name: 'NoFind', github_url: null, nexus_url: 'https://www.nexusmods.com/sts2/mods/8' })]);
     registerInvokeHandler('find_github_from_nexus', () => null);
     const user = userEvent.setup();
-    render(<Wrap advancedMode />);
+    render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('NoFind')).toBeInTheDocument(); });
     await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    const items = screen.getAllByRole('menuitem', { name: /Edit sources/ });
-    await user.click(items[0]);
-    await user.click(screen.getByRole('button', { name: /Find GitHub/ }));
+    const labels = screen.getAllByText(/^Edit sources/);
+    const labelEl = labels.find((el) => el.className.includes('gf-kebab-label'));
+    expect(labelEl).toBeDefined();
+    await user.click(labelEl!.closest('button')!);
+    await waitFor(() => { expect(screen.getByText('Sources for NoFind')).toBeInTheDocument(); });
+    const editor = screen.getByText('Sources for NoFind').closest('.gf-src-edit') as HTMLElement;
+    await user.click(within(editor).getByRole('button', { name: /Find GitHub/ }));
     await waitFor(() => {
       expect(screen.getByText(/No GitHub link found in Nexus description for NoFind/)).toBeInTheDocument();
     });
@@ -2138,12 +2234,16 @@ describe('<ModsView>', () => {
     seedMods([baseMod({ name: 'FindFail', folder_name: 'FindFail', github_url: null, nexus_url: 'https://www.nexusmods.com/sts2/mods/9' })]);
     registerInvokeHandler('find_github_from_nexus', () => { throw new Error('500'); });
     const user = userEvent.setup();
-    render(<Wrap advancedMode />);
+    render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('FindFail')).toBeInTheDocument(); });
     await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    const items = screen.getAllByRole('menuitem', { name: /Edit sources/ });
-    await user.click(items[0]);
-    await user.click(screen.getByRole('button', { name: /Find GitHub/ }));
+    const labels = screen.getAllByText(/^Edit sources/);
+    const labelEl = labels.find((el) => el.className.includes('gf-kebab-label'));
+    expect(labelEl).toBeDefined();
+    await user.click(labelEl!.closest('button')!);
+    await waitFor(() => { expect(screen.getByText('Sources for FindFail')).toBeInTheDocument(); });
+    const editor = screen.getByText('Sources for FindFail').closest('.gf-src-edit') as HTMLElement;
+    await user.click(within(editor).getByRole('button', { name: /Find GitHub/ }));
     await waitFor(() => {
       expect(screen.getByText(/Failed: 500/)).toBeInTheDocument();
     });
@@ -2168,7 +2268,7 @@ describe('<ModsView>', () => {
 
   // ── Inline update + audit kebab branches ─────────────────────────
 
-  it('Inline update failure surfaces error toast', async () => {
+  it('Drawer update failure surfaces error toast', async () => {
     seedMods([baseMod({ name: 'UpdFail', folder_name: 'UpdFail', github_url: 'https://github.com/x/y' })]);
     registerInvokeHandler('audit_mod_versions', () => [{
       mod_name: 'UpdFail',
@@ -2187,10 +2287,10 @@ describe('<ModsView>', () => {
     registerInvokeHandler('update_mod', () => { throw new Error('release deleted'); });
     const user = userEvent.setup();
     render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('UpdFail')).toBeInTheDocument(); });
+    await screen.findAllByText('UpdFail');
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
-    const pill = await screen.findByText(/Update available → v2\.0\.0/);
-    await user.click(pill);
+    const btn = await screen.findByRole('button', { name: /Update available → v2\.0\.0/ });
+    await user.click(btn);
     await waitFor(() => {
       expect(screen.getByText(/Update failed for 'UpdFail'.*release deleted/)).toBeInTheDocument();
     });
@@ -2216,10 +2316,10 @@ describe('<ModsView>', () => {
     registerInvokeHandler('update_mod', () => baseMod({ name: 'RenamedNow', folder_name: 'RenameMe', version: '2.0.0' }));
     const user = userEvent.setup();
     render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('RenameMe')).toBeInTheDocument(); });
+    await screen.findAllByText('RenameMe');
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
-    const pill = await screen.findByText(/Update available → v2\.0\.0/);
-    await user.click(pill);
+    const btn = await screen.findByRole('button', { name: /Update available → v2\.0\.0/ });
+    await user.click(btn);
     await waitFor(() => {
       expect(screen.getByText(/Updated 'RenameMe' to v2\.0\.0/)).toBeInTheDocument();
     });
@@ -2319,15 +2419,17 @@ describe('<ModsView>', () => {
 
   // ── Non-Error rejection branches (`String(e)` fallback) ──────────
 
-  it('toggle_mod failure with non-Error rejection still surfaces toast', async () => {
+  it('toggle_mod failure with non-Error rejection still surfaces toast (row switch path)', async () => {
     seedMods([baseMod()]);
     registerInvokeHandler('toggle_mod', () => { throw 'bare-string'; });
     const user = userEvent.setup();
     render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('switch'));
+    await screen.findAllByText('BaseLib');
+    await user.click(
+      screen.getByRole('switch', { name: /toggle whether BaseLib is active in game/i }),
+    );
     await waitFor(() => {
-      expect(screen.getByText(/Failed to toggle BaseLib.*bare-string/)).toBeInTheDocument();
+      expect(screen.getByText(/Failed to move BaseLib.*bare-string/)).toBeInTheDocument();
     });
   });
 
@@ -2350,8 +2452,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('D')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    await user.click(screen.getByRole('menuitem', { name: /Remove mod/ }));
+    await user.click(screen.getByRole('button', { name: /^Remove /i }));
     await waitFor(() => { expect(screen.getByText(/Delete "D"/)).toBeInTheDocument(); });
     const dangerBtn = document.querySelector('.gf-modal-foot button.gf-btn-danger') as HTMLButtonElement;
     expect(dangerBtn).toBeTruthy();
@@ -2410,7 +2511,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Quick add URL/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/ }));
     const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
     await user.type(input, 'github:foo/bar');
     await user.click(screen.getByRole('button', { name: 'Add' }));
@@ -2441,7 +2543,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Import mod/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Import mod/ }));
     await waitFor(() => {
       expect(screen.getByText(/Import failed: bare-imp/)).toBeInTheDocument();
     });
@@ -2474,10 +2577,10 @@ describe('<ModsView>', () => {
     registerInvokeHandler('update_mod', () => { throw 'bare-upd'; });
     const user = userEvent.setup();
     render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('UN')).toBeInTheDocument(); });
+    await screen.findAllByText('UN');
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
-    const pill = await screen.findByText(/Update available → v2\.0\.0/);
-    await user.click(pill);
+    const btn = await screen.findByRole('button', { name: /Update available → v2\.0\.0/ });
+    await user.click(btn);
     await waitFor(() => {
       expect(screen.getByText(/Update failed for 'UN'.*bare-upd/)).toBeInTheDocument();
     });
@@ -2500,12 +2603,16 @@ describe('<ModsView>', () => {
     seedMods([baseMod({ name: 'FE', folder_name: 'FE', github_url: null, nexus_url: 'https://www.nexusmods.com/sts2/mods/23' })]);
     registerInvokeHandler('find_github_from_nexus', () => { throw 'bare-fge'; });
     const user = userEvent.setup();
-    render(<Wrap advancedMode />);
+    render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('FE')).toBeInTheDocument(); });
     await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    const items = screen.getAllByRole('menuitem', { name: /Edit sources/ });
-    await user.click(items[0]);
-    await user.click(screen.getByRole('button', { name: /Find GitHub/ }));
+    const labels = screen.getAllByText(/^Edit sources/);
+    const labelEl = labels.find((el) => el.className.includes('gf-kebab-label'));
+    expect(labelEl).toBeDefined();
+    await user.click(labelEl!.closest('button')!);
+    await waitFor(() => { expect(screen.getByText('Sources for FE')).toBeInTheDocument(); });
+    const editor = screen.getByText('Sources for FE').closest('.gf-src-edit') as HTMLElement;
+    await user.click(within(editor).getByRole('button', { name: /Find GitHub/ }));
     await waitFor(() => {
       expect(screen.getByText(/Failed: bare-fge/)).toBeInTheDocument();
     });
@@ -2576,7 +2683,7 @@ describe('<ModsView>', () => {
     }));
     seedMods([baseMod({ name: 'PatchBehind', folder_name: 'PatchBehind', min_game_version: '1.0.5' })]);
     render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('PatchBehind')).toBeInTheDocument(); });
+    await screen.findAllByText('PatchBehind');
     expect(screen.getByText(/needs game ≥ v1\.0\.5/)).toBeInTheDocument();
   });
 
@@ -2609,7 +2716,7 @@ describe('<ModsView>', () => {
     }]);
     const user = userEvent.setup();
     render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('LegacyMod')).toBeInTheDocument(); });
+    await screen.findAllByText('LegacyMod');
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
     await waitFor(() => {
       expect(screen.getByText(/Update available → v1\.5\.0/)).toBeInTheDocument();
@@ -2618,7 +2725,7 @@ describe('<ModsView>', () => {
 
   // ── handleInlineUpdate folderName null branch (line 130) ─────────
 
-  it('inline update of a folder_name-null mod still calls update_mod', async () => {
+  it('drawer update of a folder_name-null mod still calls update_mod', async () => {
     seedMods([baseMod({ name: 'NF', folder_name: null, github_url: 'https://github.com/x/y' })]);
     registerInvokeHandler('audit_mod_versions', () => [{
       mod_name: 'NF',
@@ -2636,10 +2743,10 @@ describe('<ModsView>', () => {
     registerInvokeHandler('update_mod', () => baseMod({ name: 'NF', folder_name: null, version: '2.0.0' }));
     const user = userEvent.setup();
     render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('NF')).toBeInTheDocument(); });
+    await screen.findAllByText('NF');
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
-    const pill = await screen.findByText(/Update available → v2\.0\.0/);
-    await user.click(pill);
+    const btn = await screen.findByRole('button', { name: /Update available → v2\.0\.0/ });
+    await user.click(btn);
     await waitFor(() => {
       expect(screen.getByText(/Updated 'NF' to v2\.0\.0/)).toBeInTheDocument();
     });
@@ -2658,7 +2765,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Quick add URL/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/ }));
     const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
     await user.type(input, 'https://www.nexusmods.com/sts2/mods/50');
     await user.click(screen.getByRole('button', { name: 'Add' }));
@@ -2682,7 +2790,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Quick add URL/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/ }));
     const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
     await user.type(input, 'no-host-here');
     await user.click(screen.getByRole('button', { name: 'Add' }));
@@ -2703,7 +2812,8 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Quick add URL/ }));
+    await openAddMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Quick add URL/ }));
     const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
     // Only one path segment ('search') → parts.length=1 → returns null.
     await user.type(input, 'https://www.nexusmods.com/search');
@@ -2765,7 +2875,7 @@ describe('<ModsView>', () => {
 
   // ── Update-blocked badge `?? '?'` fallback path ──────────────────
 
-  it('Update-blocked badge renders even when latest_release_with_assets_tag is null', async () => {
+  it('Update-blocked badge surfaces inside the drawer even when latest_release_with_assets_tag is null', async () => {
     seedMods([baseMod({ name: 'BlkNull', folder_name: 'BlkNull', github_url: 'https://github.com/x/y' })]);
     registerInvokeHandler('audit_mod_versions', () => [{
       mod_name: 'BlkNull',
@@ -2783,7 +2893,7 @@ describe('<ModsView>', () => {
     }]);
     const user = userEvent.setup();
     render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('BlkNull')).toBeInTheDocument(); });
+    await screen.findAllByText('BlkNull');
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
     await waitFor(() => {
       expect(screen.getByText(/Update blocked by game version/)).toBeInTheDocument();
@@ -2799,22 +2909,22 @@ describe('<ModsView>', () => {
 
   // ── Source editor "Close source editor" label after open ─────────
 
-  it('Source editor: re-opening kebab while expanded shows "Close source editor"', async () => {
+  it('Source editor: clicking the editor\'s Cancel closes it inline (T17 dropped the kebab "Close source editor" label toggle)', async () => {
+    // T17 simplified the kebab Edit-sources affordance into a single
+    // label ("Edit sources"). The editor itself is closed via its
+    // built-in Cancel/X buttons — no kebab label flip.
     seedMods([baseMod({ name: 'Reopen', folder_name: 'Reopen' })]);
     const user = userEvent.setup();
-    render(<Wrap advancedMode />);
+    render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('Reopen')).toBeInTheDocument(); });
     await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    const open1 = screen.getAllByRole('menuitem', { name: /Edit sources/ });
-    await user.click(open1[0]);
+    const labels = screen.getAllByText(/^Edit sources/);
+    const labelEl = labels.find((el) => el.className.includes('gf-kebab-label'));
+    expect(labelEl).toBeDefined();
+    await user.click(labelEl!.closest('button')!);
     await waitFor(() => { expect(screen.getByText('Sources for Reopen')).toBeInTheDocument(); });
-    // Re-open kebab — the label flips to "Close source editor".
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    await waitFor(() => {
-      expect(screen.getByRole('menuitem', { name: /Close source editor/ })).toBeInTheDocument();
-    });
-    // Clicking it collapses the editor.
-    await user.click(screen.getByRole('menuitem', { name: /Close source editor/ }));
+    // The editor's Cancel button closes it.
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
     await waitFor(() => {
       expect(screen.queryByText('Sources for Reopen')).toBeNull();
     });
@@ -2864,53 +2974,12 @@ describe('<ModsView>', () => {
     expect(repair).toBeDisabled();
   });
 
-  // ── Storage write fallback (line 89 catch) ───────────────────────
-
-  it('Advanced toggle survives a localStorage setItem failure', async () => {
-    seedMods([]);
-    localStorage.removeItem('sts2mm-mods-advanced');
-    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new Error('quota');
-    });
-    const user = userEvent.setup();
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    // Clicking the toggle should not crash even when localStorage throws.
-    await user.click(screen.getByText('Advanced'));
-    // Advanced mode still flips in-memory — assert the Import-mod
-    // button surfaces.
-    expect(screen.getByRole('button', { name: /Import mod/ })).toBeInTheDocument();
-    setItemSpy.mockRestore();
-  });
-
-  // ── Storage read fallback (line 89 catch on getItem) ─────────────
-
-  it('Advanced state falls back to "false" when localStorage throws on read', async () => {
-    seedMods([]);
-    const getItemSpy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
-      throw new Error('locked');
-    });
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    // Off by default → Import mod button NOT visible.
-    expect(screen.queryByRole('button', { name: /Import mod/ })).toBeNull();
-    getItemSpy.mockRestore();
-  });
-
-  it('Advanced toggle writes to localStorage on flip', async () => {
-    seedMods([]);
-    // Force a known starting state — earlier tests may have left
-    // 'sts2mm-mods-advanced'='true' in localStorage. Clear it so the
-    // assertion is deterministic.
-    localStorage.removeItem('sts2mm-mods-advanced');
-    const setItem = vi.spyOn(Storage.prototype, 'setItem');
-    const user = userEvent.setup();
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText(/0 installed/)).toBeInTheDocument(); });
-    await user.click(screen.getByText('Advanced'));
-    expect(setItem).toHaveBeenCalledWith('sts2mm-mods-advanced', 'true');
-    setItem.mockRestore();
-  });
+  // 1.7.0 T17 — the per-screen Advanced toggle was removed when the
+  // per-row drawer absorbed source-pill / Freeze / Delete disclosure.
+  // The three localStorage-persistence tests that previously covered
+  // the toggle's storage paths went with it. The toggle's only remaining
+  // gate (Import mod + Quick add URL) is now always-visible, so the
+  // "advanced=off hides those buttons" branch is gone too.
 
   // ── Clipboard rejection + openUrl rejection paths ────────────────
 
@@ -2960,8 +3029,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('DelOk')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    await user.click(screen.getByRole('menuitem', { name: /Remove mod/ }));
+    await user.click(screen.getByRole('button', { name: /^Remove /i }));
     await waitFor(() => { expect(screen.getByText(/Delete "DelOk"/)).toBeInTheDocument(); });
     const dangerBtn = document.querySelector('.gf-modal-foot button.gf-btn-danger') as HTMLButtonElement;
     expect(dangerBtn).toBeTruthy();
@@ -2984,5 +3052,328 @@ describe('<ModsView>', () => {
       expect(opener.openUrl).toHaveBeenCalledWith('https://www.nexusmods.com/sts2/mods/200');
     });
     expect(screen.queryByText(/Failed/)).toBeNull();
+  });
+
+  // ── all-installed-mods framing (1.7.0) ────────────────────────────
+  // The Mods view was previously titled "Your mods", which a real user
+  // (Solo) read as "the active modpack's mods". The view actually shows
+  // every mod installed on disk — independent of which modpack is
+  // currently active. These tests pin the renamed heading + subtitle
+  // and the "Manage active modpack →" bridge that routes back to the
+  // Modpacks view's mod library workspace.
+  describe('all-installed-mods framing', () => {
+    it('uses the All installed mods heading and explanatory subtitle', async () => {
+      seedMods([baseMod({ name: 'BaseLib', folder_name: 'BaseLib' })]);
+      render(<Wrap />);
+      expect(await screen.findByRole('heading', { name: /all installed mods/i })).toBeInTheDocument();
+      // Match the unique tail of the page subtitle. The LibraryTable
+      // explainer banner below also opens with "Every mod installed on
+      // your computer…", so a substring match on that opener would be
+      // ambiguous — anchor on the page-subtitle-only clause instead.
+      expect(
+        screen.getByText(/Your active modpack decides which ones load in the game/i),
+      ).toBeInTheDocument();
+    });
+
+    it('Manage active modpack link calls onManageActiveModpack', async () => {
+      const onOpen = vi.fn();
+      seedMods([baseMod({ name: 'BaseLib', folder_name: 'BaseLib' })]);
+      const user = userEvent.setup();
+      render(<Wrap onManageActiveModpack={onOpen} />);
+      const link = await screen.findByRole('button', { name: /manage active modpack/i });
+      await user.click(link);
+      expect(onOpen).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ── per-row membership column (1.7.0 → mod-list redesign) ──────────
+  // The redesign dropped the per-row "Active in game" / "Stored" chip
+  // (active/stored is derived from the active modpack, not a per-mod
+  // input — the capability lives in the kebab now). What the row still
+  // surfaces is the membership checkbox against the active modpack,
+  // with a short "In Modpack" / "Not in Modpack" label (the full pack name
+  // lives in the aria-label/title). Solo's old confusion case — a mod
+  // disabled on disk yet still a modpack member — is now expressed
+  // purely through the checkbox's checked state, independent of any
+  // storage chip.
+  describe('per-row membership column', () => {
+    type Membership = 'in' | 'notIn' | 'includedOff' | 'noActive';
+
+    function setupRow(active: boolean, membership: Membership): void {
+      seedMods([
+        baseMod({ name: 'TargetMod', folder_name: 'TargetMod', enabled: active }),
+      ]);
+      if (membership === 'noActive') {
+        registerInvokeHandler('get_active_profile', () => null);
+        return;
+      }
+      registerInvokeHandler('get_active_profile', () => 'TestPack');
+      const included = membership === 'in' || membership === 'includedOff';
+      const enabled = membership === 'in';
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'TestPack', editable: true }],
+        mods: [
+          {
+            name: 'TargetMod',
+            version: '3.1.2',
+            folder_name: 'TargetMod',
+            mod_id: 'targetmod',
+            installed_enabled: active,
+            profiles: [
+              { profile_name: 'TestPack', included, enabled, editable: true },
+            ],
+          },
+        ],
+      }));
+    }
+
+    // Loud row lookup — `findByText` resolves once the mod name
+    // appears in the DOM. The .closest() throw catches regressions in
+    // the row's outer markup (no `data-testid="library-row"` wrapper).
+    async function getModRow(modName: string): Promise<HTMLElement> {
+      const candidates = await screen.findAllByText(modName);
+      for (const node of candidates) {
+        const row = node.closest('[data-testid="library-row"]');
+        if (row instanceof HTMLElement) return row;
+      }
+      throw new Error(`No data-testid="library-row" wrapper around "${modName}"`);
+    }
+
+    // Wait for the membership column to settle. The row exposes
+    // membership through a read-only indicator: "In Modpack" (with a check
+    // glyph + the is-in class) when a member, "Not in Modpack" otherwise.
+    // Membership is changed from the kebab, not from this indicator.
+    async function waitForMembershipStatus(row: HTMLElement, included: boolean): Promise<HTMLElement> {
+      await waitFor(() => {
+        const ind = row.querySelector('.gf-row-inpack');
+        expect(ind).not.toBeNull();
+        if (included) {
+          expect(ind!.className).toContain('is-in');
+          expect(ind!.textContent).toMatch(/In Modpack/i);
+        } else {
+          expect(ind!.className).not.toContain('is-in');
+          expect(ind!.textContent).toMatch(/Not in Modpack/i);
+        }
+      });
+      return row.querySelector('.gf-row-inpack') as HTMLElement;
+    }
+
+    it('no active/stored chip in the row; "In Modpack" indicator when a member', async () => {
+      setupRow(true, 'in');
+      render(<Wrap />);
+      const row = await getModRow('TargetMod');
+      // Storage chip removed from the row.
+      expect(row.querySelector('.gf-profile-library-storage')).toBeNull();
+      await waitForMembershipStatus(row, true);
+      expect(within(row).getByText(/^In Modpack$/i)).toBeInTheDocument();
+    });
+
+    it('"Not in Modpack" indicator when not a member (storage chip still absent)', async () => {
+      setupRow(false, 'notIn');
+      render(<Wrap />);
+      const row = await getModRow('TargetMod');
+      expect(row.querySelector('.gf-profile-library-storage')).toBeNull();
+      await waitForMembershipStatus(row, false);
+      expect(within(row).getByText(/^Not in Modpack$/i)).toBeInTheDocument();
+    });
+
+    it('active-on-disk but not a member → "Not in Modpack" (membership is independent of storage)', async () => {
+      setupRow(true, 'notIn');
+      render(<Wrap />);
+      const row = await getModRow('TargetMod');
+      await waitForMembershipStatus(row, false);
+      expect(within(row).getByText(/^Not in Modpack$/i)).toBeInTheDocument();
+    });
+
+    // Solo's confusion case — disabled on disk yet still a modpack
+    // member. The row no longer shows a "Stored" chip; the in-pack
+    // indicator stays on, which is the unambiguous membership signal.
+    it("disabled on disk yet still a member → still in Modpack (Solo's case)", async () => {
+      setupRow(false, 'in');
+      render(<Wrap />);
+      const row = await getModRow('TargetMod');
+      await waitForMembershipStatus(row, true);
+      expect(within(row).getByText(/^In Modpack$/i)).toBeInTheDocument();
+    });
+
+    it('hides the membership column entirely when no active modpack', async () => {
+      setupRow(true, 'noActive');
+      render(<Wrap />);
+      const row = await getModRow('TargetMod');
+      // Row still renders the mod, but with no membership checkbox and
+      // no storage chip.
+      expect(within(row).getByText('TargetMod')).toBeInTheDocument();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(within(row).queryByRole('checkbox')).toBeNull();
+      expect(row.querySelector('.gf-profile-library-storage')).toBeNull();
+    });
+  });
+});
+
+// ── Source editor opens inline and closes via its Cancel button ────
+//
+// Post-1.7.0 T18 unification: the row no longer has a click-to-expand
+// drawer. The kebab Edit Sources item opens the SourceEditor inline
+// underneath the row, and the editor closes through its built-in
+// Cancel button (no drawer-collapse coupling needed).
+describe('<ModsView> source editor inline lifecycle', () => {
+  it('source editor opens inline and closes when Cancel is clicked', async () => {
+    seedMods([baseMod({ name: 'EditableMod', folder_name: 'EditableMod' })]);
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await screen.findAllByText('EditableMod');
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    const items = screen.getAllByRole('menuitem', { name: /Edit sources/ });
+    await user.click(items[0]);
+    // Source editor heading appears.
+    await waitFor(() => {
+      expect(screen.getByText('Sources for EditableMod')).toBeInTheDocument();
+    });
+    // Cancel closes it.
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => {
+      expect(screen.queryByText('Sources for EditableMod')).toBeNull();
+    });
+  });
+});
+
+// ── Tag filter substring branch ─────────────────────────────────────
+// The filter row matches by tag substring (Mods.tsx ~531). Without a
+// tag-search test, the `tags.some((tag) => tag.toLowerCase().includes(...))`
+// arm sits uncovered.
+describe('<ModsView> filter by tag substring', () => {
+  it('tag dropdown narrows visible mods to ones carrying the chosen tag', async () => {
+    // Post-1.7.0 T18 unification: tag filtering moved from the search
+    // input (substring match) to a dropdown that exact-matches a single
+    // tag (filterRow on LibraryTable). The dropdown is the canonical
+    // surface; the search input no longer matches against tags.
+    seedMods([
+      baseMod({
+        name: 'TaggedMod', folder_name: 'TaggedMod',
+        tags: ['Combat', 'QoL'],
+      }),
+      baseMod({
+        name: 'OtherMod', folder_name: 'OtherMod',
+        tags: ['Cosmetic'],
+      }),
+    ]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await screen.findAllByText('TaggedMod');
+    expect(screen.getByText('OtherMod')).toBeInTheDocument();
+    await user.selectOptions(screen.getByRole('combobox', { name: /Tag/i }), 'Combat');
+    await waitFor(() => {
+      expect(screen.queryByText('OtherMod')).toBeNull();
+    });
+    expect(screen.getByText('TaggedMod')).toBeInTheDocument();
+  });
+});
+
+// ── SourceEditor onSave: note + custom_url branch (setModExtras) ─────
+// Mods.tsx ~985 — the `setModExtras` call only fires when the user
+// actually edited the note or custom_url. Existing onSave tests change
+// the github/nexus URLs only, so the extras branch sat uncovered.
+describe('<ModsView> SourceEditor saves note + custom URL via setModExtras', () => {
+  it('changing the note triggers set_mod_extras with the trimmed values', async () => {
+    seedMods([baseMod({
+      name: 'NoteMod', folder_name: 'NoteMod',
+      // Pre-existing github_url so the github-field write doesn't fire
+      // when we save (we only want to assert set_mod_extras).
+      github_url: 'https://github.com/x/y',
+      note: null,
+      custom_url: null,
+    })]);
+    registerInvokeHandler('set_mod_extras', () => null);
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await waitFor(() => { expect(screen.getByText('NoteMod')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    const items = screen.getAllByRole('menuitem', { name: /Edit sources/ });
+    await user.click(items[0]);
+    await waitFor(() => {
+      expect(screen.getByText('Sources for NoteMod')).toBeInTheDocument();
+    });
+    // Find the Note textarea by its placeholder.
+    const noteInput = await screen.findByPlaceholderText(/downloaded from Patreon/i);
+    await user.type(noteInput, 'My personal note');
+    await user.click(screen.getByRole('button', { name: /Save sources/ }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some(
+        (c) => c.cmd === 'set_mod_extras'
+          && c.args?.modName === 'NoteMod'
+          && c.args?.note === 'My personal note',
+      )).toBe(true);
+    });
+  });
+});
+
+// ── Inline snooze + unsnooze failure toasts (ModRow onSnooze/onUnsnooze) ─
+// Mods.tsx ~914 and ~923 — the ModRow's onSnooze/onUnsnooze callbacks
+// each have a catch arm that surfaces mods.toast.allFailed. The audit
+// kebab Snooze tests in Settings cover the same handler via the
+// audit-tab UI, but the ModRow path (used inside the drawer kebab on
+// Mods view) was uncovered.
+describe('<ModsView> ModRow snooze failure paths', () => {
+  it('drawer kebab → Skip this update with set_mod_snooze failure toasts the error', async () => {
+    seedMods([baseMod({
+      name: 'SnoozeFail', folder_name: 'SnoozeFail',
+      github_url: 'https://github.com/x/y',
+    })]);
+    registerInvokeHandler('audit_mod_versions', () => [{
+      mod_name: 'SnoozeFail', folder_name: 'SnoozeFail',
+      installed_version: '3.1.2',
+      latest_release_with_assets_tag: 'v3.2.0',
+      latest_has_assets: true, needs_update: true,
+      asset_names: [], releases_scanned: 1,
+      github_auto_detected: false, github_repo: 'x/y',
+      pinned: false, nexus_update_available: false,
+      update_source: 'github', snoozed: false,
+    }]);
+    registerInvokeHandler('set_mod_snooze', () => { throw new Error('lock contention'); });
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('SnoozeFail')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Audit mods' }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'audit_mod_versions')).toBe(true);
+    });
+    // Kebab → Skip this update.
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    const labels = await screen.findAllByText(/^Skip this update$/);
+    const labelEl = labels.find((el) => el.className.includes('gf-kebab-label'));
+    expect(labelEl).toBeDefined();
+    await user.click(labelEl!.closest('button')!);
+    // mods.toast.allFailed format: "Failed: {{error}}".
+    await waitFor(() => {
+      expect(screen.getByText(/Failed.*lock contention/)).toBeInTheDocument();
+    });
+  });
+
+  it('drawer kebab → Show update again with set_mod_snooze failure toasts the error', async () => {
+    seedMods([baseMod({
+      name: 'UnsnoozeFail', folder_name: 'UnsnoozeFail',
+      github_url: 'https://github.com/x/y',
+    })]);
+    registerInvokeHandler('audit_mod_versions', () => [{
+      mod_name: 'UnsnoozeFail', folder_name: 'UnsnoozeFail',
+      installed_version: '3.1.2',
+      latest_release_with_assets_tag: 'v3.2.0',
+      latest_has_assets: true, needs_update: true,
+      asset_names: [], releases_scanned: 1,
+      github_auto_detected: false, github_repo: 'x/y',
+      pinned: false, nexus_update_available: false,
+      update_source: 'github', snoozed: true,
+      snoozed_until_tag: 'v3.2.0',
+    }]);
+    registerInvokeHandler('set_mod_snooze', () => { throw new Error('write blocked'); });
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('UnsnoozeFail')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Audit mods' }));
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    await user.click(screen.getByRole('menuitem', { name: /Show update again/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/Failed.*write blocked/)).toBeInTheDocument();
+    });
   });
 });

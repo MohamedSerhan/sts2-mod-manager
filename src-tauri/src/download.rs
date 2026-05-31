@@ -1,5 +1,6 @@
 use std::io::Write as IoWrite;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -7,6 +8,14 @@ use serde::{Deserialize, Serialize};
 use crate::error::{AppError, Result};
 use crate::mods::{install_mod_from_zip, ModInfo};
 use crate::state::AppState;
+
+/// Total request timeout for HTTP clients. Long enough for a large
+/// release-asset download on a slow link, short enough that a stalled
+/// connection can't pin the download worker forever.
+const HTTP_TOTAL_TIMEOUT: Duration = Duration::from_secs(60);
+/// Connect timeout for HTTP clients. A connect that's still pending
+/// after 10s is almost certainly a routing/DNS issue, not a slow handshake.
+const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 // ── GitHub API Types ────────────────────────────────────────────────────────
 
@@ -76,6 +85,8 @@ fn build_client(token: Option<&str>) -> reqwest::Client {
     }
     reqwest::Client::builder()
         .default_headers(headers)
+        .timeout(HTTP_TOTAL_TIMEOUT)
+        .connect_timeout(HTTP_CONNECT_TIMEOUT)
         .build()
         .unwrap_or_default()
 }
@@ -343,6 +354,8 @@ where
     }
     let client = reqwest::Client::builder()
         .user_agent(concat!("sts2-mod-manager/", env!("CARGO_PKG_VERSION")))
+        .timeout(HTTP_TOTAL_TIMEOUT)
+        .connect_timeout(HTTP_CONNECT_TIMEOUT)
         .build()
         .unwrap_or_default();
 

@@ -56,13 +56,14 @@ describe('dedupeBrowserCards', () => {
 });
 
 describe('<BrowseModpacksView>', () => {
-  it('marks the modpack browser as beta', async () => {
+  it('renders the Browse Modpacks heading', async () => {
     registerInvokeHandler('fetch_modpack_browser_page', () => makePage({ cards: [] }));
 
     render(<Wrap />);
 
     expect(await screen.findByRole('heading', { name: 'Browse Modpacks' })).toBeInTheDocument();
-    expect(screen.getByText('Beta')).toBeInTheDocument();
+    // No "Beta" tag — those were removed app-wide.
+    expect(screen.queryByText('Beta')).toBeNull();
   });
 
   it('renders cards on success', async () => {
@@ -87,6 +88,34 @@ describe('<BrowseModpacksView>', () => {
     // owner appears in the subline (e.g. "@somebody · 7 mods · …")
     expect(screen.getByText(/somebody/)).toBeInTheDocument();
     expect(screen.getByText(/7 mods/)).toBeInTheDocument();
+  });
+
+  it('filters cards via the search box (by name or author) and shows a no-matches state', async () => {
+    registerInvokeHandler('fetch_modpack_browser_page', () =>
+      makePage({
+        cards: [
+          { owner: 'alice', code: 'AAAA-AAAA-AAAA', name: 'Spire Essentials', mod_count: 5, created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-10T00:00:00Z' },
+          { owner: 'bob', code: 'BBBB-BBBB-BBBB', name: 'Anime Overhaul', mod_count: 12, created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-11T00:00:00Z' },
+        ],
+      }),
+    );
+    render(<Wrap />);
+    expect(await screen.findByText('Spire Essentials')).toBeInTheDocument();
+    expect(screen.getByText('Anime Overhaul')).toBeInTheDocument();
+
+    const search = screen.getByPlaceholderText(/Search modpacks/i);
+    // By name.
+    fireEvent.change(search, { target: { value: 'anime' } });
+    expect(screen.getByText('Anime Overhaul')).toBeInTheDocument();
+    expect(screen.queryByText('Spire Essentials')).toBeNull();
+    // By author.
+    fireEvent.change(search, { target: { value: 'alice' } });
+    expect(screen.getByText('Spire Essentials')).toBeInTheDocument();
+    expect(screen.queryByText('Anime Overhaul')).toBeNull();
+    // No matches.
+    fireEvent.change(search, { target: { value: 'zzzz-nothing' } });
+    expect(screen.getByText(/No modpacks match your search/i)).toBeInTheDocument();
+    expect(screen.queryByText('Spire Essentials')).toBeNull();
   });
 
   it('collapses duplicate publishes from the same curator down to the newest', async () => {
@@ -160,7 +189,7 @@ describe('<BrowseModpacksView>', () => {
 
     const { unmount } = render(<Wrap onGoToProfiles={onGoToProfiles} />);
 
-    fireEvent.click(await screen.findByRole('button', { name: /Go to Profiles/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Go to Modpacks/i }));
     expect(onGoToProfiles).toHaveBeenCalledTimes(1);
     unmount();
 
@@ -183,7 +212,7 @@ describe('<BrowseModpacksView>', () => {
 
     expect(await screen.findByText('One Mod Pack')).toBeInTheDocument();
     expect(screen.getByText(/1 mod/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Go to Profiles/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Go to Modpacks/i }));
     expect(onGoToProfiles).toHaveBeenCalledTimes(2);
   });
 
@@ -275,5 +304,55 @@ describe('<BrowseModpacksView>', () => {
     const calls = getInvokeCalls().filter((c) => c.cmd === 'fetch_shared_profile_cmd');
     expect(calls).toHaveLength(1);
     expect(calls[0]?.args).toEqual({ code: 'somebody/AA5A-315D-61AE' });
+  });
+
+  it('error banner "Try again" re-runs the load and can recover', async () => {
+    let call = 0;
+    registerInvokeHandler('fetch_modpack_browser_page', () => {
+      call += 1;
+      if (call === 1) {
+        // eslint-disable-next-line @typescript-eslint/only-throw-error
+        throw 'GitHub returned 500 server error';
+      }
+      return makePage({
+        cards: [
+          {
+            owner: 'rescuer',
+            code: 'AA5A-315D-61AE',
+            name: 'Recovered Pack',
+            mod_count: 1,
+            created_at: '2026-05-01T00:00:00Z',
+            updated_at: '2026-05-10T00:00:00Z',
+          },
+        ],
+      });
+    });
+
+    render(<Wrap />);
+
+    // The error banner mounts a dedicated "Try again" button (the header's
+    // is a Refresh button, so this name is unambiguous).
+    fireEvent.click(await screen.findByRole('button', { name: /Try again/i }));
+
+    expect(await screen.findByText('Recovered Pack')).toBeInTheDocument();
+  });
+
+  it('rate-limit banner "Try again" re-runs the load', async () => {
+    let call = 0;
+    registerInvokeHandler('fetch_modpack_browser_page', () => {
+      call += 1;
+      if (call === 1) throw new Error('GitHub search returned 429: API rate limit exceeded');
+      return makePage({ cards: [] });
+    });
+
+    render(<Wrap />);
+
+    await screen.findByText(/rate-limiting us/i);
+    fireEvent.click(screen.getByRole('button', { name: /Try again/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByText(/rate-limiting us/i)).toBeNull();
+    });
+    expect(await screen.findByText(/be the first to share/i)).toBeInTheDocument();
   });
 });

@@ -246,7 +246,7 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                         }
 
                         let install_outcome: std::result::Result<
-                            (crate::mods::ModInfo, Vec<String>),
+                            (crate::mods::ModInfo, Vec<String>, Vec<String>),
                             String,
                         > = install_mod_from_archive(path, &mods_path)
                             .map_err(|e| e.to_string())
@@ -260,7 +260,7 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                         pre_update_preserved,
                                         &config_path,
                                     )
-                                    .map(|names| (info, names))
+                                    .map(|outcome| (info, outcome.preserved, outcome.lost))
                                     .map_err(|e| e.to_string())
                                 } else {
                                     // Fresh install: just snapshot. No
@@ -269,12 +269,12 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                     crate::mods::snapshot_after_fresh_install(
                                         &info, &mods_path, &config_path,
                                     );
-                                    Ok((info, Vec::new()))
+                                    Ok((info, Vec::new(), Vec::new()))
                                 }
                             });
 
                         match install_outcome {
-                            Ok((mod_info, preserved_configs)) => {
+                            Ok((mod_info, preserved_configs, lost_configs)) => {
                                 let file_name = path
                                     .file_name()
                                     .unwrap_or_default()
@@ -344,6 +344,11 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                     replaced_name
                                 );
 
+                                crate::mod_sources::emit_configs_lost(
+                                    &app,
+                                    &mod_info.name,
+                                    &lost_configs,
+                                );
                                 let _ = app.emit(
                                     "mod-auto-installed",
                                     ModAutoInstalled {

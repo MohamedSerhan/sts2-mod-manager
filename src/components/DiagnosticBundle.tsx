@@ -59,6 +59,11 @@ export function DiagnosticBundle({ open, onClose }: Props) {
     let out = s
       .replace(/gh[pousr]_[A-Za-z0-9]{36,}/g, '[REDACTED_GITHUB_TOKEN]')
       .replace(/github_pat_[A-Za-z0-9_]{82}/g, '[REDACTED_GITHUB_PAT]')
+      // Any bearer token, not just gh* ones (e.g. a JWT / Nexus token), should
+      // an "Authorization: Bearer …" line ever reach the log tail. The
+      // (?!\[) skips a token the gh* rules above already turned into a
+      // "[REDACTED_…]" placeholder, so those keep their specific marker.
+      .replace(/(authorization:\s*bearer\s+)(?!\[)\S+/gi, '$1[REDACTED]')
       .replace(
         /([?&])(api[_-]?key|key|token|access_token)=([^&\s]+)/gi,
         '$1$2=[REDACTED]',

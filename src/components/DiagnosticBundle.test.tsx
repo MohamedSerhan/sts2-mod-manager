@@ -575,6 +575,18 @@ describe('<DiagnosticBundle> (Report a bug)', () => {
     expect(ta.value).toContain('[REDACTED_GITHUB_PAT]');
   });
 
+  it('redacts a non-GitHub "Authorization: Bearer" token', async () => {
+    const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dummysig';
+    registerInvokeHandler('read_log_tail', () => `Authorization: Bearer ${jwt}\nkeep this line`);
+    registerInvokeHandler('get_log_path', () => '/x.log');
+    render(<Wrap />);
+    fireEvent.click(getCopyButton());
+    const ta = (await screen.findByDisplayValue(/Bug Report/)) as HTMLTextAreaElement;
+    expect(ta.value).not.toContain(jwt);
+    expect(ta.value).toMatch(/Authorization: Bearer \[REDACTED\]/);
+    expect(ta.value).toContain('keep this line');
+  });
+
   it('redacts query-string secret values but keeps the key name', async () => {
     registerInvokeHandler(
       'read_log_tail',

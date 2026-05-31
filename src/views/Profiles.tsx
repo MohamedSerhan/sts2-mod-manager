@@ -247,7 +247,12 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
    * and the UI updates immediately instead of leaving the user staring at
    * a stale "out of sync" banner until they navigate away and back.
    */
+  // Bumped on each refresh so a slower in-flight call can detect it was
+  // superseded and skip applying its (now stale) results.
+  const refreshGenRef = useRef(0);
   const refreshShareAndDrift = useCallback(async () => {
+    const gen = ++refreshGenRef.current;
+
     const shareMap: Record<string, ShareResult> = {};
     for (const p of profiles) {
       try {
@@ -255,12 +260,9 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
         if (info) shareMap[p.name] = info;
       } catch { /* no share info */ }
     }
-    setShareInfoMap(shareMap);
-
     // Track followed packs so the drift banner offers Repair (restore the
     // author's manifest) but never Save changes for them.
-    setSubscriptions(await getSubscriptions().catch(() => []));
-
+    const subs = await getSubscriptions().catch(() => []);
     const driftEntries: Record<string, ProfileDrift> = {};
     if (activeProfile) {
       try {
@@ -268,6 +270,13 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
         if (drift.has_drift) driftEntries[activeProfile] = drift;
       } catch { /* ignore */ }
     }
+
+    // A newer call started while we were awaiting — let it own the state so a
+    // stale result can't clobber a fresher one (concurrent triggers: the mount
+    // effect + Share / Re-share / Update-from-drift actions all fire this).
+    if (gen !== refreshGenRef.current) return;
+    setShareInfoMap(shareMap);
+    setSubscriptions(subs);
     setDriftMap(driftEntries);
   }, [profiles, activeProfile]);
 

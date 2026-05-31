@@ -20,16 +20,20 @@ const MAX_BYTES = 512 * 1024; // 512 KB per report — plenty for logs.
 const TTL_SECONDS = 60 * 60 * 24 * 90; // keep reports 90 days.
 const ID_LENGTH = 16;
 
+// The upload comes from the desktop app (not a browser), but allow CORS so a
+// future in-browser caller works too.
+const CORS_HEADERS = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': 'POST, OPTIONS',
+  'access-control-allow-headers': 'content-type, x-app-key',
+};
+
 function jsonResponse(obj, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(obj), {
     status,
     headers: {
       'content-type': 'application/json; charset=utf-8',
-      // The upload comes from the desktop app (not a browser), but allow
-      // CORS so a future in-browser caller works too.
-      'access-control-allow-origin': '*',
-      'access-control-allow-methods': 'POST, OPTIONS',
-      'access-control-allow-headers': 'content-type, x-app-key',
+      ...CORS_HEADERS,
       ...extraHeaders,
     },
   });
@@ -60,7 +64,10 @@ export default {
     const url = new URL(request.url);
 
     if (request.method === 'OPTIONS') {
-      return jsonResponse({}, 204);
+      // 204 responses MUST have a null body — the Workers runtime throws
+      // "Invalid response status code 204" on a body, which 500s the CORS
+      // preflight. A preflight only needs the headers.
+      return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
 
     // ── Retrieve a stored report ──────────────────────────────────

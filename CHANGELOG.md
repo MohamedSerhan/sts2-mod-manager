@@ -25,18 +25,6 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ## [Unreleased]
 
-### Added
-
-### Changed
-
-### Fixed
-
-### Security
-
----
-
-## [1.7.0] - 2026-05-31
-
 A UX simplification release. The app feels like a launcher first: pick a modpack, click Play. Power-user tools are still there, just behind progressive disclosure so they don't compete with the normal flow.
 
 ### Added

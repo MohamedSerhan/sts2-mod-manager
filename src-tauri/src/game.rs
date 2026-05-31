@@ -1103,6 +1103,27 @@ pub fn set_launch_mode(
     Ok(mode)
 }
 
+/// Validate and resolve a Nexus download directory path string.
+///
+/// Returns `Ok(None)` for empty/whitespace-only input (reset to OS default).
+/// Returns `Ok(Some(path))` for a valid, readable directory.
+/// Returns `Err(message)` for invalid/inaccessible paths.
+fn resolve_nexus_dir(path: &str) -> std::result::Result<Option<PathBuf>, String> {
+    if path.trim().is_empty() {
+        return Ok(None);
+    }
+    let dir = PathBuf::from(path.trim());
+    match std::fs::metadata(&dir) {
+        Ok(meta) if meta.is_dir() => {}
+        Ok(_) => return Err(format!("\"{}\" is not a directory.", dir.display())),
+        Err(e) => return Err(format!("Cannot access \"{}\": {}", dir.display(), e)),
+    }
+    if std::fs::read_dir(&dir).is_err() {
+        return Err(format!("\"{}\" exists but is not readable.", dir.display()));
+    }
+    Ok(Some(dir))
+}
+
 /// Return the user-configured Nexus download watch folder, or `null` when
 /// the OS default Downloads directory is used.
 #[tauri::command]
@@ -1126,52 +1147,26 @@ pub fn set_nexus_download_dir(
     path: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Option<String>, String> {
-    if path.trim().is_empty() {
-        // Reset to OS default.
-        let mut s = state.lock().map_err(|e| e.to_string())?;
-        let config_path = s.config_path.clone();
-        s.nexus_download_dir = None;
-        let file = config_path.join("nexus_download_dir.txt");
-        let _ = std::fs::remove_file(&file);
-        log::info!("Nexus download dir reset to OS default.");
-        return Ok(None);
-    }
-
-    let dir = std::path::PathBuf::from(path.trim());
-
-    // Validate: must exist and be a directory.
-    match std::fs::metadata(&dir) {
-        Ok(meta) if meta.is_dir() => {}
-        Ok(_) => {
-            return Err(format!(
-                "\"{}\" is not a directory.",
-                dir.display()
-            ));
+    match resolve_nexus_dir(&path)? {
+        None => {
+            let mut s = state.lock().map_err(|e| e.to_string())?;
+            let config_path = s.config_path.clone();
+            s.nexus_download_dir = None;
+            let file = config_path.join("nexus_download_dir.txt");
+            let _ = std::fs::remove_file(&file);
+            log::info!("Nexus download dir reset to OS default.");
+            Ok(None)
         }
-        Err(e) => {
-            return Err(format!(
-                "Cannot access \"{}\": {}",
-                dir.display(),
-                e
-            ));
+        Some(dir) => {
+            let mut s = state.lock().map_err(|e| e.to_string())?;
+            let config_path = s.config_path.clone();
+            crate::state::persist_nexus_download_dir(&config_path, &dir)
+                .map_err(|e| format!("Could not save download dir: {}", e))?;
+            s.nexus_download_dir = Some(dir.clone());
+            log::info!("Nexus download dir set to: {}", dir.display());
+            Ok(Some(dir.to_string_lossy().to_string()))
         }
     }
-
-    // Quick readability check.
-    if std::fs::read_dir(&dir).is_err() {
-        return Err(format!(
-            "\"{}\" exists but is not readable.",
-            dir.display()
-        ));
-    }
-
-    let mut s = state.lock().map_err(|e| e.to_string())?;
-    let config_path = s.config_path.clone();
-    crate::state::persist_nexus_download_dir(&config_path, &dir)
-        .map_err(|e| format!("Could not save download dir: {}", e))?;
-    s.nexus_download_dir = Some(dir.clone());
-    log::info!("Nexus download dir set to: {}", dir.display());
-    Ok(Some(dir.to_string_lossy().to_string()))
 }
 
 /// Move all files/dirs from disabled back to mods (restore from vanilla).
@@ -1324,6 +1319,55 @@ pub fn read_log_tail(
     let collected: Vec<&str> = text.lines().collect();
     let start = collected.len().saturating_sub(want);
     Ok(collected[start..].join("\n"))
+}
+
+#[cfg(test)]
+mod nexus_download_dir_command_tests {
+    use super::resolve_nexus_dir;
+    use std::path::PathBuf;
+    use tempfile::tempdir;
+
+    #[test]
+    fn empty_string_resets_to_default() {
+        assert_eq!(resolve_nexus_dir(""), Ok(None));
+    }
+
+    #[test]
+    fn whitespace_only_string_resets_to_default() {
+        assert_eq!(resolve_nexus_dir("   "), Ok(None));
+    }
+
+    #[test]
+    fn nonexistent_path_returns_cannot_access_error() {
+        let result = resolve_nexus_dir("/does/not/exist/at/all/xyz_sts2mm_test");
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("Cannot access"),
+            "expected 'Cannot access' in error message"
+        );
+    }
+
+    #[test]
+    fn valid_readable_directory_returns_resolved_path() {
+        let dir = tempdir().unwrap();
+        let path_str = dir.path().to_str().unwrap();
+        let result = resolve_nexus_dir(path_str);
+        assert!(result.is_ok(), "expected Ok, got: {:?}", result);
+        assert_eq!(result.unwrap(), Some(PathBuf::from(path_str)));
+    }
+
+    #[test]
+    fn file_path_returns_not_a_directory_error() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("nexus_test.txt");
+        std::fs::write(&file, b"content").unwrap();
+        let result = resolve_nexus_dir(file.to_str().unwrap());
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("is not a directory"),
+            "expected 'is not a directory' in error message"
+        );
+    }
 }
 
 #[cfg(test)]

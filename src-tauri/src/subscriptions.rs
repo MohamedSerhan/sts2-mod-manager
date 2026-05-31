@@ -526,6 +526,26 @@ async fn apply_subscription_update_inner(
             }
         }
 
+        // Persist the source link so the UI shows the correct chip after bundle install.
+        if downloaded {
+            if let Some(ref src) = pm.source {
+                if let Some(parsed) = crate::mod_sources::parse_source_url(src) {
+                    let mut db = crate::mod_sources::load_sources(&config_path);
+                    let key = pm.folder_name.clone().unwrap_or_else(|| pm.name.clone());
+                    let entry = db.mods.entry(key).or_default();
+                    if parsed.github_repo.is_some() {
+                        entry.github_repo = parsed.github_repo;
+                    }
+                    if parsed.nexus_url.is_some() {
+                        entry.nexus_url = parsed.nexus_url;
+                        entry.nexus_game_domain = parsed.nexus_game_domain;
+                        entry.nexus_mod_id = parsed.nexus_mod_id;
+                    }
+                    let _ = crate::mod_sources::save_sources(&db, &config_path);
+                }
+            }
+        }
+
         // Fallback: try GitHub source (only if bundle didn't install AND we
         // didn't already skip this mod for incompatibility above).
         if !downloaded && !skipped_this_mod {

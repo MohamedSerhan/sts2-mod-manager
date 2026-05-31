@@ -36,6 +36,7 @@ The `Unreleased` section is the working scratchpad for the next version. The rel
 
 ### Fixed
 
+- Mods installed from an imported or subscribed modpack now correctly show their GitHub or Nexus source links instead of appearing as unlinked.
 - If you haven't installed Slay the Spire 2 yet, the welcome guide no longer disappears for good — skip it for now and it comes back next launch.
 - When a mod update can't restore config files you'd edited, the manager now names exactly which ones to redo instead of dropping them quietly.
 - Changing a mod in your active modpack now keeps the modpack and your loaded mods in step, even when the game is running or a file can't be moved.

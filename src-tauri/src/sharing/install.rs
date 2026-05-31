@@ -281,6 +281,23 @@ pub async fn install_shared_profile(
                         }
                     }
                     log::info!("Installed bundled mod '{}'", pm.name);
+                    // Persist the curator's source link so the UI shows the correct chip.
+                    if let Some(ref src) = pm.source {
+                        if let Some(parsed) = crate::mod_sources::parse_source_url(src) {
+                            let mut db = crate::mod_sources::load_sources(&config_path);
+                            let key = pm.folder_name.clone().unwrap_or_else(|| pm.name.clone());
+                            let entry = db.mods.entry(key).or_default();
+                            if parsed.github_repo.is_some() {
+                                entry.github_repo = parsed.github_repo;
+                            }
+                            if parsed.nexus_url.is_some() {
+                                entry.nexus_url = parsed.nexus_url;
+                                entry.nexus_game_domain = parsed.nexus_game_domain;
+                                entry.nexus_mod_id = parsed.nexus_mod_id;
+                            }
+                            let _ = crate::mod_sources::save_sources(&db, &config_path);
+                        }
+                    }
                     continue;
                 }
                 Err(e) => {

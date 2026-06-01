@@ -377,6 +377,13 @@ pub async fn install_shared_profile(
         download_failures.push(pm.name.clone());
     }
 
+    // Persist every pack mod's curator source link (fill-if-empty) so the
+    // Mods view shows GitHub/Nexus chips instead of "Unlinked". Done once
+    // after the loop and for ALL mods — including ones already on disk that
+    // the loop skipped via `continue` — which is the case the previous,
+    // download-arm-nested write missed.
+    crate::profiles::persist_profile_mod_sources(&profile.mods, &config_path);
+
     if !download_failures.is_empty() {
         log::error!(
             "Could not download {} mods: {:?}. These need to be installed manually.",

@@ -28,8 +28,9 @@ use crate::mods::{merge_active_disabled_mods, scan_disabled_mods, scan_mods, Mod
 use super::apply::disk_mod_matches_pin;
 use super::crud::{
     hide_app_created_by, list_profiles, load_profile, mod_key, profile_has_json,
-    profile_mod_from_installed, profile_mod_matches_installed, profile_mod_matches_target,
-    installed_mod_matches_target, save_profile, subscribed_profile_names,
+    profile_is_edit_locked, profile_is_owned, profile_mod_from_installed,
+    profile_mod_matches_installed, profile_mod_matches_target, installed_mod_matches_target,
+    save_profile, subscribed_profile_names,
 };
 use super::{
     LoadOrderSettingsStatus, Profile, ProfileMembershipGrid, ProfileMembershipMod,
@@ -48,10 +49,14 @@ pub(crate) fn profile_membership_matrix(
     let profile_rows: Vec<ProfileMembershipProfile> = profiles
         .iter()
         .map(|profile| {
-            let subscribed = subscribed_names.contains(&profile.name.to_lowercase());
+            // Editable when it has a local manifest and isn't a *followed*
+            // (subscribed-but-not-owned) pack. A pack you published is owned —
+            // editable even though installing your own code auto-subscribed you.
+            let locked = subscribed_names.contains(&profile.name.to_lowercase())
+                && !profile_is_owned(&profile.name, profiles_path);
             ProfileMembershipProfile {
                 name: profile.name.clone(),
-                editable: !subscribed && profile_has_json(&profile.name, profiles_path),
+                editable: !locked && profile_has_json(&profile.name, profiles_path),
             }
         })
         .collect();
@@ -108,7 +113,7 @@ pub(crate) fn set_profile_mod_membership_from_paths(
     profiles_path: &Path,
     config_path: &Path,
 ) -> Result<Profile> {
-    if subscribed_profile_names(config_path).contains(&profile_name.to_lowercase()) {
+    if profile_is_edit_locked(profile_name, profiles_path, config_path) {
         return Err(AppError::Other(format!(
             "Cannot edit subscribed profile '{}'. Duplicate it first to make a local copy.",
             profile_name
@@ -174,7 +179,7 @@ pub(crate) fn set_profile_load_order_from_paths(
     profiles_path: &Path,
     config_path: &Path,
 ) -> Result<Profile> {
-    if subscribed_profile_names(config_path).contains(&profile_name.to_lowercase()) {
+    if profile_is_edit_locked(profile_name, profiles_path, config_path) {
         return Err(AppError::Other(format!(
             "Cannot edit subscribed profile '{}'. Duplicate it first to make a local copy.",
             profile_name

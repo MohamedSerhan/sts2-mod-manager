@@ -719,6 +719,82 @@ pub(crate) fn normalize_github_repo_input(raw: &str) -> Option<String> {
     parse_source_url(trimmed).and_then(|e| e.github_repo)
 }
 
+// ── Shared-profile source plumbing ───────────────────────────────────────────
+//
+// Two halves of the same job: the import side fills the importer's source
+// DB from a curator's link (`fill_source_if_absent`), and the export side
+// reads the curator's own source DB to stamp links into a pack they're
+// publishing (`shareable_source_for`). Both are deliberately fill-/read-
+// only so they can never clobber a user's hand-edited links, notes, pins,
+// or preserved config hashes.
+
+/// Merge a curator-provided source into the sources DB for `key`, filling
+/// ONLY fields that are currently empty. An existing `github_repo` or
+/// `nexus_url` is never overwritten, and `note` / `custom_url` / `tags` /
+/// `pinned` / `config_hashes` are never touched. Returns `true` when a
+/// field was actually written (so the caller can skip an unnecessary save).
+///
+/// Used by the modpack-install and subscription paths so a mod installed
+/// from a shared pack shows its GitHub/Nexus chip instead of "Unlinked".
+/// Because the fill is empty-only, re-installing or re-subscribing can't
+/// undo a link the user later corrected by hand.
+///
+/// The GitHub case is marked `github_auto_detected = true`: the link came
+/// from someone else's pack, not the user, so the updater treats it with
+/// the same caution as any other auto-detected guess.
+pub fn fill_source_if_absent(db: &mut ModSourcesDb, key: &str, parsed: &ModSourceEntry) -> bool {
+    // Nothing to contribute — don't insert an empty entry that would just
+    // serialize as noise.
+    if parsed.github_repo.is_none() && parsed.nexus_url.is_none() {
+        return false;
+    }
+    let entry = db.mods.entry(key.to_string()).or_default();
+    let mut changed = false;
+    if entry.github_repo.is_none() {
+        if let Some(ref repo) = parsed.github_repo {
+            entry.github_repo = Some(repo.clone());
+            entry.github_auto_detected = true;
+            changed = true;
+        }
+    }
+    if entry.nexus_url.is_none() {
+        if let Some(ref url) = parsed.nexus_url {
+            entry.nexus_url = Some(url.clone());
+            entry.nexus_game_domain = parsed.nexus_game_domain.clone();
+            entry.nexus_mod_id = parsed.nexus_mod_id;
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// Build a shareable `source` string for a profile mod from the curator's
+/// sources DB, preferring a GitHub link and falling back to Nexus. Returns
+/// the `github:owner/repo` or `nexus:domain/mods/id` shorthand that
+/// `parse_source_url` round-trips, or `None` when the mod has no link.
+///
+/// This is what lets a shared (or re-shared) pack carry the curator's
+/// source links: at publish time each mod is looked up here and the result
+/// stamped into `ProfileMod.source`, so friends installing the pack get the
+/// chip even when the mod's own manifest never declared a `Source`.
+pub fn shareable_source_for(
+    db: &ModSourcesDb,
+    folder_name: Option<&str>,
+    display_name: &str,
+    mod_id: Option<&str>,
+) -> Option<String> {
+    let entry = lookup_entry(&db.mods, folder_name, display_name, mod_id)?;
+    if let Some(ref repo) = entry.github_repo {
+        if let Some(canonical) = normalize_github_repo_input(repo) {
+            return Some(format!("github:{}", canonical));
+        }
+    }
+    if let (Some(domain), Some(id)) = (entry.nexus_game_domain.as_ref(), entry.nexus_mod_id) {
+        return Some(format!("nexus:{}/mods/{}", domain, id));
+    }
+    None
+}
+
 // ── Tauri Commands ──────────────────────────────────────────────────────────
 
 /// Get all mod source links.
@@ -2579,5 +2655,179 @@ mod carry_and_attach_tests {
             Some(200),
             "without a folder hint, attach writes under display name"
         );
+    }
+}
+
+#[cfg(test)]
+mod shared_profile_source_tests {
+    //! Coverage for the two helpers that move source links across a shared
+    //! pack: `fill_source_if_absent` (import side) and `shareable_source_for`
+    //! (export side). The contract that matters most for the user-reported
+    //! "everything shows Unlinked after importing a pack" bug is the
+    //! fill-only, never-clobber behaviour — re-installing or re-subscribing a
+    //! pack must not erase a link, note, or preserved config the user owns.
+    use super::*;
+
+    fn gh(repo: &str) -> ModSourceEntry {
+        parse_source_url(&format!("github:{}", repo)).unwrap()
+    }
+
+    #[test]
+    fn fills_github_into_an_empty_db() {
+        let mut db = ModSourcesDb::default();
+        let wrote = fill_source_if_absent(&mut db, "AutoPath", &gh("foo/AutoPath"));
+        assert!(wrote, "writing a brand-new link must report a change");
+        let entry = db.mods.get("AutoPath").expect("entry created");
+        assert_eq!(entry.github_repo.as_deref(), Some("foo/AutoPath"));
+        assert!(
+            entry.github_auto_detected,
+            "a curator-supplied link is auto-detected, not user-authored"
+        );
+    }
+
+    #[test]
+    fn never_clobbers_a_users_existing_github_link() {
+        // The user hand-linked this mod to the CORRECT repo. A pack that
+        // happens to point at a different repo must not overwrite it.
+        let mut db = ModSourcesDb::default();
+        db.mods.insert(
+            "AutoPath".into(),
+            ModSourceEntry {
+                github_repo: Some("realauthor/AutoPath".into()),
+                github_auto_detected: false,
+                ..Default::default()
+            },
+        );
+        let wrote = fill_source_if_absent(&mut db, "AutoPath", &gh("impostor/AutoPath"));
+        assert!(!wrote, "an already-linked mod reports no change");
+        let entry = db.mods.get("AutoPath").unwrap();
+        assert_eq!(
+            entry.github_repo.as_deref(),
+            Some("realauthor/AutoPath"),
+            "the user's link wins"
+        );
+        assert!(
+            !entry.github_auto_detected,
+            "and stays marked user-authored"
+        );
+    }
+
+    #[test]
+    fn fills_github_while_preserving_unrelated_user_fields() {
+        // A mod with a note + preserved config hash + pin, but no source yet.
+        // Filling the source must leave every other field untouched.
+        let mut db = ModSourcesDb::default();
+        let mut hashes = HashMap::new();
+        hashes.insert("settings.cfg".to_string(), "deadbeef".to_string());
+        db.mods.insert(
+            "stats_the_spire".into(),
+            ModSourceEntry {
+                note: Some("got it from Discord".into()),
+                custom_url: Some("https://discord.gg/x".into()),
+                pinned: true,
+                config_hashes: hashes,
+                ..Default::default()
+            },
+        );
+        let wrote =
+            fill_source_if_absent(&mut db, "stats_the_spire", &gh("author/stats_the_spire"));
+        assert!(wrote);
+        let entry = db.mods.get("stats_the_spire").unwrap();
+        assert_eq!(entry.github_repo.as_deref(), Some("author/stats_the_spire"));
+        assert_eq!(entry.note.as_deref(), Some("got it from Discord"));
+        assert_eq!(entry.custom_url.as_deref(), Some("https://discord.gg/x"));
+        assert!(entry.pinned, "pin survives a source fill");
+        assert_eq!(
+            entry.config_hashes.get("settings.cfg").map(String::as_str),
+            Some("deadbeef"),
+            "preserved config hashes survive a source fill"
+        );
+    }
+
+    #[test]
+    fn fills_nexus_without_disturbing_an_existing_github_link() {
+        // Mod already GitHub-linked by hand; the pack carries a Nexus link.
+        // The two are independent: Nexus fills in, GitHub stays as-is.
+        let mut db = ModSourcesDb::default();
+        db.mods.insert(
+            "ModX".into(),
+            ModSourceEntry {
+                github_repo: Some("me/ModX".into()),
+                github_auto_detected: false,
+                ..Default::default()
+            },
+        );
+        let nexus = parse_source_url("nexus:slaythespire2/mods/77").unwrap();
+        let wrote = fill_source_if_absent(&mut db, "ModX", &nexus);
+        assert!(wrote, "filling the empty Nexus side is a change");
+        let entry = db.mods.get("ModX").unwrap();
+        assert_eq!(entry.github_repo.as_deref(), Some("me/ModX"));
+        assert_eq!(entry.nexus_mod_id, Some(77));
+        assert_eq!(entry.nexus_game_domain.as_deref(), Some("slaythespire2"));
+    }
+
+    #[test]
+    fn empty_parsed_entry_writes_nothing() {
+        let mut db = ModSourcesDb::default();
+        let wrote = fill_source_if_absent(&mut db, "ModX", &ModSourceEntry::default());
+        assert!(!wrote);
+        assert!(
+            db.mods.is_empty(),
+            "a sourceless fill must not create a noise entry"
+        );
+    }
+
+    #[test]
+    fn shareable_source_round_trips_github_through_parse() {
+        let mut db = ModSourcesDb::default();
+        db.mods.insert(
+            "RegentCardsAnimeRework".into(),
+            gh("DoublePigeon/RegentCardsAnimeRework"),
+        );
+        let src = shareable_source_for(&db, Some("RegentCardsAnimeRework"), "RegentCards", None)
+            .expect("github link is shareable");
+        assert_eq!(src, "github:DoublePigeon/RegentCardsAnimeRework");
+        // The whole point: the shorthand we publish parses back to the same link.
+        let reparsed = parse_source_url(&src).unwrap();
+        assert_eq!(
+            reparsed.github_repo.as_deref(),
+            Some("DoublePigeon/RegentCardsAnimeRework")
+        );
+    }
+
+    #[test]
+    fn shareable_source_prefers_github_then_falls_back_to_nexus() {
+        // GitHub present → GitHub wins.
+        let mut db = ModSourcesDb::default();
+        db.mods.insert(
+            "Both".into(),
+            ModSourceEntry {
+                github_repo: Some("o/Both".into()),
+                nexus_url: Some("https://www.nexusmods.com/slaythespire2/mods/5".into()),
+                nexus_game_domain: Some("slaythespire2".into()),
+                nexus_mod_id: Some(5),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            shareable_source_for(&db, Some("Both"), "Both", None).as_deref(),
+            Some("github:o/Both")
+        );
+
+        // Nexus-only → Nexus shorthand, and it round-trips.
+        let mut db2 = ModSourcesDb::default();
+        db2.mods.insert(
+            "NexusOnly".into(),
+            parse_source_url("nexus:slaythespire2/mods/123").unwrap(),
+        );
+        let src = shareable_source_for(&db2, Some("NexusOnly"), "NexusOnly", None).unwrap();
+        assert_eq!(src, "nexus:slaythespire2/mods/123");
+        assert_eq!(parse_source_url(&src).unwrap().nexus_mod_id, Some(123));
+    }
+
+    #[test]
+    fn shareable_source_is_none_for_unlinked_mod() {
+        let db = ModSourcesDb::default();
+        assert!(shareable_source_for(&db, Some("Unknown"), "Unknown", None).is_none());
     }
 }

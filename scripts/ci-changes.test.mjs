@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyPaths, unreleasedBulletCount, suggestedBump } from './ci-changes.mjs';
+import { classifyPaths, unreleasedBulletCount, suggestedBump, changelogCount, combinedBump } from './ci-changes.mjs';
 
 test('classifyPaths buckets app/scripts/workflows', () => {
   assert.deepEqual(classifyPaths(['src/App.tsx']), { app: true, scripts: false, workflows: false, qa: false });
@@ -87,4 +87,57 @@ test('suggestedBump: Security only -> patch', () => {
 test('suggestedBump: empty/no bullets -> null', () => {
   assert.equal(suggestedBump('## [Unreleased]\n### Added\n'), null);
   assert.equal(suggestedBump(''), null);
+});
+
+// ─── changelogCount ───────────────────────────────────────────────────────────
+
+test('changelogCount: bullets-only text + [] frags = bullet count', () => {
+  const cl = '## [Unreleased]\n### Added\n- A new thing\n- Another thing\n### Fixed\n- A fix\n';
+  assert.equal(changelogCount(cl, []), 3);
+});
+
+test('changelogCount: empty text + 2 frags = 2', () => {
+  const frags = [
+    { category: 'fixed', slug: 'x', file: 'fixed-x.md', body: 'A fix.' },
+    { category: 'added', slug: 'y', file: 'added-y.md', body: 'A feature.' },
+  ];
+  assert.equal(changelogCount('', frags), 2);
+});
+
+test('changelogCount: both = sum', () => {
+  const cl = '## [Unreleased]\n### Fixed\n- A fix\n- Another fix\n';
+  const frags = [
+    { category: 'added', slug: 'z', file: 'added-z.md', body: 'Something new.' },
+  ];
+  assert.equal(changelogCount(cl, frags), 3);
+});
+
+// ─── combinedBump ─────────────────────────────────────────────────────────────
+
+test('combinedBump: legacy Removed -> major (legacy wins even if frags say patch)', () => {
+  const cl = '## [Unreleased]\n### Removed\n- Dropped X\n';
+  const frags = [{ category: 'fixed', slug: 'a', file: 'fixed-a.md', body: 'Fix.' }];
+  assert.equal(combinedBump(cl, frags), 'major');
+});
+
+test('combinedBump: empty legacy + fixed fragment -> patch', () => {
+  const frags = [{ category: 'fixed', slug: 'a', file: 'fixed-a.md', body: 'Fix.' }];
+  assert.equal(combinedBump('', frags), 'patch');
+});
+
+test('combinedBump: empty legacy + added fragment -> minor', () => {
+  const frags = [{ category: 'added', slug: 'b', file: 'added-b.md', body: 'Feature.' }];
+  assert.equal(combinedBump('', frags), 'minor');
+});
+
+test('combinedBump: legacy patch (Fixed) suppresses a higher fragment minor', () => {
+  // The subtle case: legacy says patch, fragments say minor. Legacy wins
+  // unconditionally during the transition, so the result is patch.
+  const cl = '## [Unreleased]\n### Fixed\n- A legacy fix\n';
+  const frags = [{ category: 'added', slug: 'b', file: 'added-b.md', body: 'Feature.' }];
+  assert.equal(combinedBump(cl, frags), 'patch');
+});
+
+test('combinedBump: empty both -> null', () => {
+  assert.equal(combinedBump('', []), null);
 });

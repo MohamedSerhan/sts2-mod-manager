@@ -32,7 +32,10 @@ pub use apply::{
     SwitchProfileResult,
 };
 pub(crate) use apply::{profile_mod_matches_pin, should_skip_pinned_profile_mod_download};
-pub use crud::{export_profile, import_profile, list_profiles, load_profile, save_profile};
+pub use crud::{
+    export_profile, import_profile, list_profiles, load_profile, persist_profile_mod_sources,
+    save_profile,
+};
 pub use drift::{ProfileDrift, RepairProfileResult, VersionMismatch};
 
 use apply::switch_profile_from_paths;

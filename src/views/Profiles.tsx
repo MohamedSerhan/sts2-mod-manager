@@ -151,6 +151,34 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
   // banner offers Repair but not Save changes for them.
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [publishTarget, setPublishTarget] = useState<{ profile: Profile; isReshare: boolean } | null>(null);
+  // Per-pack dismissal of the "Re-share recommended" nudge. Keyed by profile
+  // name so dismissing one pack doesn't hide the nudge on another. Backed by
+  // localStorage so the dismissal survives reloads; seeded from storage once.
+  // (When the share format bumps again, a re-share clears `reshare_recommended`
+  // server-side, so a stale dismissal here can't suppress the next nudge.)
+  const RESHARE_NUDGE_DISMISS_PREFIX = 'sts2mm-reshare-nudge-dismissed:';
+  const [reshareNudgeDismissed, setReshareNudgeDismissed] = useState<Record<string, boolean>>(() => {
+    try {
+      const out: Record<string, boolean> = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k?.startsWith(RESHARE_NUDGE_DISMISS_PREFIX)) {
+          out[k.slice(RESHARE_NUDGE_DISMISS_PREFIX.length)] = true;
+        }
+      }
+      return out;
+    } catch {
+      return {};
+    }
+  });
+  const dismissReshareNudge = useCallback((profileName: string) => {
+    try {
+      localStorage.setItem(RESHARE_NUDGE_DISMISS_PREFIX + profileName, 'true');
+    } catch {
+      /* storage unavailable (private mode / quota) — dismissal is best-effort */
+    }
+    setReshareNudgeDismissed((prev) => ({ ...prev, [profileName]: true }));
+  }, []);
   const [driftMap, setDriftMap] = useState<Record<string, ProfileDrift>>({});
   const [switchingProfile, setSwitchingProfile] = useState<string | null>(null);
   const [savingProfile, setSavingProfile] = useState<string | null>(null);
@@ -1257,6 +1285,13 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
             const hasUpdate = subUpdates.some(
               (u) => u.profile_name === profile.name,
             );
+            // Nudge the curator to re-publish a pack shared under an older
+            // format (e.g. before source-link backfill landed), unless they
+            // dismissed it for this pack.
+            const showReshareNudge =
+              isShared &&
+              !!shareInfoMap[profile.name]?.reshare_recommended &&
+              !reshareNudgeDismissed[profile.name];
             // T16 review fix — shared cards now host inline Copy chips
             // (share code / install link / share message). Because nested
             // <button> isn't valid HTML, the card itself is a div with
@@ -1314,6 +1349,42 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
                     <Badge variant="github" ariaHidden>
                       {t('modpack.shared')}
                     </Badge>
+                  )}
+                  {showReshareNudge && (
+                    <span
+                      className="gf-modpack-card-reshare-nudge"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        type="button"
+                        className="gf-modpack-card-reshare-cta"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPublishTarget({ profile, isReshare: true });
+                        }}
+                        title={t('profiles.reshareNudge.tooltip')}
+                        aria-label={t('profiles.reshareNudge.ctaAria', {
+                          name: profile.name,
+                        })}
+                      >
+                        <RefreshCw size={11} aria-hidden />
+                        {t('profiles.reshareNudge.label')}
+                      </button>
+                      <button
+                        type="button"
+                        className="gf-modpack-card-reshare-dismiss"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          dismissReshareNudge(profile.name);
+                        }}
+                        title={t('profiles.reshareNudge.dismiss')}
+                        aria-label={t('profiles.reshareNudge.dismissAria', {
+                          name: profile.name,
+                        })}
+                      >
+                        ×
+                      </button>
+                    </span>
                   )}
                   {hasDrift && (
                     <span

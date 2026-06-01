@@ -201,6 +201,13 @@ export interface ShareResult {
    *  Friends installing this share code will see "missing mod" entries
    *  for these. Surfaced in a toast so the curator knows to retry. */
   failed_uploads: string[];
+  /** True when this pack was last published under an older share format
+   *  than the app now produces, so re-sharing would improve it (e.g. add
+   *  source links the old manifest lacked). Only set by `getShareInfo`
+   *  (the status read); a fresh share/reshare leaves it false. Drives the
+   *  "Re-share recommended" nudge in the Profiles view. Optional so older
+   *  cached results / tests without the field don't break. */
+  reshare_recommended?: boolean;
 }
 
 export interface ModSourceEntry {

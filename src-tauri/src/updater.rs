@@ -221,8 +221,13 @@ pub async fn check_all_updates(
 
     // --- Phase 1: GitHub checks (existing logic, untouched) ---
     for m in mods {
-        // Skip pinned mods — they must be updated manually
-        if let Some(entry) = sources.get(&m.name) {
+        // Skip pinned mods — folder-first so a pin keyed by folder_name is respected
+        if let Some(entry) = lookup_entry(
+            sources,
+            m.folder_name.as_deref(),
+            &m.name,
+            m.mod_id.as_deref(),
+        ) {
             if entry.pinned {
                 continue;
             }
@@ -278,11 +283,16 @@ pub async fn check_all_updates(
         let current = m.version.trim_start_matches('v');
 
         // Check if the installed_version in mod_sources.json matches latest
-        let installed_ver_matches = sources
-            .get(&m.name)
-            .and_then(|e| e.installed_version.as_deref())
-            .map(|iv| iv.trim_start_matches('v') == latest)
-            .unwrap_or(false);
+        // Folder-first so a bundle keyed by folder_name is not missed here.
+        let installed_ver_matches = lookup_entry(
+            sources,
+            m.folder_name.as_deref(),
+            &m.name,
+            m.mod_id.as_deref(),
+        )
+        .and_then(|e| e.installed_version.as_deref().map(str::to_owned))
+        .map(|iv| iv.trim_start_matches('v').to_owned() == latest)
+        .unwrap_or(false);
 
         // Skip if versions match exactly, or version is unknown
         if installed_ver_matches || latest == current || current == "unknown" || current == "0.0.0"
@@ -2285,6 +2295,114 @@ mod version_helper_tests {
     fn nexus_update_not_flagged_when_versions_match() {
         assert!(!is_newer_version("2.1.0", "2.1.0"));
         assert!(!is_newer_version("2.2.0", "2.1.0")); // downgrade also false
+    }
+
+    /// Phase 1 (GitHub) pin check: a mod whose source entry is keyed by
+    /// `folder_name` (e.g. a bundle keyed by its container folder "Pack") must
+    /// be recognised as pinned even when `m.name` differs from the map key.
+    /// Before the fix `sources.get(&m.name)` would return None and the pin
+    /// would be silently ignored.
+    #[test]
+    fn github_phase1_pin_check_respects_folder_keyed_entry() {
+        use crate::mod_sources::ModSourceEntry;
+
+        let mut sources = std::collections::HashMap::new();
+        // Pin recorded under folder_name "Pack", NOT under m.name "Pack Bundle".
+        sources.insert(
+            "Pack".into(),
+            ModSourceEntry {
+                pinned: true,
+                ..Default::default()
+            },
+        );
+
+        // Bundle whose name differs from the map key.
+        let bundle = mod_info(|m| {
+            m.name = "Pack Bundle".into();
+            m.folder_name = Some("Pack".into());
+            m.mod_id = None;
+        });
+
+        // Folder-first lookup (the fixed path) must find the pinned entry.
+        let found = crate::mod_sources::lookup_entry(
+            &sources,
+            bundle.folder_name.as_deref(),
+            &bundle.name,
+            bundle.mod_id.as_deref(),
+        );
+        assert!(
+            found.is_some(),
+            "folder-first lookup should find source entry keyed by 'Pack'"
+        );
+        assert!(
+            found.unwrap().pinned,
+            "the found entry should be pinned"
+        );
+
+        // Name-only lookup (the OLD broken path) would miss the pin entirely.
+        let old_path = sources.get(&bundle.name);
+        assert!(
+            old_path.is_none(),
+            "name-only get must NOT find an entry keyed by folder (regression guard)"
+        );
+    }
+
+    /// Phase 1 (GitHub) installed_version check: a bundle's `installed_version`
+    /// recorded under its folder_name key must suppress a false positive update
+    /// when the installed version already matches the latest release tag.
+    /// Before the fix `sources.get(&m.name)` would return None, so
+    /// `installed_ver_matches` would be false and the update would be reported.
+    #[test]
+    fn github_phase1_installed_version_check_respects_folder_keyed_entry() {
+        use crate::mod_sources::ModSourceEntry;
+
+        let mut sources = std::collections::HashMap::new();
+        // installed_version recorded under folder_name "Pack".
+        sources.insert(
+            "Pack".into(),
+            ModSourceEntry {
+                installed_version: Some("v1.5.0".into()),
+                pinned: false,
+                ..Default::default()
+            },
+        );
+
+        // Bundle whose name differs from the map key.
+        let bundle = mod_info(|m| {
+            m.name = "Pack Bundle".into();
+            m.folder_name = Some("Pack".into());
+            m.mod_id = None;
+        });
+
+        let latest = "1.5.0"; // latest release tag (stripped of 'v')
+
+        // Folder-first lookup (the fixed path) must find installed_version.
+        let entry = crate::mod_sources::lookup_entry(
+            &sources,
+            bundle.folder_name.as_deref(),
+            &bundle.name,
+            bundle.mod_id.as_deref(),
+        );
+        let installed_ver_matches = entry
+            .and_then(|e| e.installed_version.as_deref().map(str::to_owned))
+            .map(|iv| iv.trim_start_matches('v').to_owned() == latest)
+            .unwrap_or(false);
+        assert!(
+            installed_ver_matches,
+            "folder-first lookup should detect that installed_version matches latest"
+        );
+
+        // Name-only lookup (the OLD broken path) would have returned None →
+        // installed_ver_matches = false → spurious update reported.
+        let old_path_matches = sources
+            .get(&bundle.name)
+            .and_then(|e| e.installed_version.as_deref())
+            .map(|iv| iv.trim_start_matches('v') == latest)
+            .unwrap_or(false);
+        assert!(
+            !old_path_matches,
+            "name-only path must NOT find installed_version for folder-keyed entry (regression guard)"
+        );
     }
 }
 

@@ -960,6 +960,33 @@ body {
 .gf-profile-library.is-compact .gf-modrow-meta {
   display: none;
 }
+
+/* ── Bundle row: member-name list ─────────────────────────────────── */
+/* Listed beneath the bundle title in comfortable density.
+   Uses CSS columns so names wrap into side columns when space is tight
+   rather than growing into a single tall list. */
+.gf-bundle-members {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  columns: 2 220px;
+  column-gap: 16px;
+  margin-top: 4px;
+}
+.gf-bundle-member-name {
+  font-size: 11.5px;
+  color: var(--ink-mute);
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  break-inside: avoid;
+}
+/* Compact: member-name list is hidden (title + meta only) */
+.gf-profile-library.is-compact .gf-bundle-members {
+  display: none;
+}
+
 .gf-profile-library-toolbar-actions {
   display: inline-flex;
   align-items: center;

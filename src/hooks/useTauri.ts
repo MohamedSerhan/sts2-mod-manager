@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ModInfo, Profile, ProfileMembershipGrid, ProfileLoadOrderUpdate, ProfileModOrderKey, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, RepairProfileResult, ModAuditEntry, NexusModInfo, BrowserPage } from '../types';
+import type { ModInfo, Bundle, Profile, ProfileMembershipGrid, ProfileLoadOrderUpdate, ProfileModOrderKey, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, RepairProfileResult, ModAuditEntry, NexusModInfo, BrowserPage } from '../types';
 
 // ── Game Detection & QOL ───────────────────────────────────────────────────
 
@@ -80,6 +80,12 @@ export async function setNexusDownloadDir(path: string): Promise<string | null> 
 
 export async function getInstalledMods(): Promise<ModInfo[]> {
   return invoke('get_installed_mods');
+}
+
+/** Fetch all bundle container records. Returns one entry per bundle_id
+ *  that currently has two or more member mods installed. */
+export async function getBundles(): Promise<Bundle[]> {
+  return invoke('get_bundles');
 }
 
 /**

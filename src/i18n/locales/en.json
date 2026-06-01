@@ -1325,5 +1325,10 @@
     "downloads": "Downloads",
     "noWindowsBuild": "No updater manifest — can't one-click switch.",
     "backToRelease": "To return to the stable app, just launch your release STS2 Mod Manager — it's a separate, untouched install."
+  },
+  "bundle": {
+    "memberCount_one": "{{count}} mod",
+    "memberCount_other": "{{count}} mods",
+    "membersAria": "Mods in {{name}}"
   }
 }

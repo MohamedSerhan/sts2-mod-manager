@@ -13,6 +13,9 @@ export interface ModInfo {
   folder_name: string | null;
   mod_id: string | null;
   pinned: boolean;
+  /** Container folder name shared by all members of a multi-mod bundle
+   *  download. null / absent when the mod is a standalone install. */
+  bundle_id?: string | null;
   /** Minimum STS2 build the mod's manifest declares (e.g. "0.105.0").
    *  null when the mod doesn't care about game version. */
   min_game_version?: string | null;
@@ -99,6 +102,19 @@ export interface ProfileMembershipMod {
   display_name?: string | null;
   installed_enabled: boolean;
   profiles: ProfileMembershipState[];
+  /** Carried from ModInfo.bundle_id — present on synthesized no-focus
+   *  rows only (the focused-modpack grid doesn't set it). */
+  bundle_id?: string | null;
+}
+
+/** Mirrors the BundleInfo struct returned by the `get_bundles` Tauri command.
+ *  One entry per container folder that holds a multi-mod download. */
+export interface Bundle {
+  bundle_id: string;
+  display_name: string;
+  nexus_url: string | null;
+  version: string | null;
+  member_count: number;
 }
 
 export interface ProfileMembershipState {

@@ -29,7 +29,7 @@ import { Card } from '../components/Card';
 import { SourceEditor } from '../components/SourceEditor';
 import { AutoDetectModal } from '../components/AutoDetectModal';
 import { nexusFilesUrl } from '../lib/nexusUrl';
-import type { ModAuditEntry, ModInfo } from '../types';
+import type { Bundle, ModAuditEntry, ModInfo } from '../types';
 import {
   deleteMod,
   installModFromFile,
@@ -103,6 +103,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
   const { t } = useTranslation();
   const {
     mods,
+    bundles,
     refreshMods,
     refreshAll,
     gameRunning,
@@ -156,6 +157,15 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     }
     return m;
   }, [mods]);
+
+  /** Bundle lookup by bundle_id — O(1) access for LibraryTable grouping. */
+  const bundlesById = useMemo(() => {
+    const m = new Map<string, Bundle>();
+    for (const b of bundles) {
+      m.set(b.bundle_id, b);
+    }
+    return m;
+  }, [bundles]);
 
   const confirm = useConfirm();
 
@@ -600,6 +610,8 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
   return {
     // Raw context passthroughs the toolbar needs.
     mods,
+    bundles,
+    bundlesById,
     gameRunning,
     auditResults,
     auditing,
@@ -629,6 +641,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     // Spread-in bundle for LibraryTable.
     tableActionProps,
   };
+
 }
 
 export type ModLibrary = ReturnType<typeof useModLibrary>;

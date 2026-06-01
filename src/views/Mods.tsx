@@ -51,7 +51,7 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
   // the All Mods view and the modpack view stay identical. No targetPack:
   // installs here just land on disk (the All Mods list isn't pack-scoped).
   const lib = useModLibrary();
-  const { mods, gameRunning, modInfoByKey, tableActionProps } = lib;
+  const { mods, gameRunning, modInfoByKey, bundlesById, tableActionProps } = lib;
   const { refreshMods, activeProfile } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
@@ -238,6 +238,7 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
       <LibraryTable
         modpackName={activeProfile}
         filterRow={filterRowByTag}
+        bundlesById={bundlesById}
         {...tableActionProps}
       />
         </>

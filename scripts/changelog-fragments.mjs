@@ -1,6 +1,10 @@
 // scripts/changelog-fragments.mjs
 // Lists changelog.d/ fragments, assembles them into a Keep-a-Changelog block,
 // counts them, suggests a version bump, and lints dev-speak.
+//
+// CANONICAL RULESET: this module is the single source of truth for dev-speak
+// detection. It must remain at least as strict as the inline patterns in
+// scripts/release.sh (lines ~85-87). When release.sh is updated, sync here too.
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,7 +15,15 @@ const TITLES = { added: "Added", changed: "Changed", fixed: "Fixed", security: "
 const MINOR = new Set(["added", "changed"]);
 
 const DEV_PATH_RE = /`(src\/|src-tauri\/|qa\/|tests\/|scripts\/|node_modules\/|target\/)/;
-const DEV_WORDS_RE = /\b(refactor(ed|ing|s)?|integration test|unit test|harness|WebDriver|tauri-driver|msedgedriver|AppContext|IPC|Tauri command|cargo|serde|reqwest|\.rs[^a-z]|\.tsx?[^a-z])\b/i;
+// Matches both standalone bare words (e.g. "the tsx component") AND file
+// extensions (e.g. "foo.ts"). release.sh has the bare `tsx?` alternative;
+// the \.tsx?[^a-z] extension form is kept for the dot-prefixed case.
+// Same logic applies to .rs vs bare rs — release.sh only has the extension
+// form for rs, so we match release.sh exactly there.
+const DEV_WORDS_RE = /\b(refactor(ed|ing|s)?|integration test|unit test|harness|WebDriver|tauri-driver|msedgedriver|AppContext|IPC|Tauri command|cargo|serde|reqwest|tsx?|\.rs[^a-z]|\.tsx?[^a-z])\b/i;
+// Intentional strengthening over release.sh: backticks are OPTIONAL here
+// (release.sh requires them). This catches bare mentions like `parse_manifest`
+// without backticks. Do NOT revert to backtick-required — that's a weakening.
 const DEV_TYPES_RE = /`?(parse_manifest|lookup_entry|auditByKey|install_mod_from_zip|scan_mods|RawManifest|ModInfo|ModSourceEntry|qa_cassette)`?/;
 
 export function listFragments(dir = DIR) {
@@ -74,12 +86,15 @@ if (isMain) {
     if (b) console.log(b);
   } else if (cmd === "lint") {
     const frags = listFragments();
-    const text = assemble(frags);
-    const violations = lint(text);
-    if (violations.length) {
-      process.stderr.write(`Dev-speak violations found:\n${violations.map((v) => `  - ${v}`).join("\n")}\n`);
-      process.exit(1);
+    let anyViolation = false;
+    for (const frag of frags) {
+      const violations = lint(frag.body);
+      if (violations.length) {
+        process.stderr.write(`${frag.file}: ${violations.join(", ")}\n`);
+        anyViolation = true;
+      }
     }
+    if (anyViolation) process.exit(1);
   } else {
     console.error("usage: changelog-fragments.mjs assemble|count|suggested-bump|lint");
     process.exit(2);

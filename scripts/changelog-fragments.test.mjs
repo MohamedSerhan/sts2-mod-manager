@@ -1,4 +1,4 @@
-import { test, afterEach } from "node:test";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -245,4 +245,45 @@ test("lint returns [] for another clean sentence", () => {
 test("lint flags internal type names", () => {
   assert.ok(lint("Fixed parse_manifest handling.").includes("internal type/function name"));
   assert.ok(lint("Updated RawManifest schema.").includes("internal type/function name"));
+});
+
+// M2: multi-line fragment body renders correctly
+test("assemble handles multi-line fragment body correctly", () => {
+  const dir = makeTempDir({
+    "fixed-1.md": "First improvement.\n- Second improvement.",
+  });
+  try {
+    const frags = listFragments(dir);
+    const out = assemble(frags);
+    // First line gets "- " prefix added; second already starts with "-" so kept as-is
+    assert.ok(out.includes("- First improvement."), "first line gets dash prefix");
+    assert.ok(out.includes("- Second improvement."), "second line preserved as-is");
+    assert.ok(!out.includes("- - "), "no double-dash on pre-bulleted line");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// M3: lint() tripping all three regexes returns array of length 3 (no short-circuit)
+test("lint returns all three violations when all three regexes match", () => {
+  // "src/" trips DEV_PATH_RE, "refactor" trips DEV_WORDS_RE, "parse_manifest" trips DEV_TYPES_RE
+  const violations = lint("Refactored `src/foo.ts` by rewriting parse_manifest.");
+  assert.equal(violations.length, 3, `expected 3 violations, got: ${JSON.stringify(violations)}`);
+});
+
+// I1: bare tsx?/ts word (without leading dot) now flagged — matches release.sh `tsx?` alternative
+test("lint flags bare 'tsx' word (no dot prefix)", () => {
+  const violations = lint("the tsx component loader");
+  assert.ok(violations.includes("developer jargon"), JSON.stringify(violations));
+});
+
+test("lint flags bare 'ts' word (no dot prefix)", () => {
+  const violations = lint("Updated the ts build config.");
+  assert.ok(violations.includes("developer jargon"), JSON.stringify(violations));
+});
+
+// I1: bare type name without backticks — intentional strengthening kept
+test("lint flags bare parse_manifest without backticks", () => {
+  const violations = lint("bare parse_manifest mention");
+  assert.ok(violations.includes("internal type/function name"), JSON.stringify(violations));
 });

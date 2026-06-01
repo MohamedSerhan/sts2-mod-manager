@@ -1127,6 +1127,191 @@ describe('<LibraryTable modpackName={null}>', () => {
     });
   });
 
+  // ── bundle grouping (focused / active-modpack mode) ──────────────
+  describe('bundle grouping (focused mode)', () => {
+    function mkBundleGridMod(
+      name: string,
+      bundleId: string | null,
+      included: boolean,
+    ) {
+      return {
+        name,
+        version: '1.0.0',
+        folder_name: name,
+        mod_id: name,
+        installed_enabled: true,
+        bundle_id: bundleId,
+        display_name: null,
+        profiles: [
+          { profile_name: 'Stable', included, enabled: included, editable: true },
+        ],
+      };
+    }
+
+    function mkBundle(overrides: Partial<Bundle> = {}): Bundle {
+      return {
+        bundle_id: 'Pack',
+        display_name: 'Epic Pack',
+        nexus_url: 'https://nexusmods.com/pack/42',
+        version: '3.0.0',
+        member_count: 2,
+        ...overrides,
+      };
+    }
+
+    function seedFocusedGrid(
+      mods: ReturnType<typeof mkBundleGridMod>[],
+    ) {
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }],
+        mods,
+      }));
+      registerInvokeHandler('set_profile_mod_membership', () => baseProfile({ name: 'Stable' }));
+    }
+
+    it('members sharing bundle_id collapse into ONE bundle row in focused mode', async () => {
+      seedFocusedGrid([
+        mkBundleGridMod('PackCore', 'Pack', true),
+        mkBundleGridMod('PackArt', 'Pack', false),
+        mkBundleGridMod('StandaloneMod', null, false),
+      ]);
+      const bundlesById = new Map([['Pack', mkBundle()]]);
+      render(
+        <AllProviders>
+          <LibraryTable modpackName="Stable" bundlesById={bundlesById} />
+        </AllProviders>,
+      );
+
+      // Bundle row visible (heading = bundle display_name)
+      expect(await screen.findByRole('heading', { name: 'Epic Pack' })).toBeInTheDocument();
+      // Standalone mod renders as a regular library-row
+      expect(await screen.findByText('StandaloneMod')).toBeInTheDocument();
+      // Exactly one bundle-row, one library-row
+      await waitFor(() => {
+        expect(screen.getAllByTestId('bundle-row')).toHaveLength(1);
+        expect(screen.getAllByTestId('library-row')).toHaveLength(1);
+      });
+    });
+
+    it('shows "Partially in modpack" when only some members are included', async () => {
+      seedFocusedGrid([
+        mkBundleGridMod('PackCore', 'Pack', true),
+        mkBundleGridMod('PackArt', 'Pack', false),
+      ]);
+      const bundlesById = new Map([['Pack', mkBundle()]]);
+      render(
+        <AllProviders>
+          <LibraryTable modpackName="Stable" bundlesById={bundlesById} />
+        </AllProviders>,
+      );
+      expect(await screen.findByTestId('bundle-membership-toggle')).toBeInTheDocument();
+      expect(screen.getByTestId('bundle-membership-toggle').textContent).toMatch(
+        /partially in modpack/i,
+      );
+    });
+
+    it('shows "In Modpack" when all members are included', async () => {
+      seedFocusedGrid([
+        mkBundleGridMod('PackCore', 'Pack', true),
+        mkBundleGridMod('PackArt', 'Pack', true),
+      ]);
+      const bundlesById = new Map([['Pack', mkBundle()]]);
+      render(
+        <AllProviders>
+          <LibraryTable modpackName="Stable" bundlesById={bundlesById} />
+        </AllProviders>,
+      );
+      expect(await screen.findByTestId('bundle-membership-toggle')).toBeInTheDocument();
+      expect(screen.getByTestId('bundle-membership-toggle').textContent).toMatch(/^In Modpack/i);
+    });
+
+    it('shows "Not in Modpack" when no members are included', async () => {
+      seedFocusedGrid([
+        mkBundleGridMod('PackCore', 'Pack', false),
+        mkBundleGridMod('PackArt', 'Pack', false),
+      ]);
+      const bundlesById = new Map([['Pack', mkBundle()]]);
+      render(
+        <AllProviders>
+          <LibraryTable modpackName="Stable" bundlesById={bundlesById} />
+        </AllProviders>,
+      );
+      expect(await screen.findByTestId('bundle-membership-toggle')).toBeInTheDocument();
+      expect(screen.getByTestId('bundle-membership-toggle').textContent).toMatch(/not in modpack/i);
+    });
+
+    it('pack-level toggle adds ALL members when bundle is not fully in pack', async () => {
+      seedFocusedGrid([
+        mkBundleGridMod('PackCore', 'Pack', true),
+        mkBundleGridMod('PackArt', 'Pack', false),
+      ]);
+      const bundlesById = new Map([['Pack', mkBundle()]]);
+      const user = userEvent.setup();
+      render(
+        <AllProviders>
+          <LibraryTable modpackName="Stable" bundlesById={bundlesById} />
+        </AllProviders>,
+      );
+      const toggle = await screen.findByTestId('bundle-membership-toggle');
+      await user.click(toggle);
+      await waitFor(() => {
+        // set_profile_mod_membership must be called for EACH member
+        const calls = getInvokeCalls().filter(
+          (c) => c.cmd === 'set_profile_mod_membership' && c.args?.included === true,
+        );
+        // Both PackCore (already in) and PackArt (not in) should be set to included=true
+        expect(calls.length).toBeGreaterThanOrEqual(2);
+        expect(calls.some((c) => c.args?.modName === 'PackCore')).toBe(true);
+        expect(calls.some((c) => c.args?.modName === 'PackArt')).toBe(true);
+      });
+    });
+
+    it('pack-level toggle removes ALL members when all are already in pack', async () => {
+      seedFocusedGrid([
+        mkBundleGridMod('PackCore', 'Pack', true),
+        mkBundleGridMod('PackArt', 'Pack', true),
+      ]);
+      const bundlesById = new Map([['Pack', mkBundle()]]);
+      const user = userEvent.setup();
+      render(
+        <AllProviders>
+          <LibraryTable modpackName="Stable" bundlesById={bundlesById} />
+        </AllProviders>,
+      );
+      const toggle = await screen.findByTestId('bundle-membership-toggle');
+      await user.click(toggle);
+      await waitFor(() => {
+        const calls = getInvokeCalls().filter(
+          (c) => c.cmd === 'set_profile_mod_membership' && c.args?.included === false,
+        );
+        // Both members should be set to included=false
+        expect(calls.length).toBeGreaterThanOrEqual(2);
+        expect(calls.some((c) => c.args?.modName === 'PackCore')).toBe(true);
+        expect(calls.some((c) => c.args?.modName === 'PackArt')).toBe(true);
+      });
+    });
+
+    it('non-bundled rows in focused mode are unaffected by bundle grouping', async () => {
+      seedFocusedGrid([
+        mkBundleGridMod('PackCore', 'Pack', true),
+        mkBundleGridMod('Standalone', null, false),
+      ]);
+      const bundlesById = new Map([['Pack', mkBundle()]]);
+      render(
+        <AllProviders>
+          <LibraryTable modpackName="Stable" bundlesById={bundlesById} />
+        </AllProviders>,
+      );
+      await screen.findByRole('heading', { name: 'Epic Pack' });
+      // Standalone renders as a library-row, not a bundle-row
+      const standaloneRow = (await screen.findByText('Standalone')).closest(
+        '[data-testid="library-row"]',
+      );
+      expect(standaloneRow).not.toBeNull();
+    });
+  });
+
   // ── reloadToken (external re-fetch trigger) ───────────────────────
   it('re-fetches the membership grid when reloadToken changes', async () => {
     registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);

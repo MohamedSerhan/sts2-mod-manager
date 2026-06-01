@@ -1329,6 +1329,10 @@
   "bundle": {
     "memberCount_one": "{{count}} 个模组",
     "memberCount_other": "{{count}} 个模组",
-    "membersAria": "{{name}} 中的模组"
+    "membersAria": "{{name}} 中的模组",
+    "inPack": "在模组包中",
+    "notInPack": "不在模组包中",
+    "partiallyInPack": "部分在模组包中",
+    "toggleInPackAria": "切换 {{name}} 中所有模组的加入/移出状态"
   }
 }

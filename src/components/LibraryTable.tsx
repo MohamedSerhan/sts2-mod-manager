@@ -471,8 +471,8 @@ export function LibraryTable({
   type DisplayItem = BundleDisplayItem | ModDisplayItem;
 
   const displayItems = useMemo<DisplayItem[]>(() => {
-    // Only group in no-focus mode — focused modpack never sees bundle_id rows
-    if (modpackName != null || !bundlesById || bundlesById.size === 0) {
+    // Group in both no-focus and focused modes whenever bundlesById has entries.
+    if (!bundlesById || bundlesById.size === 0) {
       return filteredRows.map((row) => ({ type: 'mod' as const, row }));
     }
     const items: DisplayItem[] = [];
@@ -497,7 +497,7 @@ export function LibraryTable({
       }
     }
     return items;
-  }, [filteredRows, modpackName, bundlesById]);
+  }, [filteredRows, bundlesById]);
 
   const visibleItems = displayItems.slice(0, visibleLimit);
 
@@ -594,6 +594,52 @@ export function LibraryTable({
       );
     } finally {
       setMembershipSaving(null);
+    }
+  }
+
+  /**
+   * Pack-level bundle membership handler: adds or removes ALL members of
+   * a bundle from the active modpack in a single action.
+   *
+   * target = !(all currently included): if every member is already in the
+   * pack the action removes all; otherwise it adds all.
+   */
+  const [bundleMembershipBusy, setBundleMembershipBusy] = useState<string | null>(null);
+
+  async function handleToggleBundleMembership(
+    bundleId: string,
+    members: ProfileMembershipMod[],
+    targetIncluded: boolean,
+  ) {
+    if (modpackName == null) return;
+    if (bundleMembershipBusy || membershipSaving || storageSaving) return;
+    const editableMembers = members.filter((m) => {
+      const s = focusedState(m);
+      return s?.editable;
+    });
+    if (editableMembers.length === 0) return;
+    try {
+      pinScroll();
+      setBundleMembershipBusy(bundleId);
+      for (const member of editableMembers) {
+        await setProfileModMembership(
+          modpackName,
+          member.name,
+          member.folder_name,
+          member.mod_id,
+          targetIncluded,
+        );
+        patchRowMembership(membershipRowKey(member), targetIncluded);
+      }
+      onMembershipChanged?.();
+    } catch (e) {
+      toastCtx.error(
+        t('profiles.library.toastFailed', {
+          error: e instanceof Error ? e.message : String(e),
+        }),
+      );
+    } finally {
+      setBundleMembershipBusy(null);
     }
   }
 
@@ -843,12 +889,36 @@ export function LibraryTable({
       ) : (
         visibleItems.map((item, itemIndex) => {
           if (item.type === 'bundle') {
+            // In focused mode compute aggregate membership state for the bundle.
+            let bundleMembership: import('./BundleRow').BundleMembership | undefined;
+            if (modpackName != null) {
+              const states = item.members.map((m) => focusedState(m));
+              const includedCount = states.filter((s) => s?.included).length;
+              const aggState =
+                includedCount === 0
+                  ? 'out'
+                  : includedCount === item.members.length
+                    ? 'in'
+                    : 'partial';
+              const targetIncluded = aggState !== 'in';
+              bundleMembership = {
+                state: aggState,
+                onToggle: () =>
+                  handleToggleBundleMembership(
+                    item.bundle.bundle_id,
+                    item.members,
+                    targetIncluded,
+                  ),
+                busy: bundleMembershipBusy === item.bundle.bundle_id,
+              };
+            }
             return (
               <BundleRow
                 key={`bundle::${item.bundle.bundle_id}`}
                 bundle={item.bundle}
                 members={item.members}
                 density={density}
+                membership={bundleMembership}
               />
             );
           }

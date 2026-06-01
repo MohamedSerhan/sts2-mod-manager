@@ -8,8 +8,9 @@
  *  - Nexus badge absent when nexus_url is null.
  *  - version absent when null.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { BundleRow } from './BundleRow';
 import type { Bundle, ProfileMembershipMod } from '../types';
 
@@ -131,6 +132,87 @@ describe('<BundleRow>', () => {
       );
       // No "vX.Y.Z" text
       expect(screen.queryByText(/^v\d/)).not.toBeInTheDocument();
+    });
+  });
+
+  // ── Focused-mode (active-modpack) membership control ─────────────
+  describe('focused mode — membership control', () => {
+    it('renders the In Modpack label when state is "in"', () => {
+      const onToggle = vi.fn();
+      render(
+        <BundleRow
+          bundle={makeBundle()}
+          members={members}
+          density="comfortable"
+          membership={{ state: 'in', onToggle }}
+        />,
+      );
+      const btn = screen.getByTestId('bundle-membership-toggle');
+      expect(btn).toBeInTheDocument();
+      expect(btn.textContent).toMatch(/^In Modpack/i);
+    });
+
+    it('renders the Not in Modpack label when state is "out"', () => {
+      const onToggle = vi.fn();
+      render(
+        <BundleRow
+          bundle={makeBundle()}
+          members={members}
+          density="comfortable"
+          membership={{ state: 'out', onToggle }}
+        />,
+      );
+      const btn = screen.getByTestId('bundle-membership-toggle');
+      expect(btn.textContent).toMatch(/not in modpack/i);
+    });
+
+    it('renders the Partially in modpack label when state is "partial"', () => {
+      const onToggle = vi.fn();
+      render(
+        <BundleRow
+          bundle={makeBundle()}
+          members={members}
+          density="comfortable"
+          membership={{ state: 'partial', onToggle }}
+        />,
+      );
+      const btn = screen.getByTestId('bundle-membership-toggle');
+      expect(btn.textContent).toMatch(/partially in modpack/i);
+    });
+
+    it('calls onToggle when the control is clicked', async () => {
+      const onToggle = vi.fn();
+      const user = userEvent.setup();
+      render(
+        <BundleRow
+          bundle={makeBundle()}
+          members={members}
+          density="comfortable"
+          membership={{ state: 'out', onToggle }}
+        />,
+      );
+      await user.click(screen.getByTestId('bundle-membership-toggle'));
+      expect(onToggle).toHaveBeenCalledOnce();
+    });
+
+    it('disables the control when busy is true', () => {
+      const onToggle = vi.fn();
+      render(
+        <BundleRow
+          bundle={makeBundle()}
+          members={members}
+          density="comfortable"
+          membership={{ state: 'out', onToggle, busy: true }}
+        />,
+      );
+      expect(screen.getByTestId('bundle-membership-toggle')).toBeDisabled();
+    });
+
+    it('does NOT render the membership control when membership prop is absent (no-focus mode)', () => {
+      render(
+        <BundleRow bundle={makeBundle()} members={members} density="comfortable" />,
+      );
+      expect(screen.queryByTestId('bundle-membership-toggle')).not.toBeInTheDocument();
     });
   });
 });

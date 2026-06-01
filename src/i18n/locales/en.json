@@ -1329,6 +1329,10 @@
   "bundle": {
     "memberCount_one": "{{count}} mod",
     "memberCount_other": "{{count}} mods",
-    "membersAria": "Mods in {{name}}"
+    "membersAria": "Mods in {{name}}",
+    "inPack": "In Modpack",
+    "notInPack": "Not in Modpack",
+    "partiallyInPack": "Partially in modpack",
+    "toggleInPackAria": "Toggle all mods in {{name}} in/out of modpack"
   }
 }

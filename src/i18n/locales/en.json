@@ -384,6 +384,13 @@
       "shareTitle": "Share — friends paste the code to install",
       "reShareTitle": "Re-share — same code, friends see an update"
     },
+    "reshareNudge": {
+      "label": "Re-share recommended",
+      "tooltip": "A newer app update improves shared packs (e.g. mod source links). Re-share to update your published copy — same code.",
+      "ctaAria": "Re-share modpack {{name}} to apply the latest improvements",
+      "dismiss": "Dismiss",
+      "dismissAria": "Dismiss the re-share recommendation for {{name}}"
+    },
     "kebab": {
       "snapshotFromCurrent": "Snapshot from current install",
       "duplicate": "Duplicate",

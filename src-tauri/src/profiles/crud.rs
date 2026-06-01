@@ -298,6 +298,43 @@ pub(super) fn profile_mod_from_installed(installed: &ModInfo) -> ProfileMod {
     }
 }
 
+/// Persist each pack mod's curator source link into the importer's
+/// `mod_sources.json` so the Mods view shows GitHub/Nexus chips instead of
+/// "Unlinked" after installing a shared pack.
+///
+/// Called once, after the install/update download loop, for EVERY mod the
+/// pack declares — not just the ones that happened to download on this run.
+/// That distinction is the whole fix: a pack mod already present on disk at
+/// the right version is skipped by the download loop (`continue`), so a
+/// write nested inside that loop never reached it and the mod stayed
+/// unlinked. Writing here, unconditionally, covers already-installed mods.
+///
+/// Each write is fill-if-empty via `mod_sources::fill_source_if_absent`, so
+/// a link the user already set (or a note / pin / preserved config on the
+/// same entry) is never clobbered. The DB is loaded and saved once for the
+/// whole batch, and only when something actually changed.
+pub fn persist_profile_mod_sources(mods: &[ProfileMod], config_path: &Path) {
+    let mut db = crate::mod_sources::load_sources(config_path);
+    let mut changed = false;
+    for pm in mods {
+        let Some(ref src) = pm.source else { continue };
+        let Some(parsed) = crate::mod_sources::parse_source_url(src) else {
+            continue;
+        };
+        // Folder-first key to match enrich_mods_with_sources' read order;
+        // falls back to display name for mods with no folder on disk.
+        let key = pm.folder_name.clone().unwrap_or_else(|| pm.name.clone());
+        if crate::mod_sources::fill_source_if_absent(&mut db, &key, &parsed) {
+            changed = true;
+        }
+    }
+    if changed {
+        if let Err(e) = crate::mod_sources::save_sources(&db, config_path) {
+            log::warn!("Failed to persist pack mod sources: {}", e);
+        }
+    }
+}
+
 pub(super) fn subscribed_profile_names(config_path: &Path) -> std::collections::HashSet<String> {
     crate::subscriptions::load_subscriptions(config_path)
         .subscriptions
@@ -434,5 +471,105 @@ mod profile_schema_compat_tests {
         let json = serde_json::to_string(&pm).unwrap();
         let round: ProfileMod = serde_json::from_str(&json).unwrap();
         assert_eq!(round.bundle_sha256.as_deref(), Some("deadbeef"));
+    }
+}
+
+#[cfg(test)]
+mod persist_profile_mod_sources_tests {
+    //! Import-side half of the "imported pack shows Unlinked" fix. The key
+    //! property: sources are written for EVERY pack mod, including ones
+    //! already installed (which the download loop skips), and the write is
+    //! fill-only so a user's own links/notes are never clobbered.
+    use super::*;
+    use tempfile::tempdir;
+
+    fn pm_with_source(name: &str, folder: &str, source: Option<&str>) -> ProfileMod {
+        ProfileMod {
+            name: name.into(),
+            version: "1.0.0".into(),
+            source: source.map(str::to_string),
+            hash: None,
+            files: vec![],
+            folder_name: Some(folder.into()),
+            mod_id: Some(folder.into()),
+            enabled: true,
+            bundle_url: None,
+            bundle_sha256: None,
+        }
+    }
+
+    #[test]
+    fn writes_source_for_every_pack_mod_even_already_installed_ones() {
+        // Mirrors the user's pack: one mod carries a github source, the rest
+        // carry none. Every mod here represents an already-installed entry
+        // (the download loop would have `continue`d past all of them), so
+        // this single call is the only thing that links them.
+        let tmp = tempdir().unwrap();
+        let config = tmp.path();
+        let mods = vec![
+            pm_with_source(
+                "RegentCardsAnimeRework",
+                "RegentCardsAnimeRework",
+                Some("github:DoublePigeon/RegentCardsAnimeRework"),
+            ),
+            pm_with_source("AutoPath", "AutoPath", None),
+        ];
+        persist_profile_mod_sources(&mods, config);
+
+        let db = crate::mod_sources::load_sources(config);
+        assert_eq!(
+            db.mods
+                .get("RegentCardsAnimeRework")
+                .and_then(|e| e.github_repo.as_deref()),
+            Some("DoublePigeon/RegentCardsAnimeRework"),
+            "the sourced mod gets linked despite being already installed"
+        );
+        assert!(
+            db.mods.get("AutoPath").is_none(),
+            "a sourceless mod creates no entry (correctly stays unlinked)"
+        );
+        assert!(
+            db.mods
+                .get("RegentCardsAnimeRework")
+                .map(|e| e.github_auto_detected)
+                .unwrap_or(false),
+            "curator-supplied link is marked auto-detected"
+        );
+    }
+
+    #[test]
+    fn does_not_clobber_a_users_existing_link_or_note() {
+        let tmp = tempdir().unwrap();
+        let config = tmp.path();
+        // User already linked AutoPath to the right repo and left a note.
+        let mut db = crate::mod_sources::ModSourcesDb::default();
+        db.mods.insert(
+            "AutoPath".into(),
+            crate::mod_sources::ModSourceEntry {
+                github_repo: Some("realauthor/AutoPath".into()),
+                github_auto_detected: false,
+                note: Some("hand-checked".into()),
+                ..Default::default()
+            },
+        );
+        crate::mod_sources::save_sources(&db, config).unwrap();
+
+        // A pack points the same mod at a different repo.
+        let mods = vec![pm_with_source(
+            "AutoPath",
+            "AutoPath",
+            Some("github:impostor/AutoPath"),
+        )];
+        persist_profile_mod_sources(&mods, config);
+
+        let after = crate::mod_sources::load_sources(config);
+        let entry = after.mods.get("AutoPath").unwrap();
+        assert_eq!(
+            entry.github_repo.as_deref(),
+            Some("realauthor/AutoPath"),
+            "user's link wins"
+        );
+        assert_eq!(entry.note.as_deref(), Some("hand-checked"), "note survives");
+        assert!(!entry.github_auto_detected, "stays user-authored");
     }
 }

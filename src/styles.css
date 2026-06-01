@@ -360,6 +360,58 @@ body {
   outline-offset: 1px;
 }
 
+/* Re-share nudge — a dismissible pill that appears on a shared card when the
+   pack was published under an older share format (e.g. before source-link
+   backfill). The CTA opens the publish modal in re-share mode; the × stores a
+   per-pack dismissal. Styled like the drift indicator (amber, low-key) so it
+   reads as a suggestion, not an error. */
+.gf-modpack-card-reshare-nudge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.gf-modpack-card-reshare-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border: 1px solid var(--warn, #f59e0b);
+  border-radius: 999px 0 0 999px;
+  background: transparent;
+  color: var(--warn, #f59e0b);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.gf-modpack-card-reshare-cta:hover {
+  background: color-mix(in oklch, var(--warn, #f59e0b) 16%, transparent);
+}
+.gf-modpack-card-reshare-dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 22px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  border: 1px solid var(--warn, #f59e0b);
+  border-left: none;
+  border-radius: 0 999px 999px 0;
+  background: transparent;
+  color: var(--warn, #f59e0b);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.gf-modpack-card-reshare-dismiss:hover {
+  background: color-mix(in oklch, var(--warn, #f59e0b) 16%, transparent);
+}
+.gf-modpack-card-reshare-cta:focus-visible,
+.gf-modpack-card-reshare-dismiss:focus-visible {
+  outline: 2px solid var(--accent, var(--ok));
+  outline-offset: 1px;
+}
+
 /* 1.7.0 T16 — modpack detail (inline drilldown) */
 .gf-modpack-detail {
   display: flex;

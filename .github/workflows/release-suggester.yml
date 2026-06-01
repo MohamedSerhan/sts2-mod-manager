@@ -30,8 +30,11 @@ jobs:
         id: decide
         run: |
           BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          BASE_BULLETS=$(git show "$BASE_SHA:CHANGELOG.md" 2>/dev/null | node scripts/ci-changes.mjs unreleased-count || echo 0)
-          BASE_FRAGS=$(git ls-tree -r --name-only "$BASE_SHA" -- changelog.d 2>/dev/null | grep -E 'changelog\.d/(added|changed|fixed|security)-.*\.md$' | wc -l || echo 0)
+          BASE_BULLETS=$(git show "$BASE_SHA:CHANGELOG.md" 2>/dev/null | node scripts/ci-changes.mjs unreleased-count || true)
+          BASE_BULLETS=${BASE_BULLETS:-0}
+          BASE_FRAGS=$(git ls-tree -r --name-only "$BASE_SHA" -- changelog.d 2>/dev/null \
+            | { grep -E 'changelog\.d/(added|changed|fixed|security)-.*\.md$' || true; } \
+            | wc -l)
           BASE_COUNT=$((BASE_BULLETS + BASE_FRAGS))
           HEAD_COUNT=$(node scripts/ci-changes.mjs changelog-count)
           echo "base=$BASE_COUNT (bullets=$BASE_BULLETS frags=$BASE_FRAGS) head=$HEAD_COUNT"

@@ -314,6 +314,13 @@
       "shareTitle": "分享 — 好友粘贴代码即可安装",
       "reShareTitle": "重新分享 — 相同代码，好友会看到更新"
     },
+    "reshareNudge": {
+      "label": "建议重新分享",
+      "tooltip": "新版应用改进了共享包（例如模组来源链接）。重新分享即可更新已发布的副本 — 代码不变。",
+      "ctaAria": "重新分享模组包 {{name}} 以应用最新改进",
+      "dismiss": "忽略",
+      "dismissAria": "忽略对 {{name}} 的重新分享建议"
+    },
     "kebab": {
       "snapshotFromCurrent": "从当前安装创建快照",
       "duplicate": "复制",

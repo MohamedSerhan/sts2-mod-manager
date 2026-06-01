@@ -46,6 +46,7 @@ A UX simplification release. The app feels like a launcher first: pick a modpack
 - When a share fails because some mods can't be bundled, the app now offers to repair those mods inline and retry the share automatically.
 - "Report a bug" replaces the old support-bundle export: it builds a redacted report — app and game version, your installed mods, the active modpack's load order, and recent logs — and opens a prefilled GitHub issue. The full report is attached automatically so nothing important is cut off, and you never need a token. You see the full report and confirm it before anything is uploaded or linked publicly.
 - You can now choose which folder the app watches for Nexus mod downloads in Settings → General. The change takes effect after restarting the app.
+- Modpacks you shared before this update now show a "Re-share recommended" hint so you can re-publish them and pass along the new source links to people who install them. You can dismiss the hint per pack if you'd rather not.
 
 ### Changed
 
@@ -81,6 +82,11 @@ A UX simplification release. The app feels like a launcher first: pick a modpack
 - Pressing Enter or Space on a button inside a mod row or modpack card no longer also opens that row or card.
 - The Help panel now keeps keyboard focus inside it while open and closes on Escape, like the app's other dialogs.
 - The bug report's active-modpack name and the development-build label now follow your chosen language instead of always showing English.
+- Mods installed from an imported or subscribed modpack now show their GitHub or Nexus source links instead of appearing as unlinked — including mods that were already installed, which the previous fix skipped. Existing links, notes, and saved settings on those mods are left untouched.
+- Sharing a modpack now carries each mod's GitHub or Nexus link to the people who install it, so a shared pack arrives linked instead of unlinked even when the mod's own files don't name a source.
+- You can edit a modpack you published again. Sharing a pack quietly subscribed you to your own copy, which then locked it as if it belonged to someone else; modpacks you published now stay editable — including adding mods to them by pasting a URL or importing a file — while ones you only follow remain protected.
+- Adding a mod that's already active to a modpack with the bulk Edit dialog no longer fails with a "mod not found" error and silently drops the change; the edit now saves and the already-active mod is left as-is.
+- The modpack mod picker now shows each mod's on-disk folder name when it differs from the display name, and you can search by that folder name (or mod id) — so mods that install under an unusual folder are easy to find and tell apart.
 
 ### Security
 

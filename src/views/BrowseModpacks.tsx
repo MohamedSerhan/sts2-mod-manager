@@ -242,6 +242,7 @@ export function BrowseModpacksView({ onGoToProfiles }: Props = {}) {
         <BrowseModpackDetail
           card={selected}
           onClose={() => setSelected(null)}
+          onInstalled={onGoToProfiles}
         />
       )}
     </>

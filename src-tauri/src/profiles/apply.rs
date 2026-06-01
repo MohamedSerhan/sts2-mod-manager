@@ -173,14 +173,14 @@ fn snapshot_current_inner(
             .source
             .clone()
             .or_else(|| {
-                crate::mod_sources::lookup_entry(
-                    &sources_db.mods,
+                // GitHub first, then Nexus — so a Nexus-only mod still
+                // snapshots its source instead of dropping to None.
+                crate::mod_sources::shareable_source_for(
+                    &sources_db,
                     m.folder_name.as_deref(),
                     &m.name,
                     m.mod_id.as_deref(),
                 )
-                .and_then(|e| e.github_repo.as_ref())
-                .map(|repo| format!("github:{}", repo))
             })
             .or_else(|| existing.and_then(|pm| pm.source.clone()));
 
@@ -809,6 +809,11 @@ pub(crate) async fn switch_profile_from_paths(
             download_failures.push(pm.name.clone());
         }
     }
+
+    // Persist every pack mod's source link (fill-if-empty) so switching to a
+    // shared profile links its mods' GitHub/Nexus chips, same as a fresh
+    // install or subscription update. Covers mods already on disk too.
+    crate::profiles::persist_profile_mod_sources(&profile.mods, config_path);
 
     // ── STEP 2: Apply profile AFTER downloads ──
     apply_profile_with_pins(&profile, mods_path, disabled_path, &pinned_set)

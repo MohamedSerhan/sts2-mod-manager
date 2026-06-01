@@ -124,3 +124,45 @@ describe('<ModMultiSelect> windowing', () => {
     expect(screen.getAllByRole('checkbox')).toHaveLength(50);
   });
 });
+
+describe('<ModMultiSelect> folder-name visibility', () => {
+  // A mod whose on-disk folder differs from its display name — the case the
+  // user hit ("Stats the Spire" lives in folder "stats_the_spire").
+  const divergent = modInfo({
+    name: 'Stats the Spire',
+    folder_name: 'stats_the_spire',
+    mod_id: 'sts2_community_stats',
+  });
+  // A mod whose folder == name: the folder line should be suppressed as noise.
+  const aligned = modInfo({ name: 'BaseLib', folder_name: 'BaseLib', mod_id: 'BaseLib' });
+
+  it('finds a mod by its on-disk folder name, not just the display name', async () => {
+    const user = userEvent.setup();
+    renderPicker([divergent, aligned]);
+    expect(screen.getAllByRole('checkbox')).toHaveLength(2);
+
+    // Searching the folder string surfaces the mod whose DISPLAY name
+    // ("Stats the Spire") doesn't contain it.
+    await user.type(screen.getByRole('textbox', { name: /search mods/i }), 'stats_the_spire');
+    const boxes = screen.getAllByRole('checkbox');
+    expect(boxes).toHaveLength(1);
+    expect(screen.getByText('Stats the Spire')).toBeInTheDocument();
+    expect(screen.queryByText('BaseLib')).not.toBeInTheDocument();
+  });
+
+  it('finds a mod by its mod_id too', async () => {
+    const user = userEvent.setup();
+    renderPicker([divergent, aligned]);
+    await user.type(screen.getByRole('textbox', { name: /search mods/i }), 'community_stats');
+    expect(screen.getAllByRole('checkbox')).toHaveLength(1);
+    expect(screen.getByText('Stats the Spire')).toBeInTheDocument();
+  });
+
+  it('shows the folder as a secondary label only when it differs from the name', () => {
+    renderPicker([divergent, aligned]);
+    // Divergent → folder shown.
+    expect(screen.getByText('stats_the_spire')).toBeInTheDocument();
+    // Aligned (folder == name) → the name appears once, no duplicate folder line.
+    expect(screen.getAllByText('BaseLib')).toHaveLength(1);
+  });
+});

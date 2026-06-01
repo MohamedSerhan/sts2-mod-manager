@@ -581,6 +581,67 @@ describe('<ProfilesView>', () => {
     });
   });
 
+  it('shows the re-share nudge on a stale shared pack and hides it after dismiss', async () => {
+    seedProfiles([baseProfile({ name: 'Stale' })]);
+    registerInvokeHandler('get_share_info', () => ({
+      owner: 'alice',
+      code: 'AA5A-315D-61AE',
+      file_path: 'Stale.json',
+      url: 'https://github.com/alice/sts2mm-profiles',
+      repo_url: 'https://github.com/alice/sts2mm-profiles',
+      failed_uploads: [],
+      reshare_recommended: true,
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+
+    const card = await screen.findByRole('button', { name: /Open Stale modpack/i });
+    // The nudge CTA is present (loud lookup — fails if the nudge never renders).
+    const cta = await within(card).findByRole('button', {
+      name: /Re-share modpack Stale to apply the latest improvements/i,
+    });
+    expect(cta).toBeInTheDocument();
+
+    // Dismiss it; the nudge disappears and stays gone.
+    const dismiss = within(card).getByRole('button', {
+      name: /Dismiss the re-share recommendation for Stale/i,
+    });
+    await user.click(dismiss);
+    await waitFor(() => {
+      expect(
+        within(card).queryByRole('button', {
+          name: /Re-share modpack Stale to apply the latest improvements/i,
+        }),
+      ).toBeNull();
+    });
+  });
+
+  it('does not show the re-share nudge when the pack is already current', async () => {
+    seedProfiles([baseProfile({ name: 'Current' })]);
+    registerInvokeHandler('get_share_info', () => ({
+      owner: 'alice',
+      code: 'AA5A-315D-61AE',
+      file_path: 'Current.json',
+      url: 'https://github.com/alice/sts2mm-profiles',
+      repo_url: 'https://github.com/alice/sts2mm-profiles',
+      failed_uploads: [],
+      reshare_recommended: false,
+    }));
+    render(<Wrap />);
+
+    const card = await screen.findByRole('button', { name: /Open Current modpack/i });
+    // The "Shared" pill confirms share-info loaded, so the absent nudge is a
+    // real negative (not just unrendered share state).
+    await waitFor(() => {
+      expect(within(card).getByText(/Shared/i)).toBeInTheDocument();
+    });
+    expect(
+      within(card).queryByRole('button', {
+        name: /Re-share modpack Current to apply the latest improvements/i,
+      }),
+    ).toBeNull();
+  });
+
   it('renders drift banner when profile drift is reported', async () => {
     seedProfiles([baseProfile({ name: 'DriftedPack' })]);
     registerInvokeHandler('get_active_profile', () => 'DriftedPack');

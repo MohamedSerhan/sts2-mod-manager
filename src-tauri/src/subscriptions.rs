@@ -591,6 +591,11 @@ async fn apply_subscription_update_inner(
         }
     }
 
+    // Persist every pack mod's curator source link (fill-if-empty) so the
+    // Mods view shows GitHub/Nexus chips instead of "Unlinked" — including
+    // for mods already on disk at the right version, which the loop skips.
+    crate::profiles::persist_profile_mod_sources(&remote.mods, &config_path);
+
     if !skipped_incompatible.is_empty() {
         log::info!(
             "Subscription update: {} mod(s) skipped due to game-version incompatibility",

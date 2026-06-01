@@ -19,8 +19,8 @@ use serde::{Deserialize, Serialize};
 
 use super::apply::{disk_mod_matches_pin, switch_profile_from_paths};
 use super::crud::{
-    hide_app_created_by, load_profile, mod_key, profile_mod_from_installed, save_profile,
-    subscribed_profile_names, version_is_wildcard,
+    hide_app_created_by, load_profile, mod_key, profile_is_edit_locked, profile_mod_from_installed,
+    save_profile, version_is_wildcard,
 };
 use super::{Profile, ProfileMod};
 use crate::error::{AppError, Result};
@@ -179,12 +179,15 @@ pub(super) fn reconcile_profile_with_disk(
     profiles_path: &Path,
     config_path: &Path,
 ) -> Result<Profile> {
-    // A followed (subscribed) pack's manifest belongs to its author. Saving
-    // drift would overwrite their curated set with whatever happens to be on
-    // this user's disk, so refuse it — the same gate set_profile_mod_membership
-    // and set_profile_load_order enforce. Repair stays allowed: it only
-    // restores the followed manifest onto disk, never the reverse.
-    if subscribed_profile_names(config_path).contains(&name.to_lowercase()) {
+    // A *followed* (subscribed but not owned) pack's manifest belongs to its
+    // author. Saving drift would overwrite their curated set with whatever
+    // happens to be on this user's disk, so refuse it — the same gate
+    // set_profile_mod_membership and set_profile_load_order enforce. A pack
+    // you published is owned (proven by its local .share) and stays editable
+    // even though installing your own code auto-subscribed you. Repair stays
+    // allowed regardless: it only restores the manifest onto disk, never the
+    // reverse.
+    if profile_is_edit_locked(name, profiles_path, config_path) {
         return Err(AppError::Other(format!(
             "Cannot edit subscribed profile '{}'. Duplicate it first to make a local copy.",
             name

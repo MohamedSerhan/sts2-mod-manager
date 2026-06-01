@@ -100,6 +100,19 @@ impl Drop for ShareGuard {
 const PROFILES_REPO: &str = "sts2mm-profiles";
 const APP_CREATED_BY: &str = "sts2-mod-manager";
 
+/// Schema/quality version of the share format a `.share` record was last
+/// published under. Bump this whenever a fix makes *re-publishing* an
+/// existing pack produce a materially better manifest, so the UI can nudge
+/// curators to re-share. A `.share` file whose stored version is below this
+/// (or absent, i.e. published before the field existed) is "stale".
+///
+/// History:
+///   1 — pre-versioned shares (implicit; never written, only inferred).
+///   2 — source links are now backfilled from the curator's mod_sources.json
+///       at publish time, so re-sharing links mods that previously imported
+///       as "Unlinked". Packs shared before this need a re-share to benefit.
+pub const SHARE_FORMAT_VERSION: u32 = 2;
+
 fn profiles_repo() -> String {
     #[cfg(test)]
     {
@@ -133,6 +146,14 @@ pub struct ShareResult {
     /// can retry instead of finding out from a confused friend later.
     #[serde(default)]
     pub failed_uploads: Vec<String>,
+    /// True when this pack was last published under an older share format
+    /// than the app now produces, so re-sharing would improve it (e.g. add
+    /// source links the old manifest lacked). Drives the "Re-share
+    /// recommended" nudge in the Profiles view. Only ever set by
+    /// `get_share_info` (the status read); a fresh share/reshare result
+    /// leaves it false since it's already current.
+    #[serde(default)]
+    pub reshare_recommended: bool,
 }
 
 pub(crate) fn attribute_profile_to_owner(mut profile: Profile, owner: &str) -> Profile {
@@ -153,6 +174,12 @@ struct ShareInfo {
     owner: String,
     /// SHA of the file in the repo (needed for updates)
     file_sha: Option<String>,
+    /// Share format version this pack was last published under. Absent in
+    /// `.share` files written before the field existed — `serde(default)`
+    /// makes those deserialize as 0, which is correctly treated as "older
+    /// than current" so they get a re-share nudge.
+    #[serde(default)]
+    share_format_version: u32,
 }
 
 /// Per-step status emitted to the frontend while a share / re-share is
@@ -381,15 +408,42 @@ fn load_profile_for_publish_from_paths(
     profiles_path: &std::path::Path,
     mods_path: &std::path::Path,
     disabled_path: &std::path::Path,
-    _config_path: &std::path::Path,
+    config_path: &std::path::Path,
     game_version: Option<&str>,
 ) -> Result<Profile> {
     let mut profile = crate::profiles::load_profile(name, profiles_path)?;
     filter_profile_for_publish_compatibility(&mut profile, mods_path, disabled_path, game_version);
+    backfill_profile_sources_from_db(&mut profile, config_path);
     if let Some(public) = list_public {
         profile.public = Some(public);
     }
     Ok(profile)
+}
+
+/// Stamp each mod's `source` from the curator's local `mod_sources.json`
+/// before publishing, when the saved profile entry doesn't already carry
+/// one. This is what lets a shared (or re-shared) pack hand friends the
+/// curator's GitHub/Nexus links even though most mod manifests declare no
+/// `Source` of their own — the links live in the curator's sources DB, not
+/// the manifest, so without this every bundle-only mod would import as
+/// "Unlinked".
+///
+/// Fill-only: a `source` already present on the profile mod (e.g. one a
+/// previous share resolved, or a manifest that did declare it) is left
+/// untouched, so re-sharing never downgrades a link that was already good.
+fn backfill_profile_sources_from_db(profile: &mut Profile, config_path: &std::path::Path) {
+    let db = crate::mod_sources::load_sources(config_path);
+    for pm in &mut profile.mods {
+        if pm.source.is_some() {
+            continue;
+        }
+        pm.source = crate::mod_sources::shareable_source_for(
+            &db,
+            pm.folder_name.as_deref(),
+            &pm.name,
+            pm.mod_id.as_deref(),
+        );
+    }
 }
 
 // ── Tauri Commands ──────────────────────────────────────────────────────────
@@ -617,6 +671,7 @@ pub(super) async fn share_profile_impl(
         code: code.clone(),
         owner: username.clone(),
         file_sha: Some(file_sha),
+        share_format_version: SHARE_FORMAT_VERSION,
     };
     let share_info_path = profiles_path.join(format!("{}.share", profile.name));
     std::fs::write(
@@ -659,6 +714,8 @@ pub(super) async fn share_profile_impl(
         url: html_url,
         repo_url: build_repo_url(&username),
         failed_uploads,
+        // Just published under the current format — nothing to nudge.
+        reshare_recommended: false,
     })
 }
 
@@ -699,6 +756,10 @@ pub fn get_share_info(
         // failed uploads here. The frontend should treat this as "current
         // share status", not a fresh share result.
         failed_uploads: Vec::new(),
+        // A pack published under an older share format benefits from a
+        // re-share (e.g. to pick up source-link backfill). Packs already at
+        // the current version — and any future-dated version — don't.
+        reshare_recommended: info.share_format_version < SHARE_FORMAT_VERSION,
     }))
 }
 
@@ -873,11 +934,13 @@ pub async fn reshare_profile(
     let owner = share_info.owner.clone();
     let code = share_info.code.clone();
 
-    // Update local share info with new SHA
+    // Update local share info with new SHA and stamp the current format
+    // version, so the re-share nudge clears once the curator re-publishes.
     let updated_info = ShareInfo {
         code: share_info.code,
         owner: share_info.owner,
         file_sha: Some(file_sha),
+        share_format_version: SHARE_FORMAT_VERSION,
     };
     let _ = std::fs::write(
         &share_info_path,
@@ -916,6 +979,8 @@ pub async fn reshare_profile(
         url: html_url,
         repo_url: build_repo_url(&owner),
         failed_uploads,
+        // Just re-published under the current format — nudge cleared.
+        reshare_recommended: false,
     })
 }
 
@@ -1224,6 +1289,132 @@ mod share_orchestration_tests {
 
         assert_eq!(prepared.mods.len(), 1);
         assert_eq!(prepared.mods[0].name, "Active Mod");
+    }
+
+    #[test]
+    fn publish_preparation_backfills_source_from_curator_sources_db() {
+        // The export-side half of the "imported pack shows Unlinked" fix:
+        // most mod manifests declare no Source, so the curator's GitHub/Nexus
+        // link lives only in their mod_sources.json. Publishing must stamp it
+        // into ProfileMod.source so friends installing the pack get the chip.
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mods_path = tmpdir.path().join("mods");
+        let disabled_path = tmpdir.path().join("mods_disabled");
+        let profiles_path = tmpdir.path().join("profiles");
+        std::fs::create_dir_all(&mods_path).unwrap();
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        std::fs::create_dir_all(&profiles_path).unwrap();
+
+        // Two mods on disk, neither with a manifest Source.
+        write_mod(&mods_path, "AutoPath", "AutoPath");
+        write_mod(&mods_path, "NexusMod", "Nexus Mod");
+
+        // Curator has linked both locally: one GitHub, one Nexus.
+        let mut db = crate::mod_sources::ModSourcesDb::default();
+        db.mods.insert(
+            "AutoPath".into(),
+            crate::mod_sources::parse_source_url("github:author/AutoPath").unwrap(),
+        );
+        db.mods.insert(
+            "NexusMod".into(),
+            crate::mod_sources::parse_source_url("nexus:slaythespire2/mods/55").unwrap(),
+        );
+        crate::mod_sources::save_sources(&db, tmpdir.path()).unwrap();
+
+        let profile = Profile {
+            name: "Stable".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![
+                profile_mod("AutoPath", "AutoPath"),
+                profile_mod("Nexus Mod", "NexusMod"),
+            ],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+        };
+        crate::profiles::save_profile(&profile, &profiles_path).unwrap();
+
+        let prepared = load_profile_for_publish_from_paths(
+            "Stable",
+            None,
+            &profiles_path,
+            &mods_path,
+            &disabled_path,
+            tmpdir.path(),
+            None,
+        )
+        .unwrap();
+
+        let by_name = |n: &str| {
+            prepared
+                .mods
+                .iter()
+                .find(|m| m.name == n)
+                .unwrap_or_else(|| panic!("{n} present"))
+        };
+        assert_eq!(
+            by_name("AutoPath").source.as_deref(),
+            Some("github:author/AutoPath"),
+            "GitHub link must be stamped from the curator's sources DB"
+        );
+        assert_eq!(
+            by_name("Nexus Mod").source.as_deref(),
+            Some("nexus:slaythespire2/mods/55"),
+            "Nexus link must be stamped too, not dropped"
+        );
+    }
+
+    #[test]
+    fn publish_preparation_keeps_existing_profile_source_over_db() {
+        // Fill-only: a source already on the saved profile mod (e.g. a prior
+        // share resolved it, or the manifest declared it) must win over the
+        // DB so re-sharing never downgrades a good link.
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mods_path = tmpdir.path().join("mods");
+        let disabled_path = tmpdir.path().join("mods_disabled");
+        let profiles_path = tmpdir.path().join("profiles");
+        std::fs::create_dir_all(&mods_path).unwrap();
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        std::fs::create_dir_all(&profiles_path).unwrap();
+        write_mod(&mods_path, "AutoPath", "AutoPath");
+
+        let mut db = crate::mod_sources::ModSourcesDb::default();
+        db.mods.insert(
+            "AutoPath".into(),
+            crate::mod_sources::parse_source_url("github:wrong/Repo").unwrap(),
+        );
+        crate::mod_sources::save_sources(&db, tmpdir.path()).unwrap();
+
+        let mut pm = profile_mod("AutoPath", "AutoPath");
+        pm.source = Some("github:correct/AutoPath".into());
+        let profile = Profile {
+            name: "Stable".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![pm],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+        };
+        crate::profiles::save_profile(&profile, &profiles_path).unwrap();
+
+        let prepared = load_profile_for_publish_from_paths(
+            "Stable",
+            None,
+            &profiles_path,
+            &mods_path,
+            &disabled_path,
+            tmpdir.path(),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            prepared.mods[0].source.as_deref(),
+            Some("github:correct/AutoPath"),
+            "an existing profile source must not be overwritten by the DB"
+        );
     }
 
     /// Verifies: user lookup -> repo exists -> bundle uploaded via releases

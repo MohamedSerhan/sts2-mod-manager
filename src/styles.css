@@ -2838,7 +2838,24 @@ body {
 }
 .gf-create-wizard-list-row:last-child { border-bottom: 0; }
 .gf-create-wizard-list-row:hover { background: var(--indigo-elev); }
-.gf-create-wizard-list-name { flex: 1; }
+.gf-create-wizard-list-name {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+/* On-disk folder name, shown under the display name only when they differ.
+   Muted + monospace so it reads as a technical disambiguator, not a second
+   title. Truncates rather than wrapping a long Nexus-style folder. */
+.gf-create-wizard-list-folder {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 10.5px;
+  color: var(--ink-mute);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .gf-create-wizard-list-meta {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 11.5px; color: var(--ink-dim);

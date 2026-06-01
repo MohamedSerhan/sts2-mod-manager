@@ -78,6 +78,7 @@ A UX simplification release. The app feels like a launcher first: pick a modpack
 - Sharing a modpack now carries each mod's GitHub or Nexus link to the people who install it, so a shared pack arrives linked instead of unlinked even when the mod's own files don't name a source.
 - You can edit a modpack you published again. Sharing a pack quietly subscribed you to your own copy, which then locked it as if it belonged to someone else; modpacks you published now stay editable — including adding mods to them by pasting a URL or importing a file — while ones you only follow remain protected.
 - Adding a mod that's already active to a modpack with the bulk Edit dialog no longer fails with a "mod not found" error and silently drops the change; the edit now saves and the already-active mod is left as-is.
+- The modpack mod picker now shows each mod's on-disk folder name when it differs from the display name, and you can search by that folder name (or mod id) — so mods that install under an unusual folder are easy to find and tell apart.
 
 ### Security
 

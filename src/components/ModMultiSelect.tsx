@@ -49,13 +49,20 @@ export function ModMultiSelect({ mods, selected, onChange, labels }: ModMultiSel
   const [sort, setSort] = useState<ModMultiSelectSort>('name');
   const [visibleLimit, setVisibleLimit] = useState(PAGE_SIZE);
 
-  // Filtered list — search filter (case-insensitive, by name) then sort.
-  // This is the FULL match set; the render is paged below via `shownMods`.
+  // Filtered list — search filter then sort. Search matches the display
+  // name AND the on-disk folder name / mod id / display override, so a mod
+  // whose folder differs from its manifest name (e.g. folder "stats_the_spire"
+  // shown as "Stats the Spire", or a Nexus "...-979-2-1-..." folder) is still
+  // findable by whatever the user remembers it as. This is the FULL match
+  // set; the render is paged below via `shownMods`.
   const filteredMods = useMemo(() => {
     const lower = search.trim().toLowerCase();
-    const list = lower
-      ? mods.filter((m) => m.name.toLowerCase().includes(lower))
-      : [...mods];
+    const matches = (m: ModInfo) =>
+      m.name.toLowerCase().includes(lower) ||
+      (m.folder_name?.toLowerCase().includes(lower) ?? false) ||
+      (m.mod_id?.toLowerCase().includes(lower) ?? false) ||
+      (m.display_name?.toLowerCase().includes(lower) ?? false);
+    const list = lower ? mods.filter(matches) : [...mods];
     if (sort === 'name') {
       list.sort((a, b) => a.name.localeCompare(b.name));
     } else if (sort === 'size') {
@@ -140,15 +147,28 @@ export function ModMultiSelect({ mods, selected, onChange, labels }: ModMultiSel
         {shownMods.map((mod) => {
           const key = mod.folder_name ?? mod.name;
           const checked = selected.has(key);
+          // Surface the on-disk folder when it differs from the shown name,
+          // so two same-named mods are distinguishable and a mod with an
+          // unusual folder (Nexus "Name-979-2-1-…") can be matched to disk.
+          const shownName = mod.display_name ?? mod.name;
+          const folder = mod.folder_name;
+          const showFolder = !!folder && folder !== shownName;
           return (
             <label key={key} className="gf-create-wizard-list-row">
               <input
                 type="checkbox"
                 checked={checked}
                 onChange={() => toggle(key)}
-                aria-label={mod.name}
+                aria-label={shownName}
               />
-              <span className="gf-create-wizard-list-name">{mod.name}</span>
+              <span className="gf-create-wizard-list-name">
+                {shownName}
+                {showFolder && (
+                  <span className="gf-create-wizard-list-folder" title={folder ?? undefined}>
+                    {folder}
+                  </span>
+                )}
+              </span>
               <span className="gf-create-wizard-list-meta">v{mod.version}</span>
             </label>
           );

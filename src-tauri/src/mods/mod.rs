@@ -28,6 +28,7 @@ use crate::state::AppState;
 // invokes. Re-exports below preserve the
 // `crate::mods::function_name` import surface the rest of the codebase
 // + integration tests rely on.
+pub mod bundle;
 mod install;
 mod scan;
 mod state;

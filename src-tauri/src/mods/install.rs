@@ -133,7 +133,7 @@ pub(super) fn repack_dir_as_zip(src_dir: &Path, dest_zip: &Path) -> Result<()> {
 /// upload id. Nexus filenames look like `MyMod-12345-1234-1599999999.zip`
 /// — we walk backwards stripping `-digits` groups until we find something
 /// that isn't a trailing digit-and-dash run.
-fn strip_nexus_suffix(stem: &str) -> String {
+pub(super) fn strip_nexus_suffix(stem: &str) -> String {
     let bytes = stem.as_bytes();
     let mut cut_pos = stem.len();
 

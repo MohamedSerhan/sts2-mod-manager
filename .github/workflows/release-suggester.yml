@@ -30,11 +30,13 @@ jobs:
         id: decide
         run: |
           BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          HEAD_COUNT=$(node scripts/ci-changes.mjs unreleased-count < CHANGELOG.md)
-          BASE_COUNT=$(git show "$BASE_SHA:CHANGELOG.md" 2>/dev/null | node scripts/ci-changes.mjs unreleased-count || echo 0)
-          echo "base=$BASE_COUNT head=$HEAD_COUNT"
+          BASE_BULLETS=$(git show "$BASE_SHA:CHANGELOG.md" 2>/dev/null | node scripts/ci-changes.mjs unreleased-count || echo 0)
+          BASE_FRAGS=$(git ls-tree -r --name-only "$BASE_SHA" -- changelog.d 2>/dev/null | grep -E 'changelog\.d/(added|changed|fixed|security)-.*\.md$' | wc -l || echo 0)
+          BASE_COUNT=$((BASE_BULLETS + BASE_FRAGS))
+          HEAD_COUNT=$(node scripts/ci-changes.mjs changelog-count)
+          echo "base=$BASE_COUNT (bullets=$BASE_BULLETS frags=$BASE_FRAGS) head=$HEAD_COUNT"
           if [ "$HEAD_COUNT" -gt "$BASE_COUNT" ]; then
-            BUMP=$(node scripts/ci-changes.mjs suggested-bump < CHANGELOG.md)
+            BUMP=$(node scripts/ci-changes.mjs combined-bump)
             echo "worthy=true" >> "$GITHUB_OUTPUT"
             echo "bump=${BUMP:-minor}" >> "$GITHUB_OUTPUT"
           else

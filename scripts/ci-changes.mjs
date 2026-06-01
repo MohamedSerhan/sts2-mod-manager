@@ -1,7 +1,8 @@
 // scripts/ci-changes.mjs
 // Pure helpers + thin CLI for the change-aware CI gate (.github/workflows/ci.yml).
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { listFragments, count as fragmentCount, suggestedBump as fragmentBump } from './changelog-fragments.mjs';
 
 // Anything that affects the built app: frontend + Rust source, bundled assets,
 // and the root build/test config (Vite/TS/Tauri/manifests). NOT qa/ (test
@@ -69,6 +70,19 @@ export function suggestedBump(changelogText) {
   return 'patch';
 }
 
+/** Combined changelog signal: legacy [Unreleased] bullets + changelog.d/ fragments. */
+export function changelogCount(changelogText, fragments) {
+  return unreleasedBulletCount(changelogText) + fragmentCount(fragments);
+}
+
+/** Combined bump: legacy suggestedBump (richer, handles major) takes precedence;
+ *  falls back to fragment bump if legacy returns null. */
+export function combinedBump(changelogText, fragments) {
+  const legacy = suggestedBump(changelogText);
+  if (legacy !== null) return legacy;
+  return fragmentBump(fragments) || null;
+}
+
 function readStdin() { try { return readFileSync(0, 'utf-8'); } catch { return ''; } }
 
 const isMain = fileURLToPath(import.meta.url) === process.argv[1];
@@ -86,8 +100,17 @@ if (isMain) {
   } else if (cmd === 'suggested-bump') {
     const b = suggestedBump(readStdin());
     if (b) console.log(b);
+  } else if (cmd === 'changelog-count') {
+    const text = existsSync('CHANGELOG.md') ? readFileSync('CHANGELOG.md', 'utf-8') : '';
+    const frags = listFragments();
+    console.log(changelogCount(text, frags));
+  } else if (cmd === 'combined-bump') {
+    const text = existsSync('CHANGELOG.md') ? readFileSync('CHANGELOG.md', 'utf-8') : '';
+    const frags = listFragments();
+    const b = combinedBump(text, frags);
+    if (b) console.log(b);
   } else {
-    console.error('usage: ci-changes.mjs classify|unreleased-count|suggested-bump');
+    console.error('usage: ci-changes.mjs classify|unreleased-count|suggested-bump|changelog-count|combined-bump');
     process.exit(2);
   }
 }

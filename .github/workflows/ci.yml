@@ -228,13 +228,16 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
-      - name: Require a new [Unreleased] CHANGELOG entry
+      - name: Require a new changelog entry (fragment or [Unreleased] bullet)
         run: |
-          BASE_COUNT=$(git show "${{ github.event.pull_request.base.sha }}:CHANGELOG.md" 2>/dev/null | node scripts/ci-changes.mjs unreleased-count || echo 0)
-          HEAD_COUNT=$(node scripts/ci-changes.mjs unreleased-count < CHANGELOG.md)
-          echo "[Unreleased] bullets — base: $BASE_COUNT, head: $HEAD_COUNT"
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          BASE_BULLETS=$(git show "$BASE_SHA:CHANGELOG.md" 2>/dev/null | node scripts/ci-changes.mjs unreleased-count || echo 0)
+          BASE_FRAGS=$(git ls-tree -r --name-only "$BASE_SHA" -- changelog.d 2>/dev/null | grep -E 'changelog\.d/(added|changed|fixed|security)-.*\.md$' | wc -l || echo 0)
+          BASE_COUNT=$((BASE_BULLETS + BASE_FRAGS))
+          HEAD_COUNT=$(node scripts/ci-changes.mjs changelog-count)
+          echo "changelog signal — base: $BASE_COUNT (bullets=$BASE_BULLETS frags=$BASE_FRAGS), head: $HEAD_COUNT"
           if [ "$HEAD_COUNT" -le "$BASE_COUNT" ]; then
-            echo "::error::App code changed but no new CHANGELOG [Unreleased] bullet was added. Add a player-language entry, or label the PR 'no-changelog' for internal-only changes."
+            echo "::error::App code changed but no new changelog entry was added. Add a changelog.d/<category>-<slug>.md fragment, or an [Unreleased] CHANGELOG bullet, in player-language — or label the PR 'no-changelog' for internal-only changes."
             exit 1
           fi
 

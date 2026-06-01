@@ -114,21 +114,69 @@ pub struct ModInfo {
     /// User-facing description override from mod_sources.json.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_description: Option<String>,
+    /// The folder name of the bundle container this mod belongs to, if any.
+    /// Set during scan when the mod is a member of a sidecar bundle container.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle_id: Option<String>,
 }
 
-/// One dependency entry in a mod manifest.
+/// Metadata about an installed bundle container.
 ///
-/// The ecosystem ships two formats for the `dependencies` array:
-///   - Old / simple: `["DepName", "OtherDep"]`
-///   - New / structured (BAKAOLC, RitsuLib-based mods): `[{"id": "DepName",
-///     "min_version": "1.2.3"}]`
-///
-/// `#[serde(untagged)]` makes serde try each variant in order and pick the
-/// first that matches. Without this, mixing the two formats made
-/// serde_json fail the entire manifest parse, which dropped the mod into
-/// the dll-only-fallback path with name "<repo-slug>" and version
-/// "unknown" — which is exactly the broken state the user kept hitting
-/// for `STS2-ShowPlayerHandCards`.
+/// Returned by `get_bundles` — one entry per sidecar-tagged container folder
+/// found under the active mods directory.
+#[derive(serde::Serialize)]
+pub struct BundleInfo {
+    /// The container folder name on disk (stable identifier).
+    pub bundle_id: String,
+    /// Human-readable name from the sidecar (e.g. "Alice Defect Visual Pack").
+    pub display_name: String,
+    /// Nexus Mods URL from the sidecar, if present.
+    pub nexus_url: Option<String>,
+    /// Installed version from the sidecar, if present.
+    pub version: Option<String>,
+    /// Number of immediate subdirectory members under the container.
+    pub member_count: usize,
+}
+
+/// Return all bundle containers (folders with a `.sts2mm-bundle.json` sidecar)
+/// currently installed under the active mods directory, one `BundleInfo` per container.
+#[tauri::command]
+pub fn get_bundles(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<BundleInfo>, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let mods_path = match s.mods_path.as_ref() {
+        Some(p) => p.clone(),
+        None => return Ok(Vec::new()),
+    };
+    drop(s);
+
+    let mut out = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&mods_path) {
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() && crate::mods::bundle::is_bundle_container(&p) {
+                if let Some(sidecar) = crate::mods::bundle::read_sidecar(&p) {
+                    let member_count = std::fs::read_dir(&p)
+                        .map(|d| d.flatten().filter(|x| x.path().is_dir()).count())
+                        .unwrap_or(0);
+                    out.push(BundleInfo {
+                        bundle_id: p
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string(),
+                        display_name: sidecar.display_name,
+                        nexus_url: sidecar.nexus_url,
+                        version: sidecar.installed_version,
+                        member_count,
+                    });
+                }
+            }
+        }
+    }
+    Ok(out)
+}
 
 // ── Local Mod Version Cache ────────────────────────────────────────────────
 
@@ -1326,6 +1374,7 @@ mod profile_manifest_refresh_tests {
             tags: vec![],
             display_name: None,
             display_description: None,
+            bundle_id: None,
         };
 
         let mod_dir = mods_path.join("BadManifest");

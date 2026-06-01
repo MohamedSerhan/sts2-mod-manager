@@ -967,6 +967,7 @@ mod profile_membership_tests {
             tags: vec![],
             display_name: None,
             display_description: None,
+            bundle_id: None,
         }];
 
         write_profile_load_order_to_settings_file(&profile, &settings_path, &pinned).unwrap();

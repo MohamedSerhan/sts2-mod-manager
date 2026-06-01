@@ -813,6 +813,7 @@ pub async fn download_and_install_github_mod(
             tags: vec![],
             display_name: None,
             display_description: None,
+            bundle_id: None,
         })
     } else {
         Err(AppError::Other(format!(
@@ -974,6 +975,7 @@ pub async fn download_url_mod(
             tags: vec![],
             display_name: None,
             display_description: None,
+            bundle_id: None,
         })
     } else {
         Err(format!("Unsupported file type: {}", file_name))

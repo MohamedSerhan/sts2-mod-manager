@@ -446,6 +446,7 @@ pub(crate) fn parse_manifest(manifest_path: &Path, base_dir: &Path, enabled: boo
         tags: vec![],
         display_name: None,
         display_description: None,
+        bundle_id: None,
     })
 }
 
@@ -504,6 +505,7 @@ pub(super) fn pck_only_mod(pck_path: &Path, base_dir: &Path, enabled: bool) -> M
         tags: vec![],
         display_name: None,
         display_description: None,
+        bundle_id: None,
     }
 }
 
@@ -567,6 +569,7 @@ pub(super) fn dll_only_mod(dll_path: &Path, base_dir: &Path, enabled: bool) -> M
         tags: vec![],
         display_name: None,
         display_description: None,
+        bundle_id: None,
     }
 }
 
@@ -801,6 +804,36 @@ pub(super) fn scan_mods_inner(dir: &Path, enabled: bool) -> Vec<ModInfo> {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
+                // A sidecar-tagged bundle container is ALWAYS a multi-mod
+                // folder: descend into its sub-directories immediately,
+                // skipping the try_load_mod_from attempt on the container
+                // itself (which would otherwise pick up the .sts2mm-bundle.json
+                // sidecar as a spurious pseudo-mod).
+                if crate::mods::bundle::is_bundle_container(&path) {
+                    let bundle_name =
+                        path.file_name().map(|n| n.to_string_lossy().to_string());
+                    let start = mods.len();
+                    if let Ok(sub_entries) = fs::read_dir(&path) {
+                        for sub_entry in sub_entries.flatten() {
+                            let sub_path = sub_entry.path();
+                            if sub_path.is_dir() {
+                                try_load_mod_from(
+                                    &sub_path,
+                                    dir,
+                                    enabled,
+                                    &mut found_names,
+                                    &mut mods,
+                                );
+                            }
+                        }
+                    }
+                    if let Some(ref bid) = bundle_name {
+                        for m in mods.iter_mut().skip(start) {
+                            m.bundle_id = Some(bid.clone());
+                        }
+                    }
+                    continue;
+                }
                 // First try at top level
                 if try_load_mod_from(&path, dir, enabled, &mut found_names, &mut mods) {
                     continue;
@@ -816,6 +849,7 @@ pub(super) fn scan_mods_inner(dir: &Path, enabled: bool) -> Vec<ModInfo> {
                     // files but wraps several sub-mod directories (e.g.
                     // AliceDefectVisualPack/ holding four separate mods).
                     // Try each immediate subdirectory as an independent mod.
+                    // (Non-sidecar containers get no bundle_id tagging.)
                     if let Ok(sub_entries) = fs::read_dir(&path) {
                         for sub_entry in sub_entries.flatten() {
                             let sub_path = sub_entry.path();
@@ -1018,6 +1052,7 @@ mod dedup_identity_tests {
             tags: vec![],
             display_name: None,
             display_description: None,
+            bundle_id: None,
         }
     }
 
@@ -1241,5 +1276,44 @@ mod pck_only_scan_tests {
         assert_eq!(info.name, "EmptyMod");
         assert_eq!(info.version, "unknown");
         assert!(!info.files.is_empty());
+    }
+
+    /// A container with a sidecar must tag every member's bundle_id with
+    /// the container folder name.
+    #[test]
+    fn sidecar_container_tags_members_with_bundle_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mods = tmp.path();
+        write_bytes(&mods.join("Pack").join("ModA").join("ModA.dll"), b"");
+        write_bytes(&mods.join("Pack").join("ModB").join("ModB.dll"), b"");
+        crate::mods::bundle::write_sidecar(
+            &mods.join("Pack"),
+            &crate::mods::bundle::BundleSidecar {
+                display_name: "Pretty Pack".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let scanned = scan_mods_inner(mods, true);
+        assert!(!scanned.is_empty());
+        assert!(
+            scanned.iter().all(|m| m.bundle_id.as_deref() == Some("Pack")),
+            "every member tagged bundle_id=Pack: {:?}",
+            scanned
+                .iter()
+                .map(|m| (&m.name, &m.bundle_id))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// A container WITHOUT a sidecar must leave all members' bundle_id as None.
+    #[test]
+    fn container_without_sidecar_has_no_bundle_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mods = tmp.path();
+        write_bytes(&mods.join("Pack").join("ModA").join("ModA.dll"), b"");
+        write_bytes(&mods.join("Pack").join("ModB").join("ModB.dll"), b"");
+        let scanned = scan_mods_inner(mods, true);
+        assert!(scanned.iter().all(|m| m.bundle_id.is_none()));
     }
 }

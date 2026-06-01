@@ -601,6 +601,7 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
                 tags: vec![],
                 display_name: None,
                 display_description: None,
+                bundle_id: None,
             })
         }
     }
@@ -1430,6 +1431,7 @@ mod config_snapshot_tests {
             tags: vec![],
             display_name: None,
             display_description: None,
+            bundle_id: None,
         };
         let new_folder = mods_path.join("MyMod");
         fs::create_dir_all(&new_folder).unwrap();

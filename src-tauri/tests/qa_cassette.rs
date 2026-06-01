@@ -59,6 +59,7 @@ fn make_mod(name: &str, version: &str, folder: &str) -> ModInfo {
         display_name: None,
         display_description: None,
         tags: Vec::new(),
+        bundle_id: None,
     }
 }
 

@@ -432,6 +432,14 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
     let has_clean_single_top_dir =
         all_top_dirs.len() == 1 && all_entries.iter().all(|n| n.contains('/'));
 
+    // A "bundle" is an archive where ≥2 distinct top-level member folders
+    // each contain files and every file is inside one of those folders (no
+    // root-level loose files). Such archives get a named container folder
+    // derived from the archive stem rather than the first manifest id.
+    let is_bundle = all_top_dirs.len() >= 2
+        && !all_entries.is_empty()
+        && all_entries.iter().all(|n| n.contains('/'));
+
     let mut extracted_files = Vec::new();
     let mut manifest: Option<ModInfo> = None;
 
@@ -440,6 +448,15 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
     // URL. Sanitize once before it gets joined into a destination path so a
     // malicious manifest with `Name: "../.."` can't redirect extraction.
     let wrap_folder_name = sanitize_path_segment(&wrap_folder_name);
+
+    // For multi-member bundle archives, override the wrap folder name with
+    // the archive-stem-derived container name (sanitized inside
+    // bundle_container_name). For everything else, keep wrap_folder_name.
+    let container_name = if is_bundle {
+        super::bundle::bundle_container_name(zip_path)
+    } else {
+        wrap_folder_name.clone()
+    };
 
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i)?;
@@ -507,7 +524,9 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
         } else if all_entries.len() == 1 {
             name.clone()
         } else {
-            format!("{}/{}", wrap_folder_name, name)
+            // For bundles: container_name = bundle_container_name(zip_path)
+            // For everything else: container_name = wrap_folder_name
+            format!("{}/{}", container_name, name)
         };
 
         let dest_path = mods_path.join(&rel_path);
@@ -538,6 +557,16 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
         if ext == "json" && manifest.is_none() {
             manifest = parse_manifest(&dest_path, mods_path, true);
         }
+    }
+
+    // For bundle archives, write a minimal sidecar into the container folder
+    // so scanners and the UI can identify it as a bundle container.
+    if is_bundle {
+        let dir = mods_path.join(&container_name);
+        let _ = super::bundle::write_sidecar(&dir, &super::bundle::BundleSidecar {
+            display_name: container_name.clone(),
+            ..Default::default()
+        });
     }
 
     let size_bytes = calculate_mod_size(mods_path, &extracted_files);
@@ -1034,6 +1063,45 @@ mod archive_dispatch_tests {
             fs::read_dir(mods_tmp.path()).unwrap().next().is_none(),
             "failed deep nested-archive install should leave no extracted wrapper folders behind"
         );
+    }
+
+    #[test]
+    fn multi_member_archive_becomes_one_bundle_container_with_sidecar() {
+        use crate::mods::bundle::{is_bundle_container, read_sidecar};
+        let tmp = tempfile::tempdir().unwrap();
+        let zip = tmp.path().join("Alice Defect Visual Pack-979-2-1.zip");
+        write_zip_file(&zip, vec![
+            ("AliceDefectSkin/AliceDefectSkin.json",
+                br#"{"id":"AliceDefectSkin","name":"Alice Defect Skin","version":"0.1.31"}"#.to_vec()),
+            ("AliceDefectSkin/AliceDefectSkin.dll", b"dll".to_vec()),
+            ("AliceDefectVoiceBridge/mod_manifest.json",
+                br#"{"id":"AliceDefectVoiceBridge","name":"Alice Defect Voice Bridge","version":"1.0.4"}"#.to_vec()),
+            ("AliceDefectVoiceBridge/AliceDefectVoiceBridge.dll", b"dll".to_vec()),
+        ]);
+        let mods = tempfile::tempdir().unwrap();
+        install_mod_from_archive(&zip, mods.path()).expect("multi-member installs");
+        let tops: Vec<_> = fs::read_dir(mods.path()).unwrap().flatten()
+            .filter(|e| e.path().is_dir()).map(|e| e.file_name().to_string_lossy().to_string()).collect();
+        assert_eq!(tops.len(), 1, "one container, got {tops:?}");
+        let container = mods.path().join(&tops[0]);
+        assert!(is_bundle_container(&container), "container has a sidecar");
+        assert!(container.join("AliceDefectSkin").is_dir());
+        assert!(container.join("AliceDefectVoiceBridge").is_dir());
+        let _ = read_sidecar(&container).expect("sidecar parses");
+    }
+
+    #[test]
+    fn single_member_archive_is_not_a_bundle() {
+        use crate::mods::bundle::is_bundle_container;
+        let tmp = tempfile::tempdir().unwrap();
+        let zip = tmp.path().join("Solo.zip");
+        write_zip_file(&zip, vec![
+            ("Solo/Solo.json", br#"{"id":"Solo","name":"Solo","version":"1.0.0"}"#.to_vec()),
+            ("Solo/Solo.dll", b"dll".to_vec()),
+        ]);
+        let mods = tempfile::tempdir().unwrap();
+        install_mod_from_archive(&zip, mods.path()).expect("single installs");
+        assert!(!is_bundle_container(&mods.path().join("Solo")));
     }
 
     #[test]

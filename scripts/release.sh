@@ -296,9 +296,13 @@ fs.writeFileSync(f, JSON.stringify(conf, null, 2) + '\n');
 # Two cases:
 #   LEGACY_HAS_BULLETS=1  (1.7.0 transition): the existing bullets in
 #     [Unreleased] move under the new version heading. If fragments also
-#     exist, their assembled block is appended after the legacy body.
+#     exist, their assembled block is appended AFTER the legacy body.
 #   LEGACY_HAS_BULLETS=0  (normal post-1.7.0 releases): the new version
 #     section body is solely the assembled fragment block.
+#
+# Both cases replace the entire [Unreleased] section (everything up to the
+# next ## [ heading, or end-of-file) so that we can rebuild the body in the
+# correct order: legacyBody (if any) then assembled fragments (if any).
 #
 # The thin [Unreleased] placeholder that replaces the working section keeps
 # the heading (the frontend parser keys on it) but has no skeleton headings —
@@ -330,22 +334,50 @@ if (!/^## \[Unreleased\]/m.test(txt)) {
   process.exit(1);
 }
 
+// Match the entire [Unreleased] section.
+// Two alternatives handle both cases:
+//   1. There IS a following ## [ heading  → stop just before \n## [
+//   2. [Unreleased] is the last section   → match everything to end-of-string
+// Using \n## \[ (not ^## \[ with multiline) means $ on the second alternative
+// can match end-of-string (m flag doesn't apply to $-in-alternation here
+// because we're not anchoring with ^/$ — we match the literal \n## \[).
+const sectionRe =
+  /^## \[Unreleased\][\s\S]*?(?=\n## \[)|^## \[Unreleased\][\s\S]*/m;
+
+// Extract the legacy body from the captured section content (legacyHasBullets
+// case only): strip the heading line, the trailing --- separator, and
+// surrounding blank lines so we get the raw bullet text.
+let legacyBody = '';
 if (legacyHasBullets) {
-  // Replace ONLY the ## [Unreleased] heading line; the legacy bullets that
-  // follow it stay put and fall under the new version heading. If fragments
-  // also exist, append their assembled block after those legacy bullets.
-  const suffix = assembled ? '\n' + assembled + '\n' : '';
-  txt = txt.replace(/^## \[Unreleased\][^\n]*\n/m, thinUnreleased + '\n' + newHeading + '\n' + suffix);
-} else {
-  // No legacy bullets — the new section body is solely the assembled
-  // fragments. Replace the entire [Unreleased] section (everything up to
-  // but not including the next ## [ heading) with the thin placeholder
-  // followed by the new version section.
-  const sectionBody = assembled ? assembled + '\n' : '';
-  txt = txt.replace(
-    /^## \[Unreleased\][\s\S]*?(?=^## \[)/m,
-    thinUnreleased + '\n' + newHeading + '\n\n' + sectionBody
-  );
+  const m = txt.match(sectionRe);
+  if (m) {
+    legacyBody = m[0]
+      .replace(/^## \[Unreleased\][^\n]*\n/, '')  // drop the heading line
+      .replace(/\n---\s*$/, '')                    // drop trailing ---
+      .replace(/^\n+/, '')                         // drop leading blank lines
+      .replace(/\n+$/, '');                        // drop trailing blank lines
+  }
+}
+
+// Build the new version section body:
+//   legacyBody (if any) first, then assembled fragments (if any).
+//   Parts are joined with a blank line; the whole block ends with one newline
+//   so the replacement string can append \n\n before the next ## [ heading.
+const bodyParts = [legacyBody, assembled].filter(Boolean);
+const sectionBody = bodyParts.length ? bodyParts.join('\n\n') + '\n' : '';
+
+txt = txt.replace(
+  sectionRe,
+  thinUnreleased + '\n' + newHeading + '\n\n' + sectionBody
+);
+
+// Guard: verify the new version heading was actually written.  If the
+// [Unreleased] section had no following ## [ heading AND no content to
+// match (edge-case empty file), the replace might have been a no-op.
+const escapedVer = process.env.NEW_VERSION.replace(/[.*+?^\${}()|[\]\\\\]/g, '\\\\$&');
+if (!new RegExp('^## \\\\[' + escapedVer + '\\\\]', 'm').test(txt)) {
+  process.stderr.write('Promotion failed: new version section was not created (no prior \"## [\" heading to anchor on?).\n');
+  process.exit(1);
 }
 
 fs.writeFileSync(clPath, txt);

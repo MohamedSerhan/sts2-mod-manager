@@ -1486,6 +1486,7 @@ mod profile_manifest_refresh_tests {
                 enabled: true,
                 bundle_url: None,
                 bundle_sha256: None,
+                bundle_members: vec![],
             }],
             created_at: now,
             updated_at: now,

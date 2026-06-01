@@ -63,6 +63,10 @@ export interface ProfileMod {
   bundle_url: string | null;
   folder_name: string | null;
   mod_id: string | null;
+  /** Member-mod display names when this entry is a bundle container.
+   *  Non-empty only when the installed mod had bundle_members set.
+   *  Absent / empty for normal mods and legacy manifests. */
+  bundle_members?: string[];
 }
 
 export interface ProfileModOrderKey {

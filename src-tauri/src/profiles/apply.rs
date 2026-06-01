@@ -231,6 +231,7 @@ fn snapshot_current_inner(
                     None
                 }
             }),
+            bundle_members: m.bundle_members.clone(),
         }
     };
 
@@ -902,6 +903,7 @@ mod snapshot_metadata_tests {
                     enabled: true,
                     bundle_url: Some("https://example.test/bundles/BaseLib.zip".into()),
                     bundle_sha256: Some("known-sha".into()),
+                    bundle_members: vec![],
                 }],
                 created_at: now,
                 updated_at: now,
@@ -994,6 +996,7 @@ mod pinned_download_tests {
             enabled: true,
             bundle_url: Some("https://example.test/UnifiedSavePath.zip".into()),
             bundle_sha256: None,
+            bundle_members: vec![],
         }
     }
 
@@ -1177,6 +1180,7 @@ mod modpack_flow_tests {
                 enabled,
                 bundle_url: Some(format!("{}{}", server.uri(), path_name)),
                 bundle_sha256: Some(sha256_hex(&zip)),
+                bundle_members: vec![],
             },
         }
     }

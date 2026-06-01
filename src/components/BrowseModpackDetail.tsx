@@ -160,6 +160,11 @@ export function BrowseModpackDetail({ card, onClose, onInstalled }: Props) {
               {profile.mods.map((m) => (
                 <div key={m.name} className="gf-mod-row">
                   <span>{m.name}</span>
+                  {(m.bundle_members?.length ?? 0) > 0 && (
+                    <span className="gf-pill gf-pill-github">
+                      {t('bundle.memberCount', { count: m.bundle_members!.length })}
+                    </span>
+                  )}
                   <span className="gf-dim">{m.version}</span>
                 </div>
               ))}

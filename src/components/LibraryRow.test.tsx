@@ -1014,4 +1014,30 @@ describe('<LibraryRow> bundle_members', () => {
     // Delete button is present.
     expect(screen.getByRole('button', { name: /^Remove BaseLib$/i })).toBeInTheDocument();
   });
+
+  it('shows the display_name override on a bundle row (Edit-sources rename)', () => {
+    // Locking the rename behaviour: when the user has set a display_name via
+    // Edit Sources on a bundle row, that name must appear — not the raw
+    // manifest name stored in `row.name` / `mod.name`. This is the regression
+    // target for bundle rename via Edit Sources.
+    renderRow({
+      row: baseMod({
+        name: 'PackContainer',
+        display_name: 'My Custom Pack Name',
+        installed_enabled: true,
+      }),
+      mod: baseModInfo({
+        name: 'PackContainer',
+        display_name: 'My Custom Pack Name',
+        bundle_members: ['CoreMod', 'ArtMod'],
+      }),
+    });
+    // The custom name must render prominently.
+    expect(screen.getByText('My Custom Pack Name')).toBeInTheDocument();
+    // The raw manifest name must also be visible (as subtitle per LibraryRow
+    // logic when display_name is set and differs from name).
+    expect(screen.getByText('PackContainer')).toBeInTheDocument();
+    // The bundle badge must still show.
+    expect(screen.getByText(/2 mods/i)).toBeInTheDocument();
+  });
 });

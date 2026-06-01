@@ -526,6 +526,7 @@ mod profile_membership_tests {
             enabled,
             bundle_url: Some(format!("https://example.test/{folder}.zip")),
             bundle_sha256: Some(format!("sha-{folder}")),
+            bundle_members: vec![],
         }
     }
 
@@ -555,6 +556,7 @@ mod profile_membership_tests {
             enabled: true,
             bundle_url: None,
             bundle_sha256: None,
+            bundle_members: vec![],
         });
         save_profile(&alpha, &profiles_path).unwrap();
         save_profile(&empty_profile("Beta"), &profiles_path).unwrap();
@@ -669,6 +671,7 @@ mod profile_membership_tests {
             enabled: true,
             bundle_url: None,
             bundle_sha256: None,
+            bundle_members: vec![],
         });
         save_profile(&profile, &profiles_path).unwrap();
 
@@ -719,6 +722,7 @@ mod profile_membership_tests {
             enabled: true,
             bundle_url: None,
             bundle_sha256: None,
+            bundle_members: vec![],
         });
         save_profile(&profile, &profiles_path).unwrap();
 
@@ -785,6 +789,7 @@ mod profile_membership_tests {
                 enabled: true,
                 bundle_url: None,
                 bundle_sha256: None,
+                bundle_members: vec![],
             });
         }
         save_profile(&profile, &profiles_path).unwrap();

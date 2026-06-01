@@ -295,6 +295,7 @@ pub(super) fn profile_mod_from_installed(installed: &ModInfo) -> ProfileMod {
         enabled: installed.enabled,
         bundle_url: None,
         bundle_sha256: None,
+        bundle_members: installed.bundle_members.clone(),
     }
 }
 
@@ -477,6 +478,7 @@ mod profile_schema_compat_tests {
             enabled: true,
             bundle_url: None,
             bundle_sha256: None,
+            bundle_members: vec![],
         };
         let json = serde_json::to_string(&pm).unwrap();
         assert!(
@@ -501,6 +503,7 @@ mod profile_schema_compat_tests {
                 "https://github.com/x/y/releases/download/bundles/a_v1.0.0.zip".into(),
             ),
             bundle_sha256: Some("deadbeef".into()),
+            bundle_members: vec![],
         };
         let json = serde_json::to_string(&pm).unwrap();
         let round: ProfileMod = serde_json::from_str(&json).unwrap();
@@ -529,6 +532,7 @@ mod persist_profile_mod_sources_tests {
             enabled: true,
             bundle_url: None,
             bundle_sha256: None,
+            bundle_members: vec![],
         }
     }
 

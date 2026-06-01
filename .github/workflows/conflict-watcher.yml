@@ -63,6 +63,6 @@ jobs:
               echo "  already routed; waiting on the bot"
               continue
             fi
-            gh pr comment "$PR" --repo "$REPO" --body "$(printf '%s\n%s\n' "$MARKER" "@claude This PR conflicts with \`main\` and cannot be merged. Merge \`origin/main\` into this branch and resolve the conflict(s) — for CHANGELOG.md, keep ALL \`[Unreleased]\` bullets from both sides (drop none) — then push. Conflict-resolution only; change nothing else.")"
+            gh pr comment "$PR" --repo "$REPO" --body "$(printf '%s\n%s\n' "$MARKER" "@claude This PR conflicts with \`main\` and cannot be merged. Merge \`origin/main\` into this branch, resolve the conflict(s), and push. Conflict-resolution only; change nothing else.")"
             echo "  routed to the bot"
           done <<< "$PRS"

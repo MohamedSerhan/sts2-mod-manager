@@ -25,9 +25,9 @@ security-99-token-rotation.md
 
 ## File body
 
-The body must be **one player-facing sentence** (no leading `- `; the
-assembler adds it). Write for players — describe what they see or do, not how
-the code works.
+The body must be **one player-facing sentence**. A leading `- ` is optional —
+the assembler adds one if it's absent, so write it either way. Write for
+players — describe what they see or do, not how the code works.
 
 ```
 Fixed an issue where mods with duplicate display names could disappear from
@@ -47,7 +47,7 @@ the library after a sync.
 ## Release workflow
 
 `scripts/release.sh` calls `node scripts/changelog-fragments.mjs assemble`
-to collect the bullets, appends them to the new version section in
+to collect the bullets, assembles them into the new version section in
 `CHANGELOG.md`, resets `[Unreleased]` to a thin placeholder, and then
 `git rm`s the consumed fragment files.
 

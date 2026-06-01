@@ -337,10 +337,9 @@ if (!/^## \[Unreleased\]/m.test(txt)) {
 // Match the entire [Unreleased] section.
 // Two alternatives handle both cases:
 //   1. There IS a following ## [ heading  → stop just before \n## [
-//   2. [Unreleased] is the last section   → match everything to end-of-string
-// Using \n## \[ (not ^## \[ with multiline) means $ on the second alternative
-// can match end-of-string (m flag doesn't apply to $-in-alternation here
-// because we're not anchoring with ^/$ — we match the literal \n## \[).
+//   2. [Unreleased] is the last section   → [\s\S]* greedily runs to end-of-string
+// The lookahead uses a literal \n## \[ (rather than ^## \[ with /m) to pin the
+// boundary to a newline-preceded heading unambiguously.
 const sectionRe =
   /^## \[Unreleased\][\s\S]*?(?=\n## \[)|^## \[Unreleased\][\s\S]*/m;
 
@@ -371,9 +370,9 @@ txt = txt.replace(
   thinUnreleased + '\n' + newHeading + '\n\n' + sectionBody
 );
 
-// Guard: verify the new version heading was actually written.  If the
-// [Unreleased] section had no following ## [ heading AND no content to
-// match (edge-case empty file), the replace might have been a no-op.
+// Paranoia check: the earlier guard ensures [Unreleased] is present, so the
+// replace above should always land. Verify the new version heading actually
+// made it into the text before we overwrite CHANGELOG.md — fail loud, not silent.
 const escapedVer = process.env.NEW_VERSION.replace(/[.*+?^\${}()|[\]\\\\]/g, '\\\\$&');
 if (!new RegExp('^## \\\\[' + escapedVer + '\\\\]', 'm').test(txt)) {
   process.stderr.write('Promotion failed: new version section was not created (no prior \"## [\" heading to anchor on?).\n');

@@ -64,24 +64,46 @@ UNRELEASED_CONTENT=$(awk '
   in_block { print }
 ' CHANGELOG.md)
 
-if ! echo "$UNRELEASED_CONTENT" | grep -qE '^[[:space:]]*[-*][[:space:]]+\S'; then
-  echo "Error: CHANGELOG.md [Unreleased] section has no bullet entries." >&2
-  echo "Add at least one bullet under ### Added / ### Changed / ### Fixed / ### Security before releasing." >&2
+# Check whether the legacy [Unreleased] body has any bullets.
+LEGACY_HAS_BULLETS=0
+if echo "$UNRELEASED_CONTENT" | grep -qE '^[[:space:]]*[-*][[:space:]]+\S'; then
+  LEGACY_HAS_BULLETS=1
+fi
+
+# Count changelog.d/ fragments (excludes README.md and .gitkeep).
+FRAGMENT_COUNT="$(node scripts/changelog-fragments.mjs count)"
+
+# Require at least one source of changelog content before releasing.
+if [[ "$LEGACY_HAS_BULLETS" -eq 0 && "$FRAGMENT_COUNT" -eq 0 ]]; then
+  echo "Error: no changelog content — add a fragment under changelog.d/ (or [Unreleased] bullets)." >&2
+  echo "  • For post-release changes: create changelog.d/<category>-<slug>.md (see changelog.d/README.md)" >&2
+  echo "  • For this release only: add at least one bullet under ### Added / ### Changed / ### Fixed / ### Security" >&2
   exit 1
 fi
 
 # --- Dev-speak lint ---
 #
-# The changelog is for PLAYERS, not developers. Block release if the
-# Unreleased section contains obvious dev-speak (file paths, refactor
-# vocabulary, internal type names). The patterns below catch the most
-# common ways internal-sounding language sneaks in. See the "Writing
-# rules" section at the top of CHANGELOG.md for the full guidance.
+# The changelog is for PLAYERS, not developers. Block release if either
+# the fragment files or the legacy [Unreleased] body contains obvious
+# dev-speak (file paths, refactor vocabulary, internal type names).
 #
 # False positive? Either rewrite the bullet for a player (preferred —
 # it almost always reads better), or delete the bullet entirely if
 # the change isn't user-visible.
 
+# Lint changelog.d/ fragments via the module (single source of truth).
+if ! node scripts/changelog-fragments.mjs lint 2>/tmp/fragment_lint_out; then
+  echo "Error: changelog.d/ fragment(s) contain dev-speak." >&2
+  echo >&2
+  sed 's/^/  /' /tmp/fragment_lint_out >&2
+  echo >&2
+  echo "Rewrite for players. Describe what they see or do, not how the code works." >&2
+  echo "See changelog.d/README.md for the player-language rules." >&2
+  exit 1
+fi
+
+# Lint the legacy [Unreleased] body (guards the 1.7.0 transition notes and
+# any hand-edited bullets that exist alongside fragments).
 DEV_PATH_RE='`(src/|src-tauri/|qa/|tests/|scripts/|node_modules/|target/)'
 DEV_WORDS_RE='\b(refactor(ed|ing|s)?|integration test|unit test|harness|WebDriver|tauri-driver|msedgedriver|AppContext|IPC|Tauri command|cargo|serde|reqwest|tsx?|\.rs[^a-z]|\.tsx?[^a-z])\b'
 DEV_TYPES_RE='`(parse_manifest|lookup_entry|auditByKey|install_mod_from_zip|scan_mods|RawManifest|ModInfo|ModSourceEntry|qa_cassette)`'
@@ -269,22 +291,69 @@ fs.writeFileSync(f, JSON.stringify(conf, null, 2) + '\n');
 # --- Promote [Unreleased] → [vX.Y.Z] in CHANGELOG.md ---
 #
 # Done via node so we can safely rewrite the file with the new heading and
-# insert a fresh empty [Unreleased] section above it.
+# insert the thin [Unreleased] placeholder above it.
+#
+# Two cases:
+#   LEGACY_HAS_BULLETS=1  (1.7.0 transition): the existing bullets in
+#     [Unreleased] move under the new version heading. If fragments also
+#     exist, their assembled block is appended after the legacy body.
+#   LEGACY_HAS_BULLETS=0  (normal post-1.7.0 releases): the new version
+#     section body is solely the assembled fragment block.
+#
+# The thin [Unreleased] placeholder that replaces the working section keeps
+# the heading (the frontend parser keys on it) but has no skeleton headings —
+# just a note pointing contributors to changelog.d/.
 
 TODAY=$(date +%Y-%m-%d)
+ASSEMBLED="$(node scripts/changelog-fragments.mjs assemble)"
+
+# Pass the assembled block and control flags as env vars so the inline node
+# script receives them without fragile shell-into-JS string escaping.
+ASSEMBLED_FRAGS="$ASSEMBLED" \
+LEGACY_HAS_BULLETS_ENV="${LEGACY_HAS_BULLETS}" \
+NEW_VERSION="${NEW}" \
+RELEASE_DATE="${TODAY}" \
 node -e "
 const fs = require('fs');
-const path = 'CHANGELOG.md';
-let txt = fs.readFileSync(path, 'utf8');
-const newHeading = '## [${NEW}] - ${TODAY}';
-const freshUnreleased = '## [Unreleased]\n\n### Added\n\n### Changed\n\n### Fixed\n\n### Security\n\n---\n';
+const clPath = 'CHANGELOG.md';
+let txt = fs.readFileSync(clPath, 'utf8');
+const assembled        = process.env.ASSEMBLED_FRAGS || '';
+const legacyHasBullets = process.env.LEGACY_HAS_BULLETS_ENV === '1';
+const newHeading       = '## [' + process.env.NEW_VERSION + '] - ' + process.env.RELEASE_DATE;
+const thinUnreleased   =
+  '## [Unreleased]\n\n' +
+  '_Changes are tracked as fragments in [\`changelog.d/\`](changelog.d/) and assembled here at release._\n\n' +
+  '---\n';
+
 if (!/^## \[Unreleased\]/m.test(txt)) {
-  console.error('CHANGELOG.md is missing [Unreleased] heading after pre-flight — refusing to write.');
+  process.stderr.write('CHANGELOG.md is missing [Unreleased] heading after pre-flight — refusing to write.\n');
   process.exit(1);
 }
-txt = txt.replace(/^## \[Unreleased\][^\n]*\n/m, freshUnreleased + '\n' + newHeading + '\n');
-fs.writeFileSync(path, txt);
+
+if (legacyHasBullets) {
+  // Replace ONLY the ## [Unreleased] heading line; the legacy bullets that
+  // follow it stay put and fall under the new version heading. If fragments
+  // also exist, append their assembled block after those legacy bullets.
+  const suffix = assembled ? '\n' + assembled + '\n' : '';
+  txt = txt.replace(/^## \[Unreleased\][^\n]*\n/m, thinUnreleased + '\n' + newHeading + '\n' + suffix);
+} else {
+  // No legacy bullets — the new section body is solely the assembled
+  // fragments. Replace the entire [Unreleased] section (everything up to
+  // but not including the next ## [ heading) with the thin placeholder
+  // followed by the new version section.
+  const sectionBody = assembled ? assembled + '\n' : '';
+  txt = txt.replace(
+    /^## \[Unreleased\][\s\S]*?(?=^## \[)/m,
+    thinUnreleased + '\n' + newHeading + '\n\n' + sectionBody
+  );
+}
+
+fs.writeFileSync(clPath, txt);
 "
+
+# Delete consumed fragment files (staged by git rm — picked up by the commit
+# below). .gitkeep and README.md are intentionally excluded from these globs.
+git rm -q changelog.d/added-*.md changelog.d/changed-*.md changelog.d/fixed-*.md changelog.d/security-*.md 2>/dev/null || true
 
 # --- Commit, tag, push ---
 

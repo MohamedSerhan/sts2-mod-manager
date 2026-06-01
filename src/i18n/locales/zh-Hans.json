@@ -964,7 +964,6 @@
     "heroEmptyCta": "打开整合包",
     "heroEmptyBrowse": "浏览整合包",
     "secondary": {
-      "switch": "切换模组包",
       "create": "创建模组包",
       "reviewUpdates": "查看更新（{{count}}）"
     },

@@ -964,7 +964,6 @@
     "heroEmptyCta": "Open Modpacks",
     "heroEmptyBrowse": "Browse modpacks",
     "secondary": {
-      "switch": "Switch modpack",
       "create": "Create modpack",
       "reviewUpdates": "Review updates ({{count}})"
     },

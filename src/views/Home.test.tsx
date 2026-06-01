@@ -416,16 +416,6 @@ describe('<HomeView> secondary surface (actions)', () => {
     registerInvokeHandler('get_share_info', () => null);
   }
 
-  it('Switch modpack routes to the Modpacks page', async () => {
-    withActive();
-    const onGoToProfiles = vi.fn();
-    const user = userEvent.setup();
-    render(<Wrap onGoToProfiles={onGoToProfiles} />);
-    await screen.findByText('Daily Pack');
-    await user.click(screen.getByRole('button', { name: /Switch modpack/i }));
-    expect(onGoToProfiles).toHaveBeenCalledTimes(1);
-  });
-
   it('Create modpack fires onCreateModpack', async () => {
     withActive();
     const onCreateModpack = vi.fn();

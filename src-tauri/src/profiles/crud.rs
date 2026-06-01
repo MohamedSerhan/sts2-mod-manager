@@ -343,6 +343,40 @@ pub(super) fn subscribed_profile_names(config_path: &Path) -> std::collections::
         .collect()
 }
 
+/// True when this profile was published by *this* user — i.e. a local
+/// `.share` sidecar exists for it. The `.share` file is written only by the
+/// share / reshare path (`sharing::share_profile`), so its presence is proof
+/// of ownership that no remote actor can forge.
+///
+/// Checks both the sanitized filename and the raw (spaces-preserved) name,
+/// mirroring `delete_profile` — historically `.share` files were written
+/// under the raw profile name, so an owned pack like `mods (copy)` has a
+/// `mods (copy).share`, not `mods__copy_.share`.
+pub(super) fn profile_is_owned(name: &str, profiles_path: &Path) -> bool {
+    let sanitized = profiles_path.join(format!("{}.share", sanitize_filename(name)));
+    let raw = profiles_path.join(format!("{}.share", name));
+    sanitized.exists() || raw.exists()
+}
+
+/// Whether a profile is locked against local edits. A profile is locked only
+/// when it is subscribed (its name matches a subscription) AND it is NOT
+/// owned by this user.
+///
+/// The subscribe-only check was too broad: installing your *own* share code
+/// auto-subscribes you to your *own* pack (see `install_shared_profile`), and
+/// a subscribed-name-only gate then locked a pack you authored. Gating on
+/// "subscribed AND not owned" keeps the intended protection — you can't
+/// clobber a pack you merely *follow*, since a sync would overwrite your
+/// edits — while letting you freely edit packs you published.
+pub(super) fn profile_is_edit_locked(
+    name: &str,
+    profiles_path: &Path,
+    config_path: &Path,
+) -> bool {
+    subscribed_profile_names(config_path).contains(&name.to_lowercase())
+        && !profile_is_owned(name, profiles_path)
+}
+
 pub(super) fn profile_has_json(profile_name: &str, profiles_path: &Path) -> bool {
     profiles_path
         .join(format!("{}.json", sanitize_filename(profile_name)))
@@ -571,5 +605,106 @@ mod persist_profile_mod_sources_tests {
         );
         assert_eq!(entry.note.as_deref(), Some("hand-checked"), "note survives");
         assert!(!entry.github_auto_detected, "stays user-authored");
+    }
+}
+
+#[cfg(test)]
+mod edit_lock_tests {
+    //! Ownership-aware edit lock. Regression coverage for the user-reported
+    //! "can't edit my own published modpack" bug: publishing a pack auto-
+    //! subscribes you to your own share code, and the old subscribed-name-only
+    //! gate then locked a pack you authored. A local `.share` sidecar proves
+    //! ownership and must unlock editing.
+    use super::*;
+    use tempfile::tempdir;
+
+    fn seed_subscription(config_path: &Path, profile_name: &str) {
+        let now = chrono::Utc::now();
+        let mut db = crate::subscriptions::SubscriptionsDb::default();
+        db.subscriptions.insert(
+            format!("owner:{profile_name}"),
+            crate::subscriptions::Subscription {
+                share_id: format!("owner:{profile_name}"),
+                share_url: format!("owner/{profile_name}"),
+                profile_name: profile_name.to_string(),
+                curator: Some("owner".into()),
+                last_synced_profile: Profile {
+                    name: profile_name.to_string(),
+                    game_version: None,
+                    created_by: Some("owner".into()),
+                    mods: vec![],
+                    created_at: now,
+                    updated_at: now,
+                    public: None,
+                },
+                last_checked: now,
+                last_synced: now,
+            },
+        );
+        crate::subscriptions::save_subscriptions(&db, config_path).unwrap();
+    }
+
+    #[test]
+    fn owned_and_subscribed_pack_is_not_locked() {
+        // The reported scenario: you published "mods (copy)", which auto-
+        // subscribed you to it. The .share sidecar (written by the share path,
+        // under the RAW name with spaces) marks it yours → editable.
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path();
+        seed_subscription(dir, "mods (copy)");
+        // Raw-name .share, exactly as the share path writes it.
+        std::fs::write(dir.join("mods (copy).share"), "{}").unwrap();
+
+        assert!(
+            profile_is_owned("mods (copy)", dir),
+            "a raw-name .share sidecar marks the pack owned"
+        );
+        assert!(
+            !profile_is_edit_locked("mods (copy)", dir, dir),
+            "an owned pack must be editable even while subscribed to its own code"
+        );
+    }
+
+    #[test]
+    fn followed_pack_without_share_file_stays_locked() {
+        // A pack you merely follow (someone else's) has a subscription but no
+        // local .share — editing it would be clobbered by a sync, so it stays
+        // locked.
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path();
+        seed_subscription(dir, "Friend Pack");
+
+        assert!(!profile_is_owned("Friend Pack", dir));
+        assert!(
+            profile_is_edit_locked("Friend Pack", dir, dir),
+            "a followed, non-owned pack remains locked"
+        );
+    }
+
+    #[test]
+    fn unsubscribed_local_pack_is_never_locked() {
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path();
+        // No subscriptions seeded, no .share file.
+        assert!(
+            !profile_is_edit_locked("My Local Pack", dir, dir),
+            "a plain local pack is always editable"
+        );
+    }
+
+    #[test]
+    fn ownership_detected_via_sanitized_share_name_too() {
+        // Defensive: if a .share is ever written under the sanitized name
+        // instead of the raw one, ownership detection still holds.
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path();
+        seed_subscription(dir, "mods (copy)");
+        std::fs::write(
+            dir.join(format!("{}.share", sanitize_filename("mods (copy)"))),
+            "{}",
+        )
+        .unwrap();
+        assert!(profile_is_owned("mods (copy)", dir));
+        assert!(!profile_is_edit_locked("mods (copy)", dir, dir));
     }
 }

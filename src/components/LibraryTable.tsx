@@ -38,7 +38,6 @@ import {
   membershipDisplayName,
   membershipRowKey,
 } from './LibraryRow';
-import { BundleRow } from './BundleRow';
 import { ModViewToggle, useModListDensity } from './ModViewToggle';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
@@ -50,7 +49,6 @@ import {
   toggleMod,
 } from '../hooks/useTauri';
 import type {
-  Bundle,
   ModAuditEntry,
   ModInfo,
   Profile,
@@ -126,10 +124,6 @@ export interface LibraryTableProps {
   // ─── ModRow-style per-row action surface (optional) ──────────────
   // When supplied, these are forwarded to LibraryRow's kebab menu.
 
-  /** Bundle lookup keyed by bundle_id. When provided, the no-focus
-   *  synthesized rows whose bundle_id has a matching entry here are
-   *  collapsed into a single BundleRow instead of individual rows. */
-  bundlesById?: Map<string, Bundle>;
   /** ModInfo lookup keyed by `folder_name ?? name`. Provides
    *  github_url, tags, pinned, etc. — everything the row's kebab needs
    *  beyond what ProfileMembershipMod carries. */
@@ -197,7 +191,6 @@ export function LibraryTable({
   toolbarActions,
   reloadToken,
   filterRow,
-  bundlesById,
   modInfoByKey,
   auditByKey,
   gameRunning,
@@ -341,7 +334,6 @@ export function LibraryTable({
         display_name: mod.display_name,
         installed_enabled: mod.enabled,
         profiles: [],
-        bundle_id: mod.bundle_id ?? null,
       })),
     };
   }, [modpackName, appMods]);
@@ -416,18 +408,12 @@ export function LibraryTable({
     const preFiltered = filterRow ? effectiveGrid.mods.filter(filterRow) : effectiveGrid.mods;
     const rows = query
       ? preFiltered.filter((row) => {
-          // When this row belongs to a known bundle, also include the
-          // bundle's display name so typing the pack name keeps all its
-          // members visible (they will then be collapsed into one BundleRow).
-          const bundleDisplayName =
-            (row.bundle_id && bundlesById?.get(row.bundle_id)?.display_name) ?? '';
           const haystack = [
             row.name,
             row.display_name ?? '',
             row.folder_name ?? '',
             row.mod_id ?? '',
             row.version,
-            bundleDisplayName,
           ]
             .join(' ')
             .toLowerCase();
@@ -458,48 +444,9 @@ export function LibraryTable({
       return compareMembershipDisplayName(a, b);
     });
     return sorted;
-  }, [effectiveGrid, filter, sort, inPackRowKeys, filterRow, bundlesById]);
+  }, [effectiveGrid, filter, sort, inPackRowKeys, filterRow]);
 
-  // ── Bundle grouping (no-focus mode only) ─────────────────────────
-  // Walk filteredRows and fold members that share a bundle_id (with a
-  // matching Bundle in bundlesById) into a single bundle display item.
-  // Rows without a known bundle stay as individual mod items.
-  // This runs AFTER filter+sort so the first member's sort position
-  // determines where the bundle row appears.
-  type BundleDisplayItem = { type: 'bundle'; bundle: Bundle; members: ProfileMembershipMod[] };
-  type ModDisplayItem = { type: 'mod'; row: ProfileMembershipMod };
-  type DisplayItem = BundleDisplayItem | ModDisplayItem;
-
-  const displayItems = useMemo<DisplayItem[]>(() => {
-    // Group in both no-focus and focused modes whenever bundlesById has entries.
-    if (!bundlesById || bundlesById.size === 0) {
-      return filteredRows.map((row) => ({ type: 'mod' as const, row }));
-    }
-    const items: DisplayItem[] = [];
-    const bundleItems = new Map<string, BundleDisplayItem>();
-    for (const row of filteredRows) {
-      const bid = row.bundle_id;
-      if (bid && bundlesById.has(bid)) {
-        const existing = bundleItems.get(bid);
-        if (existing) {
-          existing.members.push(row);
-        } else {
-          const item: BundleDisplayItem = {
-            type: 'bundle',
-            bundle: bundlesById.get(bid)!,
-            members: [row],
-          };
-          bundleItems.set(bid, item);
-          items.push(item);
-        }
-      } else {
-        items.push({ type: 'mod', row });
-      }
-    }
-    return items;
-  }, [filteredRows, bundlesById]);
-
-  const visibleItems = displayItems.slice(0, visibleLimit);
+  const visibleItems = filteredRows.slice(0, visibleLimit);
 
   function patchRowMembership(
     rowKey: string,
@@ -594,52 +541,6 @@ export function LibraryTable({
       );
     } finally {
       setMembershipSaving(null);
-    }
-  }
-
-  /**
-   * Pack-level bundle membership handler: adds or removes ALL members of
-   * a bundle from the active modpack in a single action.
-   *
-   * target = !(all currently included): if every member is already in the
-   * pack the action removes all; otherwise it adds all.
-   */
-  const [bundleMembershipBusy, setBundleMembershipBusy] = useState<string | null>(null);
-
-  async function handleToggleBundleMembership(
-    bundleId: string,
-    members: ProfileMembershipMod[],
-    targetIncluded: boolean,
-  ) {
-    if (modpackName == null) return;
-    if (bundleMembershipBusy || membershipSaving || storageSaving) return;
-    const editableMembers = members.filter((m) => {
-      const s = focusedState(m);
-      return s?.editable;
-    });
-    if (editableMembers.length === 0) return;
-    try {
-      pinScroll();
-      setBundleMembershipBusy(bundleId);
-      for (const member of editableMembers) {
-        await setProfileModMembership(
-          modpackName,
-          member.name,
-          member.folder_name,
-          member.mod_id,
-          targetIncluded,
-        );
-        patchRowMembership(membershipRowKey(member), targetIncluded);
-      }
-      onMembershipChanged?.();
-    } catch (e) {
-      toastCtx.error(
-        t('profiles.library.toastFailed', {
-          error: e instanceof Error ? e.message : String(e),
-        }),
-      );
-    } finally {
-      setBundleMembershipBusy(null);
     }
   }
 
@@ -887,42 +788,7 @@ export function LibraryTable({
           )}
         </div>
       ) : (
-        visibleItems.map((item, itemIndex) => {
-          if (item.type === 'bundle') {
-            // In focused mode compute aggregate membership state for the bundle.
-            let bundleMembership: import('./BundleRow').BundleMembership | undefined;
-            if (modpackName != null) {
-              const states = item.members.map((m) => focusedState(m));
-              const includedCount = states.filter((s) => s?.included).length;
-              const aggState =
-                includedCount === 0
-                  ? 'out'
-                  : includedCount === item.members.length
-                    ? 'in'
-                    : 'partial';
-              const targetIncluded = aggState !== 'in';
-              bundleMembership = {
-                state: aggState,
-                onToggle: () =>
-                  handleToggleBundleMembership(
-                    item.bundle.bundle_id,
-                    item.members,
-                    targetIncluded,
-                  ),
-                busy: bundleMembershipBusy === item.bundle.bundle_id,
-              };
-            }
-            return (
-              <BundleRow
-                key={`bundle::${item.bundle.bundle_id}`}
-                bundle={item.bundle}
-                members={item.members}
-                density={density}
-                membership={bundleMembership}
-              />
-            );
-          }
-          const row = item.row;
+        visibleItems.map((row) => {
           const state = focusedState(row);
           const inPack = !!state?.included;
           const inPackIndex = loadOrderDraft.findIndex(
@@ -938,7 +804,6 @@ export function LibraryTable({
             = modInfo && renderSourceEditor
               ? renderSourceEditor(modInfo)
               : undefined;
-          void itemIndex; // index not needed for LibraryRow
           return (
             <LibraryRow
               key={rowKey}
@@ -1044,12 +909,12 @@ export function LibraryTable({
           );
         })
       )}
-      {displayItems.length > visibleItems.length && (
+      {filteredRows.length > visibleItems.length && (
         <div className="gf-profile-library-footer">
           <span>
             {t('profiles.library.showing', {
               shown: visibleItems.length,
-              total: displayItems.length,
+              total: filteredRows.length,
             })}
           </span>
           <Button
@@ -1060,7 +925,7 @@ export function LibraryTable({
             {t('profiles.library.showMore', {
               count: Math.min(
                 pageSize,
-                displayItems.length - visibleItems.length,
+                filteredRows.length - visibleItems.length,
               ),
             })}
           </Button>

@@ -430,6 +430,13 @@ export function LibraryRow({
                   {mod.source ? t('mods.local') : t('mods.unlinked')}
                 </Badge>
               )}
+              {/* Bundle member-count badge — shown when this mod is a
+                  bundle container (bundle_members is non-empty). */}
+              {(mod?.bundle_members?.length ?? 0) > 0 && (
+                <span className="gf-pill gf-pill-github">
+                  {t('bundle.memberCount', { count: mod!.bundle_members!.length })}
+                </span>
+              )}
               {/* Audit pills — one at a time. Update fires onUpdate; the
                   rest are informational. */}
               {audit && isUpToDate(audit) && !showUpdatePill && !showBlockedPill && !showFrozenPill && !showSnoozedPill && (
@@ -540,6 +547,20 @@ export function LibraryRow({
               </span>
             )}
           </div>
+          {/* Bundle member list — shown in comfortable density when this
+              mod is a bundle container (bundle_members is non-empty). */}
+          {mod && (mod.bundle_members?.length ?? 0) > 0 && (
+            <ul
+              className="gf-bundle-members"
+              aria-label={t('bundle.membersAria', { name: displayName })}
+            >
+              {mod.bundle_members!.map((memberName) => (
+                <li key={memberName} className="gf-bundle-member-name">
+                  {memberName}
+                </li>
+              ))}
+            </ul>
+          )}
           {/* Description (manager override or manifest) + free-form
               note. Both render outside the drawer because they're part
               of the row's identity. */}

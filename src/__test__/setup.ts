@@ -134,7 +134,6 @@ if (typeof window !== 'undefined' && !Element.prototype.scrollIntoView) {
  */
 function registerSafeDefaults(): void {
   invokeHandlers.set('get_installed_mods', () => []);
-  invokeHandlers.set('get_bundles', () => []);
   invokeHandlers.set('get_game_info', () => ({
     game_path: null,
     mods_path: null,

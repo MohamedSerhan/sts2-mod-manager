@@ -1,17 +1,15 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { getGameInfo, getInstalledMods, getBundles, isGameRunning, checkSubscriptionUpdates, auditModVersions, updateAllMods } from '../hooks/useTauri';
+import { getGameInfo, getInstalledMods, isGameRunning, checkSubscriptionUpdates, auditModVersions, updateAllMods } from '../hooks/useTauri';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import type { Bundle, GameInfo, ModInfo, ModAuditEntry, SubscriptionUpdate } from '../types';
+import type { GameInfo, ModInfo, ModAuditEntry, SubscriptionUpdate } from '../types';
 import { useToast } from './ToastContext';
 import { useConfirm } from '../components/ConfirmDialog';
 
 interface AppContextType {
   gameInfo: GameInfo | null;
   mods: ModInfo[];
-  /** All currently-installed bundle containers (one per bundle_id). */
-  bundles: Bundle[];
   loading: boolean;
   activeProfile: string | null;
   gameRunning: boolean;
@@ -59,7 +57,6 @@ const AppContext = createContext<AppContextType | null>(null);
 export function AppProvider({ children }: { children: ReactNode }) {
   const [gameInfo, setGameInfo] = useState<GameInfo | null>(null);
   const [mods, setMods] = useState<ModInfo[]>([]);
-  const [bundles, setBundles] = useState<Bundle[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeProfile, setActiveProfileState] = useState<string | null>(null);
   const [gameRunning, setGameRunning] = useState<boolean>(false);
@@ -171,14 +168,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const refreshMods = useCallback(async () => {
     try {
-      const [installed, bundleList] = await Promise.all([
-        getInstalledMods(),
-        getBundles().catch(() => [] as Bundle[]),
-      ]);
+      const installed = await getInstalledMods();
       setMods(installed);
-      // Guard against null returns (e.g. backend pre-bundles version
-      // or test mocks that haven't registered get_bundles).
-      setBundles(Array.isArray(bundleList) ? bundleList : []);
     } catch (e) {
       console.error('Failed to get mods:', e);
     }
@@ -329,7 +320,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [refreshGameRunning, refreshMods]);
 
   return (
-    <AppContext.Provider value={{ gameInfo, mods, bundles, loading, activeProfile, gameRunning, subUpdates, auditResults, auditing, runAudit, refreshAuditEntries, updatingAll, updateAllGithub, refreshGameInfo, refreshMods, refreshAll, refreshGameRunning, refreshSubUpdates, setActiveProfile, notifyNexusOpen }}>
+    <AppContext.Provider value={{ gameInfo, mods, loading, activeProfile, gameRunning, subUpdates, auditResults, auditing, runAudit, refreshAuditEntries, updatingAll, updateAllGithub, refreshGameInfo, refreshMods, refreshAll, refreshGameRunning, refreshSubUpdates, setActiveProfile, notifyNexusOpen }}>
       {children}
     </AppContext.Provider>
   );

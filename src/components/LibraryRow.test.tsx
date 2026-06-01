@@ -867,3 +867,58 @@ describe('<LibraryRow> row click + source badges', () => {
     expect(screen.getByText(/^Link$/)).toBeInTheDocument();
   });
 });
+
+// ── bundle_members rendering (T11) ───────────────────────────────────────
+//
+// A bundle is now a normal ModInfo with bundle_members set. The row renders
+// the member list + "N mods" badge while keeping all standard controls.
+
+describe('<LibraryRow> bundle_members', () => {
+  it('renders the member-name list when bundle_members is non-empty', () => {
+    renderRow({
+      mod: baseModInfo({
+        bundle_members: ['FantasyCore', 'FantasyArt', 'FantasySound'],
+      }),
+    });
+    const list = document.querySelector('.gf-bundle-members') as HTMLElement;
+    expect(list).not.toBeNull();
+    expect(screen.getByText('FantasyCore')).toBeInTheDocument();
+    expect(screen.getByText('FantasyArt')).toBeInTheDocument();
+    expect(screen.getByText('FantasySound')).toBeInTheDocument();
+  });
+
+  it('shows the "N mods" badge when bundle_members is non-empty', () => {
+    renderRow({
+      mod: baseModInfo({ bundle_members: ['Core', 'Art'] }),
+    });
+    expect(screen.getByText(/2 mods/i)).toBeInTheDocument();
+  });
+
+  it('does NOT render the member list or badge for a normal mod (no bundle_members)', () => {
+    renderRow({ mod: baseModInfo() });
+    expect(document.querySelector('.gf-bundle-members')).toBeNull();
+    expect(screen.queryByText(/\d+ mods?/i)).toBeNull();
+  });
+
+  it('does NOT render the member list when bundle_members is an empty array', () => {
+    renderRow({ mod: baseModInfo({ bundle_members: [] }) });
+    expect(document.querySelector('.gf-bundle-members')).toBeNull();
+  });
+
+  it('standard controls are still present for a bundle row (toggle + delete)', () => {
+    // Toggle and delete must render for bundles, since a bundle is just one ModInfo.
+    const onDelete = vi.fn();
+    renderRow({
+      mod: baseModInfo({
+        bundle_members: ['Core', 'Art'],
+      }),
+      onDelete,
+    });
+    // Active/stored toggle is present.
+    expect(
+      screen.getByRole('switch', { name: /toggle whether BaseLib is active in game/i }),
+    ).toBeInTheDocument();
+    // Delete button is present.
+    expect(screen.getByRole('button', { name: /^Remove BaseLib$/i })).toBeInTheDocument();
+  });
+});

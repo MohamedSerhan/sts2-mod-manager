@@ -353,6 +353,20 @@ pub fn get_installed_mods(
     Ok(all_mods)
 }
 
+/// Whether a mod (by folder identity, or display name as a fallback) is
+/// present in `dir`. `enabled` tells the scanner which root it's reading so
+/// the returned `ModInfo` carries the right state. Used by `toggle_mod` to
+/// decide whether a move is needed or the mod is already in the target state.
+fn mod_present_in(dir: &Path, folder_name: Option<&str>, name: &str, enabled: bool) -> bool {
+    let mods = scan_mods_inner(dir, enabled);
+    match folder_name {
+        Some(folder) => mods
+            .iter()
+            .any(|m| m.folder_name.as_deref() == Some(folder)),
+        None => mods.iter().any(|m| m.name == name),
+    }
+}
+
 /// Toggle a mod between enabled and disabled.
 ///
 /// `folder_name` (when provided) is the preferred identity — two mods can
@@ -385,6 +399,27 @@ pub fn toggle_mod(
     } else {
         (mods_path.as_path(), disabled_path.as_path())
     };
+
+    // Idempotency: if the mod is already in the destination (already in the
+    // requested state) and not in the source, the toggle is a no-op success.
+    // Without this, a redundant enable/disable — e.g. the bulk-edit Save
+    // toggling a mod that's already active, or a background subscription sync
+    // having just moved it — hard-errors "No mod with folder … in <src>" and
+    // aborts the whole Save, stranding the membership write. Matching the
+    // intended state instead of failing keeps disk and manifest in sync.
+    let in_src = mod_present_in(src, folder_name.as_deref(), &name, enable);
+    if !in_src {
+        let in_dest = mod_present_in(dest, folder_name.as_deref(), &name, !enable);
+        if in_dest {
+            log::info!(
+                "toggle_mod: '{}' (folder={:?}) already {} — no-op",
+                name,
+                folder_name,
+                if enable { "active" } else { "stored" }
+            );
+            return Ok(true);
+        }
+    }
 
     // Disambiguation: when folder_name is given, find the EXACT mod by
     // folder identity and move only its files. Two mods sharing a display
@@ -1163,6 +1198,77 @@ mod user_scenario_tests {
         assert_eq!(parsed.name, "GoodMod");
         assert_eq!(parsed.version, "3.1.4");
         assert_eq!(parsed.dependencies, vec!["Dep", "PlainDep"]);
+    }
+}
+
+#[cfg(test)]
+mod toggle_idempotency_tests {
+    //! Coverage for `mod_present_in`, the helper that lets `toggle_mod` no-op
+    //! instead of hard-erroring when a mod is already in the requested state.
+    //! Regression for the bulk-edit Save crash: ticking a mod that's already
+    //! active (or that a background sync just moved) raised "No mod with
+    //! folder … in mods_disabled" and aborted the whole Save.
+    use super::mod_present_in;
+    use std::fs;
+
+    fn write_mod(root: &std::path::Path, folder: &str, display: &str) {
+        let dir = root.join(folder);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join(format!("{folder}.json")),
+            format!(r#"{{"id":"{folder}","name":"{display}","version":"1.0.0"}}"#),
+        )
+        .unwrap();
+        fs::write(dir.join(format!("{folder}.dll")), b"dll").unwrap();
+    }
+
+    #[test]
+    fn detects_presence_by_folder_and_absence() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mods = tmp.path().join("mods");
+        fs::create_dir_all(&mods).unwrap();
+        write_mod(&mods, "BaseLib", "BaseLib");
+
+        // Present by folder identity (the state `enabled` flag just labels
+        // which root we're scanning; presence is what matters here).
+        assert!(mod_present_in(&mods, Some("BaseLib"), "BaseLib", true));
+        // Absent folder → not present, even though a mod IS in the dir.
+        assert!(!mod_present_in(&mods, Some("NotHere"), "NotHere", true));
+        // Empty dir → not present.
+        let empty = tmp.path().join("mods_disabled");
+        fs::create_dir_all(&empty).unwrap();
+        assert!(!mod_present_in(&empty, Some("BaseLib"), "BaseLib", false));
+    }
+
+    #[test]
+    fn detects_presence_by_display_name_when_no_folder_given() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mods = tmp.path().join("mods");
+        fs::create_dir_all(&mods).unwrap();
+        write_mod(&mods, "auto_path", "AutoPath");
+
+        // Name-based fallback path (folder_name = None).
+        assert!(mod_present_in(&mods, None, "AutoPath", true));
+        assert!(!mod_present_in(&mods, None, "Nonexistent", true));
+    }
+
+    #[test]
+    fn already_active_mod_is_seen_in_dest_not_src() {
+        // The exact bulk-edit scenario: enabling a mod already in mods/.
+        // toggle_mod computes src=mods_disabled, dest=mods for enable=true;
+        // the helper must report "absent in src, present in dest" so the
+        // caller no-ops instead of erroring.
+        let tmp = tempfile::tempdir().unwrap();
+        let mods = tmp.path().join("mods");
+        let disabled = tmp.path().join("mods_disabled");
+        fs::create_dir_all(&mods).unwrap();
+        fs::create_dir_all(&disabled).unwrap();
+        write_mod(&mods, "BaseLib", "BaseLib"); // already active
+
+        let in_src = mod_present_in(&disabled, Some("BaseLib"), "BaseLib", true);
+        let in_dest = mod_present_in(&mods, Some("BaseLib"), "BaseLib", false);
+        assert!(!in_src, "not in the enable-source (mods_disabled)");
+        assert!(in_dest, "already in the enable-dest (mods) → toggle is a no-op");
     }
 }
 

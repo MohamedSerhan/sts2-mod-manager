@@ -43,6 +43,7 @@ import {
   setModSnooze,
   setModTags,
   getSubscriptions,
+  getShareInfo,
   setProfileModMembership,
   toggleMod,
   findGithubFromNexus,
@@ -185,15 +186,29 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     );
   }
 
-  // A followed (subscribed) pack isn't ours to edit, so installing a mod "into"
-  // it would fail server-side and strand the file in the library. When the
-  // modpack view targets a followed pack we stop BEFORE installing and explain,
-  // instead of half-completing the add.
+  // A *followed* (subscribed but not owned) pack isn't ours to edit, so
+  // installing a mod "into" it would fail server-side and strand the file in
+  // the library. When the modpack view targets such a pack we stop BEFORE
+  // installing and explain, instead of half-completing the add.
+  //
+  // Ownership matters: publishing a pack auto-subscribes you to your own share
+  // code, so a subscription alone doesn't mean "not yours". A pack you
+  // published has a local `.share` record (getShareInfo returns non-null) and
+  // stays addable — mirrors the backend's profile_is_edit_locked
+  // ("subscribed AND not owned"). Without this, paste-URL / import into your
+  // own re-shared pack is wrongly blocked while the Mod Library row-add (gated
+  // on the backend's ownership-aware editable flag) works.
   async function targetPackIsFollowed(): Promise<boolean> {
     if (!targetPack) return false;
     try {
       const subs = await getSubscriptions();
-      return subs.some((s) => s.profile_name.toLowerCase() === targetPack.toLowerCase());
+      const subscribed = subs.some(
+        (s) => s.profile_name.toLowerCase() === targetPack.toLowerCase(),
+      );
+      if (!subscribed) return false;
+      // Subscribed — but if we own it (have a local .share), it's still ours.
+      const owned = (await getShareInfo(targetPack)) != null;
+      return !owned;
     } catch {
       return false;
     }

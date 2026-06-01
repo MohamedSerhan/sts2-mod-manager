@@ -76,7 +76,8 @@ A UX simplification release. The app feels like a launcher first: pick a modpack
 - The bug report's active-modpack name and the development-build label now follow your chosen language instead of always showing English.
 - Mods installed from an imported or subscribed modpack now show their GitHub or Nexus source links instead of appearing as unlinked — including mods that were already installed, which the previous fix skipped. Existing links, notes, and saved settings on those mods are left untouched.
 - Sharing a modpack now carries each mod's GitHub or Nexus link to the people who install it, so a shared pack arrives linked instead of unlinked even when the mod's own files don't name a source.
-- You can edit a modpack you published again. Sharing a pack quietly subscribed you to your own copy, which then locked it as if it belonged to someone else; modpacks you published now stay editable, while ones you only follow remain protected.
+- You can edit a modpack you published again. Sharing a pack quietly subscribed you to your own copy, which then locked it as if it belonged to someone else; modpacks you published now stay editable — including adding mods to them by pasting a URL or importing a file — while ones you only follow remain protected.
+- Adding a mod that's already active to a modpack with the bulk Edit dialog no longer fails with a "mod not found" error and silently drops the change; the edit now saves and the already-active mod is left as-is.
 
 ### Security
 

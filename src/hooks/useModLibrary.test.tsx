@@ -87,6 +87,34 @@ describe('useModLibrary', () => {
     expect(quickAddCalls()).toHaveLength(0);
   });
 
+  it('handleQuickAdd PROCEEDS when the subscribed target pack is owned (has a .share)', async () => {
+    // Regression: publishing a pack auto-subscribes you to your own code, so a
+    // subscription alone must not block adding to it. Ownership (getShareInfo
+    // non-null) overrides the followed-pack guard.
+    followPack('MyPack');
+    registerInvokeHandler('get_share_info', () => ({
+      code: 'AA5A-315D-61AE',
+      owner: 'me',
+      file_path: 'MyPack.json',
+      url: 'https://github.com/me/sts2mm-profiles',
+      repo_url: 'https://github.com/me/sts2mm-profiles',
+      failed_uploads: [],
+    }));
+    registerInvokeHandler('quick_add_mod', () => ({
+      type: 'github_installed',
+      mod_info: { name: 'Cool', version: '1.0', enabled: true, folder_name: 'Cool', files: [] },
+    }));
+    const { result } = renderHook(() => useModLibrary({ targetPack: 'MyPack' }), {
+      wrapper: AllProviders,
+    });
+    act(() => result.current.setQuickAddUrl('https://github.com/a/b'));
+
+    await act(async () => { await result.current.handleQuickAdd(); });
+
+    // Owned → not blocked → the install actually runs.
+    await waitFor(() => expect(quickAddCalls()).toHaveLength(1));
+  });
+
   it('toggling the quick-add form is reflected in returned state', () => {
     const { result } = renderHook(() => useModLibrary(), { wrapper: AllProviders });
     expect(result.current.showQuickAdd).toBe(false);

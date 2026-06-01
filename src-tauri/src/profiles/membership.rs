@@ -87,7 +87,6 @@ pub(crate) fn profile_membership_matrix(
                 display_name: installed.display_name,
                 installed_enabled: installed.enabled,
                 profiles: states,
-                bundle_id: installed.bundle_id.clone(),
             }
         })
         .collect();
@@ -968,7 +967,7 @@ mod profile_membership_tests {
             tags: vec![],
             display_name: None,
             display_description: None,
-            bundle_id: None,
+            bundle_members: vec![],
         }];
 
         write_profile_load_order_to_settings_file(&profile, &settings_path, &pinned).unwrap();
@@ -1040,15 +1039,14 @@ mod profile_membership_tests {
         );
     }
 
-    /// Bundle-member rows in the membership grid carry the container's
-    /// `bundle_id`; standalone mods carry `None`.
+    /// A sidecar bundle container appears as a SINGLE row in the membership grid
+    /// with folder_name == container name. The individual member mods are NOT
+    /// separate rows. A standalone mod alongside still appears as its own row.
     ///
     /// Fixture: a sidecar bundle container `Pack/` holding two member mods
     /// (`ModA`, `ModB`) plus one top-level standalone mod (`StandAlone`).
-    /// The matrix must tag the two bundle members with `bundle_id = Some("Pack")`
-    /// and leave `StandAlone` with `bundle_id = None`.
     #[test]
-    fn membership_matrix_carries_bundle_id_for_bundle_members() {
+    fn membership_matrix_lists_bundle_as_one_row() {
         let game_tmp = tempfile::tempdir().unwrap();
         let config_tmp = tempfile::tempdir().unwrap();
         let mods_path = game_tmp.path().join("mods");
@@ -1058,8 +1056,7 @@ mod profile_membership_tests {
         fs::create_dir_all(&disabled_path).unwrap();
         fs::create_dir_all(&profiles_path).unwrap();
 
-        // Create bundle container Pack/ with two member mods (DLL-only is enough
-        // for the scanner to recognise them).
+        // Create bundle container Pack/ with two member mods.
         let pack_dir = mods_path.join("Pack");
         let mod_a_dir = pack_dir.join("ModA");
         let mod_b_dir = pack_dir.join("ModB");
@@ -1070,7 +1067,7 @@ mod profile_membership_tests {
         crate::mods::bundle::write_sidecar(
             &pack_dir,
             &crate::mods::bundle::BundleSidecar {
-                display_name: "Pack".into(),
+                display_name: "Pretty Pack".into(),
                 ..Default::default()
             },
         )
@@ -1079,7 +1076,6 @@ mod profile_membership_tests {
         // Create a standalone top-level mod.
         write_mod(&mods_path, "StandAlone", "StandAlone", "1.0.0");
 
-        // No profiles needed — empty profiles_path is fine.
         save_profile(&empty_profile("TestPack"), &profiles_path).unwrap();
 
         let grid = profile_membership_matrix(
@@ -1090,38 +1086,31 @@ mod profile_membership_tests {
         )
         .unwrap();
 
-        // Bundle members must carry bundle_id = Some("Pack").
-        let mod_a = grid
+        // The bundle container must appear as ONE row with folder_name == "Pack".
+        let pack_row = grid
             .mods
             .iter()
-            .find(|m| m.folder_name.as_deref() == Some("ModA"))
-            .expect("ModA must appear in the grid");
-        let mod_b = grid
-            .mods
-            .iter()
-            .find(|m| m.folder_name.as_deref() == Some("ModB"))
-            .expect("ModB must appear in the grid");
+            .find(|m| m.folder_name.as_deref() == Some("Pack"))
+            .expect("Bundle container Pack must appear as a single row in the grid");
         assert_eq!(
-            mod_a.bundle_id.as_deref(),
-            Some("Pack"),
-            "ModA is a bundle member — bundle_id must be Some(\"Pack\")"
-        );
-        assert_eq!(
-            mod_b.bundle_id.as_deref(),
-            Some("Pack"),
-            "ModB is a bundle member — bundle_id must be Some(\"Pack\")"
+            pack_row.name, "Pretty Pack",
+            "bundle row name must be the sidecar display_name"
         );
 
-        // Standalone mod must carry bundle_id = None.
-        let standalone = grid
-            .mods
-            .iter()
-            .find(|m| m.folder_name.as_deref() == Some("StandAlone"))
-            .expect("StandAlone must appear in the grid");
+        // ModA and ModB must NOT be separate rows.
         assert!(
-            standalone.bundle_id.is_none(),
-            "StandAlone is not a bundle member — bundle_id must be None, got {:?}",
-            standalone.bundle_id
+            grid.mods.iter().all(|m| m.folder_name.as_deref() != Some("ModA")),
+            "ModA must not appear as a separate grid row — it is a bundle member"
+        );
+        assert!(
+            grid.mods.iter().all(|m| m.folder_name.as_deref() != Some("ModB")),
+            "ModB must not appear as a separate grid row — it is a bundle member"
+        );
+
+        // Standalone mod must still appear as its own row.
+        assert!(
+            grid.mods.iter().any(|m| m.folder_name.as_deref() == Some("StandAlone")),
+            "StandAlone must still appear as its own row"
         );
     }
 }

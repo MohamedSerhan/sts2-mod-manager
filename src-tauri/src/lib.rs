@@ -345,8 +345,6 @@ pub fn run() {
             mod_sources::unpin_mod,
             mod_sources::auto_detect_sources,
             mod_sources::find_github_from_nexus,
-            // Bundle management
-            mods::get_bundles,
             // Dependency resolution
             mods::check_mod_dependencies,
             mods::get_mod_dependents,

@@ -1015,7 +1015,7 @@ mod pinned_download_tests {
             tags: vec![],
             display_name: None,
             display_description: None,
-            bundle_id: None,
+            bundle_members: vec![],
         }
     }
 

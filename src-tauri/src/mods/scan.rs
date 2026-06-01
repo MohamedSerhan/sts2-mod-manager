@@ -446,7 +446,7 @@ pub(crate) fn parse_manifest(manifest_path: &Path, base_dir: &Path, enabled: boo
         tags: vec![],
         display_name: None,
         display_description: None,
-        bundle_id: None,
+        bundle_members: vec![],
     })
 }
 
@@ -505,7 +505,7 @@ pub(super) fn pck_only_mod(pck_path: &Path, base_dir: &Path, enabled: bool) -> M
         tags: vec![],
         display_name: None,
         display_description: None,
-        bundle_id: None,
+        bundle_members: vec![],
     }
 }
 
@@ -569,7 +569,7 @@ pub(super) fn dll_only_mod(dll_path: &Path, base_dir: &Path, enabled: bool) -> M
         tags: vec![],
         display_name: None,
         display_description: None,
-        bundle_id: None,
+        bundle_members: vec![],
     }
 }
 
@@ -804,34 +804,118 @@ pub(super) fn scan_mods_inner(dir: &Path, enabled: bool) -> Vec<ModInfo> {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                // A sidecar-tagged bundle container is ALWAYS a multi-mod
-                // folder: descend into its sub-directories immediately,
-                // skipping the try_load_mod_from attempt on the container
-                // itself (which would otherwise pick up the .sts2mm-bundle.json
-                // sidecar as a spurious pseudo-mod).
+                // A sidecar-tagged bundle container is represented as ONE
+                // ModInfo for the whole container (Model A). The container's
+                // folder_name == container dir name; files includes every file
+                // inside (including the sidecar); bundle_members lists the
+                // display names of the immediate subdirectory members.
                 if crate::mods::bundle::is_bundle_container(&path) {
-                    let bundle_name =
-                        path.file_name().map(|n| n.to_string_lossy().to_string());
-                    let start = mods.len();
-                    if let Ok(sub_entries) = fs::read_dir(&path) {
-                        for sub_entry in sub_entries.flatten() {
-                            let sub_path = sub_entry.path();
-                            if sub_path.is_dir() {
-                                try_load_mod_from(
-                                    &sub_path,
-                                    dir,
-                                    enabled,
-                                    &mut found_names,
-                                    &mut mods,
-                                );
+                    let container_name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+
+                    let sc = crate::mods::bundle::read_sidecar(&path);
+
+                    let name = sc
+                        .as_ref()
+                        .map(|s| s.display_name.as_str())
+                        .filter(|n| !n.is_empty())
+                        .map(|n| n.to_string())
+                        .unwrap_or_else(|| container_name.clone());
+
+                    let version = sc
+                        .as_ref()
+                        .and_then(|s| s.installed_version.clone())
+                        .unwrap_or_else(|| "unknown".to_string());
+
+                    let nexus_url = sc.as_ref().and_then(|s| s.nexus_url.clone());
+                    let github_url = sc.as_ref().and_then(|s| {
+                        s.github_repo.as_ref().map(|r| {
+                            if r.starts_with("http://") || r.starts_with("https://") {
+                                r.clone()
+                            } else {
+                                format!("https://github.com/{}", r)
                             }
+                        })
+                    });
+                    let source = nexus_url.clone();
+
+                    // Collect every file inside the container (relative to dir)
+                    // so move/delete operate on the whole container.
+                    let files: Vec<String> = WalkDir::new(&path)
+                        .into_iter()
+                        .flatten()
+                        .filter(|e| e.file_type().is_file())
+                        .filter_map(|e| {
+                            e.path()
+                                .strip_prefix(dir)
+                                .ok()
+                                .map(|rel| rel.to_string_lossy().replace('\\', "/"))
+                        })
+                        .collect();
+
+                    let size_bytes = calculate_mod_size(dir, &files);
+
+                    // Derive display names for each immediate subdirectory member.
+                    let mut bundle_members: Vec<String> = Vec::new();
+                    if let Ok(sub_entries) = fs::read_dir(&path) {
+                        let mut sub_dirs: Vec<_> = sub_entries
+                            .flatten()
+                            .filter(|e| e.path().is_dir())
+                            .collect();
+                        sub_dirs.sort_by_key(|e| e.file_name());
+                        for sub_entry in sub_dirs {
+                            let sub_path = sub_entry.path();
+                            let sub_name = sub_entry.file_name().to_string_lossy().to_string();
+                            // Try parsing the member's manifest for a display name.
+                            let display = if let Ok(inner) = fs::read_dir(&sub_path) {
+                                inner
+                                    .flatten()
+                                    .find(|e| {
+                                        e.path().is_file()
+                                            && e.path()
+                                                .extension()
+                                                .and_then(|x| x.to_str())
+                                                == Some("json")
+                                    })
+                                    .and_then(|json_e| parse_manifest(&json_e.path(), dir, enabled))
+                                    .map(|info| info.name)
+                            } else {
+                                None
+                            };
+                            bundle_members.push(display.unwrap_or(sub_name));
                         }
                     }
-                    if let Some(ref bid) = bundle_name {
-                        for m in mods.iter_mut().skip(start) {
-                            m.bundle_id = Some(bid.clone());
-                        }
-                    }
+
+                    // Register the container name so PASS 3/4 won't double-count.
+                    found_names.insert(normalize_name(&container_name));
+
+                    let info = ModInfo {
+                        name,
+                        version,
+                        description: String::new(),
+                        enabled,
+                        files,
+                        source,
+                        hash: None,
+                        dependencies: Vec::new(),
+                        size_bytes,
+                        folder_name: Some(container_name),
+                        mod_id: None,
+                        github_url,
+                        nexus_url,
+                        pinned: false,
+                        min_game_version: None,
+                        author: None,
+                        note: None,
+                        custom_url: None,
+                        tags: vec![],
+                        display_name: None,
+                        display_description: None,
+                        bundle_members,
+                    };
+                    mods.push(info);
                     continue;
                 }
                 // First try at top level
@@ -849,7 +933,7 @@ pub(super) fn scan_mods_inner(dir: &Path, enabled: bool) -> Vec<ModInfo> {
                     // files but wraps several sub-mod directories (e.g.
                     // AliceDefectVisualPack/ holding four separate mods).
                     // Try each immediate subdirectory as an independent mod.
-                    // (Non-sidecar containers get no bundle_id tagging.)
+                    // (Non-sidecar containers descend and emit each member individually.)
                     if let Ok(sub_entries) = fs::read_dir(&path) {
                         for sub_entry in sub_entries.flatten() {
                             let sub_path = sub_entry.path();
@@ -1052,7 +1136,7 @@ mod dedup_identity_tests {
             tags: vec![],
             display_name: None,
             display_description: None,
-            bundle_id: None,
+            bundle_members: vec![],
         }
     }
 
@@ -1278,10 +1362,12 @@ mod pck_only_scan_tests {
         assert!(!info.files.is_empty());
     }
 
-    /// A container with a sidecar must tag every member's bundle_id with
-    /// the container folder name.
+    /// A sidecar container must scan as ONE ModInfo entry (the container itself),
+    /// not N separate member entries. The container's folder_name == container dir
+    /// name, name == sidecar display_name, bundle_members lists both sub-mods, and
+    /// files includes the sidecar path. ModA and ModB must NOT appear as separate entries.
     #[test]
-    fn sidecar_container_tags_members_with_bundle_id() {
+    fn sidecar_container_scans_as_one_bundle_entry() {
         let tmp = tempfile::tempdir().unwrap();
         let mods = tmp.path();
         write_bytes(&mods.join("Pack").join("ModA").join("ModA.dll"), b"");
@@ -1294,26 +1380,81 @@ mod pck_only_scan_tests {
             },
         )
         .unwrap();
+
         let scanned = scan_mods_inner(mods, true);
-        assert!(!scanned.is_empty());
+
+        // Exactly ONE entry for the whole bundle.
+        assert_eq!(
+            scanned.len(),
+            1,
+            "sidecar container must produce exactly one ModInfo, got {}: {:?}",
+            scanned.len(),
+            scanned.iter().map(|m| &m.folder_name).collect::<Vec<_>>()
+        );
+
+        let bundle = &scanned[0];
+        assert_eq!(
+            bundle.folder_name.as_deref(),
+            Some("Pack"),
+            "folder_name must be the container dir name"
+        );
+        assert_eq!(
+            bundle.name, "Pretty Pack",
+            "name must be the sidecar display_name"
+        );
         assert!(
-            scanned.iter().all(|m| m.bundle_id.as_deref() == Some("Pack")),
-            "every member tagged bundle_id=Pack: {:?}",
-            scanned
-                .iter()
-                .map(|m| (&m.name, &m.bundle_id))
-                .collect::<Vec<_>>()
+            !bundle.bundle_members.is_empty(),
+            "bundle_members must be populated"
+        );
+        assert_eq!(
+            bundle.bundle_members.len(),
+            2,
+            "bundle_members must list both sub-mods"
+        );
+
+        // The sidecar file itself must be in the files list.
+        let sidecar_rel = format!("Pack/{}", crate::mods::bundle::SIDECAR_FILENAME);
+        assert!(
+            bundle.files.iter().any(|f| f == &sidecar_rel),
+            "files must include the sidecar; got {:?}",
+            bundle.files
+        );
+
+        // ModA and ModB must NOT be separate entries.
+        assert!(
+            scanned.iter().all(|m| m.folder_name.as_deref() != Some("ModA")),
+            "ModA must not appear as a separate entry"
+        );
+        assert!(
+            scanned.iter().all(|m| m.folder_name.as_deref() != Some("ModB")),
+            "ModB must not appear as a separate entry"
         );
     }
 
-    /// A container WITHOUT a sidecar must leave all members' bundle_id as None.
+    /// A container WITHOUT a sidecar must still descend and surface each
+    /// member individually (the non-sidecar multi-mod container path is
+    /// unchanged from Phase 1 — b41666e behaviour).
     #[test]
-    fn container_without_sidecar_has_no_bundle_id() {
+    fn non_sidecar_container_still_descends() {
         let tmp = tempfile::tempdir().unwrap();
         let mods = tmp.path();
         write_bytes(&mods.join("Pack").join("ModA").join("ModA.dll"), b"");
         write_bytes(&mods.join("Pack").join("ModB").join("ModB.dll"), b"");
+        // No sidecar written — Pack is a plain multi-mod container.
+
         let scanned = scan_mods_inner(mods, true);
-        assert!(scanned.iter().all(|m| m.bundle_id.is_none()));
+
+        assert_eq!(
+            scanned.len(),
+            2,
+            "non-sidecar container must descend and emit each member individually, got {:?}",
+            scanned.iter().map(|m| &m.folder_name).collect::<Vec<_>>()
+        );
+        let names: std::collections::HashSet<&str> = scanned
+            .iter()
+            .filter_map(|m| m.folder_name.as_deref())
+            .collect();
+        assert!(names.contains("ModA"), "ModA must be a separate entry");
+        assert!(names.contains("ModB"), "ModB must be a separate entry");
     }
 }

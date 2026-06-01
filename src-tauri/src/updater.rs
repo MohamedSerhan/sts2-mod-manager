@@ -1735,7 +1735,7 @@ mod version_helper_tests {
             tags: vec![],
             display_name: None,
             display_description: None,
-            bundle_id: None,
+            bundle_members: vec![],
         };
         overrides(&mut info);
         info
@@ -1831,7 +1831,7 @@ mod version_helper_tests {
             tags: vec![],
             display_name: None,
             display_description: None,
-            bundle_id: None,
+            bundle_members: vec![],
         };
         assert!(install_is_incompatible(
             &mk(Some("0.110.0")),

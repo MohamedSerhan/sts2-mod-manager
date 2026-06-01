@@ -1049,6 +1049,67 @@ mod profile_membership_tests {
         );
     }
 
+    /// Regression guard: `enrich_mods_with_sources` runs before the grid is
+    /// assembled, so a `display_name` saved in `mod_sources.json` (keyed by
+    /// folder name) must appear on the resulting `ProfileMembershipMod` row.
+    ///
+    /// Steps:
+    ///   1. Write a minimal mod manifest into `mods/AutoPath/`.
+    ///   2. Write a `mod_sources.json` entry for "AutoPath" with
+    ///      `display_name = "Autooo"` and `tags = ["teez"]`.
+    ///   3. Call `profile_membership_matrix`.
+    ///   4. Assert the row for AutoPath carries `display_name == Some("Autooo")`.
+    #[test]
+    fn membership_matrix_applies_display_name_override_from_sources() {
+        let game_tmp = tempfile::tempdir().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let mods_path = game_tmp.path().join("mods");
+        let disabled_path = game_tmp.path().join("mods_disabled");
+        let profiles_path = config_tmp.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        // 1. Minimal mod on disk (folder name == "AutoPath", manifest name == "AutoPath").
+        write_mod(&mods_path, "AutoPath", "AutoPath", "1.0.0");
+
+        // 2. Save a mod_sources entry that overrides display_name.
+        let mut db = crate::mod_sources::ModSourcesDb::default();
+        db.mods.insert(
+            "AutoPath".to_string(),
+            crate::mod_sources::ModSourceEntry {
+                display_name: Some("Autooo".to_string()),
+                tags: vec!["teez".to_string()],
+                ..Default::default()
+            },
+        );
+        crate::mod_sources::save_sources(&db, config_tmp.path()).unwrap();
+
+        // 3. Empty profile so the grid still has a profiles column.
+        save_profile(&empty_profile("TestPack"), &profiles_path).unwrap();
+
+        // 4. Build the grid.
+        let grid = profile_membership_matrix(
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config_tmp.path(),
+        )
+        .unwrap();
+
+        // 5. Assert the row for AutoPath carries the enriched display_name.
+        let row = grid
+            .mods
+            .iter()
+            .find(|m| m.folder_name.as_deref() == Some("AutoPath"))
+            .expect("AutoPath must appear as a row in the membership grid");
+        assert_eq!(
+            row.display_name.as_deref(),
+            Some("Autooo"),
+            "enrich_mods_with_sources must carry the saved display_name override into the grid row"
+        );
+    }
+
     /// A sidecar bundle container appears as a SINGLE row in the membership grid
     /// with folder_name == container name. The individual member mods are NOT
     /// separate rows. A standalone mod alongside still appears as its own row.

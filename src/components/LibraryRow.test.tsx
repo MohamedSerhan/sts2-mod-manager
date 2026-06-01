@@ -868,6 +868,99 @@ describe('<LibraryRow> row click + source badges', () => {
   });
 });
 
+// ── Nexus-only / bundle update pill (T13) ────────────────────────────────
+//
+// A bundle (or Nexus-only mod) has no github_url. The update pill must
+// still appear when audit.nexus_update_available is true.
+
+describe('<LibraryRow> Nexus-only update pill', () => {
+  it('shows the update pill for a Nexus-only mod when nexus_update_available is true', () => {
+    renderRow({
+      // No github_url — this is a Nexus-only / bundle mod.
+      mod: baseModInfo({ github_url: null, nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/99' }),
+      audit: baseAudit({
+        github_repo: null,
+        latest_release_tag: null,
+        latest_release_with_assets_tag: null,
+        latest_compatible_tag: null,
+        needs_update: true,
+        nexus_update_available: true,
+        nexus_version: '2.1.0',
+        update_source: 'nexus',
+      }),
+    });
+    // The pill must be visible.
+    expect(screen.getByRole('button', { name: /Update available/i })).toBeInTheDocument();
+  });
+
+  it('shows the Nexus version in the pill label for a Nexus-only mod', () => {
+    renderRow({
+      mod: baseModInfo({ github_url: null, nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/99' }),
+      audit: baseAudit({
+        github_repo: null,
+        latest_release_tag: null,
+        latest_release_with_assets_tag: null,
+        latest_compatible_tag: null,
+        needs_update: true,
+        nexus_update_available: true,
+        nexus_version: '2.1.0',
+        update_source: 'nexus',
+      }),
+    });
+    // The pill label should show the Nexus version, not undefined.
+    // The i18n key is "Update available → v{{version}}" with v stripped in
+    // the template then re-added, so the rendered text is "v2.1.0".
+    expect(screen.getByText(/Update available → v2\.1\.0/)).toBeInTheDocument();
+  });
+
+  it('clicking the Nexus update pill fires onUpdate', async () => {
+    const onUpdate = vi.fn();
+    const user = userEvent.setup();
+    renderRow({
+      mod: baseModInfo({ github_url: null, nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/99' }),
+      audit: baseAudit({
+        github_repo: null,
+        latest_release_tag: null,
+        latest_release_with_assets_tag: null,
+        latest_compatible_tag: null,
+        needs_update: true,
+        nexus_update_available: true,
+        nexus_version: '2.1.0',
+        update_source: 'nexus',
+      }),
+      onUpdate,
+    });
+    await user.click(screen.getByRole('button', { name: /Update available/i }));
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('still shows the update pill for a GitHub update (regression guard)', () => {
+    renderRow({
+      mod: baseModInfo({ github_url: 'https://github.com/x/y' }),
+      audit: baseAudit({ needs_update: true, nexus_update_available: false }),
+    });
+    expect(screen.getByRole('button', { name: /Update available/i })).toBeInTheDocument();
+  });
+
+  it('does NOT show the update pill when needs_update is false (even if nexus_update_available is true)', () => {
+    // needs_update is the authoritative gate; nexus_update_available alone
+    // must not show the pill if the backend said no update.
+    renderRow({
+      mod: baseModInfo({ github_url: null }),
+      audit: baseAudit({ needs_update: false, nexus_update_available: true, nexus_version: '9.9.9' }),
+    });
+    expect(screen.queryByRole('button', { name: /Update available/i })).toBeNull();
+  });
+
+  it('does NOT show the update pill when the mod is pinned (nexus update ignored)', () => {
+    renderRow({
+      mod: baseModInfo({ github_url: null, pinned: true }),
+      audit: baseAudit({ needs_update: true, nexus_update_available: true, nexus_version: '2.1.0', pinned: true }),
+    });
+    expect(screen.queryByRole('button', { name: /Update available/i })).toBeNull();
+  });
+});
+
 // ── bundle_members rendering (T11) ───────────────────────────────────────
 //
 // A bundle is now a normal ModInfo with bundle_members set. The row renders

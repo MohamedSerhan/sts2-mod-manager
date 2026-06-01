@@ -331,14 +331,26 @@ pub async fn check_all_updates(
                 continue;
             }
 
-            // Skip pinned mods
-            if let Some(entry) = sources.get(&m.name) {
+            // Skip pinned mods — folder-first lookup so a pin saved under
+            // folder_name (the post-1.3.0 write key) is respected here too.
+            let source_entry = lookup_entry(
+                sources,
+                m.folder_name.as_deref(),
+                &m.name,
+                m.mod_id.as_deref(),
+            );
+            if let Some(entry) = source_entry {
                 if entry.pinned {
                     continue;
                 }
             }
 
-            let source_entry = match sources.get(&m.name) {
+            let source_entry = match lookup_entry(
+                sources,
+                m.folder_name.as_deref(),
+                &m.name,
+                m.mod_id.as_deref(),
+            ) {
                 Some(e) => e,
                 None => continue,
             };
@@ -2168,6 +2180,112 @@ mod version_helper_tests {
         assert!(!is_mod_asset("README.md"));
         assert!(!is_mod_asset("source.tar.gz"));
     }
+
+    // ── Bundle / Nexus folder-first lookup tests ──────────────────────────
+
+    /// A bundle's `ModInfo` has no display name, no mod_id, and a
+    /// `folder_name` set to the container folder. Its Nexus source MUST be
+    /// findable via `lookup_entry` keyed by that folder — this is what the
+    /// audit's Nexus phase calls after the fix.
+    #[test]
+    fn lookup_entry_finds_bundle_source_by_container_folder_name() {
+        let mut sources = std::collections::HashMap::new();
+        // The bundle's source is stored keyed by the container folder.
+        sources.insert(
+            "FantasyPack".into(),
+            ModSourceEntry {
+                nexus_url: Some("https://www.nexusmods.com/slaythespire2/mods/99".into()),
+                nexus_game_domain: Some("slaythespire2".into()),
+                nexus_mod_id: Some(99),
+                installed_version: Some("1.0.0".into()),
+                ..Default::default()
+            },
+        );
+
+        // Bundle ModInfo: folder_name="FantasyPack", name might be anything
+        // (the container has no manifest-level name for us to trust).
+        let entry = crate::mod_sources::lookup_entry(
+            &sources,
+            Some("FantasyPack"),  // folder_name — the container
+            "FantasyPack",        // name falls back to folder since bundle has no manifest name
+            None,
+        );
+        assert!(entry.is_some(), "bundle source should be found by container folder_name");
+        let e = entry.unwrap();
+        assert_eq!(e.nexus_mod_id, Some(99));
+        assert_eq!(
+            e.nexus_url.as_deref(),
+            Some("https://www.nexusmods.com/slaythespire2/mods/99"),
+        );
+    }
+
+    /// The `check_all_updates` Nexus phase now calls `lookup_entry` (folder-first).
+    /// Verify that a bundle whose source is keyed by container folder is NOT
+    /// skipped: it should reach the Nexus check (the source entry is found).
+    #[test]
+    fn nexus_audit_phase_lookup_finds_bundle_by_folder_not_name() {
+        let mut sources = std::collections::HashMap::new();
+        // Source keyed by container folder_name (not by m.name).
+        sources.insert(
+            "Pack".into(),
+            ModSourceEntry {
+                nexus_url: Some("https://www.nexusmods.com/slaythespire2/mods/42".into()),
+                nexus_game_domain: Some("slaythespire2".into()),
+                nexus_mod_id: Some(42),
+                installed_version: Some("2.0.0".into()),
+                pinned: false,
+                ..Default::default()
+            },
+        );
+
+        // Bundle ModInfo: folder_name="Pack", name="Pack Bundle" (different from key)
+        let bundle = mod_info(|m| {
+            m.name = "Pack Bundle".into();
+            m.folder_name = Some("Pack".into());
+            m.mod_id = None;
+            m.nexus_url = None; // nexus_url not on the ModInfo itself — it's in sources
+        });
+
+        // Simulate the fixed lookup from the Nexus phase of check_all_updates.
+        let found = crate::mod_sources::lookup_entry(
+            &sources,
+            bundle.folder_name.as_deref(),
+            &bundle.name,
+            bundle.mod_id.as_deref(),
+        );
+        assert!(
+            found.is_some(),
+            "folder-first lookup should find source keyed by container folder 'Pack'"
+        );
+        assert_eq!(found.unwrap().nexus_mod_id, Some(42));
+
+        // name-only lookup (the OLD broken path) would miss it.
+        let old_path = sources.get(&bundle.name);
+        assert!(
+            old_path.is_none(),
+            "name-only get should NOT find a source keyed by folder (regression guard)"
+        );
+    }
+
+    /// When a bundle's Nexus version on the server (2.1.0) is newer than the
+    /// installed version recorded in mod_sources (2.0.0), `is_newer_version`
+    /// should flag an update available.
+    #[test]
+    fn nexus_update_detected_for_bundle_when_upstream_newer_than_installed() {
+        let installed = "2.0.0";
+        let upstream = "2.1.0";
+        assert!(
+            is_newer_version(installed, upstream),
+            "upstream 2.1.0 should be flagged as newer than installed 2.0.0"
+        );
+    }
+
+    /// When the upstream Nexus version matches installed, no update is needed.
+    #[test]
+    fn nexus_update_not_flagged_when_versions_match() {
+        assert!(!is_newer_version("2.1.0", "2.1.0"));
+        assert!(!is_newer_version("2.2.0", "2.1.0")); // downgrade also false
+    }
 }
 
 // ── Audit ───────────────────────────────────────────────────────────────────
@@ -2462,13 +2580,17 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                 let latest_ver = assets_tag.trim_start_matches('v');
                 let current_ver = m.version.trim_start_matches('v');
 
-                let installed_ver_matches = ctx
-                    .sources_db
-                    .mods
-                    .get(&m.name)
-                    .and_then(|e| e.installed_version.as_deref())
-                    .map(|iv| iv.trim_start_matches('v') == latest_ver)
-                    .unwrap_or(false);
+                // Folder-first lookup so a bundle (whose source is keyed by
+                // container folder_name) isn't missed by a name-only get.
+                let installed_ver_matches = lookup_entry(
+                    &ctx.sources_db.mods,
+                    m.folder_name.as_deref(),
+                    &m.name,
+                    m.mod_id.as_deref(),
+                )
+                .and_then(|e| e.installed_version.as_deref())
+                .map(|iv| iv.trim_start_matches('v') == latest_ver)
+                .unwrap_or(false);
 
                 if !installed_ver_matches && current_ver != "unknown" && current_ver != "0.0.0" {
                     // Use semver comparison — only flag if latest > current
@@ -2539,13 +2661,17 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                                         // switches the hint copy to
                                         // "you're already on the newest
                                         // compatible".
-                                        let installed_tag = ctx
-                                            .sources_db
-                                            .mods
-                                            .get(&m.name)
-                                            .and_then(|e| e.installed_version.as_deref())
-                                            .map(|s| s.trim_start_matches('v'))
-                                            .unwrap_or("");
+                                        // Folder-first so a bundle keyed by
+                                        // container folder_name is found.
+                                        let installed_tag = lookup_entry(
+                                            &ctx.sources_db.mods,
+                                            m.folder_name.as_deref(),
+                                            &m.name,
+                                            m.mod_id.as_deref(),
+                                        )
+                                        .and_then(|e| e.installed_version.as_deref())
+                                        .map(|s| s.trim_start_matches('v'))
+                                        .unwrap_or("");
                                         let manifest_ver = m.version.trim_start_matches('v');
                                         let walk_ver = walk.tag.trim_start_matches('v');
                                         if walk_ver == installed_tag || walk_ver == manifest_ver {

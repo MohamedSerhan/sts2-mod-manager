@@ -267,6 +267,14 @@ export function LibraryRow({
   // an inline chip-row so the user doesn't have to expand anything.
   const compatibleTag =
     audit?.latest_compatible_tag ?? audit?.latest_release_with_assets_tag ?? null;
+  // Version to display in the update pill. GitHub updates use the release
+  // tag (compatibleTag); Nexus-only updates fall back to nexus_version so
+  // the pill shows a real version string rather than undefined.
+  const updateDisplayVersion = compatibleTag ?? audit?.nexus_version ?? null;
+  // Show the update pill for a GitHub update (when compatibleTag is known)
+  // OR for a Nexus-only update (nexus_update_available is true). Bundles
+  // and Nexus-only mods have no github_url, so gating on github_url alone
+  // was silently hiding their "update available" state.
   const showUpdatePill =
     !!audit
     && audit.needs_update
@@ -274,8 +282,7 @@ export function LibraryRow({
     && !audit.snoozed
     && !audit.game_version_too_old
     && !audit.latest_release_blocked_by_game_version
-    && !!compatibleTag
-    && !!mod?.github_url;
+    && (!!compatibleTag || !!audit.nexus_update_available);
   const showBlockedPill =
     !!audit?.latest_release_blocked_by_game_version && !audit.pinned;
   const showFrozenPill = !!mod?.pinned;
@@ -455,14 +462,14 @@ export function LibraryRow({
                       ? t('mods.closeSts2FirstDot')
                       : t('mods.updateClickTitle', {
                           current: mod!.version,
-                          target: compatibleTag?.replace(/^v/, ''),
+                          target: updateDisplayVersion?.replace(/^v/, ''),
                         })
                   }
                 >
                   {isUpdating ? (
                     <><RefreshCw size={9} className="animate-spin" />{t('mods.updating')}</>
                   ) : (
-                    <><Download size={9} />{t('mods.updateAvailable', { version: compatibleTag?.replace(/^v/, '') })}</>
+                    <><Download size={9} />{t('mods.updateAvailable', { version: updateDisplayVersion?.replace(/^v/, '') })}</>
                   )}
                 </button>
               )}

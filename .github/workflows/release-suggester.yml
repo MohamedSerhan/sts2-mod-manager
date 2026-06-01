@@ -1,6 +1,7 @@
 name: Release suggester
-# When a PR adds a user-facing CHANGELOG [Unreleased] entry, comment the suggested
-# bump + a link to the Release workflow. Suggest-only — this never cuts a release.
+# When a PR adds a user-facing changelog entry (a changelog.d/ fragment or an
+# [Unreleased] bullet), comment the suggested bump + a link to the Release
+# workflow. Suggest-only — this never cuts a release.
 on:
   pull_request:
     types: [opened, synchronize, reopened]

@@ -75,15 +75,24 @@ export function changelogCount(changelogText, fragments) {
   return unreleasedBulletCount(changelogText) + fragmentCount(fragments);
 }
 
-/** Combined bump: legacy suggestedBump (richer, handles major) takes precedence;
- *  falls back to fragment bump if legacy returns null. */
+/** Combined bump: legacy suggestedBump (richer — it alone can return 'major')
+ *  takes UNCONDITIONAL precedence; only when the legacy [Unreleased] section is
+ *  empty (returns null) do we fall back to the fragment-derived bump. Note this
+ *  means a patch-only legacy result suppresses a higher fragment bump — fine for
+ *  the transition, since legacy [Unreleased] is emptied once 1.7.0 ships. */
 export function combinedBump(changelogText, fragments) {
   const legacy = suggestedBump(changelogText);
-  if (legacy !== null) return legacy;
-  return fragmentBump(fragments) || null;
+  return legacy !== null ? legacy : fragmentBump(fragments);
 }
 
 function readStdin() { try { return readFileSync(0, 'utf-8'); } catch { return ''; } }
+
+/** Read the on-disk changelog signal: CHANGELOG.md text (or '' if absent) plus
+ *  the changelog.d/ fragments. Shared by the disk-reading CLI commands. */
+function readChangelogFromDisk() {
+  const text = existsSync('CHANGELOG.md') ? readFileSync('CHANGELOG.md', 'utf-8') : '';
+  return { text, frags: listFragments() };
+}
 
 const isMain = fileURLToPath(import.meta.url) === process.argv[1];
 if (isMain) {
@@ -101,12 +110,10 @@ if (isMain) {
     const b = suggestedBump(readStdin());
     if (b) console.log(b);
   } else if (cmd === 'changelog-count') {
-    const text = existsSync('CHANGELOG.md') ? readFileSync('CHANGELOG.md', 'utf-8') : '';
-    const frags = listFragments();
+    const { text, frags } = readChangelogFromDisk();
     console.log(changelogCount(text, frags));
   } else if (cmd === 'combined-bump') {
-    const text = existsSync('CHANGELOG.md') ? readFileSync('CHANGELOG.md', 'utf-8') : '';
-    const frags = listFragments();
+    const { text, frags } = readChangelogFromDisk();
     const b = combinedBump(text, frags);
     if (b) console.log(b);
   } else {

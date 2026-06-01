@@ -130,6 +130,14 @@ test('combinedBump: empty legacy + added fragment -> minor', () => {
   assert.equal(combinedBump('', frags), 'minor');
 });
 
+test('combinedBump: legacy patch (Fixed) suppresses a higher fragment minor', () => {
+  // The subtle case: legacy says patch, fragments say minor. Legacy wins
+  // unconditionally during the transition, so the result is patch.
+  const cl = '## [Unreleased]\n### Fixed\n- A legacy fix\n';
+  const frags = [{ category: 'added', slug: 'b', file: 'added-b.md', body: 'Feature.' }];
+  assert.equal(combinedBump(cl, frags), 'patch');
+});
+
 test('combinedBump: empty both -> null', () => {
   assert.equal(combinedBump('', []), null);
 });

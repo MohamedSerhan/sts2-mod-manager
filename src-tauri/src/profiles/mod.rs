@@ -120,6 +120,11 @@ pub struct ProfileMembershipMod {
     pub display_name: Option<String>,
     pub installed_enabled: bool,
     pub profiles: Vec<ProfileMembershipState>,
+    /// The folder name of the bundle container this mod belongs to, if any.
+    /// Mirrors `ModInfo::bundle_id` — set when the mod is a sidecar-tagged
+    /// bundle member; `None` for standalone mods.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

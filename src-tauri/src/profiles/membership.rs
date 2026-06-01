@@ -87,6 +87,7 @@ pub(crate) fn profile_membership_matrix(
                 display_name: installed.display_name,
                 installed_enabled: installed.enabled,
                 profiles: states,
+                bundle_id: installed.bundle_id.clone(),
             }
         })
         .collect();
@@ -1036,6 +1037,91 @@ mod profile_membership_tests {
                     .to_string_lossy()
                     .starts_with("settings.save.sts2mm-bak")),
             "the backup should be retained for manual inspection"
+        );
+    }
+
+    /// Bundle-member rows in the membership grid carry the container's
+    /// `bundle_id`; standalone mods carry `None`.
+    ///
+    /// Fixture: a sidecar bundle container `Pack/` holding two member mods
+    /// (`ModA`, `ModB`) plus one top-level standalone mod (`StandAlone`).
+    /// The matrix must tag the two bundle members with `bundle_id = Some("Pack")`
+    /// and leave `StandAlone` with `bundle_id = None`.
+    #[test]
+    fn membership_matrix_carries_bundle_id_for_bundle_members() {
+        let game_tmp = tempfile::tempdir().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let mods_path = game_tmp.path().join("mods");
+        let disabled_path = game_tmp.path().join("mods_disabled");
+        let profiles_path = config_tmp.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        // Create bundle container Pack/ with two member mods (DLL-only is enough
+        // for the scanner to recognise them).
+        let pack_dir = mods_path.join("Pack");
+        let mod_a_dir = pack_dir.join("ModA");
+        let mod_b_dir = pack_dir.join("ModB");
+        fs::create_dir_all(&mod_a_dir).unwrap();
+        fs::create_dir_all(&mod_b_dir).unwrap();
+        fs::write(mod_a_dir.join("ModA.dll"), b"dll").unwrap();
+        fs::write(mod_b_dir.join("ModB.dll"), b"dll").unwrap();
+        crate::mods::bundle::write_sidecar(
+            &pack_dir,
+            &crate::mods::bundle::BundleSidecar {
+                display_name: "Pack".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        // Create a standalone top-level mod.
+        write_mod(&mods_path, "StandAlone", "StandAlone", "1.0.0");
+
+        // No profiles needed — empty profiles_path is fine.
+        save_profile(&empty_profile("TestPack"), &profiles_path).unwrap();
+
+        let grid = profile_membership_matrix(
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config_tmp.path(),
+        )
+        .unwrap();
+
+        // Bundle members must carry bundle_id = Some("Pack").
+        let mod_a = grid
+            .mods
+            .iter()
+            .find(|m| m.folder_name.as_deref() == Some("ModA"))
+            .expect("ModA must appear in the grid");
+        let mod_b = grid
+            .mods
+            .iter()
+            .find(|m| m.folder_name.as_deref() == Some("ModB"))
+            .expect("ModB must appear in the grid");
+        assert_eq!(
+            mod_a.bundle_id.as_deref(),
+            Some("Pack"),
+            "ModA is a bundle member — bundle_id must be Some(\"Pack\")"
+        );
+        assert_eq!(
+            mod_b.bundle_id.as_deref(),
+            Some("Pack"),
+            "ModB is a bundle member — bundle_id must be Some(\"Pack\")"
+        );
+
+        // Standalone mod must carry bundle_id = None.
+        let standalone = grid
+            .mods
+            .iter()
+            .find(|m| m.folder_name.as_deref() == Some("StandAlone"))
+            .expect("StandAlone must appear in the grid");
+        assert!(
+            standalone.bundle_id.is_none(),
+            "StandAlone is not a bundle member — bundle_id must be None, got {:?}",
+            standalone.bundle_id
         );
     }
 }

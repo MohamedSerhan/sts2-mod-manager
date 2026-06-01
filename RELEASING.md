@@ -5,14 +5,16 @@ Maintainer-only notes for cutting a release of STS2 Mod Manager.
 ## What's release-worthy
 
 A change is **release-worthy** iff it is **user-facing** — i.e. it adds a
-`CHANGELOG.md` `[Unreleased]` bullet under Added / Changed / Fixed / Security
-(or Removed / Deprecated). Internal-only changes (CI, build, tests, refactors,
-docs, chore) are **not** release-worthy and don't, on their own, warrant a release.
+changelog entry: a `changelog.d/<category>-<slug>.md` fragment (category =
+added / changed / fixed / security), or a legacy `CHANGELOG.md` `[Unreleased]`
+bullet. Internal-only changes (CI, build, tests, refactors, docs, chore) are
+**not** release-worthy and don't, on their own, warrant a release.
 
 The release-suggester bot applies exactly this rule: it comments on a PR only
-when the PR adds a new `[Unreleased]` bullet, and the "Run the Release workflow"
-link it posts is how you ship — when you're ready, it releases everything queued
-in `[Unreleased]` at once.
+when the PR adds a new changelog entry (fragment or bullet), and the "Run the
+Release workflow" link it posts is how you ship — when you're ready,
+`scripts/release.sh` assembles all queued fragments into one version section and
+releases them at once.
 
 ## Release flow
 
@@ -383,7 +385,7 @@ gh label create qa-needs-human \
 | **Approval gate** | Only `MohamedSerhan`'s approval triggers the auto-merge. Another reviewer's approval has no effect. |
 | **Dual condition** | Auto-merge requires both `qa-passed` **and** a green CI run. Either condition alone is not enough. |
 | **5-round cap** | The loop escalates to `qa-needs-human` rather than running forever. You always get the final word. |
-| **Releases stay manual** | The bot updates the `[Unreleased]` CHANGELOG section as part of its fix work, but it never cuts or publishes a release. `scripts/release.sh` remains your manual step. |
+| **Releases stay manual** | The bot adds a `changelog.d/` fragment as part of its fix work, but it never cuts or publishes a release. `scripts/release.sh` remains your manual step. |
 | **No-`qa` PRs unaffected** | Removing the `qa` label (or never adding it) leaves the PR on the normal manual-merge path with no QA loop and no auto-merge. |
 
 ### CI Gate (required checks)
@@ -400,7 +402,7 @@ checks it runs depend on what files a PR touches.
   - Rust unit + integration tests — `cargo test` (`qa:rust`)
   - A 3-platform build (Windows / macOS / Linux) — confirms it bundles everywhere
   - A WebDriver UI smoke test — Windows, deterministic cassette (`qa:smoke:cassette`)
-  - A CHANGELOG check — the PR must add a bullet under `[Unreleased]`
+  - A changelog check — the PR must add a `changelog.d/` fragment (or a legacy `[Unreleased]` bullet)
 - **Scripts / workflows / docs PRs** (changes limited to `.github/`, `scripts/`,
   `docs/`, `*.md`) run lighter checks or none, so they stay fast and do not
   require a full build.
@@ -412,8 +414,9 @@ users autonomously, regardless of how the review loop resolves.
 
 #### The `no-changelog` opt-out
 
-App PRs must contain a `[Unreleased]` CHANGELOG bullet.  The auto-fix bot adds
-this automatically for user-facing fixes.
+App PRs must add a changelog entry — a `changelog.d/<category>-<slug>.md` fragment
+(or a legacy `[Unreleased]` bullet).  The auto-fix bot adds a fragment
+automatically for user-facing fixes.
 
 For genuinely internal app changes — refactors, test-only work, build tooling
 that users will never notice — label the PR `no-changelog` to skip just the

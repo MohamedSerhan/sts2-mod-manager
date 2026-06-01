@@ -4,35 +4,39 @@
     {
       "id": 1,
       "subject": "Task 1: PR1 — workflow concurrency + dedup (Fix A + C)",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** A qa-passed label toggle no longer cancels a running dev build, and one @claude comment on an auto-fix PR triggers exactly one agent.\n\n**USER-ORDERED GATE — NON-SKIPPABLE.** Close only after the live smoke is re-validated independently with captured output.\n\n```json:metadata\n{\"files\": [\".github/workflows/build.yml\", \".github/workflows/claude.yml\"], \"verifyCommand\": \"actionlint .github/workflows/build.yml .github/workflows/claude.yml\", \"acceptanceCriteria\": [\"build.yml cancel-in-progress false on labeled events\", \"claude.yml skips @claude on auto-fix PRs\", \"actionlint clean\", \"live smoke: build survives label toggle AND one agent per @claude\"], \"userGate\": true, \"tags\": [\"user-gate\"], \"gateScope\": \"this-task\"}\n```"
     },
     {
       "id": 2,
       "subject": "Task 2: changelog-fragments.mjs engine + tests",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** A tested node module that lists changelog.d/ fragments, assembles them, counts, suggests a bump, and lints dev-speak (single source of truth for the lint).\n\n```json:metadata\n{\"files\": [\"scripts/changelog-fragments.mjs\", \"scripts/changelog-fragments.test.mjs\"], \"verifyCommand\": \"node --test scripts/changelog-fragments.test.mjs\", \"acceptanceCriteria\": [\"listFragments parses + validates\", \"assemble groups in section order\", \"suggestedBump minor/patch/null\", \"lint flags dev-speak\", \"tests pass\"]}\n```"
     },
     {
       "id": 3,
       "subject": "Task 3: changelog.d/ scaffolding + release.sh integration",
-      "status": "pending",
-      "blockedBy": [2],
+      "status": "completed",
+      "blockedBy": [
+        2
+      ],
       "description": "**Goal:** release.sh assembles fragments (+ legacy [Unreleased] for the 1.7.0 transition) into the new version section and deletes them; gate + lint via the node module.\n\n```json:metadata\n{\"files\": [\"changelog.d/.gitkeep\", \"changelog.d/README.md\", \"scripts/release.sh\"], \"verifyCommand\": \"bash -n scripts/release.sh\", \"acceptanceCriteria\": [\"pre-flight gate on fragments or legacy\", \"lint via node module\", \"promotion assembles + deletes + resets placeholder\", \"dry-run shows assembled section\"]}\n```"
     },
     {
       "id": 4,
       "subject": "Task 4: CI / suggester / QA wiring to read fragments",
-      "status": "pending",
-      "blockedBy": [2],
+      "status": "completed",
+      "blockedBy": [
+        2
+      ],
       "description": "**Goal:** CI changelog gate, ci-changes.mjs, release-suggester, and QA check all read changelog.d/ instead of [Unreleased].\n\n```json:metadata\n{\"files\": [\"scripts/ci-changes.mjs\", \"scripts/ci-changes.test.mjs\", \".github/workflows/ci.yml\", \".github/workflows/release-suggester.yml\", \".github/workflows/claude-autofix-qa.yml\"], \"verifyCommand\": \"node --test scripts/ci-changes.test.mjs\", \"acceptanceCriteria\": [\"ci-changes delegates to fragments\", \"ci.yml gate on fragment\", \"suggester fragment-backed\", \"QA asks for fragment\", \"tests + actionlint pass\"]}\n```"
     },
     {
       "id": 5,
       "subject": "Task 5: auto-fix bot fragment instruction + docs",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** The auto-fix bot writes a changelog.d/ fragment (not a CHANGELOG bullet), docs explain the flow, and the conflict-watcher's CHANGELOG sentence is trimmed.\n\n```json:metadata\n{\"files\": [\".github/workflows/claude-autofix.yml\", \".github/workflows/conflict-watcher.yml\", \"RELEASING.md\", \"CHANGELOG.md\"], \"verifyCommand\": \"actionlint .github/workflows/claude-autofix.yml .github/workflows/conflict-watcher.yml\", \"acceptanceCriteria\": [\"bot writes a fragment not a bullet\", \"watcher CHANGELOG sentence trimmed\", \"docs describe fragments\", \"actionlint clean\"]}\n```"
     }
   ],
-  "lastUpdated": "2026-05-31"
+  "lastUpdated": "2026-06-01"
 }

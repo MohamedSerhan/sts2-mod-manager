@@ -87,11 +87,11 @@ jobs:
                  time, that is fine — do them sequentially; the capability is unchanged.)
               5. INTEGRATION PASS (you, after every subagent returns): edit the glue
                  files to wire the pieces together. If the change is user-facing, add ONE
-                 concise player-language bullet to the `[Unreleased]` section of
-                 CHANGELOG.md under the right heading (Added/Changed/Fixed/Security),
-                 following the CHANGELOG "Writing rules" (no file paths, function names,
-                 or dev-speak; one short active-voice sentence); skip the changelog for
-                 internal-only changes. Then run the full suite (`npm test` runs frontend
+                 changelog fragment: create a NEW file `changelog.d/<category>-${{ github.event.issue.number }}-<short-slug>.md`
+                 where <category> is one of added/changed/fixed/security, containing a
+                 single concise player-language sentence (no leading `- `; no file paths,
+                 function names, or dev-speak — see `changelog.d/README.md`). Do NOT edit
+                 CHANGELOG.md. Skip the fragment for internal-only changes. Then run the full suite (`npm test` runs frontend
                  + Rust) and fix any integration breakage until it passes. Finally COMMIT
                  ALL changes — every subagent's edits plus your glue and changelog edits —
                  to `auto-fix/${{ github.event.issue.number }}` (the subagents committed
@@ -117,11 +117,12 @@ jobs:
                  (`npm test` runs the frontend + Rust suites; for a Rust-only change
                  `cargo test --manifest-path=src-tauri/Cargo.toml`) and iterate until they
                  pass. CI will also run the full suite on the PR.
-              3. If — and only if — the change is user-facing, add ONE concise, player-
-                 language bullet to the `[Unreleased]` section of CHANGELOG.md under the
-                 right heading (Added/Changed/Fixed/Security), following the CHANGELOG
-                 "Writing rules" (no file paths, function names, or dev-speak; one short
-                 active-voice sentence). Skip the changelog for internal-only changes.
+              3. If — and only if — the change is user-facing, add ONE changelog fragment:
+                 create a NEW file `changelog.d/<category>-${{ github.event.issue.number }}-<short-slug>.md`
+                 where <category> is one of added/changed/fixed/security, containing a
+                 single concise player-language sentence (no leading `- `; no file paths,
+                 function names, or dev-speak — see `changelog.d/README.md`). Do NOT edit
+                 CHANGELOG.md. Skip the fragment for internal-only changes.
               4. Open a pull request targeting `main` whose body STARTS with
                  `Fixes #${{ github.event.issue.number }}`, summarizes the change, notes
                  whether you added a changelog entry, and explains how to test it via the

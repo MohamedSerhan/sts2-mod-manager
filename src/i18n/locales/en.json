@@ -1275,7 +1275,8 @@
       "foundNexusMod": "Found Nexus mod: {{name}}. Open it on Nexus and click \"Slow Download\" / \"Manual\" — the app will catch the zip from your Downloads folder.",
       "quickAddFailed": "Quick add failed: {{error}}",
       "rolledBack": "Rolled back '{{name}}' to v{{version}}",
-      "rollbackFailed": "Rollback failed for '{{name}}': {{error}}"
+      "rollbackFailed": "Rollback failed for '{{name}}': {{error}}",
+      "nexusUpdateOpened": "Opened {{name}} on Nexus — download the update and it'll install automatically."
     },
     "allInstalledTitle": "All installed mods",
     "allInstalledSubtitle": "Every mod installed on your computer. Your active modpack decides which ones load in the game.",

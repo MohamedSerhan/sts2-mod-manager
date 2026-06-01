@@ -215,6 +215,17 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
   }
 
   async function handleInlineUpdate(mod: ModInfo) {
+    // Nexus-only update: open the mod's Nexus page so the user can download
+    // the new version. The downloads-watcher will match the downloaded zip to
+    // this existing mod (via nexus_mod_id in the filename or name/folder
+    // matching) and update it in place — no duplicate is created.
+    if (mod.nexus_url && !mod.github_url) {
+      await openExternalUrl(mod.nexus_url);
+      notifyNexusOpen(mod.display_name?.trim() || mod.name);
+      toast.info(t('mods.toast.nexusUpdateOpened', { name: mod.display_name?.trim() || mod.name }));
+      return;
+    }
+
     const key = mod.folder_name ?? mod.name;
     if (updatingKey) return;
     setUpdatingKey(key);

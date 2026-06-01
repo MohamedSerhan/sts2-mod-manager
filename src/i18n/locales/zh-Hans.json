@@ -1275,6 +1275,7 @@
       "quickAddFailed": "快速添加失败：{{error}}",
       "rolledBack": "已将「{{name}}」回滚到 v{{version}}",
       "rollbackFailed": "「{{name}}」回滚失败：{{error}}",
+      "nexusUpdateOpened": "已在 Nexus 上打开「{{name}}」— 下载更新后将自动安装。",
       "snoozed": "已跳过 {{name}} 的更新提示，直到下个版本"
     },
     "allInstalledTitle": "已安装的所有模组",

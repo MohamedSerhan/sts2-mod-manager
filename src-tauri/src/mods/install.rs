@@ -1106,6 +1106,81 @@ mod archive_dispatch_tests {
     }
 
     #[test]
+    fn enrich_sets_link_and_version_on_bundle_container() {
+        use crate::mods::bundle::{bundle_container_name, enrich_bundle_sidecar, read_sidecar};
+
+        // Build a 2-member bundle zip (the same shape used by multi_member_archive_becomes_one_bundle_container_with_sidecar)
+        let tmp = tempfile::tempdir().unwrap();
+        let zip = tmp.path().join("Pretty Pack-979-2-1.zip");
+        write_zip_file(
+            &zip,
+            vec![
+                (
+                    "AliceDefectSkin/AliceDefectSkin.json",
+                    br#"{"id":"AliceDefectSkin","name":"Alice Defect Skin","version":"0.1.31"}"#
+                        .to_vec(),
+                ),
+                ("AliceDefectSkin/AliceDefectSkin.dll", b"dll".to_vec()),
+                (
+                    "AliceDefectVoiceBridge/mod_manifest.json",
+                    br#"{"id":"AliceDefectVoiceBridge","name":"Alice Defect Voice Bridge","version":"1.0.4"}"#
+                        .to_vec(),
+                ),
+                (
+                    "AliceDefectVoiceBridge/AliceDefectVoiceBridge.dll",
+                    b"dll".to_vec(),
+                ),
+            ],
+        );
+
+        let mods = tempfile::tempdir().unwrap();
+        install_mod_from_archive(&zip, mods.path()).expect("bundle installs");
+
+        // Confirm the container exists with a sidecar before enriching.
+        let container = mods.path().join(bundle_container_name(&zip));
+        assert!(
+            crate::mods::bundle::is_bundle_container(&container),
+            "container must have a sidecar after install"
+        );
+
+        // Enrich: should return true for a real bundle container.
+        assert!(enrich_bundle_sidecar(
+            mods.path(),
+            &zip,
+            Some("Pretty Pack"),
+            Some("https://www.nexusmods.com/slaythespire2/mods/979".to_string()),
+            Some("slaythespire2".to_string()),
+            Some(979),
+            Some("2.0".to_string()),
+        ));
+
+        let s = read_sidecar(&container).expect("sidecar must be readable after enrich");
+        assert_eq!(s.display_name, "Pretty Pack");
+        assert_eq!(
+            s.nexus_url.as_deref(),
+            Some("https://www.nexusmods.com/slaythespire2/mods/979")
+        );
+        assert_eq!(s.nexus_game_domain.as_deref(), Some("slaythespire2"));
+        assert_eq!(s.nexus_mod_id, Some(979));
+        assert_eq!(s.installed_version.as_deref(), Some("2.0"));
+
+        // A non-bundle archive path (no container on disk) → returns false.
+        let solo_dir = tempfile::tempdir().unwrap();
+        assert!(
+            !enrich_bundle_sidecar(
+                solo_dir.path(),
+                std::path::Path::new("Nope.zip"),
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
+            "enrich must be a no-op for a path with no bundle container"
+        );
+    }
+
+    #[test]
     fn install_mod_from_archive_rejects_mod_hidden_behind_extra_wrapper_folders() {
         let tmp = tempfile::tempdir().unwrap();
         let outer_zip = tmp.path().join("TooManyFolders.zip");

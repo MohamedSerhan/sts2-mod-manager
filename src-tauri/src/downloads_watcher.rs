@@ -312,10 +312,12 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                 // First try to get the real version from Nexus API (mod
                                 // manifests often have stale version strings). Fall back
                                 // to the manifest version if Nexus isn't available.
+                                let version_to_store_for_bundle;
                                 {
                                     let nexus_ver = fetch_nexus_version_blocking(&mod_info.name, &config_path, &state);
                                     let version_to_store = nexus_ver
                                         .unwrap_or_else(|| mod_info.version.clone());
+                                    version_to_store_for_bundle = version_to_store.clone();
                                     if version_to_store != "unknown" && version_to_store != "0.0.0" {
                                         // Folder-first key so installed_version is stored
                                         // under the same DB key the folder-first read
@@ -334,6 +336,45 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                             mod_info.name
                                         );
                                     }
+                                }
+
+                                // If this archive produced a bundle container, enrich its
+                                // sidecar with the resolved Nexus link + version so the
+                                // bundle row can show them. For single-mod installs this
+                                // is a no-op (enrich_bundle_sidecar returns false and
+                                // leaves no side-effects).
+                                {
+                                    let install_key = mod_info.folder_name
+                                        .as_deref()
+                                        .unwrap_or(mod_info.name.as_str());
+                                    let sources_db = crate::mod_sources::load_sources(&config_path);
+                                    let nexus_entry = crate::mod_sources::lookup_entry(
+                                        &sources_db.mods,
+                                        Some(install_key),
+                                        &mod_info.name,
+                                        mod_info.mod_id.as_deref(),
+                                    );
+                                    let (nexus_url, nexus_game_domain, nexus_mod_id) =
+                                        nexus_entry.map_or(
+                                            (None, None, None),
+                                            |e| (e.nexus_url.clone(), e.nexus_game_domain.clone(), e.nexus_mod_id),
+                                        );
+                                    let bundle_version = if version_to_store_for_bundle != "unknown"
+                                        && version_to_store_for_bundle != "0.0.0"
+                                    {
+                                        Some(version_to_store_for_bundle.clone())
+                                    } else {
+                                        None
+                                    };
+                                    crate::mods::bundle::enrich_bundle_sidecar(
+                                        &mods_path,
+                                        path,
+                                        None, // human title not available at this point without an extra Nexus API call
+                                        nexus_url,
+                                        nexus_game_domain,
+                                        nexus_mod_id,
+                                        bundle_version,
+                                    );
                                 }
 
                                 let replaced_name = replaced_identity.map(|(name, _)| name);

@@ -73,6 +73,45 @@ pub fn bundle_container_name(archive_path: &Path) -> String {
     sanitize_path_segment(&strip_nexus_suffix(&stem))
 }
 
+/// After a bundle auto-installs, copy the resolved upstream link + version into
+/// the container's sidecar. Returns `false` (no-op) when the archive didn't
+/// produce a bundle container. Only overwrites fields for which a value is
+/// provided — fields with `None` are left unchanged from whatever was already
+/// in the sidecar (or the struct default if the sidecar is brand-new).
+pub fn enrich_bundle_sidecar(
+    mods_path: &std::path::Path,
+    archive_path: &std::path::Path,
+    display_name: Option<&str>,
+    nexus_url: Option<String>,
+    nexus_game_domain: Option<String>,
+    nexus_mod_id: Option<u64>,
+    version: Option<String>,
+) -> bool {
+    let container = mods_path.join(bundle_container_name(archive_path));
+    if !is_bundle_container(&container) {
+        return false;
+    }
+    let mut s = read_sidecar(&container).unwrap_or_default();
+    if let Some(n) = display_name {
+        if !n.is_empty() {
+            s.display_name = n.to_string();
+        }
+    }
+    if nexus_url.is_some() {
+        s.nexus_url = nexus_url;
+    }
+    if nexus_game_domain.is_some() {
+        s.nexus_game_domain = nexus_game_domain;
+    }
+    if nexus_mod_id.is_some() {
+        s.nexus_mod_id = nexus_mod_id;
+    }
+    if version.is_some() {
+        s.installed_version = version;
+    }
+    write_sidecar(&container, &s).is_ok()
+}
+
 /// Strip a trailing " (N)" or "_(N)" browser-duplicate suffix from `s`,
 /// returning the stem without it. Only strips when the parenthesised group
 /// contains purely decimal digits and is at the very end of the string.

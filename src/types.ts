@@ -102,8 +102,9 @@ export interface ProfileMembershipMod {
   display_name?: string | null;
   installed_enabled: boolean;
   profiles: ProfileMembershipState[];
-  /** Carried from ModInfo.bundle_id — present on synthesized no-focus
-   *  rows only (the focused-modpack grid doesn't set it). */
+  /** Carried from ModInfo.bundle_id — set on synthesized no-focus rows
+   *  AND on rows returned by the backend membership grid (profiles/membership.rs),
+   *  so focused-mode bundle grouping works in ModpackDetail too. */
   bundle_id?: string | null;
 }
 

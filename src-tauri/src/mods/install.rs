@@ -82,7 +82,7 @@ pub(super) fn extract_rar_to_dir(rar_path: &Path, dest_dir: &Path) -> Result<()>
 /// rar extractions back into install_mod_from_zip so the wrap-folder /
 /// zip-slip / manifest-discovery code only lives in one place.
 ///
-/// Note: skips its own output file (`__sts2mm_repack.zip`) so an in-place
+/// Note: skips its own output file (matched by filename) so an in-place
 /// repack doesn't try to include the partially-written zip in itself —
 /// would otherwise truncate to zero on the first read pass.
 pub(super) fn repack_dir_as_zip(src_dir: &Path, dest_zip: &Path) -> Result<()> {
@@ -255,7 +255,11 @@ fn install_mod_from_archive_unchecked(archive_path: &Path, mods_path: &Path) -> 
                 ))
             })?;
             extract_7z_to_dir(archive_path, staging.path())?;
-            let repack_zip = staging.path().join("__sts2mm_repack.zip");
+            let repack_name = format!(
+                "{}.zip",
+                archive_path.file_stem().unwrap_or_default().to_string_lossy()
+            );
+            let repack_zip = staging.path().join(repack_name);
             repack_dir_as_zip(staging.path(), &repack_zip)?;
             install_mod_from_zip(&repack_zip, mods_path)
         }
@@ -267,7 +271,11 @@ fn install_mod_from_archive_unchecked(archive_path: &Path, mods_path: &Path) -> 
                 ))
             })?;
             extract_rar_to_dir(archive_path, staging.path())?;
-            let repack_zip = staging.path().join("__sts2mm_repack.zip");
+            let repack_name = format!(
+                "{}.zip",
+                archive_path.file_stem().unwrap_or_default().to_string_lossy()
+            );
+            let repack_zip = staging.path().join(repack_name);
             repack_dir_as_zip(staging.path(), &repack_zip)?;
             install_mod_from_zip(&repack_zip, mods_path)
         }
@@ -976,6 +984,89 @@ mod archive_dispatch_tests {
             info.files.iter().any(|f| f.ends_with(".dll")),
             "the .dll from the .7z must end up on the file list, got files: {:?}",
             info.files,
+        );
+    }
+
+    #[test]
+    fn seven_z_bundle_not_named_sts2mm_repack_and_becomes_bundle_container() {
+        // Build a .7z fixture containing TWO mod folders so the install
+        // pipeline treats it as a multi-member bundle. The critical assertions
+        // are:
+        //   1. The top-level container is NOT named `__sts2mm_repack`.
+        //   2. The container is flagged as a bundle (has a sidecar).
+        //   3. Both member subdirectories are present inside the container.
+        //
+        // Implementation note: sevenz_rust2::compress_to_path walks the
+        // given directory and stores its children at the archive root. To
+        // prevent the output .7z from being included in its own archive we
+        // keep the two mod-folder source tree in a SEPARATE tempdir from
+        // the one where the .7z is written.
+        use crate::mods::bundle::is_bundle_container;
+
+        // Content tree: two mod folders side-by-side.
+        let content_tmp = tempfile::tempdir().unwrap();
+
+        let mod_a_dir = content_tmp.path().join("ModA");
+        fs::create_dir_all(&mod_a_dir).unwrap();
+        fs::write(
+            mod_a_dir.join("ModA.json"),
+            br#"{"id":"ModA","name":"Mod A","version":"1.0.0","author":"T","dependencies":[],"has_dll":true,"has_pck":false,"affects_gameplay":false}"#,
+        )
+        .unwrap();
+        fs::write(mod_a_dir.join("ModA.dll"), b"fake-dll-a").unwrap();
+
+        let mod_b_dir = content_tmp.path().join("ModB");
+        fs::create_dir_all(&mod_b_dir).unwrap();
+        fs::write(
+            mod_b_dir.join("ModB.json"),
+            br#"{"id":"ModB","name":"Mod B","version":"2.0.0","author":"T","dependencies":[],"has_dll":true,"has_pck":false,"affects_gameplay":false}"#,
+        )
+        .unwrap();
+        fs::write(mod_b_dir.join("ModB.dll"), b"fake-dll-b").unwrap();
+
+        // Write the .7z to a different tempdir so it is not included in
+        // the archive's own source walk.
+        let output_tmp = tempfile::tempdir().unwrap();
+        let seven_z_path = output_tmp.path().join("DualPack.7z");
+        sevenz_rust2::compress_to_path(content_tmp.path(), &seven_z_path)
+            .expect("compress two-folder fixture to .7z");
+
+        let mods_tmp = tempfile::tempdir().unwrap();
+        install_mod_from_archive(&seven_z_path, mods_tmp.path())
+            .expect("two-folder .7z bundle install must succeed");
+
+        // Exactly one top-level directory in mods/.
+        let tops: Vec<_> = fs::read_dir(mods_tmp.path())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.path().is_dir())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(tops.len(), 1, "expected one container dir, got {tops:?}");
+
+        let container_name = &tops[0];
+
+        // Must NOT be the internal sentinel name.
+        assert_ne!(
+            container_name, "__sts2mm_repack",
+            "container must be named after the original archive stem, not the internal sentinel"
+        );
+
+        // The container must carry a bundle sidecar.
+        let container = mods_tmp.path().join(container_name);
+        assert!(
+            is_bundle_container(&container),
+            "7z bundle container must have a sidecar; container dir: {container_name}"
+        );
+
+        // Both member subdirs must be present.
+        assert!(
+            container.join("ModA").is_dir(),
+            "ModA subdir must be inside the container"
+        );
+        assert!(
+            container.join("ModB").is_dir(),
+            "ModB subdir must be inside the container"
         );
     }
 

@@ -586,6 +586,7 @@ export function ModpackDetail({
           }
           onMembershipChanged={refreshAfterMutation}
           onLoadOrderChanged={refreshAfterMutation}
+          bundlesById={lib.bundlesById}
           {...lib.tableActionProps}
         />
       </section>

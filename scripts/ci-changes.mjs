@@ -1,7 +1,8 @@
 // scripts/ci-changes.mjs
 // Pure helpers + thin CLI for the change-aware CI gate (.github/workflows/ci.yml).
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { listFragments, count as fragmentCount, suggestedBump as fragmentBump } from './changelog-fragments.mjs';
 
 // Anything that affects the built app: frontend + Rust source, bundled assets,
 // and the root build/test config (Vite/TS/Tauri/manifests). NOT qa/ (test
@@ -69,7 +70,29 @@ export function suggestedBump(changelogText) {
   return 'patch';
 }
 
+/** Combined changelog signal: legacy [Unreleased] bullets + changelog.d/ fragments. */
+export function changelogCount(changelogText, fragments) {
+  return unreleasedBulletCount(changelogText) + fragmentCount(fragments);
+}
+
+/** Combined bump: legacy suggestedBump (richer — it alone can return 'major')
+ *  takes UNCONDITIONAL precedence; only when the legacy [Unreleased] section is
+ *  empty (returns null) do we fall back to the fragment-derived bump. Note this
+ *  means a patch-only legacy result suppresses a higher fragment bump — fine for
+ *  the transition, since legacy [Unreleased] is emptied once 1.7.0 ships. */
+export function combinedBump(changelogText, fragments) {
+  const legacy = suggestedBump(changelogText);
+  return legacy !== null ? legacy : fragmentBump(fragments);
+}
+
 function readStdin() { try { return readFileSync(0, 'utf-8'); } catch { return ''; } }
+
+/** Read the on-disk changelog signal: CHANGELOG.md text (or '' if absent) plus
+ *  the changelog.d/ fragments. Shared by the disk-reading CLI commands. */
+function readChangelogFromDisk() {
+  const text = existsSync('CHANGELOG.md') ? readFileSync('CHANGELOG.md', 'utf-8') : '';
+  return { text, frags: listFragments() };
+}
 
 const isMain = fileURLToPath(import.meta.url) === process.argv[1];
 if (isMain) {
@@ -86,8 +109,15 @@ if (isMain) {
   } else if (cmd === 'suggested-bump') {
     const b = suggestedBump(readStdin());
     if (b) console.log(b);
+  } else if (cmd === 'changelog-count') {
+    const { text, frags } = readChangelogFromDisk();
+    console.log(changelogCount(text, frags));
+  } else if (cmd === 'combined-bump') {
+    const { text, frags } = readChangelogFromDisk();
+    const b = combinedBump(text, frags);
+    if (b) console.log(b);
   } else {
-    console.error('usage: ci-changes.mjs classify|unreleased-count|suggested-bump');
+    console.error('usage: ci-changes.mjs classify|unreleased-count|suggested-bump|changelog-count|combined-bump');
     process.exit(2);
   }
 }

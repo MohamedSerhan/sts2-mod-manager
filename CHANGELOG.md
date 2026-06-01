@@ -2,14 +2,22 @@
 
 What changed in each release, written for players — not developers.
 
-## Writing rules (read before editing `[Unreleased]`)
+## Writing rules (read before adding a changelog entry)
+
+**New changes go in `changelog.d/`, not here.** Add a fragment file
+`changelog.d/<category>-<slug>.md` (category = added/changed/fixed/security) with
+one player-facing sentence — see [`changelog.d/README.md`](changelog.d/README.md).
+`scripts/release.sh` assembles the fragments into a new version section here at
+release time. (The `[Unreleased]` section below still holds the staged 1.7.0
+notes; from 1.7.0 onward it stays a thin placeholder.) Per-file fragments mean
+two PRs never conflict on the changelog.
 
 These notes show up in two places, both seen by players:
 
 1. The **"What's new" card** on the Home view (in-app, fires once per version).
 2. The **GitHub release page** (auto-posted by `scripts/release.sh`).
 
-Players don't care about our codebase. Rules:
+Players don't care about our codebase. Rules (apply to every fragment):
 
 - **Describe the change, not the implementation.** "The Mods view now shows which mods have updates" — yes. "Refactored audit state into a shared context provider" — no.
 - **Skip internal-only changes.** New tests, new directories, refactors that don't change behavior — those belong in commit messages, not here.
@@ -17,11 +25,11 @@ Players don't care about our codebase. Rules:
 - **One short sentence per bullet.** If a second sentence is needed, it should explain why the player cares.
 - **Active voice, present tense.** "Disabling a mod now moves it to..." not "Mods are now moved to..."
 
-The release script lints `[Unreleased]` for common dev-speak (file paths, words like "refactor"/"WebDriver"/"AppContext", etc.) and refuses to ship until it passes. Run `scripts/release.sh patch` to see what it caught.
+The release script lints fragments (and the legacy `[Unreleased]` body) for common dev-speak (file paths, words like "refactor"/"WebDriver"/"AppContext", etc.) and refuses to ship until it passes. Run `node scripts/changelog-fragments.mjs lint` to check your fragments.
 
 ## Releases follow [Semantic Versioning](https://semver.org/); entries follow [Keep a Changelog](https://keepachangelog.com/).
 
-The `Unreleased` section is the working scratchpad for the next version. The release script renames it to the tagged version on bump.
+Pending changes accumulate as fragments in `changelog.d/`; the release script assembles them into a new version section on bump. (The `[Unreleased]` section below holds the staged 1.7.0 notes until that release ships.)
 
 ## [Unreleased]
 

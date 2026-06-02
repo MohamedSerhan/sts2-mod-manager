@@ -40,6 +40,7 @@ import {
   Copy,
   Download,
   Files,
+  FolderOpen,
   ListOrdered,
   Pencil,
   Play,
@@ -423,9 +424,22 @@ export function ModpackDetail({
       )}
       {/* Bug 7 / reporter feedback: enable/disable EVERY mod in this pack,
           as visible buttons (parity with the Mod Library), not buried in a
-          kebab. Scoped to the pack; disabled while the game is running. */}
+          kebab. Scoped to the pack; disabled while the game is running.
+          FB-E: the global "Open mods folder" lives here too (next to the bulk
+          actions) — it was removed from each mod's kebab to declutter. The
+          toolbar row wraps these onto a second bar under the search when the
+          window is narrow (gf-profile-library-toolbar flex-wrap). */}
       {profile.mods.length > 0 && (
         <>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={lib.handleOpenFolder}
+            title={t('mods.openModsFolder')}
+          >
+            <FolderOpen size={14} />
+            {t('mods.openModsFolder')}
+          </Button>
           <Button
             variant="ghost"
             size="sm"

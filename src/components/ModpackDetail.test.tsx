@@ -585,6 +585,22 @@ describe('<ModpackDetail>', () => {
     });
   });
 
+  it('the modpack toolbar exposes a visible "Open mods folder" button (FB-E)', async () => {
+    const profile = setupPack({
+      inPack: [modInfo({ name: 'PackA', folder_name: 'PackA', mod_id: 'PackA' })],
+    });
+    registerInvokeHandler('open_mods_folder', () => true);
+    const user = userEvent.setup();
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+    await screen.findAllByText('PackA');
+    // A real toolbar button (not the AddModsMenu dropdown item, which is a
+    // hidden menuitem) sits next to Enable all / Disable all.
+    await user.click(screen.getByRole('button', { name: /^Open mods folder$/i }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'open_mods_folder')).toBe(true);
+    });
+  });
+
   it('Enable all surfaces mods that could not be toggled by name (FB-A/FB-C)', async () => {
     const profile = setupPack({
       inPack: [modInfo({ name: 'PackA', folder_name: 'PackA', mod_id: 'PackA', enabled: false })],

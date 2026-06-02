@@ -644,7 +644,6 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     onRollback: handleRollback,
     onDelete: handleDelete,
     onCopyVersion: handleCopyVersion,
-    onOpenModsFolder: handleOpenFolder,
     onOpenThisModFolder: handleOpenThisModFolder,
     onEditSources,
     onFindGithubFromNexus: handleFindGithubFromNexus,

@@ -189,7 +189,6 @@ export interface LibraryRowProps {
   onRollback?: () => void;
   onDelete?: () => void;
   onCopyVersion?: () => void;
-  onOpenModsFolder?: () => void;
   /** Open THIS mod's folder (vs. the global mods dir). Bug 6. */
   onOpenThisModFolder?: () => void;
   onEditSources?: () => void;
@@ -240,7 +239,6 @@ export function LibraryRow({
   onRollback = noop,
   onDelete = noop,
   onCopyVersion = noop,
-  onOpenModsFolder = noop,
   onOpenThisModFolder = noop,
   onEditSources = noop,
   onFindGithubFromNexus = noop,
@@ -683,7 +681,6 @@ export function LibraryRow({
             onSnooze={onSnooze}
             onUnsnooze={onUnsnooze}
             onCopyVersion={onCopyVersion}
-            onOpenModsFolder={onOpenModsFolder}
             onOpenThisModFolder={onOpenThisModFolder}
             onEditSources={onEditSources}
             onFindGithubFromNexus={onFindGithubFromNexus}
@@ -738,7 +735,6 @@ interface LibraryRowKebabProps {
   onSnooze: () => void;
   onUnsnooze: () => void;
   onCopyVersion: () => void;
-  onOpenModsFolder: () => void;
   onOpenThisModFolder: () => void;
   onEditSources: () => void;
   onFindGithubFromNexus: () => void;
@@ -768,7 +764,6 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
     onSnooze,
     onUnsnooze,
     onCopyVersion,
-    onOpenModsFolder,
     onOpenThisModFolder,
     onEditSources,
     onFindGithubFromNexus,
@@ -830,9 +825,6 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
           </KebabItem>
           <KebabItem icon={<Copy size={12} />} onClick={onCopyVersion}>
             {t('mods.copyVersion', { version: mod.version })}
-          </KebabItem>
-          <KebabItem icon={<FolderOpen size={12} />} onClick={onOpenModsFolder}>
-            {t('mods.openModsFolder')}
           </KebabItem>
           <KebabItem icon={<FolderOpen size={12} />} onClick={onOpenThisModFolder}>
             {t('mods.openThisModFolder')}

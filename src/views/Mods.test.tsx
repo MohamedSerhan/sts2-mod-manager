@@ -954,18 +954,6 @@ describe('<ModsView>', () => {
     // (in jsdom without a clipboard mock) we just verify no crash.
   });
 
-  it('Open mods folder from kebab triggers open_mods_folder', async () => {
-    seedMods([baseMod()]);
-    const user = userEvent.setup();
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    await user.click(screen.getByRole('menuitem', { name: /Open mods folder/ }));
-    await waitFor(() => {
-      expect(getInvokeCalls().some((c) => c.cmd === 'open_mods_folder')).toBe(true);
-    });
-  });
-
   it('advanced kebab → Repair fires repair_mod when github_url exists', async () => {
     seedMods([baseMod({ name: 'BrokenMod', folder_name: 'BrokenMod', github_url: 'https://github.com/x/y' })]);
     registerInvokeHandler('repair_mod', () => baseMod({ name: 'BrokenMod', version: '2.0.0' }));
@@ -3433,9 +3421,11 @@ describe('<ModsView> per-mod open folder', () => {
         (c) => c.cmd === 'open_mod_folder' && c.args?.folderName === 'OpenMe',
       )).toBe(true);
     });
-    // The global "Open mods folder" item is still present too.
+    // FB-E: the GLOBAL "Open mods folder" was removed from the per-row kebab
+    // (it moved to the modpack toolbar bar); only the per-mod action remains.
     await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    expect(screen.getAllByRole('menuitem', { name: /^Open mods folder$/i }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('menuitem', { name: /^Open mods folder$/i })).toBeNull();
+    expect(screen.getByRole('menuitem', { name: /Open this mod's folder/i })).toBeInTheDocument();
   });
 });
 

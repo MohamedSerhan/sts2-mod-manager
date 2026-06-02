@@ -153,7 +153,6 @@ export interface LibraryTableProps {
   onRollback?: (mod: ModInfo) => void;
   onDelete?: (mod: ModInfo) => void;
   onCopyVersion?: (mod: ModInfo) => void;
-  onOpenModsFolder?: () => void;
   onOpenThisModFolder?: (mod: ModInfo) => void;
   onEditSources?: (mod: ModInfo) => void;
   onFindGithubFromNexus?: (mod: ModInfo) => void;
@@ -211,7 +210,6 @@ export function LibraryTable({
   onRollback,
   onDelete,
   onCopyVersion,
-  onOpenModsFolder,
   onOpenThisModFolder,
   onEditSources,
   onFindGithubFromNexus,
@@ -879,7 +877,6 @@ export function LibraryTable({
               onRollback={modInfo && onRollback ? () => onRollback(modInfo) : undefined}
               onDelete={modInfo && onDelete ? () => onDelete(modInfo) : undefined}
               onCopyVersion={modInfo && onCopyVersion ? () => onCopyVersion(modInfo) : undefined}
-              onOpenModsFolder={onOpenModsFolder}
               onOpenThisModFolder={modInfo && onOpenThisModFolder ? () => onOpenThisModFolder(modInfo) : undefined}
               onEditSources={modInfo && onEditSources ? () => onEditSources(modInfo) : undefined}
               onFindGithubFromNexus={modInfo && onFindGithubFromNexus ? () => onFindGithubFromNexus(modInfo) : undefined}

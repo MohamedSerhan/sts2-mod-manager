@@ -125,6 +125,55 @@ describe('<ModMultiSelect> windowing', () => {
   });
 });
 
+describe('<ModMultiSelect> selected peek', () => {
+  it('expands the selected-count toggle to list chosen mod names', async () => {
+    const user = userEvent.setup();
+    const mods = [
+      modInfo({ name: 'Alpha', folder_name: 'alpha' }),
+      modInfo({ name: 'Beta', folder_name: 'beta' }),
+      modInfo({ name: 'Gamma', folder_name: 'gamma' }),
+    ];
+
+    function PeekHarness() {
+      const [selected, setSelected] = useState<Set<string>>(new Set(['alpha', 'gamma']));
+      return (
+        <ModMultiSelect mods={mods} selected={selected} onChange={setSelected} labels={labels} />
+      );
+    }
+
+    render(
+      <AllProviders>
+        <PeekHarness />
+      </AllProviders>,
+    );
+
+    // Peek is closed by default — the panel doesn't exist yet.
+    expect(screen.queryByTestId('mod-multiselect-selected-peek')).not.toBeInTheDocument();
+
+    // Click the "Selected 2" toggle button to open the peek.
+    await user.click(screen.getByRole('button', { name: /Selected 2/i }));
+
+    const peek = screen.getByTestId('mod-multiselect-selected-peek');
+    // Alpha and Gamma are selected — both should appear.
+    expect(peek).toHaveTextContent('Alpha');
+    expect(peek).toHaveTextContent('Gamma');
+    // Beta is NOT selected — should not appear in the peek panel.
+    expect(peek).not.toHaveTextContent('Beta');
+  });
+
+  it('shows the empty hint when nothing is selected', async () => {
+    const user = userEvent.setup();
+    renderPicker([modInfo({ name: 'Alpha', folder_name: 'alpha' })]);
+
+    // Nothing is selected initially; click the "Selected 0" toggle.
+    await user.click(screen.getByRole('button', { name: /Selected 0/i }));
+
+    const peek = screen.getByTestId('mod-multiselect-selected-peek');
+    expect(peek).toHaveTextContent(/no mods selected/i);
+    expect(peek).not.toHaveTextContent('Alpha');
+  });
+});
+
 describe('<ModMultiSelect> folder-name visibility', () => {
   // A mod whose on-disk folder differs from its display name — the case the
   // user hit ("Stats the Spire" lives in folder "stats_the_spire").

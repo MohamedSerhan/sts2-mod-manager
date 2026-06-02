@@ -48,6 +48,7 @@ export function ModMultiSelect({ mods, selected, onChange, labels }: ModMultiSel
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<ModMultiSelectSort>('name');
   const [visibleLimit, setVisibleLimit] = useState(PAGE_SIZE);
+  const [peekOpen, setPeekOpen] = useState(false);
 
   // Filtered list — search filter then sort. Search matches the display
   // name AND the on-disk folder name / mod id / display override, so a mod
@@ -72,6 +73,17 @@ export function ModMultiSelect({ mods, selected, onChange, labels }: ModMultiSel
     }
     return list;
   }, [mods, search, sort]);
+
+  // All selected mods' display names — independent of search/sort/paging so the
+  // peek shows every selected mod, not just the visible page.
+  const selectedNames = useMemo(
+    () =>
+      mods
+        .filter((m) => selected.has(m.folder_name ?? m.name))
+        .map((m) => m.display_name?.trim() || m.name)
+        .sort((a, b) => a.localeCompare(b)),
+    [mods, selected],
+  );
 
   // Reset paging whenever the match set changes out from under us, so the
   // footer never reads "Showing 50 of 200" against a freshly-filtered list.
@@ -127,9 +139,18 @@ export function ModMultiSelect({ mods, selected, onChange, labels }: ModMultiSel
         </label>
       </div>
       <div className="gf-create-wizard-choose-actions">
-        <span className="gf-create-wizard-selected-count" aria-live="polite">
-          {labels.selectedCount(selected.size)}
-        </span>
+        <button
+          type="button"
+          className="gf-create-wizard-selected-count gf-create-wizard-selected-toggle"
+          aria-expanded={peekOpen}
+          aria-controls="gf-create-wizard-selected-peek"
+          onClick={() => setPeekOpen((o) => !o)}
+        >
+          <span aria-live="polite">{labels.selectedCount(selected.size)}</span>
+          <span className="gf-create-wizard-health-hint">
+            {peekOpen ? t('createModpack.step2HideSelected') : t('createModpack.step2ShowSelected')}
+          </span>
+        </button>
         {mods.length > 0 && (
           <button
             type="button"
@@ -140,6 +161,23 @@ export function ModMultiSelect({ mods, selected, onChange, labels }: ModMultiSel
           </button>
         )}
       </div>
+      {peekOpen && (
+        <div
+          id="gf-create-wizard-selected-peek"
+          data-testid="mod-multiselect-selected-peek"
+          className="gf-create-wizard-selected-peek"
+        >
+          {selectedNames.length === 0 ? (
+            <span className="gf-create-wizard-empty">{t('createModpack.step2NoneSelected')}</span>
+          ) : (
+            <ul>
+              {selectedNames.map((n) => (
+                <li key={n}>{n}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       <div className="gf-create-wizard-list">
         {mods.length === 0 && (
           <div className="gf-create-wizard-empty">{labels.noMods}</div>

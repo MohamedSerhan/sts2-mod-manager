@@ -152,6 +152,8 @@
     "step3Blocked_other": "{{count}} mods need a newer game version",
     "step3Frozen_one": "{{count}} frozen mod will stay at its current version",
     "step3Frozen_other": "{{count}} frozen mods will stay at their current version",
+    "step3Show": "Show mods",
+    "step3Hide": "Hide",
     "step3ContinueAnyway": "Continue anyway",
     "step4Subtitle": "Name your modpack, then create it.",
     "step4NameLabel": "Modpack name",

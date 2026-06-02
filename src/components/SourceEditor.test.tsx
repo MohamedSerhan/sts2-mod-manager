@@ -335,7 +335,7 @@ describe('<SourceEditor>', () => {
         findingGithub={false}
         onClose={() => {}}
         onClear={() => {}}
-        onFindGithub={() => {}}
+        onFindGithub={async () => null}
         onSave={() => {}}
       />,
     );
@@ -347,7 +347,7 @@ describe('<SourceEditor>', () => {
         findingGithub={false}
         onClose={() => {}}
         onClear={() => {}}
-        onFindGithub={() => {}}
+        onFindGithub={async () => null}
         onSave={() => {}}
       />,
     );

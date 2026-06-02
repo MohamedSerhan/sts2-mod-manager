@@ -90,7 +90,8 @@
       "add": "Add",
       "allInPack": "Every installed mod is already in this modpack.",
       "added": "Added {{mod}} to {{pack}}",
-      "addFailed": "Couldn't add {{mod}}: {{error}}"
+      "addFailed": "Couldn't add {{mod}}: {{error}}",
+      "inactiveToggleHint": "This modpack isn't active — enabling/disabling mods in-game is only available for the active modpack. Switch to it to manage what loads."
     },
     "edit": {
       "title": "Edit \"{{name}}\"",

@@ -540,6 +540,35 @@ export function ModpackDetail({
         )}
       </div>
 
+      {/* Inactive-pack hint — explains why per-mod toggles are disabled and
+          offers an inline Switch action to activate this pack. Hidden when
+          the pack IS already active. */}
+      {!isActive && (
+        <div
+          className="gf-modpack-detail-inactive-hint"
+          data-testid="modpack-detail-inactive-hint"
+          role="note"
+        >
+          <span>{t('modpack.detail.inactiveToggleHint')}</span>
+          {onSwitch && (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => onSwitch(profile.name)}
+              disabled={switchingOther}
+              title={t('profiles.card.activateProfile')}
+            >
+              {switchingThis ? (
+                <RefreshCw size={14} className="animate-spin" />
+              ) : (
+                <Play size={14} fill="currentColor" />
+              )}
+              {t('profiles.card.switchTo')}
+            </Button>
+          )}
+        </div>
+      )}
+
       {/* Quick-add form (shown when "+ Add mods → Quick add URL" is picked). */}
       {lib.renderQuickAddForm()}
 

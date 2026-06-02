@@ -90,7 +90,8 @@
       "add": "添加",
       "allInPack": "所有已安装的模组都已加入此模组包。",
       "added": "已将 {{mod}} 添加到 {{pack}}",
-      "addFailed": "无法添加 {{mod}}：{{error}}"
+      "addFailed": "无法添加 {{mod}}：{{error}}",
+      "inactiveToggleHint": "此模组包当前未激活——只有激活的模组包才能在游戏中启用或禁用模组。切换到该模组包即可管理加载内容。"
     },
     "edit": {
       "title": "编辑“{{name}}”",

@@ -13,7 +13,7 @@
  * sections, and the wiring.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { ModpackDetail } from './ModpackDetail';
@@ -150,7 +150,8 @@ describe('<ModpackDetail>', () => {
       await screen.findByRole('heading', { level: 2, name: 'Sample' }),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Back to modpacks/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Switch to/i })).toBeInTheDocument();
+    // Both the header CTA and the inactive-hint have a "Switch to" button for a non-active pack.
+    expect(screen.getAllByRole('button', { name: /Switch to/i }).length).toBeGreaterThanOrEqual(1);
   });
 
   it('omits the Switch button when the modpack is already active', async () => {
@@ -793,5 +794,29 @@ describe('<ModpackDetail>', () => {
     render(<Wrap profile={profile} onBack={vi.fn()} />);
     const available = await expandLibrary(user);
     expect(within(available).getByText(/^Local$/i)).toBeInTheDocument();
+  });
+
+  // ── Inactive-pack toggle hint ─────────────────────────────────────
+  describe('inactive-pack toggle hint', () => {
+    it('shows the hint with a Switch action on a non-active pack', async () => {
+      registerInvokeHandler('get_active_profile', () => 'Some Other Pack');
+      const profile = setupPack({ packName: 'Sample', inPack: [modInfo({ name: 'M', folder_name: 'M' })] });
+      const onSwitch = vi.fn();
+      render(<Wrap {...baseProps()} profile={profile} onSwitch={onSwitch} />);
+      const hint = await screen.findByText(/only available for the active modpack/i);
+      expect(hint).toBeInTheDocument();
+      // The hint's Switch control fires onSwitch for THIS pack.
+      const region = hint.closest('[data-testid="modpack-detail-inactive-hint"]') as HTMLElement;
+      fireEvent.click(within(region).getByRole('button', { name: /switch to/i }));
+      expect(onSwitch).toHaveBeenCalledWith('Sample');
+    });
+
+    it('hides the hint when the pack is active', async () => {
+      registerInvokeHandler('get_active_profile', () => 'Sample');
+      const profile = setupPack({ packName: 'Sample', inPack: [modInfo({ name: 'M', folder_name: 'M' })] });
+      render(<Wrap {...baseProps()} profile={profile} onSwitch={vi.fn()} />);
+      await screen.findByTestId('modpack-detail-in-pack');
+      expect(screen.queryByTestId('modpack-detail-inactive-hint')).toBeNull();
+    });
   });
 });

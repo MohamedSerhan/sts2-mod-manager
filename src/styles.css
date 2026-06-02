@@ -84,12 +84,12 @@
   --danger-ink-soft:    oklch(0.82 0.12 25);
   --danger-ink-2:       oklch(0.85 0.12 25);
   --danger-ink-3:       oklch(0.85 0.13 25);
-  --danger-msg:         oklch(0.85 0.10 25);
+  --danger-msg:         var(--danger-text); /* alias: imperceptible dup of --danger-text */
   --danger-text:        oklch(0.86 0.10 25);
   --danger-edge:        oklch(0.55 0.16 25);
   --danger-edge2:       oklch(0.55 0.18 25);
   --danger-deep:        oklch(0.55 0.13 25);
-  --danger-btn:         oklch(0.40 0.10 30);
+  --hero-fill-warm:     oklch(0.40 0.10 30); /* GitHub hero gradient warm stop */
   --danger-fill-deep:   oklch(0.25 0.08 25);
   --danger-line-strong: oklch(0.65 0.18 25 / 0.6);
   /* success / green ramp */
@@ -206,12 +206,12 @@
   --danger-ink-soft:    oklch(0.82 0.12 25);
   --danger-ink-2:       oklch(0.85 0.12 25);
   --danger-ink-3:       oklch(0.85 0.13 25);
-  --danger-msg:         oklch(0.85 0.10 25);
+  --danger-msg:         var(--danger-text); /* alias: imperceptible dup of --danger-text */
   --danger-text:        oklch(0.86 0.10 25);
   --danger-edge:        oklch(0.55 0.16 25);
   --danger-edge2:       oklch(0.55 0.18 25);
   --danger-deep:        oklch(0.55 0.13 25);
-  --danger-btn:         oklch(0.40 0.10 30);
+  --hero-fill-warm:     oklch(0.40 0.10 30); /* GitHub hero gradient warm stop */
   --danger-fill-deep:   oklch(0.25 0.08 25);
   --danger-line-strong: oklch(0.65 0.18 25 / 0.6);
   /* success / green ramp */

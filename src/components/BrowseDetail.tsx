@@ -39,7 +39,7 @@ export function BrowseDetail(props: Props) {
               background:
                 props.kind === 'nexus' && props.mod.picture_url
                   ? `linear-gradient(135deg, color-mix(in oklch, var(--indigo-deep) 55%, transparent), color-mix(in oklch, var(--indigo-deep) 95%, transparent)), url('${props.mod.picture_url}') center/cover`
-                  : 'linear-gradient(135deg, var(--danger-btn), var(--indigo-shimmer))',
+                  : 'linear-gradient(135deg, var(--hero-fill-warm), var(--indigo-shimmer))',
             }}
           />
           <button

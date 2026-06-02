@@ -117,7 +117,23 @@ pub fn load_subscriptions(config_path: &Path) -> SubscriptionsDb {
         return SubscriptionsDb::default();
     }
     match fs::read_to_string(&path) {
-        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+        Ok(content) => match serde_json::from_str(&content) {
+            Ok(db) => db,
+            Err(e) => {
+                // A present-but-corrupt file is a data-loss hazard: defaulting
+                // here silently drops every subscription. Don't stay silent —
+                // surface it so the user/log shows why subscriptions vanished.
+                // (Empty/whitespace-only files are a normal "no data" state.)
+                if !content.trim().is_empty() {
+                    log::error!(
+                        "Failed to parse subscriptions at {}: {} — falling back to empty defaults (saved subscriptions will not be loaded)",
+                        path.display(),
+                        e
+                    );
+                }
+                SubscriptionsDb::default()
+            }
+        },
         Err(_) => SubscriptionsDb::default(),
     }
 }

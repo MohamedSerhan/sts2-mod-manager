@@ -585,6 +585,12 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
    * moved to mods_disabled. It never deletes a user's mod library.
    */
   async function handleRepairDrift(name: string) {
+    // Re-entry guard: handleRepairDrift uses switchingProfile as its
+    // in-flight flag, so a second click (before the first resolves) would
+    // otherwise double-invoke repair_profile. The banner Repair button is
+    // also disabled while switchingProfile is set; this guards the
+    // programmatic / detail-view callers too.
+    if (switchingProfile) return;
     const drift = driftMap[name];
     const orphanCount = drift?.added.length ?? 0;
     const orphans = drift?.added ?? [];
@@ -1197,7 +1203,10 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
             size="sm"
             onClick={() => handleRepairDrift(activeProfile)}
             title={t('profiles.drift.repairTitle')}
-            disabled={savingProfile !== null}
+            // Repair runs through switchingProfile (NOT savingProfile), so it
+            // must also disable while a switch/repair is in flight — otherwise
+            // a second click double-invokes repair_profile.
+            disabled={savingProfile !== null || switchingProfile !== null}
           >
             {t('profiles.drift.repair')}
           </Button>

@@ -164,7 +164,6 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
   const [importingCode, setImportingCode] = useState(false);
   const [applyingSub, setApplyingSub] = useState<string | null>(null);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
-  const [, setChecking] = useState(false);
   const [updateDetail, setUpdateDetail] = useState<SubscriptionUpdate | null>(null);
   // Share info for the curator's OWN active profile (separate from
   // `activeSub` which only covers profiles received from someone else).
@@ -209,7 +208,6 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
 
   async function checkSubs(showToast = false) {
     try {
-      setChecking(true);
       const u = await checkSubscriptionUpdates();
       const updates = u.filter((s) => s.has_update);
       setSubUpdates(updates);
@@ -221,8 +219,6 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
         const errMsg = e instanceof Error ? e.message : String(e);
         toast.error(t('home.toast.checkFailed', { error: errMsg }));
       }
-    } finally {
-      setChecking(false);
     }
   }
 

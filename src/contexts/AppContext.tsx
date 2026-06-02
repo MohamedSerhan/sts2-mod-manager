@@ -200,14 +200,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setAuditing(true);
       // `only` scopes the audit to specific mods (the modpack view audits
       // just its pack's mods); omitted = audit everything (All Mods view).
-      const results = await auditModVersions(only && only.length > 0 ? only : undefined);
-      setAuditResults(results);
+      const scoped = only && only.length > 0;
+      const results = await auditModVersions(scoped ? only : undefined);
+      if (scoped) {
+        // A scoped re-check must NOT wipe updates already found on OTHER
+        // mods by a prior full audit. Merge the fresh rows over the
+        // existing ones (replace same-named, append new) via the functional
+        // setter so a modpack-scoped audit doesn't clobber the shared
+        // auditResults. When there's no prior audit, the scoped results
+        // stand on their own.
+        setAuditResults((prev) => {
+          if (!prev) return results;
+          const byName = new Map(results.map((e) => [e.mod_name, e]));
+          const existingNames = new Set(prev.map((e) => e.mod_name));
+          const merged = prev.map((e) => byName.get(e.mod_name) ?? e);
+          for (const e of results) {
+            if (!existingNames.has(e.mod_name)) merged.push(e);
+          }
+          return merged;
+        });
+      } else {
+        setAuditResults(results);
+      }
     } catch (e) {
       toast.error(t('app.auditFailed', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setAuditing(false);
     }
-  }, [toast]);
+  }, [toast, t]);
 
   /** Re-audit a targeted subset of mods and splice the fresh entries back
    *  into `auditResults`. Used after single-mod / bulk updates so rows

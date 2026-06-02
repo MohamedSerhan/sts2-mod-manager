@@ -995,6 +995,16 @@ pub async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::P
         let Some(outpath) = zip_entry_outpath(mods_path, file.name()) else {
             continue;
         };
+        // Defense-in-depth (audit L-11): re-assert containment even though
+        // zip_entry_outpath already sanitizes, so a future weakening of that
+        // helper can't silently reintroduce a zip-slip on this path.
+        if !crate::mods::path_is_inside(&outpath, mods_path) {
+            log::warn!(
+                "Skipping bundle entry '{}' that escapes the mods directory",
+                file.name()
+            );
+            continue;
+        }
         if file.name().ends_with('/') {
             std::fs::create_dir_all(&outpath)?;
         } else {

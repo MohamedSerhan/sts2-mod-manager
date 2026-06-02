@@ -342,31 +342,38 @@ pub fn apply_profile_with_pins(
     // desired enabled state. Last write wins, but the same ProfileMod owns all
     // its identifiers so collisions only happen if two profile entries share an
     // identifier — in which case the profile itself is malformed.
+    //
+    // Keys are lowercased to match `mod_key`'s convention (crud.rs), which
+    // `drift.rs` uses when it compares the same mods. On a case-sensitive
+    // filesystem (Linux / Steam Deck) a profile identifier that differs only
+    // in case from the on-disk folder would otherwise miss here and silently
+    // disable a mod that drift considers present.
     let mut profile_state: HashMap<String, bool> = HashMap::new();
     for pm in &profile.mods {
-        profile_state.insert(pm.name.clone(), pm.enabled);
+        profile_state.insert(pm.name.to_lowercase(), pm.enabled);
         if let Some(ref folder) = pm.folder_name {
-            profile_state.insert(folder.clone(), pm.enabled);
+            profile_state.insert(folder.to_lowercase(), pm.enabled);
         }
         if let Some(ref id) = pm.mod_id {
-            profile_state.insert(id.clone(), pm.enabled);
+            profile_state.insert(id.to_lowercase(), pm.enabled);
         }
     }
 
     // Look up an on-disk mod against the multi-key profile state. Returns None
     // if no identifier matched the profile at all (i.e. mod is not part of the
-    // profile and should be disabled).
+    // profile and should be disabled). Lookups are lowercased to match the
+    // keys built above.
     let lookup = |m: &crate::mods::ModInfo| -> Option<bool> {
-        if let Some(v) = profile_state.get(&m.name) {
+        if let Some(v) = profile_state.get(&m.name.to_lowercase()) {
             return Some(*v);
         }
         if let Some(ref folder) = m.folder_name {
-            if let Some(v) = profile_state.get(folder) {
+            if let Some(v) = profile_state.get(&folder.to_lowercase()) {
                 return Some(*v);
             }
         }
         if let Some(ref id) = m.mod_id {
-            if let Some(v) = profile_state.get(id) {
+            if let Some(v) = profile_state.get(&id.to_lowercase()) {
                 return Some(*v);
             }
         }
@@ -586,6 +593,26 @@ pub(crate) async fn switch_profile_from_paths(
             downloaded: 0,
             failed_downloads: vec![],
         });
+    }
+
+    // ── STEP 0: Snapshot current mods before any destructive move ──
+    // The phases below delete version-mismatched mods and move folders between
+    // the enabled/disabled directories. A crash mid-switch would otherwise
+    // leave mods half-moved with no recovery point, so take a timestamped
+    // backup first (same backups dir + best-effort handling as the pre-launch
+    // / reset-to-vanilla flows in game.rs). A backup failure must not abort the
+    // switch.
+    let backup_dir = config_path.join("backups");
+    let _ = std::fs::create_dir_all(&backup_dir);
+    match crate::backup::create_backup(mods_path, &backup_dir) {
+        Ok(backup_name) => {
+            log::info!("Pre-switch backup created for profile '{}': {}", name, backup_name)
+        }
+        Err(e) => log::warn!(
+            "Failed to create pre-switch backup before applying profile '{}': {}",
+            name,
+            e
+        ),
     }
 
     // ── STEP 1: Download missing mods AND restore version-mismatched mods ──

@@ -265,7 +265,9 @@ fn backup_settings_save(settings_path: &Path) -> Result<PathBuf> {
         chrono::Utc::now().timestamp_millis()
     );
     let mut backup_path = parent.join(&backup_name);
-    let mut suffix = 1u8;
+    // u32 (not u8): 256+ same-millisecond backups must not saturate the counter
+    // and spin `backup_path` on a fixed name forever. (Audit L-5)
+    let mut suffix = 1u32;
     while backup_path.exists() {
         backup_path = parent.join(format!("{}-{}", backup_name, suffix));
         suffix = suffix.saturating_add(1);
@@ -297,6 +299,17 @@ where
             write_err,
             backup_path.display()
         )));
+    }
+    // Success: the rewrite landed cleanly, so the `.sts2mm-bak-<ts>` snapshot is
+    // no longer needed. Remove it so repeated load-order edits don't accumulate
+    // one stale backup of settings.save per save, forever. (Audit L-6) The
+    // backup is only retained on the failure path above, for manual recovery.
+    if let Err(e) = fs::remove_file(&backup_path) {
+        log::warn!(
+            "Failed to remove settings.save backup {} after a successful write: {}",
+            backup_path.display(),
+            e
+        );
     }
     Ok(backup_path)
 }
@@ -995,16 +1008,92 @@ mod profile_membership_tests {
         assert_eq!(mod_list[2]["custom"].as_i64(), Some(9));
         assert_eq!(saved["mod_settings"]["mods_enabled"].as_bool(), Some(true));
         assert_eq!(saved["audio"]["master"].as_i64(), Some(80));
+        // L-6: on a successful rewrite the pre-write backup is cleaned up so it
+        // doesn't accumulate one stale settings.save copy per load-order edit.
         assert!(
-            fs::read_dir(tmp.path())
+            !fs::read_dir(tmp.path())
                 .unwrap()
                 .flatten()
                 .any(|entry| entry
                     .file_name()
                     .to_string_lossy()
                     .starts_with("settings.save.sts2mm-bak")),
-            "settings.save should be backed up before the manager rewrites it"
+            "a successful settings.save rewrite must remove its temporary backup"
         );
+    }
+
+    #[test]
+    fn settings_save_write_removes_backup_on_success() {
+        // L-6: a clean rewrite must not leave a `.sts2mm-bak-<ts>` snapshot
+        // behind. Use the low-level helper directly so the assertion is about
+        // the backup lifecycle, not the JSON rewrite.
+        let tmp = tempfile::tempdir().unwrap();
+        let settings_path = tmp.path().join("settings.save");
+        let original = r#"{"mod_settings":{"mod_list":[]}}"#;
+        fs::write(&settings_path, original).unwrap();
+
+        let returned = write_settings_save_with_backup_and_restore(
+            &settings_path,
+            "{\"mod_settings\":{\"mod_list\":[],\"mods_enabled\":true}}",
+            |path, contents| fs::write(path, contents),
+        )
+        .unwrap();
+
+        // The new contents landed...
+        assert!(fs::read_to_string(&settings_path).unwrap().contains("mods_enabled"));
+        // ...and the temporary backup was deleted on the success path.
+        assert!(
+            !returned.exists(),
+            "the returned backup path must be removed after a successful write"
+        );
+        assert!(
+            !fs::read_dir(tmp.path())
+                .unwrap()
+                .flatten()
+                .any(|entry| entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("settings.save.sts2mm-bak")),
+            "no settings.save backup should remain after a successful write"
+        );
+    }
+
+    #[test]
+    fn settings_save_backup_disambiguates_when_same_timestamp_name_exists() {
+        // L-5: the collision suffix counter is u32, so a same-millisecond name
+        // clash picks a fresh `-1` suffix instead of overwriting the existing
+        // backup (and, at 256+ clashes, must not saturate into an infinite
+        // loop on a fixed name). Pre-seed the un-suffixed backup name and
+        // confirm the write still produces a *distinct* backup file.
+        let tmp = tempfile::tempdir().unwrap();
+        let settings_path = tmp.path().join("settings.save");
+        fs::write(&settings_path, "{}").unwrap();
+
+        // Pre-create every backup name the helper would pick this millisecond,
+        // forcing the suffix loop to advance past the first candidate.
+        let ts = chrono::Utc::now().timestamp_millis();
+        let base = tmp.path().join(format!("settings.save.sts2mm-bak-{}", ts));
+        fs::write(&base, "pre-existing").unwrap();
+
+        let returned = write_settings_save_with_backup_and_restore(
+            &settings_path,
+            "{\"written\":true}",
+            |path, contents| fs::write(path, contents),
+        )
+        .unwrap();
+
+        // The pre-existing backup must be untouched (a different file was used).
+        assert_eq!(
+            fs::read_to_string(&base).unwrap(),
+            "pre-existing",
+            "the collision path must not clobber an existing backup of the same name"
+        );
+        assert_ne!(
+            returned, base,
+            "the suffix counter must pick a distinct backup path on a name clash"
+        );
+        // And the write itself still succeeded.
+        assert_eq!(fs::read_to_string(&settings_path).unwrap(), "{\"written\":true}");
     }
 
     #[test]

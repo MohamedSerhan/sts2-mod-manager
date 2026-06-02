@@ -802,12 +802,27 @@ fn bundle_url_is_allowed(raw: &str) -> bool {
     }
 }
 
+/// Whether `raw` points at a loopback host. Used only to widen the bundle
+/// download guard under `cfg!(test)` so the modpack flow tests can fetch from a
+/// local mock server; never relied on in shipped builds.
+fn url_host_is_loopback(raw: &str) -> bool {
+    url::Url::parse(raw)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_string))
+        .map(|h| h == "127.0.0.1" || h == "::1" || h == "localhost")
+        .unwrap_or(false)
+}
+
 pub async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::Path) -> Result<()> {
     // SSRF guard: the bundle URL comes from an untrusted modpack manifest.
     // Refuse anything that isn't an https GitHub asset URL before any fetch so
     // a malicious manifest can't make us hit an internal/arbitrary address.
     // (Audit H-1)
-    if !bundle_url_is_allowed(url) {
+    // Loopback is permitted only under cfg!(test) so the modpack flow tests can
+    // download from a local mock server; cfg!(test) is false in release and
+    // integration builds, so shipped builds enforce the GitHub-host allowlist.
+    let url_allowed = bundle_url_is_allowed(url) || (cfg!(test) && url_host_is_loopback(url));
+    if !url_allowed {
         return Err(AppError::Other(format!(
             "Refusing to download bundle for '{}' from a disallowed URL: {}",
             mod_name, url
@@ -2101,19 +2116,13 @@ mod download_bundle_url_routing_tests {
 
     #[tokio::test]
     async fn download_bundle_rejects_non_github_url() {
-        // A reachable non-GitHub host (here a loopback mock) must be refused
-        // BEFORE any fetch — the bundle URL is attacker-controlled. (Audit H-1)
-        let server = MockServer::start().await;
-        let zip_bytes = make_tiny_zip("ExternalMod.json");
-        Mock::given(method("GET"))
-            .and(path("/some/path/ExternalMod.zip"))
-            .respond_with(ResponseTemplate::new(200).set_body_bytes(zip_bytes))
-            .mount(&server)
-            .await;
-
+        // An external (non-GitHub, non-loopback) host must be refused before any
+        // fetch — the bundle URL is attacker-controlled. (Audit H-1.) Loopback
+        // is allowed under cfg!(test) for the flow tests, so use a public host
+        // here to exercise the production rejection path.
         let tmp = tempfile::tempdir().unwrap();
         let res = download_bundle(
-            &format!("{}/some/path/ExternalMod.zip", server.uri()),
+            "https://evil.example.com/some/path/ExternalMod.zip",
             "ExternalMod",
             tmp.path(),
         )

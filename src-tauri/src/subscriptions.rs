@@ -329,37 +329,33 @@ pub async fn repair_modpack_subscription(
         )
     };
 
-    log::info!("Repair: wiping mods directory at {}", mods_path.display());
-    wipe_directory_contents(&mods_path).map_err(|e| e.to_string())?;
+    // Move both mod dirs aside (instead of deleting) so a failed re-download —
+    // network error, missing bundle URL, absent Nexus key — rolls back to the
+    // user's existing mods instead of leaving them with nothing. (Audit M-9)
+    log::info!(
+        "Repair: stashing mods + disabled dirs before reinstall for '{}'",
+        share_id
+    );
+    let swap = crate::fs_safety::swap_dirs_aside(&[&mods_path, &disabled_path])
+        .map_err(|e| format!("Failed to stash existing mods before repair: {}", e))?;
 
-    log::info!("Repair: wiping disabled mods directory at {}", disabled_path.display());
-    wipe_directory_contents(&disabled_path).map_err(|e| e.to_string())?;
-
-    log::info!("Repair: directories cleared, running subscription update for '{}'", share_id);
-    let profile = apply_subscription_update_inner(share_id.clone(), app_handle, state).await?;
-    log::info!("Repair: completed for '{}'", share_id);
-
-    Ok(profile)
-}
-
-/// Delete all entries inside `dir` without removing `dir` itself.
-/// No-op if `dir` does not exist.
-fn wipe_directory_contents(dir: &Path) -> Result<()> {
-    if !dir.exists() {
-        return Ok(());
-    }
-    for entry in fs::read_dir(dir)?.flatten() {
-        let path = entry.path();
-        let result = if path.is_dir() {
-            fs::remove_dir_all(&path)
-        } else {
-            fs::remove_file(&path)
-        };
-        if let Err(e) = result {
-            log::error!("Repair: failed to remove '{}': {}", path.display(), e);
+    match apply_subscription_update_inner(share_id.clone(), app_handle, state).await {
+        Ok(profile) => {
+            swap.discard().map_err(|e| e.to_string())?;
+            log::info!("Repair: completed for '{}'", share_id);
+            Ok(profile)
+        }
+        Err(e) => {
+            log::error!(
+                "Repair: reinstall failed ({}); restoring the pre-repair mods",
+                e
+            );
+            if let Err(re) = swap.restore() {
+                log::error!("Repair: rollback ALSO failed: {}", re);
+            }
+            Err(e)
         }
     }
-    Ok(())
 }
 
 async fn apply_subscription_update_inner(

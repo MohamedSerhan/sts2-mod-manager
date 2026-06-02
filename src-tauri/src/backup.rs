@@ -199,25 +199,27 @@ pub fn restore_backup(backup_name: &str, backup_dir: &Path, mods_path: &Path) ->
 
     log::info!("Restoring backup '{}' into {}", backup_name, mods_path.display());
 
-    // Clear current mods
-    if mods_path.exists() {
-        for entry in fs::read_dir(mods_path)?.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                fs::remove_dir_all(&path)?;
-            } else {
-                fs::remove_file(&path)?;
-            }
+    // Move the current mods aside first so a failure mid-copy rolls back to the
+    // pre-restore state instead of leaving the user with an empty mods folder.
+    // (Audit H-4)
+    let swap = crate::fs_safety::swap_dirs_aside(&[mods_path])?;
+    match copy_dir_recursive(&src, mods_path) {
+        Ok(()) => {
+            swap.discard()?;
+            log::info!("Backup '{}' restored successfully", backup_name);
+            Ok(())
         }
-    } else {
-        fs::create_dir_all(mods_path)?;
+        Err(e) => {
+            log::error!(
+                "restore_backup: copy failed ({}); rolling back to the pre-restore mods",
+                e
+            );
+            if let Err(re) = swap.restore() {
+                log::error!("restore_backup: rollback ALSO failed: {}", re);
+            }
+            Err(e.into())
+        }
     }
-
-    // Copy backup contents into mods
-    copy_dir_recursive(&src, mods_path)?;
-
-    log::info!("Backup '{}' restored successfully", backup_name);
-    Ok(())
 }
 
 /// Move all mods from mods/ to mods_disabled/ (reset to vanilla state).

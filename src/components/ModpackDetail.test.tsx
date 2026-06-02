@@ -422,6 +422,68 @@ describe('<ModpackDetail>', () => {
     await waitFor(() => expect(onLibraryChanged).toHaveBeenCalled());
   });
 
+  // ── Bug 2: adding from the library must not yank the scroll to the top ──
+  // The available list shrinks on each add, so without a scroll pin the page
+  // collapses upward and the user loses their place. handleAdd reuses the
+  // same pinScroll safety net the LibraryTable rows already use.
+  it('pins the scroll position when adding a mod from the library', async () => {
+    const profile = setupPack({
+      inPack: [modInfo({ name: 'PackMod', folder_name: 'PackMod', mod_id: 'PackMod' })],
+      available: [
+        modInfo({ name: 'LibA', folder_name: 'LibA', mod_id: 'LibA' }),
+        modInfo({ name: 'LibB', folder_name: 'LibB', mod_id: 'LibB' }),
+      ],
+    });
+    registerInvokeHandler('set_profile_mod_membership', () => baseProfile());
+    const user = userEvent.setup();
+    const { container } = render(
+      <AllProviders>
+        <div data-scroller="yes">
+          <ModpackDetail profile={profile} onBack={vi.fn()} />
+        </div>
+      </AllProviders>,
+    );
+    const available = await expandLibrary(user);
+
+    // jsdom reports 0 layout, so fake a real scroll container around the
+    // detail view so pinScroll can find it and engage.
+    const scroller = container.querySelector('[data-scroller="yes"]') as HTMLElement;
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 4000 });
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 400 });
+    let scrollTopVal = 1800;
+    Object.defineProperty(scroller, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopVal,
+      set: (v: number) => { scrollTopVal = v; },
+    });
+    const realGCS = window.getComputedStyle.bind(window);
+    const gcs = vi
+      .spyOn(window, 'getComputedStyle')
+      .mockImplementation((el: Element, pe?: string | null) =>
+        (el === scroller
+          ? ({ overflowY: 'auto' } as CSSStyleDeclaration)
+          : realGCS(el, pe)));
+    const rafCbs: FrameRequestCallback[] = [];
+    const raf = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((cb: FrameRequestCallback) => { rafCbs.push(cb); return rafCbs.length; });
+
+    try {
+      await user.click(within(available).getAllByRole('button', { name: /^Add$/i })[0]);
+      // Simulate the engine collapsing the list to the top mid-add…
+      scrollTopVal = 0;
+      // …the pin re-asserts the captured position on the following frames.
+      let guard = 0;
+      while (rafCbs.length && guard++ < 50) {
+        rafCbs.shift()!(0);
+      }
+      expect(scrollTopVal).toBe(1800);
+    } finally {
+      gcs.mockRestore();
+      raf.mockRestore();
+    }
+  });
+
   it('Add on the ACTIVE pack also calls toggle_mod with enable=true', async () => {
     registerInvokeHandler('get_active_profile', () => 'Sample');
     const profile = setupPack({

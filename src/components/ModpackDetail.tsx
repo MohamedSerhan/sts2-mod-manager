@@ -60,6 +60,7 @@ import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from './ConfirmDialog';
 import { useModLibrary } from '../hooks/useModLibrary';
+import { usePinScroll } from '../hooks/usePinScroll';
 import { deleteMod, setProfileModMembership, toggleMod } from '../hooks/useTauri';
 import type { ModInfo, Profile, ShareResult } from '../types';
 import type { ProfileDrift } from '../hooks/useTauri';
@@ -145,6 +146,10 @@ export function ModpackDetail({
     targetPack: profile.name,
     auditScope: () => profile.mods.map((m) => m.name),
   });
+  // Scroll-pin safety net (shared with LibraryTable via usePinScroll). The
+  // Add-from-library and enable/disable-all actions shrink/refresh the list;
+  // pinning keeps the user where they were instead of collapsing to the top.
+  const { ref: rootRef, pinScroll } = usePinScroll<HTMLDivElement>();
   // "Add from your Library" is collapsed by default to keep the focus on
   // the pack's own mods; the user expands it to browse the rest.
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -250,6 +255,10 @@ export function ModpackDetail({
   const handleAdd = async (mod: ModInfo) => {
     const key = modKey(mod);
     if (busyKeys.has(key)) return;
+    // Bug 2: the available list shrinks when this mod joins the pack and the
+    // refresh re-renders both sections — pin the scroll so the page doesn't
+    // collapse upward and lose the user's place.
+    pinScroll();
     setBusy(key, true);
     try {
       // Flip the mod ON in the game folder FIRST when this is the active
@@ -395,7 +404,7 @@ export function ModpackDetail({
   );
 
   return (
-    <div className="gf-modpack-detail" data-testid="modpack-detail">
+    <div className="gf-modpack-detail" data-testid="modpack-detail" ref={rootRef}>
       <div className="gf-modpack-detail-head">
         <Button
           variant="ghost"

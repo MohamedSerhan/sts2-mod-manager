@@ -522,6 +522,45 @@ describe('<ModpackDetail>', () => {
     expect(screen.queryByText(/missing/i)).toBeNull();
   });
 
+  // ── Bug 7: enable-all / disable-all scoped to THIS modpack ────────────
+  // These existed only on the Mod Library page. The pack detail view now
+  // offers them too, iterating the pack's mods (not the whole library) and
+  // reusing the pinScroll safety net so it doesn't reintroduce Bug 2.
+  it('Advanced → Enable all toggles every pack mod on (Bug 7)', async () => {
+    const profile = setupPack({
+      inPack: [
+        modInfo({ name: 'PackA', folder_name: 'PackA', mod_id: 'PackA', enabled: false }),
+        modInfo({ name: 'PackB', folder_name: 'PackB', mod_id: 'PackB', enabled: false }),
+      ],
+    });
+    registerInvokeHandler('toggle_mod', () => null);
+    const user = userEvent.setup();
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+    await user.click(await screen.findByRole('button', { name: /Advanced actions/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /^Enable all$/i }));
+    await waitFor(() => {
+      expect(getInvokeCalls().filter((c) => c.cmd === 'toggle_mod').length).toBe(2);
+    });
+    const toggles = getInvokeCalls().filter((c) => c.cmd === 'toggle_mod');
+    expect(toggles.every((c) => c.args?.enable === true)).toBe(true);
+    expect(toggles.map((c) => c.args?.name).sort()).toEqual(['PackA', 'PackB']);
+  });
+
+  it('Advanced → Disable all toggles every pack mod off (Bug 7)', async () => {
+    const profile = setupPack({
+      inPack: [modInfo({ name: 'PackA', folder_name: 'PackA', mod_id: 'PackA', enabled: true })],
+    });
+    registerInvokeHandler('toggle_mod', () => null);
+    const user = userEvent.setup();
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+    await user.click(await screen.findByRole('button', { name: /Advanced actions/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /^Disable all$/i }));
+    await waitFor(() => {
+      expect(getInvokeCalls().filter((c) => c.cmd === 'toggle_mod').length).toBe(1);
+    });
+    expect(getInvokeCalls().find((c) => c.cmd === 'toggle_mod')?.args?.enable).toBe(false);
+  });
+
   it('Add on the ACTIVE pack also calls toggle_mod with enable=true', async () => {
     registerInvokeHandler('get_active_profile', () => 'Sample');
     const profile = setupPack({

@@ -32,6 +32,7 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ArrowLeft,
+  Ban,
   Camera,
   Check,
   ChevronDown,
@@ -339,6 +340,35 @@ export function ModpackDetail({
     }
   };
 
+  // Bug 7: enable/disable EVERY mod in THIS pack (vs. the whole library).
+  // Iterates the pack's mods and toggles each on disk, reusing pinScroll so
+  // the list doesn't collapse upward (Bug 2) as rows re-render.
+  const [bulkToggling, setBulkToggling] = useState(false);
+  const handleToggleAllInPack = async (enabled: boolean) => {
+    if (bulkToggling || gameRunning || profile.mods.length === 0) return;
+    pinScroll();
+    setBulkToggling(true);
+    try {
+      for (const pm of profile.mods) {
+        await toggleMod(pm.name, pm.folder_name ?? null, enabled);
+      }
+      await refreshAfterMutation();
+      toast.success(
+        enabled
+          ? t('modpack.detail.enabledAllInPack', { pack: profile.name })
+          : t('modpack.detail.disabledAllInPack', { pack: profile.name }),
+      );
+    } catch (e) {
+      toast.error(
+        t('modpack.detail.toggleAllFailed', {
+          error: e instanceof Error ? e.message : String(e),
+        }),
+      );
+    } finally {
+      setBulkToggling(false);
+    }
+  };
+
   // "+ Add mods ▾" dropdown + Edit + Load order — these share the search
   // row inside the LibraryTable (via its toolbarActions slot). All install
   // methods are consolidated into the one dropdown to keep the row calm.
@@ -515,6 +545,26 @@ export function ModpackDetail({
               >
                 {t('common.refresh')}
               </KebabItem>
+              {profile.mods.length > 0 && (
+                <>
+                  <KebabItem
+                    icon={<Check size={12} />}
+                    onClick={() => handleToggleAllInPack(true)}
+                    disabled={gameRunning || bulkToggling}
+                    description={gameRunning ? t('mods.closeSts2First') : undefined}
+                  >
+                    {t('mods.enableAll')}
+                  </KebabItem>
+                  <KebabItem
+                    icon={<Ban size={12} />}
+                    onClick={() => handleToggleAllInPack(false)}
+                    disabled={gameRunning || bulkToggling}
+                    description={gameRunning ? t('mods.closeSts2First') : undefined}
+                  >
+                    {t('mods.disableAll')}
+                  </KebabItem>
+                </>
+              )}
             </KebabSection>
             {(profile.mods.length > 0 || onDelete) && (
               <>

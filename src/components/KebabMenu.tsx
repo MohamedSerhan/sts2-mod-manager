@@ -78,7 +78,7 @@ export function KebabMenu({
         <div
           className="gf-kebab"
           role="menu"
-          style={align === 'left' ? { right: 'auto', left: 0 } : undefined}
+          style={align === 'left' ? { insetInlineEnd: 'auto', insetInlineStart: 0 } : undefined}
           onClick={(e) => e.stopPropagation()}
         >
           <KebabContext.Provider value={{ close: () => setOpen(false) }}>
@@ -139,7 +139,7 @@ export function KebabItem({ icon, onClick, danger, disabled, description, childr
       }}
     >
       <span className="gf-kebab-ico">{icon}</span>
-      <span style={{ flex: 1, textAlign: 'left', minWidth: 0 }}>
+      <span style={{ flex: 1, textAlign: 'start', minWidth: 0 }}>
         <span className="gf-kebab-label">{children}</span>
         {description && <span className="gf-kebab-desc">{description}</span>}
       </span>

@@ -66,7 +66,7 @@ export function SourceEditor({
   function statusBadge(ok: boolean) {
     return ok ? (
       <span className="gf-src-edit-status gf-src-edit-status-ok">
-        <Check size={9} style={{ display: 'inline', marginRight: 2 }} /> {t('sourceEditor.ok')}
+        <Check size={9} style={{ display: 'inline', marginInlineEnd: 2 }} /> {t('sourceEditor.ok')}
       </span>
     ) : (
       <span className="gf-src-edit-status gf-src-edit-status-empty">{t('sourceEditor.empty')}</span>
@@ -90,7 +90,7 @@ export function SourceEditor({
       <div className="gf-src-edit-grid">
         <div className="gf-src-edit-field">
           <label className="gf-src-edit-label">
-            <Type size={11} style={{ marginRight: 4 }} />
+            <Type size={11} style={{ marginInlineEnd: 4 }} />
             {t('sourceEditor.displayName')}
             {displayName && (
               <button
@@ -116,7 +116,7 @@ export function SourceEditor({
 
         <div className="gf-src-edit-field">
           <label className="gf-src-edit-label">
-            <FileText size={11} style={{ marginRight: 4 }} />
+            <FileText size={11} style={{ marginInlineEnd: 4 }} />
             {t('sourceEditor.displayDescription')}
             {displayDescription && (
               <button
@@ -146,7 +146,7 @@ export function SourceEditor({
         {/* GitHub */}
         <div className="gf-src-edit-field">
           <label className="gf-src-edit-label">
-            <GitBranch size={11} style={{ marginRight: 4 }} />
+            <GitBranch size={11} style={{ marginInlineEnd: 4 }} />
             {t('sourceEditor.githubRepo')}
             {github && (
               <button
@@ -175,7 +175,7 @@ export function SourceEditor({
         {/* Nexus */}
         <div className="gf-src-edit-field">
           <label className="gf-src-edit-label">
-            <ExternalLink size={11} style={{ marginRight: 4 }} />
+            <ExternalLink size={11} style={{ marginInlineEnd: 4 }} />
             {t('sourceEditor.nexusUrl')}
             {nexus && (
               <button
@@ -205,7 +205,7 @@ export function SourceEditor({
         {/* Free-form note */}
         <div className="gf-src-edit-field">
           <label className="gf-src-edit-label">
-            <StickyNote size={11} style={{ marginRight: 4 }} />
+            <StickyNote size={11} style={{ marginInlineEnd: 4 }} />
             {t('sourceEditor.note')}
             {note && (
               <button
@@ -233,7 +233,7 @@ export function SourceEditor({
         {/* Custom (non-GitHub/Nexus) URL */}
         <div className="gf-src-edit-field">
           <label className="gf-src-edit-label">
-            <LinkIcon size={11} style={{ marginRight: 4 }} />
+            <LinkIcon size={11} style={{ marginInlineEnd: 4 }} />
             {t('sourceEditor.otherLink')}
             {customUrl && (
               <button
@@ -262,7 +262,7 @@ export function SourceEditor({
       <div className="gf-src-edit-grid">
         <div className="gf-src-edit-field">
           <label className="gf-src-edit-label">
-            <Tags size={11} style={{ marginRight: 4 }} />
+            <Tags size={11} style={{ marginInlineEnd: 4 }} />
             {t('sourceEditor.tags')}
             {tags && (
               <button

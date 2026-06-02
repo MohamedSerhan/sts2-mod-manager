@@ -183,7 +183,7 @@ export async function installSharedProfileWithConfirm(
       <ul
         style={{
           margin: 0,
-          paddingLeft: 18,
+          paddingInlineStart: 18,
           maxHeight: 180,
           overflowY: 'auto',
           fontFamily:

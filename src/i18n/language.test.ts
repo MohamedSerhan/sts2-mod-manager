@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, beforeEach } from 'vitest';
 import {
   DEFAULT_LANGUAGE_PREFERENCE,
   LANGUAGE_STORAGE_KEY,
+  isRtlLanguage,
   loadLanguagePreference,
   resolveDetectedLanguage,
   saveLanguagePreference,
@@ -81,6 +82,30 @@ describe('resolveDetectedLanguage', () => {
     // And when paired with a real locale later in the list, the blank
     // entry must not short-circuit the search.
     expect(resolveDetectedLanguage(['   ', 'zh-CN'])).toBe('zh-Hans');
+  });
+});
+
+describe('isRtlLanguage', () => {
+  it('flags right-to-left scripts (Arabic and friends) by primary subtag', () => {
+    expect(isRtlLanguage('ar')).toBe(true);
+    expect(isRtlLanguage('ar-EG')).toBe(true);
+    expect(isRtlLanguage('AR')).toBe(true);
+    expect(isRtlLanguage('he')).toBe(true);
+    expect(isRtlLanguage('fa')).toBe(true);
+    expect(isRtlLanguage('ur')).toBe(true);
+  });
+
+  it('treats left-to-right locales (including the other supported ones) as LTR', () => {
+    expect(isRtlLanguage('en')).toBe(false);
+    expect(isRtlLanguage('ru')).toBe(false);
+    expect(isRtlLanguage('zh-Hans')).toBe(false);
+    expect(isRtlLanguage('zh-Hant')).toBe(false);
+  });
+
+  it('is safe for empty / nullish input', () => {
+    expect(isRtlLanguage('')).toBe(false);
+    expect(isRtlLanguage(null)).toBe(false);
+    expect(isRtlLanguage(undefined)).toBe(false);
   });
 });
 

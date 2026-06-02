@@ -1100,7 +1100,9 @@
       "en": "English",
       "zh": "中文",
       "auto": "Auto",
-      "zhHans": "Simplified Chinese"
+      "zhHans": "Simplified Chinese",
+      "ru": "Русский",
+      "ar": "العربية"
     },
     "accounts": {
       "nexusKey": "Nexus Mods API Key",

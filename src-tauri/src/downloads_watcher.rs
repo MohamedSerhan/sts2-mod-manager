@@ -235,15 +235,21 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                             )
                         }).unwrap_or_default();
 
-                        if let Some(ref existing) = existing_mod {
+                        // For an update, move the old mod's files ASIDE rather
+                        // than deleting them outright. If the install below
+                        // returns Err we restore them, so a failed update can
+                        // never leave the user with the old mod gone and no
+                        // replacement (audit L-10). On success we discard the
+                        // stash. `None` for a fresh install (nothing to stash).
+                        let stashed_existing = existing_mod.as_ref().map(|existing| {
                             log::info!(
                                 "Downloads watcher: updating existing mod '{}' (folder: {:?}, preserving {} config files)",
                                 existing.name,
                                 existing.folder_name,
                                 pre_update_preserved.len(),
                             );
-                            remove_existing_mod_files(existing, &mods_path, disabled_path.as_deref());
-                        }
+                            stash_existing_mod_files(existing, &mods_path, disabled_path.as_deref())
+                        });
 
                         let install_outcome: std::result::Result<
                             (crate::mods::ModInfo, Vec<String>, Vec<String>),
@@ -275,6 +281,12 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
 
                         match install_outcome {
                             Ok((mod_info, preserved_configs, lost_configs)) => {
+                                // Install succeeded — the new mod is in place,
+                                // so drop the stashed copy of the old one.
+                                if let Some(stash) = stashed_existing {
+                                    stash.discard();
+                                }
+
                                 let file_name = path
                                     .file_name()
                                     .unwrap_or_default()
@@ -416,6 +428,15 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                 );
                             }
                             Err(e) => {
+                                // Install failed. Put the old mod's files back
+                                // so the user isn't left with neither the old
+                                // nor the new version (audit L-10). This also
+                                // sweeps away any partial output the failed
+                                // install left at the old mod's location.
+                                if let Some(stash) = stashed_existing {
+                                    stash.restore();
+                                }
+
                                 let file_name = path
                                     .file_name()
                                     .unwrap_or_default()
@@ -715,47 +736,124 @@ fn strip_nexus_suffix(stem: &str) -> String {
     }
 }
 
-/// Remove an existing mod's files from disk (both enabled and disabled paths).
-fn remove_existing_mod_files(
+/// An old mod's files moved ASIDE (not deleted) before an auto-update install,
+/// so the update can be rolled back if the install fails. Mirrors the path set
+/// the old `remove_existing_mod_files` deleted (mod dir + loose top-level files,
+/// in both the enabled and disabled locations), but moves each item to a unique
+/// temp sibling on the same filesystem instead of removing it.
+///
+/// On install success call [`StashedMod::discard`]; on failure call
+/// [`StashedMod::restore`] to put the originals back (sweeping away any partial
+/// output the failed install left at the original locations).
+struct StashedMod {
+    /// (original path, temp path it was moved to). Only items that actually
+    /// existed are recorded.
+    moved: Vec<(PathBuf, PathBuf)>,
+}
+
+impl StashedMod {
+    /// Success path: the new install is in place, so delete the saved originals.
+    fn discard(self) {
+        for (_orig, temp) in &self.moved {
+            if temp.is_dir() {
+                let _ = std::fs::remove_dir_all(temp);
+            } else if temp.exists() {
+                let _ = std::fs::remove_file(temp);
+            }
+        }
+    }
+
+    /// Failure path: delete whatever now sits at each original location (partial
+    /// install output) and move the saved originals back. Done in reverse order
+    /// for symmetry with the stash order.
+    fn restore(self) {
+        for (orig, temp) in self.moved.iter().rev() {
+            // Remove any partial install output occupying the original path.
+            if orig.is_dir() {
+                let _ = std::fs::remove_dir_all(orig);
+            } else if orig.exists() {
+                let _ = std::fs::remove_file(orig);
+            }
+            if let Err(e) = std::fs::rename(temp, orig) {
+                log::error!(
+                    "Failed to restore stashed mod file {:?} -> {:?}: {}",
+                    temp,
+                    orig,
+                    e
+                );
+            }
+        }
+    }
+}
+
+/// Pick an unused sibling path next to `p` (same parent → same filesystem, so
+/// the move is an atomic rename) to hold `p` while the update runs. Works for
+/// both files and directories.
+fn unique_stash_sibling(p: &Path) -> Option<PathBuf> {
+    let parent = p.parent().filter(|p| !p.as_os_str().is_empty())?;
+    let base = p.file_name().and_then(|n| n.to_str()).unwrap_or("item");
+    for n in 0..100_000u32 {
+        let cand = parent.join(format!(".{base}.sts2mm-update-stash-{n}"));
+        if !cand.exists() {
+            return Some(cand);
+        }
+    }
+    None
+}
+
+/// Move `orig` aside to a unique temp sibling and record it in `moved`. No-op if
+/// `orig` doesn't exist. On a rename failure the item is left in place (the
+/// install will overwrite it as before — we never delete it up front).
+fn stash_one(orig: PathBuf, moved: &mut Vec<(PathBuf, PathBuf)>) {
+    if !orig.exists() {
+        return;
+    }
+    let Some(temp) = unique_stash_sibling(&orig) else {
+        log::error!("Could not allocate a stash path for {:?}; leaving in place", orig);
+        return;
+    };
+    match std::fs::rename(&orig, &temp) {
+        Ok(()) => {
+            log::info!("Stashed old mod path {:?} -> {:?}", orig, temp);
+            moved.push((orig, temp));
+        }
+        Err(e) => log::error!("Failed to stash {:?} aside: {} — leaving in place", orig, e),
+    }
+}
+
+/// Move an existing mod's files ASIDE (both enabled and disabled paths) so a
+/// failed update can restore them. Replaces the old delete-then-install order
+/// that left a failed update with the mod gone and no recovery (audit L-10).
+fn stash_existing_mod_files(
     existing: &ModInfo,
     mods_path: &Path,
     disabled_path: Option<&Path>,
-) {
+) -> StashedMod {
     // Determine the folder name to look for
     let folder = existing
         .folder_name
         .as_deref()
         .unwrap_or(&existing.name);
 
-    // Try removing from mods path
-    let mod_dir = mods_path.join(folder);
-    if mod_dir.exists() {
-        log::info!("Removing old mod directory: {:?}", mod_dir);
-        let _ = std::fs::remove_dir_all(&mod_dir);
-    }
+    let mut moved: Vec<(PathBuf, PathBuf)> = Vec::new();
 
-    // Also remove any top-level manifest/files
+    // Move the mod directory in the enabled path aside.
+    stash_one(mods_path.join(folder), &mut moved);
+
+    // Also move any top-level manifest/files aside.
     for file in &existing.files {
-        let p = mods_path.join(file);
-        if p.exists() {
-            let _ = std::fs::remove_file(&p);
+        stash_one(mods_path.join(file), &mut moved);
+    }
+
+    // Same for the disabled path.
+    if let Some(dp) = disabled_path {
+        stash_one(dp.join(folder), &mut moved);
+        for file in &existing.files {
+            stash_one(dp.join(file), &mut moved);
         }
     }
 
-    // Try removing from disabled path
-    if let Some(dp) = disabled_path {
-        let disabled_dir = dp.join(folder);
-        if disabled_dir.exists() {
-            log::info!("Removing old disabled mod directory: {:?}", disabled_dir);
-            let _ = std::fs::remove_dir_all(&disabled_dir);
-        }
-        for file in &existing.files {
-            let p = dp.join(file);
-            if p.exists() {
-                let _ = std::fs::remove_file(&p);
-            }
-        }
-    }
+    StashedMod { moved }
 }
 
 /// Transfer mod_sources entry from old mod name to new mod name.

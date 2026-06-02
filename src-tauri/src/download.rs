@@ -908,7 +908,14 @@ pub async fn download_and_install_github_mod(
         asset.size
     );
 
-    let dest = cache_path.join(&asset.name);
+    // `asset.name` comes from the GitHub release API and is publisher-
+    // controlled — a crafted asset name like `..%2F..%2Fevil.dll` (or one
+    // containing path separators) would otherwise traverse out of the cache
+    // or mods folder when joined below. Sanitize to a single safe segment
+    // before any join, matching the URL-download path. (Audit M-8)
+    let safe_asset_name = crate::mods::sanitize_path_segment(&asset.name);
+
+    let dest = cache_path.join(&safe_asset_name);
 
     download_file(&asset.browser_download_url, &dest, |downloaded, total| {
         log::debug!("Downloading {}: {}/{}", asset.name, downloaded, total);
@@ -937,10 +944,17 @@ pub async fn download_and_install_github_mod(
         crate::mods::install_mod_from_archive(&dest, mods_path)
     } else if matches!(ext.as_str(), "dll" | "pck") {
         // Single DLL file - copy directly
-        let dest_path = mods_path.join(&asset.name);
+        let dest_path = mods_path.join(&safe_asset_name);
+        // Defense-in-depth: even after sanitize_path_segment, confirm the
+        // join didn't escape the mods folder before writing.
+        if !crate::mods::path_is_inside(&dest_path, mods_path) {
+            return Err(AppError::Other(format!(
+                "Refusing to write outside mods folder: {}",
+                dest_path.display()
+            )));
+        }
         std::fs::copy(&dest, &dest_path)?;
-        let mod_name = asset
-            .name
+        let mod_name = safe_asset_name
             .trim_end_matches(".dll")
             .trim_end_matches(".DLL")
             .trim_end_matches(".pck")
@@ -951,7 +965,7 @@ pub async fn download_and_install_github_mod(
             version: release.tag_name.clone(),
             description: release.body.clone().unwrap_or_default(),
             enabled: true,
-            files: vec![asset.name.clone()],
+            files: vec![safe_asset_name.clone()],
             source: Some(format!("github:{}/{}", owner, repo)),
             hash: None,
             dependencies: Vec::new(),

@@ -65,7 +65,12 @@ export function BrowseModpacksView({ onGoToProfiles }: Props = {}) {
   const [selected, setSelected] = useState<BrowserCard | null>(null);
   const [query, setQuery] = useState('');
 
-  async function load(force = false) {
+  // `isCancelled` lets the mount effect abort its in-flight load on unmount
+  // (the fetch can be parked behind the 45s timeout, well past teardown).
+  // Without the guard, the awaited setState fires on an unmounted component.
+  // Button-initiated loads (Retry / Refresh) pass no guard — they're always
+  // live because the component is mounted to host the button.
+  async function load(force = false, isCancelled: () => boolean = () => false) {
     setLoading(true);
     setRateLimited(false);
     setError(null);
@@ -75,20 +80,24 @@ export function BrowseModpacksView({ onGoToProfiles }: Props = {}) {
         BROWSER_LOAD_TIMEOUT_MS,
         t('browseModpacks.timedOut'),
       );
+      if (isCancelled()) return;
       setPage(result);
     } catch (e) {
+      if (isCancelled()) return;
       if (isRateLimit(e)) {
         setRateLimited(true);
       } else {
         setError(e instanceof Error ? e.message : String(e));
       }
     } finally {
-      setLoading(false);
+      if (!isCancelled()) setLoading(false);
     }
   }
 
   useEffect(() => {
-    load(false);
+    let cancelled = false;
+    load(false, () => cancelled);
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

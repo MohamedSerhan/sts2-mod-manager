@@ -186,7 +186,23 @@ pub fn load_sources(config_path: &Path) -> ModSourcesDb {
         return ModSourcesDb::default();
     }
     match fs::read_to_string(&path) {
-        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+        Ok(content) => match serde_json::from_str(&content) {
+            Ok(db) => db,
+            Err(e) => {
+                // A present-but-corrupt file is a data-loss hazard: defaulting
+                // here silently discards every saved source link. Don't stay
+                // silent — surface it so the user/log shows why links vanished.
+                // (Empty/whitespace-only files are a normal "no data" state.)
+                if !content.trim().is_empty() {
+                    log::error!(
+                        "Failed to parse mod sources at {}: {} — falling back to empty defaults (saved source links will not be loaded)",
+                        path.display(),
+                        e
+                    );
+                }
+                ModSourcesDb::default()
+            }
+        },
         Err(_) => ModSourcesDb::default(),
     }
 }
@@ -194,7 +210,7 @@ pub fn load_sources(config_path: &Path) -> ModSourcesDb {
 pub fn save_sources(db: &ModSourcesDb, config_path: &Path) -> Result<()> {
     let path = sources_path(config_path);
     let json = serde_json::to_string_pretty(db)?;
-    fs::write(&path, json)?;
+    crate::fs_safety::atomic_write(&path, json.as_bytes())?;
     Ok(())
 }
 
@@ -572,9 +588,9 @@ pub fn enrich_mods_with_sources(mods: &mut [ModInfo], config_path: &Path) {
             if let Some(ref repo) = entry.github_repo {
                 let canonical = normalize_github_repo_input(repo);
                 if let Some(c) = canonical {
-                    if !entry.github_auto_detected {
-                        m.github_url = Some(format!("https://github.com/{}", c));
-                    } else if m.github_url.is_none() {
+                    // A manual entry always wins; an auto-detected guess only
+                    // fills in when the manifest didn't supply a URL.
+                    if !entry.github_auto_detected || m.github_url.is_none() {
                         m.github_url = Some(format!("https://github.com/{}", c));
                     }
                 }

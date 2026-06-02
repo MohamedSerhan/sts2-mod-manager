@@ -8,9 +8,11 @@
  *   POST /            { "report": "<text>" }   ->  { "url": "<base>/r/<id>" }
  *   GET  /r/<id>                                ->  the stored report (text/plain)
  *
- * Storage is a KV namespace (binding REPORTS) with a TTL. An optional
- * shared key (secret APP_KEY) gates uploads: when set, the app must send a
- * matching `x-app-key` header. Reports are stored verbatim — the app
+ * Storage is a KV namespace (binding REPORTS) with a TTL. A shared key
+ * (secret APP_KEY) gates uploads: the app must send a matching `x-app-key`
+ * header. APP_KEY is REQUIRED in production — a deploy without it refuses
+ * uploads (503) rather than running open; set ENVIRONMENT="dev" to relax
+ * this for local `wrangler dev`. Reports are stored verbatim — the app
  * redacts paths/tokens/username before uploading.
  *
  * Deploy: see README.md in this folder.
@@ -73,7 +75,12 @@ export default {
     // ── Retrieve a stored report ──────────────────────────────────
     if (request.method === 'GET' && url.pathname.startsWith('/r/')) {
       const id = url.pathname.slice('/r/'.length);
-      if (!id || !env.REPORTS) return new Response('Not found', { status: 404 });
+      // Validate the id shape BEFORE touching KV: our ids are lowercase hex
+      // (see newId), so reject anything else with a 404 — no path traversal,
+      // no probing KV with arbitrary keys.
+      if (!env.REPORTS || !/^[a-f0-9]{1,64}$/.test(id)) {
+        return new Response('Not found', { status: 404 });
+      }
       const report = await env.REPORTS.get(`report:${id}`);
       if (report === null) return new Response('Not found', { status: 404 });
       return new Response(report, {
@@ -83,6 +90,11 @@ export default {
           // Reports are attacker-supplied text served from the worker's own
           // origin — stop browsers MIME-sniffing one into HTML/JS.
           'x-content-type-options': 'nosniff',
+          // Defense-in-depth for the attacker-supplied body: forbid loading any
+          // sub-resource, deny framing, and never let a shared cache retain it.
+          'content-security-policy': "default-src 'none'",
+          'x-frame-options': 'DENY',
+          'cache-control': 'no-store',
           // Render inline rather than download.
           'content-disposition': 'inline; filename="sts2-bug-report.txt"',
         },
@@ -94,7 +106,16 @@ export default {
       if (!env.REPORTS) {
         return jsonResponse({ error: 'storage not configured' }, 500);
       }
-      // Optional shared-key gate (constant-time compare).
+      // APP_KEY is REQUIRED in production: without it, uploads would be
+      // unauthenticated and unlimited. Refuse to ingest rather than run open.
+      // ENVIRONMENT defaults to production (it's set to "dev" only for local
+      // `wrangler dev`), so a misconfigured prod deploy fails closed.
+      const isProduction = (env.ENVIRONMENT ?? 'production') !== 'dev';
+      if (isProduction && !env.APP_KEY) {
+        return jsonResponse({ error: 'uploads disabled: APP_KEY not configured' }, 503);
+      }
+      // Shared-key gate (constant-time compare). Enforced whenever APP_KEY is
+      // set; in production it's always set per the guard above.
       if (env.APP_KEY && !constantTimeEqual(request.headers.get('x-app-key') ?? '', env.APP_KEY)) {
         return jsonResponse({ error: 'unauthorized' }, 401);
       }

@@ -188,6 +188,21 @@ pub fn list_backups(backup_dir: &Path) -> Vec<BackupInfo> {
 /// Clears the current `mods_path` and copies all files from the named
 /// backup directory into it.
 pub fn restore_backup(backup_name: &str, backup_dir: &Path, mods_path: &Path) -> Result<()> {
+    // Reject anything that isn't a plain "backup_*" snapshot folder. A name
+    // containing path separators or ".." could resolve outside backup_dir and
+    // copy an arbitrary directory into mods. (Audit M-6; stricter than the
+    // prefix-only guard in delete_backup.)
+    if !backup_name.starts_with("backup_")
+        || backup_name.contains('/')
+        || backup_name.contains('\\')
+        || backup_name.contains("..")
+    {
+        return Err(crate::error::AppError::Other(format!(
+            "Refusing to restore '{}' — not a valid backup name",
+            backup_name
+        )));
+    }
+
     let src = backup_dir.join(backup_name);
     if !src.exists() {
         log::error!("restore_backup: backup '{}' not found at {}", backup_name, src.display());
@@ -199,25 +214,27 @@ pub fn restore_backup(backup_name: &str, backup_dir: &Path, mods_path: &Path) ->
 
     log::info!("Restoring backup '{}' into {}", backup_name, mods_path.display());
 
-    // Clear current mods
-    if mods_path.exists() {
-        for entry in fs::read_dir(mods_path)?.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                fs::remove_dir_all(&path)?;
-            } else {
-                fs::remove_file(&path)?;
-            }
+    // Move the current mods aside first so a failure mid-copy rolls back to the
+    // pre-restore state instead of leaving the user with an empty mods folder.
+    // (Audit H-4)
+    let swap = crate::fs_safety::swap_dirs_aside(&[mods_path])?;
+    match copy_dir_recursive(&src, mods_path) {
+        Ok(()) => {
+            swap.discard()?;
+            log::info!("Backup '{}' restored successfully", backup_name);
+            Ok(())
         }
-    } else {
-        fs::create_dir_all(mods_path)?;
+        Err(e) => {
+            log::error!(
+                "restore_backup: copy failed ({}); rolling back to the pre-restore mods",
+                e
+            );
+            if let Err(re) = swap.restore() {
+                log::error!("restore_backup: rollback ALSO failed: {}", re);
+            }
+            Err(e.into())
+        }
     }
-
-    // Copy backup contents into mods
-    copy_dir_recursive(&src, mods_path)?;
-
-    log::info!("Backup '{}' restored successfully", backup_name);
-    Ok(())
 }
 
 /// Move all mods from mods/ to mods_disabled/ (reset to vanilla state).
@@ -331,6 +348,54 @@ mod backup_pure_tests {
         fs::create_dir_all(&dir).unwrap();
         delete_backup("backup_2026-05-01_10-00-00", backups.path()).unwrap();
         assert!(!dir.exists());
+    }
+
+    #[test]
+    fn restore_backup_rejects_path_traversal_name() {
+        let root = tempfile::tempdir().unwrap();
+        let backup_dir = root.path().join("backups");
+        fs::create_dir_all(&backup_dir).unwrap();
+
+        // An attacker-controlled directory OUTSIDE backup_dir.
+        let evil = root.path().join("evil");
+        fs::create_dir_all(&evil).unwrap();
+        fs::write(evil.join("evil.txt"), "pwned").unwrap();
+
+        // Current mods the user must not lose.
+        let mods = root.path().join("mods");
+        fs::create_dir_all(&mods).unwrap();
+        fs::write(mods.join("keep.txt"), "keep").unwrap();
+
+        // "../evil" resolves to an existing directory outside backup_dir.
+        let res = restore_backup("../evil", &backup_dir, &mods);
+
+        assert!(res.is_err(), "a traversal backup name must be rejected");
+        assert!(mods.join("keep.txt").exists(), "user mods must be untouched");
+        assert!(
+            !mods.join("evil.txt").exists(),
+            "escaped directory contents must not be copied into mods"
+        );
+    }
+
+    #[test]
+    fn restore_backup_restores_named_backup_and_replaces_current() {
+        let root = tempfile::tempdir().unwrap();
+        let backup_dir = root.path().join("backups");
+        let snap = backup_dir.join("backup_2026-01-01_00-00-00");
+        fs::create_dir_all(&snap).unwrap();
+        fs::write(snap.join("ModA.dll"), "a").unwrap();
+
+        let mods = root.path().join("mods");
+        fs::create_dir_all(&mods).unwrap();
+        fs::write(mods.join("stale.txt"), "stale").unwrap();
+
+        restore_backup("backup_2026-01-01_00-00-00", &backup_dir, &mods).unwrap();
+
+        assert!(mods.join("ModA.dll").exists(), "backup contents restored");
+        assert!(
+            !mods.join("stale.txt").exists(),
+            "pre-restore contents replaced by the backup"
+        );
     }
 
     #[test]

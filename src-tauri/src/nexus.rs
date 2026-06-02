@@ -84,6 +84,19 @@ pub fn parse_nxm_url(url_str: &str) -> Result<NxmLink> {
     })
 }
 
+/// Validate a Nexus game domain before it is interpolated into an API URL.
+///
+/// Game domains are short lowercase slugs (e.g. `slaythespire2`). Restricting
+/// to `[a-z0-9]` and a sane length prevents path-injection such as
+/// `../admin` from escaping the intended `/v1/games/{game}/...` path.
+pub(crate) fn is_valid_game_domain(game: &str) -> bool {
+    !game.is_empty()
+        && game.len() <= 64
+        && game
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+}
+
 // ── Nexus API Client ────────────────────────────────────────────────────────
 
 /// Nexus Mods API response for mod info.
@@ -326,6 +339,9 @@ pub async fn get_nexus_mod_info(
     mod_id: u64,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<NexusModInfo, String> {
+    if !is_valid_game_domain(&game) {
+        return Err(format!("Invalid Nexus game domain: {}", game));
+    }
     let api_key = {
         let s = state.lock().map_err(|e| e.to_string())?;
         s.nexus_api_key
@@ -396,6 +412,31 @@ mod nexus_helper_tests {
         let nxm = parse_nxm_url("nxm://slaythespire2/mods/103/files/456").unwrap();
         assert!(nxm.key.is_none());
         assert!(nxm.expires.is_none());
+    }
+
+    #[test]
+    fn is_valid_game_domain_accepts_slugs_and_rejects_injection() {
+        // Valid lowercase-alphanumeric slugs.
+        assert!(is_valid_game_domain("slaythespire2"));
+        assert!(is_valid_game_domain("skyrim"));
+        assert!(is_valid_game_domain("fallout4"));
+        assert!(is_valid_game_domain("a"));
+
+        // Empty and over-long are rejected.
+        assert!(!is_valid_game_domain(""));
+        assert!(!is_valid_game_domain(&"a".repeat(65)));
+        assert!(is_valid_game_domain(&"a".repeat(64)));
+
+        // Path-injection and non-slug characters (M-4 / M-5).
+        assert!(!is_valid_game_domain(".."));
+        assert!(!is_valid_game_domain("../admin"));
+        assert!(!is_valid_game_domain("foo/bar"));
+        assert!(!is_valid_game_domain("SlayTheSpire2")); // uppercase
+        assert!(!is_valid_game_domain("foo_bar")); // underscore
+        assert!(!is_valid_game_domain("foo-bar")); // hyphen
+        assert!(!is_valid_game_domain("foo bar")); // space
+        assert!(!is_valid_game_domain("foo.bar")); // dot
+        assert!(!is_valid_game_domain("foo%2Fbar")); // percent
     }
 
     #[test]

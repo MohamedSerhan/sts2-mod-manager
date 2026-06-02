@@ -4,6 +4,7 @@ mod download;
 mod downloads_watcher;
 mod error;
 mod external_open;
+mod fs_safety;
 mod game;
 // `mod_sources` and `mods` are pub so `tests/qa_scenarios.rs` can call
 // scan_mods / install_mod_from_zip / load_sources / lookup_entry the
@@ -116,19 +117,34 @@ pub fn run() {
     // verbatim — caller is responsible for creating the directory and
     // populating it. Logged loudly so a misconfigured CI run is
     // obvious in the log dump.
-    let fixture_game_path = std::env::var("STS2_FIXTURE_GAME_PATH")
-        .ok()
-        .map(std::path::PathBuf::from)
-        .filter(|p| p.exists());
-    if let Some(p) = fixture_game_path {
-        log::info!(
-            "STS2_FIXTURE_GAME_PATH override — using {} (auto-detect skipped)",
-            p.display(),
-        );
-        if let Ok(mut s) = app_state.lock() {
-            s.set_game_path(p);
+    //
+    // Gated behind `qa-cassette` (same feature `qa_cassette::is_active()`
+    // keys off of) so this env-var override is compiled OUT of shipped
+    // builds entirely — a release binary can never be steered at an
+    // attacker-supplied game directory via the environment.
+    #[cfg(feature = "qa-cassette")]
+    let fixture_applied = {
+        let fixture_game_path = std::env::var("STS2_FIXTURE_GAME_PATH")
+            .ok()
+            .map(std::path::PathBuf::from)
+            .filter(|p| p.exists());
+        if let Some(p) = fixture_game_path {
+            log::info!(
+                "STS2_FIXTURE_GAME_PATH override — using {} (auto-detect skipped)",
+                p.display(),
+            );
+            if let Ok(mut s) = app_state.lock() {
+                s.set_game_path(p);
+            }
+            true
+        } else {
+            false
         }
-    } else {
+    };
+    #[cfg(not(feature = "qa-cassette"))]
+    let fixture_applied = false;
+
+    if !fixture_applied {
         let restored_saved_game_path = if let Ok(mut s) = app_state.lock() {
             state::restore_persisted_game_path(&mut s, game::validate_game_path)
         } else {

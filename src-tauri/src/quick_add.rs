@@ -81,6 +81,12 @@ pub fn resolve_nexus_url(url: &str) -> Result<(String, u64)> {
         // Expected: ["game_domain", "mods", "1234"]
         if parts.len() >= 3 && parts[1] == "mods" {
             let game_domain = parts[0].to_string();
+            if !crate::nexus::is_valid_game_domain(&game_domain) {
+                return Err(AppError::Other(format!(
+                    "Invalid Nexus game domain in shorthand: {}",
+                    game_domain
+                )));
+            }
             let mod_id: u64 = parts[2].parse().map_err(|_| {
                 AppError::Other(format!("Invalid mod ID in Nexus shorthand: {}", parts[2]))
             })?;
@@ -96,7 +102,7 @@ pub fn resolve_nexus_url(url: &str) -> Result<(String, u64)> {
     let parsed = url::Url::parse(url)?;
 
     let host = parsed.host_str().unwrap_or("");
-    if !host.contains("nexusmods.com") {
+    if host != "nexusmods.com" && host != "www.nexusmods.com" {
         return Err(AppError::Other(format!(
             "Not a Nexus Mods URL: {}",
             url
@@ -111,6 +117,12 @@ pub fn resolve_nexus_url(url: &str) -> Result<(String, u64)> {
     // Expected: ["game_domain", "mods", "1234"]
     if segments.len() >= 3 && segments[1] == "mods" {
         let game_domain = segments[0].to_string();
+        if !crate::nexus::is_valid_game_domain(&game_domain) {
+            return Err(AppError::Other(format!(
+                "Invalid Nexus game domain in URL: {}",
+                game_domain
+            )));
+        }
         let mod_id: u64 = segments[2].parse().map_err(|_| {
             AppError::Other(format!("Invalid mod ID in Nexus URL: {}", segments[2]))
         })?;
@@ -169,6 +181,30 @@ mod url_resolver_tests {
         assert!(resolve_nexus_url("nexus:foo/posts/123").is_err()); // wrong path
         assert!(resolve_nexus_url("nexus:foo/mods/not-a-number").is_err());
         assert!(resolve_nexus_url("garbage").is_err());
+    }
+
+    #[test]
+    fn resolve_nexus_url_rejects_lookalike_hosts() {
+        // M-3: host must match exactly, not merely contain "nexusmods.com".
+        assert!(resolve_nexus_url("https://nexusmods.com.evil.com/foo/mods/1").is_err());
+        assert!(resolve_nexus_url("https://evilnexusmods.com/foo/mods/1").is_err());
+        assert!(resolve_nexus_url("https://nexusmods.com.evil.com/slaythespire2/mods/1").is_err());
+        // The legitimate hosts still resolve.
+        assert!(resolve_nexus_url("https://nexusmods.com/slaythespire2/mods/1").is_ok());
+        assert!(resolve_nexus_url("https://www.nexusmods.com/slaythespire2/mods/1").is_ok());
+    }
+
+    #[test]
+    fn resolve_nexus_url_rejects_path_injecting_game_domain() {
+        // M-4: a malicious game_domain must not path-inject the API URL.
+        // `nexus:../mods/1` reaches the game_domain branch with domain ".."
+        // which the validator must reject (dots are not slug characters).
+        assert!(resolve_nexus_url("nexus:../mods/1").is_err());
+        assert!(resolve_nexus_url("nexus:..%2Fadmin/mods/1").is_err());
+        assert!(resolve_nexus_url("https://www.nexusmods.com/..%2Fadmin/mods/1").is_err());
+        // Uppercase / non-slug characters are rejected too.
+        assert!(resolve_nexus_url("nexus:SlayTheSpire2/mods/1").is_err());
+        assert!(resolve_nexus_url("nexus:foo_bar/mods/1").is_err());
     }
 }
 

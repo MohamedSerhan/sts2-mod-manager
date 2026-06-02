@@ -117,7 +117,23 @@ pub fn load_subscriptions(config_path: &Path) -> SubscriptionsDb {
         return SubscriptionsDb::default();
     }
     match fs::read_to_string(&path) {
-        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+        Ok(content) => match serde_json::from_str(&content) {
+            Ok(db) => db,
+            Err(e) => {
+                // A present-but-corrupt file is a data-loss hazard: defaulting
+                // here silently drops every subscription. Don't stay silent —
+                // surface it so the user/log shows why subscriptions vanished.
+                // (Empty/whitespace-only files are a normal "no data" state.)
+                if !content.trim().is_empty() {
+                    log::error!(
+                        "Failed to parse subscriptions at {}: {} — falling back to empty defaults (saved subscriptions will not be loaded)",
+                        path.display(),
+                        e
+                    );
+                }
+                SubscriptionsDb::default()
+            }
+        },
         Err(_) => SubscriptionsDb::default(),
     }
 }
@@ -125,7 +141,7 @@ pub fn load_subscriptions(config_path: &Path) -> SubscriptionsDb {
 pub fn save_subscriptions(db: &SubscriptionsDb, config_path: &Path) -> Result<()> {
     let path = subs_path(config_path);
     let json = serde_json::to_string_pretty(db)?;
-    fs::write(&path, json)?;
+    crate::fs_safety::atomic_write(&path, json.as_bytes())?;
     Ok(())
 }
 
@@ -329,37 +345,33 @@ pub async fn repair_modpack_subscription(
         )
     };
 
-    log::info!("Repair: wiping mods directory at {}", mods_path.display());
-    wipe_directory_contents(&mods_path).map_err(|e| e.to_string())?;
+    // Move both mod dirs aside (instead of deleting) so a failed re-download —
+    // network error, missing bundle URL, absent Nexus key — rolls back to the
+    // user's existing mods instead of leaving them with nothing. (Audit M-9)
+    log::info!(
+        "Repair: stashing mods + disabled dirs before reinstall for '{}'",
+        share_id
+    );
+    let swap = crate::fs_safety::swap_dirs_aside(&[&mods_path, &disabled_path])
+        .map_err(|e| format!("Failed to stash existing mods before repair: {}", e))?;
 
-    log::info!("Repair: wiping disabled mods directory at {}", disabled_path.display());
-    wipe_directory_contents(&disabled_path).map_err(|e| e.to_string())?;
-
-    log::info!("Repair: directories cleared, running subscription update for '{}'", share_id);
-    let profile = apply_subscription_update_inner(share_id.clone(), app_handle, state).await?;
-    log::info!("Repair: completed for '{}'", share_id);
-
-    Ok(profile)
-}
-
-/// Delete all entries inside `dir` without removing `dir` itself.
-/// No-op if `dir` does not exist.
-fn wipe_directory_contents(dir: &Path) -> Result<()> {
-    if !dir.exists() {
-        return Ok(());
-    }
-    for entry in fs::read_dir(dir)?.flatten() {
-        let path = entry.path();
-        let result = if path.is_dir() {
-            fs::remove_dir_all(&path)
-        } else {
-            fs::remove_file(&path)
-        };
-        if let Err(e) = result {
-            log::error!("Repair: failed to remove '{}': {}", path.display(), e);
+    match apply_subscription_update_inner(share_id.clone(), app_handle, state).await {
+        Ok(profile) => {
+            swap.discard().map_err(|e| e.to_string())?;
+            log::info!("Repair: completed for '{}'", share_id);
+            Ok(profile)
+        }
+        Err(e) => {
+            log::error!(
+                "Repair: reinstall failed ({}); restoring the pre-repair mods",
+                e
+            );
+            if let Err(re) = swap.restore() {
+                log::error!("Repair: rollback ALSO failed: {}", re);
+            }
+            Err(e)
         }
     }
-    Ok(())
 }
 
 async fn apply_subscription_update_inner(

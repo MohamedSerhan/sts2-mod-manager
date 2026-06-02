@@ -137,6 +137,42 @@ pub async fn list_dev_builds(state: State<'_, AppState>) -> Result<Vec<DevBuild>
     Ok(parse_dev_builds(releases))
 }
 
+/// Hosts a dev-build updater manifest is allowed to live on. GitHub serves
+/// release assets either from the API/site host (`github.com`) or, after the
+/// redirect, from its asset CDN (`objects.githubusercontent.com`); both are
+/// legitimate `browser_download_url` hosts. Anything else is rejected.
+const ALLOWED_MANIFEST_HOSTS: &[&str] = &["github.com", "objects.githubusercontent.com"];
+
+/// Validate the caller-supplied updater manifest URL before it is ever handed
+/// to `updater_builder().endpoints()`.
+///
+/// The frontend only ever passes a `manifest_url` we ourselves discovered from
+/// the GitHub releases API, but the command accepts an arbitrary string over
+/// IPC, so we re-check it here: require `https` and a host on the GitHub
+/// allowlist. Without this, an attacker who can reach the command could point
+/// the updater at an arbitrary endpoint — an SSRF vector and a way to feed a
+/// forced-downgrade / attacker-chosen manifest. (Signature verification still
+/// gates the actual install, but the endpoint must not be attacker-controlled
+/// in the first place.) Returns the parsed URL on success so the caller does
+/// not parse twice.
+fn validate_manifest_url(manifest_url: &str) -> Result<url::Url, String> {
+    let parsed =
+        url::Url::parse(manifest_url).map_err(|e| format!("Bad manifest URL: {e}"))?;
+    if parsed.scheme() != "https" {
+        return Err(format!(
+            "Refusing manifest URL with non-https scheme: {}",
+            parsed.scheme()
+        ));
+    }
+    match parsed.host_str() {
+        Some(host) if ALLOWED_MANIFEST_HOSTS.contains(&host) => Ok(parsed),
+        other => Err(format!(
+            "Refusing manifest URL on disallowed host: {}",
+            other.unwrap_or("<none>")
+        )),
+    }
+}
+
 /// One-click switch: install a chosen dev build from its `latest.json`
 /// updater manifest using tauri-plugin-updater — the same silent
 /// download + signature-verify + install + relaunch path the release
@@ -151,9 +187,7 @@ pub async fn switch_dev_build(
     manifest_url: String,
 ) -> Result<(), String> {
     use tauri_plugin_updater::UpdaterExt;
-    let url = manifest_url
-        .parse()
-        .map_err(|e| format!("Bad manifest URL: {e}"))?;
+    let url = validate_manifest_url(&manifest_url)?;
     let updater = app
         .updater_builder()
         .endpoints(vec![url])

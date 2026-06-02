@@ -372,9 +372,22 @@ pub async fn switch_profile(
     // Update active profile (also persist to disk)
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.active_profile = Some(name.clone());
-    let _ = std::fs::write(s.config_path.join("active_profile.txt"), &name);
+    persist_active_profile(&s.config_path, &name);
 
     Ok(result)
+}
+
+/// Persist the active profile name to active_profile.txt, logging (not
+/// silently swallowing) any write error. (Audit L-7)
+fn persist_active_profile(config_path: &std::path::Path, name: &str) {
+    let path = config_path.join("active_profile.txt");
+    if let Err(e) = std::fs::write(&path, name) {
+        log::error!(
+            "Failed to persist active profile to {}: {}",
+            path.display(),
+            e
+        );
+    }
 }
 
 #[tauri::command]
@@ -484,7 +497,7 @@ pub async fn repair_profile(
 
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.active_profile = Some(name.clone());
-    let _ = std::fs::write(s.config_path.join("active_profile.txt"), &name);
+    persist_active_profile(&s.config_path, &name);
 
     Ok(result)
 }

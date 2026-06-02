@@ -50,7 +50,9 @@ pub fn read_sidecar(container: &Path) -> Option<BundleSidecar> {
 pub fn write_sidecar(container: &Path, sidecar: &BundleSidecar) -> std::io::Result<()> {
     let json = serde_json::to_string_pretty(sidecar)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-    fs::write(sidecar_path(container), json)
+    // Atomic write so a crash mid-write can't truncate the sidecar (which would
+    // drop the bundle's display name / Nexus link / version). (Audit H-3 class.)
+    crate::fs_safety::atomic_write(&sidecar_path(container), json.as_bytes())
 }
 
 /// Derive a sanitized container folder name from a downloaded archive path.

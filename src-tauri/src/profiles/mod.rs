@@ -325,6 +325,18 @@ pub fn delete_profile_cmd(
     let config_path = s.config_path.clone();
     let mods_path = s.mods_path.clone();
     let disabled_path = s.disabled_mods_path.clone();
+    // FB2-D: deleting the ACTIVE pack resets the game folder to vanilla (moves
+    // its mods out), which can't happen with the game holding the files. Lock
+    // the action down rather than half-doing it — the running-game state
+    // already tells the user mods can't be changed. (A non-active pack is just
+    // a manifest delete, so it stays allowed while the game runs.)
+    let is_active = s
+        .active_profile
+        .as_deref()
+        .is_some_and(|a| a.eq_ignore_ascii_case(&name));
+    if is_active {
+        crate::game::ensure_game_not_running()?;
+    }
     delete_profile(&name, &s.profiles_path).map_err(|e| e.to_string())?;
     // Bug 3: if the deleted pack was the active one, drop the active-profile
     // pointer (in-memory + active_profile.txt). Without this the UI keeps the
@@ -334,17 +346,11 @@ pub fn delete_profile_cmd(
 
     if was_active {
         log::info!("Cleared active profile after deleting active pack '{}'", name);
-        // Reported follow-up: clearing the pointer left the deleted pack's mods
-        // sitting in the active folder, so a "modded" launch loaded them with
-        // errors. Empty the active folder (move everything to disabled) so the
-        // post-delete state is genuinely vanilla — no mods loaded. Best-effort,
-        // and only when the game is closed (we can't move locked files).
-        if crate::game::is_game_running() {
-            log::warn!(
-                "Active pack '{}' deleted while the game is running; active mods folder left as-is",
-                name
-            );
-        } else if let (Some(mods_path), Some(disabled_path)) = (mods_path, disabled_path) {
+        // FB-B: clearing the pointer left the deleted pack's mods sitting in the
+        // active folder, so a "modded" launch loaded them with errors. Empty the
+        // active folder (move everything to disabled) so the post-delete state is
+        // genuinely vanilla. The game is guaranteed closed by the guard above.
+        if let (Some(mods_path), Some(disabled_path)) = (mods_path, disabled_path) {
             let moved = crate::mods::move_all_mods_between(&mods_path, &disabled_path);
             if !moved.is_empty() {
                 log::info!(

@@ -73,6 +73,44 @@ pub fn bundle_container_name(archive_path: &Path) -> String {
     sanitize_path_segment(&strip_nexus_suffix(&stem))
 }
 
+/// Extract the Nexus FILE version embedded in a download filename's suffix.
+///
+/// Nexus download names look like `{name}-{modId}-{version}-{fileId}.zip`, with
+/// the version's dots written as dashes — e.g.
+/// `AliceDefectSkin V2.0-979-2-1-1780132414.zip` → `Some("2.1")`
+/// (mod 979, version `2-1`, file id `1780132414`).
+///
+/// This is the most reliable version source for a bundle: it is exactly the file
+/// the user downloaded and, unlike the Nexus API, needs no key or network. The
+/// pack version is NOT inside the archive — member manifests only carry per-mod
+/// versions, which is why a pack used to display a sub-mod's number.
+///
+/// Returns `None` for manually-renamed downloads with no Nexus suffix, or a
+/// suffix with no version segment between the mod id and the file id.
+pub fn nexus_file_version(archive_path: &Path) -> Option<String> {
+    let stem = archive_path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let stem = strip_browser_copy_suffix(&stem); // drop a trailing " (N)"
+    let name = strip_nexus_suffix(&stem);
+    if name.len() >= stem.len() {
+        return None; // nothing stripped → no Nexus suffix present
+    }
+    // The stripped tail is the numeric suffix "-{modId}-{v..}-{fileId}".
+    let segs: Vec<&str> = stem[name.len()..]
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect();
+    // Need a mod id + at least one version segment + a file id.
+    if segs.len() < 3 || !segs.iter().all(|s| s.chars().all(|c| c.is_ascii_digit())) {
+        return None;
+    }
+    let version = segs[1..segs.len() - 1].join(".");
+    (!version.is_empty()).then_some(version)
+}
+
 /// After a bundle auto-installs, copy the resolved upstream link + version into
 /// the container's sidecar. Returns `false` (no-op) when the archive didn't
 /// produce a bundle container. Only overwrites fields for which a value is
@@ -188,5 +226,35 @@ mod tests {
             "nexus id suffix stripped, got {name}"
         );
         assert!(!name.is_empty());
+    }
+
+    #[test]
+    fn nexus_file_version_extracts_version_from_filename() {
+        assert_eq!(
+            nexus_file_version(std::path::Path::new(
+                "AliceDefectSkin V2.0-979-2-1-1780132414.zip"
+            )),
+            Some("2.1".to_string())
+        );
+    }
+
+    #[test]
+    fn nexus_file_version_handles_browser_copy_and_multi_segment_version() {
+        assert_eq!(
+            nexus_file_version(std::path::Path::new(
+                "RelicsReminder-284-1-1-0-1775500710 (2).zip"
+            )),
+            Some("1.1.0".to_string())
+        );
+    }
+
+    #[test]
+    fn nexus_file_version_none_without_nexus_suffix() {
+        assert_eq!(nexus_file_version(std::path::Path::new("MyMod.zip")), None);
+        // A single trailing number is a file id, not a version.
+        assert_eq!(
+            nexus_file_version(std::path::Path::new("MyMod-1775500710.zip")),
+            None
+        );
     }
 }

@@ -309,18 +309,27 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
 
                                 // Update installed_version in mod_sources so the audit
                                 // knows we just installed this version.
-                                // First try to get the real version from Nexus API (mod
-                                // manifests often have stale version strings). Fall back
-                                // to the manifest version if Nexus isn't available.
+                                // Resolve the version to record. Priority:
+                                //  1. the version in the Nexus download filename
+                                //     ("...-979-2-1-..." -> "2.1") — exactly the file the
+                                //     user installed, no API key/network needed;
+                                //  2. the live Nexus file version (API);
+                                //  3. the archive's manifest version — last resort, and
+                                //     for a multi-mod pack this is just the FIRST member's
+                                //     number (e.g. "0.1.31"), which is why packs used to
+                                //     show a sub-mod's version.
                                 let version_to_store_for_bundle;
                                 {
-                                    let nexus_ver = fetch_nexus_version_blocking(
-                                        &mod_info.name,
-                                        mod_info.folder_name.as_deref(),
-                                        mod_info.mod_id.as_deref(),
-                                        &config_path,
-                                        &state,
-                                    );
+                                    let nexus_ver = crate::mods::bundle::nexus_file_version(path)
+                                        .or_else(|| {
+                                            fetch_nexus_version_blocking(
+                                                &mod_info.name,
+                                                mod_info.folder_name.as_deref(),
+                                                mod_info.mod_id.as_deref(),
+                                                &config_path,
+                                                &state,
+                                            )
+                                        });
                                     let version_to_store = nexus_ver
                                         .unwrap_or_else(|| mod_info.version.clone());
                                     version_to_store_for_bundle = version_to_store.clone();

@@ -29,12 +29,12 @@
   --color-text-dim: oklch(0.55 0.02 285);
 }
 
-/* v5 raw tokens — used by the .gf-* utility classes below */
-:root {
-  /* Render every native control (select popups, scrollbars, date pickers)
-     in dark mode so OS-drawn widgets like <select> option lists aren't a
-     light popup with near-invisible text. */
-  color-scheme: dark;
+/* v5 raw tokens — now scoped per theme so .gf-* classes re-theme.
+   data-theme is always present (set pre-paint by the inline script in
+   index.html), so these are never undefined at runtime. */
+:root[data-theme="dark"] {
+  --app-color-scheme: dark;
+
   --gf:        oklch(0.78 0.13 80);
   --gf-hov:    oklch(0.83 0.13 80);
   --gf-ink:    oklch(0.18 0.04 285);
@@ -61,6 +61,79 @@
   /* Aliases used by batch 4 CSS — gold ramp for progress bars / wizard rail */
   --gold:       var(--gf);
   --gold-2:     oklch(0.83 0.13 80);
+
+  /* Tailwind @theme tokens, re-pointed at the raw tokens so bg-surface /
+     text-text utilities re-theme. Overriding the emitted --color-* here wins
+     over the @theme :root defaults (higher specificity). */
+  --color-background: var(--indigo-bg);
+  --color-surface: var(--indigo-panel);
+  --color-surface-hover: var(--indigo-elev);
+  --color-border: var(--indigo-line);
+  --color-primary: var(--gf);
+  --color-primary-hover: var(--gf-hov);
+  --color-primary-ink: var(--gf-ink);
+  --color-accent: var(--ember);
+  --color-success: var(--ok);
+  --color-warning: var(--warn);
+  --color-danger: var(--danger);
+  --color-text: var(--ink);
+  --color-text-muted: var(--ink-mute);
+  --color-text-dim: var(--ink-dim);
+}
+
+/* Light palette is authored in a later task; SEEDED with the dark values for
+   now so no token is ever undefined while the literal migration is in flight. */
+:root[data-theme="light"] {
+  --app-color-scheme: light;
+
+  --gf:        oklch(0.78 0.13 80);
+  --gf-hov:    oklch(0.83 0.13 80);
+  --gf-ink:    oklch(0.18 0.04 285);
+  --gf-tint:   oklch(0.78 0.13 80 / 0.18);
+  --gf-line:   oklch(0.78 0.13 80 / 0.40);
+
+  --indigo-bg:    oklch(0.16 0.04 280);
+  --indigo-side:  oklch(0.12 0.04 280);
+  --indigo-top:   oklch(0.14 0.04 280);
+  --indigo-panel: oklch(0.20 0.04 280);
+  --indigo-elev:  oklch(0.24 0.05 280);
+  --indigo-deep:  oklch(0.10 0.04 280);
+  --indigo-line:  oklch(0.28 0.05 280);
+
+  --ink:        oklch(0.92 0.02 285);
+  --ink-mute:   oklch(0.72 0.02 285);
+  --ink-dim:    oklch(0.55 0.02 285);
+
+  --ember:      oklch(0.65 0.16 50);
+  --ok:         oklch(0.74 0.11 165);
+  --warn:       oklch(0.78 0.13 75);
+  --danger:     oklch(0.65 0.18 25);
+
+  --gold:       var(--gf);
+  --gold-2:     oklch(0.83 0.13 80);
+
+  --color-background: var(--indigo-bg);
+  --color-surface: var(--indigo-panel);
+  --color-surface-hover: var(--indigo-elev);
+  --color-border: var(--indigo-line);
+  --color-primary: var(--gf);
+  --color-primary-hover: var(--gf-hov);
+  --color-primary-ink: var(--gf-ink);
+  --color-accent: var(--ember);
+  --color-success: var(--ok);
+  --color-warning: var(--warn);
+  --color-danger: var(--danger);
+  --color-text: var(--ink);
+  --color-text-muted: var(--ink-mute);
+  --color-text-dim: var(--ink-dim);
+}
+
+/* Drive native controls (select popups, scrollbars, date pickers) from the
+   active theme so OS-drawn widgets match. accent-color brands checkboxes/
+   radios with the gold instead of the OS default blue. */
+:root {
+  color-scheme: var(--app-color-scheme);
+  accent-color: var(--gf);
 }
 
 body {
@@ -1516,7 +1589,7 @@ body {
   padding: 0 28px 0 10px;
   outline: none;
   /* Render the native <option> popup dark to match the dropdown. */
-  color-scheme: dark;
+  color-scheme: var(--app-color-scheme);
 }
 .gf-sort-control select:focus { border-color: var(--gf-line); }
 .gf-sort-control select option {
@@ -2413,7 +2486,7 @@ body {
 /* Render native control chrome dark so <select> popups show light,
    readable <option> text instead of the OS default (light popup + faint
    text) — same reason .gf-sort-control select sets this. */
-.gf-set-input { color-scheme: dark; }
+.gf-set-input { color-scheme: var(--app-color-scheme); }
 /* Belt-and-suspenders for browsers that honor option styling: dark popup
    rows with readable text (matches .gf-sort-control select option). */
 .gf-set-input option {

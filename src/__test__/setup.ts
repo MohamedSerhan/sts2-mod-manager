@@ -129,7 +129,6 @@ if (typeof window !== 'undefined' && !Element.prototype.scrollIntoView) {
 // lookups need it. Default to "no light preference" (resolves to dark). Tests
 // that exercise auto/light override window.matchMedia themselves.
 if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
-  // @ts-expect-error - minimal MediaQueryList stub for jsdom
   window.matchMedia = (query: string) => ({
     matches: false,
     media: query,

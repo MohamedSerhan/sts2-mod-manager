@@ -715,7 +715,7 @@ function AppInner() {
                 <Icon size={14} className="gf-nav-icon" />
                 <span className="gf-nav-label">{navLabels[id]}</span>
                 {badge !== null && (
-                  <span className="gf-nav-badge" title={badge === 1 ? t('app.packUpdateTooltip_one', { badge }) : t('app.packUpdateTooltip_other', { badge })}>
+                  <span className="gf-nav-badge" title={t('app.packUpdateTooltip', { count: badge, badge })}>
                     {badge}
                   </span>
                 )}

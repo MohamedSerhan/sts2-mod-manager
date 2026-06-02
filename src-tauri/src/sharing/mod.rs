@@ -1,3 +1,6 @@
+use std::io::Write;
+use std::path::Path;
+
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
@@ -180,6 +183,23 @@ struct ShareInfo {
     /// than current" so they get a re-share nudge.
     #[serde(default)]
     share_format_version: u32,
+}
+
+fn save_share_info(path: &Path, info: &ShareInfo) -> Result<()> {
+    let json = serde_json::to_vec_pretty(info)?;
+    let dir = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(dir)?;
+
+    let mut temp = tempfile::Builder::new()
+        .prefix(".share-info-")
+        .tempfile_in(dir)?;
+    temp.write_all(&json)?;
+    temp.as_file().sync_all()?;
+    temp.persist(path).map_err(|e| e.error)?;
+    Ok(())
 }
 
 /// Per-step status emitted to the frontend while a share / re-share is
@@ -674,12 +694,7 @@ pub(super) async fn share_profile_impl(
         share_format_version: SHARE_FORMAT_VERSION,
     };
     let share_info_path = profiles_path.join(format!("{}.share", profile.name));
-    std::fs::write(
-        &share_info_path,
-        serde_json::to_string_pretty(&share_info).map_err(|e| {
-            crate::error::AppError::Other(format!("Failed to serialize share info: {}", e))
-        })?,
-    )?;
+    save_share_info(&share_info_path, &share_info)?;
 
     // Reclaim disk on the `bundles` release: any asset no profile manifest
     // references after this upload is dead weight. Runs after the manifest
@@ -944,12 +959,7 @@ pub async fn reshare_profile(
         file_sha: Some(file_sha),
         share_format_version: SHARE_FORMAT_VERSION,
     };
-    let _ = std::fs::write(
-        &share_info_path,
-        serde_json::to_string_pretty(&updated_info).map_err(|e| {
-            crate::error::AppError::Other(format!("Failed to serialize share info: {}", e))
-        })?,
-    );
+    save_share_info(&share_info_path, &updated_info).map_err(|e| e.to_string())?;
 
     // Reclaim disk on the `bundles` release: any asset no profile
     // manifest still references after this re-share is dead weight.
@@ -1062,12 +1072,7 @@ pub async fn set_modpack_listing(
     .map_err(|e| e.to_string())?;
 
     share_info.file_sha = Some(file_sha);
-    let _ = std::fs::write(
-        &share_info_path,
-        serde_json::to_string_pretty(&share_info).map_err(|e| {
-            crate::error::AppError::Other(format!("Failed to serialize share info: {}", e))
-        })?,
-    );
+    save_share_info(&share_info_path, &share_info).map_err(|e| e.to_string())?;
 
     if let Ok(mut s) = state.lock() {
         s.modpack_browser_cache.clear();
@@ -1080,6 +1085,42 @@ pub async fn set_modpack_listing(
 mod listing_tests {
     use super::*;
     use chrono::Utc;
+
+    #[test]
+    fn save_share_info_writes_and_replaces_sidecar_without_temp_leftovers() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("owned.share");
+        let first = ShareInfo {
+            code: "AAAA-BBBB-CCCC".into(),
+            owner: "alice".into(),
+            file_sha: Some("old".into()),
+            share_format_version: 1,
+        };
+        let second = ShareInfo {
+            code: "AAAA-BBBB-CCCC".into(),
+            owner: "alice".into(),
+            file_sha: Some("new".into()),
+            share_format_version: SHARE_FORMAT_VERSION,
+        };
+
+        save_share_info(&path, &first).unwrap();
+        save_share_info(&path, &second).unwrap();
+
+        let saved: ShareInfo =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved.file_sha.as_deref(), Some("new"));
+        assert_eq!(saved.share_format_version, SHARE_FORMAT_VERSION);
+
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().contains("share-info"))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "atomic sidecar writes should not leave temp files behind"
+        );
+    }
 
     fn make_profile(name: &str, public: Option<bool>) -> Profile {
         Profile {
@@ -1116,75 +1157,6 @@ mod listing_tests {
             fresh.public = Some(p);
         }
         assert_eq!(fresh.public, Some(false));
-    }
-}
-
-#[cfg(test)]
-mod serialize_error_tests {
-    //! L-4: the three `.share`-info write sites in `share_profile`,
-    //! `reshare_profile`, and `set_modpack_listing` used to call
-    //! `serde_json::to_string_pretty(..).unwrap()`, which aborts the thread
-    //! on a serialization error. They now map that error into
-    //! `AppError::Other("Failed to serialize share info: ..")` and propagate
-    //! it via `?`. `ShareInfo` itself can never fail to serialize, so these
-    //! tests exercise the *exact* error-mapping expression the call sites use
-    //! against a value that serde_json genuinely rejects, proving the path
-    //! returns `Err` instead of panicking.
-    use super::*;
-    use std::collections::HashMap;
-
-    /// serde_json rejects maps whose keys don't serialize to a string
-    /// (here a tuple key), giving us a deterministic `to_string_pretty`
-    /// failure without relying on any unstable float/NaN behavior.
-    fn unserializable() -> HashMap<(i32, i32), i32> {
-        let mut m = HashMap::new();
-        m.insert((1, 2), 3);
-        m
-    }
-
-    /// Mirrors the closure now used at all three call sites: a serialization
-    /// error must become `AppError::Other` with the agreed-upon prefix, never
-    /// a panic. `share_profile` propagates this `AppError` directly; the two
-    /// `Result<_, String>` commands rely on `From<AppError> for String`.
-    #[test]
-    fn serialize_failure_maps_to_app_error_other() {
-        let result: crate::error::Result<String> = serde_json::to_string_pretty(&unserializable())
-            .map_err(|e| {
-                crate::error::AppError::Other(format!("Failed to serialize share info: {}", e))
-            });
-
-        let err = result.expect_err("tuple-keyed map must fail to serialize as JSON");
-        match err {
-            crate::error::AppError::Other(msg) => {
-                assert!(
-                    msg.starts_with("Failed to serialize share info: "),
-                    "unexpected error message: {msg}"
-                );
-            }
-            other => panic!("expected AppError::Other, got {other:?}"),
-        }
-    }
-
-    /// The `set_modpack_listing` / `reshare_profile` sites return
-    /// `Result<_, String>`. Confirm the `?`-conversion path yields an `Err`
-    /// (via `From<AppError> for String`) rather than aborting the thread.
-    #[test]
-    fn serialize_failure_propagates_as_string_err() {
-        fn like_a_command() -> std::result::Result<(), String> {
-            let _ = std::fs::write(
-                std::path::Path::new("unused-on-the-error-path"),
-                serde_json::to_string_pretty(&unserializable()).map_err(|e| {
-                    crate::error::AppError::Other(format!("Failed to serialize share info: {}", e))
-                })?,
-            );
-            Ok(())
-        }
-
-        let err = like_a_command().expect_err("serialization failure should short-circuit to Err");
-        assert!(
-            err.starts_with("Failed to serialize share info: "),
-            "unexpected error string: {err}"
-        );
     }
 }
 

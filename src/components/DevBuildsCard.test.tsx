@@ -1,6 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { DevBuildsCard } from './DevBuildsCard';
 import { AllProviders } from '../__test__/providers';
 import { registerInvokeHandler, getInvokeCalls, setMockAppVersion } from '../__test__/setup';
@@ -60,6 +61,7 @@ describe('DevBuildsCard', () => {
   it('Downloads disclosure reveals per-platform links', async () => {
     setMockAppVersion('1.6.1-dev.pr1.gdeadbee');
     registerInvokeHandler('list_dev_builds', () => BUILDS);
+    vi.mocked(openUrl).mockClear();
     const user = userEvent.setup();
     renderCard();
     const rows = await screen.findAllByRole('listitem');
@@ -68,7 +70,12 @@ describe('DevBuildsCard', () => {
     // Links are not visible until the disclosure is opened.
     expect(within(pr61row).queryByText('macOS')).not.toBeInTheDocument();
     await user.click(within(pr61row).getByText(/downloads/i));
-    expect(within(pr61row).getByText('macOS')).toBeInTheDocument();
+    const macButton = within(pr61row).getByText('macOS');
+    expect(macButton).toBeInTheDocument();
+    await user.click(macButton);
+    await vi.waitFor(() => {
+      expect(openUrl).toHaveBeenCalledWith('https://e/pr61.dmg');
+    });
   });
 
   it('shows empty + error(+retry) states', async () => {

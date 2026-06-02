@@ -75,4 +75,19 @@ describe('locale resources', () => {
 
     expect(untranslated).toEqual([]);
   });
+
+  it('uses i18next plural resolution instead of manual suffix branching', () => {
+    const sources = import.meta.glob('../../**/*.{ts,tsx}', {
+      query: '?raw',
+      import: 'default',
+      eager: true,
+    }) as Record<string, string>;
+    const offenders = Object.entries(sources)
+      .filter(([file]) => !file.includes('/__test__/') && !file.includes('.test.'))
+      .filter(([, source]) => /t\(\s*['"][^'"]+_(?:one|other)['"]/.test(source))
+      .map(([file]) => file.replace(/^\.\.\/\.\.\//, ''))
+      .sort();
+
+    expect(offenders).toEqual([]);
+  });
 });

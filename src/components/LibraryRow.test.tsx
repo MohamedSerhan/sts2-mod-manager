@@ -1041,3 +1041,23 @@ describe('<LibraryRow> bundle_members', () => {
     expect(screen.getByText(/2 mods/i)).toBeInTheDocument();
   });
 });
+
+// ── kebab → Auto-detect source (T-kebab-autodetect) ─────────────────────────
+
+describe('<LibraryRow> kebab → Auto-detect source', () => {
+  it('fires onAutoDetectSource when the menu item is clicked on a normal mod', async () => {
+    const onAutoDetectSource = vi.fn();
+    const user = userEvent.setup();
+    renderRow({ mod: baseModInfo(), onAutoDetectSource });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /auto-detect source/i }));
+    expect(onAutoDetectSource).toHaveBeenCalledTimes(1);
+  });
+
+  it('the "Auto-detect source" menu item is present regardless of whether github_url is set', async () => {
+    const user = userEvent.setup();
+    renderRow({ mod: baseModInfo({ github_url: null }) });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    expect(screen.getByRole('menuitem', { name: /auto-detect source/i })).toBeInTheDocument();
+  });
+});

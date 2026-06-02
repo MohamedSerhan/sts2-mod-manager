@@ -156,6 +156,7 @@ export interface LibraryTableProps {
   onEditSources?: (mod: ModInfo) => void;
   onFindGithubFromNexus?: (mod: ModInfo) => void;
   onOpenExternalUrl?: (url: string, mod: ModInfo) => void;
+  onAutoDetectSource?: (mod: ModInfo) => void;
   /** Render-prop for the inline source editor: when a row's key
    *  matches, the parent returns the editor JSX to slot inside the
    *  row. Returns null otherwise. */
@@ -212,6 +213,7 @@ export function LibraryTable({
   onEditSources,
   onFindGithubFromNexus,
   onOpenExternalUrl,
+  onAutoDetectSource,
   renderSourceEditor,
 }: LibraryTableProps) {
   const { t } = useTranslation();
@@ -904,6 +906,7 @@ export function LibraryTable({
               onEditSources={modInfo && onEditSources ? () => onEditSources(modInfo) : undefined}
               onFindGithubFromNexus={modInfo && onFindGithubFromNexus ? () => onFindGithubFromNexus(modInfo) : undefined}
               onOpenExternalUrl={modInfo && onOpenExternalUrl ? (url: string) => onOpenExternalUrl(url, modInfo) : undefined}
+              onAutoDetectSource={modInfo && onAutoDetectSource ? () => onAutoDetectSource(modInfo) : undefined}
               sourceEditorSlot={sourceEditorSlot}
             />
           );

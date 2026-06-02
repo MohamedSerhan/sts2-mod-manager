@@ -665,7 +665,8 @@
     "notCheckedLabel": "未检查 — 搜索被限速",
     "rateLimitedBanner": "GitHub 对搜索进行了限速 — 请等待约 {{minutes}} 分钟后再试。在设置中添加 GitHub 令牌可提高限制。",
     "rateLimitedBanner_auth": "GitHub 对搜索进行了限速（已认证，30 次/分钟）。请等待约 {{minutes}} 分钟后再试。",
-    "rateLimitedBanner_unauth": "GitHub 对搜索进行了限速 — 在设置中添加 GitHub 令牌（30 次/分钟，而非 10 次/分钟）后再试，或等待约 {{minutes}} 分钟。"
+    "rateLimitedBanner_unauth": "GitHub 对搜索进行了限速 — 在设置中添加 GitHub 令牌（30 次/分钟，而非 10 次/分钟）后再试，或等待约 {{minutes}} 分钟。",
+    "scopedTitle": "为「{{name}}」自动检测来源"
   },
   "browseDetail": {
     "github": "GitHub",
@@ -1243,6 +1244,7 @@
     "snoozeUpdate": "跳过此更新",
     "sources": "来源",
     "editSources": "编辑来源…",
+    "autoDetectSourceOne": "自动检测来源",
     "viewOnGitHubKebab": "在 GitHub 上查看",
     "viewOnNexusKebab": "在 Nexus 上查看",
     "findGitHubFromNexus": "从 Nexus 查找 GitHub",
@@ -1281,7 +1283,8 @@
       "rolledBack": "已将「{{name}}」回滚到 v{{version}}",
       "rollbackFailed": "「{{name}}」回滚失败：{{error}}",
       "nexusUpdateOpened": "已在 Nexus 上打开「{{name}}」— 下载更新后将自动安装。",
-      "snoozed": "已跳过 {{name}} 的更新提示，直到下个版本"
+      "snoozed": "已跳过 {{name}} 的更新提示，直到下个版本",
+      "autoDetectBundleUnsupported": "合集不支持自动来源检测 — {{name}} 包含多个模组。"
     },
     "allInstalledTitle": "已安装的所有模组",
     "allInstalledSubtitle": "你已安装到本地的所有模组。当前的模组包决定哪些模组会被加载到游戏中。",

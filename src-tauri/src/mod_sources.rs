@@ -1619,6 +1619,17 @@ struct Candidate {
     score: u32,
 }
 
+// ── Scope filter (pure helper) ──────────────────────────────────────────────
+
+/// Retain only the mod identified by `only` (matched by folder_name first,
+/// then by name). `None` means no filter — all mods are returned unchanged.
+fn scope_installed(mut installed: Vec<crate::mods::ModInfo>, only: Option<&str>) -> Vec<crate::mods::ModInfo> {
+    if let Some(key) = only {
+        installed.retain(|m| m.folder_name.as_deref() == Some(key) || m.name == key);
+    }
+    installed
+}
+
 // ── Main Auto-Detect ────────────────────────────────────────────────────────
 
 /// Auto-detect GitHub sources for mods that don't have one linked.
@@ -1627,6 +1638,7 @@ struct Candidate {
 #[tauri::command]
 pub async fn auto_detect_sources(
     state: tauri::State<'_, AppState>,
+    only_mod: Option<String>,
 ) -> std::result::Result<AutoDetectResult, String> {
     let (config_path, mods_path, disabled_mods_path, token) = {
         let s = state.lock().map_err(|e| e.to_string())?;
@@ -1656,6 +1668,8 @@ pub async fn auto_detect_sources(
             }
         }
     }
+
+    let installed = scope_installed(installed, only_mod.as_deref());
 
     let authenticated = token.is_some();
     let mut matched = Vec::new();
@@ -2938,5 +2952,75 @@ mod shared_profile_source_tests {
     fn shareable_source_is_none_for_unlinked_mod() {
         let db = ModSourcesDb::default();
         assert!(shareable_source_for(&db, Some("Unknown"), "Unknown", None).is_none());
+    }
+
+    // ── scope_installed unit tests ────────────────────────────────────────────
+
+    fn make_mod(name: &str, folder: Option<&str>) -> crate::mods::ModInfo {
+        crate::mods::ModInfo {
+            name: name.to_string(),
+            version: "1.0.0".to_string(),
+            description: String::new(),
+            enabled: true,
+            files: vec![],
+            source: None,
+            hash: None,
+            dependencies: vec![],
+            size_bytes: 0,
+            folder_name: folder.map(String::from),
+            mod_id: None,
+            github_url: None,
+            nexus_url: None,
+            pinned: false,
+            min_game_version: None,
+            author: None,
+            tags: vec![],
+            display_name: None,
+            display_description: None,
+            note: None,
+            custom_url: None,
+            bundle_members: vec![],
+        }
+    }
+
+    #[test]
+    fn scope_installed_none_returns_all() {
+        let installed = vec![
+            make_mod("Alpha", Some("alpha-folder")),
+            make_mod("Beta", Some("beta-folder")),
+        ];
+        let result = scope_installed(installed, None);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn scope_installed_matches_by_folder_name() {
+        let installed = vec![
+            make_mod("Alpha", Some("alpha-folder")),
+            make_mod("Beta", Some("beta-folder")),
+        ];
+        let result = scope_installed(installed, Some("alpha-folder"));
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].name, "Alpha");
+    }
+
+    #[test]
+    fn scope_installed_matches_by_mod_name_when_no_folder() {
+        let installed = vec![
+            make_mod("AlicePack", None),
+            make_mod("BobPack", None),
+        ];
+        let result = scope_installed(installed, Some("AlicePack"));
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].name, "AlicePack");
+    }
+
+    #[test]
+    fn scope_installed_no_match_returns_empty() {
+        let installed = vec![
+            make_mod("Alpha", Some("alpha-folder")),
+        ];
+        let result = scope_installed(installed, Some("nonexistent"));
+        assert!(result.is_empty());
     }
 }

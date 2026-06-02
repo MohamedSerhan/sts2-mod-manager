@@ -34,6 +34,7 @@ import {
   Link as LinkIcon,
   RefreshCw,
   RotateCcw,
+  Search,
   Snowflake,
   Sun,
   ToggleLeft,
@@ -192,6 +193,7 @@ export interface LibraryRowProps {
   onEditSources?: () => void;
   onFindGithubFromNexus?: () => void;
   onOpenExternalUrl?: (url: string) => void;
+  onAutoDetectSource?: () => void;
   /** Optional slot rendered inside the row (currently used by the
    *  Library view to attach the inline SourceEditor below the row). */
   sourceEditorSlot?: ReactNode;
@@ -240,6 +242,7 @@ export function LibraryRow({
   onEditSources = noop,
   onFindGithubFromNexus = noop,
   onOpenExternalUrl = noop,
+  onAutoDetectSource = noop,
   sourceEditorSlot,
 }: LibraryRowProps) {
   const { t } = useTranslation();
@@ -680,6 +683,7 @@ export function LibraryRow({
             onOpenModsFolder={onOpenModsFolder}
             onEditSources={onEditSources}
             onFindGithubFromNexus={onFindGithubFromNexus}
+            onAutoDetectSource={onAutoDetectSource}
             onRepair={onRepair}
             onRollback={onRollback}
             onDelete={onDelete}
@@ -733,6 +737,7 @@ interface LibraryRowKebabProps {
   onOpenModsFolder: () => void;
   onEditSources: () => void;
   onFindGithubFromNexus: () => void;
+  onAutoDetectSource: () => void;
   onRepair: () => void;
   onRollback: () => void;
   onDelete: () => void;
@@ -761,6 +766,7 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
     onOpenModsFolder,
     onEditSources,
     onFindGithubFromNexus,
+    onAutoDetectSource,
     onRepair,
     onRollback,
     onDelete,
@@ -849,6 +855,9 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
         <KebabSection head={t('mods.sources')}>
           <KebabItem icon={<LinkIcon size={12} />} onClick={onEditSources}>
             {t('mods.editSources')}
+          </KebabItem>
+          <KebabItem icon={<Search size={12} />} onClick={onAutoDetectSource}>
+            {t('mods.autoDetectSourceOne')}
           </KebabItem>
           {mod.github_url && (
             <KebabItem

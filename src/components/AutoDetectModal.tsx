@@ -13,9 +13,10 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onApplied: () => void;
+  focusMod?: string | null;
 }
 
-export function AutoDetectModal({ open, onClose, onApplied }: Props) {
+export function AutoDetectModal({ open, onClose, onApplied, focusMod }: Props) {
   const { t } = useTranslation();
   const toast = useToast();
   const [scanning, setScanning] = useState(false);
@@ -28,11 +29,11 @@ export function AutoDetectModal({ open, onClose, onApplied }: Props) {
     setScanning(true);
     setResult(null);
     setSkipped(new Set());
-    autoDetectSources()
+    autoDetectSources(focusMod ?? undefined)
       .then(setResult)
       .catch((e) => toast.error(t('autoDetect.scanFailed', { error: e instanceof Error ? e.message : String(e) })))
       .finally(() => setScanning(false));
-  }, [open]);
+  }, [open, focusMod]);
 
   if (!open) return null;
 
@@ -95,7 +96,9 @@ export function AutoDetectModal({ open, onClose, onApplied }: Props) {
       <div className="gf-modal" style={{ width: 640 }} onClick={(e) => e.stopPropagation()}>
         <div className="gf-modal-head">
           <div>
-            <div className="gf-modal-title">{t('autoDetect.title')}</div>
+            <div className="gf-modal-title">
+              {focusMod ? t('autoDetect.scopedTitle', { name: focusMod }) : t('autoDetect.title')}
+            </div>
             <div className="gf-modal-sub">
               {t('autoDetect.subtitle')}
             </div>

@@ -665,7 +665,8 @@
     "notCheckedLabel": "not checked — search was rate-limited",
     "rateLimitedBanner": "GitHub rate-limited the search — wait about {{minutes}} minute(s) and run again. Add a GitHub token in Settings to get a higher limit.",
     "rateLimitedBanner_auth": "GitHub rate-limited the search (authenticated, 30 req/min). Wait about {{minutes}} minute(s) and run again.",
-    "rateLimitedBanner_unauth": "GitHub rate-limited the search — add a GitHub token in Settings (30 req/min vs 10/min) and run again, or wait about {{minutes}} minute(s)."
+    "rateLimitedBanner_unauth": "GitHub rate-limited the search — add a GitHub token in Settings (30 req/min vs 10/min) and run again, or wait about {{minutes}} minute(s).",
+    "scopedTitle": "Auto-detect source for {{name}}"
   },
   "browseDetail": {
     "github": "GitHub",
@@ -1243,6 +1244,7 @@
     "snoozeUpdate": "Skip this update",
     "sources": "Sources",
     "editSources": "Edit sources…",
+    "autoDetectSourceOne": "Auto-detect source",
     "viewOnGitHubKebab": "View on GitHub",
     "viewOnNexusKebab": "View on Nexus",
     "findGitHubFromNexus": "Find GitHub from Nexus",
@@ -1281,7 +1283,8 @@
       "quickAddFailed": "Quick add failed: {{error}}",
       "rolledBack": "Rolled back '{{name}}' to v{{version}}",
       "rollbackFailed": "Rollback failed for '{{name}}': {{error}}",
-      "nexusUpdateOpened": "Opened {{name}} on Nexus — download the update and it'll install automatically."
+      "nexusUpdateOpened": "Opened {{name}} on Nexus — download the update and it'll install automatically.",
+      "autoDetectBundleUnsupported": "Auto-linking isn't supported for bundles — {{name}} is a pack of several mods."
     },
     "allInstalledTitle": "All installed mods",
     "allInstalledSubtitle": "Every mod installed on your computer. Your active modpack decides which ones load in the game.",

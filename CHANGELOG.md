@@ -82,6 +82,7 @@ A UX simplification release. The app feels like a launcher first: pick a modpack
 - Pressing Enter or Space on a button inside a mod row or modpack card no longer also opens that row or card.
 - The Help panel now keeps keyboard focus inside it while open and closes on Escape, like the app's other dialogs.
 - The bug report's active-modpack name and the development-build label now follow your chosen language instead of always showing English.
+- Skin, asset, and voice mods that ship as a resource-pack file with no code now appear in the Mod Library and install correctly from Nexus.
 - Mods installed from an imported or subscribed modpack now show their GitHub or Nexus source links instead of appearing as unlinked — including mods that were already installed, which the previous fix skipped. Existing links, notes, and saved settings on those mods are left untouched.
 - Sharing a modpack now carries each mod's GitHub or Nexus link to the people who install it, so a shared pack arrives linked instead of unlinked even when the mod's own files don't name a source.
 - You can edit a modpack you published again. Sharing a pack quietly subscribed you to your own copy, which then locked it as if it belonged to someone else; modpacks you published now stay editable — including adding mods to them by pasting a URL or importing a file — while ones you only follow remain protected.

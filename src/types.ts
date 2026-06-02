@@ -13,6 +13,10 @@ export interface ModInfo {
   folder_name: string | null;
   mod_id: string | null;
   pinned: boolean;
+  /** Display names of the individual mods bundled inside this container.
+   *  Non-empty only when this ModInfo represents the single library entry
+   *  for a multi-mod (bundle) download. Empty / absent for normal mods. */
+  bundle_members?: string[];
   /** Minimum STS2 build the mod's manifest declares (e.g. "0.105.0").
    *  null when the mod doesn't care about game version. */
   min_game_version?: string | null;
@@ -59,6 +63,10 @@ export interface ProfileMod {
   bundle_url: string | null;
   folder_name: string | null;
   mod_id: string | null;
+  /** Member-mod display names when this entry is a bundle container.
+   *  Non-empty only when the installed mod had bundle_members set.
+   *  Absent / empty for normal mods and legacy manifests. */
+  bundle_members?: string[];
 }
 
 export interface ProfileModOrderKey {
@@ -230,6 +238,18 @@ export interface AutoDetectResult {
    *  Surfaced so the modal can show "X already linked — nothing to detect"
    *  instead of three confusing zero badges. */
   skipped_already_linked?: number;
+  /** true when GitHub's search quota was exhausted mid-run.
+   *  When true, `not_checked` contains mods that were NOT searched —
+   *  they must NOT be shown as "no candidates". */
+  rate_limited?: boolean;
+  /** Unix timestamp (seconds) when the GitHub search quota resets.
+   *  Only meaningful when rate_limited is true. */
+  rate_limit_reset_at?: number | null;
+  /** Mods whose search was abandoned due to rate-limiting.
+   *  Distinct from `unmatched` — these weren't searched, not "no match". */
+  not_checked?: string[];
+  /** Whether an authenticated GitHub token was used for this run. */
+  authenticated?: boolean;
 }
 
 export interface AutoDetectMatch {

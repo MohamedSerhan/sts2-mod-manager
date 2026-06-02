@@ -526,6 +526,7 @@ mod profile_membership_tests {
             enabled,
             bundle_url: Some(format!("https://example.test/{folder}.zip")),
             bundle_sha256: Some(format!("sha-{folder}")),
+            bundle_members: vec![],
         }
     }
 
@@ -555,6 +556,7 @@ mod profile_membership_tests {
             enabled: true,
             bundle_url: None,
             bundle_sha256: None,
+            bundle_members: vec![],
         });
         save_profile(&alpha, &profiles_path).unwrap();
         save_profile(&empty_profile("Beta"), &profiles_path).unwrap();
@@ -669,6 +671,7 @@ mod profile_membership_tests {
             enabled: true,
             bundle_url: None,
             bundle_sha256: None,
+            bundle_members: vec![],
         });
         save_profile(&profile, &profiles_path).unwrap();
 
@@ -719,6 +722,7 @@ mod profile_membership_tests {
             enabled: true,
             bundle_url: None,
             bundle_sha256: None,
+            bundle_members: vec![],
         });
         save_profile(&profile, &profiles_path).unwrap();
 
@@ -785,6 +789,7 @@ mod profile_membership_tests {
                 enabled: true,
                 bundle_url: None,
                 bundle_sha256: None,
+                bundle_members: vec![],
             });
         }
         save_profile(&profile, &profiles_path).unwrap();
@@ -972,6 +977,7 @@ mod profile_membership_tests {
             tags: vec![],
             display_name: None,
             display_description: None,
+            bundle_members: vec![],
         }];
 
         write_profile_load_order_to_settings_file(&profile, &settings_path, &pinned).unwrap();
@@ -1040,6 +1046,142 @@ mod profile_membership_tests {
                     .to_string_lossy()
                     .starts_with("settings.save.sts2mm-bak")),
             "the backup should be retained for manual inspection"
+        );
+    }
+
+    /// Regression guard: `enrich_mods_with_sources` runs before the grid is
+    /// assembled, so a `display_name` saved in `mod_sources.json` (keyed by
+    /// folder name) must appear on the resulting `ProfileMembershipMod` row.
+    ///
+    /// Steps:
+    ///   1. Write a minimal mod manifest into `mods/AutoPath/`.
+    ///   2. Write a `mod_sources.json` entry for "AutoPath" with
+    ///      `display_name = "Autooo"` and `tags = ["teez"]`.
+    ///   3. Call `profile_membership_matrix`.
+    ///   4. Assert the row for AutoPath carries `display_name == Some("Autooo")`.
+    #[test]
+    fn membership_matrix_applies_display_name_override_from_sources() {
+        let game_tmp = tempfile::tempdir().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let mods_path = game_tmp.path().join("mods");
+        let disabled_path = game_tmp.path().join("mods_disabled");
+        let profiles_path = config_tmp.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        // 1. Minimal mod on disk (folder name == "AutoPath", manifest name == "AutoPath").
+        write_mod(&mods_path, "AutoPath", "AutoPath", "1.0.0");
+
+        // 2. Save a mod_sources entry that overrides display_name.
+        let mut db = crate::mod_sources::ModSourcesDb::default();
+        db.mods.insert(
+            "AutoPath".to_string(),
+            crate::mod_sources::ModSourceEntry {
+                display_name: Some("Autooo".to_string()),
+                tags: vec!["teez".to_string()],
+                ..Default::default()
+            },
+        );
+        crate::mod_sources::save_sources(&db, config_tmp.path()).unwrap();
+
+        // 3. Empty profile so the grid still has a profiles column.
+        save_profile(&empty_profile("TestPack"), &profiles_path).unwrap();
+
+        // 4. Build the grid.
+        let grid = profile_membership_matrix(
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config_tmp.path(),
+        )
+        .unwrap();
+
+        // 5. Assert the row for AutoPath carries the enriched display_name.
+        let row = grid
+            .mods
+            .iter()
+            .find(|m| m.folder_name.as_deref() == Some("AutoPath"))
+            .expect("AutoPath must appear as a row in the membership grid");
+        assert_eq!(
+            row.display_name.as_deref(),
+            Some("Autooo"),
+            "enrich_mods_with_sources must carry the saved display_name override into the grid row"
+        );
+    }
+
+    /// A sidecar bundle container appears as a SINGLE row in the membership grid
+    /// with folder_name == container name. The individual member mods are NOT
+    /// separate rows. A standalone mod alongside still appears as its own row.
+    ///
+    /// Fixture: a sidecar bundle container `Pack/` holding two member mods
+    /// (`ModA`, `ModB`) plus one top-level standalone mod (`StandAlone`).
+    #[test]
+    fn membership_matrix_lists_bundle_as_one_row() {
+        let game_tmp = tempfile::tempdir().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let mods_path = game_tmp.path().join("mods");
+        let disabled_path = game_tmp.path().join("mods_disabled");
+        let profiles_path = config_tmp.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        // Create bundle container Pack/ with two member mods.
+        let pack_dir = mods_path.join("Pack");
+        let mod_a_dir = pack_dir.join("ModA");
+        let mod_b_dir = pack_dir.join("ModB");
+        fs::create_dir_all(&mod_a_dir).unwrap();
+        fs::create_dir_all(&mod_b_dir).unwrap();
+        fs::write(mod_a_dir.join("ModA.dll"), b"dll").unwrap();
+        fs::write(mod_b_dir.join("ModB.dll"), b"dll").unwrap();
+        crate::mods::bundle::write_sidecar(
+            &pack_dir,
+            &crate::mods::bundle::BundleSidecar {
+                display_name: "Pretty Pack".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        // Create a standalone top-level mod.
+        write_mod(&mods_path, "StandAlone", "StandAlone", "1.0.0");
+
+        save_profile(&empty_profile("TestPack"), &profiles_path).unwrap();
+
+        let grid = profile_membership_matrix(
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config_tmp.path(),
+        )
+        .unwrap();
+
+        // The bundle container must appear as ONE row with folder_name == "Pack".
+        let pack_row = grid
+            .mods
+            .iter()
+            .find(|m| m.folder_name.as_deref() == Some("Pack"))
+            .expect("Bundle container Pack must appear as a single row in the grid");
+        assert_eq!(
+            pack_row.name, "Pretty Pack",
+            "bundle row name must be the sidecar display_name"
+        );
+
+        // ModA and ModB must NOT be separate rows.
+        assert!(
+            grid.mods.iter().all(|m| m.folder_name.as_deref() != Some("ModA")),
+            "ModA must not appear as a separate grid row — it is a bundle member"
+        );
+        assert!(
+            grid.mods.iter().all(|m| m.folder_name.as_deref() != Some("ModB")),
+            "ModB must not appear as a separate grid row — it is a bundle member"
+        );
+
+        // Standalone mod must still appear as its own row.
+        assert!(
+            grid.mods.iter().any(|m| m.folder_name.as_deref() == Some("StandAlone")),
+            "StandAlone must still appear as its own row"
         );
     }
 }

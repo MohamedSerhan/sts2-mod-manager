@@ -1,19 +1,48 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { act, render, renderHook, waitFor } from '@testing-library/react';
 import { open } from '@tauri-apps/plugin-dialog';
+import { openUrl } from '@tauri-apps/plugin-opener';
 
 import { useModLibrary } from './useModLibrary';
 import { AllProviders } from '../__test__/providers';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
+import type { ModInfo } from '../types';
 
 /**
  * Direct unit tests for the useModLibrary hook (otherwise only covered
- * transitively via Mods/ModpackDetail). Focus: the import / quick-add guards
- * and the followed-pack "stop before installing" rule, which are pure decision
- * logic that's easy to regress.
+ * transitively via Mods/ModpackDetail). Focus: the import / quick-add guards,
+ * the followed-pack "stop before installing" rule, and the Nexus-only update
+ * path — all pure decision logic that's easy to regress.
  */
 const importCalls = () => getInvokeCalls().filter((c) => c.cmd === 'install_mod_from_file');
 const quickAddCalls = () => getInvokeCalls().filter((c) => c.cmd === 'quick_add_mod');
+const updateModCalls = () => getInvokeCalls().filter((c) => c.cmd === 'update_mod');
+
+/** Minimal ModInfo shape used by update tests. */
+function makeMod(overrides: Partial<{
+  name: string;
+  folder_name: string | null;
+  github_url: string | null;
+  nexus_url: string | null;
+}> = {}) {
+  return {
+    name: 'TestMod',
+    version: '1.0.0',
+    description: '',
+    enabled: true,
+    files: [],
+    source: null,
+    hash: null,
+    dependencies: [],
+    size_bytes: 0,
+    folder_name: 'TestMod',
+    mod_id: null,
+    pinned: false,
+    github_url: null,
+    nexus_url: null,
+    ...overrides,
+  };
+}
 
 function followPack(name: string) {
   registerInvokeHandler('get_subscriptions', () => [
@@ -24,6 +53,8 @@ function followPack(name: string) {
 beforeEach(() => {
   vi.mocked(open).mockReset();
   vi.mocked(open).mockResolvedValue(null);
+  vi.mocked(openUrl).mockReset();
+  vi.mocked(openUrl).mockResolvedValue(undefined);
 });
 
 describe('useModLibrary', () => {
@@ -120,5 +151,129 @@ describe('useModLibrary', () => {
     expect(result.current.showQuickAdd).toBe(false);
     act(() => result.current.setShowQuickAdd(true));
     expect(result.current.showQuickAdd).toBe(true);
+  });
+
+  it('handleInlineUpdate on a Nexus-only mod opens Nexus page and does NOT call update_mod', async () => {
+    const nexusMod = makeMod({
+      name: 'AliceDefectSkin',
+      folder_name: 'AliceDefectSkin V2.0',
+      nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/42',
+      github_url: null,
+    });
+    const { result } = renderHook(() => useModLibrary(), { wrapper: AllProviders });
+
+    await act(async () => {
+      await result.current.tableActionProps.onUpdate(nexusMod);
+    });
+
+    // Must have opened the Nexus URL in the browser.
+    await waitFor(() => {
+      expect(openUrl).toHaveBeenCalledWith('https://www.nexusmods.com/slaythespire2/mods/42');
+    });
+    // Must NOT have triggered a GitHub-based update.
+    expect(updateModCalls()).toHaveLength(0);
+  });
+
+  it('handleInlineUpdate on a GitHub-linked mod calls update_mod and not openUrl', async () => {
+    const githubMod = makeMod({
+      name: 'RelicsReminder',
+      folder_name: 'RelicsReminder',
+      github_url: 'https://github.com/some/relics-reminder',
+      nexus_url: null,
+    });
+    registerInvokeHandler('update_mod', () => ({
+      name: 'RelicsReminder',
+      version: '2.0.0',
+      description: '',
+      enabled: true,
+      files: [],
+      source: null,
+      hash: null,
+      dependencies: [],
+      size_bytes: 0,
+      folder_name: 'RelicsReminder',
+      mod_id: null,
+      pinned: false,
+      github_url: 'https://github.com/some/relics-reminder',
+      nexus_url: null,
+    }));
+    const { result } = renderHook(() => useModLibrary(), { wrapper: AllProviders });
+
+    await act(async () => {
+      await result.current.tableActionProps.onUpdate(githubMod);
+    });
+
+    await waitFor(() => expect(updateModCalls()).toHaveLength(1));
+    expect(updateModCalls()[0].args?.name).toBe('RelicsReminder');
+    // Must NOT have opened any URL in the browser for the GitHub path.
+    expect(openUrl).not.toHaveBeenCalled();
+  });
+});
+
+/** Minimal ModInfo for autoDetectSource tests. */
+function makeModInfo(overrides: Partial<ModInfo> = {}): ModInfo {
+  return {
+    name: 'TestMod',
+    version: '1.0.0',
+    description: '',
+    enabled: true,
+    files: [],
+    source: null,
+    hash: null,
+    dependencies: [],
+    size_bytes: 0,
+    folder_name: 'TestMod',
+    mod_id: null,
+    pinned: false,
+    github_url: null,
+    nexus_url: null,
+    tags: [],
+    display_name: null,
+    display_description: null,
+    ...overrides,
+  };
+}
+
+describe('useModLibrary — handleAutoDetectSource', () => {
+  const autoDetectCalls = () => getInvokeCalls().filter((c) => c.cmd === 'auto_detect_sources');
+
+  it('scoped auto-detect: invokes auto_detect_sources with onlyMod = folder_name for a normal mod', async () => {
+    registerInvokeHandler('auto_detect_sources', () => ({
+      matched: [],
+      unmatched: [],
+      not_checked: [],
+      skipped_already_linked: 0,
+    }));
+    const mod = makeModInfo({ name: 'CoolMod', folder_name: 'cool-mod-folder' });
+    const { result } = renderHook(() => useModLibrary(), { wrapper: AllProviders });
+
+    await act(async () => {
+      result.current.tableActionProps.onAutoDetectSource(mod);
+    });
+
+    // The modal opens. Render it to trigger its useEffect (which fires the invoke).
+    render(
+      <AllProviders>
+        {result.current.renderAutoDetectModal()}
+      </AllProviders>,
+    );
+    await waitFor(() => expect(autoDetectCalls()).toHaveLength(1));
+    expect(autoDetectCalls()[0].args).toMatchObject({ onlyMod: 'cool-mod-folder' });
+  });
+
+  it('bundle auto-detect: shows the unsupported toast and does NOT invoke auto_detect_sources', async () => {
+    const bundleMod = makeModInfo({
+      name: 'AlicePack',
+      folder_name: 'alice-pack',
+      bundle_members: ['AliceCore', 'AliceArt'],
+    });
+    const { result } = renderHook(() => useModLibrary(), { wrapper: AllProviders });
+
+    await act(async () => {
+      result.current.tableActionProps.onAutoDetectSource(bundleMod);
+    });
+
+    // Must never have triggered the scan.
+    expect(autoDetectCalls()).toHaveLength(0);
   });
 });

@@ -79,6 +79,13 @@ pub struct ProfileMod {
     /// manager versions before v1.4.0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bundle_sha256: Option<String>,
+    /// Member-mod display names when this entry is a bundle container.
+    /// Non-empty only when the installed `ModInfo` had non-empty
+    /// `bundle_members`. Serialized into the shared profile manifest so
+    /// friends browsing the pack see a "N mods" badge on the bundle row.
+    /// Legacy manifests without this field deserialize as an empty Vec.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bundle_members: Vec<String>,
 }
 
 fn default_enabled() -> bool {

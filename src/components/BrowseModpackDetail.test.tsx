@@ -425,4 +425,49 @@ describe('<BrowseModpackDetail>', () => {
     expect(title).toBeTruthy();
     expect(title!.textContent).toBe('Cool Pack');
   });
+
+  it('renders a "N mods" bundle badge for a ProfileMod with bundle_members', async () => {
+    // A shared pack that contains a bundle entry (e.g. a Nexus multi-mod download).
+    // The bundle ProfileMod carries bundle_members so the friend browsing the pack
+    // can see it's a bundle before installing.
+    const profileWithBundle: Profile = {
+      ...profile,
+      mods: [
+        {
+          name: 'FantasyPack',
+          version: '3.0.0',
+          source: null,
+          hash: null,
+          files: [],
+          enabled: true,
+          bundle_url: null,
+          folder_name: 'FantasyPack',
+          mod_id: null,
+          bundle_members: ['FantasyCore', 'FantasyArt'],
+        },
+        {
+          name: 'ModAlpha',
+          version: '1.2.3',
+          source: null,
+          hash: null,
+          files: [],
+          enabled: true,
+          bundle_url: null,
+          folder_name: null,
+          mod_id: null,
+        },
+      ],
+    };
+    fetchMock.mockResolvedValueOnce(profileWithBundle);
+    renderDetail();
+    await screen.findByText('FantasyPack');
+    // The bundle row must show a "2 mods" member-count badge.
+    expect(screen.getByText(/2 mods/i)).toBeInTheDocument();
+    // The normal mod row must NOT show any such badge.
+    const rows = document.querySelectorAll('.gf-mod-row');
+    // ModAlpha's row must not contain a mods badge.
+    const alphaRow = [...rows].find((r) => r.textContent?.includes('ModAlpha'));
+    expect(alphaRow).toBeTruthy();
+    expect(alphaRow!.querySelector('.gf-pill-github')).toBeNull();
+  });
 });

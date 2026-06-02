@@ -1,0 +1,1 @@
+Clicking Update on a Nexus-only mod now opens the mod's Nexus page so you can download the new version — the app auto-installs it when the zip lands in your Downloads folder, instead of showing an error.

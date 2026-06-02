@@ -867,3 +867,197 @@ describe('<LibraryRow> row click + source badges', () => {
     expect(screen.getByText(/^Link$/)).toBeInTheDocument();
   });
 });
+
+// ── Nexus-only / bundle update pill (T13) ────────────────────────────────
+//
+// A bundle (or Nexus-only mod) has no github_url. The update pill must
+// still appear when audit.nexus_update_available is true.
+
+describe('<LibraryRow> Nexus-only update pill', () => {
+  it('shows the update pill for a Nexus-only mod when nexus_update_available is true', () => {
+    renderRow({
+      // No github_url — this is a Nexus-only / bundle mod.
+      mod: baseModInfo({ github_url: null, nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/99' }),
+      audit: baseAudit({
+        github_repo: null,
+        latest_release_tag: null,
+        latest_release_with_assets_tag: null,
+        latest_compatible_tag: null,
+        needs_update: true,
+        nexus_update_available: true,
+        nexus_version: '2.1.0',
+        update_source: 'nexus',
+      }),
+    });
+    // The pill must be visible.
+    expect(screen.getByRole('button', { name: /Update available/i })).toBeInTheDocument();
+  });
+
+  it('shows the Nexus version in the pill label for a Nexus-only mod', () => {
+    renderRow({
+      mod: baseModInfo({ github_url: null, nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/99' }),
+      audit: baseAudit({
+        github_repo: null,
+        latest_release_tag: null,
+        latest_release_with_assets_tag: null,
+        latest_compatible_tag: null,
+        needs_update: true,
+        nexus_update_available: true,
+        nexus_version: '2.1.0',
+        update_source: 'nexus',
+      }),
+    });
+    // The pill label should show the Nexus version, not undefined.
+    // The i18n key is "Update available → v{{version}}" with v stripped in
+    // the template then re-added, so the rendered text is "v2.1.0".
+    expect(screen.getByText(/Update available → v2\.1\.0/)).toBeInTheDocument();
+  });
+
+  it('clicking the Nexus update pill fires onUpdate', async () => {
+    const onUpdate = vi.fn();
+    const user = userEvent.setup();
+    renderRow({
+      mod: baseModInfo({ github_url: null, nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/99' }),
+      audit: baseAudit({
+        github_repo: null,
+        latest_release_tag: null,
+        latest_release_with_assets_tag: null,
+        latest_compatible_tag: null,
+        needs_update: true,
+        nexus_update_available: true,
+        nexus_version: '2.1.0',
+        update_source: 'nexus',
+      }),
+      onUpdate,
+    });
+    await user.click(screen.getByRole('button', { name: /Update available/i }));
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('still shows the update pill for a GitHub update (regression guard)', () => {
+    renderRow({
+      mod: baseModInfo({ github_url: 'https://github.com/x/y' }),
+      audit: baseAudit({ needs_update: true, nexus_update_available: false }),
+    });
+    expect(screen.getByRole('button', { name: /Update available/i })).toBeInTheDocument();
+  });
+
+  it('does NOT show the update pill when needs_update is false (even if nexus_update_available is true)', () => {
+    // needs_update is the authoritative gate; nexus_update_available alone
+    // must not show the pill if the backend said no update.
+    renderRow({
+      mod: baseModInfo({ github_url: null }),
+      audit: baseAudit({ needs_update: false, nexus_update_available: true, nexus_version: '9.9.9' }),
+    });
+    expect(screen.queryByRole('button', { name: /Update available/i })).toBeNull();
+  });
+
+  it('does NOT show the update pill when the mod is pinned (nexus update ignored)', () => {
+    renderRow({
+      mod: baseModInfo({ github_url: null, pinned: true }),
+      audit: baseAudit({ needs_update: true, nexus_update_available: true, nexus_version: '2.1.0', pinned: true }),
+    });
+    expect(screen.queryByRole('button', { name: /Update available/i })).toBeNull();
+  });
+});
+
+// ── bundle_members rendering (T11) ───────────────────────────────────────
+//
+// A bundle is now a normal ModInfo with bundle_members set. The row renders
+// the member list + "N mods" badge while keeping all standard controls.
+
+describe('<LibraryRow> bundle_members', () => {
+  it('renders the member-name list when bundle_members is non-empty', () => {
+    renderRow({
+      mod: baseModInfo({
+        bundle_members: ['FantasyCore', 'FantasyArt', 'FantasySound'],
+      }),
+    });
+    const list = document.querySelector('.gf-bundle-members') as HTMLElement;
+    expect(list).not.toBeNull();
+    expect(screen.getByText('FantasyCore')).toBeInTheDocument();
+    expect(screen.getByText('FantasyArt')).toBeInTheDocument();
+    expect(screen.getByText('FantasySound')).toBeInTheDocument();
+  });
+
+  it('shows the "N mods" badge when bundle_members is non-empty', () => {
+    renderRow({
+      mod: baseModInfo({ bundle_members: ['Core', 'Art'] }),
+    });
+    expect(screen.getByText(/2 mods/i)).toBeInTheDocument();
+  });
+
+  it('does NOT render the member list or badge for a normal mod (no bundle_members)', () => {
+    renderRow({ mod: baseModInfo() });
+    expect(document.querySelector('.gf-bundle-members')).toBeNull();
+    expect(screen.queryByText(/\d+ mods?/i)).toBeNull();
+  });
+
+  it('does NOT render the member list when bundle_members is an empty array', () => {
+    renderRow({ mod: baseModInfo({ bundle_members: [] }) });
+    expect(document.querySelector('.gf-bundle-members')).toBeNull();
+  });
+
+  it('standard controls are still present for a bundle row (toggle + delete)', () => {
+    // Toggle and delete must render for bundles, since a bundle is just one ModInfo.
+    const onDelete = vi.fn();
+    renderRow({
+      mod: baseModInfo({
+        bundle_members: ['Core', 'Art'],
+      }),
+      onDelete,
+    });
+    // Active/stored toggle is present.
+    expect(
+      screen.getByRole('switch', { name: /toggle whether BaseLib is active in game/i }),
+    ).toBeInTheDocument();
+    // Delete button is present.
+    expect(screen.getByRole('button', { name: /^Remove BaseLib$/i })).toBeInTheDocument();
+  });
+
+  it('shows the display_name override on a bundle row (Edit-sources rename)', () => {
+    // Locking the rename behaviour: when the user has set a display_name via
+    // Edit Sources on a bundle row, that name must appear — not the raw
+    // manifest name stored in `row.name` / `mod.name`. This is the regression
+    // target for bundle rename via Edit Sources.
+    renderRow({
+      row: baseMod({
+        name: 'PackContainer',
+        display_name: 'My Custom Pack Name',
+        installed_enabled: true,
+      }),
+      mod: baseModInfo({
+        name: 'PackContainer',
+        display_name: 'My Custom Pack Name',
+        bundle_members: ['CoreMod', 'ArtMod'],
+      }),
+    });
+    // The custom name must render prominently.
+    expect(screen.getByText('My Custom Pack Name')).toBeInTheDocument();
+    // The raw manifest name must also be visible (as subtitle per LibraryRow
+    // logic when display_name is set and differs from name).
+    expect(screen.getByText('PackContainer')).toBeInTheDocument();
+    // The bundle badge must still show.
+    expect(screen.getByText(/2 mods/i)).toBeInTheDocument();
+  });
+});
+
+// ── kebab → Auto-detect source (T-kebab-autodetect) ─────────────────────────
+
+describe('<LibraryRow> kebab → Auto-detect source', () => {
+  it('fires onAutoDetectSource when the menu item is clicked on a normal mod', async () => {
+    const onAutoDetectSource = vi.fn();
+    const user = userEvent.setup();
+    renderRow({ mod: baseModInfo(), onAutoDetectSource });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /auto-detect source/i }));
+    expect(onAutoDetectSource).toHaveBeenCalledTimes(1);
+  });
+
+  it('the "Auto-detect source" menu item is present regardless of whether github_url is set', async () => {
+    const user = userEvent.setup();
+    renderRow({ mod: baseModInfo({ github_url: null }) });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    expect(screen.getByRole('menuitem', { name: /auto-detect source/i })).toBeInTheDocument();
+  });
+});

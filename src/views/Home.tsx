@@ -11,7 +11,6 @@ import {
   Check,
   MessageSquare,
   Link as LinkIcon,
-  Layers,
   Plus,
 } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
@@ -500,13 +499,6 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
       {activeProfile && (
         <div className="gf-home-secondary">
           <div className="gf-home-secondary-actions">
-            <button
-              type="button"
-              className="gf-btn-3"
-              onClick={() => onGoToProfiles?.()}
-            >
-              <Layers size={13} /> {t('home.secondary.switch')}
-            </button>
             <button
               type="button"
               className="gf-btn-3"

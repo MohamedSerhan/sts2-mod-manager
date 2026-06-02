@@ -156,6 +156,7 @@ export interface LibraryTableProps {
   onEditSources?: (mod: ModInfo) => void;
   onFindGithubFromNexus?: (mod: ModInfo) => void;
   onOpenExternalUrl?: (url: string, mod: ModInfo) => void;
+  onAutoDetectSource?: (mod: ModInfo) => void;
   /** Render-prop for the inline source editor: when a row's key
    *  matches, the parent returns the editor JSX to slot inside the
    *  row. Returns null otherwise. */
@@ -212,6 +213,7 @@ export function LibraryTable({
   onEditSources,
   onFindGithubFromNexus,
   onOpenExternalUrl,
+  onAutoDetectSource,
   renderSourceEditor,
 }: LibraryTableProps) {
   const { t } = useTranslation();
@@ -446,7 +448,7 @@ export function LibraryTable({
     return sorted;
   }, [effectiveGrid, filter, sort, inPackRowKeys, filterRow]);
 
-  const visibleRows = filteredRows.slice(0, visibleLimit);
+  const visibleItems = filteredRows.slice(0, visibleLimit);
 
   function patchRowMembership(
     rowKey: string,
@@ -788,7 +790,7 @@ export function LibraryTable({
           )}
         </div>
       ) : (
-        visibleRows.map((row) => {
+        visibleItems.map((row) => {
           const state = focusedState(row);
           const inPack = !!state?.included;
           const inPackIndex = loadOrderDraft.findIndex(
@@ -904,16 +906,17 @@ export function LibraryTable({
               onEditSources={modInfo && onEditSources ? () => onEditSources(modInfo) : undefined}
               onFindGithubFromNexus={modInfo && onFindGithubFromNexus ? () => onFindGithubFromNexus(modInfo) : undefined}
               onOpenExternalUrl={modInfo && onOpenExternalUrl ? (url: string) => onOpenExternalUrl(url, modInfo) : undefined}
+              onAutoDetectSource={modInfo && onAutoDetectSource ? () => onAutoDetectSource(modInfo) : undefined}
               sourceEditorSlot={sourceEditorSlot}
             />
           );
         })
       )}
-      {filteredRows.length > visibleRows.length && (
+      {filteredRows.length > visibleItems.length && (
         <div className="gf-profile-library-footer">
           <span>
             {t('profiles.library.showing', {
-              shown: visibleRows.length,
+              shown: visibleItems.length,
               total: filteredRows.length,
             })}
           </span>
@@ -925,7 +928,7 @@ export function LibraryTable({
             {t('profiles.library.showMore', {
               count: Math.min(
                 pageSize,
-                filteredRows.length - visibleRows.length,
+                filteredRows.length - visibleItems.length,
               ),
             })}
           </Button>

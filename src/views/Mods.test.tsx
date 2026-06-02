@@ -80,6 +80,28 @@ async function openAddMenu(user: ReturnType<typeof userEvent.setup>): Promise<vo
 }
 
 describe('<ModsView>', () => {
+  it('toolbar "Auto-detect sources" button opens the auto-detect scan', async () => {
+    seedMods([baseMod()]);
+    registerInvokeHandler('auto_detect_sources', () => ({
+      matched: [],
+      unmatched: [],
+      skipped_already_linked: 0,
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    // Toolbar (and its bulk-action row) only render once mods exist.
+    await screen.findByText('BaseLib');
+    const label = i18n.t('mods.autoDetectSources');
+    // The dedicated toolbar button — the Add-mods menu item with the same label
+    // is role="menuitem" and isn't in the DOM until that menu opens, so the
+    // role="button" lookup is unambiguous.
+    await user.click(screen.getByRole('button', { name: new RegExp(label, 'i') }));
+    // Opening the modal kicks off a scan via the auto_detect_sources command.
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'auto_detect_sources')).toBe(true);
+    });
+  });
+
   it('renders the empty state when no mods are installed', async () => {
     seedMods([]);
     render(<Wrap />);

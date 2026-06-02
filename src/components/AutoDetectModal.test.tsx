@@ -295,6 +295,94 @@ describe('<AutoDetectModal>', () => {
     });
   });
 
+  describe('rate-limited banner', () => {
+    it('shows the rate-limited banner when rate_limited is true', async () => {
+      registerInvokeHandler('auto_detect_sources', () => ({
+        matched: [],
+        unmatched: ['SearchedMod'],
+        not_checked: ['ThrottledMod'],
+        skipped_already_linked: 0,
+        rate_limited: true,
+        rate_limit_reset_at: null,
+        authenticated: false,
+      }));
+      render(<Wrap />);
+      // Identify the banner by its unique "GitHub rate-limited" copy — role="alert"
+      // alone is ambiguous because the global toast region is also role="alert".
+      const banner = await screen.findByText(/GitHub rate-limited/i);
+      expect(banner).toBeInTheDocument();
+      // It is exposed as an alert for a11y.
+      expect(banner.closest('[role="alert"]')).not.toBeNull();
+    });
+
+    it('does NOT show the banner when rate_limited is false', async () => {
+      registerInvokeHandler('auto_detect_sources', () => ({
+        matched: [{ mod_name: 'BaseLib', github_repo: 'Alchyr/BaseLib', confidence: 'high' }],
+        unmatched: [],
+        not_checked: [],
+        skipped_already_linked: 0,
+        rate_limited: false,
+        rate_limit_reset_at: null,
+        authenticated: true,
+      }));
+      render(<Wrap />);
+      await waitFor(() => {
+        expect(screen.getByText('BaseLib')).toBeInTheDocument();
+      });
+      expect(screen.queryByText(/GitHub rate-limited/i)).toBeNull();
+    });
+
+    it('does NOT show the banner when rate_limited is absent', async () => {
+      registerInvokeHandler('auto_detect_sources', () => ({
+        matched: [],
+        unmatched: ['UnfoundMod'],
+        skipped_already_linked: 0,
+      }));
+      render(<Wrap />);
+      await waitFor(() => {
+        expect(screen.getByText('UnfoundMod')).toBeInTheDocument();
+      });
+      expect(screen.queryByText(/GitHub rate-limited/i)).toBeNull();
+    });
+
+    it('shows "not checked" rows for mods in not_checked and does NOT label them "no candidates"', async () => {
+      registerInvokeHandler('auto_detect_sources', () => ({
+        matched: [],
+        unmatched: [],
+        not_checked: ['ThrottledMod'],
+        skipped_already_linked: 0,
+        rate_limited: true,
+        rate_limit_reset_at: null,
+        authenticated: false,
+      }));
+      render(<Wrap />);
+      await waitFor(() => {
+        expect(screen.getByText('ThrottledMod')).toBeInTheDocument();
+      });
+      expect(screen.getByText(/search was rate-limited/i)).toBeInTheDocument();
+      // Must NOT say "no candidates" for a throttled mod.
+      expect(screen.queryByText('no candidates')).toBeNull();
+    });
+
+    it('shows the not-checked stat badge when not_checked is non-empty', async () => {
+      registerInvokeHandler('auto_detect_sources', () => ({
+        matched: [{ mod_name: 'BaseLib', github_repo: 'Alchyr/BaseLib', confidence: 'high' }],
+        unmatched: [],
+        not_checked: ['ThrottledMod', 'OtherMod'],
+        skipped_already_linked: 0,
+        rate_limited: true,
+        rate_limit_reset_at: null,
+        authenticated: true,
+      }));
+      render(<Wrap />);
+      await waitFor(() => {
+        expect(screen.getByText('BaseLib')).toBeInTheDocument();
+      });
+      // The "not checked" stat badge (count=2) must appear.
+      expect(screen.getByText('not checked')).toBeInTheDocument();
+    });
+  });
+
   describe('dismiss affordances', () => {
     it('Close (X) button fires onClose', async () => {
       registerInvokeHandler('auto_detect_sources', () => ({

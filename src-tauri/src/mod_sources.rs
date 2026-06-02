@@ -4,7 +4,10 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::download::{fetch_latest_release, search_github_repos_relevance, GitHubRepo};
+use crate::download::{
+    fetch_latest_release, quota_is_low, search_github_repos_relevance,
+    search_github_repos_relevance_outcome, GitHubRepo, RateLimitInfo, SearchOutcome,
+};
 use crate::error::Result;
 use crate::mods::ModInfo;
 use crate::state::AppState;
@@ -141,6 +144,27 @@ pub struct AutoDetectResult {
     /// nothing to do because every mod already has a source".
     #[serde(default)]
     pub skipped_already_linked: u32,
+    /// `true` when at least one search call was cut short by GitHub's
+    /// rate-limiter (HTTP 403/429). When true the `not_checked` list
+    /// contains mods whose search was abandoned — they are NOT "no match",
+    /// they simply weren't searched. The UI shows a prominent banner.
+    #[serde(default)]
+    pub rate_limited: bool,
+    /// Unix timestamp (seconds) when the GitHub search quota is expected
+    /// to reset. Only meaningful when `rate_limited` is true. Used by
+    /// the UI to show "try again in ~N minutes".
+    #[serde(default)]
+    pub rate_limit_reset_at: Option<i64>,
+    /// Mods whose search was abandoned due to rate-limiting (subset of
+    /// what would have been `unmatched`). These must NOT be shown as
+    /// "no candidates" — they simply weren't searched.
+    #[serde(default)]
+    pub not_checked: Vec<String>,
+    /// Whether an authenticated GitHub token was used. Authenticated
+    /// searches get 30 req/min vs 10/min unauthenticated, so this is
+    /// useful context when diagnosing rate-limit hits.
+    #[serde(default)]
+    pub authenticated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1502,6 +1526,9 @@ fn extract_folder_name(m: &ModInfo) -> Option<String> {
 }
 
 /// Extract the author name from a mod's source field if it looks like "github:owner/repo".
+/// Retained for potential future use; currently not called from the auto-detect search loop
+/// because author-prefixed queries produced too many false positives.
+#[allow(dead_code)]
 fn extract_author(m: &ModInfo) -> Option<String> {
     if let Some(ref src) = m.source {
         if let Some(rest) = src.strip_prefix("github:") {
@@ -1592,6 +1619,17 @@ struct Candidate {
     score: u32,
 }
 
+// ── Scope filter (pure helper) ──────────────────────────────────────────────
+
+/// Retain only the mod identified by `only` (matched by folder_name first,
+/// then by name). `None` means no filter — all mods are returned unchanged.
+fn scope_installed(mut installed: Vec<crate::mods::ModInfo>, only: Option<&str>) -> Vec<crate::mods::ModInfo> {
+    if let Some(key) = only {
+        installed.retain(|m| m.folder_name.as_deref() == Some(key) || m.name == key);
+    }
+    installed
+}
+
 // ── Main Auto-Detect ────────────────────────────────────────────────────────
 
 /// Auto-detect GitHub sources for mods that don't have one linked.
@@ -1600,6 +1638,7 @@ struct Candidate {
 #[tauri::command]
 pub async fn auto_detect_sources(
     state: tauri::State<'_, AppState>,
+    only_mod: Option<String>,
 ) -> std::result::Result<AutoDetectResult, String> {
     let (config_path, mods_path, disabled_mods_path, token) = {
         let s = state.lock().map_err(|e| e.to_string())?;
@@ -1630,8 +1669,24 @@ pub async fn auto_detect_sources(
         }
     }
 
+    let installed = scope_installed(installed, only_mod.as_deref());
+
+    let authenticated = token.is_some();
     let mut matched = Vec::new();
     let mut unmatched = Vec::new();
+    let mut not_checked = Vec::new();
+    let mut rate_limited = false;
+    let mut rate_limit_reset_at: Option<i64> = None;
+
+    // Cross-mod query result cache: avoid issuing the same search term twice
+    // in one auto-detect run. Key = query string (lowercase), Value = the
+    // Vec<Candidate> already collected from that query.
+    let mut query_cache: std::collections::HashMap<String, Vec<(GitHubRepo, u32)>> =
+        std::collections::HashMap::new();
+
+    // Rate-limit state shared across all mod iterations.
+    // Updated after each successful search response.
+    let mut last_rl: Option<RateLimitInfo> = None;
 
     // Phase 0: Save any manifest-extracted URLs to the sources DB —
     // ONLY for mods that don't already have a source linked.
@@ -1742,23 +1797,37 @@ pub async fn auto_detect_sources(
             }
         }
 
-        let folder_name = extract_folder_name(m);
-        let author = extract_author(m);
+        // If we are already rate-limited, skip remaining mods entirely
+        // and record them as "not_checked" rather than "unmatched".
+        if rate_limited {
+            not_checked.push(m.name.clone());
+            continue;
+        }
 
-        // Build a list of search queries to try (in order of specificity)
+        let folder_name = extract_folder_name(m);
+
+        // Build a reduced set of high-signal queries (2–3 per mod) to minimise
+        // GitHub Search API consumption (cap: 30 req/min authenticated, 10/min
+        // unauthenticated). Empirically the two highest-signal queries are:
+        //   1. Exact mod name + "sts2" qualifier (matches repos whose name or
+        //      description contains the word "sts2").
+        //   2. Folder name when it differs substantially from the display name.
+        // A third fallback query uses the stripped name (without STS2 affixes)
+        // for mods whose name IS "sts2-<something>" or "<something>-sts2".
+        // Individual-word queries (the old query 6) are dropped: they produce
+        // too many false positives and consume too many API calls per mod.
+        // Author-prefixed queries are also dropped: authors aren't reliably
+        // available in the manifest for most mods.
+        //
+        // Net effect: ≤ 3 queries per mod (down from 6–8) while preserving
+        // match quality for the mods that actually have GitHub repos.
         let mut queries: Vec<String> = Vec::new();
 
-        // 1. Just the mod name (hyphenated) – many STS2 mods don't mention "sts2" in repo name
+        // Query 1 (highest signal): mod name + "sts2" qualifier.
         let name_hyphenated = m.name.replace(' ', "-");
-        queries.push(name_hyphenated.clone());
+        queries.push(format!("{} sts2", name_hyphenated));
 
-        // 2. Mod name + STS2 qualifier (the original approach)
-        queries.push(format!(
-            "{} slay-the-spire-2 OR sts2 OR \"slay the spire 2\"",
-            name_hyphenated
-        ));
-
-        // 3. If the folder name differs from the mod name, search that too
+        // Query 2: folder name when it's meaningfully different from the display name.
         if let Some(ref folder) = folder_name {
             let folder_norm = normalize(folder);
             if folder_norm != normalize(&m.name) {
@@ -1766,39 +1835,19 @@ pub async fn auto_detect_sources(
             }
         }
 
-        // 4. Stripped name (without STS2 prefixes/suffixes)
+        // Query 3 (fallback): stripped name without STS2 affixes, with sts2 qualifier.
         if let Some(stripped) = strip_sts2_affixes(&m.name) {
-            let stripped_q = stripped.replace(' ', "-");
+            let stripped_q = format!("{} sts2", stripped.replace(' ', "-"));
             if !queries.contains(&stripped_q) {
                 queries.push(stripped_q);
             }
         }
 
-        // 5. If we know the author, search "author/mod-name"
-        if let Some(ref auth) = author {
-            queries.push(format!("{} {}", auth, name_hyphenated));
-        }
+        // Deduplicate within this mod (case-insensitive).
+        let mut seen_q = std::collections::HashSet::new();
+        queries.retain(|q| seen_q.insert(q.to_lowercase()));
 
-        // 6. If the mod name has multiple words, try individual significant words + sts2
-        let words: Vec<&str> = m
-            .name
-            .split(|c: char| c == ' ' || c == '-' || c == '_')
-            .filter(|w| w.len() > 2)
-            .collect();
-        if words.len() >= 2 {
-            for w in &words {
-                let wq = format!("{} sts2", w);
-                if !queries.contains(&wq) {
-                    queries.push(wq);
-                }
-            }
-        }
-
-        // De-duplicate queries (case-insensitive)
-        let mut seen = std::collections::HashSet::new();
-        queries.retain(|q| seen.insert(q.to_lowercase()));
-
-        // Search GitHub with each query and collect all unique candidates
+        // Search GitHub with each query and collect all unique candidates.
         let mut candidates: Vec<Candidate> = Vec::new();
         let mut seen_repos = std::collections::HashSet::new();
 
@@ -1810,12 +1859,79 @@ pub async fn auto_detect_sources(
         const MIN_SCORE: u32 = 80;
 
         for query in &queries {
-            // Rate-limit: 100ms delay between API calls
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            let cache_key = query.to_lowercase();
 
-            let repos = search_github_repos_relevance(query, token.as_deref())
-                .await
-                .unwrap_or_default();
+            // Cross-mod deduplication: if we already issued this exact query
+            // in this run, reuse its cached results instead of hitting the API.
+            let repos: Vec<GitHubRepo> = if let Some(cached) = query_cache.get(&cache_key) {
+                log::debug!("Auto-detect: cache hit for query '{}'", query);
+                cached.iter().map(|(r, _)| r.clone()).collect()
+            } else {
+                // Adaptive pacing: if the last response told us quota is
+                // nearly exhausted, wait until the reset window rather than
+                // burning the last few requests and triggering a hard 429.
+                if let Some(ref rl) = last_rl {
+                    if quota_is_low(rl) {
+                        let wait = rl.secs_until_reset();
+                        // Cap at 5 s to avoid blocking the UI for too long;
+                        // if the reset is further away we mark as rate-limited.
+                        if wait > 5 {
+                            log::warn!(
+                                "Auto-detect: quota low (remaining={}) and reset is {}s away — \
+                                 stopping search to avoid hard rate-limit",
+                                rl.remaining,
+                                wait
+                            );
+                            rate_limited = true;
+                            rate_limit_reset_at = Some(rl.reset_at);
+                            not_checked.push(m.name.clone());
+                            break;
+                        } else if wait > 0 {
+                            log::info!(
+                                "Auto-detect: quota low, waiting {}s for reset",
+                                wait
+                            );
+                            tokio::time::sleep(std::time::Duration::from_secs(wait as u64)).await;
+                        }
+                    }
+                }
+
+                match search_github_repos_relevance_outcome(query, token.as_deref()).await {
+                    SearchOutcome::Ok(repos) => {
+                        // Cache results for potential reuse by other mods.
+                        let pairs: Vec<_> = repos.iter().map(|r| (r.clone(), 0u32)).collect();
+                        query_cache.insert(cache_key.clone(), pairs);
+                        repos
+                    }
+                    SearchOutcome::RateLimited(info) => {
+                        rate_limited = true;
+                        // Keep the earliest/latest reset_at (take the latest,
+                        // which is the most conservative).
+                        let reset = info.reset_at;
+                        rate_limit_reset_at = Some(match rate_limit_reset_at {
+                            Some(existing) => existing.max(reset),
+                            None => reset,
+                        });
+                        last_rl = Some(info);
+                        not_checked.push(m.name.clone());
+                        break; // stop issuing queries for this mod
+                    }
+                    SearchOutcome::Err(e) => {
+                        log::warn!(
+                            "Auto-detect search error for query '{}': {}",
+                            query,
+                            e
+                        );
+                        Vec::new()
+                    }
+                }
+            };
+
+            // If we already hit a rate-limit this iteration, exit inner loop.
+            if rate_limited && not_checked.last().map(|n| n == &m.name).unwrap_or(false) {
+                break;
+            }
+
             for repo in repos {
                 if seen_repos.contains(&repo.full_name) {
                     continue;
@@ -1840,6 +1956,12 @@ pub async fn auto_detect_sources(
             }
         }
 
+        // If this mod was added to not_checked (rate-limited mid-search), skip
+        // the candidate-evaluation block below.
+        if rate_limited && not_checked.last().map(|n| n == &m.name).unwrap_or(false) {
+            continue;
+        }
+
         // Sort candidates by score descending
         candidates.sort_by(|a, b| b.score.cmp(&a.score));
 
@@ -1856,9 +1978,6 @@ pub async fn auto_detect_sources(
                 );
                 continue;
             }
-
-            // Rate-limit before release check
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
             let has_release = fetch_latest_release(
                 &candidate.repo.owner.login,
@@ -1913,6 +2032,10 @@ pub async fn auto_detect_sources(
         matched,
         unmatched,
         skipped_already_linked,
+        rate_limited,
+        rate_limit_reset_at,
+        not_checked,
+        authenticated,
     })
 }
 
@@ -1956,6 +2079,7 @@ mod enrich_priority_tests {
             tags: vec![],
             display_name: None,
             display_description: None,
+            bundle_members: vec![],
         }
     }
 
@@ -2828,5 +2952,75 @@ mod shared_profile_source_tests {
     fn shareable_source_is_none_for_unlinked_mod() {
         let db = ModSourcesDb::default();
         assert!(shareable_source_for(&db, Some("Unknown"), "Unknown", None).is_none());
+    }
+
+    // ── scope_installed unit tests ────────────────────────────────────────────
+
+    fn make_mod(name: &str, folder: Option<&str>) -> crate::mods::ModInfo {
+        crate::mods::ModInfo {
+            name: name.to_string(),
+            version: "1.0.0".to_string(),
+            description: String::new(),
+            enabled: true,
+            files: vec![],
+            source: None,
+            hash: None,
+            dependencies: vec![],
+            size_bytes: 0,
+            folder_name: folder.map(String::from),
+            mod_id: None,
+            github_url: None,
+            nexus_url: None,
+            pinned: false,
+            min_game_version: None,
+            author: None,
+            tags: vec![],
+            display_name: None,
+            display_description: None,
+            note: None,
+            custom_url: None,
+            bundle_members: vec![],
+        }
+    }
+
+    #[test]
+    fn scope_installed_none_returns_all() {
+        let installed = vec![
+            make_mod("Alpha", Some("alpha-folder")),
+            make_mod("Beta", Some("beta-folder")),
+        ];
+        let result = scope_installed(installed, None);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn scope_installed_matches_by_folder_name() {
+        let installed = vec![
+            make_mod("Alpha", Some("alpha-folder")),
+            make_mod("Beta", Some("beta-folder")),
+        ];
+        let result = scope_installed(installed, Some("alpha-folder"));
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].name, "Alpha");
+    }
+
+    #[test]
+    fn scope_installed_matches_by_mod_name_when_no_folder() {
+        let installed = vec![
+            make_mod("AlicePack", None),
+            make_mod("BobPack", None),
+        ];
+        let result = scope_installed(installed, Some("AlicePack"));
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].name, "AlicePack");
+    }
+
+    #[test]
+    fn scope_installed_no_match_returns_empty() {
+        let installed = vec![
+            make_mod("Alpha", Some("alpha-folder")),
+        ];
+        let result = scope_installed(installed, Some("nonexistent"));
+        assert!(result.is_empty());
     }
 }

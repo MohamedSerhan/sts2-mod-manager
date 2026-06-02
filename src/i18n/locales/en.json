@@ -660,7 +660,13 @@
     "skippedAlreadyLinked_one": "{{count}} mod skipped — already linked.",
     "skippedAlreadyLinked_other": "{{count}} mods skipped — already linked.",
     "applyingMatches_one": "Apply {{count}} match",
-    "applyingMatches_other": "Apply {{count}} matches"
+    "applyingMatches_other": "Apply {{count}} matches",
+    "notChecked": "not checked",
+    "notCheckedLabel": "not checked — search was rate-limited",
+    "rateLimitedBanner": "GitHub rate-limited the search — wait about {{minutes}} minute(s) and run again. Add a GitHub token in Settings to get a higher limit.",
+    "rateLimitedBanner_auth": "GitHub rate-limited the search (authenticated, 30 req/min). Wait about {{minutes}} minute(s) and run again.",
+    "rateLimitedBanner_unauth": "GitHub rate-limited the search — add a GitHub token in Settings (30 req/min vs 10/min) and run again, or wait about {{minutes}} minute(s).",
+    "scopedTitle": "Auto-detect source for {{name}}"
   },
   "browseDetail": {
     "github": "GitHub",
@@ -971,7 +977,6 @@
     "heroEmptyCta": "Open Modpacks",
     "heroEmptyBrowse": "Browse modpacks",
     "secondary": {
-      "switch": "Switch modpack",
       "create": "Create modpack",
       "reviewUpdates": "Review updates ({{count}})"
     },
@@ -1239,6 +1244,7 @@
     "snoozeUpdate": "Skip this update",
     "sources": "Sources",
     "editSources": "Edit sources…",
+    "autoDetectSourceOne": "Auto-detect source",
     "viewOnGitHubKebab": "View on GitHub",
     "viewOnNexusKebab": "View on Nexus",
     "findGitHubFromNexus": "Find GitHub from Nexus",
@@ -1276,7 +1282,9 @@
       "foundNexusMod": "Found Nexus mod: {{name}}. Open it on Nexus and click \"Slow Download\" / \"Manual\" — the app will catch the zip from your Downloads folder.",
       "quickAddFailed": "Quick add failed: {{error}}",
       "rolledBack": "Rolled back '{{name}}' to v{{version}}",
-      "rollbackFailed": "Rollback failed for '{{name}}': {{error}}"
+      "rollbackFailed": "Rollback failed for '{{name}}': {{error}}",
+      "nexusUpdateOpened": "Opened {{name}} on Nexus — download the update and it'll install automatically.",
+      "autoDetectBundleUnsupported": "Auto-linking isn't supported for bundles — {{name}} is a pack of several mods."
     },
     "allInstalledTitle": "All installed mods",
     "allInstalledSubtitle": "Every mod installed on your computer. Your active modpack decides which ones load in the game.",
@@ -1333,5 +1341,10 @@
     "downloads": "Downloads",
     "noWindowsBuild": "No updater manifest — can't one-click switch.",
     "backToRelease": "To return to the stable app, just launch your release STS2 Mod Manager — it's a separate, untouched install."
+  },
+  "bundle": {
+    "memberCount_one": "{{count}} mod",
+    "memberCount_other": "{{count}} mods",
+    "membersAria": "Mods in {{name}}"
   }
 }

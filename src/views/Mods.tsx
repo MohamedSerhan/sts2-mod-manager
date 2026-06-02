@@ -4,6 +4,7 @@ import {
   Trash2,
   ToggleLeft,
   ToggleRight,
+  Search,
 } from 'lucide-react';
 import { Button } from '../components/Button';
 import { LibraryTable } from '../components/LibraryTable';
@@ -223,6 +224,14 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
               <Button variant="danger" size="sm" onClick={handleDeleteAll} disabled={gameRunning} title={gameRunning ? t('mods.closeSts2First') : t('mods.deleteAll')}>
                 <Trash2 size={14} />
                 {t('mods.deleteAll')}
+              </Button>
+              {/* Yellow-outline shortcut to the same auto-detect flow offered in
+                  the "+ Add mods" menu — placed at the end of the bulk-action row.
+                  Not gated on gameRunning: it only searches GitHub, never touches
+                  the mods folder. */}
+              <Button variant="ghost" size="sm" className="gf-btn-accent" onClick={() => lib.setShowAutoDetect(true)} title={t('mods.autoDetectSources')}>
+                <Search size={14} />
+                {t('mods.autoDetectSources')}
               </Button>
             </div>
           )}

@@ -34,6 +34,7 @@ import {
   Link as LinkIcon,
   RefreshCw,
   RotateCcw,
+  Search,
   Snowflake,
   Sun,
   ToggleLeft,
@@ -192,6 +193,7 @@ export interface LibraryRowProps {
   onEditSources?: () => void;
   onFindGithubFromNexus?: () => void;
   onOpenExternalUrl?: (url: string) => void;
+  onAutoDetectSource?: () => void;
   /** Optional slot rendered inside the row (currently used by the
    *  Library view to attach the inline SourceEditor below the row). */
   sourceEditorSlot?: ReactNode;
@@ -240,6 +242,7 @@ export function LibraryRow({
   onEditSources = noop,
   onFindGithubFromNexus = noop,
   onOpenExternalUrl = noop,
+  onAutoDetectSource = noop,
   sourceEditorSlot,
 }: LibraryRowProps) {
   const { t } = useTranslation();
@@ -267,6 +270,14 @@ export function LibraryRow({
   // an inline chip-row so the user doesn't have to expand anything.
   const compatibleTag =
     audit?.latest_compatible_tag ?? audit?.latest_release_with_assets_tag ?? null;
+  // Version to display in the update pill. GitHub updates use the release
+  // tag (compatibleTag); Nexus-only updates fall back to nexus_version so
+  // the pill shows a real version string rather than undefined.
+  const updateDisplayVersion = compatibleTag ?? audit?.nexus_version ?? null;
+  // Show the update pill for a GitHub update (when compatibleTag is known)
+  // OR for a Nexus-only update (nexus_update_available is true). Bundles
+  // and Nexus-only mods have no github_url, so gating on github_url alone
+  // was silently hiding their "update available" state.
   const showUpdatePill =
     !!audit
     && audit.needs_update
@@ -274,8 +285,7 @@ export function LibraryRow({
     && !audit.snoozed
     && !audit.game_version_too_old
     && !audit.latest_release_blocked_by_game_version
-    && !!compatibleTag
-    && !!mod?.github_url;
+    && (!!compatibleTag || !!audit.nexus_update_available);
   const showBlockedPill =
     !!audit?.latest_release_blocked_by_game_version && !audit.pinned;
   const showFrozenPill = !!mod?.pinned;
@@ -430,6 +440,13 @@ export function LibraryRow({
                   {mod.source ? t('mods.local') : t('mods.unlinked')}
                 </Badge>
               )}
+              {/* Bundle member-count badge — shown when this mod is a
+                  bundle container (bundle_members is non-empty). */}
+              {(mod?.bundle_members?.length ?? 0) > 0 && (
+                <span className="gf-pill gf-pill-github">
+                  {t('bundle.memberCount', { count: mod!.bundle_members!.length })}
+                </span>
+              )}
               {/* Audit pills — one at a time. Update fires onUpdate; the
                   rest are informational. */}
               {audit && isUpToDate(audit) && !showUpdatePill && !showBlockedPill && !showFrozenPill && !showSnoozedPill && (
@@ -448,14 +465,14 @@ export function LibraryRow({
                       ? t('mods.closeSts2FirstDot')
                       : t('mods.updateClickTitle', {
                           current: mod!.version,
-                          target: compatibleTag?.replace(/^v/, ''),
+                          target: updateDisplayVersion?.replace(/^v/, ''),
                         })
                   }
                 >
                   {isUpdating ? (
                     <><RefreshCw size={9} className="animate-spin" />{t('mods.updating')}</>
                   ) : (
-                    <><Download size={9} />{t('mods.updateAvailable', { version: compatibleTag?.replace(/^v/, '') })}</>
+                    <><Download size={9} />{t('mods.updateAvailable', { version: updateDisplayVersion?.replace(/^v/, '') })}</>
                   )}
                 </button>
               )}
@@ -540,6 +557,20 @@ export function LibraryRow({
               </span>
             )}
           </div>
+          {/* Bundle member list — shown in comfortable density when this
+              mod is a bundle container (bundle_members is non-empty). */}
+          {mod && (mod.bundle_members?.length ?? 0) > 0 && (
+            <ul
+              className="gf-bundle-members"
+              aria-label={t('bundle.membersAria', { name: displayName })}
+            >
+              {mod.bundle_members!.map((memberName) => (
+                <li key={memberName} className="gf-bundle-member-name">
+                  {memberName}
+                </li>
+              ))}
+            </ul>
+          )}
           {/* Description (manager override or manifest) + free-form
               note. Both render outside the drawer because they're part
               of the row's identity. */}
@@ -652,6 +683,7 @@ export function LibraryRow({
             onOpenModsFolder={onOpenModsFolder}
             onEditSources={onEditSources}
             onFindGithubFromNexus={onFindGithubFromNexus}
+            onAutoDetectSource={onAutoDetectSource}
             onRepair={onRepair}
             onRollback={onRollback}
             onDelete={onDelete}
@@ -705,6 +737,7 @@ interface LibraryRowKebabProps {
   onOpenModsFolder: () => void;
   onEditSources: () => void;
   onFindGithubFromNexus: () => void;
+  onAutoDetectSource: () => void;
   onRepair: () => void;
   onRollback: () => void;
   onDelete: () => void;
@@ -733,6 +766,7 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
     onOpenModsFolder,
     onEditSources,
     onFindGithubFromNexus,
+    onAutoDetectSource,
     onRepair,
     onRollback,
     onDelete,
@@ -821,6 +855,9 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
         <KebabSection head={t('mods.sources')}>
           <KebabItem icon={<LinkIcon size={12} />} onClick={onEditSources}>
             {t('mods.editSources')}
+          </KebabItem>
+          <KebabItem icon={<Search size={12} />} onClick={onAutoDetectSource}>
+            {t('mods.autoDetectSourceOne')}
           </KebabItem>
           {mod.github_url && (
             <KebabItem

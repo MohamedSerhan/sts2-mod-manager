@@ -121,6 +121,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
 
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [showAutoDetect, setShowAutoDetect] = useState(false);
+  const [autoDetectFocusMod, setAutoDetectFocusMod] = useState<string | null>(null);
   const [quickAddUrl, setQuickAddUrl] = useState('');
   const [quickAdding, setQuickAdding] = useState(false);
   // Per-row source editor opens inside the row's slot. The view owns which
@@ -215,6 +216,17 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
   }
 
   async function handleInlineUpdate(mod: ModInfo) {
+    // Nexus-only update: open the mod's Nexus page so the user can download
+    // the new version. The downloads-watcher will match the downloaded zip to
+    // this existing mod (via nexus_mod_id in the filename or name/folder
+    // matching) and update it in place — no duplicate is created.
+    if (mod.nexus_url && !mod.github_url) {
+      await openExternalUrl(mod.nexus_url);
+      notifyNexusOpen(mod.display_name?.trim() || mod.name);
+      toast.info(t('mods.toast.nexusUpdateOpened', { name: mod.display_name?.trim() || mod.name }));
+      return;
+    }
+
     const key = mod.folder_name ?? mod.name;
     if (updatingKey) return;
     setUpdatingKey(key);
@@ -443,6 +455,15 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     }
   }
 
+  function handleAutoDetectSource(mod: ModInfo) {
+    if (mod.bundle_members && mod.bundle_members.length > 0) {
+      toast.info(t('mods.toast.autoDetectBundleUnsupported', { name: mod.display_name?.trim() || mod.name }));
+      return;
+    }
+    setAutoDetectFocusMod(mod.folder_name ?? mod.name);
+    setShowAutoDetect(true);
+  }
+
   function handleOpenExternalUrl(url: string, mod: ModInfo) {
     if (mod.nexus_url && url === mod.nexus_url) {
       notifyNexusOpen(mod.name);
@@ -504,7 +525,8 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     return (
       <AutoDetectModal
         open={showAutoDetect}
-        onClose={() => setShowAutoDetect(false)}
+        focusMod={autoDetectFocusMod}
+        onClose={() => { setShowAutoDetect(false); setAutoDetectFocusMod(null); }}
         onApplied={() => {
           refreshMods();
           // If an audit already ran, re-run it so the newly-linked rows
@@ -609,6 +631,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     onEditSources,
     onFindGithubFromNexus: handleFindGithubFromNexus,
     onOpenExternalUrl: handleOpenExternalUrl,
+    onAutoDetectSource: handleAutoDetectSource,
     renderSourceEditor,
   };
 
@@ -644,6 +667,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     // Spread-in bundle for LibraryTable.
     tableActionProps,
   };
+
 }
 
 export type ModLibrary = ReturnType<typeof useModLibrary>;

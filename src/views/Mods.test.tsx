@@ -3404,6 +3404,74 @@ describe('<ModsView> per-mod open folder', () => {
   });
 });
 
+// ── Regression guards: source edits persist across the refresh ───────
+// Both behaviors are already fixed; these lock the FE refresh wiring so a
+// future change can't reintroduce stale-after-save. If the save handler
+// stopped calling refreshMods, the editor/list would keep showing the old
+// value and these would fail.
+describe('<ModsView> source-edit persistence regressions', () => {
+  it('a typed GitHub repo persists across refresh — user override wins over the manifest', async () => {
+    let mods = [baseMod({
+      name: 'GhMod', folder_name: 'GhMod',
+      github_url: 'https://github.com/wrong/manifest',
+    })];
+    registerInvokeHandler('get_installed_mods', () => mods);
+    registerInvokeHandler('set_mod_sources_full', () => {
+      // Backend persists the user's repo; the enrich on the next scan makes
+      // the user link win over the manifest URL (covered in Rust too).
+      mods = [{ ...mods[0], github_url: 'https://github.com/user/typed' }];
+      return null;
+    });
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await waitFor(() => { expect(screen.getByText('GhMod')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    await user.click(screen.getAllByRole('menuitem', { name: /Edit sources/ })[0]);
+    await waitFor(() => { expect(screen.getByText('Sources for GhMod')).toBeInTheDocument(); });
+
+    const ghInput = screen.getByPlaceholderText('owner/repo') as HTMLInputElement;
+    expect(ghInput.value).toBe('wrong/manifest'); // seeded from the manifest
+    await user.clear(ghInput);
+    await user.type(ghInput, 'user/typed');
+    await user.click(screen.getByRole('button', { name: /Save sources/ }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls().some(
+        (c) => c.cmd === 'set_mod_sources_full' && c.args?.githubRepo === 'user/typed',
+      )).toBe(true);
+    });
+    // Editor closes on save; reopen — the field reflects the persisted user
+    // override (not the manifest), proving it survived the refresh.
+    await waitFor(() => { expect(screen.queryByText('Sources for GhMod')).toBeNull(); });
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    await user.click(screen.getAllByRole('menuitem', { name: /Edit sources/ })[0]);
+    const ghInput2 = await screen.findByPlaceholderText('owner/repo') as HTMLInputElement;
+    await waitFor(() => { expect(ghInput2.value).toBe('user/typed'); });
+  });
+
+  it('editing a display name updates the in-memory list on the same refresh (no restart)', async () => {
+    let mods = [baseMod({ name: 'Foo', folder_name: 'Foo', display_name: null })];
+    registerInvokeHandler('get_installed_mods', () => mods);
+    registerInvokeHandler('set_mod_display_overrides', () => {
+      mods = [{ ...mods[0], display_name: 'Friendly Foo' }];
+      return null;
+    });
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await waitFor(() => { expect(screen.getByText('Foo')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    await user.click(screen.getAllByRole('menuitem', { name: /Edit sources/ })[0]);
+    await waitFor(() => { expect(screen.getByText('Sources for Foo')).toBeInTheDocument(); });
+
+    const nameInput = screen.getByPlaceholderText('Foo') as HTMLInputElement; // display-name field
+    await user.type(nameInput, 'Friendly Foo');
+    await user.click(screen.getByRole('button', { name: /Save sources/ }));
+
+    // The list reflects the new display name immediately — no app restart.
+    await waitFor(() => { expect(screen.getByText('Friendly Foo')).toBeInTheDocument(); });
+  });
+});
+
 // ── Inline snooze + unsnooze failure toasts (ModRow onSnooze/onUnsnooze) ─
 // Mods.tsx ~914 and ~923 — the ModRow's onSnooze/onUnsnooze callbacks
 // each have a catch arm that surfaces mods.toast.allFailed. The audit

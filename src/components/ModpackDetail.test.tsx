@@ -506,6 +506,27 @@ describe('<ModpackDetail>', () => {
     });
   });
 
+  it('the "(N missing)" indicator lists the missing mod names on hover (FB-D)', async () => {
+    const profile = setupPack({
+      inPack: [modInfo({ name: 'OnDisk1', folder_name: 'OnDisk1', mod_id: 'OnDisk1' })],
+    });
+    const drift: ProfileDrift = {
+      added: [],
+      removed: ['Gone1', 'Gone2', 'Gone3'],
+      toggled: [],
+      version_changed: [],
+      has_drift: true,
+    };
+    render(<Wrap profile={profile} onBack={vi.fn()} drift={drift} />);
+    await waitFor(() => {
+      expect(screen.getByText(/3 missing/)).toBeInTheDocument();
+    });
+    // The names are in the tooltip (present in the DOM, shown on hover/focus).
+    expect(screen.getByText('Gone1')).toBeInTheDocument();
+    expect(screen.getByText('Gone2')).toBeInTheDocument();
+    expect(screen.getByText('Gone3')).toBeInTheDocument();
+  });
+
   it('shows no missing indicator when nothing in the manifest is missing (Bug 5)', async () => {
     const profile = setupPack({
       inPack: [modInfo({ name: 'OnDisk1', folder_name: 'OnDisk1', mod_id: 'OnDisk1' })],

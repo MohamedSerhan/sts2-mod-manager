@@ -166,7 +166,8 @@ export function ModpackDetail({
   // "(N missing)" makes the header agree with the scan instead of silently
   // over-counting. (Empty folders are deliberately not scanned as mods, so we
   // never go the other way.)
-  const missingCount = drift?.removed?.length ?? 0;
+  const missingMods = drift?.removed ?? [];
+  const missingCount = missingMods.length;
   const switchingThis = switchingProfile === profile.name;
   const switchingOther = !!switchingProfile && switchingProfile !== profile.name;
 
@@ -655,10 +656,23 @@ export function ModpackDetail({
             </span>
             {missingCount > 0 && (
               <span
-                className="gf-modpack-detail-count-missing"
-                title={t('modpack.detail.missingTitle')}
+                className="gf-modpack-detail-missing"
+                tabIndex={0}
+                aria-label={t('modpack.detail.missingTitle')}
               >
-                {t('modpack.detail.missingCount', { count: missingCount })}
+                <span className="gf-modpack-detail-count-missing">
+                  {t('modpack.detail.missingCount', { count: missingCount })}
+                </span>
+                <span className="gf-modpack-detail-missing-tip" role="tooltip">
+                  <span className="gf-modpack-detail-missing-tip-head">
+                    {t('modpack.detail.missingTipHead')}
+                  </span>
+                  {missingMods.map((name) => (
+                    <span key={name} className="gf-modpack-detail-missing-tip-item">
+                      {name}
+                    </span>
+                  ))}
+                </span>
               </span>
             )}
             <HelpHint helpKey="modpackWhat" />

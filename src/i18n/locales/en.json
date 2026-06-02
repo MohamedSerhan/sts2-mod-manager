@@ -1102,6 +1102,12 @@
       "auto": "Auto",
       "zhHans": "Simplified Chinese"
     },
+    "theme": {
+      "label": "Theme",
+      "dark": "Dark",
+      "light": "Light",
+      "auto": "Auto"
+    },
     "accounts": {
       "nexusKey": "Nexus Mods API Key",
       "saved": "Saved ✓",

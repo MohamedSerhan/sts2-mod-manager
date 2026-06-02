@@ -11,6 +11,7 @@ import {
   Trash2,
   Play,
   Download,
+  Palette,
 } from 'lucide-react';
 import { GITHUB_TOKEN_TEMPLATE_URL } from '../lib/githubLinks';
 import { open } from '@tauri-apps/plugin-dialog';
@@ -24,6 +25,7 @@ import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../components/ConfirmDialog';
 import { LogsViewer } from '../components/LogsViewer';
 import { LanguageSelect } from '../components/LanguageSelect';
+import { ThemeSelect } from '../components/ThemeSelect';
 import { AboutCard } from '../components/AboutCard';
 import { DevBuildsCard } from '../components/DevBuildsCard';
 import { isDevBuild } from '../lib/isDevBuild';
@@ -558,6 +560,14 @@ export function SettingsView() {
                 {t('settings.language.label')}
               </h3>
               <LanguageSelect />
+            </Card>
+
+            <Card className="space-y-4" style={{ marginTop: 8 }}>
+              <h3 className="text-base font-semibold text-text flex items-center gap-2">
+                <Palette size={16} />
+                {t('settings.theme.label')}
+              </h3>
+              <ThemeSelect />
             </Card>
 
             {/* 1.7.0 v7 — About card relocated from the Home page footer.

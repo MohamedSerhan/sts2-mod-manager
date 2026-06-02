@@ -1102,6 +1102,12 @@
       "auto": "自动",
       "zhHans": "简体中文"
     },
+    "theme": {
+      "label": "主题",
+      "dark": "深色",
+      "light": "浅色",
+      "auto": "自动"
+    },
     "accounts": {
       "nexusKey": "Nexus Mods API 密钥",
       "saved": "已保存 ✓",

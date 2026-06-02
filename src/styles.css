@@ -1381,6 +1381,13 @@ body {
 .gf-btn-danger { color: oklch(0.75 0.13 25); border-color: oklch(0.55 0.16 25 / 0.4); }
 .gf-btn-danger:hover:not(:disabled) { background: oklch(0.55 0.16 25 / 0.15); color: oklch(0.85 0.13 25); }
 
+/* Accent (gold) outline — the library's "Auto-detect sources" shortcut. Same
+   shape as .gf-btn-3 (ghost) with a gold border/text so it draws the eye
+   without the weight of the filled-yellow primary action. Defined after
+   .gf-btn-3 so its border/colour win at equal specificity. */
+.gf-btn-accent { color: var(--gold-2); border-color: oklch(0.83 0.13 80 / 0.5); }
+.gf-btn-accent:hover:not(:disabled) { background: oklch(0.83 0.13 80 / 0.12); color: var(--gold); }
+
 /* ── Card / panel ─────────────────────────────────────────────────── */
 .gf-card {
   background: var(--indigo-panel);

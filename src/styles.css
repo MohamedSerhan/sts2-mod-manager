@@ -498,6 +498,15 @@ body {
   font-weight: 700;
   flex: 0 0 auto;
 }
+/* Bug 5: "(N missing)" note next to the manifest count when some manifest
+   entries have no mod on disk, so the header reconciles with the scan. */
+.gf-modpack-detail-count-missing {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--gf-warn, var(--gf-text-muted));
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
 .gf-modpack-detail-search {
   display: flex;
 }

@@ -159,6 +159,13 @@ export function ModpackDetail({
   const isActive = activeProfile === profile.name;
   const isShared = !!shareInfo;
   const hasDrift = !!drift?.has_drift;
+  // Bug 5: the header count is manifest membership (profile.mods.length) while
+  // the list shows mods actually on disk. Drift's `removed` set is exactly the
+  // manifest entries with no installed mod, so surfacing its size as
+  // "(N missing)" makes the header agree with the scan instead of silently
+  // over-counting. (Empty folders are deliberately not scanned as mods, so we
+  // never go the other way.)
+  const missingCount = drift?.removed?.length ?? 0;
   const switchingThis = switchingProfile === profile.name;
   const switchingOther = !!switchingProfile && switchingProfile !== profile.name;
 
@@ -565,6 +572,14 @@ export function ModpackDetail({
             <span className="gf-modpack-detail-count" aria-hidden>
               {profile.mods.length}
             </span>
+            {missingCount > 0 && (
+              <span
+                className="gf-modpack-detail-count-missing"
+                title={t('modpack.detail.missingTitle')}
+              >
+                {t('modpack.detail.missingCount', { count: missingCount })}
+              </span>
+            )}
             <HelpHint helpKey="modpackWhat" />
           </div>
           {/* Updates affordance — scoped to this pack's mods. */}

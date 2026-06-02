@@ -484,6 +484,44 @@ describe('<ModpackDetail>', () => {
     }
   });
 
+  // ── Bug 5: the header count must reconcile with the on-disk scan ──────
+  // profile.mods.length counts manifest membership; the in-pack list shows
+  // mods actually on disk. When the manifest references mods that aren't
+  // installed (drift.removed), the header surfaces "(N missing)" so the two
+  // numbers stop disagreeing.
+  it('shows "(N missing)" when the manifest references mods not installed on disk (Bug 5)', async () => {
+    const profile = setupPack({
+      inPack: [modInfo({ name: 'OnDisk1', folder_name: 'OnDisk1', mod_id: 'OnDisk1' })],
+    });
+    const drift: ProfileDrift = {
+      added: [],
+      removed: ['Gone1', 'Gone2', 'Gone3'],
+      toggled: [],
+      version_changed: [],
+      has_drift: true,
+    };
+    render(<Wrap profile={profile} onBack={vi.fn()} drift={drift} />);
+    await waitFor(() => {
+      expect(screen.getByText(/3 missing/)).toBeInTheDocument();
+    });
+  });
+
+  it('shows no missing indicator when nothing in the manifest is missing (Bug 5)', async () => {
+    const profile = setupPack({
+      inPack: [modInfo({ name: 'OnDisk1', folder_name: 'OnDisk1', mod_id: 'OnDisk1' })],
+    });
+    const drift: ProfileDrift = {
+      added: [],
+      removed: [],
+      toggled: [],
+      version_changed: [],
+      has_drift: false,
+    };
+    render(<Wrap profile={profile} onBack={vi.fn()} drift={drift} />);
+    await screen.findByRole('heading', { level: 2, name: 'Sample' });
+    expect(screen.queryByText(/missing/i)).toBeNull();
+  });
+
   it('Add on the ACTIVE pack also calls toggle_mod with enable=true', async () => {
     registerInvokeHandler('get_active_profile', () => 'Sample');
     const profile = setupPack({

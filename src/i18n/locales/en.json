@@ -64,6 +64,8 @@
     "detail": {
       "inPackHeading": "In this modpack",
       "statusCounts": "{{active}} active / {{total}} mods in this modpack",
+      "missingCount": "({{count}} missing)",
+      "missingTitle": "In this modpack's manifest but not installed on disk. Repair or save the modpack to reconcile.",
       "runningNow": "running in game now",
       "addMods": "Add mods",
       "checkUpdates": "Check for updates",

@@ -796,6 +796,28 @@ describe('<ModpackDetail>', () => {
     expect(within(available).getByText(/^Local$/i)).toBeInTheDocument();
   });
 
+  // ── In-pack tag filter ───────────────────────────────────────────
+  describe('in-pack tag filter', () => {
+    it('filters the pack rows to the chosen tag', async () => {
+      const profile = setupPack({
+        packName: 'Sample',
+        inPack: [
+          modInfo({ name: 'CombatMod', folder_name: 'CombatMod', tags: ['combat'] }),
+          modInfo({ name: 'UiMod', folder_name: 'UiMod', tags: ['ui'] }),
+        ],
+      });
+      render(<Wrap {...baseProps()} profile={profile} />);
+      // Both rows present initially.
+      expect((await screen.findAllByText('CombatMod')).length).toBeGreaterThan(0);
+      expect(screen.getAllByText('UiMod').length).toBeGreaterThan(0);
+      // Filter to "combat".
+      const tagSelect = screen.getByLabelText(/tag/i) as HTMLSelectElement;
+      fireEvent.change(tagSelect, { target: { value: 'combat' } });
+      await waitFor(() => expect(screen.queryByText('UiMod')).toBeNull());
+      expect(screen.getAllByText('CombatMod').length).toBeGreaterThan(0);
+    });
+  });
+
   // ── Inactive-pack toggle hint ─────────────────────────────────────
   describe('inactive-pack toggle hint', () => {
     it('shows the hint with a Switch action on a non-active pack', async () => {

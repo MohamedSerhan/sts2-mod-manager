@@ -163,6 +163,25 @@ export function ModpackDetail({
   // Search for the "Add from your Library" section only — the in-pack
   // LibraryTable owns its own search (same as the All Mods view).
   const [availableQuery, setAvailableQuery] = useState('');
+  // Tag filter for the in-pack LibraryTable (packScoped mode).
+  // Options are derived from the tags on this pack's mods via lib.modInfoByKey.
+  const [tagFilter, setTagFilter] = useState('');
+  const packTagOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const pm of profile.mods) {
+      const info =
+        lib.modInfoByKey.get(pm.folder_name ?? pm.name) ??
+        lib.modInfoByKey.get(pm.name);
+      for (const tag of info?.tags ?? []) {
+        const trimmed = tag.trim();
+        if (trimmed && !seen.has(trimmed.toLowerCase()))
+          seen.set(trimmed.toLowerCase(), trimmed);
+      }
+    }
+    return [...seen.values()].sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }),
+    );
+  }, [profile.mods, lib.modInfoByKey]);
 
   // Build a set of mod-names that belong to this pack so the updates
   // affordance is scoped to the pack's own mods.
@@ -328,6 +347,23 @@ export function ModpackDetail({
   // methods are consolidated into the one dropdown to keep the row calm.
   const packToolbarActions = (
     <>
+      {packTagOptions.length > 0 && (
+        <label className="gf-sort-control">
+          <span>{t('mods.tags.label')}</span>
+          <select
+            aria-label={t('mods.tags.label')}
+            value={tagFilter}
+            onChange={(e) => setTagFilter(e.target.value)}
+          >
+            <option value="">{t('mods.tags.all')}</option>
+            {packTagOptions.map((tag) => (
+              <option key={tag} value={tag}>
+                {tag}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <AddModsMenu lib={lib} />
       <Button
         variant="secondary"
@@ -610,9 +646,19 @@ export function ModpackDetail({
           coupleActiveStorage
           reloadToken={`${membershipSignature}|active:${activeProfile ?? ''}`}
           toolbarActions={packToolbarActions}
-          filterRow={(row) =>
-            !!row.profiles.find((p) => p.profile_name === profile.name)?.included
-          }
+          filterRow={(row) => {
+            const included = !!row.profiles.find(
+              (p) => p.profile_name === profile.name,
+            )?.included;
+            if (!included) return false;
+            if (!tagFilter) return true;
+            const info =
+              lib.modInfoByKey.get(row.folder_name ?? row.name) ??
+              lib.modInfoByKey.get(row.name);
+            return (info?.tags ?? []).some(
+              (tg) => tg.toLowerCase() === tagFilter.toLowerCase(),
+            );
+          }}
           onMembershipChanged={refreshAfterMutation}
           onLoadOrderChanged={refreshAfterMutation}
           {...lib.tableActionProps}

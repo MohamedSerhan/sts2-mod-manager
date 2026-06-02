@@ -848,6 +848,30 @@ describe('<ProfilesView>', () => {
     });
   });
 
+  it('drift banner Save changes names the mods dropped from the pack (FB-C)', async () => {
+    // The user couldn't tell what Save removed. The toast now lists the mods
+    // dropped from the manifest (drift.removed — missing on disk) by name.
+    seedProfiles([baseProfile({ name: 'DriftedPack' })]);
+    registerInvokeHandler('get_active_profile', () => 'DriftedPack');
+    registerInvokeHandler('get_profile_drift', () => ({
+      added: [],
+      removed: ['GoneA', 'GoneB'],
+      toggled: [],
+      version_changed: [],
+      has_drift: true,
+    }));
+    registerInvokeHandler('save_profile_drift', (args) => baseProfile({ name: String(args?.name) }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('DriftedPack')).toBeInTheDocument(); });
+    await user.click(await screen.findByRole('button', { name: /Save changes/i }));
+    await waitFor(() => {
+      const text = document.body.textContent ?? '';
+      expect(text).toContain('GoneA');
+      expect(text).toContain('GoneB');
+    });
+  });
+
   it('drift banner Repair with no active extras renders the safe body', async () => {
     seedProfiles([baseProfile({ name: 'DriftedPack' })]);
     registerInvokeHandler('get_active_profile', () => 'DriftedPack');

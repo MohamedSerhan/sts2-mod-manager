@@ -667,6 +667,11 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
 
   async function handleSaveDrift(name: string) {
     if (savingProfile) return;
+    // Capture the drift BEFORE the save clears it, so the toast can name what
+    // changed (FB-C: "I can't see what Save removed"). added = mods folded into
+    // the manifest; removed = manifest entries dropped because they're missing
+    // on disk (the "disappearing" mods).
+    const drift = driftMap[name];
     try {
       setSavingProfile(name);
       // Apply only the drift diff — NOT a full re-snapshot. snapshotProfile
@@ -688,11 +693,19 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       });
       await refreshAll();
       await loadProfiles();
-      toastCtx.success(
-        shareInfoMap[name]
-          ? t('profiles.toast.savedChangesWithReShare', { name })
-          : t('profiles.toast.savedChanges', { name })
-      );
+      const base = shareInfoMap[name]
+        ? t('profiles.toast.savedChangesWithReShare', { name })
+        : t('profiles.toast.savedChanges', { name });
+      const parts: string[] = [];
+      const added = drift?.added ?? [];
+      const removed = drift?.removed ?? [];
+      if (added.length > 0) {
+        parts.push(t('common.parts.addedWithList', { count: added.length, list: added.join(', ') }));
+      }
+      if (removed.length > 0) {
+        parts.push(t('common.parts.removedWithList', { count: removed.length, list: removed.join(', ') }));
+      }
+      toastCtx.success(parts.length > 0 ? `${base} ${parts.join(', ')}` : base);
     } catch (e) {
       toastCtx.error(t('profiles.toast.saveFailed', { error: e instanceof Error ? e.message : String(e) }));
     } finally {

@@ -45,6 +45,8 @@
       "downloadsFailed_one": "{{count}} 个下载失败",
       "downloadsFailed_other": "{{count}} 个下载失败",
       "disabledOrphansWithList": "{{count}} 个已移至禁用：{{list}}",
+      "addedWithList": "已添加 {{count}} 个：{{list}}",
+      "removedWithList": "已移除 {{count}} 个：{{list}}",
       "replacedWithList": "已更新 {{count}} 个：{{list}}",
       "replaceFailedWithList": "保留 {{count}} 个原版本（更新失败）：{{list}}"
     }

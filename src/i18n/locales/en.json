@@ -45,6 +45,8 @@
       "downloadsFailed_one": "{{count}} download failed",
       "downloadsFailed_other": "{{count}} downloads failed",
       "disabledOrphansWithList": "{{count}} moved to disabled: {{list}}",
+      "addedWithList": "added {{count}}: {{list}}",
+      "removedWithList": "removed {{count}}: {{list}}",
       "replacedWithList": "{{count}} updated: {{list}}",
       "replaceFailedWithList": "{{count}} kept (update failed): {{list}}"
     }

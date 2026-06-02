@@ -35,6 +35,7 @@ import {
   installModFromFile,
   quickAddMod,
   openModsFolder,
+  openModFolder,
   openExternalUrl,
   setModSource,
   setModSourcesFull,
@@ -398,6 +399,16 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     }
   }
 
+  // Bug 6: open ONE mod's folder (vs. the global mods dir). Backend resolves
+  // the folder against the active then disabled mods directories.
+  async function handleOpenThisModFolder(mod: ModInfo) {
+    try {
+      await openModFolder(mod.folder_name ?? mod.name);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   async function handleClearSource(modName: string, folderName: string | null) {
     try {
       await setModSource(modName, '', folderName);
@@ -634,6 +645,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     onDelete: handleDelete,
     onCopyVersion: handleCopyVersion,
     onOpenModsFolder: handleOpenFolder,
+    onOpenThisModFolder: handleOpenThisModFolder,
     onEditSources,
     onFindGithubFromNexus: handleFindGithubFromNexus,
     onOpenExternalUrl: handleOpenExternalUrl,

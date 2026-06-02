@@ -19,6 +19,12 @@ export async function openModsFolder(): Promise<boolean> {
   return invoke('open_mods_folder');
 }
 
+/** Open a single mod's folder in the OS file explorer (Bug 6). Resolves
+ *  against the active then disabled mods folders backend-side. */
+export async function openModFolder(folderName: string): Promise<boolean> {
+  return invoke('open_mod_folder', { folderName });
+}
+
 export async function openGameFolder(): Promise<boolean> {
   return invoke('open_game_folder');
 }

@@ -154,6 +154,7 @@ export interface LibraryTableProps {
   onDelete?: (mod: ModInfo) => void;
   onCopyVersion?: (mod: ModInfo) => void;
   onOpenModsFolder?: () => void;
+  onOpenThisModFolder?: (mod: ModInfo) => void;
   onEditSources?: (mod: ModInfo) => void;
   onFindGithubFromNexus?: (mod: ModInfo) => void;
   onOpenExternalUrl?: (url: string, mod: ModInfo) => void;
@@ -211,6 +212,7 @@ export function LibraryTable({
   onDelete,
   onCopyVersion,
   onOpenModsFolder,
+  onOpenThisModFolder,
   onEditSources,
   onFindGithubFromNexus,
   onOpenExternalUrl,
@@ -878,6 +880,7 @@ export function LibraryTable({
               onDelete={modInfo && onDelete ? () => onDelete(modInfo) : undefined}
               onCopyVersion={modInfo && onCopyVersion ? () => onCopyVersion(modInfo) : undefined}
               onOpenModsFolder={onOpenModsFolder}
+              onOpenThisModFolder={modInfo && onOpenThisModFolder ? () => onOpenThisModFolder(modInfo) : undefined}
               onEditSources={modInfo && onEditSources ? () => onEditSources(modInfo) : undefined}
               onFindGithubFromNexus={modInfo && onFindGithubFromNexus ? () => onFindGithubFromNexus(modInfo) : undefined}
               onOpenExternalUrl={modInfo && onOpenExternalUrl ? (url: string) => onOpenExternalUrl(url, modInfo) : undefined}

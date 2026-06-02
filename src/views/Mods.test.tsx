@@ -3379,6 +3379,31 @@ describe('<ModsView> Find GitHub then Save does not null out the found repo', ()
   });
 });
 
+// ── Bug 6: per-mod "Open this mod's folder" ──────────────────────────
+// The kebab gained a per-mod open-folder action (alongside the global
+// "Open mods folder"). It threads onOpenThisModFolder all the way down to
+// the backend open_mod_folder command with the mod's folder name.
+describe('<ModsView> per-mod open folder', () => {
+  it('kebab "Open this mod\'s folder" invokes open_mod_folder with the mod folder', async () => {
+    seedMods([baseMod({ name: 'OpenMe', folder_name: 'OpenMe' })]);
+    registerInvokeHandler('open_mod_folder', () => true);
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await waitFor(() => { expect(screen.getByText('OpenMe')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    const items = await screen.findAllByRole('menuitem', { name: /Open this mod's folder/i });
+    await user.click(items[0]);
+    await waitFor(() => {
+      expect(getInvokeCalls().some(
+        (c) => c.cmd === 'open_mod_folder' && c.args?.folderName === 'OpenMe',
+      )).toBe(true);
+    });
+    // The global "Open mods folder" item is still present too.
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    expect(screen.getAllByRole('menuitem', { name: /^Open mods folder$/i }).length).toBeGreaterThan(0);
+  });
+});
+
 // ── Inline snooze + unsnooze failure toasts (ModRow onSnooze/onUnsnooze) ─
 // Mods.tsx ~914 and ~923 — the ModRow's onSnooze/onUnsnooze callbacks
 // each have a catch arm that surfaces mods.toast.allFailed. The audit

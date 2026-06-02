@@ -190,6 +190,8 @@ export interface LibraryRowProps {
   onDelete?: () => void;
   onCopyVersion?: () => void;
   onOpenModsFolder?: () => void;
+  /** Open THIS mod's folder (vs. the global mods dir). Bug 6. */
+  onOpenThisModFolder?: () => void;
   onEditSources?: () => void;
   onFindGithubFromNexus?: () => void;
   onOpenExternalUrl?: (url: string) => void;
@@ -239,6 +241,7 @@ export function LibraryRow({
   onDelete = noop,
   onCopyVersion = noop,
   onOpenModsFolder = noop,
+  onOpenThisModFolder = noop,
   onEditSources = noop,
   onFindGithubFromNexus = noop,
   onOpenExternalUrl = noop,
@@ -681,6 +684,7 @@ export function LibraryRow({
             onUnsnooze={onUnsnooze}
             onCopyVersion={onCopyVersion}
             onOpenModsFolder={onOpenModsFolder}
+            onOpenThisModFolder={onOpenThisModFolder}
             onEditSources={onEditSources}
             onFindGithubFromNexus={onFindGithubFromNexus}
             onAutoDetectSource={onAutoDetectSource}
@@ -735,6 +739,7 @@ interface LibraryRowKebabProps {
   onUnsnooze: () => void;
   onCopyVersion: () => void;
   onOpenModsFolder: () => void;
+  onOpenThisModFolder: () => void;
   onEditSources: () => void;
   onFindGithubFromNexus: () => void;
   onAutoDetectSource: () => void;
@@ -764,6 +769,7 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
     onUnsnooze,
     onCopyVersion,
     onOpenModsFolder,
+    onOpenThisModFolder,
     onEditSources,
     onFindGithubFromNexus,
     onAutoDetectSource,
@@ -827,6 +833,9 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
           </KebabItem>
           <KebabItem icon={<FolderOpen size={12} />} onClick={onOpenModsFolder}>
             {t('mods.openModsFolder')}
+          </KebabItem>
+          <KebabItem icon={<FolderOpen size={12} />} onClick={onOpenThisModFolder}>
+            {t('mods.openThisModFolder')}
           </KebabItem>
           {audit?.snoozed ? (
             <KebabItem

@@ -1243,6 +1243,7 @@
     "modActions": "Mod actions",
     "copyVersion": "Copy version (v{{version}})",
     "openModsFolder": "Open mods folder",
+    "openThisModFolder": "Open this mod's folder",
     "unsnoozeDesc": "Show the update suggestion again for the current upstream release.",
     "unsnoozeUpdate": "Show update again",
     "snoozeDesc": "Skip this update until a newer release appears upstream (currently v{{version}}). Use this when the website's announced version doesn't match the file's actual version.",

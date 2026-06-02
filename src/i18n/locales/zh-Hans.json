@@ -1243,6 +1243,7 @@
     "modActions": "模组操作",
     "copyVersion": "复制版本 (v{{version}})",
     "openModsFolder": "打开模组文件夹",
+    "openThisModFolder": "打开此模组的文件夹",
     "unsnoozeDesc": "再次显示当前上游版本的更新建议。",
     "unsnoozeUpdate": "再次显示更新",
     "snoozeDesc": "跳过此更新，直到上游出现新版本（当前为 v{{version}}）。当网站公布的版本与文件实际版本不匹配时使用此选项。",

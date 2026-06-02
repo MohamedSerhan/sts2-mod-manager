@@ -287,6 +287,7 @@ pub fn run() {
             game::set_game_path,
             game::get_game_info,
             game::open_mods_folder,
+            game::open_mod_folder,
             game::open_game_folder,
             game::launch_game,
             game::launch_vanilla,

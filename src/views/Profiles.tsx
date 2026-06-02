@@ -1508,6 +1508,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
         isReshare={publishTarget?.isReshare ?? false}
         onGoToSettings={onGoToSettings}
         onClose={() => setPublishTarget(null)}
+        onListingChanged={() => { void loadProfiles(); }}
         onShared={(result) => {
           // Optimistically patch share info so the row flips Share→Re-share
           // immediately even before the reload below settles. Capture the name

@@ -29,6 +29,7 @@ function Wrap(props: Partial<React.ComponentProps<typeof PublishModal>> = {}) {
         isReshare={props.isReshare}
         onClose={props.onClose ?? (() => {})}
         onShared={props.onShared}
+        onListingChanged={props.onListingChanged}
         onGoToSettings={props.onGoToSettings ?? (() => {})}
       />
     </AllProviders>
@@ -371,6 +372,32 @@ describe('<PublishModal>', () => {
     expect(onShared).toHaveBeenCalledWith(shareOk);
     // Done button surfaces in the footer (not Publish).
     expect(screen.getByRole('button', { name: 'Done' })).toBeInTheDocument();
+  });
+
+  it('toggling public listing in the success screen notifies the parent to refresh (state-sync)', async () => {
+    // setModpackListing changes the saved manifest's listing state. Without a
+    // parent notification, the parent's profile.public goes stale, so
+    // reopening Publish would seed the toggle from the old value (appears
+    // reverted). The toggle must tell the parent to refresh.
+    tokenIsSet(true);
+    registerInvokeHandler('share_profile', () => shareOk);
+    registerInvokeHandler('set_modpack_listing', () => null);
+    const onListingChanged = vi.fn();
+    const user = userEvent.setup();
+    render(<Wrap onListingChanged={onListingChanged} />);
+    const publishBtn = await screen.findByRole('button', { name: /Publish/ });
+    await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
+    await user.click(publishBtn);
+    await waitForModalTitle('Modpack published');
+
+    // The listing toggle starts at "No" (private default). Flip it public.
+    await user.click(screen.getByRole('button', { name: 'No' }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some(
+        (c) => c.cmd === 'set_modpack_listing' && c.args?.public === true,
+      )).toBe(true);
+    });
+    await waitFor(() => { expect(onListingChanged).toHaveBeenCalled(); });
   });
 
   it('isReshare=true uses reshare_profile and shows update-pushed title', async () => {

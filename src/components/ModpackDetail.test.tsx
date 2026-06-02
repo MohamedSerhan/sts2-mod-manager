@@ -536,8 +536,8 @@ describe('<ModpackDetail>', () => {
     registerInvokeHandler('toggle_mod', () => null);
     const user = userEvent.setup();
     render(<Wrap profile={profile} onBack={vi.fn()} />);
-    await user.click(await screen.findByRole('button', { name: /Advanced actions/i }));
-    await user.click(await screen.findByRole('menuitem', { name: /^Enable all$/i }));
+    await screen.findAllByText('PackA');
+    await user.click(await screen.findByRole('button', { name: /^Enable all$/i }));
     await waitFor(() => {
       expect(getInvokeCalls().filter((c) => c.cmd === 'toggle_mod').length).toBe(2);
     });
@@ -553,12 +553,35 @@ describe('<ModpackDetail>', () => {
     registerInvokeHandler('toggle_mod', () => null);
     const user = userEvent.setup();
     render(<Wrap profile={profile} onBack={vi.fn()} />);
-    await user.click(await screen.findByRole('button', { name: /Advanced actions/i }));
-    await user.click(await screen.findByRole('menuitem', { name: /^Disable all$/i }));
+    await screen.findAllByText('PackA');
+    await user.click(await screen.findByRole('button', { name: /^Disable all$/i }));
     await waitFor(() => {
       expect(getInvokeCalls().filter((c) => c.cmd === 'toggle_mod').length).toBe(1);
     });
     expect(getInvokeCalls().find((c) => c.cmd === 'toggle_mod')?.args?.enable).toBe(false);
+  });
+
+  it('Enable all in the pack re-fetches the membership grid so the row toggles refresh (Bug 8)', async () => {
+    // The fix for the reported "enable/disable all isn't updating" bug: a bulk
+    // toggle changes enabled state but not membership/identity, so without a
+    // reload nonce the focused in-pack grid wouldn't re-pull and the row
+    // toggles stayed stale. Assert the grid is re-fetched after Enable all.
+    const profile = setupPack({
+      inPack: [modInfo({ name: 'PackA', folder_name: 'PackA', mod_id: 'PackA', enabled: false })],
+    });
+    registerInvokeHandler('toggle_mod', () => null);
+    const user = userEvent.setup();
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+    await screen.findAllByText('PackA');
+    const before = getInvokeCalls().filter((c) => c.cmd === 'get_profile_memberships').length;
+    await user.click(await screen.findByRole('button', { name: /^Enable all$/i }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'toggle_mod')).toBe(true);
+    });
+    await waitFor(() => {
+      expect(getInvokeCalls().filter((c) => c.cmd === 'get_profile_memberships').length)
+        .toBeGreaterThan(before);
+    });
   });
 
   it('Add on the ACTIVE pack also calls toggle_mod with enable=true', async () => {

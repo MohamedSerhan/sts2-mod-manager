@@ -529,6 +529,41 @@ describe('<ModsView>', () => {
     });
   });
 
+  it('Enable all with an active modpack updates the row toggle, not just the header', async () => {
+    // The All Mods table runs FOCUSED when a modpack is active
+    // (modpackName=activeProfile). Its rows come from the membership grid,
+    // which re-fetches only on identity/reloadToken change — so a bulk
+    // enable/disable used to leave the row toggles stale while the header
+    // count (from appMods) updated. A reload nonce now forces the grid
+    // re-fetch after a bulk op.
+    registerInvokeHandler('get_active_profile', () => 'Active');
+    let enabled = false;
+    registerInvokeHandler('get_installed_mods', () =>
+      [baseMod({ name: 'Solo', folder_name: 'Solo', enabled })]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Active', editable: true }],
+      mods: [{
+        name: 'Solo', version: '3.1.2', folder_name: 'Solo', mod_id: 'Solo',
+        installed_enabled: enabled,
+        profiles: [{ profile_name: 'Active', included: true, enabled, editable: true }],
+      }],
+    }));
+    registerInvokeHandler('enable_all_mods', () => { enabled = true; return true; });
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await screen.findAllByText('Solo');
+    expect(screen.getByRole('switch', { name: /toggle whether Solo is active in game/i }))
+      .toHaveAttribute('aria-checked', 'false');
+    await user.click(screen.getByRole('button', { name: /Enable all/ }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'enable_all_mods')).toBe(true);
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: /toggle whether Solo is active in game/i }))
+        .toHaveAttribute('aria-checked', 'true');
+    });
+  });
+
   it('Delete all opens a typed-phrase confirm modal', async () => {
     seedMods([baseMod()]);
     const user = userEvent.setup();

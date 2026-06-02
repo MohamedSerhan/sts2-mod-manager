@@ -344,6 +344,11 @@ export function ModpackDetail({
   // Iterates the pack's mods and toggles each on disk, reusing pinScroll so
   // the list doesn't collapse upward (Bug 2) as rows re-render.
   const [bulkToggling, setBulkToggling] = useState(false);
+  // Bumped after a bulk toggle so the in-pack LibraryTable re-fetches its
+  // membership grid — a toggle changes enabled state but not the installed
+  // set or membership, so the grid wouldn't otherwise re-pull and the row
+  // toggles would stay stale (the bug the reporter hit). See reloadToken below.
+  const [bulkReloadNonce, setBulkReloadNonce] = useState(0);
   const handleToggleAllInPack = async (enabled: boolean) => {
     if (bulkToggling || gameRunning || profile.mods.length === 0) return;
     pinScroll();
@@ -353,6 +358,7 @@ export function ModpackDetail({
         await toggleMod(pm.name, pm.folder_name ?? null, enabled);
       }
       await refreshAfterMutation();
+      setBulkReloadNonce((n) => n + 1);
       toast.success(
         enabled
           ? t('modpack.detail.enabledAllInPack', { pack: profile.name })
@@ -395,6 +401,33 @@ export function ModpackDetail({
           <ListOrdered size={14} />
           {t('profiles.loadOrder.button')}
         </Button>
+      )}
+      {/* Bug 7 / reporter feedback: enable/disable EVERY mod in this pack,
+          as visible buttons (parity with the Mod Library), not buried in a
+          kebab. Scoped to the pack; disabled while the game is running. */}
+      {profile.mods.length > 0 && (
+        <>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => handleToggleAllInPack(true)}
+            disabled={gameRunning || bulkToggling}
+            title={gameRunning ? t('mods.closeSts2First') : t('mods.enableAll')}
+          >
+            <Check size={14} />
+            {t('mods.enableAll')}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => handleToggleAllInPack(false)}
+            disabled={gameRunning || bulkToggling}
+            title={gameRunning ? t('mods.closeSts2First') : t('mods.disableAll')}
+          >
+            <Ban size={14} />
+            {t('mods.disableAll')}
+          </Button>
+        </>
       )}
     </>
   );
@@ -545,26 +578,6 @@ export function ModpackDetail({
               >
                 {t('common.refresh')}
               </KebabItem>
-              {profile.mods.length > 0 && (
-                <>
-                  <KebabItem
-                    icon={<Check size={12} />}
-                    onClick={() => handleToggleAllInPack(true)}
-                    disabled={gameRunning || bulkToggling}
-                    description={gameRunning ? t('mods.closeSts2First') : undefined}
-                  >
-                    {t('mods.enableAll')}
-                  </KebabItem>
-                  <KebabItem
-                    icon={<Ban size={12} />}
-                    onClick={() => handleToggleAllInPack(false)}
-                    disabled={gameRunning || bulkToggling}
-                    description={gameRunning ? t('mods.closeSts2First') : undefined}
-                  >
-                    {t('mods.disableAll')}
-                  </KebabItem>
-                </>
-              )}
             </KebabSection>
             {(profile.mods.length > 0 || onDelete) && (
               <>
@@ -653,7 +666,7 @@ export function ModpackDetail({
           modpackName={profile.name}
           packScoped
           coupleActiveStorage
-          reloadToken={`${membershipSignature}|active:${activeProfile ?? ''}`}
+          reloadToken={`${membershipSignature}|active:${activeProfile ?? ''}|bulk:${bulkReloadNonce}`}
           toolbarActions={packToolbarActions}
           filterRow={(row) =>
             !!row.profiles.find((p) => p.profile_name === profile.name)?.included

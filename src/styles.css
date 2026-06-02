@@ -82,7 +82,9 @@
 }
 
 /* Light palette is authored in a later task; SEEDED with the dark values for
-   now so no token is ever undefined while the literal migration is in flight. */
+   now so no token is ever undefined while the literal migration is in flight.
+   Intentional: switching to light at this stage still renders dark visuals —
+   the real light values are not yet authored. */
 :root[data-theme="light"] {
   --app-color-scheme: light;
 
@@ -132,8 +134,8 @@
    active theme so OS-drawn widgets match. accent-color brands checkboxes/
    radios with the gold instead of the OS default blue. */
 :root {
-  color-scheme: var(--app-color-scheme);
-  accent-color: var(--gf);
+  color-scheme: var(--app-color-scheme, dark);
+  accent-color: var(--gf, oklch(0.78 0.13 80));
 }
 
 body {

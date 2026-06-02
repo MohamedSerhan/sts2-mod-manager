@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { SourceEditor } from './SourceEditor';
@@ -37,7 +37,7 @@ describe('<SourceEditor>', () => {
         findingGithub={false}
         onClose={opts.onClose ?? (() => {})}
         onClear={opts.onClear ?? (() => {})}
-        onFindGithub={opts.onFindGithub ?? (() => {})}
+        onFindGithub={opts.onFindGithub ?? (async () => null)}
         onSave={opts.onSave ?? (() => {})}
         {...opts}
       />,
@@ -87,11 +87,50 @@ describe('<SourceEditor>', () => {
   });
 
   it('Find GitHub button calls onFindGithub', async () => {
-    const onFindGithub = vi.fn();
+    const onFindGithub = vi.fn(async () => null);
     const user = userEvent.setup();
     renderEditor(baseMod({ nexus_url: 'https://www.nexusmods.com/sts2/mods/103' }), { onFindGithub });
     await user.click(screen.getByRole('button', { name: 'Find GitHub' }));
     expect(onFindGithub).toHaveBeenCalled();
+  });
+
+  // ── Bug 1: Find GitHub must reflect into the field, not just fire ──────
+  // Previously onFindGithub returned void and the editor seeded `github`
+  // from props only at mount, so a successful find left the field empty and
+  // the Nexus-only banner up — and a subsequent Save then clobbered the
+  // just-found repo with null. The Find handler now consumes the returned
+  // repo and writes it into the field.
+  it('a successful Find populates the GitHub field and drops the Nexus-only banner', async () => {
+    const onFindGithub = vi.fn(async () => 'Alchyr/BaseLib');
+    const user = userEvent.setup();
+    renderEditor(baseMod({ nexus_url: 'https://www.nexusmods.com/sts2/mods/103' }), { onFindGithub });
+    expect(screen.getByText(/Nexus-only mod/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Find GitHub' }));
+    const input = screen.getByPlaceholderText('owner/repo') as HTMLInputElement;
+    await waitFor(() => expect(input.value).toBe('Alchyr/BaseLib'));
+    // Banner + its Find button are gone once a GitHub source exists.
+    expect(screen.queryByText(/Nexus-only mod/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Find GitHub' })).toBeNull();
+  });
+
+  it('a Find that returns a full GitHub URL is normalized to owner/repo in the field', async () => {
+    const onFindGithub = vi.fn(async () => 'https://github.com/Alchyr/BaseLib');
+    const user = userEvent.setup();
+    renderEditor(baseMod({ nexus_url: 'https://www.nexusmods.com/sts2/mods/103' }), { onFindGithub });
+    await user.click(screen.getByRole('button', { name: 'Find GitHub' }));
+    const input = screen.getByPlaceholderText('owner/repo') as HTMLInputElement;
+    await waitFor(() => expect(input.value).toBe('Alchyr/BaseLib'));
+  });
+
+  it('a Find that returns null leaves the field empty and keeps the banner', async () => {
+    const onFindGithub = vi.fn(async () => null);
+    const user = userEvent.setup();
+    renderEditor(baseMod({ nexus_url: 'https://www.nexusmods.com/sts2/mods/103' }), { onFindGithub });
+    await user.click(screen.getByRole('button', { name: 'Find GitHub' }));
+    await waitFor(() => expect(onFindGithub).toHaveBeenCalled());
+    const input = screen.getByPlaceholderText('owner/repo') as HTMLInputElement;
+    expect(input.value).toBe('');
+    expect(screen.getByText(/Nexus-only mod/)).toBeInTheDocument();
   });
 
   it('"Find GitHub" is disabled and labelled "Searching…" while findingGithub=true', () => {

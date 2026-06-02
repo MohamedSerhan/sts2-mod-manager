@@ -3329,6 +3329,56 @@ describe('<ModsView> SourceEditor saves note + custom URL via setModExtras', () 
   });
 });
 
+// ── Bug 1: Find GitHub → Save must not clobber the found repo ─────────
+// A Nexus-only mod's "Find GitHub" persists the discovered repo and
+// refreshes. The open editor must reflect that repo in its field so the
+// follow-up Save is a no-op instead of writing null over the just-found
+// source (set_mod_sources_full with githubRepo=null).
+describe('<ModsView> Find GitHub then Save does not null out the found repo', () => {
+  it('populates the GitHub field on find and does not save a null github afterward', async () => {
+    let mods = [baseMod({
+      name: 'NexusOnly', folder_name: 'NexusOnly',
+      github_url: null,
+      nexus_url: 'https://www.nexusmods.com/sts2/mods/103',
+    })];
+    registerInvokeHandler('get_installed_mods', () => mods);
+    // The backend persists the repo to disk; the refresh that follows the
+    // find re-reads it, so the mod now carries a github_url.
+    registerInvokeHandler('find_github_from_nexus', () => {
+      mods = [{ ...mods[0], github_url: 'https://github.com/owner/repo' }];
+      return 'owner/repo';
+    });
+    registerInvokeHandler('set_mod_sources_full', () => null);
+
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await waitFor(() => { expect(screen.getByText('NexusOnly')).toBeInTheDocument(); });
+
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    const items = screen.getAllByRole('menuitem', { name: /Edit sources/ });
+    await user.click(items[0]);
+    await waitFor(() => {
+      expect(screen.getByText('Sources for NexusOnly')).toBeInTheDocument();
+    });
+
+    // Find GitHub → field gets the repo, banner drops.
+    await user.click(screen.getByRole('button', { name: 'Find GitHub' }));
+    const ghInput = await screen.findByPlaceholderText('owner/repo') as HTMLInputElement;
+    await waitFor(() => { expect(ghInput.value).toBe('owner/repo'); });
+    expect(screen.queryByRole('button', { name: 'Find GitHub' })).toBeNull();
+
+    // Save → editor closes on success; the guard sees the field == stored
+    // repo, so set_mod_sources_full is never called with a null github.
+    await user.click(screen.getByRole('button', { name: /Save sources/ }));
+    await waitFor(() => {
+      expect(screen.queryByText('Sources for NexusOnly')).toBeNull();
+    });
+    expect(getInvokeCalls().some(
+      (c) => c.cmd === 'set_mod_sources_full' && c.args?.githubRepo == null,
+    )).toBe(false);
+  });
+});
+
 // ── Inline snooze + unsnooze failure toasts (ModRow onSnooze/onUnsnooze) ─
 // Mods.tsx ~914 and ~923 — the ModRow's onSnooze/onUnsnooze callbacks
 // each have a catch arm that surfaces mods.toast.allFailed. The audit

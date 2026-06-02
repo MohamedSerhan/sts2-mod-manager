@@ -1096,6 +1096,12 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
             onOpenLoadOrder={openLoadOrderEditor}
             onRepairDrift={handleRepairDrift}
             onLibraryChanged={handleLibraryChanged}
+            renameExistingNames={profiles.map((p) => p.name)}
+            onRenamed={(oldName, newName) => {
+              loadProfiles();
+              setSelectedModpack(newName);
+              if (activeProfile === oldName) setActiveProfile(newName);
+            }}
           />
         );
       })()}

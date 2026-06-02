@@ -698,6 +698,16 @@ describe('<ModpackDetail>', () => {
     expect(onDelete).toHaveBeenCalledWith('Sample');
   });
 
+  it('opens the Rename modal from the header kebab', async () => {
+    const user = userEvent.setup();
+    const profile = setupPack({ packName: 'Sample', inPack: [modInfo({ name: 'M', folder_name: 'M' })] });
+    render(<Wrap {...baseProps()} profile={profile} renameExistingNames={['Sample']} onRenamed={vi.fn()} />);
+    await screen.findByRole('heading', { level: 2, name: 'Sample' });
+    await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /^rename$/i }));
+    expect(await screen.findByRole('dialog', { name: /rename/i })).toBeInTheDocument();
+  });
+
   it('Auto-detect sources lives in the header kebab (not "+ Add mods") and opens the scan modal', async () => {
     const user = userEvent.setup();
     render(<Wrap {...baseProps()} />);

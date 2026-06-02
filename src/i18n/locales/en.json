@@ -102,6 +102,19 @@
       "saved": "Updated \"{{name}}\" (+{{added}} / −{{removed}})",
       "failed": "Couldn't save changes: {{error}}"
     },
+    "rename": {
+      "title": "Rename \"{{name}}\"",
+      "label": "New name",
+      "placeholder": "Enter a new modpack name",
+      "save": "Rename",
+      "saving": "Renaming…",
+      "cancel": "Cancel",
+      "collision": "A modpack with that name already exists.",
+      "empty": "Name can't be empty.",
+      "unchanged": "That's already the current name.",
+      "success": "Renamed \"{{old}}\" to \"{{new}}\".",
+      "failed": "Rename failed: {{error}}"
+    },
     "storage": {
       "active": "Active in game",
       "stored": "Stored",
@@ -401,6 +414,7 @@
     "kebab": {
       "snapshotFromCurrent": "Snapshot from current install",
       "duplicate": "Duplicate",
+      "rename": "Rename",
       "exportJson": "Export JSON...",
       "copyShareCode": "Copy share code",
       "copyShareLink": "Copy share link",

@@ -46,6 +46,7 @@ import {
   RefreshCw,
   Search,
   Share2,
+  SquarePen,
   Trash2,
 } from 'lucide-react';
 import { Badge } from './Badge';
@@ -54,6 +55,7 @@ import { Card } from './Card';
 import { HelpHint } from './HelpHint';
 import { KebabDivider, KebabItem, KebabMenu, KebabSection } from './KebabMenu';
 import { EditModpackModal } from './EditModpackModal';
+import { RenameModpackModal } from './RenameModpackModal';
 import { AddModsMenu } from './AddModsMenu';
 import { LibraryTable } from './LibraryTable';
 import { useApp } from '../contexts/AppContext';
@@ -89,6 +91,14 @@ export interface ModpackDetailProps {
   /** Refreshes the underlying profile list after a membership
    *  mutation so the parent's drift / share metadata stays current. */
   onLibraryChanged?: () => void;
+  /** Called after a successful rename with (oldName, newName) so the
+   *  parent can reload the profile list, reselect the new name, and
+   *  follow the active pack when the renamed pack was active. */
+  onRenamed?: (oldName: string, newName: string) => void;
+  /** Full list of current modpack names, used by the rename modal for
+   *  inline case-insensitive collision validation. Falls back to just
+   *  this pack's own name when the parent doesn't supply it. */
+  renameExistingNames?: string[];
 }
 
 /** Identity key for a profile mod / installed mod: prefer the on-disk
@@ -133,6 +143,8 @@ export function ModpackDetail({
   shareInfo,
   drift,
   onLibraryChanged,
+  onRenamed,
+  renameExistingNames,
 }: ModpackDetailProps) {
   const { t } = useTranslation();
   const { activeProfile, auditResults, mods, refreshAll, gameRunning } = useApp();
@@ -150,6 +162,8 @@ export function ModpackDetail({
   const [libraryOpen, setLibraryOpen] = useState(false);
   // Bulk-edit membership via the wizard's checkbox picker.
   const [editing, setEditing] = useState(false);
+  // Rename this pack via the small inline-validation modal.
+  const [renaming, setRenaming] = useState(false);
 
   const isActive = activeProfile === profile.name;
   const isShared = !!shareInfo;
@@ -507,6 +521,9 @@ export function ModpackDetail({
                   {t('profiles.kebab.duplicate')}
                 </KebabItem>
               )}
+              <KebabItem icon={<SquarePen size={12} />} onClick={() => setRenaming(true)}>
+                {t('profiles.kebab.rename')}
+              </KebabItem>
               {onExportJson && (
                 <KebabItem icon={<Copy size={12} />} onClick={() => onExportJson(profile.name)}>
                   {t('profiles.kebab.exportJson')}
@@ -768,6 +785,19 @@ export function ModpackDetail({
           profile={profile}
           onClose={() => setEditing(false)}
           onSaved={refreshAfterMutation}
+        />
+      )}
+
+      {/* Rename this pack (inline-validated name modal). */}
+      {renaming && (
+        <RenameModpackModal
+          profile={profile}
+          existingNames={renameExistingNames ?? [profile.name]}
+          onClose={() => setRenaming(false)}
+          onRenamed={(oldName, newName) => {
+            setRenaming(false);
+            onRenamed?.(oldName, newName);
+          }}
         />
       )}
     </div>

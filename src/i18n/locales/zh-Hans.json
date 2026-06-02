@@ -102,6 +102,19 @@
       "saved": "已更新“{{name}}”（+{{added}} / −{{removed}}）",
       "failed": "无法保存更改：{{error}}"
     },
+    "rename": {
+      "title": "重命名“{{name}}”",
+      "label": "新名称",
+      "placeholder": "输入新的模组包名称",
+      "save": "重命名",
+      "saving": "正在重命名…",
+      "cancel": "取消",
+      "collision": "已存在同名模组包。",
+      "empty": "名称不能为空。",
+      "unchanged": "新名称与当前名称相同。",
+      "success": "已将“{{old}}”重命名为“{{new}}”。",
+      "failed": "重命名失败：{{error}}"
+    },
     "storage": {
       "active": "已激活于游戏",
       "stored": "已存储",
@@ -330,6 +343,7 @@
     "kebab": {
       "snapshotFromCurrent": "从当前安装创建快照",
       "duplicate": "复制",
+      "rename": "重命名",
       "exportJson": "导出 JSON...",
       "copyShareCode": "复制分享码",
       "copyShareLink": "复制分享链接",

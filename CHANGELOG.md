@@ -33,6 +33,12 @@ Pending changes accumulate as fragments in `changelog.d/`; the release script as
 
 ## [Unreleased]
 
+_Changes are tracked as fragments in [`changelog.d/`](changelog.d/) and assembled here at release._
+
+---
+
+## [1.7.0] - 2026-06-02
+
 A UX simplification release. The app feels like a launcher first: pick a modpack, click Play. Power-user tools are still there, just behind progressive disclosure so they don't compete with the normal flow.
 
 ### Added
@@ -95,7 +101,21 @@ A UX simplification release. The app feels like a launcher first: pick a modpack
 - The share-link parser now accepts only `import`, `install`, and `load` action prefixes; unknown actions are rejected rather than silently coerced.
 - Updated bundled dependencies to clear security advisories (the `openssl` library and the `tmp` test helper).
 
----
+### Added
+
+- Each mod row's kebab (⋯) menu now has an "Auto-detect source" item that runs a scoped GitHub search for just that one mod; selecting it on a bundle (pack of several mods) shows a toast explaining that auto-linking isn't supported for bundles.
+- Downloads that contain several mods (like the Alice Defect pack) now install and appear as a single pack — enable, disable, delete, or add it to a modpack as one unit, and rename it like any other mod.
+
+### Fixed
+
+- Fixed rare data-loss cases — a crash while the app was saving could wipe your saved mod sources, subscriptions, or profiles, and a failed backup-restore or modpack repair could leave your mods folder empty.
+- Auto-detect sources no longer silently shows "no candidates" for mods when GitHub's search quota runs out mid-scan; a banner now explains the rate-limit and mods that weren't searched are marked "not checked" so you know to run the scan again.
+- Bundled packs and Nexus-linked mods now show their real Nexus version (the file version) instead of an unrelated version number taken from one of the mods inside the pack. Existing packs correct themselves the next time you install or update them.
+- Clicking Update on a Nexus-only mod now opens the mod's Nexus page so you can download the new version — the app auto-installs it when the zip lands in your Downloads folder, instead of showing an error.
+
+### Security
+
+- Hardened how shared modpacks are downloaded and how Nexus and dev-build links are validated, so a malicious modpack can't steer the app at unexpected addresses.
 
 ## [1.6.1] - 2026-05-23
 

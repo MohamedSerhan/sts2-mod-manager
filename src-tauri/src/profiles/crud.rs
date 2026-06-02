@@ -154,10 +154,13 @@ pub fn rename_profile(old: &str, new: &str, profiles_path: &Path) -> Result<Prof
     let mut profile = load_profile(old, profiles_path)?; // errors if old missing
 
     // Collision: a DIFFERENT profile already named `new`. (A no-op rename to the
-    // same on-disk file is allowed.)
+    // same on-disk file is allowed.) Compare by canonical identity, not path
+    // string: on a case-insensitive FS a case-only rename ("My Pack" → "my
+    // pack") aliases the same inode, so a string `!=` check would wrongly
+    // reject it as a collision with itself.
     let old_json = profiles_path.join(format!("{}.json", sanitize_filename(old)));
     let new_json = profiles_path.join(format!("{}.json", sanitize_filename(new_trimmed)));
-    if new_json.exists() && new_json != old_json {
+    if new_json.exists() && !paths_refer_to_same_file(&new_json, &old_json) {
         return Err(AppError::InvalidProfile(format!(
             "A modpack named '{}' already exists",
             new_trimmed
@@ -170,14 +173,16 @@ pub fn rename_profile(old: &str, new: &str, profiles_path: &Path) -> Result<Prof
         profiles_path.join(format!("{}.share", old)),
         profiles_path.join(format!("{}.share", sanitize_filename(old))),
     ];
+    let dest_share = profiles_path.join(format!("{}.share", new_trimmed));
     if let Some(src) = share_candidates.iter().find(|p| p.exists()) {
         let bytes = fs::read(src)?;
-        crate::fs_safety::atomic_write(
-            &profiles_path.join(format!("{}.share", new_trimmed)),
-            &bytes,
-        )?;
+        crate::fs_safety::atomic_write(&dest_share, &bytes)?;
         for p in &share_candidates {
-            if p.exists() && p != &profiles_path.join(format!("{}.share", new_trimmed)) {
+            // Guard by canonical identity, not path-string inequality: on a
+            // case-insensitive FS a case-only rename aliases the same inode as
+            // `dest_share`, so a string `!=` check would delete the file we
+            // just wrote (losing the share code).
+            if p.exists() && !paths_refer_to_same_file(p, &dest_share) {
                 let _ = fs::remove_file(p);
             }
         }
@@ -187,9 +192,11 @@ pub fn rename_profile(old: &str, new: &str, profiles_path: &Path) -> Result<Prof
     profile.updated_at = chrono::Utc::now();
     save_profile(&profile, profiles_path)?;
 
-    // Remove the stale .json only if the sanitized filename actually changed
-    // (e.g. "Pack" → "pack" map to the same file on a case-insensitive FS).
-    if old_json.exists() && old_json != new_json {
+    // Remove the stale .json only if it's a genuinely different file. On a
+    // case-insensitive FS ("Pack" → "pack") the old and new names alias the
+    // same inode that `save_profile` just wrote — a string `!=` check would
+    // delete the renamed profile. Guard by canonical identity instead.
+    if old_json.exists() && !paths_refer_to_same_file(&old_json, &new_json) {
         fs::remove_file(&old_json)?;
     }
     Ok(profile)
@@ -206,6 +213,17 @@ pub fn import_profile(json: &str, profiles_path: &Path) -> Result<Profile> {
         .map_err(|e| AppError::InvalidProfile(format!("Invalid profile JSON: {}", e)))?;
     save_profile(&profile, profiles_path)?;
     Ok(profile)
+}
+
+/// True when two paths refer to the same file on disk. Handles
+/// case-insensitive filesystems (Windows/macOS) where two distinct-cased
+/// names alias a single inode. Falls back to a path comparison when
+/// canonicalization fails (e.g. a path that no longer exists).
+fn paths_refer_to_same_file(a: &Path, b: &Path) -> bool {
+    match (fs::canonicalize(a), fs::canonicalize(b)) {
+        (Ok(ca), Ok(cb)) => ca == cb,
+        _ => a == b,
+    }
 }
 
 /// Sanitize a profile name for use as a filename.
@@ -840,5 +858,22 @@ mod rename_tests {
         let r = rename_profile("Same", "Same", dir).unwrap();
         assert_eq!(r.name, "Same");
         assert!(load_profile("Same", dir).is_ok());
+    }
+
+    #[test]
+    fn case_only_rename_preserves_json_and_share() {
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path();
+        save_profile(&sample("My Pack"), dir).unwrap();
+        let share_body = r#"{"code":"AA5A-315D-61AE","owner":"me","file_sha":"abc","share_format_version":3}"#;
+        std::fs::write(dir.join("My Pack.share"), share_body).unwrap();
+
+        let renamed = rename_profile("My Pack", "my pack", dir).unwrap();
+        assert_eq!(renamed.name, "my pack");
+        // The renamed profile must still load under the new name (not deleted).
+        assert!(load_profile("my pack", dir).is_ok(), "profile must survive a case-only rename");
+        // And its share code must be preserved under the new name (not deleted).
+        let moved = std::fs::read_to_string(dir.join("my pack.share")).unwrap();
+        assert_eq!(moved, share_body, "share code must survive a case-only rename");
     }
 }

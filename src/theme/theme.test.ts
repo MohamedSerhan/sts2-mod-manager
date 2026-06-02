@@ -50,6 +50,14 @@ describe('theme preference', () => {
     expect(resolveThemePreference('auto')).toBe('dark');
   });
 
+  it('resolves auto to dark when matchMedia is unavailable', () => {
+    // The default/CI path: jsdom has no matchMedia until the suite mocks it,
+    // so prefersLight() must fail closed and auto must resolve to dark.
+    vi.stubGlobal('matchMedia', undefined);
+    expect(prefersLight()).toBe(false);
+    expect(resolveThemePreference('auto')).toBe('dark');
+  });
+
   it('applyTheme writes the data-theme attribute', () => {
     applyTheme('light');
     expect(document.documentElement.dataset.theme).toBe('light');

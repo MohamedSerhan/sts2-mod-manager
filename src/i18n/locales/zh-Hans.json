@@ -408,7 +408,8 @@
         "nameAsc": "名称 A-Z",
         "nameDesc": "名称 Z-A",
         "activeFirst": "活跃优先",
-        "storedFirst": "已存储优先"
+        "storedFirst": "已存储优先",
+        "tagAsc": "按标签（A–Z）"
       },
       "empty": {
         "title": "未安装任何模组",

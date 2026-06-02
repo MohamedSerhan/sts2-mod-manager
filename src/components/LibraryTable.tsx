@@ -63,7 +63,8 @@ export type LibrarySortMode =
   | 'nameDesc'
   | 'inPackFirst'
   | 'activeFirst'
-  | 'storedFirst';
+  | 'storedFirst'
+  | 'tagAsc';
 
 export interface LibraryTableProps {
   /** The modpack whose membership column we focus on. The table
@@ -177,6 +178,18 @@ function compareMembershipDisplayName(
     sensitivity: 'base',
     numeric: true,
   });
+}
+
+/** Alphabetically-first tag of a row's ModInfo (lowercased), or null when
+ *  untagged. `null` sorts AFTER any tag. */
+function firstTagKey(
+  row: ProfileMembershipMod,
+  modInfoByKey?: Map<string, ModInfo>,
+): string | null {
+  const info = modInfoByKey?.get(membershipRowKey(row)) ?? modInfoByKey?.get(row.name);
+  const tags = (info?.tags ?? []).map((tg) => tg.trim().toLowerCase()).filter(Boolean);
+  if (tags.length === 0) return null;
+  return tags.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }))[0];
 }
 
 export function LibraryTable({
@@ -443,10 +456,21 @@ export function LibraryTable({
           || compareMembershipDisplayName(a, b)
         );
       }
+      if (sort === 'tagAsc') {
+        const at = firstTagKey(a, modInfoByKey);
+        const bt = firstTagKey(b, modInfoByKey);
+        if (at !== bt) {
+          if (at === null) return 1;   // untagged after tagged
+          if (bt === null) return -1;
+          const byTag = at.localeCompare(bt, undefined, { sensitivity: 'base', numeric: true });
+          if (byTag !== 0) return byTag;
+        }
+        return compareMembershipDisplayName(a, b);
+      }
       return compareMembershipDisplayName(a, b);
     });
     return sorted;
-  }, [effectiveGrid, filter, sort, inPackRowKeys, filterRow]);
+  }, [effectiveGrid, filter, sort, inPackRowKeys, filterRow, modInfoByKey]);
 
   const visibleItems = filteredRows.slice(0, visibleLimit);
 
@@ -757,6 +781,7 @@ export function LibraryTable({
                 <option value="storedFirst">
                   {t('profiles.library.sort.storedFirst')}
                 </option>
+                <option value="tagAsc">{t('profiles.library.sort.tagAsc')}</option>
               </select>
             </label>
           </div>

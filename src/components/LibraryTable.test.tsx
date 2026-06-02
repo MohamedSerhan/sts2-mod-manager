@@ -1183,6 +1183,41 @@ describe('<LibraryTable modpackName={null}>', () => {
     }
   });
 
+  describe('sort by tag', () => {
+    function gridFromInstalled(names: string[]) {
+      registerInvokeHandler('get_installed_mods', () =>
+        names.map((n) => mkModInfo({ name: n, folder_name: n, mod_id: n })),
+      );
+    }
+    it('orders by first tag alphabetically, untagged last', async () => {
+      gridFromInstalled(['Zeta', 'Apple', 'NoTag']);
+      const modInfoByKey = new Map([
+        ['Zeta', mkModInfo({ name: 'Zeta', folder_name: 'Zeta', tags: ['combat'] })],
+        ['Apple', mkModInfo({ name: 'Apple', folder_name: 'Apple', tags: ['ui', 'aesthetic'] })],
+        ['NoTag', mkModInfo({ name: 'NoTag', folder_name: 'NoTag', tags: [] })],
+      ]);
+      render(<Wrap modpackName={null} modInfoByKey={modInfoByKey} />);
+      const sortSelect = await screen.findByLabelText(/sort/i) as HTMLSelectElement;
+      fireEvent.change(sortSelect, { target: { value: 'tagAsc' } });
+      // Apple → "aesthetic", Zeta → "combat", NoTag → untagged (last).
+      const titles = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent);
+      const order = titles.filter((tt) => ['Apple', 'Zeta', 'NoTag'].includes(tt ?? ''));
+      expect(order).toEqual(['Apple', 'Zeta', 'NoTag']);
+    });
+
+    it('handles a 100-mod library without error', async () => {
+      const names = Array.from({ length: 100 }, (_, i) => `Mod${String(i).padStart(3, '0')}`);
+      gridFromInstalled(names);
+      const modInfoByKey = new Map(names.map((n, i) => [n, mkModInfo({ name: n, folder_name: n, tags: i % 2 ? ['alpha'] : [] })]));
+      render(<Wrap modpackName={null} modInfoByKey={modInfoByKey} pageSize={200} />);
+      const sortSelect = await screen.findByLabelText(/sort/i) as HTMLSelectElement;
+      fireEvent.change(sortSelect, { target: { value: 'tagAsc' } });
+      // First rendered row is a tagged one (alpha sorts before untagged).
+      const titles = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent);
+      expect(titles[0]).toMatch(/^Mod\d{3}$/);
+    });
+  });
+
   it('pins the scroll position when a row mutates, so the user is never yanked to the top', async () => {
     registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
     registerInvokeHandler('get_profile_memberships', () => ({

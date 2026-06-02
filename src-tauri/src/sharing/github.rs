@@ -783,7 +783,37 @@ pub(super) async fn cleanup_orphan_bundle_assets(
 
 /// Download a bundled mod zip from a URL and extract into mods_path.
 /// Uses the GitHub API (not raw.githubusercontent.com) to avoid CDN caching issues.
+/// Whether a modpack bundle may be downloaded from `raw`. The bundle URL comes
+/// from an untrusted manifest, so only `https` downloads from GitHub's asset
+/// hosts are allowed — this prevents a malicious manifest from pointing the
+/// downloader at an internal or arbitrary address (SSRF). (Audit H-1 / M-2)
+fn bundle_url_is_allowed(raw: &str) -> bool {
+    match url::Url::parse(raw) {
+        Ok(u) => {
+            u.scheme() == "https"
+                && matches!(
+                    u.host_str(),
+                    Some("github.com")
+                        | Some("raw.githubusercontent.com")
+                        | Some("objects.githubusercontent.com")
+                )
+        }
+        Err(_) => false,
+    }
+}
+
 pub async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::Path) -> Result<()> {
+    // SSRF guard: the bundle URL comes from an untrusted modpack manifest.
+    // Refuse anything that isn't an https GitHub asset URL before any fetch so
+    // a malicious manifest can't make us hit an internal/arbitrary address.
+    // (Audit H-1)
+    if !bundle_url_is_allowed(url) {
+        return Err(AppError::Other(format!(
+            "Refusing to download bundle for '{}' from a disallowed URL: {}",
+            mod_name, url
+        )));
+    }
+
     let client = reqwest::Client::builder()
         .user_agent(concat!("sts2-mod-manager/", env!("CARGO_PKG_VERSION")))
         .timeout(HTTP_TOTAL_TIMEOUT)
@@ -863,7 +893,7 @@ pub async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::P
             )));
         }
         resp.bytes().await?
-    } else if url.contains("raw.githubusercontent.com") {
+    } else if url.starts_with("https://raw.githubusercontent.com/") {
         // Use GitHub API to avoid CDN caching issues
         let parts: Vec<&str> = url
             .trim_start_matches("https://raw.githubusercontent.com/")
@@ -1968,6 +1998,51 @@ mod download_bundle_url_routing_tests {
         zw.finish().unwrap().into_inner()
     }
 
+    #[test]
+    fn bundle_url_allowlist_accepts_github_hosts_only() {
+        // Allowed: https on GitHub's asset hosts.
+        assert!(bundle_url_is_allowed(
+            "https://github.com/o/r/releases/download/t/a.zip"
+        ));
+        assert!(bundle_url_is_allowed(
+            "https://raw.githubusercontent.com/o/r/main/mods/a.zip"
+        ));
+        assert!(bundle_url_is_allowed(
+            "https://objects.githubusercontent.com/github-production-release-asset/x"
+        ));
+
+        // Rejected: SSRF / scheme / host-confusion vectors.
+        assert!(
+            !bundle_url_is_allowed("http://github.com/o/r/releases/download/t/a.zip"),
+            "http must be rejected"
+        );
+        assert!(
+            !bundle_url_is_allowed("http://169.254.169.254/latest/meta-data/"),
+            "link-local address must be rejected"
+        );
+        assert!(
+            !bundle_url_is_allowed("http://127.0.0.1:8080/x.zip"),
+            "loopback must be rejected"
+        );
+        assert!(
+            !bundle_url_is_allowed("https://evil.com/x.zip"),
+            "arbitrary host must be rejected"
+        );
+        assert!(
+            !bundle_url_is_allowed("https://evil.com/?x=raw.githubusercontent.com"),
+            "substring of an allowed host in the query must not pass (M-2)"
+        );
+        assert!(
+            !bundle_url_is_allowed("https://raw.githubusercontent.com.evil.com/x.zip"),
+            "host suffix attack must not pass"
+        );
+        assert!(
+            !bundle_url_is_allowed("file:///etc/passwd"),
+            "file scheme must be rejected"
+        );
+        assert!(!bundle_url_is_allowed("not a url"), "garbage must be rejected");
+    }
+
     #[tokio::test]
     async fn download_bundle_handles_raw_githubusercontent_url() {
         // Sets STS2_GITHUB_API_BASE — share the env-var lock with the other suites.
@@ -2025,8 +2100,9 @@ mod download_bundle_url_routing_tests {
     }
 
     #[tokio::test]
-    async fn download_bundle_handles_arbitrary_https_url() {
-        // No env-var mutation here — direct URL into the mock server, so no lock needed.
+    async fn download_bundle_rejects_non_github_url() {
+        // A reachable non-GitHub host (here a loopback mock) must be refused
+        // BEFORE any fetch — the bundle URL is attacker-controlled. (Audit H-1)
         let server = MockServer::start().await;
         let zip_bytes = make_tiny_zip("ExternalMod.json");
         Mock::given(method("GET"))
@@ -2036,15 +2112,21 @@ mod download_bundle_url_routing_tests {
             .await;
 
         let tmp = tempfile::tempdir().unwrap();
-        download_bundle(
+        let res = download_bundle(
             &format!("{}/some/path/ExternalMod.zip", server.uri()),
             "ExternalMod",
             tmp.path(),
         )
-        .await
-        .expect("non-github URL must work");
+        .await;
 
-        assert!(tmp.path().join("ExternalMod.json").exists());
+        assert!(
+            res.is_err(),
+            "a non-GitHub bundle URL must be rejected even when reachable"
+        );
+        assert!(
+            !tmp.path().join("ExternalMod.json").exists(),
+            "nothing should be written for a rejected URL"
+        );
     }
 }
 

@@ -56,6 +56,62 @@ export function assemble(fragments) {
   return out.join("\n").trim();
 }
 
+// Canonical sort index for a "### Title" heading: known categories first in
+// CATEGORIES order, then any unrecognised headings in first-seen order.
+function headingRank(heading, firstSeen) {
+  const i = CATEGORIES.findIndex((c) => TITLES[c] === heading);
+  return i === -1 ? CATEGORIES.length + firstSeen.indexOf(heading) : i;
+}
+
+/**
+ * Normalize a Keep-a-Changelog version body so each "### Category" heading
+ * appears at most once. Guards the release-time merge of a legacy [Unreleased]
+ * body (which carries its own ### sections) with the assembled changelog.d/
+ * block (also ### sections): naive concatenation produced duplicate
+ * "### Fixed" / "### Added" / "### Security" headers in the 1.7.0 release.
+ *
+ * Preserves any preamble text before the first heading, concatenates the
+ * bullets of same-named sections in encounter order, and re-emits sections in
+ * canonical order (Added → Changed → Fixed → Security, then any extras in
+ * first-seen order). Idempotent on already-clean bodies.
+ */
+export function mergeCategorySections(body) {
+  const lines = String(body).split("\n");
+  const preamble = [];
+  const firstSeen = []; // heading text, first-encounter order
+  const bullets = new Map(); // heading -> non-blank content lines
+  let current = null;
+  for (const line of lines) {
+    const m = /^###\s+(.+?)\s*$/.exec(line);
+    if (m) {
+      current = m[1];
+      if (!bullets.has(current)) {
+        bullets.set(current, []);
+        firstSeen.push(current);
+      }
+    } else if (current === null) {
+      preamble.push(line);
+    } else if (line.trim() !== "") {
+      bullets.get(current).push(line);
+    }
+  }
+
+  const out = [];
+  const pre = preamble.join("\n").trim();
+  if (pre) out.push(pre, "");
+
+  const ordered = [...firstSeen].sort(
+    (a, b) => headingRank(a, firstSeen) - headingRank(b, firstSeen),
+  );
+  for (const heading of ordered) {
+    const items = bullets.get(heading);
+    if (!items.length) continue;
+    out.push(`### ${heading}`, "", ...items, "");
+  }
+
+  return out.join("\n").trim();
+}
+
 export const count = (frags) => frags.length;
 
 export function suggestedBump(frags) {
@@ -95,8 +151,14 @@ if (isMain) {
       }
     }
     if (anyViolation) process.exit(1);
+  } else if (cmd === "merge-sections") {
+    // Read a Keep-a-Changelog version body on stdin, collapse duplicate
+    // category headers, print the normalized body on stdout.
+    let input = "";
+    try { input = readFileSync(0, "utf8"); } catch { input = ""; }
+    console.log(mergeCategorySections(input));
   } else {
-    console.error("usage: changelog-fragments.mjs assemble|count|suggested-bump|lint");
+    console.error("usage: changelog-fragments.mjs assemble|count|suggested-bump|lint|merge-sections");
     process.exit(2);
   }
 }

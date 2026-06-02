@@ -319,6 +319,11 @@ NEW_VERSION="${NEW}" \
 RELEASE_DATE="${TODAY}" \
 node -e "
 const fs = require('fs');
+const { pathToFileURL } = require('url');
+const { resolve } = require('path');
+(async () => {
+const { mergeCategorySections } =
+  await import(pathToFileURL(resolve('scripts/changelog-fragments.mjs')).href);
 const clPath = 'CHANGELOG.md';
 let txt = fs.readFileSync(clPath, 'utf8');
 const assembled        = process.env.ASSEMBLED_FRAGS || '';
@@ -362,8 +367,11 @@ if (legacyHasBullets) {
 //   legacyBody (if any) first, then assembled fragments (if any).
 //   Parts are joined with a blank line; the whole block ends with one newline
 //   so the replacement string can append \n\n before the next ## [ heading.
-const bodyParts = [legacyBody, assembled].filter(Boolean);
-const sectionBody = bodyParts.length ? bodyParts.join('\n\n') + '\n' : '';
+// Merge the legacy [Unreleased] body with the assembled fragment block and
+// collapse any duplicate category headers (### Fixed appearing twice, etc.) —
+// the bug that hit the 1.7.0 release when both sources coexisted.
+const combined = [legacyBody, assembled].filter(Boolean).join('\n\n');
+const sectionBody = combined ? mergeCategorySections(combined) + '\n' : '';
 
 txt = txt.replace(
   sectionRe,
@@ -380,6 +388,7 @@ if (!new RegExp('^## \\\\[' + escapedVer + '\\\\]', 'm').test(txt)) {
 }
 
 fs.writeFileSync(clPath, txt);
+})().catch((e) => { process.stderr.write(String((e && e.stack) || e) + '\n'); process.exit(1); });
 "
 
 # Delete consumed fragment files (staged by git rm — picked up by the commit

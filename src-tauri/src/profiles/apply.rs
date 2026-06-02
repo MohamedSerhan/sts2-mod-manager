@@ -25,7 +25,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::mods::{scan_disabled_mods, scan_mods};
+use crate::mods::{merge_active_disabled_mods, scan_disabled_mods, scan_mods};
 
 use super::crud::{load_profile, mod_identity_keys, sanitize_filename, save_profile, version_is_wildcard};
 use super::membership::sync_profile_load_order_to_settings;
@@ -105,8 +105,8 @@ fn snapshot_current_inner(
     config_path: Option<&Path>,
     game_version_for_filter: Option<&str>,
 ) -> Result<Profile> {
-    let enabled_mods = scan_mods(mods_path);
-    let disabled_mods = scan_disabled_mods(disabled_path);
+    let all_mods =
+        merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
     let now = Utc::now();
 
     // Bug #21 mirror: when this snapshot represents an explicit user
@@ -235,12 +235,12 @@ fn snapshot_current_inner(
         }
     };
 
-    // Add enabled mods
-    for m in enabled_mods {
+    for m in all_mods {
         if is_incompatible(&m) {
             log::info!(
-                "Snapshot '{}': filtering enabled mod '{}' — needs game v{}, user has v{}",
+                "Snapshot '{}': filtering {} mod '{}' — needs game v{}, user has v{}",
                 name,
+                if m.enabled { "enabled" } else { "disabled" },
                 m.name,
                 m.min_game_version.as_deref().unwrap_or("?"),
                 game_version_for_filter.unwrap_or("?"),
@@ -248,23 +248,8 @@ fn snapshot_current_inner(
             filtered_incompatible += 1;
             continue;
         }
-        profile_mods.push(build_profile_mod(m, true));
-    }
-
-    // Add disabled mods
-    for m in disabled_mods {
-        if is_incompatible(&m) {
-            log::info!(
-                "Snapshot '{}': filtering disabled mod '{}' — needs game v{}, user has v{}",
-                name,
-                m.name,
-                m.min_game_version.as_deref().unwrap_or("?"),
-                game_version_for_filter.unwrap_or("?"),
-            );
-            filtered_incompatible += 1;
-            continue;
-        }
-        profile_mods.push(build_profile_mod(m, false));
+        let enabled = m.enabled;
+        profile_mods.push(build_profile_mod(m, enabled));
     }
 
     if filtered_incompatible > 0 {
@@ -1004,6 +989,52 @@ mod snapshot_metadata_tests {
         .unwrap();
 
         assert_eq!(snapshot.created_by, None);
+    }
+
+    /// Regression test for issue #107: a mod whose folder appears in BOTH the
+    /// active and disabled directories must be included exactly once in the
+    /// snapshot, not twice.
+    #[test]
+    fn snapshot_deduplicates_mod_in_both_active_and_disabled_folders() {
+        let game_tmp = tempfile::tempdir().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let mods_path = game_tmp.path().join("mods");
+        let disabled_path = game_tmp.path().join("mods_disabled");
+        let profiles_path = config_tmp.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        // Write the same mod manifest in both active and disabled directories
+        // (torn state from interrupted enable/disable operation).
+        let manifest = br#"{"name":"AeonglessFem","version":"1.5"}"#;
+        let active_dir = mods_path.join("AeonglessFem");
+        fs::create_dir_all(&active_dir).unwrap();
+        fs::write(active_dir.join("AeonglessFem.json"), manifest).unwrap();
+
+        let disabled_dir = disabled_path.join("AeonglessFem");
+        fs::create_dir_all(&disabled_dir).unwrap();
+        fs::write(disabled_dir.join("AeonglessFem.json"), manifest).unwrap();
+
+        let snapshot = snapshot_current_with_paths(
+            "Test Pack",
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            snapshot.mods.len(),
+            1,
+            "mod in both active and disabled folders must appear exactly once in the snapshot"
+        );
+        assert!(
+            snapshot.mods[0].enabled,
+            "active copy should be preferred over disabled copy"
+        );
     }
 }
 

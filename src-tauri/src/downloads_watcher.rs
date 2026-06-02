@@ -314,7 +314,13 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                 // to the manifest version if Nexus isn't available.
                                 let version_to_store_for_bundle;
                                 {
-                                    let nexus_ver = fetch_nexus_version_blocking(&mod_info.name, &config_path, &state);
+                                    let nexus_ver = fetch_nexus_version_blocking(
+                                        &mod_info.name,
+                                        mod_info.folder_name.as_deref(),
+                                        mod_info.mod_id.as_deref(),
+                                        &config_path,
+                                        &state,
+                                    );
                                     let version_to_store = nexus_ver
                                         .unwrap_or_else(|| mod_info.version.clone());
                                     version_to_store_for_bundle = version_to_store.clone();
@@ -759,11 +765,17 @@ fn remove_existing_mod_files(
 /// matches the local mod's flavor (currently: "lite" detection).
 fn fetch_nexus_version_blocking(
     mod_name: &str,
+    folder_name: Option<&str>,
+    mod_id_key: Option<&str>,
     config_path: &Path,
     state: &AppState,
 ) -> Option<String> {
     let db = load_sources(config_path);
-    let entry = db.mods.get(mod_name)?;
+    // Folder-first lookup (matching enrich/audit/pin): a bundle's source entry is
+    // keyed by its container folder, not its display name, so a name-only
+    // `db.mods.get(mod_name)` misses it — and the caller then falls back to a
+    // member manifest version (e.g. "0.1.31" instead of the Nexus file "2.1").
+    let entry = crate::mod_sources::lookup_entry(&db.mods, folder_name, mod_name, mod_id_key)?;
     let domain = entry.nexus_game_domain.as_ref()?;
     let mod_id = entry.nexus_mod_id?;
 

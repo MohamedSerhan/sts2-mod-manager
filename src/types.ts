@@ -238,6 +238,18 @@ export interface AutoDetectResult {
    *  Surfaced so the modal can show "X already linked — nothing to detect"
    *  instead of three confusing zero badges. */
   skipped_already_linked?: number;
+  /** true when GitHub's search quota was exhausted mid-run.
+   *  When true, `not_checked` contains mods that were NOT searched —
+   *  they must NOT be shown as "no candidates". */
+  rate_limited?: boolean;
+  /** Unix timestamp (seconds) when the GitHub search quota resets.
+   *  Only meaningful when rate_limited is true. */
+  rate_limit_reset_at?: number | null;
+  /** Mods whose search was abandoned due to rate-limiting.
+   *  Distinct from `unmatched` — these weren't searched, not "no match". */
+  not_checked?: string[];
+  /** Whether an authenticated GitHub token was used for this run. */
+  authenticated?: boolean;
 }
 
 export interface AutoDetectMatch {

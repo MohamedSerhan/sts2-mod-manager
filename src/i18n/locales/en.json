@@ -660,7 +660,12 @@
     "skippedAlreadyLinked_one": "{{count}} mod skipped — already linked.",
     "skippedAlreadyLinked_other": "{{count}} mods skipped — already linked.",
     "applyingMatches_one": "Apply {{count}} match",
-    "applyingMatches_other": "Apply {{count}} matches"
+    "applyingMatches_other": "Apply {{count}} matches",
+    "notChecked": "not checked",
+    "notCheckedLabel": "not checked — search was rate-limited",
+    "rateLimitedBanner": "GitHub rate-limited the search — wait about {{minutes}} minute(s) and run again. Add a GitHub token in Settings to get a higher limit.",
+    "rateLimitedBanner_auth": "GitHub rate-limited the search (authenticated, 30 req/min). Wait about {{minutes}} minute(s) and run again.",
+    "rateLimitedBanner_unauth": "GitHub rate-limited the search — add a GitHub token in Settings (30 req/min vs 10/min) and run again, or wait about {{minutes}} minute(s)."
   },
   "browseDetail": {
     "github": "GitHub",

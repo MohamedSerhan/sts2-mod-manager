@@ -660,7 +660,12 @@
     "skippedAlreadyLinked_one": "已跳过 {{count}} 个模组—已关联。",
     "skippedAlreadyLinked_other": "已跳过 {{count}} 个模组—已关联。",
     "applyingMatches_one": "应用 {{count}} 个匹配",
-    "applyingMatches_other": "应用 {{count}} 个匹配"
+    "applyingMatches_other": "应用 {{count}} 个匹配",
+    "notChecked": "未检查",
+    "notCheckedLabel": "未检查 — 搜索被限速",
+    "rateLimitedBanner": "GitHub 对搜索进行了限速 — 请等待约 {{minutes}} 分钟后再试。在设置中添加 GitHub 令牌可提高限制。",
+    "rateLimitedBanner_auth": "GitHub 对搜索进行了限速（已认证，30 次/分钟）。请等待约 {{minutes}} 分钟后再试。",
+    "rateLimitedBanner_unauth": "GitHub 对搜索进行了限速 — 在设置中添加 GitHub 令牌（30 次/分钟，而非 10 次/分钟）后再试，或等待约 {{minutes}} 分钟。"
   },
   "browseDetail": {
     "github": "GitHub",

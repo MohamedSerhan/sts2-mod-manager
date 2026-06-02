@@ -7,7 +7,7 @@
  */
 import { useState } from 'react';
 import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { ModMultiSelect, type ModMultiSelectLabels } from './ModMultiSelect';
@@ -171,6 +171,37 @@ describe('<ModMultiSelect> selected peek', () => {
     const peek = screen.getByTestId('mod-multiselect-selected-peek');
     expect(peek).toHaveTextContent(/no mods selected/i);
     expect(peek).not.toHaveTextContent('Alpha');
+  });
+
+  it('shows both items when two mods share the same display_name but have different folder_names', async () => {
+    // Regression: with the old key={name} both <li>s had key="Dup", React
+    // silently dropped the second one and only one "Dup" would render.
+    // Now key={folder_name} is stable and unique, so both items appear.
+    const user = userEvent.setup();
+    const mods = [
+      modInfo({ name: 'Dup', display_name: 'Dup', folder_name: 'a' }),
+      modInfo({ name: 'Dup', display_name: 'Dup', folder_name: 'b' }),
+    ];
+
+    function DupHarness() {
+      const [selected, setSelected] = useState<Set<string>>(new Set(['a', 'b']));
+      return (
+        <ModMultiSelect mods={mods} selected={selected} onChange={setSelected} labels={labels} />
+      );
+    }
+
+    render(
+      <AllProviders>
+        <DupHarness />
+      </AllProviders>,
+    );
+
+    // Open the peek.
+    await user.click(screen.getByRole('button', { name: /Selected 2/i }));
+
+    const peek = screen.getByTestId('mod-multiselect-selected-peek');
+    // Both mods must appear — duplicate display names must not be silently dropped.
+    expect(within(peek).getAllByText('Dup')).toHaveLength(2);
   });
 });
 

@@ -75,13 +75,15 @@ export function ModMultiSelect({ mods, selected, onChange, labels }: ModMultiSel
   }, [mods, search, sort]);
 
   // All selected mods' display names — independent of search/sort/paging so the
-  // peek shows every selected mod, not just the visible page.
+  // peek shows every selected mod, not just the visible page. Keyed by
+  // folder_name (stable unique id) so two mods with the same display_name
+  // both appear without React silently dropping the duplicate key.
   const selectedNames = useMemo(
     () =>
       mods
         .filter((m) => selected.has(m.folder_name ?? m.name))
-        .map((m) => m.display_name?.trim() || m.name)
-        .sort((a, b) => a.localeCompare(b)),
+        .map((m) => ({ key: m.folder_name ?? m.name, label: m.display_name?.trim() || m.name }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
     [mods, selected],
   );
 
@@ -171,8 +173,8 @@ export function ModMultiSelect({ mods, selected, onChange, labels }: ModMultiSel
             <span className="gf-create-wizard-empty">{t('createModpack.step2NoneSelected')}</span>
           ) : (
             <ul>
-              {selectedNames.map((n) => (
-                <li key={n}>{n}</li>
+              {selectedNames.map(({ key, label }) => (
+                <li key={key}>{label}</li>
               ))}
             </ul>
           )}

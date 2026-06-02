@@ -532,7 +532,7 @@ function HealthRow({ label, mods, idKey }: { label: string; mods: string[]; idKe
       </button>
       {open && (
         <ul id={listId} className="gf-create-wizard-health-mods">
-          {mods.map((name) => <li key={name}>{name}</li>)}
+          {mods.map((name, i) => <li key={`${idKey}-${name}-${i}`}>{name}</li>)}
         </ul>
       )}
     </li>

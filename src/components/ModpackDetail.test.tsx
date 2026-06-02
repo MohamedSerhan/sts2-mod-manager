@@ -151,7 +151,7 @@ describe('<ModpackDetail>', () => {
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Back to modpacks/i })).toBeInTheDocument();
     // Both the header CTA and the inactive-hint have a "Switch to" button for a non-active pack.
-    expect(screen.getAllByRole('button', { name: /Switch to/i }).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByRole('button', { name: /Switch to/i })).toHaveLength(2);
   });
 
   it('omits the Switch button when the modpack is already active', async () => {

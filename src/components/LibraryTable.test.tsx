@@ -1212,9 +1212,12 @@ describe('<LibraryTable modpackName={null}>', () => {
       render(<Wrap modpackName={null} modInfoByKey={modInfoByKey} pageSize={200} />);
       const sortSelect = await screen.findByLabelText(/sort/i) as HTMLSelectElement;
       fireEvent.change(sortSelect, { target: { value: 'tagAsc' } });
-      // First rendered row is a tagged one (alpha sorts before untagged).
-      const titles = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent);
-      expect(titles[0]).toMatch(/^Mod\d{3}$/);
+      // Odd-indexed mods are tagged ['alpha']; even-indexed are untagged. tagAsc → all tagged first.
+      const titles = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent ?? '');
+      const suffix = (tt: string) => Number(tt.replace('Mod', ''));
+      expect(titles).toHaveLength(100);
+      expect(titles.slice(0, 50).every((tt) => suffix(tt) % 2 === 1)).toBe(true);   // first 50 are the tagged (odd) mods
+      expect(titles.slice(50).every((tt) => suffix(tt) % 2 === 0)).toBe(true);      // last 50 are the untagged (even) mods
     });
   });
 

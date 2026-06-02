@@ -213,11 +213,11 @@
   --danger-edge2:       oklch(0.55 0.20 25);
   --danger-deep:        oklch(0.54 0.16 25);
   --hero-fill-warm:     oklch(0.88 0.05 40); /* GitHub hero gradient warm stop */
-  --danger-fill-deep:   oklch(0.55 0.18 25);
+  --danger-fill-deep:   oklch(0.48 0.18 25); /* deeper than --danger */
   --danger-line-strong: oklch(0.55 0.20 25 / 0.7);
   /* success / green ramp */
   --ok-bright:          oklch(0.52 0.14 160);
-  --ok-deep:            oklch(0.55 0.12 160);
+  --ok-deep:            oklch(0.48 0.12 160); /* deeper than --ok-bright */
   --green-edge:         oklch(0.55 0.15 145);
   --green-line:         oklch(0.52 0.15 145 / 0.7);
   /* info / blue ramp (ink/text flip dark) */
@@ -245,7 +245,7 @@
   --blue-hover:         oklch(0.940 0.025 250);
   --blue-hover2:        oklch(0.930 0.030 250);
   --blue-drag:          oklch(0.920 0.035 250);
-  --blue-line:          oklch(0.620 0.100 250);
+  --blue-line:          oklch(0.620 0.060 250);
   /* light wells / panel scrims (semi-transparent overlays go light) */
   --panel-deep:         oklch(0.920 0.010 270);
   --well-base:          oklch(0.910 0.010 270);

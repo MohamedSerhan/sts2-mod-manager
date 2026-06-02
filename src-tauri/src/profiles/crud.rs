@@ -141,6 +141,60 @@ pub fn delete_profile(name: &str, profiles_path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Rename a profile: move the `.json` (and the `.share` sidecar, preserving
+/// its bytes so the share code survives) from `old` to `new`. The remote
+/// manifest in the curator's repo is keyed by the stable share CODE, not the
+/// name, so a local rename never orphans a shared pack — provided we MOVE the
+/// `.share` rather than delete+recreate it.
+pub fn rename_profile(old: &str, new: &str, profiles_path: &Path) -> Result<Profile> {
+    let new_trimmed = new.trim();
+    if new_trimmed.is_empty() {
+        return Err(AppError::InvalidProfile("Name can't be empty".into()));
+    }
+    let mut profile = load_profile(old, profiles_path)?; // errors if old missing
+
+    // Collision: a DIFFERENT profile already named `new`. (A no-op rename to the
+    // same on-disk file is allowed.)
+    let old_json = profiles_path.join(format!("{}.json", sanitize_filename(old)));
+    let new_json = profiles_path.join(format!("{}.json", sanitize_filename(new_trimmed)));
+    if new_json.exists() && new_json != old_json {
+        return Err(AppError::InvalidProfile(format!(
+            "A modpack named '{}' already exists",
+            new_trimmed
+        )));
+    }
+
+    // Move the .share sidecar (raw old → raw new), mirroring delete_profile's
+    // raw+sanitized lookup. Preserve bytes verbatim so the share code stays.
+    let share_candidates = [
+        profiles_path.join(format!("{}.share", old)),
+        profiles_path.join(format!("{}.share", sanitize_filename(old))),
+    ];
+    if let Some(src) = share_candidates.iter().find(|p| p.exists()) {
+        let bytes = fs::read(src)?;
+        crate::fs_safety::atomic_write(
+            &profiles_path.join(format!("{}.share", new_trimmed)),
+            &bytes,
+        )?;
+        for p in &share_candidates {
+            if p.exists() && p != &profiles_path.join(format!("{}.share", new_trimmed)) {
+                let _ = fs::remove_file(p);
+            }
+        }
+    }
+
+    profile.name = new_trimmed.to_string();
+    profile.updated_at = chrono::Utc::now();
+    save_profile(&profile, profiles_path)?;
+
+    // Remove the stale .json only if the sanitized filename actually changed
+    // (e.g. "Pack" → "pack" map to the same file on a case-insensitive FS).
+    if old_json.exists() && old_json != new_json {
+        fs::remove_file(&old_json)?;
+    }
+    Ok(profile)
+}
+
 /// Export a profile as a JSON string.
 pub fn export_profile(profile: &Profile) -> String {
     serde_json::to_string_pretty(profile).unwrap_or_else(|_| "{}".to_string())
@@ -711,5 +765,80 @@ mod edit_lock_tests {
         .unwrap();
         assert!(profile_is_owned("mods (copy)", dir));
         assert!(!profile_is_edit_locked("mods (copy)", dir, dir));
+    }
+}
+
+#[cfg(test)]
+mod rename_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn sample(name: &str) -> Profile {
+        Profile {
+            name: name.into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+        }
+    }
+
+    #[test]
+    fn renames_json_and_returns_renamed_profile() {
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path();
+        save_profile(&sample("Old Pack"), dir).unwrap();
+
+        let renamed = rename_profile("Old Pack", "New Pack", dir).unwrap();
+        assert_eq!(renamed.name, "New Pack");
+        assert!(load_profile("New Pack", dir).is_ok(), "new json present");
+        assert!(load_profile("Old Pack", dir).is_err(), "old json gone");
+    }
+
+    #[test]
+    fn moves_share_sidecar_preserving_bytes() {
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path();
+        save_profile(&sample("Old Pack"), dir).unwrap();
+        // .share is written under the RAW name by the share path.
+        let share_body = r#"{"code":"AA5A-315D-61AE","owner":"me","file_sha":"abc","share_format_version":3}"#;
+        std::fs::write(dir.join("Old Pack.share"), share_body).unwrap();
+
+        rename_profile("Old Pack", "New Pack", dir).unwrap();
+
+        assert!(!dir.join("Old Pack.share").exists(), "old share moved away");
+        let moved = std::fs::read_to_string(dir.join("New Pack.share")).unwrap();
+        assert_eq!(moved, share_body, "share code preserved verbatim");
+    }
+
+    #[test]
+    fn rejects_collision_with_a_different_existing_profile() {
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path();
+        save_profile(&sample("Old Pack"), dir).unwrap();
+        save_profile(&sample("Taken"), dir).unwrap();
+        assert!(rename_profile("Old Pack", "Taken", dir).is_err());
+        // Original still intact after a rejected rename.
+        assert!(load_profile("Old Pack", dir).is_ok());
+    }
+
+    #[test]
+    fn rejects_empty_new_name() {
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path();
+        save_profile(&sample("Old Pack"), dir).unwrap();
+        assert!(rename_profile("Old Pack", "   ", dir).is_err());
+    }
+
+    #[test]
+    fn no_op_rename_to_same_name_succeeds() {
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path();
+        save_profile(&sample("Same"), dir).unwrap();
+        let r = rename_profile("Same", "Same", dir).unwrap();
+        assert_eq!(r.name, "Same");
+        assert!(load_profile("Same", dir).is_ok());
     }
 }

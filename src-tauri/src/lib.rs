@@ -329,6 +329,7 @@ pub fn run() {
             profiles::create_profile,
             profiles::delete_profile_cmd,
             profiles::duplicate_profile,
+            profiles::rename_profile,
             profiles::switch_profile,
             profiles::repair_profile,
             profiles::snapshot_profile,

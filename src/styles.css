@@ -2642,19 +2642,23 @@ body {
 .gf-help.warn { color: var(--amber-ink-2); }
 .gf-help.muted { color: var(--ink-mute); }
 
-.gf-language-select {
+.gf-language-select,
+.gf-theme-select {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 5px;
   max-width: 220px;
 }
-.gf-language-select .gf-field-label { margin-bottom: 0; }
-.gf-language-select select { min-width: 180px; }
+.gf-language-select .gf-field-label,
+.gf-theme-select .gf-field-label { margin-bottom: 0; }
+.gf-language-select select,
+.gf-theme-select select { min-width: 180px; }
 /* Native <option> elements inherit unpredictable system colors on
    Windows/Linux against the dark panel background — the dropdown
    list rendered nearly invisible. Force readable contrast. */
-.gf-language-select select option {
+.gf-language-select select option,
+.gf-theme-select select option {
   background-color: var(--indigo-panel);
   color: var(--ink);
 }

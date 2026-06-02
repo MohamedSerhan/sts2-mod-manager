@@ -20,7 +20,7 @@ export function ThemeSelect() {
   }
 
   return (
-    <div className="gf-language-select">
+    <div className="gf-theme-select">
       <label htmlFor={id} className="gf-field-label">
         {t('settings.theme.label')}
       </label>

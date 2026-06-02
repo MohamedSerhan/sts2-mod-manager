@@ -170,7 +170,7 @@ pub fn load_sources(config_path: &Path) -> ModSourcesDb {
 pub fn save_sources(db: &ModSourcesDb, config_path: &Path) -> Result<()> {
     let path = sources_path(config_path);
     let json = serde_json::to_string_pretty(db)?;
-    fs::write(&path, json)?;
+    crate::fs_safety::atomic_write(&path, json.as_bytes())?;
     Ok(())
 }
 

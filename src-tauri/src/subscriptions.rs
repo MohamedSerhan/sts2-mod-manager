@@ -125,7 +125,7 @@ pub fn load_subscriptions(config_path: &Path) -> SubscriptionsDb {
 pub fn save_subscriptions(db: &SubscriptionsDb, config_path: &Path) -> Result<()> {
     let path = subs_path(config_path);
     let json = serde_json::to_string_pretty(db)?;
-    fs::write(&path, json)?;
+    crate::fs_safety::atomic_write(&path, json.as_bytes())?;
     Ok(())
 }
 

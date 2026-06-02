@@ -85,11 +85,12 @@ pub fn list_profiles(profiles_path: &Path) -> Vec<Profile> {
 
 /// Save a profile to disk.
 pub fn save_profile(profile: &Profile, profiles_path: &Path) -> Result<()> {
-    let _ = fs::create_dir_all(profiles_path);
     let file_name = sanitize_filename(&profile.name);
     let path = profiles_path.join(format!("{}.json", file_name));
     let json = serde_json::to_string_pretty(profile)?;
-    fs::write(&path, json)?;
+    // atomic_write creates the parent dir (propagating any error, unlike the
+    // old silent `let _ = create_dir_all`) and renames into place.
+    crate::fs_safety::atomic_write(&path, json.as_bytes())?;
     Ok(())
 }
 

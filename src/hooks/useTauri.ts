@@ -416,8 +416,8 @@ export async function unpinMod(modName: string, folderName: string | null = null
   return invoke('unpin_mod', { modName, folderName });
 }
 
-export async function autoDetectSources(): Promise<AutoDetectResult> {
-  return invoke('auto_detect_sources');
+export async function autoDetectSources(onlyMod?: string): Promise<AutoDetectResult> {
+  return invoke('auto_detect_sources', { onlyMod });
 }
 
 export async function findGithubFromNexus(

@@ -1159,6 +1159,7 @@ mod share_orchestration_tests {
             enabled: true,
             bundle_url: None,
             bundle_sha256: None,
+            bundle_members: vec![],
         }
     }
 
@@ -1504,6 +1505,7 @@ mod share_orchestration_tests {
                 enabled: true,
                 bundle_url: None,
                 bundle_sha256: None,
+                bundle_members: vec![],
             }],
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
@@ -1639,6 +1641,7 @@ mod share_orchestration_tests {
                 enabled: true,
                 bundle_url: None,
                 bundle_sha256: None,
+                bundle_members: vec![],
             }],
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
@@ -1711,5 +1714,184 @@ mod share_orchestration_tests {
         );
 
         std::env::remove_var("STS2_GITHUB_RELEASES_BASE");
+    }
+}
+
+#[cfg(test)]
+mod bundle_share_roundtrip_tests {
+    //! Share round-trip for a bundle: zip a sidecar-tagged container with
+    //! two member mods, extract into a fresh mods dir, scan → verify the
+    //! result is ONE bundle entry whose bundle_members lists both members
+    //! and whose files include the sidecar.
+    //!
+    //! Does NOT touch GitHub (no wiremock needed). We drive
+    //! `zip_profile_mod_files` + `zip_entry_outpath` (the same helpers
+    //! the real share path uses) to prove the sidecar survives the
+    //! zip → extract round-trip.
+
+    use super::upload::{zip_entry_outpath, zip_profile_mod_files};
+    use crate::mods::bundle::{write_sidecar, BundleSidecar, SIDECAR_FILENAME};
+    use crate::mods::scan_mods;
+
+    /// Build a 2-member bundle container in `mods_path`:
+    ///
+    /// ```text
+    /// mods/
+    ///   PackContainer/
+    ///     .sts2mm-bundle.json   (sidecar, display_name = "My Pack")
+    ///     CoreMod/
+    ///       CoreMod.json
+    ///       CoreMod.dll
+    ///     ArtMod/
+    ///       ArtMod.json
+    ///       ArtMod.dll
+    /// ```
+    fn build_bundle_on_disk(mods_path: &std::path::Path) {
+        let container = mods_path.join("PackContainer");
+        std::fs::create_dir_all(&container).unwrap();
+
+        // Sidecar
+        write_sidecar(
+            &container,
+            &BundleSidecar {
+                display_name: "My Pack".into(),
+                installed_version: Some("2.0.0".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        // Member 1: CoreMod
+        let core = container.join("CoreMod");
+        std::fs::create_dir_all(&core).unwrap();
+        std::fs::write(
+            core.join("CoreMod.json"),
+            br#"{"id":"CoreMod","name":"Core Mod","version":"2.0.0"}"#,
+        )
+        .unwrap();
+        std::fs::write(core.join("CoreMod.dll"), b"core-dll").unwrap();
+
+        // Member 2: ArtMod
+        let art = container.join("ArtMod");
+        std::fs::create_dir_all(&art).unwrap();
+        std::fs::write(
+            art.join("ArtMod.json"),
+            br#"{"id":"ArtMod","name":"Art Mod","version":"2.0.0"}"#,
+        )
+        .unwrap();
+        std::fs::write(art.join("ArtMod.dll"), b"art-dll").unwrap();
+    }
+
+    #[test]
+    fn shared_bundle_reconstructs_as_bundle_for_friend() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mods_path = tmpdir.path().join("mods");
+        std::fs::create_dir_all(&mods_path).unwrap();
+
+        // Install the bundle on the curator's side.
+        build_bundle_on_disk(&mods_path);
+
+        // Scan to get the bundle ModInfo.
+        let installed = scan_mods(&mods_path);
+        let bundle = installed
+            .iter()
+            .find(|m| m.folder_name.as_deref() == Some("PackContainer"))
+            .expect("scanner must find the bundle container as one ModInfo");
+
+        assert!(
+            !bundle.bundle_members.is_empty(),
+            "scan must populate bundle_members for the container"
+        );
+        assert!(
+            bundle.files.iter().any(|f| f.contains(SIDECAR_FILENAME)),
+            "bundle files must include the sidecar: {:?}",
+            bundle.files
+        );
+
+        // Build a ProfileMod from the installed ModInfo.
+        // This mirrors what profile_mod_from_installed now does: it copies
+        // bundle_members from the installed ModInfo into the ProfileMod so
+        // the shared manifest carries member info.
+        let pm = crate::profiles::ProfileMod {
+            name: bundle.name.clone(),
+            version: bundle.version.clone(),
+            source: bundle.source.clone(),
+            hash: bundle.hash.clone(),
+            files: bundle.files.clone(),
+            folder_name: bundle.folder_name.clone(),
+            mod_id: bundle.mod_id.clone(),
+            enabled: bundle.enabled,
+            bundle_url: None,
+            bundle_sha256: None,
+            bundle_members: bundle.bundle_members.clone(),
+        };
+        assert_eq!(
+            pm.bundle_members, bundle.bundle_members,
+            "ProfileMod must carry bundle_members from the installed ModInfo"
+        );
+
+        // Zip the bundle (curator side — mirrors share_profile_impl).
+        let disabled_path = tmpdir.path().join("mods_disabled");
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        let zip_data = zip_profile_mod_files(&pm, &mods_path, &disabled_path)
+            .expect("zipping the bundle container must succeed");
+
+        // Extract into a FRESH mods dir (friend side — mirrors download_bundle).
+        let friend_mods = tmpdir.path().join("friend_mods");
+        std::fs::create_dir_all(&friend_mods).unwrap();
+        let mut archive =
+            zip::ZipArchive::new(std::io::Cursor::new(zip_data)).expect("valid zip");
+        for i in 0..archive.len() {
+            let mut entry = archive.by_index(i).expect("valid entry");
+            let name = entry.name().to_string();
+            let Some(out_path) = zip_entry_outpath(&friend_mods, &name) else {
+                continue;
+            };
+            if let Some(parent) = out_path.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            if !name.ends_with('/') {
+                let mut file = std::fs::File::create(&out_path).unwrap();
+                std::io::copy(&mut entry, &mut file).unwrap();
+            }
+        }
+
+        // Scan the friend's mods dir — must see exactly ONE bundle entry.
+        let friend_installed = scan_mods(&friend_mods);
+        assert_eq!(
+            friend_installed.len(),
+            1,
+            "friend must see exactly one bundle entry, not multiple: {:?}",
+            friend_installed
+                .iter()
+                .map(|m| &m.name)
+                .collect::<Vec<_>>()
+        );
+
+        let friend_bundle = &friend_installed[0];
+
+        assert!(
+            !friend_bundle.bundle_members.is_empty(),
+            "reconstructed bundle must list bundle_members"
+        );
+        assert_eq!(
+            friend_bundle.bundle_members.len(),
+            2,
+            "must list both member mods, got {:?}",
+            friend_bundle.bundle_members
+        );
+        assert!(
+            friend_bundle
+                .files
+                .iter()
+                .any(|f| f.contains(SIDECAR_FILENAME)),
+            "reconstructed bundle files must include the sidecar: {:?}",
+            friend_bundle.files
+        );
+        assert_eq!(
+            friend_bundle.folder_name.as_deref(),
+            Some("PackContainer"),
+            "folder_name must match the container directory"
+        );
     }
 }

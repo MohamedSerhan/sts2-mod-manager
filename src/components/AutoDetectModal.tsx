@@ -13,9 +13,10 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onApplied: () => void;
+  focusMod?: string | null;
 }
 
-export function AutoDetectModal({ open, onClose, onApplied }: Props) {
+export function AutoDetectModal({ open, onClose, onApplied, focusMod }: Props) {
   const { t } = useTranslation();
   const toast = useToast();
   const [scanning, setScanning] = useState(false);
@@ -28,22 +29,33 @@ export function AutoDetectModal({ open, onClose, onApplied }: Props) {
     setScanning(true);
     setResult(null);
     setSkipped(new Set());
-    autoDetectSources()
+    autoDetectSources(focusMod ?? undefined)
       .then(setResult)
       .catch((e) => toast.error(t('autoDetect.scanFailed', { error: e instanceof Error ? e.message : String(e) })))
       .finally(() => setScanning(false));
-  }, [open]);
+  }, [open, focusMod]);
 
   if (!open) return null;
 
   const matched = result?.matched ?? [];
   const unmatched = result?.unmatched ?? [];
+  const notChecked = result?.not_checked ?? [];
+  const isRateLimited = result?.rate_limited === true;
 
   // Categorise matches by confidence (high / low). Auto-detect returns a
   // single confidence string per match; we treat anything not "high" as
   // ambiguous.
   const high = matched.filter((m) => m.confidence === 'high');
   const ambiguous = matched.filter((m) => m.confidence !== 'high');
+
+  // Compute a human-readable "try again in N minutes" hint when we have a
+  // reset timestamp.
+  const resetMinutes: number | null = (() => {
+    if (!result?.rate_limit_reset_at) return null;
+    const secsAway = result.rate_limit_reset_at - Math.floor(Date.now() / 1000);
+    if (secsAway <= 0) return null;
+    return Math.ceil(secsAway / 60);
+  })();
 
   const willApply = high.filter((m) => !skipped.has(m.mod_name));
 
@@ -84,7 +96,9 @@ export function AutoDetectModal({ open, onClose, onApplied }: Props) {
       <div className="gf-modal" style={{ width: 640 }} onClick={(e) => e.stopPropagation()}>
         <div className="gf-modal-head">
           <div>
-            <div className="gf-modal-title">{t('autoDetect.title')}</div>
+            <div className="gf-modal-title">
+              {focusMod ? t('autoDetect.scopedTitle', { name: focusMod }) : t('autoDetect.title')}
+            </div>
             <div className="gf-modal-sub">
               {t('autoDetect.subtitle')}
             </div>
@@ -102,13 +116,33 @@ export function AutoDetectModal({ open, onClose, onApplied }: Props) {
             </div>
           ) : !result ? (
             <div style={{ padding: 18, color: 'var(--ink-mute)' }}>{t('autoDetect.noResult')}</div>
-          ) : matched.length === 0 && unmatched.length === 0 ? (
+          ) : matched.length === 0 && unmatched.length === 0 && notChecked.length === 0 ? (
             // Nothing scanned. Either there are no mods installed, or every
             // installed mod already has a GitHub or Nexus source attached
             // (auto-detect skips those by design — we don't overwrite a
             // deliberate user choice). Spell that out so the user doesn't
             // see three confusing zero badges with no context.
             <div style={{ padding: 22 }}>
+              {isRateLimited && (
+                <div
+                  role="alert"
+                  style={{
+                    marginBottom: 14,
+                    padding: '10px 14px',
+                    background: 'oklch(0.25 0.08 25 / 0.18)',
+                    border: '1px solid oklch(0.55 0.16 25 / 0.45)',
+                    borderRadius: 6,
+                    fontSize: 12.5,
+                    color: 'oklch(0.82 0.12 25)',
+                    lineHeight: 1.55,
+                  }}
+                >
+                  {t('autoDetect.rateLimitedBanner', {
+                    context: result.authenticated ? 'auth' : 'unauth',
+                    minutes: resetMinutes ?? '?',
+                  })}
+                </div>
+              )}
               {result.skipped_already_linked && result.skipped_already_linked > 0 ? (
                 <>
                   <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', marginBottom: 6 }}>
@@ -131,6 +165,29 @@ export function AutoDetectModal({ open, onClose, onApplied }: Props) {
             </div>
           ) : (
             <>
+              {/* Rate-limited banner — shown prominently above results so the
+                  user understands why some mods show "not checked" instead of
+                  a real result. Must NOT be mistaken for "no candidates". */}
+              {isRateLimited && (
+                <div
+                  role="alert"
+                  style={{
+                    margin: '0 0 10px',
+                    padding: '10px 14px',
+                    background: 'oklch(0.25 0.08 25 / 0.18)',
+                    border: '1px solid oklch(0.55 0.16 25 / 0.45)',
+                    borderRadius: 6,
+                    fontSize: 12.5,
+                    color: 'oklch(0.82 0.12 25)',
+                    lineHeight: 1.55,
+                  }}
+                >
+                  {t('autoDetect.rateLimitedBanner', {
+                    context: result.authenticated ? 'auth' : 'unauth',
+                    minutes: resetMinutes ?? '?',
+                  })}
+                </div>
+              )}
               <div className="gf-detect-stats">
                 <div className="gf-detect-stat ok">
                   {high.length}
@@ -144,6 +201,12 @@ export function AutoDetectModal({ open, onClose, onApplied }: Props) {
                   {unmatched.length}
                   <span>{t('autoDetect.noMatch')}</span>
                 </div>
+                {notChecked.length > 0 && (
+                  <div className="gf-detect-stat" style={{ color: 'var(--ink-dim)' }}>
+                    {notChecked.length}
+                    <span>{t('autoDetect.notChecked')}</span>
+                  </div>
+                )}
               </div>
               {result.skipped_already_linked && result.skipped_already_linked > 0 && (
                 <div style={{ marginTop: 10, fontSize: 12, color: 'var(--ink-dim)' }}>
@@ -184,6 +247,16 @@ export function AutoDetectModal({ open, onClose, onApplied }: Props) {
                     <span className="gf-detect-name">{name}</span>
                     <span className="gf-detect-match">{t('autoDetect.noCandidates')}</span>
                     <span style={{ fontSize: 10.5, color: 'oklch(0.82 0.16 25)' }}>—</span>
+                  </div>
+                ))}
+                {notChecked.map((name) => (
+                  <div key={name} className="gf-detect-row" style={{ opacity: 0.55 }}>
+                    <span className="gf-detect-led" />
+                    <span className="gf-detect-name">{name}</span>
+                    <span className="gf-detect-match" style={{ color: 'var(--ink-dim)', fontStyle: 'italic' }}>
+                      {t('autoDetect.notCheckedLabel')}
+                    </span>
+                    <span style={{ fontSize: 10.5, color: 'var(--ink-dim)' }}>—</span>
                   </div>
                 ))}
               </div>

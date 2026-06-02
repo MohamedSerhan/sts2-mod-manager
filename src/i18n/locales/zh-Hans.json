@@ -660,7 +660,13 @@
     "skippedAlreadyLinked_one": "已跳过 {{count}} 个模组—已关联。",
     "skippedAlreadyLinked_other": "已跳过 {{count}} 个模组—已关联。",
     "applyingMatches_one": "应用 {{count}} 个匹配",
-    "applyingMatches_other": "应用 {{count}} 个匹配"
+    "applyingMatches_other": "应用 {{count}} 个匹配",
+    "notChecked": "未检查",
+    "notCheckedLabel": "未检查 — 搜索被限速",
+    "rateLimitedBanner": "GitHub 对搜索进行了限速 — 请等待约 {{minutes}} 分钟后再试。在设置中添加 GitHub 令牌可提高限制。",
+    "rateLimitedBanner_auth": "GitHub 对搜索进行了限速（已认证，30 次/分钟）。请等待约 {{minutes}} 分钟后再试。",
+    "rateLimitedBanner_unauth": "GitHub 对搜索进行了限速 — 在设置中添加 GitHub 令牌（30 次/分钟，而非 10 次/分钟）后再试，或等待约 {{minutes}} 分钟。",
+    "scopedTitle": "为「{{name}}」自动检测来源"
   },
   "browseDetail": {
     "github": "GitHub",
@@ -971,7 +977,6 @@
     "heroEmptyCta": "打开整合包",
     "heroEmptyBrowse": "浏览整合包",
     "secondary": {
-      "switch": "切换模组包",
       "create": "创建模组包",
       "reviewUpdates": "查看更新（{{count}}）"
     },
@@ -1239,6 +1244,7 @@
     "snoozeUpdate": "跳过此更新",
     "sources": "来源",
     "editSources": "编辑来源…",
+    "autoDetectSourceOne": "自动检测来源",
     "viewOnGitHubKebab": "在 GitHub 上查看",
     "viewOnNexusKebab": "在 Nexus 上查看",
     "findGitHubFromNexus": "从 Nexus 查找 GitHub",
@@ -1276,7 +1282,9 @@
       "quickAddFailed": "快速添加失败：{{error}}",
       "rolledBack": "已将「{{name}}」回滚到 v{{version}}",
       "rollbackFailed": "「{{name}}」回滚失败：{{error}}",
-      "snoozed": "已跳过 {{name}} 的更新提示，直到下个版本"
+      "nexusUpdateOpened": "已在 Nexus 上打开「{{name}}」— 下载更新后将自动安装。",
+      "snoozed": "已跳过 {{name}} 的更新提示，直到下个版本",
+      "autoDetectBundleUnsupported": "合集不支持自动来源检测 — {{name}} 包含多个模组。"
     },
     "allInstalledTitle": "已安装的所有模组",
     "allInstalledSubtitle": "你已安装到本地的所有模组。当前的模组包决定哪些模组会被加载到游戏中。",
@@ -1333,5 +1341,10 @@
     "downloads": "下载",
     "noWindowsBuild": "无更新包 manifest，无法一键切换。",
     "backToRelease": "要回到稳定版应用，只需启动你的正式版 STS2 Mod Manager——它是独立安装、不受影响的。"
+  },
+  "bundle": {
+    "memberCount_one": "{{count}} 个模组",
+    "memberCount_other": "{{count}} 个模组",
+    "membersAria": "{{name}} 中的模组"
   }
 }

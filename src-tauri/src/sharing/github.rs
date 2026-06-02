@@ -2250,6 +2250,7 @@ mod github_api_stress_tests {
                 enabled: true,
                 bundle_url: None,
                 bundle_sha256: None,
+                bundle_members: vec![],
             });
         }
 

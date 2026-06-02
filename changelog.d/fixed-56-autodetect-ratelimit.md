@@ -1,0 +1,1 @@
+Auto-detect sources no longer silently shows "no candidates" for mods when GitHub's search quota runs out mid-scan; a banner now explains the rate-limit and mods that weren't searched are marked "not checked" so you know to run the scan again.

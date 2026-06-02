@@ -1012,6 +1012,33 @@ body {
 .gf-profile-library.is-compact .gf-modrow-meta {
   display: none;
 }
+
+/* ── Bundle row: member-name list ─────────────────────────────────── */
+/* Listed beneath the bundle title in comfortable density.
+   Uses CSS columns so names wrap into side columns when space is tight
+   rather than growing into a single tall list. */
+.gf-bundle-members {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  columns: 2 220px;
+  column-gap: 16px;
+  margin-top: 4px;
+}
+.gf-bundle-member-name {
+  font-size: 11.5px;
+  color: var(--ink-mute);
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  break-inside: avoid;
+}
+/* Compact: member-name list is hidden (title + meta only) */
+.gf-profile-library.is-compact .gf-bundle-members {
+  display: none;
+}
+
 .gf-profile-library-toolbar-actions {
   display: inline-flex;
   align-items: center;
@@ -1354,6 +1381,13 @@ body {
 .gf-btn-danger { color: oklch(0.75 0.13 25); border-color: oklch(0.55 0.16 25 / 0.4); }
 .gf-btn-danger:hover:not(:disabled) { background: oklch(0.55 0.16 25 / 0.15); color: oklch(0.85 0.13 25); }
 
+/* Accent (gold) outline — the library's "Auto-detect sources" shortcut. Same
+   shape as .gf-btn-3 (ghost) with a gold border/text so it draws the eye
+   without the weight of the filled-yellow primary action. Defined after
+   .gf-btn-3 so its border/colour win at equal specificity. */
+.gf-btn-accent { color: var(--gold-2); border-color: oklch(0.83 0.13 80 / 0.5); }
+.gf-btn-accent:hover:not(:disabled) { background: oklch(0.83 0.13 80 / 0.12); color: var(--gold); }
+
 /* ── Card / panel ─────────────────────────────────────────────────── */
 .gf-card {
   background: var(--indigo-panel);
@@ -1421,9 +1455,13 @@ body {
 .gf-page-sub { font-size: 13px; color: var(--ink-mute); margin-top: 4px; }
 /* Action cluster. min-width:0 (and no flex-shrink:0) lets it shrink below
    its single-row content width so the inner flex-wrap actually kicks in
-   instead of overflowing the viewport; flex-end keeps the wrapped rows
-   right-aligned, matching their resting position on a wide screen. */
-.gf-page-actions { display: flex; gap: 8px; flex-wrap: wrap; min-width: 0; justify-content: flex-end; }
+   instead of overflowing the viewport. margin-left:auto keeps the whole
+   cluster right-aligned whether it sits inline with the title OR wraps to
+   its own line below it; flex-end only right-aligns the buttons WITHIN the
+   cluster, not the cluster's position on a wrapped line — which is why a
+   wider button set (e.g. after an audit adds "Update N mods") used to jump
+   to the left. */
+.gf-page-actions { display: flex; gap: 8px; flex-wrap: wrap; min-width: 0; justify-content: flex-end; margin-left: auto; }
 
 /* ── Tabs ─────────────────────────────────────────────────────────── */
 .gf-tabs {

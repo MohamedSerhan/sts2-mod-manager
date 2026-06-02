@@ -357,6 +357,7 @@ mod reconcile_tests {
             enabled,
             bundle_url: Some(format!("https://example.test/{folder}.zip")),
             bundle_sha256: Some(format!("sha-{folder}")),
+            bundle_members: vec![],
         }
     }
 

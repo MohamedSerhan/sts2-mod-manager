@@ -993,6 +993,75 @@ describe('<LibraryTable modpackName={null}>', () => {
     });
   });
 
+  // ── bundle as normal row (no-focus mode) ─────────────────────────
+  // A bundle is now ONE ModInfo with bundle_members. It appears as a
+  // single library-row, identical to a normal mod, but with the member
+  // list and "N mods" badge rendered inside the row.
+  describe('bundle renders as a normal row', () => {
+    function mkBundleModInfo(): ModInfo {
+      return {
+        name: 'Epic Pack',
+        version: '3.0.0',
+        description: '',
+        enabled: true,
+        files: [],
+        source: null,
+        hash: null,
+        dependencies: [],
+        size_bytes: 0,
+        folder_name: 'EpicPack',
+        mod_id: null,
+        github_url: null,
+        nexus_url: 'https://nexusmods.com/pack/42',
+        pinned: false,
+        bundle_members: ['PackCore', 'PackArt'],
+        tags: [],
+        display_name: null,
+        display_description: null,
+      };
+    }
+
+    it('a bundle ModInfo appears as ONE library-row (not a bundle-row)', async () => {
+      registerInvokeHandler('get_installed_mods', () => [mkBundleModInfo()]);
+      render(<Wrap modpackName={null} />);
+
+      // One library-row for the bundle container
+      const rows = await screen.findAllByTestId('library-row');
+      expect(rows).toHaveLength(1);
+      // No bundle-row (old grouping component is deleted)
+      expect(screen.queryByTestId('bundle-row')).not.toBeInTheDocument();
+    });
+
+    it('bundle row title is the bundle name', async () => {
+      registerInvokeHandler('get_installed_mods', () => [mkBundleModInfo()]);
+      render(<Wrap modpackName={null} />);
+      expect(
+        await screen.findByRole('heading', { name: 'Epic Pack' }),
+      ).toBeInTheDocument();
+    });
+
+    it('bundle row shows member names in comfortable density', async () => {
+      registerInvokeHandler('get_installed_mods', () => [mkBundleModInfo()]);
+      const modInfoByKey = new Map([
+        ['EpicPack', mkBundleModInfo()],
+      ]);
+      render(<Wrap modpackName={null} modInfoByKey={modInfoByKey} />);
+      await screen.findByRole('heading', { name: 'Epic Pack' });
+      expect(screen.getByText('PackCore')).toBeInTheDocument();
+      expect(screen.getByText('PackArt')).toBeInTheDocument();
+    });
+
+    it('bundle row shows the "N mods" badge', async () => {
+      registerInvokeHandler('get_installed_mods', () => [mkBundleModInfo()]);
+      const modInfoByKey = new Map([
+        ['EpicPack', mkBundleModInfo()],
+      ]);
+      render(<Wrap modpackName={null} modInfoByKey={modInfoByKey} />);
+      await screen.findByRole('heading', { name: 'Epic Pack' });
+      expect(screen.getByText(/2 mods/i)).toBeInTheDocument();
+    });
+  });
+
   // ── reloadToken (external re-fetch trigger) ───────────────────────
   it('re-fetches the membership grid when reloadToken changes', async () => {
     registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
@@ -1025,6 +1094,93 @@ describe('<LibraryTable modpackName={null}>', () => {
     await waitFor(() => {
       expect(memberships).toBeGreaterThan(before);
     });
+  });
+
+  // ── Flow-level regression: display_name override survives the full
+  //    LibraryTable pipeline (T14 gap — existing test only covered
+  //    LibraryRow directly; this test covers the mocked-command →
+  //    grid → filteredRows → LibraryRow render path end-to-end for
+  //    BOTH focused mode and no-modpack mode).
+
+  it('[flow] focused mode: display_name from ProfileMembershipMod reaches the row title (regression guard)', async () => {
+    // In focused mode LibraryTable fetches get_profile_memberships which
+    // includes ProfileMembershipMod.display_name enriched by the Rust
+    // enrich_mods_with_sources layer. The grid row is passed whole to
+    // LibraryRow as `row`; display_name must appear as the visible title
+    // and the raw manifest name as the secondary hint only.
+    registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'MyPack' })]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'MyPack', editable: true }],
+      mods: [
+        {
+          name: 'AutoPath',
+          display_name: 'Autooo',
+          version: '1.0.0',
+          folder_name: 'AutoPath',
+          mod_id: 'AutoPath',
+          installed_enabled: true,
+          profiles: [
+            { profile_name: 'MyPack', included: true, enabled: true, editable: true },
+          ],
+        },
+      ],
+    }));
+
+    render(<Wrap modpackName="MyPack" />);
+
+    // The row title (h3.gf-profile-library-title) must show "Autooo".
+    const title = await screen.findByRole('heading', { name: 'Autooo' });
+    expect(title).toBeInTheDocument();
+
+    // "AutoPath" must only appear as the secondary raw-name hint — NOT
+    // as the heading — so the user sees their saved override prominently.
+    const rawHints = screen.getAllByText('AutoPath');
+    // Every instance of "AutoPath" must be a .gf-profile-library-rawname
+    // span, never an h3 heading.
+    for (const el of rawHints) {
+      expect(el.tagName.toLowerCase()).not.toBe('h3');
+      expect(el.closest('h3')).toBeNull();
+    }
+  });
+
+  it('[flow] no-modpack mode: display_name from AppContext mods reaches the row title (regression guard)', async () => {
+    // In no-modpack mode LibraryTable synthesizes the grid from AppContext's
+    // `mods` array (seeded via get_installed_mods). The synthesized row must
+    // carry display_name so LibraryRow renders the user's override.
+    registerInvokeHandler('get_installed_mods', () => [
+      {
+        name: 'AutoPath',
+        display_name: 'Autooo',
+        version: '1.0.0',
+        description: '',
+        enabled: true,
+        files: [],
+        source: null,
+        hash: null,
+        dependencies: [],
+        size_bytes: 0,
+        folder_name: 'AutoPath',
+        mod_id: 'AutoPath',
+        github_url: null,
+        nexus_url: null,
+        pinned: false,
+        min_game_version: null,
+        author: null,
+        tags: [],
+        display_description: null,
+      },
+    ]);
+
+    render(<Wrap modpackName={null} />);
+
+    const title = await screen.findByRole('heading', { name: 'Autooo' });
+    expect(title).toBeInTheDocument();
+
+    const rawHints = screen.getAllByText('AutoPath');
+    for (const el of rawHints) {
+      expect(el.tagName.toLowerCase()).not.toBe('h3');
+      expect(el.closest('h3')).toBeNull();
+    }
   });
 
   it('pins the scroll position when a row mutates, so the user is never yanked to the top', async () => {

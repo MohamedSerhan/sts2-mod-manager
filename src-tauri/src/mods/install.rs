@@ -82,7 +82,7 @@ pub(super) fn extract_rar_to_dir(rar_path: &Path, dest_dir: &Path) -> Result<()>
 /// rar extractions back into install_mod_from_zip so the wrap-folder /
 /// zip-slip / manifest-discovery code only lives in one place.
 ///
-/// Note: skips its own output file (`__sts2mm_repack.zip`) so an in-place
+/// Note: skips its own output file (matched by filename) so an in-place
 /// repack doesn't try to include the partially-written zip in itself —
 /// would otherwise truncate to zero on the first read pass.
 pub(super) fn repack_dir_as_zip(src_dir: &Path, dest_zip: &Path) -> Result<()> {
@@ -133,7 +133,7 @@ pub(super) fn repack_dir_as_zip(src_dir: &Path, dest_zip: &Path) -> Result<()> {
 /// upload id. Nexus filenames look like `MyMod-12345-1234-1599999999.zip`
 /// — we walk backwards stripping `-digits` groups until we find something
 /// that isn't a trailing digit-and-dash run.
-fn strip_nexus_suffix(stem: &str) -> String {
+pub(super) fn strip_nexus_suffix(stem: &str) -> String {
     let bytes = stem.as_bytes();
     let mut cut_pos = stem.len();
 
@@ -255,7 +255,11 @@ fn install_mod_from_archive_unchecked(archive_path: &Path, mods_path: &Path) -> 
                 ))
             })?;
             extract_7z_to_dir(archive_path, staging.path())?;
-            let repack_zip = staging.path().join("__sts2mm_repack.zip");
+            let repack_name = format!(
+                "{}.zip",
+                archive_path.file_stem().unwrap_or_default().to_string_lossy()
+            );
+            let repack_zip = staging.path().join(repack_name);
             repack_dir_as_zip(staging.path(), &repack_zip)?;
             install_mod_from_zip(&repack_zip, mods_path)
         }
@@ -267,7 +271,11 @@ fn install_mod_from_archive_unchecked(archive_path: &Path, mods_path: &Path) -> 
                 ))
             })?;
             extract_rar_to_dir(archive_path, staging.path())?;
-            let repack_zip = staging.path().join("__sts2mm_repack.zip");
+            let repack_name = format!(
+                "{}.zip",
+                archive_path.file_stem().unwrap_or_default().to_string_lossy()
+            );
+            let repack_zip = staging.path().join(repack_name);
             repack_dir_as_zip(staging.path(), &repack_zip)?;
             install_mod_from_zip(&repack_zip, mods_path)
         }
@@ -432,6 +440,14 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
     let has_clean_single_top_dir =
         all_top_dirs.len() == 1 && all_entries.iter().all(|n| n.contains('/'));
 
+    // A "bundle" is an archive where ≥2 distinct top-level member folders
+    // each contain files and every file is inside one of those folders (no
+    // root-level loose files). Such archives get a named container folder
+    // derived from the archive stem rather than the first manifest id.
+    let is_bundle = all_top_dirs.len() >= 2
+        && !all_entries.is_empty()
+        && all_entries.iter().all(|n| n.contains('/'));
+
     let mut extracted_files = Vec::new();
     let mut manifest: Option<ModInfo> = None;
 
@@ -440,6 +456,15 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
     // URL. Sanitize once before it gets joined into a destination path so a
     // malicious manifest with `Name: "../.."` can't redirect extraction.
     let wrap_folder_name = sanitize_path_segment(&wrap_folder_name);
+
+    // For multi-member bundle archives, override the wrap folder name with
+    // the archive-stem-derived container name (sanitized inside
+    // bundle_container_name). For everything else, keep wrap_folder_name.
+    let container_name = if is_bundle {
+        super::bundle::bundle_container_name(zip_path)
+    } else {
+        wrap_folder_name.clone()
+    };
 
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i)?;
@@ -507,7 +532,9 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
         } else if all_entries.len() == 1 {
             name.clone()
         } else {
-            format!("{}/{}", wrap_folder_name, name)
+            // For bundles: container_name = bundle_container_name(zip_path)
+            // For everything else: container_name = wrap_folder_name
+            format!("{}/{}", container_name, name)
         };
 
         let dest_path = mods_path.join(&rel_path);
@@ -538,6 +565,16 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
         if ext == "json" && manifest.is_none() {
             manifest = parse_manifest(&dest_path, mods_path, true);
         }
+    }
+
+    // For bundle archives, write a minimal sidecar into the container folder
+    // so scanners and the UI can identify it as a bundle container.
+    if is_bundle {
+        let dir = mods_path.join(&container_name);
+        let _ = super::bundle::write_sidecar(&dir, &super::bundle::BundleSidecar {
+            display_name: container_name.clone(),
+            ..Default::default()
+        });
     }
 
     let size_bytes = calculate_mod_size(mods_path, &extracted_files);
@@ -572,6 +609,7 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
                 tags: vec![],
                 display_name: None,
                 display_description: None,
+                bundle_members: vec![],
             })
         }
     }
@@ -950,6 +988,89 @@ mod archive_dispatch_tests {
     }
 
     #[test]
+    fn seven_z_bundle_not_named_sts2mm_repack_and_becomes_bundle_container() {
+        // Build a .7z fixture containing TWO mod folders so the install
+        // pipeline treats it as a multi-member bundle. The critical assertions
+        // are:
+        //   1. The top-level container is NOT named `__sts2mm_repack`.
+        //   2. The container is flagged as a bundle (has a sidecar).
+        //   3. Both member subdirectories are present inside the container.
+        //
+        // Implementation note: sevenz_rust2::compress_to_path walks the
+        // given directory and stores its children at the archive root. To
+        // prevent the output .7z from being included in its own archive we
+        // keep the two mod-folder source tree in a SEPARATE tempdir from
+        // the one where the .7z is written.
+        use crate::mods::bundle::is_bundle_container;
+
+        // Content tree: two mod folders side-by-side.
+        let content_tmp = tempfile::tempdir().unwrap();
+
+        let mod_a_dir = content_tmp.path().join("ModA");
+        fs::create_dir_all(&mod_a_dir).unwrap();
+        fs::write(
+            mod_a_dir.join("ModA.json"),
+            br#"{"id":"ModA","name":"Mod A","version":"1.0.0","author":"T","dependencies":[],"has_dll":true,"has_pck":false,"affects_gameplay":false}"#,
+        )
+        .unwrap();
+        fs::write(mod_a_dir.join("ModA.dll"), b"fake-dll-a").unwrap();
+
+        let mod_b_dir = content_tmp.path().join("ModB");
+        fs::create_dir_all(&mod_b_dir).unwrap();
+        fs::write(
+            mod_b_dir.join("ModB.json"),
+            br#"{"id":"ModB","name":"Mod B","version":"2.0.0","author":"T","dependencies":[],"has_dll":true,"has_pck":false,"affects_gameplay":false}"#,
+        )
+        .unwrap();
+        fs::write(mod_b_dir.join("ModB.dll"), b"fake-dll-b").unwrap();
+
+        // Write the .7z to a different tempdir so it is not included in
+        // the archive's own source walk.
+        let output_tmp = tempfile::tempdir().unwrap();
+        let seven_z_path = output_tmp.path().join("DualPack.7z");
+        sevenz_rust2::compress_to_path(content_tmp.path(), &seven_z_path)
+            .expect("compress two-folder fixture to .7z");
+
+        let mods_tmp = tempfile::tempdir().unwrap();
+        install_mod_from_archive(&seven_z_path, mods_tmp.path())
+            .expect("two-folder .7z bundle install must succeed");
+
+        // Exactly one top-level directory in mods/.
+        let tops: Vec<_> = fs::read_dir(mods_tmp.path())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.path().is_dir())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(tops.len(), 1, "expected one container dir, got {tops:?}");
+
+        let container_name = &tops[0];
+
+        // Must NOT be the internal sentinel name.
+        assert_ne!(
+            container_name, "__sts2mm_repack",
+            "container must be named after the original archive stem, not the internal sentinel"
+        );
+
+        // The container must carry a bundle sidecar.
+        let container = mods_tmp.path().join(container_name);
+        assert!(
+            is_bundle_container(&container),
+            "7z bundle container must have a sidecar; container dir: {container_name}"
+        );
+
+        // Both member subdirs must be present.
+        assert!(
+            container.join("ModA").is_dir(),
+            "ModA subdir must be inside the container"
+        );
+        assert!(
+            container.join("ModB").is_dir(),
+            "ModB subdir must be inside the container"
+        );
+    }
+
+    #[test]
     fn install_mod_from_archive_propagates_a_useful_error_for_a_corrupt_rar() {
         // Confirms .rar dispatch routes through the rar extractor and
         // surfaces a real failure (vs panicking) when the file isn't a
@@ -1033,6 +1154,120 @@ mod archive_dispatch_tests {
         assert!(
             fs::read_dir(mods_tmp.path()).unwrap().next().is_none(),
             "failed deep nested-archive install should leave no extracted wrapper folders behind"
+        );
+    }
+
+    #[test]
+    fn multi_member_archive_becomes_one_bundle_container_with_sidecar() {
+        use crate::mods::bundle::{is_bundle_container, read_sidecar};
+        let tmp = tempfile::tempdir().unwrap();
+        let zip = tmp.path().join("Alice Defect Visual Pack-979-2-1.zip");
+        write_zip_file(&zip, vec![
+            ("AliceDefectSkin/AliceDefectSkin.json",
+                br#"{"id":"AliceDefectSkin","name":"Alice Defect Skin","version":"0.1.31"}"#.to_vec()),
+            ("AliceDefectSkin/AliceDefectSkin.dll", b"dll".to_vec()),
+            ("AliceDefectVoiceBridge/mod_manifest.json",
+                br#"{"id":"AliceDefectVoiceBridge","name":"Alice Defect Voice Bridge","version":"1.0.4"}"#.to_vec()),
+            ("AliceDefectVoiceBridge/AliceDefectVoiceBridge.dll", b"dll".to_vec()),
+        ]);
+        let mods = tempfile::tempdir().unwrap();
+        install_mod_from_archive(&zip, mods.path()).expect("multi-member installs");
+        let tops: Vec<_> = fs::read_dir(mods.path()).unwrap().flatten()
+            .filter(|e| e.path().is_dir()).map(|e| e.file_name().to_string_lossy().to_string()).collect();
+        assert_eq!(tops.len(), 1, "one container, got {tops:?}");
+        let container = mods.path().join(&tops[0]);
+        assert!(is_bundle_container(&container), "container has a sidecar");
+        assert!(container.join("AliceDefectSkin").is_dir());
+        assert!(container.join("AliceDefectVoiceBridge").is_dir());
+        let _ = read_sidecar(&container).expect("sidecar parses");
+    }
+
+    #[test]
+    fn single_member_archive_is_not_a_bundle() {
+        use crate::mods::bundle::is_bundle_container;
+        let tmp = tempfile::tempdir().unwrap();
+        let zip = tmp.path().join("Solo.zip");
+        write_zip_file(&zip, vec![
+            ("Solo/Solo.json", br#"{"id":"Solo","name":"Solo","version":"1.0.0"}"#.to_vec()),
+            ("Solo/Solo.dll", b"dll".to_vec()),
+        ]);
+        let mods = tempfile::tempdir().unwrap();
+        install_mod_from_archive(&zip, mods.path()).expect("single installs");
+        assert!(!is_bundle_container(&mods.path().join("Solo")));
+    }
+
+    #[test]
+    fn enrich_sets_link_and_version_on_bundle_container() {
+        use crate::mods::bundle::{bundle_container_name, enrich_bundle_sidecar, read_sidecar};
+
+        // Build a 2-member bundle zip (the same shape used by multi_member_archive_becomes_one_bundle_container_with_sidecar)
+        let tmp = tempfile::tempdir().unwrap();
+        let zip = tmp.path().join("Pretty Pack-979-2-1.zip");
+        write_zip_file(
+            &zip,
+            vec![
+                (
+                    "AliceDefectSkin/AliceDefectSkin.json",
+                    br#"{"id":"AliceDefectSkin","name":"Alice Defect Skin","version":"0.1.31"}"#
+                        .to_vec(),
+                ),
+                ("AliceDefectSkin/AliceDefectSkin.dll", b"dll".to_vec()),
+                (
+                    "AliceDefectVoiceBridge/mod_manifest.json",
+                    br#"{"id":"AliceDefectVoiceBridge","name":"Alice Defect Voice Bridge","version":"1.0.4"}"#
+                        .to_vec(),
+                ),
+                (
+                    "AliceDefectVoiceBridge/AliceDefectVoiceBridge.dll",
+                    b"dll".to_vec(),
+                ),
+            ],
+        );
+
+        let mods = tempfile::tempdir().unwrap();
+        install_mod_from_archive(&zip, mods.path()).expect("bundle installs");
+
+        // Confirm the container exists with a sidecar before enriching.
+        let container = mods.path().join(bundle_container_name(&zip));
+        assert!(
+            crate::mods::bundle::is_bundle_container(&container),
+            "container must have a sidecar after install"
+        );
+
+        // Enrich: should return true for a real bundle container.
+        assert!(enrich_bundle_sidecar(
+            mods.path(),
+            &zip,
+            Some("Pretty Pack"),
+            Some("https://www.nexusmods.com/slaythespire2/mods/979".to_string()),
+            Some("slaythespire2".to_string()),
+            Some(979),
+            Some("2.0".to_string()),
+        ));
+
+        let s = read_sidecar(&container).expect("sidecar must be readable after enrich");
+        assert_eq!(s.display_name, "Pretty Pack");
+        assert_eq!(
+            s.nexus_url.as_deref(),
+            Some("https://www.nexusmods.com/slaythespire2/mods/979")
+        );
+        assert_eq!(s.nexus_game_domain.as_deref(), Some("slaythespire2"));
+        assert_eq!(s.nexus_mod_id, Some(979));
+        assert_eq!(s.installed_version.as_deref(), Some("2.0"));
+
+        // A non-bundle archive path (no container on disk) → returns false.
+        let solo_dir = tempfile::tempdir().unwrap();
+        assert!(
+            !enrich_bundle_sidecar(
+                solo_dir.path(),
+                std::path::Path::new("Nope.zip"),
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
+            "enrich must be a no-op for a path with no bundle container"
         );
     }
 
@@ -1362,6 +1597,7 @@ mod config_snapshot_tests {
             tags: vec![],
             display_name: None,
             display_description: None,
+            bundle_members: vec![],
         };
         let new_folder = mods_path.join("MyMod");
         fs::create_dir_all(&new_folder).unwrap();

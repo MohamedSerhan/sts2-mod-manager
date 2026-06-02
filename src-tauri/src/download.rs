@@ -237,6 +237,165 @@ async fn fetch_one_search(client: &reqwest::Client, q: &str) -> Result<Vec<GitHu
     Ok(search.items)
 }
 
+// ── Rate-limit resilience ────────────────────────────────────────────────────
+
+/// Parsed rate-limit info extracted from GitHub response headers.
+/// Used to decide how long to pause (or whether to abort) before the next
+/// search call in `auto_detect_sources`.
+#[derive(Debug, Clone)]
+pub struct RateLimitInfo {
+    /// Remaining requests in the current window (X-RateLimit-Remaining).
+    pub remaining: u32,
+    /// Unix timestamp when the window resets (X-RateLimit-Reset).
+    /// Also used as the reset time when a 429/403 carries Retry-After.
+    pub reset_at: i64,
+}
+
+impl RateLimitInfo {
+    /// How many seconds until the rate-limit window resets.
+    /// Returns 0 if the window has already passed.
+    pub fn secs_until_reset(&self) -> i64 {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        (self.reset_at - now).max(0)
+    }
+}
+
+/// Outcome of a single search call that distinguishes rate-limiting from
+/// other errors so callers can adapt pacing instead of silently dropping results.
+#[derive(Debug)]
+pub enum SearchOutcome {
+    /// Search succeeded — here are the repos.
+    Ok(Vec<GitHubRepo>),
+    /// GitHub returned 403 or 429 with rate-limit headers; search quota
+    /// is exhausted. The `reset_at` is a Unix timestamp the caller can
+    /// wait until (or surface to the user).
+    RateLimited(RateLimitInfo),
+    /// Any other error (network, DNS, parse, etc.).
+    Err(crate::error::AppError),
+}
+
+/// Extract `X-RateLimit-Remaining` and `X-RateLimit-Reset` from response headers.
+/// Returns `None` when the headers are absent (non-search endpoint, local server, etc.)
+pub fn parse_rate_limit_headers(headers: &reqwest::header::HeaderMap) -> Option<RateLimitInfo> {
+    let remaining = headers
+        .get("x-ratelimit-remaining")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u32>().ok())?;
+    let reset_at = headers
+        .get("x-ratelimit-reset")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<i64>().ok())?;
+    Some(RateLimitInfo { remaining, reset_at })
+}
+
+/// Infer a `reset_at` timestamp from a `Retry-After` header (seconds delta)
+/// when the standard `X-RateLimit-Reset` header is absent.
+fn retry_after_reset_at(headers: &reqwest::header::HeaderMap) -> Option<i64> {
+    let delta = headers
+        .get("retry-after")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<i64>().ok())?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    Some(now + delta)
+}
+
+/// `true` when `remaining` is low enough that we should slow down.
+/// Threshold: ≤ 3 remaining (generous enough to not stall on the last
+/// few calls before a healthy window restores).
+pub fn quota_is_low(info: &RateLimitInfo) -> bool {
+    info.remaining <= 3
+}
+
+/// Search GitHub repositories sorted by best-match relevance.
+/// Returns a `SearchOutcome` so the caller can distinguish rate-limiting
+/// from other errors instead of silently treating throttled calls as
+/// "no candidates."
+///
+/// Design: reads `X-RateLimit-*` and `Retry-After` headers so the caller
+/// can adaptively pace the next call rather than burning through quota
+/// with a fixed delay.
+pub async fn search_github_repos_relevance_outcome(
+    query: &str,
+    token: Option<&str>,
+) -> SearchOutcome {
+    let client = build_client(token);
+    let url = "https://api.github.com/search/repositories";
+
+    let req = client
+        .get(url)
+        .header(
+            reqwest::header::ACCEPT,
+            "application/vnd.github.mercy-preview+json",
+        )
+        .query(&[("q", query), ("per_page", "30")]);
+
+    log::debug!("Auto-detect search: GET {}?q={}&per_page=30", url, query);
+
+    let raw_resp = match req.send().await {
+        Ok(r) => r,
+        Err(e) => return SearchOutcome::Err(e.into()),
+    };
+
+    let status = raw_resp.status();
+    let headers = raw_resp.headers().clone();
+
+    // 403/429 → treat as rate-limited regardless of body content.
+    // GitHub may return 403 for burst violations in addition to the
+    // primary-rate-limit 429. Both carry X-RateLimit-Reset or Retry-After.
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS
+        || status == reqwest::StatusCode::FORBIDDEN
+    {
+        let info = parse_rate_limit_headers(&headers).unwrap_or_else(|| {
+            let reset_at = retry_after_reset_at(&headers).unwrap_or_else(|| {
+                // Fallback: assume the window resets in 60 s.
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() as i64;
+                now + 60
+            });
+            RateLimitInfo { remaining: 0, reset_at }
+        });
+        log::warn!(
+            "Auto-detect: rate-limited (HTTP {}) for query '{}'; reset_at={} ({}s away)",
+            status,
+            query,
+            info.reset_at,
+            info.secs_until_reset()
+        );
+        return SearchOutcome::RateLimited(info);
+    }
+
+    // For other non-2xx statuses, propagate as an error.
+    let resp = match raw_resp.error_for_status() {
+        Ok(r) => r,
+        Err(e) => return SearchOutcome::Err(e.into()),
+    };
+
+    // On a successful 2xx response, check remaining quota from headers so
+    // the caller can slow down proactively before the next call.
+    let maybe_rl = parse_rate_limit_headers(&headers);
+    if let Some(ref rl) = maybe_rl {
+        log::debug!(
+            "Auto-detect: quota remaining={} reset_at={} (query: {})",
+            rl.remaining,
+            rl.reset_at,
+            query
+        );
+    }
+
+    match resp.json::<GitHubSearchResponse>().await {
+        Ok(search) => SearchOutcome::Ok(search.items),
+        Err(e) => SearchOutcome::Err(e.into()),
+    }
+}
+
 /// Search GitHub for STS2 mod repositories.
 ///
 /// Strategy: THREE parallel API calls, merged + STS2-filtered.
@@ -310,26 +469,22 @@ pub async fn search_github_repos(query: &str, token: Option<&str>) -> Result<Vec
 /// Search GitHub repositories sorted by best-match relevance (no STS2 qualifier appended).
 /// Used by auto-detect so the most semantically relevant repo wins, not the most recently
 /// updated one. Includes the mercy-preview Accept header so `topics` is reliably populated.
+///
+/// This is the legacy `Result`-returning wrapper kept for callers outside
+/// the auto-detect loop. The auto-detect path uses
+/// `search_github_repos_relevance_outcome` to distinguish rate-limiting.
 pub async fn search_github_repos_relevance(
     query: &str,
     token: Option<&str>,
 ) -> Result<Vec<GitHubRepo>> {
-    let client = build_client(token);
-    let url = "https://api.github.com/search/repositories";
-
-    let req = client
-        .get(url)
-        .header(
-            reqwest::header::ACCEPT,
-            "application/vnd.github.mercy-preview+json",
-        )
-        .query(&[("q", query), ("per_page", "30")]);
-
-    log::debug!("Auto-detect search: GET {}?q={}&per_page=30", url, query);
-
-    let resp = req.send().await?.error_for_status()?;
-    let search: GitHubSearchResponse = resp.json().await?;
-    Ok(search.items)
+    match search_github_repos_relevance_outcome(query, token).await {
+        SearchOutcome::Ok(repos) => Ok(repos),
+        SearchOutcome::RateLimited(info) => Err(crate::error::AppError::Other(format!(
+            "GitHub search rate-limited; reset in {}s",
+            info.secs_until_reset()
+        ))),
+        SearchOutcome::Err(e) => Err(e),
+    }
 }
 
 /// Download a file from a URL to a destination path with progress callback.
@@ -813,6 +968,7 @@ pub async fn download_and_install_github_mod(
             tags: vec![],
             display_name: None,
             display_description: None,
+            bundle_members: vec![],
         })
     } else {
         Err(AppError::Other(format!(
@@ -974,6 +1130,7 @@ pub async fn download_url_mod(
             tags: vec![],
             display_name: None,
             display_description: None,
+            bundle_members: vec![],
         })
     } else {
         Err(format!("Unsupported file type: {}", file_name))
@@ -1215,5 +1372,82 @@ mod asset_selection_tests {
     fn peek_zip_min_game_version_errors_on_non_zip_file() {
         let path = Path::new("src/download.rs");
         assert!(peek_zip_min_game_version(path).is_err());
+    }
+
+    // ── Rate-limit header parsing ────────────────────────────────────────────
+
+    fn make_headers(pairs: &[(&str, &str)]) -> reqwest::header::HeaderMap {
+        let mut m = reqwest::header::HeaderMap::new();
+        for (k, v) in pairs {
+            if let (Ok(name), Ok(val)) = (
+                reqwest::header::HeaderName::from_bytes(k.as_bytes()),
+                reqwest::header::HeaderValue::from_str(v),
+            ) {
+                m.insert(name, val);
+            }
+        }
+        m
+    }
+
+    #[test]
+    fn parse_rate_limit_headers_extracts_remaining_and_reset() {
+        let headers = make_headers(&[
+            ("x-ratelimit-remaining", "5"),
+            ("x-ratelimit-reset", "1800000000"),
+        ]);
+        let info = parse_rate_limit_headers(&headers)
+            .expect("headers present — should parse");
+        assert_eq!(info.remaining, 5);
+        assert_eq!(info.reset_at, 1_800_000_000);
+    }
+
+    #[test]
+    fn parse_rate_limit_headers_returns_none_when_headers_absent() {
+        let headers = make_headers(&[]);
+        assert!(parse_rate_limit_headers(&headers).is_none());
+    }
+
+    #[test]
+    fn parse_rate_limit_headers_returns_none_when_only_remaining_present() {
+        // Both headers are required — missing reset_at → None.
+        let headers = make_headers(&[("x-ratelimit-remaining", "0")]);
+        assert!(parse_rate_limit_headers(&headers).is_none());
+    }
+
+    #[test]
+    fn quota_is_low_true_at_zero() {
+        let info = RateLimitInfo { remaining: 0, reset_at: 9_999_999_999 };
+        assert!(quota_is_low(&info));
+    }
+
+    #[test]
+    fn quota_is_low_true_at_three() {
+        let info = RateLimitInfo { remaining: 3, reset_at: 9_999_999_999 };
+        assert!(quota_is_low(&info));
+    }
+
+    #[test]
+    fn quota_is_low_false_at_four() {
+        let info = RateLimitInfo { remaining: 4, reset_at: 9_999_999_999 };
+        assert!(!quota_is_low(&info));
+    }
+
+    #[test]
+    fn rate_limit_info_secs_until_reset_returns_zero_for_past_timestamp() {
+        let info = RateLimitInfo { remaining: 0, reset_at: 1 }; // epoch + 1s = long ago
+        assert_eq!(info.secs_until_reset(), 0);
+    }
+
+    #[test]
+    fn rate_limit_info_secs_until_reset_returns_positive_for_future_timestamp() {
+        let far_future = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+            + 120;
+        let info = RateLimitInfo { remaining: 0, reset_at: far_future };
+        let secs = info.secs_until_reset();
+        // Should be between 119 and 120 (tiny clock drift tolerance).
+        assert!((119..=120).contains(&secs), "expected ~120s, got {}", secs);
     }
 }

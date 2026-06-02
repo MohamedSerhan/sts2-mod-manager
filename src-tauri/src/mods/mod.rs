@@ -28,6 +28,7 @@ use crate::state::AppState;
 // invokes. Re-exports below preserve the
 // `crate::mods::function_name` import surface the rest of the codebase
 // + integration tests rely on.
+pub mod bundle;
 mod install;
 mod scan;
 mod state;
@@ -113,21 +114,13 @@ pub struct ModInfo {
     /// User-facing description override from mod_sources.json.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_description: Option<String>,
+    /// Display names of the member mods inside this bundle container.
+    /// Non-empty only when this ModInfo represents a sidecar bundle container
+    /// (folder_name = container name, files = all container files).
+    /// Empty for standalone mods.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bundle_members: Vec<String>,
 }
-
-/// One dependency entry in a mod manifest.
-///
-/// The ecosystem ships two formats for the `dependencies` array:
-///   - Old / simple: `["DepName", "OtherDep"]`
-///   - New / structured (BAKAOLC, RitsuLib-based mods): `[{"id": "DepName",
-///     "min_version": "1.2.3"}]`
-///
-/// `#[serde(untagged)]` makes serde try each variant in order and pick the
-/// first that matches. Without this, mixing the two formats made
-/// serde_json fail the entire manifest parse, which dropped the mod into
-/// the dll-only-fallback path with name "<repo-slug>" and version
-/// "unknown" — which is exactly the broken state the user kept hitting
-/// for `STS2-ShowPlayerHandCards`.
 
 // ── Local Mod Version Cache ────────────────────────────────────────────────
 
@@ -869,7 +862,7 @@ pub fn get_mod_dependents(
 #[cfg(test)]
 mod user_scenario_tests {
     use super::scan::parse_manifest;
-    use super::{move_mod_by_info, scan_disabled_mods, scan_mods};
+    use super::{delete_mod_files_by_info, move_mod_by_info, scan_disabled_mods, scan_mods};
     use std::fs;
     use tempfile::TempDir;
 
@@ -1199,6 +1192,182 @@ mod user_scenario_tests {
         assert_eq!(parsed.version, "3.1.4");
         assert_eq!(parsed.dependencies, vec!["Dep", "PlainDep"]);
     }
+
+    // ── Bundle atomicity regression tests ─────────────────────────────────
+    //
+    // These two tests are the "never split" guarantee: toggle (move) and
+    // delete MUST operate on the WHOLE container, never individual files.
+    // If either test fails, move_mod_by_info / delete_mod_files_by_info no
+    // longer move/delete the sidecar or one of the members — the bundle
+    // has been split, which breaks re-enable and leaves orphan files.
+
+    fn make_bundle_fixture(mods: &std::path::Path) {
+        // Pack/ModA/ModA.dll
+        write(
+            &mods.join("Pack").join("ModA").join("ModA.dll"),
+            "fake-mod-a",
+        );
+        // Pack/ModB/ModB.dll
+        write(
+            &mods.join("Pack").join("ModB").join("ModB.dll"),
+            "fake-mod-b",
+        );
+        // Write the bundle sidecar into Pack/
+        crate::mods::bundle::write_sidecar(
+            &mods.join("Pack"),
+            &crate::mods::bundle::BundleSidecar {
+                display_name: "Pretty Pack".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    }
+
+    /// Regression: move_mod_by_info must move the WHOLE container atomically.
+    /// The bundle's ModInfo.files includes every file under Pack/ (ModA, ModB,
+    /// sidecar). After the move, nothing must remain in mods/Pack/ and everything
+    /// must appear in mods_disabled/Pack/. Scanning the disabled dir must yield
+    /// exactly ONE bundle entry (enabled=false, folder_name "Pack", bundle_members
+    /// listing both members, files include the sidecar).
+    #[test]
+    fn bundle_moves_as_one_unit() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mods_path = tmp.path().join("mods");
+        let disabled_path = tmp.path().join("mods_disabled");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+
+        make_bundle_fixture(&mods_path);
+
+        // Scan to get the single bundle ModInfo.
+        let scanned = scan_mods(&mods_path);
+        assert_eq!(
+            scanned.len(),
+            1,
+            "fixture must produce exactly one bundle entry, got {}: {:?}",
+            scanned.len(),
+            scanned.iter().map(|m| &m.folder_name).collect::<Vec<_>>()
+        );
+        let bundle = scanned[0].clone();
+        assert_eq!(
+            bundle.folder_name.as_deref(),
+            Some("Pack"),
+            "bundle must have folder_name == container dir"
+        );
+        // Sidecar must already be in files before the move.
+        let sidecar_rel = format!("Pack/{}", crate::mods::bundle::SIDECAR_FILENAME);
+        assert!(
+            bundle.files.iter().any(|f| f == &sidecar_rel),
+            "sidecar must be in files before move; got {:?}",
+            bundle.files
+        );
+
+        // Move the bundle to disabled.
+        move_mod_by_info(&bundle, &mods_path, &disabled_path)
+            .expect("move_mod_by_info must succeed for a valid bundle");
+
+        // Nothing must remain under mods/Pack/
+        let pack_src = mods_path.join("Pack");
+        assert!(
+            !pack_src.exists() || fs::read_dir(&pack_src).map(|mut d| d.next().is_none()).unwrap_or(true),
+            "mods/Pack/ must be empty or removed after move (no files left behind)"
+        );
+
+        // Every member file and the sidecar must now be at the destination.
+        let dst_mod_a = disabled_path.join("Pack").join("ModA").join("ModA.dll");
+        let dst_mod_b = disabled_path.join("Pack").join("ModB").join("ModB.dll");
+        let dst_sidecar = disabled_path.join("Pack").join(crate::mods::bundle::SIDECAR_FILENAME);
+        assert!(
+            dst_mod_a.exists(),
+            "Pack/ModA/ModA.dll must be in mods_disabled after move"
+        );
+        assert!(
+            dst_mod_b.exists(),
+            "Pack/ModB/ModB.dll must be in mods_disabled after move"
+        );
+        assert!(
+            dst_sidecar.exists(),
+            "sidecar .sts2mm-bundle.json must be in mods_disabled after move (no split)"
+        );
+
+        // Scanning mods_disabled must yield exactly ONE bundle entry
+        // (the container is still one unit, just disabled now).
+        let disabled_scan = scan_disabled_mods(&disabled_path);
+        assert_eq!(
+            disabled_scan.len(),
+            1,
+            "disabled dir must contain exactly ONE bundle entry after move, got {}: {:?}",
+            disabled_scan.len(),
+            disabled_scan.iter().map(|m| &m.folder_name).collect::<Vec<_>>()
+        );
+        let moved = &disabled_scan[0];
+        assert_eq!(
+            moved.folder_name.as_deref(),
+            Some("Pack"),
+            "moved bundle must still have folder_name == 'Pack'"
+        );
+        assert!(
+            !moved.enabled,
+            "bundle must be disabled after move to mods_disabled"
+        );
+        assert!(
+            !moved.bundle_members.is_empty(),
+            "moved bundle must still list bundle_members"
+        );
+        assert!(
+            moved.files.iter().any(|f| f.ends_with(crate::mods::bundle::SIDECAR_FILENAME)),
+            "moved bundle's files must include the sidecar path"
+        );
+    }
+
+    /// Regression: delete_mod_files_by_info must remove the WHOLE container.
+    /// After deletion, every member file AND the sidecar must be gone; no
+    /// member survives.
+    #[test]
+    fn bundle_deletes_as_one_unit() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mods_path = tmp.path().join("mods");
+        fs::create_dir_all(&mods_path).unwrap();
+
+        make_bundle_fixture(&mods_path);
+
+        // Scan to get the bundle ModInfo.
+        let scanned = scan_mods(&mods_path);
+        assert_eq!(
+            scanned.len(),
+            1,
+            "fixture must produce exactly one bundle entry before delete, got {}",
+            scanned.len()
+        );
+        let bundle = scanned[0].clone();
+
+        // Delete the bundle.
+        delete_mod_files_by_info(&bundle, &mods_path);
+
+        // All files that were listed in ModInfo.files must be gone.
+        for file_rel in &bundle.files {
+            let abs = mods_path.join(file_rel.replace('\\', "/"));
+            assert!(
+                !abs.exists(),
+                "file '{}' must be gone after delete_mod_files_by_info (bundle split detected)",
+                file_rel
+            );
+        }
+
+        // Confirm specifically: sidecar, ModA, ModB
+        assert!(
+            !mods_path.join("Pack").join(crate::mods::bundle::SIDECAR_FILENAME).exists(),
+            "sidecar must be deleted"
+        );
+        assert!(
+            !mods_path.join("Pack").join("ModA").join("ModA.dll").exists(),
+            "Pack/ModA/ModA.dll must be deleted"
+        );
+        assert!(
+            !mods_path.join("Pack").join("ModB").join("ModB.dll").exists(),
+            "Pack/ModB/ModB.dll must be deleted"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -1317,6 +1486,7 @@ mod profile_manifest_refresh_tests {
                 enabled: true,
                 bundle_url: None,
                 bundle_sha256: None,
+                bundle_members: vec![],
             }],
             created_at: now,
             updated_at: now,
@@ -1431,6 +1601,7 @@ mod profile_manifest_refresh_tests {
             tags: vec![],
             display_name: None,
             display_description: None,
+            bundle_members: vec![],
         };
 
         let mod_dir = mods_path.join("BadManifest");

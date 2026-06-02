@@ -1,0 +1,1 @@
+Each mod row's kebab (⋯) menu now has an "Auto-detect source" item that runs a scoped GitHub search for just that one mod; selecting it on a bundle (pack of several mods) shows a toast explaining that auto-linking isn't supported for bundles.

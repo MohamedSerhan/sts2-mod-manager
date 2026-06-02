@@ -3,6 +3,7 @@ import { type ReactNode } from 'react';
 import { AppProvider } from '../contexts/AppContext';
 import { ConfirmProvider } from '../components/ConfirmDialog';
 import { ToastProvider } from '../contexts/ToastContext';
+import { ThemeProvider } from '../theme/ThemeContext';
 
 /**
  * Wraps children in the full provider stack the production app uses.
@@ -16,10 +17,12 @@ import { ToastProvider } from '../contexts/ToastContext';
  */
 export function AllProviders({ children }: { children: ReactNode }) {
   return (
-    <ToastProvider>
-      <ConfirmProvider>
-        <AppProvider>{children}</AppProvider>
-      </ConfirmProvider>
-    </ToastProvider>
+    <ThemeProvider>
+      <ToastProvider>
+        <ConfirmProvider>
+          <AppProvider>{children}</AppProvider>
+        </ConfirmProvider>
+      </ToastProvider>
+    </ThemeProvider>
   );
 }

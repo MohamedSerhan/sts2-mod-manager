@@ -125,6 +125,23 @@ if (typeof window !== 'undefined' && !Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = function () {};
 }
 
+// jsdom doesn't implement matchMedia; ThemeProvider and prefers-color-scheme
+// lookups need it. Default to "no light preference" (resolves to dark). Tests
+// that exercise auto/light override window.matchMedia themselves.
+if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
+  // @ts-expect-error - minimal MediaQueryList stub for jsdom
+  window.matchMedia = (query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  });
+}
+
 /**
  * Sensible defaults for the most-called read-only Tauri commands.
  * Without these, AppContext.refreshAll() poisons descendant components

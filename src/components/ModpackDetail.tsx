@@ -422,48 +422,46 @@ export function ModpackDetail({
           {t('profiles.loadOrder.button')}
         </Button>
       )}
-      {/* Bug 7 / reporter feedback: enable/disable EVERY mod in this pack,
-          as visible buttons (parity with the Mod Library), not buried in a
-          kebab. Scoped to the pack; disabled while the game is running.
-          FB-E: the global "Open mods folder" lives here too (next to the bulk
-          actions) — it was removed from each mod's kebab to declutter. The
-          toolbar row wraps these onto a second bar under the search when the
-          window is narrow (gf-profile-library-toolbar flex-wrap). */}
-      {profile.mods.length > 0 && (
-        <>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={lib.handleOpenFolder}
-            title={t('mods.openModsFolder')}
-          >
-            <FolderOpen size={14} />
-            {t('mods.openModsFolder')}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => handleToggleAllInPack(true)}
-            disabled={gameRunning || bulkToggling}
-            title={gameRunning ? t('mods.closeSts2First') : t('mods.enableAll')}
-          >
-            <Check size={14} />
-            {t('mods.enableAll')}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => handleToggleAllInPack(false)}
-            disabled={gameRunning || bulkToggling}
-            title={gameRunning ? t('mods.closeSts2First') : t('mods.disableAll')}
-          >
-            <Ban size={14} />
-            {t('mods.disableAll')}
-          </Button>
-        </>
-      )}
     </>
   );
+
+  // FB2-A: the pack's bulk actions sit on their OWN bar under the toolbar
+  // (search + Add mods / Edit / Load order), so they never crowd the search
+  // row or clip on a narrow window. "Open mods folder" sits next to Enable /
+  // Disable all (it was removed from each mod's kebab to declutter).
+  const packBulkBar = profile.mods.length > 0 ? (
+    <>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={lib.handleOpenFolder}
+        title={t('mods.openModsFolder')}
+      >
+        <FolderOpen size={14} />
+        {t('mods.openModsFolder')}
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => handleToggleAllInPack(true)}
+        disabled={gameRunning || bulkToggling}
+        title={gameRunning ? t('mods.closeSts2First') : t('mods.enableAll')}
+      >
+        <Check size={14} />
+        {t('mods.enableAll')}
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => handleToggleAllInPack(false)}
+        disabled={gameRunning || bulkToggling}
+        title={gameRunning ? t('mods.closeSts2First') : t('mods.disableAll')}
+      >
+        <Ban size={14} />
+        {t('mods.disableAll')}
+      </Button>
+    </>
+  ) : null;
 
   // Updates affordance shown beside the section title. Mirrors the audit
   // button's states but scoped to this pack: not-yet-checked → "Check for
@@ -714,6 +712,7 @@ export function ModpackDetail({
           coupleActiveStorage
           reloadToken={`${membershipSignature}|active:${activeProfile ?? ''}|bulk:${bulkReloadNonce}`}
           toolbarActions={packToolbarActions}
+          bulkActionsBar={packBulkBar}
           filterRow={(row) =>
             !!row.profiles.find((p) => p.profile_name === profile.name)?.included
           }

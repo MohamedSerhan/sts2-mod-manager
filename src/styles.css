@@ -1000,10 +1000,16 @@ body {
   justify-content: space-between;
   gap: 10px;
   margin-bottom: 2px;
-  /* FB-E: wrap the action buttons onto a second "bar" under the search when
-     the window is too narrow to fit them on one line, instead of clipping
-     "Disable all" off the right edge. */
+}
+/* FB2-A: dedicated second row under the toolbar for the pack's bulk actions
+   (Open mods folder / Enable all / Disable all), so they never crowd the
+   search + Add mods / Edit / Load order row or get clipped. */
+.gf-profile-library-bulk-bar {
+  display: flex;
   flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 6px;
 }
 .gf-profile-library-search {
   flex: 1 1 280px;
@@ -1098,10 +1104,7 @@ body {
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
-  /* Grow to claim the wrapped line (so the actions sit as their own bar
-     under the search) and wrap internally if even one row is too wide. */
-  flex: 1 1 auto;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
 }
 .gf-profile-library-help {
   border: 1px solid var(--indigo-line);

@@ -112,6 +112,10 @@ export interface LibraryTableProps {
    *  puts its "+ Add mods" / Edit / Load order actions here so they share
    *  the search row. */
   toolbarActions?: ReactNode;
+  /** A dedicated second row rendered UNDER the toolbar (search + toolbarActions)
+   *  for the pack's bulk actions, so they don't crowd or wrap into the search
+   *  row. (FB2-A.) */
+  bulkActionsBar?: ReactNode;
   /** External re-fetch trigger. When this value changes, the focused-mode
    *  membership grid is re-pulled. Lets a parent that mutates membership
    *  outside this table (e.g. the modpack view's "Add from your Library"
@@ -191,6 +195,7 @@ export function LibraryTable({
   coupleActiveStorage = false,
   packScoped = false,
   toolbarActions,
+  bulkActionsBar,
   reloadToken,
   filterRow,
   modInfoByKey,
@@ -737,6 +742,9 @@ export function LibraryTable({
           </div>
         )}
       </div>
+      {bulkActionsBar && (
+        <div className="gf-profile-library-bulk-bar">{bulkActionsBar}</div>
+      )}
       {/* The checkbox/drag explainer only applies to the All Mods view. The
           modpack view carries its own "listed in load order" note. */}
       {!packScoped && (

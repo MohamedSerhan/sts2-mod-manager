@@ -28,7 +28,7 @@
  * refreshAll so the parent's profile list / drift / share metadata and
  * the local `mods` array stay current.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ArrowLeft,
@@ -188,14 +188,20 @@ export function ModpackDetail({
         lib.modInfoByKey.get(pm.name);
       for (const tag of info?.tags ?? []) {
         const trimmed = tag.trim();
-        if (trimmed && !seen.has(trimmed.toLowerCase()))
-          seen.set(trimmed.toLowerCase(), trimmed);
+        if (trimmed && !seen.has(trimmed.toLocaleLowerCase()))
+          seen.set(trimmed.toLocaleLowerCase(), trimmed);
       }
     }
     return [...seen.values()].sort((a, b) =>
       a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }),
     );
   }, [profile.mods, lib.modInfoByKey]);
+
+  // Clear a stale tagFilter when the tag it references is no longer present
+  // among the pack's mods (e.g. after removing the last mod that carried it).
+  useEffect(() => {
+    if (tagFilter && !packTagOptions.includes(tagFilter)) setTagFilter('');
+  }, [packTagOptions, tagFilter]);
 
   // Build a set of mod-names that belong to this pack so the updates
   // affordance is scoped to the pack's own mods.
@@ -673,7 +679,7 @@ export function ModpackDetail({
               lib.modInfoByKey.get(row.folder_name ?? row.name) ??
               lib.modInfoByKey.get(row.name);
             return (info?.tags ?? []).some(
-              (tg) => tg.toLowerCase() === tagFilter.toLowerCase(),
+              (tg) => tg.toLocaleLowerCase() === tagFilter.toLocaleLowerCase(),
             );
           }}
           onMembershipChanged={refreshAfterMutation}

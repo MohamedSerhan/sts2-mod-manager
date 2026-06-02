@@ -117,7 +117,8 @@ key string is duplicated here intentionally (pre-bundle, can't import).
   `@theme` block.)
 - Add `--app-color-scheme: dark|light` per block; replace the three hardcoded
   `color-scheme: dark` (styles.css `:37`, `:1519`, `:2416`) with
-  `color-scheme: var(--app-color-scheme)`.
+  `color-scheme: var(--app-color-scheme)`. This drives every native control —
+  see **Native controls & `color-scheme`** below for the full inventory.
 
 ### Tokenize by semantic role, not per-literal
 
@@ -155,6 +156,42 @@ Grow the set from ~37 to ~55–65 named tokens. The recurring inline pattern
 **Dark-output invariant:** after migration, every token's *dark* value equals the
 literal it replaced, so dark mode renders identically. Verified by reading the
 diff and by visual QA against the current build.
+
+## Native controls & `color-scheme`
+
+Native/OS-drawn widgets are the classic place a half-themed app fails (a dark
+`<option>` popup over a light page, an invisible scrollbar). Audit of `src/`:
+
+- **Dropdowns** — 5 existing `<select>` (LanguageSelect, Mods sort,
+  LibraryTable, ModMultiSelect, CreateModpackWizard) plus the new ThemeSelect.
+  The native `<option>` popup is OS-drawn and obeys `color-scheme`. Today three
+  spots force `color-scheme: dark` (`:37` global, `:1519` a select, `:2416`
+  `.gf-set-input`) precisely to keep those popups dark; all three become
+  `color-scheme: var(--app-color-scheme)`, so the popup flips to light
+  (light background, dark option text) in light mode.
+- **Scrollbars** — `::-webkit-scrollbar*` (`:74–77`) already use tokens
+  (`--indigo-side/line/elev`) and re-theme via the light palette. Verify the
+  light track/thumb keep visible contrast. Reactive `color-scheme` also covers
+  any native scrollbar the webkit rules don't reach (e.g. inside `<select>`
+  popups). (WebView2 = Chromium, so `::-webkit-*` is sufficient; no Firefox
+  `scrollbar-color` needed.)
+- **Checkboxes / radios** — 3 + 3 native inputs. Covered by reactive
+  `color-scheme`; additionally set `accent-color: var(--gf)` (reuses the gold
+  token, themed in both blocks) so they take the brand color and stay legible on
+  either surface instead of the OS default blue.
+- **Text / search inputs, textareas** — 2 search inputs, 5 `<textarea>`, plus
+  text inputs, all styled via `.gf-*` token classes. `color-scheme` handles the
+  native caret / autofill / spellcheck bits. No hardcoded `::placeholder`,
+  `caret-color`, or `::selection` exist today (audit found none); verify
+  placeholder + caret legibility in light and tokenize if any are added.
+- **Focus outlines** — all `outline: … var(--gf|--ok|--accent)`, token-based, so
+  they re-theme. A gold ring on a light surface can be low-contrast, so the light
+  palette darkens `--gf` enough to keep focus rings visible (ties to the palette
+  tuning below).
+- **Date / time / range / number / color inputs** — none in use; nothing to do,
+  but reactive `color-scheme` would cover them if introduced later.
+
+Autofill background (WebView2/Chromium) is a visual-QA check, not a code change.
 
 ## Light palette
 
@@ -225,8 +262,12 @@ New i18n keys in **both** locales:
   (`tsc && vite build`) is clean.
 - **Visual QA:** run `npm run dev`, drive the UI with the browser/preview tool,
   screenshot Home / Library / Modpacks / Browse / Settings / a modal in **both**
-  themes; scan for any dark literal leaking into light. Before/after screenshots
-  go in the PR body.
+  themes; scan for any dark literal leaking into light. **Explicitly exercise
+  native controls in light mode:** open each `<select>` popup (language, theme,
+  Mods sort, LibraryTable, ModMultiSelect, wizard) and confirm a light popup with
+  dark option text; toggle a checkbox/radio; focus inputs/textareas (caret +
+  focus ring visible); scroll a long list (scrollbar contrast). Before/after
+  screenshots go in the PR body.
 
 ## Risks & mitigations
 

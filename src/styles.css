@@ -1448,9 +1448,13 @@ body {
 .gf-page-sub { font-size: 13px; color: var(--ink-mute); margin-top: 4px; }
 /* Action cluster. min-width:0 (and no flex-shrink:0) lets it shrink below
    its single-row content width so the inner flex-wrap actually kicks in
-   instead of overflowing the viewport; flex-end keeps the wrapped rows
-   right-aligned, matching their resting position on a wide screen. */
-.gf-page-actions { display: flex; gap: 8px; flex-wrap: wrap; min-width: 0; justify-content: flex-end; }
+   instead of overflowing the viewport. margin-left:auto keeps the whole
+   cluster right-aligned whether it sits inline with the title OR wraps to
+   its own line below it; flex-end only right-aligns the buttons WITHIN the
+   cluster, not the cluster's position on a wrapped line — which is why a
+   wider button set (e.g. after an audit adds "Update N mods") used to jump
+   to the left. */
+.gf-page-actions { display: flex; gap: 8px; flex-wrap: wrap; min-width: 0; justify-content: flex-end; margin-left: auto; }
 
 /* ── Tabs ─────────────────────────────────────────────────────────── */
 .gf-tabs {

@@ -522,61 +522,82 @@ describe('<ModpackDetail>', () => {
     expect(screen.queryByText(/missing/i)).toBeNull();
   });
 
-  // ── Bug 7: enable-all / disable-all scoped to THIS modpack ────────────
-  // These existed only on the Mod Library page. The pack detail view now
-  // offers them too, iterating the pack's mods (not the whole library) and
-  // reusing the pinScroll safety net so it doesn't reintroduce Bug 2.
-  it('Advanced → Enable all toggles every pack mod on (Bug 7)', async () => {
+  // ── Bug 7 / FB-A: enable-all / disable-all scoped to THIS modpack ─────
+  // Visible toolbar buttons that call set_profile_mods_enabled, which resolves
+  // each manifest entry to its real on-disk mod backend-side (the manifest
+  // folder_name can drift) — fixing the reported "mod not found in
+  // mods_disabled" error from the old per-manifest-folder toggle loop.
+  it('Enable all calls set_profile_mods_enabled with enabled=true (Bug 7 / FB-A)', async () => {
     const profile = setupPack({
       inPack: [
         modInfo({ name: 'PackA', folder_name: 'PackA', mod_id: 'PackA', enabled: false }),
         modInfo({ name: 'PackB', folder_name: 'PackB', mod_id: 'PackB', enabled: false }),
       ],
     });
-    registerInvokeHandler('toggle_mod', () => null);
+    registerInvokeHandler('set_profile_mods_enabled', () => ({
+      enabled: true, toggled: ['PackA', 'PackB'], missing: [], failed: [],
+    }));
     const user = userEvent.setup();
     render(<Wrap profile={profile} onBack={vi.fn()} />);
     await screen.findAllByText('PackA');
     await user.click(await screen.findByRole('button', { name: /^Enable all$/i }));
     await waitFor(() => {
-      expect(getInvokeCalls().filter((c) => c.cmd === 'toggle_mod').length).toBe(2);
+      const call = getInvokeCalls().find((c) => c.cmd === 'set_profile_mods_enabled');
+      expect(call?.args).toMatchObject({ name: 'Sample', enabled: true });
     });
-    const toggles = getInvokeCalls().filter((c) => c.cmd === 'toggle_mod');
-    expect(toggles.every((c) => c.args?.enable === true)).toBe(true);
-    expect(toggles.map((c) => c.args?.name).sort()).toEqual(['PackA', 'PackB']);
   });
 
-  it('Advanced → Disable all toggles every pack mod off (Bug 7)', async () => {
+  it('Disable all calls set_profile_mods_enabled with enabled=false (Bug 7 / FB-A)', async () => {
     const profile = setupPack({
       inPack: [modInfo({ name: 'PackA', folder_name: 'PackA', mod_id: 'PackA', enabled: true })],
     });
-    registerInvokeHandler('toggle_mod', () => null);
+    registerInvokeHandler('set_profile_mods_enabled', () => ({
+      enabled: false, toggled: ['PackA'], missing: [], failed: [],
+    }));
     const user = userEvent.setup();
     render(<Wrap profile={profile} onBack={vi.fn()} />);
     await screen.findAllByText('PackA');
     await user.click(await screen.findByRole('button', { name: /^Disable all$/i }));
     await waitFor(() => {
-      expect(getInvokeCalls().filter((c) => c.cmd === 'toggle_mod').length).toBe(1);
+      const call = getInvokeCalls().find((c) => c.cmd === 'set_profile_mods_enabled');
+      expect(call?.args).toMatchObject({ name: 'Sample', enabled: false });
     });
-    expect(getInvokeCalls().find((c) => c.cmd === 'toggle_mod')?.args?.enable).toBe(false);
   });
 
-  it('Enable all in the pack re-fetches the membership grid so the row toggles refresh (Bug 8)', async () => {
-    // The fix for the reported "enable/disable all isn't updating" bug: a bulk
-    // toggle changes enabled state but not membership/identity, so without a
-    // reload nonce the focused in-pack grid wouldn't re-pull and the row
-    // toggles stayed stale. Assert the grid is re-fetched after Enable all.
+  it('Enable all surfaces mods that could not be toggled by name (FB-A/FB-C)', async () => {
     const profile = setupPack({
       inPack: [modInfo({ name: 'PackA', folder_name: 'PackA', mod_id: 'PackA', enabled: false })],
     });
-    registerInvokeHandler('toggle_mod', () => null);
+    registerInvokeHandler('set_profile_mods_enabled', () => ({
+      enabled: true, toggled: [], missing: ['GhostMod'], failed: [],
+    }));
+    const user = userEvent.setup();
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+    await screen.findAllByText('PackA');
+    await user.click(await screen.findByRole('button', { name: /^Enable all$/i }));
+    // The toast names the mod that couldn't be toggled (it's not installed).
+    await waitFor(() => {
+      expect(screen.getByText(/GhostMod/)).toBeInTheDocument();
+    });
+  });
+
+  it('Enable all in the pack re-fetches the membership grid so the row toggles refresh (Bug 8)', async () => {
+    // A bulk toggle changes enabled state but not membership/identity, so
+    // without a reload nonce the focused in-pack grid wouldn't re-pull and the
+    // row toggles stayed stale. Assert the grid is re-fetched after Enable all.
+    const profile = setupPack({
+      inPack: [modInfo({ name: 'PackA', folder_name: 'PackA', mod_id: 'PackA', enabled: false })],
+    });
+    registerInvokeHandler('set_profile_mods_enabled', () => ({
+      enabled: true, toggled: ['PackA'], missing: [], failed: [],
+    }));
     const user = userEvent.setup();
     render(<Wrap profile={profile} onBack={vi.fn()} />);
     await screen.findAllByText('PackA');
     const before = getInvokeCalls().filter((c) => c.cmd === 'get_profile_memberships').length;
     await user.click(await screen.findByRole('button', { name: /^Enable all$/i }));
     await waitFor(() => {
-      expect(getInvokeCalls().some((c) => c.cmd === 'toggle_mod')).toBe(true);
+      expect(getInvokeCalls().some((c) => c.cmd === 'set_profile_mods_enabled')).toBe(true);
     });
     await waitFor(() => {
       expect(getInvokeCalls().filter((c) => c.cmd === 'get_profile_memberships').length)

@@ -62,7 +62,7 @@ import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from './ConfirmDialog';
 import { useModLibrary } from '../hooks/useModLibrary';
 import { usePinScroll } from '../hooks/usePinScroll';
-import { deleteMod, setProfileModMembership, toggleMod } from '../hooks/useTauri';
+import { deleteMod, setProfileModMembership, setProfileModsEnabled, toggleMod } from '../hooks/useTauri';
 import type { ModInfo, Profile, ShareResult } from '../types';
 import type { ProfileDrift } from '../hooks/useTauri';
 
@@ -354,16 +354,34 @@ export function ModpackDetail({
     pinScroll();
     setBulkToggling(true);
     try {
-      for (const pm of profile.mods) {
-        await toggleMod(pm.name, pm.folder_name ?? null, enabled);
-      }
+      // FB-A: resolve each pack mod to its real on-disk folder backend-side
+      // (the manifest folder_name can drift), best-effort, and report which
+      // couldn't be toggled — instead of looping toggleMod by manifest folder,
+      // which hard-errored on the first drifted entry.
+      const result = await setProfileModsEnabled(profile.name, enabled);
       await refreshAfterMutation();
       setBulkReloadNonce((n) => n + 1);
-      toast.success(
-        enabled
-          ? t('modpack.detail.enabledAllInPack', { pack: profile.name })
-          : t('modpack.detail.disabledAllInPack', { pack: profile.name }),
-      );
+      const base = enabled
+        ? t('modpack.detail.enabledAllInPack', { pack: profile.name })
+        : t('modpack.detail.disabledAllInPack', { pack: profile.name });
+      const issues: string[] = [];
+      if (result.missing.length > 0) {
+        issues.push(t('modpack.detail.toggleAllMissing', {
+          count: result.missing.length,
+          list: result.missing.join(', '),
+        }));
+      }
+      if (result.failed.length > 0) {
+        issues.push(t('modpack.detail.toggleAllSomeFailed', {
+          count: result.failed.length,
+          list: result.failed.join(', '),
+        }));
+      }
+      if (issues.length > 0) {
+        toast.info(`${base} ${issues.join(' ')}`);
+      } else {
+        toast.success(base);
+      }
     } catch (e) {
       toast.error(
         t('modpack.detail.toggleAllFailed', {

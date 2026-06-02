@@ -69,6 +69,8 @@
       "enabledAllInPack": "Enabled all mods in {{pack}}",
       "disabledAllInPack": "Disabled all mods in {{pack}}",
       "toggleAllFailed": "Couldn't update all mods: {{error}}",
+      "toggleAllMissing": "{{count}} not installed: {{list}}.",
+      "toggleAllSomeFailed": "{{count}} couldn't be moved: {{list}}.",
       "runningNow": "running in game now",
       "addMods": "Add mods",
       "checkUpdates": "Check for updates",

@@ -69,6 +69,8 @@
       "enabledAllInPack": "已启用 {{pack}} 中的所有模组",
       "disabledAllInPack": "已禁用 {{pack}} 中的所有模组",
       "toggleAllFailed": "无法更新所有模组：{{error}}",
+      "toggleAllMissing": "{{count}} 个未安装：{{list}}。",
+      "toggleAllSomeFailed": "{{count}} 个无法移动：{{list}}。",
       "runningNow": "正在游戏中运行",
       "addMods": "添加模组",
       "checkUpdates": "检查更新",

@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ModInfo, Profile, ProfileMembershipGrid, ProfileLoadOrderUpdate, ProfileModOrderKey, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, RepairProfileResult, ModAuditEntry, NexusModInfo, BrowserPage } from '../types';
+import type { ModInfo, Profile, ProfileMembershipGrid, ProfileLoadOrderUpdate, ProfileModOrderKey, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, RepairProfileResult, SetProfileModsEnabledResult, ModAuditEntry, NexusModInfo, BrowserPage } from '../types';
 
 // ── Game Detection & QOL ───────────────────────────────────────────────────
 
@@ -466,6 +466,16 @@ export async function fetchModpackBrowserPage(
   forceRefresh: boolean,
 ): Promise<BrowserPage> {
   return invoke('fetch_modpack_browser_page', { page, forceRefresh });
+}
+
+/** Enable or disable every mod in a modpack at once. Resolves each manifest
+ *  entry to its real on-disk mod backend-side, so it works even when the
+ *  manifest folder name has drifted. */
+export async function setProfileModsEnabled(
+  name: string,
+  enabled: boolean,
+): Promise<SetProfileModsEnabledResult> {
+  return invoke('set_profile_mods_enabled', { name, enabled });
 }
 
 export async function setModpackListing(

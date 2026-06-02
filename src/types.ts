@@ -129,6 +129,17 @@ export interface SwitchProfileResult {
   replace_failures?: string[];
 }
 
+/** Result of bulk enable/disable of a modpack's mods. */
+export interface SetProfileModsEnabledResult {
+  enabled: boolean;
+  /** Display names of mods actually moved into the requested state. */
+  toggled: string[];
+  /** Pack mods with no matching installed mod (can't be toggled). */
+  missing: string[];
+  /** Matched mods whose move failed. */
+  failed: string[];
+}
+
 export interface RepairProfileResult extends SwitchProfileResult {
   /** Active mods that were not in the profile manifest and were moved to
    *  mods_disabled as part of repair. */

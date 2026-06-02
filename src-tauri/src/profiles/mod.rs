@@ -37,12 +37,14 @@ pub use crud::{
     save_profile,
 };
 pub use drift::{ProfileDrift, RepairProfileResult, VersionMismatch};
+pub use membership::SetProfileModsEnabledResult;
 
 use apply::switch_profile_from_paths;
 use crud::delete_profile;
 use membership::{
     profile_membership_matrix, set_profile_load_order_from_paths,
-    set_profile_mod_membership_from_paths, sync_profile_load_order_to_settings,
+    set_profile_mod_membership_from_paths, set_profile_mods_enabled_from_paths,
+    sync_profile_load_order_to_settings,
 };
 
 pub(super) const APP_CREATED_BY: &str = "sts2-mod-manager";
@@ -219,6 +221,31 @@ pub fn set_profile_mod_membership(
     .map_err(|e| e.to_string())
 }
 
+/// Enable or disable every mod in a profile at once (the modpack view's
+/// "Enable all" / "Disable all"). Resolves each manifest entry to its real
+/// on-disk mod, so it works even when the manifest folder name has drifted.
+#[tauri::command]
+pub fn set_profile_mods_enabled(
+    name: String,
+    enabled: bool,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<SetProfileModsEnabledResult, String> {
+    crate::game::ensure_game_not_running()?;
+    let (mods_path, disabled_path, profiles_path) = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        (
+            s.mods_path.as_ref().ok_or("Game path not set")?.clone(),
+            s.disabled_mods_path
+                .as_ref()
+                .ok_or("Game path not set")?
+                .clone(),
+            s.profiles_path.clone(),
+        )
+    };
+    set_profile_mods_enabled_from_paths(&name, enabled, &mods_path, &disabled_path, &profiles_path)
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn set_profile_load_order(
     profile_name: String,
@@ -296,14 +323,38 @@ pub fn delete_profile_cmd(
 ) -> std::result::Result<bool, String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let config_path = s.config_path.clone();
+    let mods_path = s.mods_path.clone();
+    let disabled_path = s.disabled_mods_path.clone();
     delete_profile(&name, &s.profiles_path).map_err(|e| e.to_string())?;
     // Bug 3: if the deleted pack was the active one, drop the active-profile
     // pointer (in-memory + active_profile.txt). Without this the UI keeps the
     // gone pack flagged "active" and the next launch tries to restore it.
-    if clear_active_profile_if_deleted(&mut s.active_profile, &config_path, &name) {
-        log::info!("Cleared active profile after deleting active pack '{}'", name);
-    }
+    let was_active = clear_active_profile_if_deleted(&mut s.active_profile, &config_path, &name);
     drop(s);
+
+    if was_active {
+        log::info!("Cleared active profile after deleting active pack '{}'", name);
+        // Reported follow-up: clearing the pointer left the deleted pack's mods
+        // sitting in the active folder, so a "modded" launch loaded them with
+        // errors. Empty the active folder (move everything to disabled) so the
+        // post-delete state is genuinely vanilla — no mods loaded. Best-effort,
+        // and only when the game is closed (we can't move locked files).
+        if crate::game::is_game_running() {
+            log::warn!(
+                "Active pack '{}' deleted while the game is running; active mods folder left as-is",
+                name
+            );
+        } else if let (Some(mods_path), Some(disabled_path)) = (mods_path, disabled_path) {
+            let moved = crate::mods::move_all_mods_between(&mods_path, &disabled_path);
+            if !moved.is_empty() {
+                log::info!(
+                    "Reset active mods folder to vanilla after deleting active pack '{}': stored {} mod(s)",
+                    name,
+                    moved.len()
+                );
+            }
+        }
+    }
 
     // Also clean up any matching subscription
     let mut db = crate::subscriptions::load_subscriptions(&config_path);

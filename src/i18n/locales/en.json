@@ -43,7 +43,10 @@
       "disabledOrphans_other": "disabled {{count}} extra mods",
       "downloadedNum": "downloaded {{count}}",
       "downloadsFailed_one": "{{count}} download failed",
-      "downloadsFailed_other": "{{count}} downloads failed"
+      "downloadsFailed_other": "{{count}} downloads failed",
+      "disabledOrphansWithList": "{{count}} moved to disabled: {{list}}",
+      "replacedWithList": "{{count}} updated: {{list}}",
+      "replaceFailedWithList": "{{count}} kept (update failed): {{list}}"
     }
   },
   "confirm": {

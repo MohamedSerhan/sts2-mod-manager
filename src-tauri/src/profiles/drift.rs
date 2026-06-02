@@ -268,6 +268,14 @@ pub struct RepairProfileResult {
     /// Deprecated compatibility field. Repair no longer deletes orphans.
     #[serde(default)]
     pub deleted_orphans: Vec<String>,
+    /// Mods whose mismatched on-disk copy was replaced with the profile's
+    /// version (passed through from the switch step). (Bug 4.)
+    #[serde(default)]
+    pub replaced_mods: Vec<String>,
+    /// Mods whose replace failed; the old on-disk version was rolled back and
+    /// kept. (Bug 4.)
+    #[serde(default)]
+    pub replace_failures: Vec<String>,
 }
 
 pub(super) async fn repair_profile_from_paths(
@@ -324,6 +332,8 @@ pub(super) async fn repair_profile_from_paths(
         failed_downloads: switch_result.failed_downloads,
         disabled_orphans,
         deleted_orphans: Vec::new(),
+        replaced_mods: switch_result.replaced_mods,
+        replace_failures: switch_result.replace_failures,
     })
 }
 

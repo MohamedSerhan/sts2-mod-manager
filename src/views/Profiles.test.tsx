@@ -701,12 +701,67 @@ describe('<ProfilesView>', () => {
       expect(getInvokeCalls().some((c) => c.cmd === 'repair_profile')).toBe(true);
     });
     expect(getInvokeCalls().some((c) => c.cmd === 'create_backup_cmd')).toBe(false);
-    // Success toast with summary — parts joined by ", " with i18next
-    // plurals so the singular reads "1 download failed" instead of the
-    // old "1 download(s) failed" lazy-form.
+    // Success toast with summary — now name-bearing (Bug 4): which orphans
+    // were disabled, plus downloads/failures/missing each list their mods.
     await waitFor(() => {
       const found = document.body.textContent ?? '';
-      expect(found).toContain('disabled 2 extra mods, downloaded 1, 1 download failed, 1 still missing');
+      expect(found).toContain('2 moved to disabled: Orphan1, Orphan2, downloaded 1, 1 failed: FailedX, 1 still missing: StillMissing');
+    });
+  });
+
+  it('repair toast lists replaced + kept-old + disabled mod names, not just counts (Bug 4)', async () => {
+    seedProfiles([baseProfile({ name: 'DriftedPack' })]);
+    registerInvokeHandler('get_active_profile', () => 'DriftedPack');
+    registerInvokeHandler('get_profile_drift', () => ({
+      added: ['Orphan1'], removed: [], toggled: [], version_changed: [], has_drift: true,
+    }));
+    registerInvokeHandler('repair_profile', () => ({
+      applied: true,
+      downloaded: 1,
+      missing_mods: [],
+      failed_downloads: [],
+      disabled_orphans: ['Orphan1'],
+      deleted_orphans: [],
+      replaced_mods: ['UpgradedMod'],
+      replace_failures: ['KeptOldMod'],
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('DriftedPack')).toBeInTheDocument(); });
+    const repairBanner = await screen.findByTitle('Re-apply manifest and store extra active mods');
+    await user.click(repairBanner);
+    const modal = await confirmModal();
+    await user.click(modal.getByRole('button', { name: 'Repair' }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'repair_profile')).toBe(true);
+    });
+    await waitFor(() => {
+      const text = document.body.textContent ?? '';
+      expect(text).toContain('UpgradedMod'); // a replaced mod, named
+      expect(text).toContain('KeptOldMod');  // a kept-old (failed update) mod, named
+      expect(text).toContain('Orphan1');     // a disabled orphan, named
+    });
+  });
+
+  it('switch toast lists replaced + kept-old mod names (Bug 4)', async () => {
+    seedProfiles([baseProfile({ name: 'A' }), baseProfile({ name: 'B' })]);
+    registerInvokeHandler('get_active_profile', () => 'A');
+    registerInvokeHandler('switch_profile', () => ({
+      applied: true,
+      downloaded: 1,
+      missing_mods: [],
+      failed_downloads: [],
+      replaced_mods: ['UpgradedX'],
+      replace_failures: ['KeptY'],
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await openDetailFor(user, 'B');
+    await user.click(screen.getByRole('button', { name: /Switch to/i }));
+    await waitFor(() => {
+      const text = document.body.textContent ?? '';
+      expect(text).toContain('UpgradedX');
+      expect(text).toContain('KeptY');
     });
   });
 

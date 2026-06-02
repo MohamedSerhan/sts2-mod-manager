@@ -43,7 +43,10 @@
       "disabledOrphans_other": "已禁用 {{count}} 个多余模组",
       "downloadedNum": "已下载 {{count}} 个",
       "downloadsFailed_one": "{{count}} 个下载失败",
-      "downloadsFailed_other": "{{count}} 个下载失败"
+      "downloadsFailed_other": "{{count}} 个下载失败",
+      "disabledOrphansWithList": "{{count}} 个已移至禁用：{{list}}",
+      "replacedWithList": "已更新 {{count}} 个：{{list}}",
+      "replaceFailedWithList": "保留 {{count}} 个原版本（更新失败）：{{list}}"
     }
   },
   "confirm": {

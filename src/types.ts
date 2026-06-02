@@ -121,6 +121,12 @@ export interface SwitchProfileResult {
   missing_mods: string[];
   downloaded: number;
   failed_downloads: string[];
+  /** Mods whose mismatched on-disk copy was replaced with the profile's
+   *  version (non-destructively). Surfaced by name in the toast. */
+  replaced_mods?: string[];
+  /** Mods whose update/replace failed; the old on-disk version was rolled
+   *  back and kept, so they are not lost (vs. `failed_downloads`). */
+  replace_failures?: string[];
 }
 
 export interface RepairProfileResult extends SwitchProfileResult {

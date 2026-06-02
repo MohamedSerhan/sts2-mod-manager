@@ -566,6 +566,14 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       if (result.missing_mods.length > 0) {
         parts.push(t('common.parts.stillMissingWithList', { count: result.missing_mods.length, list: result.missing_mods.join(', ') }));
       }
+      // Bug 4: name the mods we replaced and the ones whose update failed but
+      // whose old version we kept (so the user knows nothing was lost).
+      if (result.replaced_mods && result.replaced_mods.length > 0) {
+        parts.push(t('common.parts.replacedWithList', { count: result.replaced_mods.length, list: result.replaced_mods.join(', ') }));
+      }
+      if (result.replace_failures && result.replace_failures.length > 0) {
+        parts.push(t('common.parts.replaceFailedWithList', { count: result.replace_failures.length, list: result.replace_failures.join(', ') }));
+      }
 
       if (parts.length > 0) {
         toastCtx.info(t('profiles.toast.switchedWithDetails', { name, details: parts.join('. ') }));
@@ -622,17 +630,28 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       await refreshAll();
       await loadProfiles();
 
+      // Bug 4: report mods by NAME (not just counts) — which orphans were
+      // disabled, which mods were updated, and which kept their old version
+      // because the update failed (so the user knows nothing was lost).
       const summary: string[] = [];
       const disabledOrphans = result.disabled_orphans ?? [];
       if (disabledOrphans.length > 0) {
-        summary.push(t('common.parts.disabledOrphans', { count: disabledOrphans.length }));
+        summary.push(t('common.parts.disabledOrphansWithList', { count: disabledOrphans.length, list: disabledOrphans.join(', ') }));
+      }
+      const replaced = result.replaced_mods ?? [];
+      if (replaced.length > 0) {
+        summary.push(t('common.parts.replacedWithList', { count: replaced.length, list: replaced.join(', ') }));
       }
       if (result.downloaded > 0) summary.push(t('common.parts.downloadedNum', { count: result.downloaded }));
+      const replaceFailures = result.replace_failures ?? [];
+      if (replaceFailures.length > 0) {
+        summary.push(t('common.parts.replaceFailedWithList', { count: replaceFailures.length, list: replaceFailures.join(', ') }));
+      }
       if (result.failed_downloads.length > 0) {
-        summary.push(t('common.parts.downloadsFailed', { count: result.failed_downloads.length }));
+        summary.push(t('common.parts.failedWithList', { count: result.failed_downloads.length, list: result.failed_downloads.join(', ') }));
       }
       if (result.missing_mods.length > 0) {
-        summary.push(t('common.parts.stillMissing', { count: result.missing_mods.length }));
+        summary.push(t('common.parts.stillMissingWithList', { count: result.missing_mods.length, list: result.missing_mods.join(', ') }));
       }
       toastCtx.success(
         summary.length > 0

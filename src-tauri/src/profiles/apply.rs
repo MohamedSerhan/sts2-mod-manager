@@ -521,6 +521,38 @@ pub struct SwitchProfileResult {
     pub missing_mods: Vec<String>,
     pub downloaded: u32,
     pub failed_downloads: Vec<String>,
+    /// Mods whose mismatched on-disk copy was replaced with the profile's
+    /// version. Surfaced by name in the toast instead of a bare count. (Bug 4.)
+    #[serde(default)]
+    pub replaced_mods: Vec<String>,
+    /// Mods whose update/replace failed: the existing on-disk version was
+    /// rolled back and kept, so they are NOT lost. Distinct from
+    /// `failed_downloads`, which are missing mods with no working source. (Bug 4.)
+    #[serde(default)]
+    pub replace_failures: Vec<String>,
+}
+
+/// Bug 4: stash a mod's on-disk folder (and the install-target slot, if
+/// different) aside via [`crate::fs_safety::swap_dirs_aside`] so a failed
+/// reinstall can be rolled back instead of deleting-then-losing the mod.
+/// `source_base` is where the current copy lives (mods_path or disabled_path);
+/// installs always write into `mods_path`.
+fn stash_mod_for_replace(
+    disk_mod: &crate::mods::ModInfo,
+    source_base: &Path,
+    mods_path: &Path,
+) -> std::io::Result<crate::fs_safety::DirSwap> {
+    let folder = disk_mod
+        .folder_name
+        .clone()
+        .unwrap_or_else(|| disk_mod.name.clone());
+    let source_dir = source_base.join(&folder);
+    let target_dir = mods_path.join(&folder);
+    if source_dir == target_dir {
+        crate::fs_safety::swap_dirs_aside(&[source_dir.as_path()])
+    } else {
+        crate::fs_safety::swap_dirs_aside(&[source_dir.as_path(), target_dir.as_path()])
+    }
 }
 
 /// Switch to a profile: downloads missing mods, then applies the target
@@ -577,6 +609,8 @@ pub(crate) async fn switch_profile_from_paths(
             missing_mods: vec![],
             downloaded: 0,
             failed_downloads: vec![],
+            replaced_mods: vec![],
+            replace_failures: vec![],
         });
     }
 
@@ -623,8 +657,17 @@ pub(crate) async fn switch_profile_from_paths(
     let pinned_set = crate::mod_sources::load_pinned_set(config_path);
     let mut downloaded_count = 0u32;
     let mut download_failures: Vec<String> = Vec::new();
+    // Bug 4: mismatched mods whose old copy was replaced (success) / rolled
+    // back and kept (failure). Reported by name in the toast.
+    let mut replaced_mods: Vec<String> = Vec::new();
+    let mut replace_failures: Vec<String> = Vec::new();
 
     for pm in &profile.mods {
+        // Per-iteration stash handle for a non-destructive mismatch replace
+        // (Bug 4): set when the old copy is moved aside, then resolved
+        // (discard on a verified download / restore on failure) after the
+        // download attempts below.
+        let mut replace_swap: Option<crate::fs_safety::DirSwap> = None;
         // Find matching on-disk mod
         let on_disk_mod = on_disk_by_id
             .get(&pm.name)
@@ -698,23 +741,40 @@ pub(crate) async fn switch_profile_from_paths(
                 } else {
                     disabled_path
                 };
-                crate::mods::delete_mod_files_by_info(disk_mod, base);
-                match crate::mods::restore_mod_from_cache(
-                    cache_path,
-                    &pm.name,
-                    &pm.version,
-                    mods_path,
-                ) {
-                    Ok(()) => {
-                        log::info!("Restored '{}' v{} from local cache", pm.name, pm.version);
-                        downloaded_count += 1;
-                        continue;
-                    }
+                // Bug 4: stash the existing copy aside (don't delete) so a
+                // failed cache restore rolls back to the old version.
+                match stash_mod_for_replace(disk_mod, base, mods_path) {
+                    Ok(swap) => match crate::mods::restore_mod_from_cache(
+                        cache_path,
+                        &pm.name,
+                        &pm.version,
+                        mods_path,
+                    ) {
+                        Ok(()) => {
+                            let _ = swap.discard();
+                            log::info!("Restored '{}' v{} from local cache", pm.name, pm.version);
+                            downloaded_count += 1;
+                            replaced_mods.push(pm.name.clone());
+                            continue;
+                        }
+                        Err(e) => {
+                            if let Err(re) = swap.restore() {
+                                log::error!(
+                                    "Rollback after cache-restore failure for '{}' failed: {}",
+                                    pm.name, re
+                                );
+                            }
+                            log::warn!(
+                                "Cache restore failed for '{}': {} -- trying bundle",
+                                pm.name,
+                                e
+                            );
+                        }
+                    },
                     Err(e) => {
                         log::warn!(
-                            "Cache restore failed for '{}': {} -- trying bundle",
-                            pm.name,
-                            e
+                            "Could not stash '{}' aside for cache restore: {} -- trying bundle",
+                            pm.name, e
                         );
                     }
                 }
@@ -727,7 +787,19 @@ pub(crate) async fn switch_profile_from_paths(
                 } else {
                     disabled_path
                 };
-                crate::mods::delete_mod_files_by_info(disk_mod, base);
+                // Bug 4: stash the existing copy aside (don't delete) so a
+                // failed bundle/GitHub download below rolls back to it. The
+                // swap is committed/rolled back after the download attempts.
+                match stash_mod_for_replace(disk_mod, base, mods_path) {
+                    Ok(swap) => replace_swap = Some(swap),
+                    Err(e) => {
+                        log::warn!(
+                            "Could not stash '{}' aside before replace ({}); deleting in place",
+                            pm.name, e
+                        );
+                        crate::mods::delete_mod_files_by_info(disk_mod, base);
+                    }
+                }
                 // Fall through to the download logic below
             } else {
                 log::info!(
@@ -817,7 +889,29 @@ pub(crate) async fn switch_profile_from_paths(
             }
         }
 
-        if !downloaded {
+        // Bug 4: resolve a non-destructive replace. Commit the new copy on a
+        // verified download; otherwise roll back to the stashed original so a
+        // failed update never loses the mod.
+        if let Some(swap) = replace_swap.take() {
+            if downloaded {
+                let _ = swap.discard();
+                replaced_mods.push(pm.name.clone());
+            } else {
+                if let Err(e) = swap.restore() {
+                    log::error!(
+                        "Failed to roll back '{}' after a failed update: {}",
+                        pm.name, e
+                    );
+                } else {
+                    log::warn!(
+                        "Update failed for '{}'; kept the existing on-disk version",
+                        pm.name
+                    );
+                }
+                replace_failures.push(pm.name.clone());
+            }
+        } else if !downloaded {
+            // Fresh install of a missing mod genuinely failed (no source).
             log::error!("No download source for mod '{}' -- cannot restore", pm.name);
             download_failures.push(pm.name.clone());
         }
@@ -879,6 +973,8 @@ pub(crate) async fn switch_profile_from_paths(
         missing_mods: still_missing,
         downloaded: downloaded_count,
         failed_downloads: download_failures,
+        replaced_mods,
+        replace_failures,
     })
 }
 
@@ -1765,6 +1861,115 @@ mod modpack_flow_tests {
             .join("UnpinnedExtra")
             .join("UnpinnedExtra.dll")
             .exists());
+    }
+
+    #[tokio::test]
+    async fn failed_replace_keeps_the_existing_on_disk_version() {
+        // Bug 4: a version-mismatch replace whose download fails must NOT lose
+        // the mod. The old on-disk copy is stashed aside and rolled back —
+        // never deleted-then-left-gone (which only the heavyweight STEP 0
+        // backup could recover).
+        let paths = flow_paths();
+        let server = MockServer::start().await;
+
+        // Profile wants v2.0.0 from a bundle URL that 404s (no mock mounted)
+        // and has no GitHub fallback — so the replace download must fail.
+        let pm = ProfileMod {
+            name: "Keeper".into(),
+            version: "2.0.0".into(),
+            source: None,
+            hash: None,
+            files: vec!["Keeper/Keeper.json".into(), "Keeper/Keeper.dll".into()],
+            folder_name: Some("Keeper".into()),
+            mod_id: Some("keeper".into()),
+            enabled: true,
+            bundle_url: Some(format!("{}/missing/Keeper.zip", server.uri())),
+            bundle_sha256: Some("00".repeat(32)),
+            bundle_members: vec![],
+        };
+        save_pack("Keeper Pack", &paths.profiles, vec![PublishedMod { profile_mod: pm }]);
+
+        // On disk: the OLD v1.0.0 with a distinctive marker.
+        install_loose_mod(&paths.mods, "Keeper", "old-keeper-v1");
+
+        let result = switch_profile_from_paths(
+            "Keeper Pack",
+            &paths.mods,
+            &paths.disabled,
+            &paths.profiles,
+            &paths.config,
+            &paths.cache,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert!(result.applied);
+        // The crux: the old version is STILL on disk (rolled back), not lost.
+        let dll = paths.mods.join("Keeper").join("Keeper.dll");
+        assert!(dll.exists(), "the existing mod must survive a failed update");
+        assert_eq!(
+            fs::read_to_string(&dll).unwrap(),
+            "old-keeper-v1",
+            "the rolled-back copy must be the original on-disk version"
+        );
+        // It must not be reported as missing — it's present, just not updated.
+        assert!(
+            !result.missing_mods.contains(&"Keeper".to_string()),
+            "a kept-old mod is not missing; missing={:?}",
+            result.missing_mods
+        );
+    }
+
+    #[tokio::test]
+    async fn successful_replace_swaps_in_the_new_version_and_reports_it() {
+        // Bug 4 happy path: a version mismatch with a working bundle replaces
+        // the old copy with the new one and reports it by name (replaced_mods),
+        // with no rollback.
+        let paths = flow_paths();
+        let server = MockServer::start().await;
+        save_pack(
+            "Upgrade Pack",
+            &paths.profiles,
+            vec![
+                publish_mod(
+                    &server,
+                    "/up/upgrader.zip",
+                    "Upgrader",
+                    "upgrader",
+                    "Upgrader",
+                    "2.0.0",
+                    "new-v2",
+                    true,
+                    None,
+                )
+                .await,
+            ],
+        );
+        // On disk: the OLD v1.0.0.
+        install_loose_mod(&paths.mods, "Upgrader", "old-v1");
+
+        let result = switch_profile_from_paths(
+            "Upgrade Pack",
+            &paths.mods,
+            &paths.disabled,
+            &paths.profiles,
+            &paths.config,
+            &paths.cache,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            result.replaced_mods.contains(&"Upgrader".to_string()),
+            "a successful replace must be reported by name; replaced={:?}",
+            result.replaced_mods
+        );
+        assert!(result.replace_failures.is_empty());
+        // The new content is on disk (no leftover swap dirs).
+        assert_marker(&paths.mods, "Upgrader", "new-v2");
+        assert_no_root_artifacts(&paths);
     }
 
     #[test]

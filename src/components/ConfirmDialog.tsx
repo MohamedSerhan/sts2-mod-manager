@@ -98,7 +98,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
           >
             <div
               className="gf-modal-head"
-              style={pending.destructive ? { background: 'oklch(0.65 0.18 25 / 0.06)' } : undefined}
+              style={pending.destructive ? { background: 'color-mix(in oklch, var(--danger) 6%, transparent)' } : undefined}
             >
               <div>
                 <div className="gf-modal-title">{pending.title}</div>
@@ -123,14 +123,14 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
                       alignItems: 'flex-start',
                       gap: 10,
                       padding: 12,
-                      background: 'oklch(0.55 0.16 25 / 0.10)',
-                      border: '1px solid oklch(0.55 0.16 25 / 0.3)',
+                      background: 'color-mix(in oklch, var(--danger-edge) 10%, transparent)',
+                      border: '1px solid color-mix(in oklch, var(--danger-edge) 30%, transparent)',
                       borderRadius: 7,
                       marginBottom: pending.checkbox || pending.typedPhrase ? 12 : 0,
                     }}
                   >
-                    <AlertTriangle size={16} style={{ color: 'oklch(0.75 0.13 25)', flexShrink: 0, marginTop: 1 }} />
-                    <div style={{ fontSize: 12, color: 'oklch(0.85 0.10 25)' }}>{pending.warning}</div>
+                    <AlertTriangle size={16} style={{ color: 'var(--danger-bright)', flexShrink: 0, marginTop: 1 }} />
+                    <div style={{ fontSize: 12, color: 'var(--danger-msg)' }}>{pending.warning}</div>
                   </div>
                 )}
                 {pending.checkbox && (
@@ -156,7 +156,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
                   </label>
                 )}
                 {pending.typedPhrase && (
-                  <div style={{ fontSize: 12.5, color: 'oklch(0.86 0.10 25)' }}>
+                  <div style={{ fontSize: 12.5, color: 'var(--danger-text)' }}>
                     <Trans i18nKey="confirm.typePhrase" values={{ phrase: pending.typedPhrase }}>
                       Type <b>{pending.typedPhrase}</b> to confirm:
                     </Trans>
@@ -200,7 +200,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
                   onClick={() => close(true)}
                   disabled={!phraseOk}
                   autoFocus={!pending.typedPhrase}
-                  style={pending.destructive && pending.typedPhrase ? { background: 'oklch(0.65 0.18 25)', color: '#fff', border: 0 } : undefined}
+                  style={pending.destructive && pending.typedPhrase ? { background: 'var(--danger)', color: '#fff', border: 0 } : undefined}
                 >
                   {pending.confirmLabel || (pending.destructive ? t('common.delete') : t('common.confirm'))}
                 </button>

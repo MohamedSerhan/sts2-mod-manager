@@ -511,7 +511,7 @@ export function LibraryRow({
               {minGameViolated && (
                 <span
                   className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded"
-                  style={{ background: 'oklch(0.78 0.16 60 / 0.18)', color: 'oklch(0.85 0.16 60)' }}
+                  style={{ background: 'color-mix(in oklch, var(--amber-glow) 18%, transparent)', color: 'var(--ember-bright)' }}
                   title={t('mods.minGameVersionTitle', { minVer: mod!.min_game_version, yourVer: gameVersion ?? 'unknown' })}
                 >
                   <AlertTriangle size={9} /> {t('mods.needsGameVersion', { version: mod!.min_game_version })}

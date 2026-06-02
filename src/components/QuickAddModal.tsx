@@ -128,7 +128,7 @@ export function QuickAddModal({ open, onClose }: Props) {
                 padding: 10,
                 border: '1px solid var(--indigo-line)',
                 borderRadius: 7,
-                background: 'oklch(0.20 0.025 270 / 0.5)',
+                background: 'color-mix(in oklch, var(--panel-deep) 50%, transparent)',
               }}
             >
               <div

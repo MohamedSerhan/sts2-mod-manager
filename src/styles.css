@@ -73,6 +73,7 @@
   --amber-ink:          oklch(0.85 0.12 70);
   --amber-ink-2:        oklch(0.85 0.14 70);
   --amber-glow:         oklch(0.78 0.16 60);
+  --ember-bright:       oklch(0.85 0.16 60);
   --ember-edge:         oklch(0.60 0.16 60);
   --gold-tint-base:     oklch(0.65 0.13 70);
   --gold-pill-glow:     oklch(0.70 0.14 85);
@@ -80,12 +81,16 @@
   --danger-bright:      oklch(0.75 0.13 25);
   --danger-strong:      oklch(0.78 0.13 25);
   --danger-ink:         oklch(0.82 0.16 25);
+  --danger-ink-soft:    oklch(0.82 0.12 25);
   --danger-ink-2:       oklch(0.85 0.12 25);
   --danger-ink-3:       oklch(0.85 0.13 25);
+  --danger-msg:         oklch(0.85 0.10 25);
   --danger-text:        oklch(0.86 0.10 25);
   --danger-edge:        oklch(0.55 0.16 25);
   --danger-edge2:       oklch(0.55 0.18 25);
   --danger-deep:        oklch(0.55 0.13 25);
+  --danger-btn:         oklch(0.40 0.10 30);
+  --danger-fill-deep:   oklch(0.25 0.08 25);
   --danger-line-strong: oklch(0.65 0.18 25 / 0.6);
   /* success / green ramp */
   --ok-bright:          oklch(0.66 0.13 165);
@@ -95,6 +100,7 @@
   /* info / blue ramp */
   --info:               oklch(0.55 0.13 250);
   --info-ink:           oklch(0.78 0.10 250);
+  --info-ink-2:         oklch(0.75 0.10 250);
   --info-text:          oklch(0.85 0.07 250);
   /* nexus / source pill */
   --nexus-ink:          oklch(0.78 0.13 55);
@@ -189,6 +195,7 @@
   --amber-ink:          oklch(0.85 0.12 70);
   --amber-ink-2:        oklch(0.85 0.14 70);
   --amber-glow:         oklch(0.78 0.16 60);
+  --ember-bright:       oklch(0.85 0.16 60);
   --ember-edge:         oklch(0.60 0.16 60);
   --gold-tint-base:     oklch(0.65 0.13 70);
   --gold-pill-glow:     oklch(0.70 0.14 85);
@@ -196,12 +203,16 @@
   --danger-bright:      oklch(0.75 0.13 25);
   --danger-strong:      oklch(0.78 0.13 25);
   --danger-ink:         oklch(0.82 0.16 25);
+  --danger-ink-soft:    oklch(0.82 0.12 25);
   --danger-ink-2:       oklch(0.85 0.12 25);
   --danger-ink-3:       oklch(0.85 0.13 25);
+  --danger-msg:         oklch(0.85 0.10 25);
   --danger-text:        oklch(0.86 0.10 25);
   --danger-edge:        oklch(0.55 0.16 25);
   --danger-edge2:       oklch(0.55 0.18 25);
   --danger-deep:        oklch(0.55 0.13 25);
+  --danger-btn:         oklch(0.40 0.10 30);
+  --danger-fill-deep:   oklch(0.25 0.08 25);
   --danger-line-strong: oklch(0.65 0.18 25 / 0.6);
   /* success / green ramp */
   --ok-bright:          oklch(0.66 0.13 165);
@@ -211,6 +222,7 @@
   /* info / blue ramp */
   --info:               oklch(0.55 0.13 250);
   --info-ink:           oklch(0.78 0.10 250);
+  --info-ink-2:         oklch(0.75 0.10 250);
   --info-text:          oklch(0.85 0.07 250);
   /* nexus / source pill */
   --nexus-ink:          oklch(0.78 0.13 55);

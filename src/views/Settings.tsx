@@ -488,7 +488,7 @@ export function SettingsView() {
                         padding: '10px 12px',
                         borderRadius: 7,
                         border: `1px solid ${selected ? 'var(--gf)' : 'var(--indigo-line)'}`,
-                        background: selected ? 'oklch(0.65 0.13 70 / 0.08)' : 'var(--indigo-panel)',
+                        background: selected ? 'color-mix(in oklch, var(--gold-tint-base) 8%, transparent)' : 'var(--indigo-panel)',
                         cursor: savingLaunchMode ? 'progress' : 'pointer',
                         opacity: savingLaunchMode && !selected ? 0.7 : 1,
                       }}

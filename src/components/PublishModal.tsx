@@ -144,11 +144,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
         const more = result.failed_uploads.length > 5
           ? t('publish.failedUploadsMore', { count: result.failed_uploads.length - 5 })
           : '';
-        toast.error(
-          count === 1
-            ? t('publish.failedUploadsToast_one', { count, list })
-            : t('publish.failedUploadsToast_other', { count, list, more }),
-        );
+        toast.error(t('publish.failedUploadsToast', { count, list, more }));
       } else {
         toast.success(isReshare ? t('publish.updatePushedToast') : t('publish.profilePublishedToast'));
       }
@@ -545,9 +541,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
                   <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
                   <div>
                     <b>
-                      {shared.failed_uploads.length === 1
-                        ? t('publish.failedUploadsSummary_one', { count: shared.failed_uploads.length })
-                        : t('publish.failedUploadsSummary_other', { count: shared.failed_uploads.length })}
+                      {t('publish.failedUploadsSummary', { count: shared.failed_uploads.length })}
                     </b>{' '}
                     {shared.failed_uploads.slice(0, 5).join(', ')}
                     {shared.failed_uploads.length > 5 && t('publish.failedUploadsMore', { count: shared.failed_uploads.length - 5 })}.{' '}

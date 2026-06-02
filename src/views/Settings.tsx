@@ -709,7 +709,7 @@ export function SettingsView() {
                         )}
                       </div>
                       <div className="gf-backup-meta">
-                        {b.mod_count} {b.mod_count === 1 ? t('settings.backups.files_one', { count: 1 }) : t('settings.backups.files_other', { count: b.mod_count })} · {formatSizeMb(b.size_bytes)}
+                        {b.mod_count} {t('settings.backups.files', { count: b.mod_count })} · {formatSizeMb(b.size_bytes)}
                       </div>
                     </div>
                     <Button

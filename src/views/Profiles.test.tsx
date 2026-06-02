@@ -381,7 +381,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await openDetailFor(user, 'B');
-    await user.click(screen.getByRole('button', { name: /Switch to/i }));
+    await user.click(screen.getAllByRole('button', { name: /Switch to/i })[0]);
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'switch_profile')).toBe(true);
     });
@@ -408,7 +408,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await openDetailFor(user, 'B');
-    await user.click(screen.getByRole('button', { name: /Switch to/i }));
+    await user.click(screen.getAllByRole('button', { name: /Switch to/i })[0]);
 
     const modal = await confirmModal();
     await user.click(modal.getByRole('button', { name: /Stay here/i }));
@@ -431,7 +431,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await openDetailFor(user, 'B');
-    await user.click(screen.getByRole('button', { name: /Switch to/i }));
+    await user.click(screen.getAllByRole('button', { name: /Switch to/i })[0]);
     await waitFor(() => {
       expect(screen.getByText(/3 mod\(s\) downloaded/)).toBeInTheDocument();
     });
@@ -1325,7 +1325,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await openDetailFor(user, 'B');
-    await user.click(screen.getByRole('button', { name: /Switch to/i }));
+    await user.click(screen.getAllByRole('button', { name: /Switch to/i })[0]);
     await waitFor(() => {
       expect(screen.getByText(/Failed to switch.*boom/)).toBeInTheDocument();
     });
@@ -1845,7 +1845,7 @@ describe('<ProfilesView>', () => {
 
     // Non-active modpack detail surfaces "Switch to".
     await openDetailFor(user, 'OtherP');
-    expect(screen.getByRole('button', { name: /Switch to/i })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /Switch to/i }).length).toBeGreaterThan(0);
     await user.click(screen.getByRole('button', { name: /Back to modpacks/i }));
 
     // Active modpack detail: Switch is not rendered (you can't activate

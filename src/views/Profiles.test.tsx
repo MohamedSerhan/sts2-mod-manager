@@ -872,6 +872,44 @@ describe('<ProfilesView>', () => {
     });
   });
 
+  it('the modpack "(N missing)" updates live on a mods change, without navigating away (FB2-C)', async () => {
+    // The drift indicator used to go stale until you left to Mod Library and
+    // back. A plain Refresh (which changes the installed mods but does NOT go
+    // through the membership-change callback) must now update drift live.
+    seedProfiles([baseProfile({
+      name: 'A',
+      mods: [profileMod({ name: 'Gone', folder_name: 'Gone', mod_id: 'Gone' })],
+    })]);
+    registerInvokeHandler('get_active_profile', () => 'A');
+    let installed: unknown[] = [];
+    registerInvokeHandler('get_installed_mods', () => installed);
+    let missing = true;
+    registerInvokeHandler('get_profile_drift', () => ({
+      added: [],
+      removed: missing ? ['Gone'] : [],
+      toggled: [],
+      version_changed: [],
+      has_drift: missing,
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('A')).toBeInTheDocument(); });
+    await openDetailFor(user, 'A');
+    await waitFor(() => { expect(screen.getByText(/1 missing/)).toBeInTheDocument(); });
+
+    // The mod becomes installed and the drift clears. Refresh re-pulls the mods.
+    installed = [{
+      name: 'Gone', version: '1.0', folder_name: 'Gone', mod_id: 'Gone',
+      enabled: true, files: [], source: null, hash: null, dependencies: [],
+      size_bytes: 0, pinned: false,
+    }];
+    missing = false;
+    await openAdvancedMenu(user);
+    await user.click(await screen.findByRole('menuitem', { name: /^Refresh$/i }));
+
+    await waitFor(() => { expect(screen.queryByText(/1 missing/)).toBeNull(); });
+  });
+
   it('drift banner Repair with no active extras renders the safe body', async () => {
     seedProfiles([baseProfile({ name: 'DriftedPack' })]);
     registerInvokeHandler('get_active_profile', () => 'DriftedPack');

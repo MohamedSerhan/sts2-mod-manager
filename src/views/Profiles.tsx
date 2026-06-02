@@ -203,7 +203,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
   // webview's drag events — so reordering uses pointer events instead.
   const loadOrderListRef = useRef<HTMLDivElement>(null);
   const { t, i18n } = useTranslation();
-  const { refreshAll, setActiveProfile, activeProfile, subUpdates, refreshSubUpdates } = useApp();
+  const { refreshAll, setActiveProfile, activeProfile, subUpdates, refreshSubUpdates, mods } = useApp();
   const toastCtx = useToast();
   // Shared clipboard hook — same one Home + PublishModal use, so a
   // wording change for "Couldn't copy" propagates everywhere without
@@ -312,6 +312,43 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     if (profiles.length === 0) return;
     refreshShareAndDrift();
   }, [profiles, activeProfile, refreshShareAndDrift]);
+
+  // FB2-C: drift (the banner + the modpack's "(N missing)" indicator) is a
+  // function of the INSTALLED mods, but the effect above only re-runs when the
+  // profile list or active pack changes. A per-row toggle/delete refreshes the
+  // mods array (not the profiles), so drift stayed stale until you navigated
+  // away and back. Recompute drift for the active pack whenever the installed
+  // set / versions / enabled-state change — drift-only, so it doesn't re-fetch
+  // share info on every toggle.
+  const installedDriftSignature = useMemo(
+    () =>
+      mods
+        .map((m) => `${m.folder_name ?? m.name} ${m.version} ${m.enabled ? 1 : 0}`)
+        .sort()
+        .join('|'),
+    [mods],
+  );
+  useEffect(() => {
+    if (!activeProfile) {
+      setDriftMap((prev) => (Object.keys(prev).length > 0 ? {} : prev));
+      return;
+    }
+    let cancelled = false;
+    getProfileDrift(activeProfile)
+      .then((drift) => {
+        if (cancelled || !drift) return;
+        setDriftMap((prev) => {
+          const next = { ...prev };
+          if (drift.has_drift) next[activeProfile] = drift;
+          else delete next[activeProfile];
+          return next;
+        });
+      })
+      .catch(() => { /* ignore */ });
+    return () => {
+      cancelled = true;
+    };
+  }, [installedDriftSignature, activeProfile]);
 
   // The active pack is a followed one when it shows up in our subscriptions.
   // A followed manifest isn't ours to write, so the drift banner drops its

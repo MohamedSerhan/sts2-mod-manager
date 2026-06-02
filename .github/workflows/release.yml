@@ -39,4 +39,4 @@ jobs:
       - name: Cut release
         env:
           SKIP_QA: "1"
-        run: ./scripts/release.sh "${{ inputs.bump }}"
+        run: bash scripts/release.sh "${{ inputs.bump }}"

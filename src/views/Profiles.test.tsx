@@ -2533,6 +2533,47 @@ describe('<ProfilesView> load-order editor close', () => {
     });
   });
 
+  // Regression test: post-rename view bounce.
+  // Before the fix, setSelectedModpack(newName) ran while profiles still held
+  // the old names → the orphan-guard fired → user was bounced back to the list.
+  // With the fix, await loadProfiles() ensures profiles is updated before
+  // setSelectedModpack(newName), so the guard sees the new name and stays.
+  it('rename: detail view stays open on the renamed pack (no orphan-guard bounce)', async () => {
+    let renamed = false;
+    registerInvokeHandler('list_profiles_cmd', async () => {
+      if (renamed) {
+        await new Promise((r) => setTimeout(r, 20));
+        return [baseProfile({ name: 'Beta' })];
+      }
+      return [baseProfile({ name: 'Alpha' })];
+    });
+    registerInvokeHandler('rename_profile', () => {
+      renamed = true;
+      return baseProfile({ name: 'Beta' });
+    });
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await openDetailFor(user, 'Alpha');
+
+    // Open the Advanced kebab and click Rename
+    await openAdvancedMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /^Rename$/i }));
+
+    // The rename modal should appear — clear the pre-filled name and type the new one
+    const input = await screen.findByRole('textbox', { name: /New name/i });
+    await user.clear(input);
+    await user.type(input, 'Beta');
+
+    // Click the Rename button inside the modal foot
+    await user.click(screen.getByRole('button', { name: /^Rename$/i }));
+
+    // After the rename, the detail view must show Beta (not bounced to the list).
+    await screen.findByRole('heading', { level: 2, name: 'Beta' });
+    // The list-view "No modpacks" or the list of profile cards must NOT be visible.
+    expect(screen.queryByText(/No modpacks yet/i)).toBeNull();
+  });
+
   it('moveLoadOrderItem swap reorders the draft (covers moveLoadOrderItem path used by ▲/▼ buttons)', async () => {
     seedProfiles([
       baseProfile({

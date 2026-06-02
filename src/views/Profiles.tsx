@@ -1097,10 +1097,10 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
             onRepairDrift={handleRepairDrift}
             onLibraryChanged={handleLibraryChanged}
             renameExistingNames={profiles.map((p) => p.name)}
-            onRenamed={(oldName, newName) => {
-              loadProfiles();
-              setSelectedModpack(newName);
+            onRenamed={async (oldName, newName) => {
               if (activeProfile === oldName) setActiveProfile(newName);
+              await loadProfiles();
+              setSelectedModpack(newName);
             }}
           />
         );

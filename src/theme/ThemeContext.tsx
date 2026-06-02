@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import {
   applyTheme,
+  isSupportedThemePreference,
   loadThemePreference,
   resolveThemePreference,
   saveThemePreference,
@@ -18,8 +19,15 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 const LIGHT_QUERY = '(prefers-color-scheme: light)';
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [preference, setPreference] = useState<ThemePreference>(() => loadThemePreference());
+  const [preference, setPreferenceState] = useState<ThemePreference>(() => loadThemePreference());
   const [mode, setMode] = useState<ThemeMode>(() => resolveThemePreference(loadThemePreference()));
+
+  // Validate at the boundary so a consumer can't push an unsupported value
+  // through the raw state setter (mirrors how language.ts guards its setter).
+  function setPreference(next: ThemePreference): void {
+    if (!isSupportedThemePreference(next)) return;
+    setPreferenceState(next);
+  }
 
   // Apply + persist on every preference change.
   useEffect(() => {

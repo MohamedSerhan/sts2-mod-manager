@@ -709,6 +709,10 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     try {
       await deleteProfile(name);
       setProfiles((prev) => prev.filter((p) => p.name !== name));
+      // Bug 3: if we just deleted the active pack, clear the AppContext
+      // active pointer too (the backend clears active_profile.txt) so nothing
+      // keeps flagging the now-gone pack as active until an app restart.
+      if (name === activeProfile) setActiveProfile(null);
       toastCtx.success(t('profiles.toast.deleted', { name }));
     } catch (e) {
       toastCtx.error(t('profiles.toast.deleteFailed', { error: e instanceof Error ? e.message : String(e) }));

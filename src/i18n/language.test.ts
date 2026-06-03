@@ -40,6 +40,22 @@ describe('resolveDetectedLanguage', () => {
     expect(resolveDetectedLanguage(['fr-FR', 'es-ES'])).toBe('en');
   });
 
+  it('routes region-tagged Russian and Arabic locales to their base language', () => {
+    // navigator.language is usually region-tagged (ru-RU, ar-SA, …); these must
+    // resolve to the base locale via the primary-subtag fallback, not fall
+    // through to English.
+    expect(resolveDetectedLanguage(['ru-RU'])).toBe('ru');
+    expect(resolveDetectedLanguage(['ru'])).toBe('ru');
+    expect(resolveDetectedLanguage(['ar-EG'])).toBe('ar');
+    expect(resolveDetectedLanguage(['ar-SA'])).toBe('ar');
+    expect(resolveDetectedLanguage(['ar'])).toBe('ar');
+  });
+
+  it('still falls back to English for unsupported region-tagged locales', () => {
+    expect(resolveDetectedLanguage(['fr-CA'])).toBe('en');
+    expect(resolveDetectedLanguage(['es-MX', 'pt-BR'])).toBe('en');
+  });
+
   it('routes Simplified Chinese locales to Simplified Chinese', () => {
     expect(resolveDetectedLanguage(['zh-CN'])).toBe('zh-Hans');
     expect(resolveDetectedLanguage(['zh-SG'])).toBe('zh-Hans');

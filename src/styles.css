@@ -1748,7 +1748,7 @@ body {
 .gf-tabs-settings .gf-tab.active::after {
   content: '';
   position: absolute;
-  left: 8px; right: 8px; bottom: -1px;
+  inset-inline: 8px; bottom: -1px;
   height: 2px;
   background: var(--gf);
 }

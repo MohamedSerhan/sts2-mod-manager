@@ -87,6 +87,16 @@ function resolveOneLocale(locale: string, availableLanguages: readonly string[])
       : 'zh-Hans';
     return availableLanguages.includes(target) ? target as SupportedLanguageCode : null;
   }
+  // Region-tagged variants of any other registered language fall back to their
+  // primary subtag (e.g. ru-RU → ru, ar-EG → ar). Most browsers report a
+  // region-tagged navigator.language, so without this auto-detect would miss
+  // Russian/Arabic users entirely. en/zh are handled above with their own
+  // script/region rules; this generic step means a newly registered locale
+  // picks up its `xx-YY` forms from just a SUPPORTED_LANGUAGES entry.
+  const base = normalized.split('-')[0];
+  if (base !== normalized && availableLanguages.includes(base)) {
+    return base as SupportedLanguageCode;
+  }
   return null;
 }
 

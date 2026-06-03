@@ -43,7 +43,12 @@
       "disabledOrphans_other": "تم تعطيل {{count}} مودات إضافية",
       "downloadedNum": "تم تنزيل {{count}}",
       "downloadsFailed_one": "فشل {{count}} تنزيل",
-      "downloadsFailed_other": "فشل {{count}} تنزيلات"
+      "downloadsFailed_other": "فشل {{count}} تنزيلات",
+      "disabledOrphansWithList": "{{count}} نُقلت إلى المعطّلة: {{list}}",
+      "addedWithList": "أُضيفت {{count}}: {{list}}",
+      "removedWithList": "أُزيلت {{count}}: {{list}}",
+      "replacedWithList": "{{count}} حُدّثت: {{list}}",
+      "replaceFailedWithList": "{{count}} أُبقيت (فشل التحديث): {{list}}"
     }
   },
   "confirm": {
@@ -90,7 +95,16 @@
       "add": "إضافة",
       "allInPack": "كل مود مثبّت موجود بالفعل في هذه الحزمة.",
       "added": "تمت إضافة {{mod}} إلى {{pack}}",
-      "addFailed": "تعذّرت إضافة {{mod}}: {{error}}"
+      "addFailed": "تعذّرت إضافة {{mod}}: {{error}}",
+      "missingCount": "({{count}} مفقودة)",
+      "missingTitle": "موجودة في بيان الحزمة لكنها غير مثبّتة على القرص. أصلِح الحزمة أو احفظها للمطابقة.",
+      "missingTipHead": "في البيان لكنها غير مثبّتة:",
+      "enabledAllInPack": "تم تفعيل كل المودات في «{{pack}}»",
+      "disabledAllInPack": "تم تعطيل كل المودات في «{{pack}}»",
+      "toggleAllFailed": "تعذّر تحديث كل المودات: {{error}}",
+      "toggleAllMissing": "{{count}} غير مثبّتة: {{list}}.",
+      "toggleAllSomeFailed": "{{count}} تعذّر نقلها: {{list}}.",
+      "inactiveToggleHint": "هذه الحزمة غير نشطة — لا يمكن تفعيل/تعطيل المودات داخل اللعبة إلا للحزمة النشطة. بدّل إليها للتحكم بما يُحمَّل."
     },
     "edit": {
       "title": "تعديل «{{name}}»",
@@ -106,6 +120,19 @@
       "stored": "مُخزَّن",
       "storedHint": "مثبّت على القرص لكنه ليس في مجلد اللعبة",
       "toggleAria": "تبديل ما إذا كان {{mod}} نشطًا في اللعبة"
+    },
+    "rename": {
+      "title": "إعادة تسمية «{{name}}»",
+      "label": "الاسم الجديد",
+      "placeholder": "أدخل اسمًا جديدًا للحزمة",
+      "save": "إعادة تسمية",
+      "saving": "جارٍ إعادة التسمية…",
+      "cancel": "إلغاء",
+      "collision": "توجد حزمة بهذا الاسم بالفعل.",
+      "empty": "لا يمكن أن يكون الاسم فارغًا.",
+      "unchanged": "هذا هو الاسم الحالي بالفعل.",
+      "success": "تمت إعادة تسمية «{{old}}» إلى «{{new}}».",
+      "failed": "فشلت إعادة التسمية: {{error}}"
     }
   },
   "libraryTable": {
@@ -163,7 +190,12 @@
     "createFailed": "تعذّر إنشاء الحزمة: {{error}}",
     "next": "التالي",
     "back": "رجوع",
-    "cancel": "إلغاء"
+    "cancel": "إلغاء",
+    "step2ShowSelected": "إظهار المحدد",
+    "step2HideSelected": "إخفاء",
+    "step2NoneSelected": "لم يتم تحديد أي مودات",
+    "step3Show": "إظهار المودات",
+    "step3Hide": "إخفاء"
   },
   "launch": {
     "title": "جارٍ تشغيل Slay the Spire 2",
@@ -398,7 +430,8 @@
       "copyShareCode": "نسخ رمز المشاركة",
       "copyShareLink": "نسخ رابط المشاركة",
       "copyShareMessageLabel": "نسخ رسالة المشاركة",
-      "deleteProfile": "حذف الحزمة…"
+      "deleteProfile": "حذف الحزمة…",
+      "rename": "إعادة تسمية"
     },
     "confirm": {
       "switch": {
@@ -1171,7 +1204,13 @@
     "defaultPathWin": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\SlayTheSpire2",
     "sts2App": "SlayTheSpire2.app",
     "sts2Pck": "SlayTheSpire2.pck",
-    "sts2Exe": "SlayTheSpire2.exe"
+    "sts2Exe": "SlayTheSpire2.exe",
+    "theme": {
+      "label": "السمة",
+      "dark": "داكنة",
+      "light": "فاتحة",
+      "auto": "تلقائي"
+    }
   },
   "mods": {
     "repairConfirmTitle": "إصلاح «{{name}}»؟",
@@ -1212,7 +1251,6 @@
     "repairDesc": "إعادة تثبيت قسرية من GitHub. استخدمه عندما تظهر النسخة «غير معروفة»، أو ترفض اللعبة تحميل هذا المود، أو يبدو التثبيت معطّلاً.",
     "repairNeedSource": "اربط مصدر GitHub أولاً عبر «تعديل المصادر…» — يجلب الإصلاح من GitHub.",
     "subtitle": "{{total}} مثبّت · {{enabled}} نشط{{disabled}}",
-    "openFolder": "فتح مجلد المودات",
     "importMod": "استيراد مود",
     "quickAddUrl": "إضافة سريعة عبر رابط",
     "autoDetectSources": "الكشف التلقائي عن المصادر",
@@ -1323,7 +1361,8 @@
       "removeFromModpackDesc": "أسقِط هذا المود من بيان {{pack}}. تبقى الملفات مثبّتة.",
       "deleteFromDisk": "حذف من القرص",
       "deleteFromDiskDesc": "حذف ملفات هذا المود نهائيًا من حاسوبك."
-    }
+    },
+    "openThisModFolder": "فتح مجلد هذا المود"
   },
   "devBuilds": {
     "title": "نسخ التطوير",

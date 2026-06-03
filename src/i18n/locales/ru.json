@@ -43,7 +43,12 @@
       "disabledOrphans_other": "отключено {{count}} лишних модов",
       "downloadedNum": "загружено {{count}}",
       "downloadsFailed_one": "{{count}} загрузка не удалась",
-      "downloadsFailed_other": "{{count}} загрузок не удалось"
+      "downloadsFailed_other": "{{count}} загрузок не удалось",
+      "disabledOrphansWithList": "{{count}} перемещено в отключённые: {{list}}",
+      "addedWithList": "добавлено {{count}}: {{list}}",
+      "removedWithList": "удалено {{count}}: {{list}}",
+      "replacedWithList": "{{count}} обновлено: {{list}}",
+      "replaceFailedWithList": "{{count}} сохранено (обновление не удалось): {{list}}"
     }
   },
   "confirm": {
@@ -90,7 +95,16 @@
       "add": "Добавить",
       "allInPack": "Все установленные моды уже в этой сборке.",
       "added": "{{mod}} добавлен в {{pack}}",
-      "addFailed": "Не удалось добавить {{mod}}: {{error}}"
+      "addFailed": "Не удалось добавить {{mod}}: {{error}}",
+      "missingCount": "({{count}} отсутствует)",
+      "missingTitle": "Указаны в манифесте сборки, но не установлены на диске. Запустите восстановление или сохраните сборку для согласования.",
+      "missingTipHead": "В манифесте, но не установлены:",
+      "enabledAllInPack": "Включены все моды в «{{pack}}»",
+      "disabledAllInPack": "Отключены все моды в «{{pack}}»",
+      "toggleAllFailed": "Не удалось обновить все моды: {{error}}",
+      "toggleAllMissing": "{{count}} не установлено: {{list}}.",
+      "toggleAllSomeFailed": "{{count}} не удалось переместить: {{list}}.",
+      "inactiveToggleHint": "Эта сборка не активна — включать и отключать моды в игре можно только для активной сборки. Переключитесь на неё, чтобы управлять загрузкой."
     },
     "edit": {
       "title": "Изменить «{{name}}»",
@@ -106,6 +120,19 @@
       "stored": "В хранилище",
       "storedHint": "Установлен на диске, но не в папке игры",
       "toggleAria": "Переключить, активен ли {{mod}} в игре"
+    },
+    "rename": {
+      "title": "Переименовать «{{name}}»",
+      "label": "Новое название",
+      "placeholder": "Введите новое название сборки",
+      "save": "Переименовать",
+      "saving": "Переименование…",
+      "cancel": "Отмена",
+      "collision": "Сборка с таким названием уже существует.",
+      "empty": "Название не может быть пустым.",
+      "unchanged": "Это уже текущее название.",
+      "success": "«{{old}}» переименовано в «{{new}}».",
+      "failed": "Не удалось переименовать: {{error}}"
     }
   },
   "libraryTable": {
@@ -163,7 +190,12 @@
     "createFailed": "Не удалось создать сборку: {{error}}",
     "next": "Далее",
     "back": "Назад",
-    "cancel": "Отмена"
+    "cancel": "Отмена",
+    "step2ShowSelected": "Показать выбранные",
+    "step2HideSelected": "Скрыть",
+    "step2NoneSelected": "Моды не выбраны",
+    "step3Show": "Показать моды",
+    "step3Hide": "Скрыть"
   },
   "launch": {
     "title": "Запуск Slay the Spire 2",
@@ -398,7 +430,8 @@
       "copyShareCode": "Копировать код для обмена",
       "copyShareLink": "Копировать ссылку для обмена",
       "copyShareMessageLabel": "Копировать сообщение для обмена",
-      "deleteProfile": "Удалить сборку…"
+      "deleteProfile": "Удалить сборку…",
+      "rename": "Переименовать"
     },
     "confirm": {
       "switch": {
@@ -1171,7 +1204,13 @@
     "defaultPathWin": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\SlayTheSpire2",
     "sts2App": "SlayTheSpire2.app",
     "sts2Pck": "SlayTheSpire2.pck",
-    "sts2Exe": "SlayTheSpire2.exe"
+    "sts2Exe": "SlayTheSpire2.exe",
+    "theme": {
+      "label": "Тема",
+      "dark": "Тёмная",
+      "light": "Светлая",
+      "auto": "Авто"
+    }
   },
   "mods": {
     "repairConfirmTitle": "Восстановить «{{name}}»?",
@@ -1212,7 +1251,6 @@
     "repairDesc": "Принудительная переустановка с GitHub. Используйте, когда версия отображается как «неизвестно», игра отказывается загружать этот мод или установка выглядит повреждённой.",
     "repairNeedSource": "Сначала привяжите источник GitHub через «Изменить источники…» — восстановление загружает с GitHub.",
     "subtitle": "{{total}} установлено · {{enabled}} активно{{disabled}}",
-    "openFolder": "Открыть папку модов",
     "importMod": "Импортировать мод",
     "quickAddUrl": "Быстро добавить по ссылке",
     "autoDetectSources": "Автоопределение источников",
@@ -1323,7 +1361,8 @@
       "removeFromModpackDesc": "Убрать этот мод из манифеста {{pack}}. Файлы останутся установленными.",
       "deleteFromDisk": "Удалить с диска",
       "deleteFromDiskDesc": "Безвозвратно удалить файлы этого мода с вашего компьютера."
-    }
+    },
+    "openThisModFolder": "Открыть папку этого мода"
   },
   "devBuilds": {
     "title": "Сборки для разработки",

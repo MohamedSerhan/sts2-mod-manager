@@ -25,6 +25,7 @@ import { cn } from './lib/utils';
 import { ToastProvider, useToast } from './contexts/ToastContext';
 import { AppProvider, useApp } from './contexts/AppContext';
 import { ConfirmProvider, useConfirm } from './components/ConfirmDialog';
+import { ThemeProvider } from './theme/ThemeContext';
 import { importShareCodeSmart } from './lib/shareImport';
 import { getSubscriptions } from './hooks/useTauri';
 import { OnboardingOverlay } from './components/OnboardingOverlay';
@@ -76,13 +77,15 @@ const RESIZE_HANDLES: { direction: ResizeDirection; className: string }[] = [
 
 export default function App() {
   return (
-    <ToastProvider>
-      <ConfirmProvider>
-        <AppProvider>
-          <AppInner />
-        </AppProvider>
-      </ConfirmProvider>
-    </ToastProvider>
+    <ThemeProvider>
+      <ToastProvider>
+        <ConfirmProvider>
+          <AppProvider>
+            <AppInner />
+          </AppProvider>
+        </ConfirmProvider>
+      </ToastProvider>
+    </ThemeProvider>
   );
 }
 

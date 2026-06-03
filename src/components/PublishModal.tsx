@@ -395,12 +395,12 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onLi
               {!isReshare && (
                 <div
                   style={{
-                    background: 'oklch(0.55 0.13 250 / 0.10)',
-                    border: '1px solid oklch(0.55 0.13 250 / 0.3)',
+                    background: 'color-mix(in oklch, var(--info) 10%, transparent)',
+                    border: '1px solid color-mix(in oklch, var(--info) 30%, transparent)',
                     borderRadius: 7,
                     padding: '10px 12px',
                     fontSize: 12,
-                    color: 'oklch(0.85 0.07 250)',
+                    color: 'var(--info-text)',
                     display: 'flex',
                     gap: 9,
                   }}
@@ -493,12 +493,12 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onLi
 
               <div
                 style={{
-                  background: 'oklch(0.55 0.13 250 / 0.10)',
-                  border: '1px solid oklch(0.55 0.13 250 / 0.3)',
+                  background: 'color-mix(in oklch, var(--info) 10%, transparent)',
+                  border: '1px solid color-mix(in oklch, var(--info) 30%, transparent)',
                   borderRadius: 7,
                   padding: '10px 12px',
                   fontSize: 12,
-                  color: 'oklch(0.85 0.07 250)',
+                  color: 'var(--info-text)',
                   display: 'flex',
                   gap: 9,
                   marginTop: 10,
@@ -531,12 +531,12 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onLi
               {shared.failed_uploads && shared.failed_uploads.length > 0 && (
                 <div
                   style={{
-                    background: 'oklch(0.55 0.13 25 / 0.10)',
-                    border: '1px solid oklch(0.55 0.13 25 / 0.35)',
+                    background: 'color-mix(in oklch, var(--danger-deep) 10%, transparent)',
+                    border: '1px solid color-mix(in oklch, var(--danger-deep) 35%, transparent)',
                     borderRadius: 7,
                     padding: '10px 12px',
                     fontSize: 12,
-                    color: 'oklch(0.86 0.10 25)',
+                    color: 'var(--danger-text)',
                     display: 'flex',
                     gap: 9,
                     marginTop: 10,

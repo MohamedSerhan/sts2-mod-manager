@@ -5,6 +5,19 @@
     <link rel="icon" type="image/png" href="/icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>STS2 Mod Manager</title>
+    <script>
+      // Set the theme attribute before any CSS resolves so there is no flash
+      // and tokens (scoped under :root[data-theme=...]) are never undefined.
+      // Mirrors src/theme/theme.ts; the storage key is duplicated because this
+      // runs before the bundle loads.
+      try {
+        var p = localStorage.getItem('sts2mm-theme');
+        var m = p === 'light' ? 'light'
+          : p === 'auto' ? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+          : 'dark';
+        document.documentElement.dataset.theme = m;
+      } catch (e) { document.documentElement.dataset.theme = 'dark'; }
+    </script>
   </head>
 
   <body>

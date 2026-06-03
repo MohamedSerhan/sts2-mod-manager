@@ -1183,73 +1183,67 @@ describe('<LibraryTable modpackName={null}>', () => {
     }
   });
 
-  describe('sort by tag', () => {
+  describe('priorityTag ordering', () => {
     function gridFromInstalled(names: string[]) {
       registerInvokeHandler('get_installed_mods', () =>
         names.map((n) => mkModInfo({ name: n, folder_name: n, mod_id: n })),
       );
     }
-    it('orders by first tag alphabetically, untagged last', async () => {
-      gridFromInstalled(['Zeta', 'Apple', 'NoTag']);
+    it('brings the priority tag to the top, then orders the rest by tag A–Z (untagged last)', async () => {
+      gridFromInstalled(['Apple', 'Zeta', 'Mid', 'Plain']);
+      const modInfoByKey = new Map([
+        ['Apple', mkModInfo({ name: 'Apple', folder_name: 'Apple', tags: ['ui'] })],
+        ['Zeta', mkModInfo({ name: 'Zeta', folder_name: 'Zeta', tags: ['combat'] })],
+        ['Mid', mkModInfo({ name: 'Mid', folder_name: 'Mid', tags: ['combat'] })],
+        ['Plain', mkModInfo({ name: 'Plain', folder_name: 'Plain', tags: [] })],
+      ]);
+      render(<Wrap modpackName={null} modInfoByKey={modInfoByKey} priorityTag="combat" />);
+      await screen.findByTestId('library-table');
+      const titles = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent);
+      const order = titles.filter((tt) => ['Apple', 'Zeta', 'Mid', 'Plain'].includes(tt ?? ''));
+      // combat first (Mid, Zeta by name) → other tags A–Z (ui = Apple) → untagged last (Plain).
+      expect(order).toEqual(['Mid', 'Zeta', 'Apple', 'Plain']);
+    });
+
+    it('is case-insensitive and hides nothing — it only reorders', async () => {
+      gridFromInstalled(['Apple', 'Zeta']);
+      const modInfoByKey = new Map([
+        ['Apple', mkModInfo({ name: 'Apple', folder_name: 'Apple', tags: ['UI'] })],
+        ['Zeta', mkModInfo({ name: 'Zeta', folder_name: 'Zeta', tags: ['combat'] })],
+      ]);
+      render(<Wrap modpackName={null} modInfoByKey={modInfoByKey} priorityTag="ui" />);
+      await screen.findByTestId('library-table');
+      // Both rows still render (nothing filtered out); the "UI" mod is on top.
+      const titles = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent);
+      const order = titles.filter((tt) => ['Apple', 'Zeta'].includes(tt ?? ''));
+      expect(order).toEqual(['Apple', 'Zeta']);
+    });
+
+    it('with no priorityTag, uses the normal sort (no tag reordering)', async () => {
+      gridFromInstalled(['Zeta', 'Apple']);
       const modInfoByKey = new Map([
         ['Zeta', mkModInfo({ name: 'Zeta', folder_name: 'Zeta', tags: ['combat'] })],
-        ['Apple', mkModInfo({ name: 'Apple', folder_name: 'Apple', tags: ['ui', 'aesthetic'] })],
-        ['NoTag', mkModInfo({ name: 'NoTag', folder_name: 'NoTag', tags: [] })],
+        ['Apple', mkModInfo({ name: 'Apple', folder_name: 'Apple', tags: ['ui'] })],
       ]);
       render(<Wrap modpackName={null} modInfoByKey={modInfoByKey} />);
-      const sortSelect = await screen.findByLabelText(/sort/i) as HTMLSelectElement;
-      fireEvent.change(sortSelect, { target: { value: 'tagAsc' } });
-      // Apple → "aesthetic", Zeta → "combat", NoTag → untagged (last).
-      const titles = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent);
-      const order = titles.filter((tt) => ['Apple', 'Zeta', 'NoTag'].includes(tt ?? ''));
-      expect(order).toEqual(['Apple', 'Zeta', 'NoTag']);
+      // Default no-focus sort is nameAsc → Apple before Zeta (by name, not tag).
+      const titles = (await screen.findAllByRole('heading', { level: 3 })).map((h) => h.textContent);
+      const order = titles.filter((tt) => ['Apple', 'Zeta'].includes(tt ?? ''));
+      expect(order).toEqual(['Apple', 'Zeta']);
     });
 
     it('handles a 100-mod library without error', async () => {
       const names = Array.from({ length: 100 }, (_, i) => `Mod${String(i).padStart(3, '0')}`);
       gridFromInstalled(names);
       const modInfoByKey = new Map(names.map((n, i) => [n, mkModInfo({ name: n, folder_name: n, tags: i % 2 ? ['alpha'] : [] })]));
-      render(<Wrap modpackName={null} modInfoByKey={modInfoByKey} pageSize={200} />);
-      const sortSelect = await screen.findByLabelText(/sort/i) as HTMLSelectElement;
-      fireEvent.change(sortSelect, { target: { value: 'tagAsc' } });
-      // Odd-indexed mods are tagged ['alpha']; even-indexed are untagged. tagAsc → all tagged first.
+      render(<Wrap modpackName={null} modInfoByKey={modInfoByKey} priorityTag="alpha" pageSize={200} />);
+      await screen.findByTestId('library-table');
+      // Odd-indexed mods are tagged ['alpha'] → priority → first 50; even (untagged) → last 50.
       const titles = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent ?? '');
       const suffix = (tt: string) => Number(tt.replace('Mod', ''));
       expect(titles).toHaveLength(100);
-      expect(titles.slice(0, 50).every((tt) => suffix(tt) % 2 === 1)).toBe(true);   // first 50 are the tagged (odd) mods
-      expect(titles.slice(50).every((tt) => suffix(tt) % 2 === 0)).toBe(true);      // last 50 are the untagged (even) mods
-    });
-
-    it('brings the chosen tag to the top via the secondary picker', async () => {
-      gridFromInstalled(['Apple', 'Zeta', 'Mid']);
-      const modInfoByKey = new Map([
-        ['Apple', mkModInfo({ name: 'Apple', folder_name: 'Apple', tags: ['ui'] })],
-        ['Zeta', mkModInfo({ name: 'Zeta', folder_name: 'Zeta', tags: ['combat'] })],
-        ['Mid', mkModInfo({ name: 'Mid', folder_name: 'Mid', tags: ['combat'] })],
-      ]);
-      render(<Wrap modpackName={null} modInfoByKey={modInfoByKey} />);
-      const sortSelect = await screen.findByLabelText(/sort/i) as HTMLSelectElement;
-      fireEvent.change(sortSelect, { target: { value: 'tagAsc' } });
-      // Pick "combat" → combat-tagged mods float up (Mid, Zeta by name), then Apple.
-      const tagPicker = await screen.findByLabelText(/bring to the top/i) as HTMLSelectElement;
-      fireEvent.change(tagPicker, { target: { value: 'combat' } });
-      const titles = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent);
-      const order = titles.filter((tt) => ['Apple', 'Zeta', 'Mid'].includes(tt ?? ''));
-      expect(order).toEqual(['Mid', 'Zeta', 'Apple']);
-    });
-
-    it('shows the secondary tag picker only for the By tag sort', async () => {
-      gridFromInstalled(['Apple', 'Zeta']);
-      const modInfoByKey = new Map([
-        ['Apple', mkModInfo({ name: 'Apple', folder_name: 'Apple', tags: ['ui'] })],
-        ['Zeta', mkModInfo({ name: 'Zeta', folder_name: 'Zeta', tags: ['combat'] })],
-      ]);
-      render(<Wrap modpackName={null} modInfoByKey={modInfoByKey} />);
-      const sortSelect = await screen.findByLabelText(/sort/i) as HTMLSelectElement;
-      fireEvent.change(sortSelect, { target: { value: 'nameAsc' } });
-      expect(screen.queryByLabelText(/bring to the top/i)).toBeNull();
-      fireEvent.change(sortSelect, { target: { value: 'tagAsc' } });
-      expect(screen.getByLabelText(/bring to the top/i)).toBeInTheDocument();
+      expect(titles.slice(0, 50).every((tt) => suffix(tt) % 2 === 1)).toBe(true);   // tagged (odd) on top
+      expect(titles.slice(50).every((tt) => suffix(tt) % 2 === 0)).toBe(true);      // untagged (even) last
     });
   });
 

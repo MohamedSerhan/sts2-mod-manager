@@ -202,7 +202,7 @@ describe('<ModsView>', () => {
     expect(screen.queryByText('CardArtEditor')).toBeNull();
   });
 
-  it('manager tags render on rows and can filter large libraries by category', async () => {
+  it('manager tags render on rows and the Tag picker brings a category to the top (hides nothing)', async () => {
     seedMods([
       baseMod({ name: 'BaseLib', folder_name: 'BaseLib', tags: ['utility', 'beta'] }),
       baseMod({ name: 'CardArtEditor', folder_name: 'CardArtEditor', tags: ['visual'] }),
@@ -216,10 +216,18 @@ describe('<ModsView>', () => {
     expect(screen.getAllByText('utility').length).toBeGreaterThan(0);
     expect(screen.getAllByText('visual').length).toBeGreaterThan(0);
 
+    // Choosing a tag REORDERS (does not hide): the utility mod floats to the
+    // top, every mod stays visible, and untagged sorts last.
     await user.selectOptions(screen.getByRole('combobox', { name: /Tag/i }), 'utility');
     expect(screen.getByText('BaseLib')).toBeInTheDocument();
-    expect(screen.queryByText('CardArtEditor')).toBeNull();
-    expect(screen.queryByText('NoTag')).toBeNull();
+    expect(screen.getByText('CardArtEditor')).toBeInTheDocument();
+    expect(screen.getByText('NoTag')).toBeInTheDocument();
+    const order = screen
+      .getAllByRole('heading', { level: 3 })
+      .map((h) => h.textContent)
+      .filter((tt) => ['BaseLib', 'CardArtEditor', 'NoTag'].includes(tt ?? ''));
+    expect(order[0]).toBe('BaseLib');
+    expect(order[order.length - 1]).toBe('NoTag');
   });
 
   it('sort dropdown supports common mod-library orders', async () => {
@@ -3263,12 +3271,10 @@ describe('<ModsView> source editor inline lifecycle', () => {
 // The filter row matches by tag substring (Mods.tsx ~531). Without a
 // tag-search test, the `tags.some((tag) => tag.toLowerCase().includes(...))`
 // arm sits uncovered.
-describe('<ModsView> filter by tag substring', () => {
-  it('tag dropdown narrows visible mods to ones carrying the chosen tag', async () => {
-    // Post-1.7.0 T18 unification: tag filtering moved from the search
-    // input (substring match) to a dropdown that exact-matches a single
-    // tag (filterRow on LibraryTable). The dropdown is the canonical
-    // surface; the search input no longer matches against tags.
+describe('<ModsView> tag priority picker', () => {
+  it('tag dropdown brings the chosen tag to the top without hiding the rest', async () => {
+    // The Tag dropdown reorders rather than filters: the chosen tag's mods
+    // float to the top, and every mod stays visible.
     seedMods([
       baseMod({
         name: 'TaggedMod', folder_name: 'TaggedMod',
@@ -3284,10 +3290,14 @@ describe('<ModsView> filter by tag substring', () => {
     await screen.findAllByText('TaggedMod');
     expect(screen.getByText('OtherMod')).toBeInTheDocument();
     await user.selectOptions(screen.getByRole('combobox', { name: /Tag/i }), 'Combat');
-    await waitFor(() => {
-      expect(screen.queryByText('OtherMod')).toBeNull();
-    });
+    // Both stay visible; the Combat mod is ordered before the other.
     expect(screen.getByText('TaggedMod')).toBeInTheDocument();
+    expect(screen.getByText('OtherMod')).toBeInTheDocument();
+    const order = screen
+      .getAllByRole('heading', { level: 3 })
+      .map((h) => h.textContent)
+      .filter((tt) => ['TaggedMod', 'OtherMod'].includes(tt ?? ''));
+    expect(order).toEqual(['TaggedMod', 'OtherMod']);
   });
 });
 

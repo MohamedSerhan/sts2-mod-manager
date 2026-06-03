@@ -63,8 +63,7 @@ export type LibrarySortMode =
   | 'nameDesc'
   | 'inPackFirst'
   | 'activeFirst'
-  | 'storedFirst'
-  | 'tagAsc';
+  | 'storedFirst';
 
 export interface LibraryTableProps {
   /** The modpack whose membership column we focus on. The table
@@ -121,6 +120,11 @@ export interface LibraryTableProps {
    *  rendering. Used by the Library view to apply tag / extra filters
    *  on top of the table's own search. */
   filterRow?: (row: ProfileMembershipMod) => boolean;
+  /** Tag to prioritise in the ordering (from the page Tag picker). When set,
+   *  mods carrying this tag sort to the top, then the rest order by their first
+   *  tag A–Z (untagged last); ties by display name. OVERRIDES the sort mode
+   *  while a tag is chosen, and hides nothing — it only reorders. */
+  priorityTag?: string;
 
   // ─── ModRow-style per-row action surface (optional) ──────────────
   // When supplied, these are forwarded to LibraryRow's kebab menu.
@@ -215,6 +219,7 @@ export function LibraryTable({
   toolbarActions,
   reloadToken,
   filterRow,
+  priorityTag = '',
   modInfoByKey,
   auditByKey,
   gameRunning,
@@ -251,9 +256,6 @@ export function LibraryTable({
   const [sort, setSort] = useState<LibrarySortMode>(
     initialSort ?? (modpackName ? 'inPackFirst' : 'nameAsc'),
   );
-  // When sort === 'tagAsc', which tag to prioritise. '' = A–Z (order by each
-  // mod's first tag); a specific tag = bring that tag's mods to the top.
-  const [tagSortKey, setTagSortKey] = useState('');
   const [visibleLimit, setVisibleLimit] = useState(pageSize);
   const [membershipSaving, setMembershipSaving] = useState<string | null>(null);
   const [storageSaving, setStorageSaving] = useState<string | null>(null);
@@ -452,6 +454,24 @@ export function LibraryTable({
     sorted.sort((a, b) => {
       const aIn = inPackRowKeys.has(membershipRowKey(a));
       const bIn = inPackRowKeys.has(membershipRowKey(b));
+      // Tag-priority ordering (the page Tag picker) OVERRIDES the sort mode
+      // while a tag is chosen: that tag's mods first, then the rest by first
+      // tag A–Z (untagged last); ties by display name. Nothing is hidden.
+      if (priorityTag) {
+        const key = priorityTag.toLocaleLowerCase();
+        const aHas = rowHasTag(a, key, modInfoByKey);
+        const bHas = rowHasTag(b, key, modInfoByKey);
+        if (aHas !== bHas) return aHas ? -1 : 1;
+        const at = firstTagKey(a, modInfoByKey);
+        const bt = firstTagKey(b, modInfoByKey);
+        if (at !== bt) {
+          if (at === null) return 1;   // untagged after tagged
+          if (bt === null) return -1;
+          const byTag = at.localeCompare(bt, undefined, { sensitivity: 'base', numeric: true });
+          if (byTag !== 0) return byTag;
+        }
+        return compareMembershipDisplayName(a, b);
+      }
       if (sort === 'nameDesc') return compareMembershipDisplayName(b, a);
       if (sort === 'inPackFirst') {
         if (aIn !== bIn) return Number(bIn) - Number(aIn);
@@ -469,56 +489,12 @@ export function LibraryTable({
           || compareMembershipDisplayName(a, b)
         );
       }
-      if (sort === 'tagAsc') {
-        // A specific tag chosen → that tag's mods float to the top.
-        if (tagSortKey) {
-          const key = tagSortKey.toLocaleLowerCase();
-          const aHas = rowHasTag(a, key, modInfoByKey);
-          const bHas = rowHasTag(b, key, modInfoByKey);
-          if (aHas !== bHas) return aHas ? -1 : 1;
-          return compareMembershipDisplayName(a, b);
-        }
-        // A–Z → order by each mod's alphabetically-first tag, untagged last.
-        const at = firstTagKey(a, modInfoByKey);
-        const bt = firstTagKey(b, modInfoByKey);
-        if (at !== bt) {
-          if (at === null) return 1;   // untagged after tagged
-          if (bt === null) return -1;
-          const byTag = at.localeCompare(bt, undefined, { sensitivity: 'base', numeric: true });
-          if (byTag !== 0) return byTag;
-        }
-        return compareMembershipDisplayName(a, b);
-      }
       return compareMembershipDisplayName(a, b);
     });
     return sorted;
-  }, [effectiveGrid, filter, sort, tagSortKey, inPackRowKeys, filterRow, modInfoByKey]);
+  }, [effectiveGrid, filter, sort, priorityTag, inPackRowKeys, filterRow, modInfoByKey]);
 
   const visibleItems = filteredRows.slice(0, visibleLimit);
-
-  // Distinct tags across known mods, for the "By tag → which tag" secondary
-  // picker. Derived from modInfoByKey (supplied by the All-Mods view).
-  const tagOptions = useMemo(() => {
-    const seen = new Map<string, string>();
-    if (modInfoByKey) {
-      for (const info of modInfoByKey.values()) {
-        for (const tag of info.tags ?? []) {
-          const trimmed = tag.trim();
-          if (trimmed && !seen.has(trimmed.toLocaleLowerCase())) {
-            seen.set(trimmed.toLocaleLowerCase(), trimmed);
-          }
-        }
-      }
-    }
-    return [...seen.values()].sort((a, b) =>
-      a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }),
-    );
-  }, [modInfoByKey]);
-
-  // If the chosen sort-tag disappears (mods removed / refreshed), fall back to A–Z.
-  useEffect(() => {
-    if (tagSortKey && !tagOptions.includes(tagSortKey)) setTagSortKey('');
-  }, [tagOptions, tagSortKey]);
 
   function patchRowMembership(
     rowKey: string,
@@ -827,26 +803,8 @@ export function LibraryTable({
                 <option value="storedFirst">
                   {t('profiles.library.sort.storedFirst')}
                 </option>
-                <option value="tagAsc">{t('profiles.library.sort.tagAsc')}</option>
               </select>
             </label>
-            {/* When "By tag" is active, a secondary picker chooses A–Z or a
-                specific tag to bring to the top. Only shown when tags exist. */}
-            {sort === 'tagAsc' && tagOptions.length > 0 && (
-              <label className="gf-sort-control gf-profile-library-sort">
-                <span>{t('mods.tags.label')}</span>
-                <select
-                  value={tagSortKey}
-                  onChange={(event) => setTagSortKey(event.target.value)}
-                  aria-label={t('profiles.library.sort.tagWhichAria')}
-                >
-                  <option value="">{t('profiles.library.sort.tagAToZ')}</option>
-                  {tagOptions.map((tag) => (
-                    <option key={tag} value={tag}>{tag}</option>
-                  ))}
-                </select>
-              </label>
-            )}
           </div>
         )}
       </div>

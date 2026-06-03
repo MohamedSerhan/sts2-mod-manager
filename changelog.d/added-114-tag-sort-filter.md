@@ -1,1 +1,1 @@
-You can now sort your mod library by tag — alphabetically, or bringing a chosen tag's mods to the top — and filter a modpack's own mods by tag right from its page.
+On the mod library, picking a tag now floats that tag's mods to the top (with the rest ordered by tag) instead of hiding the others; inside a modpack you can still filter its mods by tag.

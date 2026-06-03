@@ -338,10 +338,7 @@
         "nameAsc": "Name A-Z",
         "nameDesc": "Name Z-A",
         "activeFirst": "Active first",
-        "storedFirst": "Stored first",
-        "tagAsc": "By tag",
-        "tagAToZ": "A–Z",
-        "tagWhichAria": "Tag to bring to the top"
+        "storedFirst": "Stored first"
       },
       "empty": {
         "title": "No installed mods",

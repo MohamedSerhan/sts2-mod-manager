@@ -21,13 +21,35 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..', '..');
 
 const MSEDGEDRIVER = resolve(__dirname, 'msedgedriver.exe');
-const APP_BINARY = resolve(
-  REPO_ROOT,
-  'src-tauri',
-  'target',
-  'release',
-  'sts2-mod-manager.exe',
-);
+// Resolve cargo's actual target directory so we find the binary even when a
+// machine-wide shared target is configured (CARGO_TARGET_DIR or a
+// .cargo/config `build.target-dir`). `cargo metadata` honors all of those;
+// fall back to the in-tree default if it's unavailable.
+function cargoTargetDir() {
+  try {
+    const res = spawnSync(
+      'cargo',
+      [
+        'metadata',
+        '--manifest-path',
+        resolve(REPO_ROOT, 'src-tauri', 'Cargo.toml'),
+        '--format-version',
+        '1',
+        '--no-deps',
+      ],
+      { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+    );
+    if (res.status === 0 && res.stdout) {
+      const dir = JSON.parse(res.stdout).target_directory;
+      if (dir) return dir;
+    }
+  } catch {
+    /* fall through to the in-tree default below */
+  }
+  return resolve(REPO_ROOT, 'src-tauri', 'target');
+}
+
+const APP_BINARY = resolve(cargoTargetDir(), 'release', 'sts2-mod-manager.exe');
 // tauri-driver intermediary port (the WebDriver client connects here).
 const DRIVER_PORT = 4444;
 // msedgedriver port (tauri-driver forwards to here).

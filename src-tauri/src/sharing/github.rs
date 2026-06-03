@@ -838,6 +838,13 @@ pub async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::P
         )));
     }
 
+    if expected_sha256.is_none() {
+        log::warn!(
+            "download_bundle: no bundle_sha256 for '{}' — integrity check skipped (legacy profile)",
+            mod_name
+        );
+    }
+
     let client = reqwest::Client::builder()
         .user_agent(concat!("sts2-mod-manager/", env!("CARGO_PKG_VERSION")))
         .timeout(HTTP_TOTAL_TIMEOUT)

@@ -79,10 +79,12 @@ jobs:
           node-version: "22"
           cache: "npm"
       - run: npm ci
-      - name: Frontend tests (vitest)
-        # qa:unit = `vitest run` only. (`npm test` would ALSO run cargo test,
-        # which the test-rust job already covers — avoid the duplicate.)
-        run: npm run qa:unit
+      - name: Frontend tests + coverage gate (vitest)
+        # qa:coverage = `vitest run --coverage`, which ALSO enforces the
+        # thresholds declared in vitest.config.ts. Use it (not qa:unit) so a
+        # coverage regression is caught in the PR gate, not only at release.
+        # (`npm test` would ALSO run cargo test, which test-rust covers.)
+        run: npm run qa:coverage
 
   test-rust:
     needs: changes
@@ -98,8 +100,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-      - name: Rust tests
+      - name: Rust tests (default features)
         run: cargo test --manifest-path=src-tauri/Cargo.toml
+      - name: Rust tests (qa-cassette feature)
+        # The cassette-gated integration tests compile/run only under this
+        # feature. Without this step, a signature drift in cassette-only code
+        # (or its fixtures) surfaces only at release, not in the PR gate.
+        run: cargo test --manifest-path=src-tauri/Cargo.toml --features qa-cassette
 
   app-build:
     needs: changes

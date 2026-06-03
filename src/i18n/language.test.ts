@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, beforeEach } from 'vitest';
 import {
   DEFAULT_LANGUAGE_PREFERENCE,
   LANGUAGE_STORAGE_KEY,
+  isRtlLanguage,
   loadLanguagePreference,
   resolveDetectedLanguage,
   saveLanguagePreference,
@@ -37,6 +38,22 @@ describe('resolveDetectedLanguage', () => {
 
   it('falls back to English for unsupported non-Chinese locales', () => {
     expect(resolveDetectedLanguage(['fr-FR', 'es-ES'])).toBe('en');
+  });
+
+  it('routes region-tagged Russian and Arabic locales to their base language', () => {
+    // navigator.language is usually region-tagged (ru-RU, ar-SA, …); these must
+    // resolve to the base locale via the primary-subtag fallback, not fall
+    // through to English.
+    expect(resolveDetectedLanguage(['ru-RU'])).toBe('ru');
+    expect(resolveDetectedLanguage(['ru'])).toBe('ru');
+    expect(resolveDetectedLanguage(['ar-EG'])).toBe('ar');
+    expect(resolveDetectedLanguage(['ar-SA'])).toBe('ar');
+    expect(resolveDetectedLanguage(['ar'])).toBe('ar');
+  });
+
+  it('still falls back to English for unsupported region-tagged locales', () => {
+    expect(resolveDetectedLanguage(['fr-CA'])).toBe('en');
+    expect(resolveDetectedLanguage(['es-MX', 'pt-BR'])).toBe('en');
   });
 
   it('routes Simplified Chinese locales to Simplified Chinese', () => {
@@ -81,6 +98,30 @@ describe('resolveDetectedLanguage', () => {
     // And when paired with a real locale later in the list, the blank
     // entry must not short-circuit the search.
     expect(resolveDetectedLanguage(['   ', 'zh-CN'])).toBe('zh-Hans');
+  });
+});
+
+describe('isRtlLanguage', () => {
+  it('flags right-to-left scripts (Arabic and friends) by primary subtag', () => {
+    expect(isRtlLanguage('ar')).toBe(true);
+    expect(isRtlLanguage('ar-EG')).toBe(true);
+    expect(isRtlLanguage('AR')).toBe(true);
+    expect(isRtlLanguage('he')).toBe(true);
+    expect(isRtlLanguage('fa')).toBe(true);
+    expect(isRtlLanguage('ur')).toBe(true);
+  });
+
+  it('treats left-to-right locales (including the other supported ones) as LTR', () => {
+    expect(isRtlLanguage('en')).toBe(false);
+    expect(isRtlLanguage('ru')).toBe(false);
+    expect(isRtlLanguage('zh-Hans')).toBe(false);
+    expect(isRtlLanguage('zh-Hant')).toBe(false);
+  });
+
+  it('is safe for empty / nullish input', () => {
+    expect(isRtlLanguage('')).toBe(false);
+    expect(isRtlLanguage(null)).toBe(false);
+    expect(isRtlLanguage(undefined)).toBe(false);
   });
 });
 

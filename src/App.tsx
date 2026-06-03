@@ -769,7 +769,7 @@ function AppInner() {
                   size={14}
                   style={{
                     opacity: 0.4,
-                    marginLeft: 4,
+                    marginInlineStart: 4,
                     transform: showProfileSwitcher ? 'rotate(180deg)' : undefined,
                     transition: 'transform 0.15s',
                   }}

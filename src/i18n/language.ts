@@ -5,6 +5,8 @@ export const DEFAULT_LANGUAGE_PREFERENCE = 'auto';
 export const SUPPORTED_LANGUAGES = [
   { code: 'en', labelKey: 'settings.language.en' },
   { code: 'zh-Hans', labelKey: 'settings.language.zhHans' },
+  { code: 'ru', labelKey: 'settings.language.ru' },
+  { code: 'ar', labelKey: 'settings.language.ar' },
 ] as const;
 
 export type SupportedLanguageCode = (typeof SUPPORTED_LANGUAGES)[number]['code'];
@@ -12,6 +14,18 @@ export type LanguagePreference = SupportedLanguageCode | typeof DEFAULT_LANGUAGE
 
 export const SUPPORTED_LANGUAGE_CODES = SUPPORTED_LANGUAGES.map((language) => language.code);
 const TRADITIONAL_CHINESE_REGIONS = new Set(['tw', 'hk', 'mo']);
+
+// Languages whose script is written right-to-left. Keyed by the primary subtag
+// so `ar`, `ar-EG`, etc. all resolve to RTL even though only exact codes are
+// registered in SUPPORTED_LANGUAGES. Drives the document `dir` attribute via
+// applyDocumentDirection in ./index.
+const RTL_LANGUAGE_SUBTAGS = new Set(['ar', 'he', 'fa', 'ur']);
+
+export function isRtlLanguage(code: string | null | undefined): boolean {
+  if (!code) return false;
+  const base = code.trim().toLowerCase().split('-')[0];
+  return RTL_LANGUAGE_SUBTAGS.has(base);
+}
 
 export function isSupportedLanguagePreference(value: string | null): value is LanguagePreference {
   return value === DEFAULT_LANGUAGE_PREFERENCE || SUPPORTED_LANGUAGE_CODES.includes(value as SupportedLanguageCode);
@@ -72,6 +86,16 @@ function resolveOneLocale(locale: string, availableLanguages: readonly string[])
       ? 'zh-Hant'
       : 'zh-Hans';
     return availableLanguages.includes(target) ? target as SupportedLanguageCode : null;
+  }
+  // Region-tagged variants of any other registered language fall back to their
+  // primary subtag (e.g. ru-RU → ru, ar-EG → ar). Most browsers report a
+  // region-tagged navigator.language, so without this auto-detect would miss
+  // Russian/Arabic users entirely. en/zh are handled above with their own
+  // script/region rules; this generic step means a newly registered locale
+  // picks up its `xx-YY` forms from just a SUPPORTED_LANGUAGES entry.
+  const base = normalized.split('-')[0];
+  if (base !== normalized && availableLanguages.includes(base)) {
+    return base as SupportedLanguageCode;
   }
   return null;
 }

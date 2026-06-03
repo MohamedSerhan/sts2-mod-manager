@@ -585,7 +585,7 @@ export function SettingsView() {
                 <Key size={18} />
                 {t('settings.accounts.nexusKey')}
                 {nexusKeySaved && (
-                  <span className="gf-pill gf-pill-update" style={{ marginLeft: 6 }}>{t('settings.accounts.saved')}</span>
+                  <span className="gf-pill gf-pill-update" style={{ marginInlineStart: 6 }}>{t('settings.accounts.saved')}</span>
                 )}
               </h3>
               <div className="gf-field" style={{ margin: 0 }}>
@@ -636,7 +636,7 @@ export function SettingsView() {
                 {t('settings.accounts.githubToken')}
                 <span className="text-xs text-text-dim font-normal">{t('settings.accounts.optional')}</span>
                 {githubTokenSaved && (
-                  <span className="gf-pill gf-pill-update" style={{ marginLeft: 6 }}>{t('settings.accounts.saved')}</span>
+                  <span className="gf-pill gf-pill-update" style={{ marginInlineStart: 6 }}>{t('settings.accounts.saved')}</span>
                 )}
               </h3>
               <div className="gf-field" style={{ margin: 0 }}>
@@ -715,7 +715,7 @@ export function SettingsView() {
                       <div className="gf-backup-time">
                         {formatBackupTimestamp(b.name)}
                         {i === 0 && (
-                          <span className="gf-pill gf-pill-update" style={{ marginLeft: 8 }}>{t('settings.backups.newest')}</span>
+                          <span className="gf-pill gf-pill-update" style={{ marginInlineStart: 8 }}>{t('settings.backups.newest')}</span>
                         )}
                       </div>
                       <div className="gf-backup-meta">

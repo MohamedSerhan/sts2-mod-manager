@@ -46,7 +46,7 @@ export function BrowseDetail(props: Props) {
             className="gf-btn-3 gf-btn-icon"
             onClick={props.onClose}
             title={t('common.close')}
-            style={{ position: 'absolute', top: 12, right: 12, background: 'color-mix(in oklch, var(--indigo-deep) 60%, transparent)' }}
+            style={{ position: 'absolute', top: 12, insetInlineEnd: 12, background: 'color-mix(in oklch, var(--indigo-deep) 60%, transparent)' }}
           >
             <X size={14} />
           </button>
@@ -64,7 +64,7 @@ export function BrowseDetail(props: Props) {
                   <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
                     <span className="gf-pill gf-pill-github">{t('browseDetail.github')}</span>
                     <span className="gf-pill" style={{ background: 'var(--indigo-line)', color: 'var(--ink-mute)' }}>
-                      <Star size={9} style={{ marginRight: 3 }} />
+                      <Star size={9} style={{ marginInlineEnd: 3 }} />
                       {props.repo.stargazers_count.toLocaleString()}
                     </span>
                     {props.repo.owner?.login && (

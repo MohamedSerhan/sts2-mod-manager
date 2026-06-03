@@ -149,7 +149,7 @@ export function ProfileSwitcher({ onClose, onAddPack, onManageAll }: Props) {
     <div
       ref={popRef}
       className="gf-pop"
-      style={{ top: 'calc(100% + 4px)', left: 0, right: 'auto' }}
+      style={{ top: 'calc(100% + 4px)', insetInlineStart: 0, insetInlineEnd: 'auto' }}
     >
       <div className="gf-pop-head">{t('profileSwitcher.title')}</div>
       {loading ? (
@@ -172,7 +172,7 @@ export function ProfileSwitcher({ onClose, onAddPack, onManageAll }: Props) {
               className={`gf-pop-item ${isActive ? 'active' : ''}`}
               onClick={() => handleSwitch(p.name)}
               disabled={switching !== null}
-              style={{ background: 'transparent', border: 0, width: '100%', textAlign: 'left', font: 'inherit', cursor: 'pointer' }}
+              style={{ background: 'transparent', border: 0, width: '100%', textAlign: 'start', font: 'inherit', cursor: 'pointer' }}
             >
               <div
                 style={{

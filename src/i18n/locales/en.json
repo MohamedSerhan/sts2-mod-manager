@@ -1133,7 +1133,9 @@
       "en": "English",
       "zh": "中文",
       "auto": "Auto",
-      "zhHans": "Simplified Chinese"
+      "zhHans": "Simplified Chinese",
+      "ru": "Русский",
+      "ar": "العربية"
     },
     "theme": {
       "label": "Theme",

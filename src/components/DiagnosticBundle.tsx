@@ -336,7 +336,7 @@ function DiagnosticBundlePanel({ onClose }: { onClose: () => void }) {
             <div className="gf-diag-item">
               <span className="check"><Check size={12} /></span>
               <b style={{ color: 'var(--ink)' }}>{t('diagnosticBundle.gameInfo')}</b>
-              <span style={{ marginLeft: 'auto', fontSize: 11 }}>
+              <span style={{ marginInlineStart: 'auto', fontSize: 11 }}>
                 {gameInfo?.game_version
                   ? gameInfo.game_version
                   : gameInfo?.valid
@@ -347,22 +347,22 @@ function DiagnosticBundlePanel({ onClose }: { onClose: () => void }) {
             <div className="gf-diag-item">
               <span className="check"><Check size={12} /></span>
               <b style={{ color: 'var(--ink)' }}>{t('diagnosticBundle.modList')}</b>
-              <span style={{ marginLeft: 'auto', fontSize: 11 }}>{t('diagnosticBundle.entriesCount', { count: mods.length })}</span>
+              <span style={{ marginInlineStart: 'auto', fontSize: 11 }}>{t('diagnosticBundle.entriesCount', { count: mods.length })}</span>
             </div>
             <div className="gf-diag-item">
               <span className="check"><Check size={12} /></span>
               <b style={{ color: 'var(--ink)' }}>{t('diagnosticBundle.loadOrder')}</b>
-              <span style={{ marginLeft: 'auto', fontSize: 11 }}>{activeProfile || t('common.vanilla')}</span>
+              <span style={{ marginInlineStart: 'auto', fontSize: 11 }}>{activeProfile || t('common.vanilla')}</span>
             </div>
             <div className="gf-diag-item">
               <span className="check"><Check size={12} /></span>
               <b style={{ color: 'var(--ink)' }}>{t('diagnosticBundle.recentLogs')}</b>
-              <span style={{ marginLeft: 'auto', fontSize: 11 }}>{t('diagnosticBundle.last500Lines')}</span>
+              <span style={{ marginInlineStart: 'auto', fontSize: 11 }}>{t('diagnosticBundle.last500Lines')}</span>
             </div>
             <div className="gf-diag-item">
               <span style={{ color: 'var(--ink-mute)' }}>—</span>
               <span>{t('diagnosticBundle.sensitiveData')}</span>
-              <span style={{ marginLeft: 'auto', fontSize: 11 }}>{t('diagnosticBundle.excluded')}</span>
+              <span style={{ marginInlineStart: 'auto', fontSize: 11 }}>{t('diagnosticBundle.excluded')}</span>
             </div>
           </div>
           <label

@@ -1449,20 +1449,33 @@ async function specSkippedModAbsentFromSnapshot(driver) {
   // proves the manager UI knows the mod is incompatible — the same compat
   // gate (install_is_incompatible) the snapshot filter relies on.
   await navToMods(driver);
-  const refreshBtn = await waitForElement(
-    driver,
-    By.xpath("//button[normalize-space(.)='Refresh' or contains(., 'Refresh')]"),
-    'Mods toolbar Refresh button',
-  );
-  await refreshBtn.click();
-  await waitForElement(
-    driver,
-    By.xpath("//*[normalize-space(text())='SkippedMod']"),
-    'SkippedMod row (post-seed re-scan)',
-    // A backend disk re-scan + render after Refresh can exceed the 10s
-    // default under release-machine load; give it headroom (was a flaky miss).
-    30_000,
-  );
+  // The post-Refresh disk re-scan + render can be slow under release-machine
+  // load (right after a full app build + a real-network audit on GitHub-sourced
+  // mods), and occasionally a single Refresh doesn't surface the freshly-seeded
+  // row in time. Re-click Refresh and poll with a generous overall budget; on a
+  // final miss, dump a diagnostic so a CI failure is actionable, not opaque.
+  const skippedRowXpath = "//*[normalize-space(text())='SkippedMod']";
+  let skippedRowFound = false;
+  for (let attempt = 1; attempt <= 3 && !skippedRowFound; attempt += 1) {
+    const refreshBtn = await waitForElement(
+      driver,
+      By.xpath("//button[normalize-space(.)='Refresh' or contains(., 'Refresh')]"),
+      'Mods toolbar Refresh button',
+    );
+    await refreshBtn.click();
+    try {
+      await driver.wait(until.elementLocated(By.xpath(skippedRowXpath)), 25_000);
+      skippedRowFound = true;
+    } catch {
+      console.log(`  [#21] SkippedMod not visible after Refresh attempt ${attempt}/3 — retrying…`);
+    }
+  }
+  if (!skippedRowFound) {
+    const src = await driver.getPageSource();
+    const rowCount = (await driver.findElements(By.css('.gf-mod-row, .gf-card'))).length;
+    console.log(`  [#21 diag] 'SkippedMod' in page source: ${src.includes('SkippedMod')}; mod-row/card elements: ${rowCount}`);
+    throw new Error('SkippedMod row never appeared after 3 Refresh attempts (post-seed re-scan)');
+  }
   await waitForElement(
     driver,
     By.xpath(

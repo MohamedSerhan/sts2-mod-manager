@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import i18n, { applyDocumentDirection } from '.';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import i18n, { applyDocumentDirection, resolveLanguagePreference } from '.';
 
 // Verifies the RTL wiring added for Arabic: applyDocumentDirection mirrors the
 // <html> dir/lang attributes off the active locale, and the languageChanged
@@ -35,5 +35,47 @@ describe('document direction (RTL)', () => {
     await i18n.changeLanguage('ru');
     expect(document.documentElement.getAttribute('dir')).toBe('ltr');
     expect(document.documentElement.getAttribute('lang')).toBe('ru');
+  });
+});
+
+describe('resolveLanguagePreference', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('returns a manual preference verbatim without consulting the browser', () => {
+    // The non-"auto" branch must short-circuit detection entirely: even with a
+    // browser that would auto-detect Arabic, an explicit choice wins.
+    vi.stubGlobal('navigator', { languages: ['ar-EG'], language: 'ar-EG' });
+    expect(resolveLanguagePreference('ru')).toBe('ru');
+    expect(resolveLanguagePreference('zh-Hans')).toBe('zh-Hans');
+    expect(resolveLanguagePreference('en')).toBe('en');
+  });
+
+  it('detects from the browser locales when the preference is "auto"', () => {
+    // The "auto" branch routes through getBrowserLocales → resolveDetectedLanguage.
+    vi.stubGlobal('navigator', { languages: ['ru-RU'], language: 'ru-RU' });
+    expect(resolveLanguagePreference('auto')).toBe('ru');
+
+    vi.stubGlobal('navigator', { languages: ['fr-FR'], language: 'fr-FR' });
+    expect(resolveLanguagePreference('auto')).toBe('en');
+  });
+});
+
+describe('applyDocumentDirection without a DOM', () => {
+  afterEach(() => {
+    // Restore the real jsdom document immediately so neither this suite's other
+    // hooks nor later suites observe the stubbed-away global.
+    vi.unstubAllGlobals();
+  });
+
+  it('is a no-op when document is undefined (node/SSR string-only import)', () => {
+    // i18n is sometimes imported purely for its translations in a non-DOM
+    // context. applyDocumentDirection must detect the missing `document`
+    // global and return without throwing instead of dereferencing
+    // documentElement.
+    vi.stubGlobal('document', undefined);
+    expect(typeof document).toBe('undefined');
+    expect(() => applyDocumentDirection('ar')).not.toThrow();
   });
 });

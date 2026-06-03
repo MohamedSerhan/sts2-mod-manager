@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import type { ReactElement } from 'react';
 
 import {
   importShareCodeSmart,
   installSharedProfileWithConfirm,
 } from './shareImport';
+import type { ConfirmOptions } from '../components/ConfirmDialog';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
 
 /**
@@ -266,6 +268,116 @@ describe('importShareCodeSmart', () => {
       t: mockT,
     });
     expect(outcome.kind).toBe('synced');
+  });
+
+  it('non-canonical input that still resolves → installed outcome', async () => {
+    // `no-slash-here` has no `/`, so canonicalShareCode returns null and the
+    // smart router falls through to installSharedProfileWithConfirm with the
+    // raw input. We mock that path to succeed, exercising the `installed`
+    // arm of the `!canonical` return ternary.
+    registerInvokeHandler('fetch_shared_profile_cmd', () => ({
+      name: 'Fallback Install',
+      mods: [],
+      created_at: '2026-01-01',
+    }));
+    registerInvokeHandler('install_shared_profile', () => ({
+      name: 'Fallback Install',
+      mods: [],
+      created_at: '2026-01-01',
+    }));
+
+    const outcome = await importShareCodeSmart('no-slash-here', {
+      confirm: confirmAccept,
+      subscriptions: [],
+      activeProfile: null,
+      subUpdates: [],
+      t: mockT,
+    });
+
+    expect(outcome.kind).toBe('installed');
+    if (outcome.kind === 'installed') {
+      expect(outcome.profile.name).toBe('Fallback Install');
+    }
+    // The raw (un-canonicalized) input was handed to the fetch/install path.
+    expect(getInvokeCalls().filter((c) => c.cmd === 'install_shared_profile')).toHaveLength(1);
+  });
+
+  it('non-canonical input with confirm rejected → cancelled outcome', async () => {
+    // Same `!canonical` fall-through, but the user rejects the consent dialog
+    // so installSharedProfileWithConfirm returns null → the `cancelled` arm of
+    // the same ternary.
+    registerInvokeHandler('fetch_shared_profile_cmd', () => ({
+      name: 'Fallback Install',
+      mods: [],
+      created_at: '2026-01-01',
+    }));
+
+    const outcome = await importShareCodeSmart('no-slash-here', {
+      confirm: confirmReject,
+      subscriptions: [],
+      activeProfile: null,
+      subUpdates: [],
+      t: mockT,
+    });
+
+    expect(outcome.kind).toBe('cancelled');
+    // Rejected before install — nothing was installed.
+    expect(getInvokeCalls().some((c) => c.cmd === 'install_shared_profile')).toBe(false);
+  });
+
+  it('install confirmation lists a non-URL source verbatim (URL parse falls back to the raw string)', async () => {
+    // A mod whose bundle_url is a bare token rather than an http(s) URL:
+    // `new URL(s)` throws, so the host-extraction catch returns the raw
+    // string and it shows up as-is in the source list (covering both the
+    // catch fallback and the "render the hosts" branch).
+    registerInvokeHandler('fetch_shared_profile_cmd', () => ({
+      name: 'Odd-Source Pack',
+      mods: [
+        {
+          name: 'Local Mod',
+          version: '1.0.0',
+          source: 'not-a-valid-url',
+          bundle_url: null,
+          files: [],
+          enabled: true,
+        },
+        {
+          name: 'Web Mod',
+          version: '1.0.0',
+          source: null,
+          bundle_url: 'https://github.com/owner/repo/releases/download/v1/m.zip',
+          files: [],
+          enabled: true,
+        },
+      ],
+      created_at: '2026-01-01',
+    }));
+    registerInvokeHandler('install_shared_profile', () => ({
+      name: 'Odd-Source Pack',
+      mods: [],
+      created_at: '2026-01-01',
+    }));
+
+    let confirmedBody: unknown = null;
+    const captureConfirm = async (opts: ConfirmOptions): Promise<ConfirmResult> => {
+      confirmedBody = opts.body;
+      return { confirmed: true as const, checked: false };
+    };
+
+    const profile = await installSharedProfileWithConfirm(
+      'alice/AA5A-315D-61AE',
+      captureConfirm,
+      mockT,
+    );
+
+    expect(profile?.name).toBe('Odd-Source Pack');
+    // The consent dialog body is the React node we build; render it to plain
+    // text and assert BOTH the parsed host and the raw non-URL token appear.
+    const { render } = await import('@testing-library/react');
+    const { container } = render(confirmedBody as ReactElement);
+    expect(container.textContent).toContain('not-a-valid-url');
+    expect(container.textContent).toContain('github.com');
+    expect(getInvokeCalls().filter((c) => c.cmd === 'install_shared_profile')).toHaveLength(1);
   });
 
   it('install confirmation handles manifests without creator or source URLs', async () => {

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, renderHook, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 
@@ -275,5 +275,139 @@ describe('useModLibrary — handleAutoDetectSource', () => {
 
     // Must never have triggered the scan.
     expect(autoDetectCalls()).toHaveLength(0);
+  });
+});
+
+describe('useModLibrary — handleOpenThisModFolder', () => {
+  const openFolderCalls = () => getInvokeCalls().filter((c) => c.cmd === 'open_mod_folder');
+
+  it('opens the mod folder via open_mod_folder using folder_name', async () => {
+    registerInvokeHandler('open_mod_folder', () => true);
+    const mod = makeModInfo({ name: 'CoolMod', folder_name: 'cool-mod-folder' });
+    const { result } = renderHook(() => useModLibrary(), { wrapper: AllProviders });
+
+    await act(async () => {
+      await result.current.tableActionProps.onOpenThisModFolder(mod);
+    });
+
+    await waitFor(() => expect(openFolderCalls()).toHaveLength(1));
+    expect(openFolderCalls()[0].args?.folderName).toBe('cool-mod-folder');
+  });
+
+  it('surfaces an error toast when open_mod_folder rejects', async () => {
+    // Drives the catch branch: the backend command throws, so the handler
+    // must toast the error message rather than swallow it.
+    registerInvokeHandler('open_mod_folder', () => {
+      throw new Error('folder is gone');
+    });
+    const mod = makeModInfo({ name: 'CoolMod', folder_name: 'cool-mod-folder' });
+    const { result } = renderHook(() => useModLibrary(), { wrapper: AllProviders });
+
+    await act(async () => {
+      await result.current.tableActionProps.onOpenThisModFolder(mod);
+    });
+
+    // The error message (raw, not an i18n key) is shown in a toast.
+    expect(await screen.findByText('folder is gone')).toBeInTheDocument();
+  });
+});
+
+describe('useModLibrary — renderAutoDetectModal callbacks', () => {
+  const autoDetectCalls = () => getInvokeCalls().filter((c) => c.cmd === 'auto_detect_sources');
+  const auditCalls = () => getInvokeCalls().filter((c) => c.cmd === 'audit_mod_versions');
+  const setSourceCalls = () => getInvokeCalls().filter((c) => c.cmd === 'set_mod_source');
+
+  /** A scan result with exactly one high-confidence match so the modal's
+   *  "Apply 1 match" button renders and handleApply can run. */
+  function oneHighMatchResult() {
+    return {
+      matched: [{ mod_name: 'CoolMod', github_repo: 'owner/cool', confidence: 'high' }],
+      unmatched: [],
+      not_checked: [],
+      skipped_already_linked: 0,
+    };
+  }
+
+  it('onClose (Cancel) closes the modal and clears the focused mod', async () => {
+    registerInvokeHandler('auto_detect_sources', () => oneHighMatchResult());
+    const { result } = renderHook(() => useModLibrary(), { wrapper: AllProviders });
+
+    // Open the modal (renderAutoDetectModal is gated on showAutoDetect).
+    act(() => result.current.setShowAutoDetect(true));
+    render(
+      <AllProviders>{result.current.renderAutoDetectModal()}</AllProviders>,
+    );
+    // Wait for the scan to finish so the footer (with Cancel) is rendered.
+    await screen.findByText('Cancel');
+
+    fireEvent.click(screen.getByText('Cancel'));
+
+    // onClose flipped showAutoDetect back off.
+    await waitFor(() => expect(result.current.showAutoDetect).toBe(false));
+  });
+
+  it('onApplied refreshes mods but does NOT re-audit when no audit has run (auditResults null)', async () => {
+    registerInvokeHandler('auto_detect_sources', () => oneHighMatchResult());
+    registerInvokeHandler('set_mod_source', () => ({ github: 'owner/cool', nexus: null }));
+    const { result } = renderHook(() => useModLibrary(), { wrapper: AllProviders });
+
+    // No handleCheckUpdates() call → auditResults stays null.
+    act(() => result.current.setShowAutoDetect(true));
+    render(
+      <AllProviders>{result.current.renderAutoDetectModal()}</AllProviders>,
+    );
+
+    // Apply the single high-confidence match.
+    const applyBtn = await screen.findByText('Apply 1 match');
+    await act(async () => {
+      fireEvent.click(applyBtn);
+    });
+
+    // handleApply wrote the source, then onApplied() ran refreshMods().
+    await waitFor(() => expect(setSourceCalls()).toHaveLength(1));
+    // auditResults was null → the `if (auditResults) runAudit()` branch is
+    // skipped, so NO audit ran as a side effect of applying.
+    expect(auditCalls()).toHaveLength(0);
+    // Sanity: the scan itself did fire.
+    expect(autoDetectCalls()).toHaveLength(1);
+  });
+
+  it('onApplied re-audits when a prior audit populated auditResults', async () => {
+    registerInvokeHandler('auto_detect_sources', () => oneHighMatchResult());
+    registerInvokeHandler('set_mod_source', () => ({ github: 'owner/cool', nexus: null }));
+    // A non-empty audit result so auditResults becomes non-null (truthy).
+    registerInvokeHandler('audit_mod_versions', () => [
+      {
+        mod_name: 'CoolMod',
+        folder_name: 'cool-mod-folder',
+        current_version: '1.0.0',
+        latest_release_with_assets_tag: 'v1.1.0',
+        update_available: true,
+      },
+    ]);
+    const { result } = renderHook(() => useModLibrary(), { wrapper: AllProviders });
+
+    // Populate auditResults FIRST so the modal's onApplied closure sees it
+    // as non-null when it runs.
+    await act(async () => {
+      await result.current.handleCheckUpdates();
+    });
+    await waitFor(() => expect(result.current.auditResults).not.toBeNull());
+    expect(auditCalls()).toHaveLength(1);
+
+    act(() => result.current.setShowAutoDetect(true));
+    render(
+      <AllProviders>{result.current.renderAutoDetectModal()}</AllProviders>,
+    );
+
+    const applyBtn = await screen.findByText('Apply 1 match');
+    await act(async () => {
+      fireEvent.click(applyBtn);
+    });
+
+    await waitFor(() => expect(setSourceCalls()).toHaveLength(1));
+    // onApplied saw a non-null auditResults → ran runAudit() again, so a
+    // SECOND audit_mod_versions call lands.
+    await waitFor(() => expect(auditCalls()).toHaveLength(2));
   });
 });

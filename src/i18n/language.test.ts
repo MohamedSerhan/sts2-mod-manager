@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it, beforeEach } from 'vitest';
+import { afterEach, describe, expect, it, beforeEach, vi } from 'vitest';
 import {
   DEFAULT_LANGUAGE_PREFERENCE,
   LANGUAGE_STORAGE_KEY,
+  getBrowserLocales,
   isRtlLanguage,
   loadLanguagePreference,
   resolveDetectedLanguage,
@@ -71,6 +72,21 @@ describe('resolveDetectedLanguage', () => {
   it('future-proofs Traditional Chinese once zh-Hant is available', () => {
     expect(resolveDetectedLanguage(['zh-TW'], ['en', 'zh-Hans', 'zh-Hant'])).toBe('zh-Hant');
     expect(resolveDetectedLanguage(['zh-HK'], ['en', 'zh-Hans', 'zh-Hant'])).toBe('zh-Hant');
+  });
+
+  it('falls back to English when a Chinese locale is detected but no Chinese translation is registered', () => {
+    // Defensive: the zh routing resolves a *target* script (zh-Hans / zh-Hant)
+    // and then checks it is actually registered. If a build shipped without any
+    // Chinese resources, the zh branch must yield no match (returning null
+    // internally) and let the resolver fall through to English rather than
+    // returning an unavailable code.
+    expect(resolveDetectedLanguage(['zh-CN'], ['en'])).toBe('en');
+    expect(resolveDetectedLanguage(['zh-SG'], ['en', 'ru'])).toBe('en');
+    // Even a Traditional-region locale with neither zh-Hant nor zh-Hans
+    // registered must not resolve to an unavailable script.
+    expect(resolveDetectedLanguage(['zh-TW'], ['en'])).toBe('en');
+    // …but a later supported locale in the list is still honoured.
+    expect(resolveDetectedLanguage(['zh-CN', 'ru-RU'], ['en', 'ru'])).toBe('ru');
   });
 
   it('checks later browser locales before falling back to English', () => {
@@ -190,5 +206,87 @@ describe('storage-failure resilience', () => {
     };
     expect(() => saveLanguagePreference('zh-Hans', blocked)).not.toThrow();
     expect(writes).toEqual(['attempted']);
+  });
+});
+
+describe('getBrowserLocales', () => {
+  afterEach(() => {
+    // Restore the real jsdom navigator so later suites detect the env normally.
+    vi.unstubAllGlobals();
+  });
+
+  it('returns an empty list when navigator is unavailable', () => {
+    // Pure node / SSR contexts that import i18n only for strings have no
+    // navigator; detection must yield no locales rather than throwing.
+    vi.stubGlobal('navigator', undefined);
+    expect(getBrowserLocales()).toEqual([]);
+  });
+
+  it('combines navigator.languages with navigator.language and de-duplicates', () => {
+    vi.stubGlobal('navigator', {
+      languages: ['ru-RU', 'en-US'],
+      language: 'ru-RU',
+    });
+    // navigator.language ('ru-RU') is already present in languages, so the
+    // Set-dedupe collapses the duplicate while preserving order/first-seen.
+    expect(getBrowserLocales()).toEqual(['ru-RU', 'en-US']);
+  });
+
+  it('appends navigator.language not already present in navigator.languages', () => {
+    vi.stubGlobal('navigator', {
+      languages: ['ar-EG'],
+      language: 'fr-FR',
+    });
+    expect(getBrowserLocales()).toEqual(['ar-EG', 'fr-FR']);
+  });
+
+  it('drops falsy entries from navigator.languages', () => {
+    vi.stubGlobal('navigator', {
+      languages: ['', 'en-US', undefined],
+      language: 'en-US',
+    });
+    // The empty string and undefined are filtered out; 'en-US' from .language
+    // is a duplicate and de-duplicated away.
+    expect(getBrowserLocales()).toEqual(['en-US']);
+  });
+
+  it('falls back to navigator.language when navigator.languages is not an array', () => {
+    // Some WebViews expose navigator.language but not the languages array;
+    // the Array.isArray guard must skip the missing list and still surface
+    // the single language.
+    vi.stubGlobal('navigator', {
+      languages: undefined,
+      language: 'zh-CN',
+    });
+    expect(getBrowserLocales()).toEqual(['zh-CN']);
+  });
+
+  it('returns an empty list when neither languages nor language is present', () => {
+    vi.stubGlobal('navigator', {});
+    expect(getBrowserLocales()).toEqual([]);
+  });
+});
+
+describe('storage helpers when the localStorage global is absent', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('loadLanguagePreference uses the default when localStorage is undefined', () => {
+    // Node/SSR (and some hardened WebViews) have no localStorage binding at
+    // all, so `typeof localStorage === 'undefined'`. The default-arg storage
+    // resolver must hand back undefined and the loader must boot on "auto".
+    vi.stubGlobal('localStorage', undefined);
+    expect(typeof localStorage).toBe('undefined');
+    expect(loadLanguagePreference()).toBe(DEFAULT_LANGUAGE_PREFERENCE);
+  });
+
+  it('saveLanguagePreference is a silent no-op when localStorage is undefined', () => {
+    // Same missing-binding case for the writer: the default-arg resolver
+    // returns undefined, so the guard short-circuits before touching storage
+    // and the selector can never crash on an absent localStorage.
+    vi.stubGlobal('localStorage', undefined);
+    expect(typeof localStorage).toBe('undefined');
+    expect(() => saveLanguagePreference('ru')).not.toThrow();
   });
 });

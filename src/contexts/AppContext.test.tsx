@@ -609,6 +609,201 @@ describe('<AppProvider>', () => {
     expect(auditCallsBulk).toBe(1);
   });
 
+  it('scoped runAudit(only) with a prior full audit merges instead of clobbering', async () => {
+    // First call (full audit) seeds three rows; the scoped re-check then
+    // returns fresh data for a subset + one brand-new row. This exercises
+    // the scoped merge path in runAudit (only && only.length > 0, the
+    // scoped ? only branch, if (scoped), and the functional setter's
+    // merge: same-name replace via `?? e`, untouched rows preserved, and
+    // a new row appended).
+    let auditCalls = 0;
+    let lastArgs: Record<string, unknown> | undefined;
+    registerInvokeHandler('audit_mod_versions', (args) => {
+      auditCalls += 1;
+      lastArgs = args;
+      if (auditCalls === 1) {
+        return [
+          { mod_name: 'A', installed_version: '1.0.0', needs_update: false, pinned: false },
+          { mod_name: 'B', installed_version: '1.0.0', needs_update: true, pinned: false },
+          { mod_name: 'C', installed_version: '1.0.0', needs_update: false, pinned: false },
+        ];
+      }
+      // Scoped re-check: B gets a fresh version, D is a never-before-seen
+      // mod (the new-row append branch).
+      return [
+        { mod_name: 'B', installed_version: '2.0.0', needs_update: false, pinned: false },
+        { mod_name: 'D', installed_version: '0.1.0', needs_update: false, pinned: false },
+      ];
+    });
+
+    let captured: ReturnType<typeof useApp> | null = null as unknown as ReturnType<typeof useApp> | null;
+    render(
+      <Wrap>
+        <Probe onCtx={(c) => { captured = c; }} />
+      </Wrap>,
+    );
+    await waitFor(() => { expect(captured?.loading).toBe(false); });
+
+    // Full audit first so `prev` is non-null when the scoped run merges.
+    await act(async () => { await captured!.runAudit(); });
+    expect(captured?.auditResults).toHaveLength(3);
+
+    // Scoped audit — the `only` argument must reach the backend, proving
+    // the scoped ? only branch fired.
+    await act(async () => { await captured!.runAudit(['B', 'D']); });
+    expect(lastArgs?.only).toEqual(['B', 'D']);
+
+    // Merge semantics: A untouched (?? e), B replaced (byName hit),
+    // C untouched (?? e), D appended (existingNames miss → push).
+    expect(captured?.auditResults).toHaveLength(4);
+    expect(captured?.auditResults?.find((r) => r.mod_name === 'A')?.installed_version).toBe('1.0.0');
+    expect(captured?.auditResults?.find((r) => r.mod_name === 'B')?.installed_version).toBe('2.0.0');
+    expect(captured?.auditResults?.find((r) => r.mod_name === 'C')?.installed_version).toBe('1.0.0');
+    expect(captured?.auditResults?.find((r) => r.mod_name === 'D')?.installed_version).toBe('0.1.0');
+  });
+
+  it('scoped runAudit(only) with no prior results stands on its own', async () => {
+    // auditResults is null before the very first run, so a scoped audit
+    // hits the `if (!prev) return results` short-circuit inside the
+    // functional setter rather than merging.
+    registerInvokeHandler('audit_mod_versions', (args) => {
+      expect(args?.only).toEqual(['Solo']);
+      return [{ mod_name: 'Solo', installed_version: '1.2.3', needs_update: false, pinned: false }];
+    });
+
+    let captured: ReturnType<typeof useApp> | null = null as unknown as ReturnType<typeof useApp> | null;
+    render(
+      <Wrap>
+        <Probe onCtx={(c) => { captured = c; }} />
+      </Wrap>,
+    );
+    await waitFor(() => { expect(captured?.loading).toBe(false); });
+    expect(captured?.auditResults).toBeNull();
+
+    await act(async () => { await captured!.runAudit(['Solo']); });
+    expect(captured?.auditResults).toHaveLength(1);
+    expect(captured?.auditResults?.[0].mod_name).toBe('Solo');
+    expect(captured?.auditResults?.[0].installed_version).toBe('1.2.3');
+  });
+
+  it('updateAllGithub is a no-op when called with an empty name list', async () => {
+    let updateAllCalls = 0;
+    registerInvokeHandler('update_all_mods', () => {
+      updateAllCalls += 1;
+      return [];
+    });
+    let captured: ReturnType<typeof useApp> | null = null as unknown as ReturnType<typeof useApp> | null;
+    render(
+      <Wrap>
+        <Probe onCtx={(c) => { captured = c; }} />
+      </Wrap>,
+    );
+    await waitFor(() => { expect(captured?.loading).toBe(false); });
+
+    await act(async () => { await captured!.updateAllGithub([]); });
+    // Early-return guard fired: no confirm dialog, no backend update.
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(updateAllCalls).toBe(0);
+    expect(captured?.updatingAll).toBe(false);
+  });
+
+  it('updateAllGithub aborts cleanly when the user cancels the confirm', async () => {
+    let updateAllCalls = 0;
+    registerInvokeHandler('update_all_mods', () => {
+      updateAllCalls += 1;
+      return [];
+    });
+    let captured: ReturnType<typeof useApp> | null = null as unknown as ReturnType<typeof useApp> | null;
+    render(
+      <Wrap>
+        <Probe onCtx={(c) => { captured = c; }} />
+      </Wrap>,
+    );
+    await waitFor(() => { expect(captured?.loading).toBe(false); });
+
+    const user = userEvent.setup();
+    let bulkPromise: Promise<void> | null = null;
+    act(() => { bulkPromise = captured!.updateAllGithub(['A', 'B']); });
+    // Dismiss the confirm via Cancel — `!ok` short-circuits before any
+    // backend update runs. The modal exposes two "Cancel" controls (the
+    // header X icon and the footer button, both aria-labelled "Cancel");
+    // grab both loudly and click the footer one.
+    const cancelBtns = await screen.findAllByRole('button', { name: /^Cancel$/ });
+    expect(cancelBtns.length).toBeGreaterThanOrEqual(1);
+    await user.click(cancelBtns[cancelBtns.length - 1]);
+    await bulkPromise!;
+
+    expect(updateAllCalls).toBe(0);
+    expect(captured?.updatingAll).toBe(false);
+  });
+
+  it('updateAllGithub shows the "nothing to update" toast when no mods changed', async () => {
+    // Confirm proceeds, but update_all_mods returns an empty list, so the
+    // count === 0 arm of the success toast fires.
+    registerInvokeHandler('update_all_mods', () => []);
+    let captured: ReturnType<typeof useApp> | null = null as unknown as ReturnType<typeof useApp> | null;
+    render(
+      <Wrap>
+        <Probe onCtx={(c) => { captured = c; }} />
+      </Wrap>,
+    );
+    await waitFor(() => { expect(captured?.loading).toBe(false); });
+
+    const user = userEvent.setup();
+    let bulkPromise: Promise<void> | null = null;
+    act(() => { bulkPromise = captured!.updateAllGithub(['A']); });
+    const confirmBtn = await screen.findByRole('button', { name: /^Update 1 mod$/ });
+    await user.click(confirmBtn);
+    await bulkPromise!;
+
+    expect(screen.getByText(/Nothing to update\./)).toBeInTheDocument();
+  });
+
+  it('updateAllGithub surfaces a failure toast when update_all_mods rejects with an Error', async () => {
+    // Covers the catch block's `e instanceof Error ? e.message` arm.
+    registerInvokeHandler('update_all_mods', () => { throw new Error('disk full'); });
+    let captured: ReturnType<typeof useApp> | null = null as unknown as ReturnType<typeof useApp> | null;
+    render(
+      <Wrap>
+        <Probe onCtx={(c) => { captured = c; }} />
+      </Wrap>,
+    );
+    await waitFor(() => { expect(captured?.loading).toBe(false); });
+
+    const user = userEvent.setup();
+    let bulkPromise: Promise<void> | null = null;
+    act(() => { bulkPromise = captured!.updateAllGithub(['A']); });
+    const confirmBtn = await screen.findByRole('button', { name: /^Update 1 mod$/ });
+    await user.click(confirmBtn);
+    await bulkPromise!;
+
+    expect(screen.getByText(/Update failed: disk full/)).toBeInTheDocument();
+    // updatingAll must have reverted in the finally block.
+    expect(captured?.updatingAll).toBe(false);
+  });
+
+  it('updateAllGithub stringifies a non-Error rejection in the failure toast', async () => {
+    // Covers the catch block's `String(e)` arm (the non-Error branch).
+    registerInvokeHandler('update_all_mods', () => { throw 'kaboom'; });
+    let captured: ReturnType<typeof useApp> | null = null as unknown as ReturnType<typeof useApp> | null;
+    render(
+      <Wrap>
+        <Probe onCtx={(c) => { captured = c; }} />
+      </Wrap>,
+    );
+    await waitFor(() => { expect(captured?.loading).toBe(false); });
+
+    const user = userEvent.setup();
+    let bulkPromise: Promise<void> | null = null;
+    act(() => { bulkPromise = captured!.updateAllGithub(['A']); });
+    const confirmBtn = await screen.findByRole('button', { name: /^Update 1 mod$/ });
+    await user.click(confirmBtn);
+    await bulkPromise!;
+
+    expect(screen.getByText(/Update failed: kaboom/)).toBeInTheDocument();
+    expect(captured?.updatingAll).toBe(false);
+  });
+
   it('mod-auto-installed event is ignored when no audit has been loaded', async () => {
     let auditCalls = 0;
     registerInvokeHandler('audit_mod_versions', () => {

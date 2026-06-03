@@ -41,4 +41,33 @@ describe('nexus URL helpers', () => {
     expect(isNexusModsHost('www.nexusmods.com')).toBe(true);
     expect(isNexusModsHost('nexusmods.com.evil.test')).toBe(false);
   });
+
+  it.each([
+    '',           // empty
+    '   ',        // whitespace only
+  ])('returns null for empty/whitespace input %p', (input) => {
+    // Hits the `if (!trimmed) return null` early-out before any matching.
+    expect(parseNexusModInput(input)).toBeNull();
+    expect(nexusFilesUrl(input)).toBeNull();
+  });
+
+  it.each([
+    'just some text',                 // not a URL, not nexusmods.com/...
+    'https://github.com/owner/repo',  // a real URL but wrong host shape for the shorthand
+    'ftp://nexusmods.com/sts2/mods/1',// scheme not matched by normalizeUrlInput's http(s) test
+  ])('returns null when the input is neither a known URL nor shorthand: %s', (input) => {
+    // Falls through normalizeUrlInput → null (the `return null` for
+    // inputs that don't start with http(s):// or (www.)nexusmods.com/).
+    expect(parseNexusModInput(input)).toBeNull();
+  });
+
+  it.each([
+    'http://',                        // valid scheme prefix but malformed URL → new URL throws
+    'https://',
+  ])('returns null when the URL constructor throws on %s', (input) => {
+    // Passes normalizeUrlInput (starts with http(s)://) but `new URL()`
+    // throws on the bare authority, exercising the catch branch.
+    expect(parseNexusModInput(input)).toBeNull();
+    expect(nexusFilesUrl(input)).toBeNull();
+  });
 });

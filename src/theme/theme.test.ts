@@ -62,4 +62,58 @@ describe('theme preference', () => {
     applyTheme('light');
     expect(document.documentElement.dataset.theme).toBe('light');
   });
+
+  it('resolves auto to dark when matchMedia itself throws', () => {
+    // Some sandboxed/embedded webviews expose matchMedia but throw on
+    // invocation. prefersLight() must swallow that and fail closed to dark
+    // rather than letting the theme selector crash. (theme.ts line 49.)
+    vi.stubGlobal('matchMedia', () => {
+      throw new Error('matchMedia blocked');
+    });
+    expect(prefersLight()).toBe(false);
+    expect(resolveThemePreference('auto')).toBe('dark');
+  });
+
+  it('falls back to dark when reading from storage throws', () => {
+    // A storage object whose getItem throws (e.g. quota/security errors)
+    // must not propagate — loadThemePreference fails closed to the default.
+    // (theme.ts line 28.)
+    const hostileStorage = {
+      getItem: () => {
+        throw new Error('getItem blocked');
+      },
+      setItem: () => {},
+      removeItem: () => {},
+      clear: () => {},
+      key: () => null,
+      length: 0,
+    } as unknown as Storage;
+    expect(loadThemePreference(hostileStorage)).toBe(DEFAULT_THEME_PREFERENCE);
+  });
+
+  it('treats storage as unavailable when the localStorage global access throws', () => {
+    // Privacy modes can make even *touching* `localStorage` throw a
+    // SecurityError. getStorage() must catch that and report "no storage",
+    // so load/save degrade to the default instead of crashing. Exercising
+    // the default-parameter path here also covers theme.ts line 18.
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      get() {
+        throw new Error('localStorage access blocked');
+      },
+    });
+    try {
+      // No explicit storage arg → forces getStorage() → throwing getter.
+      expect(loadThemePreference()).toBe(DEFAULT_THEME_PREFERENCE);
+      // saveThemePreference must also no-op rather than throw.
+      expect(() => saveThemePreference('light')).not.toThrow();
+    } finally {
+      if (original) {
+        Object.defineProperty(globalThis, 'localStorage', original);
+      } else {
+        delete (globalThis as { localStorage?: unknown }).localStorage;
+      }
+    }
+  });
 });

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseChangelog } from './changelog';
+import {
+  getAllEntries,
+  getEntryForVersion,
+  getLatestReleasedEntry,
+  parseChangelog,
+} from './changelog';
 
 /**
  * Tests for the CHANGELOG.md parser used by the "What's new" card.
@@ -102,5 +107,49 @@ describe('parseChangelog', () => {
 
   it('returns an empty array on input with no version headings', () => {
     expect(parseChangelog('# Changelog\n\nJust prose.\n')).toEqual([]);
+  });
+});
+
+/**
+ * The three convenience wrappers (getAllEntries / getLatestReleasedEntry /
+ * getEntryForVersion) parse the *bundled* CHANGELOG.md (the no-arg
+ * parseChangelog path). We assert structural invariants rather than exact
+ * version strings so the tests don't churn on every release bump, while
+ * still exercising the wrapper logic end-to-end against the real file.
+ */
+describe('changelog convenience wrappers (bundled CHANGELOG.md)', () => {
+  it('getAllEntries returns the parsed bundled entries, all with non-empty bodies', () => {
+    const all = getAllEntries();
+    // The bundled changelog always has content, so this is non-empty.
+    expect(all.length).toBeGreaterThan(0);
+    // getAllEntries is a thin pass-through of the no-arg parser — same shape.
+    expect(all).toEqual(parseChangelog());
+    // The link-reference-footer filter means every returned entry has a body.
+    expect(all.every((e) => e.body.length > 0)).toBe(true);
+    // The bundled file keeps an [Unreleased] section.
+    expect(all.some((e) => e.version.toLowerCase() === 'unreleased')).toBe(true);
+  });
+
+  it('getLatestReleasedEntry returns the first non-Unreleased entry', () => {
+    const latest = getLatestReleasedEntry();
+    expect(latest).not.toBeNull();
+    expect(latest!.version.toLowerCase()).not.toBe('unreleased');
+    // It must equal the first released (non-Unreleased) entry in file order.
+    const firstReleased = getAllEntries().find(
+      (e) => e.version.toLowerCase() !== 'unreleased',
+    );
+    expect(latest).toEqual(firstReleased);
+  });
+
+  it('getEntryForVersion matches a real version and strips a leading v', () => {
+    const latest = getLatestReleasedEntry()!;
+    // Exact version → same entry.
+    expect(getEntryForVersion(latest.version)).toEqual(latest);
+    // Leading "v" is stripped before matching, so "v<version>" resolves too.
+    expect(getEntryForVersion(`v${latest.version}`)).toEqual(latest);
+  });
+
+  it('getEntryForVersion returns null for a version not in the changelog', () => {
+    expect(getEntryForVersion('0.0.0-does-not-exist')).toBeNull();
   });
 });

@@ -28,6 +28,7 @@
  *                        itself handles the token + repo setup later.
  */
 import { useEffect, useRef, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useApp } from '../contexts/AppContext';
 import {
@@ -59,10 +60,10 @@ type Step = 1 | 2 | 3 | 4;
 type Strategy = 'fromActive' | 'empty' | 'clone';
 
 interface HealthSummary {
-  linked: number;
-  updates: number;
-  blocked: number;
-  frozen: number;
+  linked: string[];
+  updates: string[];
+  blocked: string[];
+  frozen: string[];
 }
 
 export function CreateModpackWizard({ onClose, onCreated }: Props) {
@@ -156,24 +157,28 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
       );
       const isSelected = (folder: string | null | undefined, name: string) =>
         selectedMods.has(folder ?? name);
-      const linked = mods.filter(
-        (m) => isSelected(m.folder_name, m.name) && (m.github_url || m.nexus_url),
-      ).length;
-      const updates = entries.filter(
-        (e) => e.needs_update && isSelected(e.folder_name, e.mod_name),
-      ).length;
-      const blocked = entries.filter(
-        (e) => e.game_version_too_old === true && isSelected(e.folder_name, e.mod_name),
-      ).length;
-      const frozen = entries.filter(
-        (e) => e.pinned && isSelected(e.folder_name, e.mod_name),
-      ).length;
+      const displayFor = (folder: string | null | undefined, name: string) => {
+        const m = mods.find((mm) => (mm.folder_name ?? mm.name) === (folder ?? name));
+        return m?.display_name?.trim() || m?.name || name;
+      };
+      const linked = mods
+        .filter((m) => isSelected(m.folder_name, m.name) && (m.github_url || m.nexus_url))
+        .map((m) => m.display_name?.trim() || m.name);
+      const updates = entries
+        .filter((e) => e.needs_update && isSelected(e.folder_name, e.mod_name))
+        .map((e) => displayFor(e.folder_name, e.mod_name));
+      const blocked = entries
+        .filter((e) => e.game_version_too_old === true && isSelected(e.folder_name, e.mod_name))
+        .map((e) => displayFor(e.folder_name, e.mod_name));
+      const frozen = entries
+        .filter((e) => e.pinned && isSelected(e.folder_name, e.mod_name))
+        .map((e) => displayFor(e.folder_name, e.mod_name));
       setHealth({ linked, updates, blocked, frozen });
     } catch {
       // Audit failures are non-blocking — the user can still create
       // the pack. Surface zeros rather than hiding the section since
       // the layout shift would otherwise jump the Continue button.
-      setHealth({ linked: 0, updates: 0, blocked: 0, frozen: 0 });
+      setHealth({ linked: [], updates: [], blocked: [], frozen: [] });
     } finally {
       setAuditing(false);
     }
@@ -493,28 +498,47 @@ function StrategyOption({
 
 // ── Step 3: Check health ──────────────────────────────────────────────
 
-function StepHealth({
-  auditing,
-  health,
-}: {
-  auditing: boolean;
-  health: HealthSummary | null;
-}) {
+function StepHealth({ auditing, health }: { auditing: boolean; health: HealthSummary | null }) {
   const { t } = useTranslation();
   if (auditing || !health) {
-    return (
-      <div className="gf-create-wizard-health-loading">
-        {t('createModpack.step3Checking')}
-      </div>
-    );
+    return <div className="gf-create-wizard-health-loading">{t('createModpack.step3Checking')}</div>;
   }
   return (
     <ul className="gf-create-wizard-health-list">
-      <li>{t('createModpack.step3Linked', { count: health.linked })}</li>
-      <li>{t('createModpack.step3Updates', { count: health.updates })}</li>
-      <li>{t('createModpack.step3Blocked', { count: health.blocked })}</li>
-      <li>{t('createModpack.step3Frozen', { count: health.frozen })}</li>
+      <HealthRow label={t('createModpack.step3Linked', { count: health.linked.length })} mods={health.linked} idKey="linked" />
+      <HealthRow label={t('createModpack.step3Updates', { count: health.updates.length })} mods={health.updates} idKey="updates" />
+      <HealthRow label={t('createModpack.step3Blocked', { count: health.blocked.length })} mods={health.blocked} idKey="blocked" />
+      <HealthRow label={t('createModpack.step3Frozen', { count: health.frozen.length })} mods={health.frozen} idKey="frozen" />
     </ul>
+  );
+}
+
+function HealthRow({ label, mods, idKey }: { label: string; mods: string[]; idKey: string }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  if (mods.length === 0) {
+    return <li className="gf-create-wizard-health-row">{label}</li>;
+  }
+  const listId = `gf-health-${idKey}`;
+  return (
+    <li className="gf-create-wizard-health-row">
+      <button
+        type="button"
+        className="gf-create-wizard-health-toggle"
+        aria-expanded={open}
+        aria-controls={listId}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <ChevronDown size={14} className={`gf-create-wizard-health-chevron ${open ? 'is-open' : ''}`} aria-hidden />
+        <span>{label}</span>
+        <span className="gf-create-wizard-health-hint">{open ? t('createModpack.step3Hide') : t('createModpack.step3Show')}</span>
+      </button>
+      {open && (
+        <ul id={listId} className="gf-create-wizard-health-mods">
+          {mods.map((name, i) => <li key={`${idKey}-${name}-${i}`}>{name}</li>)}
+        </ul>
+      )}
+    </li>
   );
 }
 

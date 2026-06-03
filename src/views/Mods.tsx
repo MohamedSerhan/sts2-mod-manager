@@ -16,7 +16,6 @@ import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../components/ConfirmDialog';
 import { HelpHint } from '../components/HelpHint';
 import { BrowseView } from './Browse';
-import type { ProfileMembershipMod } from '../types';
 import {
   deleteAllMods,
   enableAllMods,
@@ -53,11 +52,11 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
   // the All Mods view and the modpack view stay identical. No targetPack:
   // installs here just land on disk (the All Mods list isn't pack-scoped).
   const lib = useModLibrary();
-  const { mods, gameRunning, modInfoByKey, tableActionProps } = lib;
+  const { mods, gameRunning, tableActionProps } = lib;
   const { refreshMods, activeProfile } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
-  const [tagFilter, setTagFilter] = useState('');
+  const [priorityTag, setPriorityTag] = useState('');
   // Bulk enable/disable changes mods' enabled state but not the installed
   // SET, so the focused membership grid (used when a modpack is active)
   // wouldn't re-fetch and the row toggles stayed stale. Bumping this nonce
@@ -107,9 +106,9 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
     }
   }
 
-  // Tag filter for the page-level toolbar. We feed this into
-  // LibraryTable's `filterRow` so the existing search + sort + paginate
-  // run after the tag prefilter.
+  // Tags present across the install, for the page-level Tag picker. Choosing
+  // one feeds LibraryTable's `priorityTag`: it reorders (selected tag first,
+  // then the rest A–Z by tag, untagged last) rather than hiding anything.
   const tagOptions = useMemo(() => {
     const seen = new Map<string, string>();
     for (const mod of mods) {
@@ -129,17 +128,6 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
   const totalCount = mods.length;
   const enabledCount = mods.filter((m) => m.enabled).length;
   const disabledCount = mods.filter((m) => !m.enabled).length;
-
-  // Row filter: by tag. Each row arrives from the membership grid; we
-  // look up its ModInfo to check its tags.
-  function filterRowByTag(row: ProfileMembershipMod): boolean {
-    const tagKey = tagFilter.toLocaleLowerCase();
-    if (!tagKey) return true;
-    const key = row.folder_name ?? row.name;
-    const mod = modInfoByKey.get(key);
-    if (!mod) return false;
-    return (mod.tags ?? []).some((tag) => tag.toLocaleLowerCase() === tagKey);
-  }
 
   return (
     <div className="gf-body">
@@ -200,9 +188,9 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
           button is toggled on. */}
       {lib.renderQuickAddForm()}
 
-      {/* Tag filter + bulk actions strip. LibraryTable owns the
-          per-table search + sort below, so this row only carries
-          page-level affordances (tag filter, enable/disable/delete-all). */}
+      {/* Tag priority picker + bulk actions strip. LibraryTable owns the
+          per-table search + sort below; this row carries page-level
+          affordances (tag priority, enable/disable/delete-all). */}
       {(tagOptions.length > 0 || mods.length > 0) && (
         <div className="gf-toolbar">
           {tagOptions.length > 0 && (
@@ -210,8 +198,8 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
               <span>{t('mods.tags.label')}</span>
               <select
                 aria-label={t('mods.tags.label')}
-                value={tagFilter}
-                onChange={(e) => setTagFilter(e.target.value)}
+                value={priorityTag}
+                onChange={(e) => setPriorityTag(e.target.value)}
               >
                 <option value="">{t('mods.tags.all')}</option>
                 {tagOptions.map((tag) => (
@@ -259,8 +247,8 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
           checkboxes, no drag). */}
       <LibraryTable
         modpackName={activeProfile}
+        priorityTag={priorityTag}
         reloadToken={`bulk:${bulkReloadNonce}`}
-        filterRow={filterRowByTag}
         {...tableActionProps}
       />
         </>

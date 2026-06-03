@@ -1183,6 +1183,70 @@ describe('<LibraryTable modpackName={null}>', () => {
     }
   });
 
+  describe('priorityTag ordering', () => {
+    function gridFromInstalled(names: string[]) {
+      registerInvokeHandler('get_installed_mods', () =>
+        names.map((n) => mkModInfo({ name: n, folder_name: n, mod_id: n })),
+      );
+    }
+    it('brings the priority tag to the top, then orders the rest by tag A–Z (untagged last)', async () => {
+      gridFromInstalled(['Apple', 'Zeta', 'Mid', 'Plain']);
+      const modInfoByKey = new Map([
+        ['Apple', mkModInfo({ name: 'Apple', folder_name: 'Apple', tags: ['ui'] })],
+        ['Zeta', mkModInfo({ name: 'Zeta', folder_name: 'Zeta', tags: ['combat'] })],
+        ['Mid', mkModInfo({ name: 'Mid', folder_name: 'Mid', tags: ['combat'] })],
+        ['Plain', mkModInfo({ name: 'Plain', folder_name: 'Plain', tags: [] })],
+      ]);
+      render(<Wrap modpackName={null} modInfoByKey={modInfoByKey} priorityTag="combat" />);
+      await screen.findByTestId('library-table');
+      const titles = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent);
+      const order = titles.filter((tt) => ['Apple', 'Zeta', 'Mid', 'Plain'].includes(tt ?? ''));
+      // combat first (Mid, Zeta by name) → other tags A–Z (ui = Apple) → untagged last (Plain).
+      expect(order).toEqual(['Mid', 'Zeta', 'Apple', 'Plain']);
+    });
+
+    it('is case-insensitive and hides nothing — it only reorders', async () => {
+      gridFromInstalled(['Apple', 'Zeta']);
+      const modInfoByKey = new Map([
+        ['Apple', mkModInfo({ name: 'Apple', folder_name: 'Apple', tags: ['UI'] })],
+        ['Zeta', mkModInfo({ name: 'Zeta', folder_name: 'Zeta', tags: ['combat'] })],
+      ]);
+      render(<Wrap modpackName={null} modInfoByKey={modInfoByKey} priorityTag="ui" />);
+      await screen.findByTestId('library-table');
+      // Both rows still render (nothing filtered out); the "UI" mod is on top.
+      const titles = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent);
+      const order = titles.filter((tt) => ['Apple', 'Zeta'].includes(tt ?? ''));
+      expect(order).toEqual(['Apple', 'Zeta']);
+    });
+
+    it('with no priorityTag, uses the normal sort (no tag reordering)', async () => {
+      gridFromInstalled(['Zeta', 'Apple']);
+      const modInfoByKey = new Map([
+        ['Zeta', mkModInfo({ name: 'Zeta', folder_name: 'Zeta', tags: ['combat'] })],
+        ['Apple', mkModInfo({ name: 'Apple', folder_name: 'Apple', tags: ['ui'] })],
+      ]);
+      render(<Wrap modpackName={null} modInfoByKey={modInfoByKey} />);
+      // Default no-focus sort is nameAsc → Apple before Zeta (by name, not tag).
+      const titles = (await screen.findAllByRole('heading', { level: 3 })).map((h) => h.textContent);
+      const order = titles.filter((tt) => ['Apple', 'Zeta'].includes(tt ?? ''));
+      expect(order).toEqual(['Apple', 'Zeta']);
+    });
+
+    it('handles a 100-mod library without error', async () => {
+      const names = Array.from({ length: 100 }, (_, i) => `Mod${String(i).padStart(3, '0')}`);
+      gridFromInstalled(names);
+      const modInfoByKey = new Map(names.map((n, i) => [n, mkModInfo({ name: n, folder_name: n, tags: i % 2 ? ['alpha'] : [] })]));
+      render(<Wrap modpackName={null} modInfoByKey={modInfoByKey} priorityTag="alpha" pageSize={200} />);
+      await screen.findByTestId('library-table');
+      // Odd-indexed mods are tagged ['alpha'] → priority → first 50; even (untagged) → last 50.
+      const titles = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent ?? '');
+      const suffix = (tt: string) => Number(tt.replace('Mod', ''));
+      expect(titles).toHaveLength(100);
+      expect(titles.slice(0, 50).every((tt) => suffix(tt) % 2 === 1)).toBe(true);   // tagged (odd) on top
+      expect(titles.slice(50).every((tt) => suffix(tt) % 2 === 0)).toBe(true);      // untagged (even) last
+    });
+  });
+
   it('pins the scroll position when a row mutates, so the user is never yanked to the top', async () => {
     registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
     registerInvokeHandler('get_profile_memberships', () => ({

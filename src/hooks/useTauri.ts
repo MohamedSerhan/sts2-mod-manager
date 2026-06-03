@@ -187,6 +187,10 @@ export async function duplicateProfile(name: string, newName: string): Promise<P
   return invoke('duplicate_profile', { name, newName });
 }
 
+export async function renameProfile(oldName: string, newName: string): Promise<Profile> {
+  return invoke('rename_profile', { oldName, newName });
+}
+
 export async function exportProfile(name: string): Promise<string> {
   return invoke('export_profile_cmd', { name });
 }

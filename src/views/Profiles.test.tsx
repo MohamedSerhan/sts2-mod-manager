@@ -389,7 +389,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await openDetailFor(user, 'B');
-    await user.click(screen.getByRole('button', { name: /Switch to/i }));
+    await user.click(screen.getAllByRole('button', { name: /Switch to/i })[0]);
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'switch_profile')).toBe(true);
     });
@@ -416,7 +416,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await openDetailFor(user, 'B');
-    await user.click(screen.getByRole('button', { name: /Switch to/i }));
+    await user.click(screen.getAllByRole('button', { name: /Switch to/i })[0]);
 
     const modal = await confirmModal();
     await user.click(modal.getByRole('button', { name: /Stay here/i }));
@@ -439,7 +439,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await openDetailFor(user, 'B');
-    await user.click(screen.getByRole('button', { name: /Switch to/i }));
+    await user.click(screen.getAllByRole('button', { name: /Switch to/i })[0]);
     await waitFor(() => {
       expect(screen.getByText(/3 mod\(s\) downloaded/)).toBeInTheDocument();
     });
@@ -757,7 +757,9 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await openDetailFor(user, 'B');
-    await user.click(screen.getByRole('button', { name: /Switch to/i }));
+    // Inactive packs now render two "Switch to" affordances (header CTA + the
+    // inactive-pack hint, #114); either triggers the same switch. Click the first.
+    await user.click(screen.getAllByRole('button', { name: /Switch to/i })[0]);
     await waitFor(() => {
       const text = document.body.textContent ?? '';
       expect(text).toContain('UpgradedX');
@@ -1450,7 +1452,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await openDetailFor(user, 'B');
-    await user.click(screen.getByRole('button', { name: /Switch to/i }));
+    await user.click(screen.getAllByRole('button', { name: /Switch to/i })[0]);
     await waitFor(() => {
       expect(screen.getByText(/Failed to switch.*boom/)).toBeInTheDocument();
     });
@@ -2068,7 +2070,7 @@ describe('<ProfilesView>', () => {
 
     // Non-active modpack detail surfaces "Switch to".
     await openDetailFor(user, 'OtherP');
-    expect(screen.getByRole('button', { name: /Switch to/i })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /Switch to/i }).length).toBeGreaterThan(0);
     await user.click(screen.getByRole('button', { name: /Back to modpacks/i }));
 
     // Active modpack detail: Switch is not rendered (you can't activate
@@ -2754,6 +2756,47 @@ describe('<ProfilesView> load-order editor close', () => {
         screen.queryByRole('dialog', { name: /Load order for OrderPack/i }),
       ).toBeNull();
     });
+  });
+
+  // Regression test: post-rename view bounce.
+  // Before the fix, setSelectedModpack(newName) ran while profiles still held
+  // the old names → the orphan-guard fired → user was bounced back to the list.
+  // With the fix, await loadProfiles() ensures profiles is updated before
+  // setSelectedModpack(newName), so the guard sees the new name and stays.
+  it('rename: detail view stays open on the renamed pack (no orphan-guard bounce)', async () => {
+    let renamed = false;
+    registerInvokeHandler('list_profiles_cmd', async () => {
+      if (renamed) {
+        await new Promise((r) => setTimeout(r, 20));
+        return [baseProfile({ name: 'Beta' })];
+      }
+      return [baseProfile({ name: 'Alpha' })];
+    });
+    registerInvokeHandler('rename_profile', () => {
+      renamed = true;
+      return baseProfile({ name: 'Beta' });
+    });
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await openDetailFor(user, 'Alpha');
+
+    // Open the Advanced kebab and click Rename
+    await openAdvancedMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /^Rename$/i }));
+
+    // The rename modal should appear — clear the pre-filled name and type the new one
+    const input = await screen.findByRole('textbox', { name: /New name/i });
+    await user.clear(input);
+    await user.type(input, 'Beta');
+
+    // Click the Rename button inside the modal foot
+    await user.click(screen.getByRole('button', { name: /^Rename$/i }));
+
+    // After the rename, the detail view must show Beta (not bounced to the list).
+    await screen.findByRole('heading', { level: 2, name: 'Beta' });
+    // The list-view "No modpacks" or the list of profile cards must NOT be visible.
+    expect(screen.queryByText(/No modpacks yet/i)).toBeNull();
   });
 
   it('moveLoadOrderItem swap reorders the draft (covers moveLoadOrderItem path used by ▲/▼ buttons)', async () => {

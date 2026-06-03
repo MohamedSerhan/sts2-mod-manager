@@ -400,6 +400,43 @@ pub fn duplicate_profile(
     Ok(profile)
 }
 
+/// Rename a profile, preserving its `.share` code, active state, and any
+/// subscriptions pointing at it.
+#[tauri::command]
+pub fn rename_profile(
+    old_name: String,
+    new_name: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Profile, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let renamed = crud::rename_profile(&old_name, &new_name, &s.profiles_path)
+        .map_err(|e| e.to_string())?;
+    let new = renamed.name.clone();
+
+    // (c) If the renamed pack was active, follow it. Compare case-insensitively
+    // so a casing difference between the stored active-profile pointer and the
+    // requested old name doesn't strand active_profile.txt at the gone name
+    // (mirrors the case-insensitive active-pointer handling on the delete path).
+    if s
+        .active_profile
+        .as_deref()
+        .is_some_and(|active| active.eq_ignore_ascii_case(&old_name))
+    {
+        s.active_profile = Some(new.clone());
+        persist_active_profile(&s.config_path, &new);
+    }
+    let config_path = s.config_path.clone();
+    drop(s);
+
+    // (d) Re-point subscriptions, mirroring delete_profile_cmd's cleanup.
+    let mut db = crate::subscriptions::load_subscriptions(&config_path);
+    if crate::subscriptions::rename_profile_name(&mut db, &old_name, &new) {
+        let _ = crate::subscriptions::save_subscriptions(&db, &config_path);
+    }
+    log::info!("Renamed profile '{}' to '{}'", old_name, new);
+    Ok(renamed)
+}
+
 #[tauri::command]
 pub async fn switch_profile(
     name: String,

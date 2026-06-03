@@ -13,7 +13,7 @@
  * sections, and the wiring.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { ModpackDetail } from './ModpackDetail';
@@ -150,7 +150,8 @@ describe('<ModpackDetail>', () => {
       await screen.findByRole('heading', { level: 2, name: 'Sample' }),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Back to modpacks/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Switch to/i })).toBeInTheDocument();
+    // Both the header CTA and the inactive-hint have a "Switch to" button for a non-active pack.
+    expect(screen.getAllByRole('button', { name: /Switch to/i })).toHaveLength(2);
   });
 
   it('omits the Switch button when the modpack is already active', async () => {
@@ -919,6 +920,29 @@ describe('<ModpackDetail>', () => {
     expect(onDelete).toHaveBeenCalledWith('Sample');
   });
 
+  it('opens the Rename modal from the header kebab', async () => {
+    const user = userEvent.setup();
+    const profile = setupPack({ packName: 'Sample', inPack: [modInfo({ name: 'M', folder_name: 'M' })] });
+    render(<Wrap {...baseProps()} profile={profile} renameExistingNames={['Sample']} onRenamed={vi.fn()} />);
+    await screen.findByRole('heading', { level: 2, name: 'Sample' });
+    await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /^rename$/i }));
+    expect(await screen.findByRole('dialog', { name: /rename/i })).toBeInTheDocument();
+  });
+
+  it('does not offer Rename when onRenamed is not provided (e.g. a placeholder pack)', async () => {
+    const user = userEvent.setup();
+    const profile = setupPack({ packName: 'Sample', inPack: [modInfo({ name: 'M', folder_name: 'M' })] });
+    // baseProps() omits onRenamed, so the kebab must not surface a Rename item.
+    render(<Wrap {...baseProps()} profile={profile} />);
+    await screen.findByRole('heading', { level: 2, name: 'Sample' });
+    await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
+    // The kebab opens (Auto-detect / Refresh are always present)…
+    expect(await screen.findByRole('menuitem', { name: /Auto-detect sources/i })).toBeInTheDocument();
+    // …but Rename is gated off.
+    expect(screen.queryByRole('menuitem', { name: /^rename$/i })).toBeNull();
+  });
+
   it('Auto-detect sources lives in the header kebab (not "+ Add mods") and opens the scan modal', async () => {
     const user = userEvent.setup();
     render(<Wrap {...baseProps()} />);
@@ -1015,5 +1039,51 @@ describe('<ModpackDetail>', () => {
     render(<Wrap profile={profile} onBack={vi.fn()} />);
     const available = await expandLibrary(user);
     expect(within(available).getByText(/^Local$/i)).toBeInTheDocument();
+  });
+
+  // ── In-pack tag filter ───────────────────────────────────────────
+  describe('in-pack tag filter', () => {
+    it('filters the pack rows to the chosen tag', async () => {
+      const profile = setupPack({
+        packName: 'Sample',
+        inPack: [
+          modInfo({ name: 'CombatMod', folder_name: 'CombatMod', tags: ['combat'] }),
+          modInfo({ name: 'UiMod', folder_name: 'UiMod', tags: ['ui'] }),
+        ],
+      });
+      render(<Wrap {...baseProps()} profile={profile} />);
+      // Both rows present initially.
+      expect((await screen.findAllByText('CombatMod')).length).toBeGreaterThan(0);
+      expect(screen.getAllByText('UiMod').length).toBeGreaterThan(0);
+      // Filter to "combat".
+      const tagSelect = screen.getByLabelText(/tag/i) as HTMLSelectElement;
+      fireEvent.change(tagSelect, { target: { value: 'combat' } });
+      await waitFor(() => expect(screen.queryByText('UiMod')).toBeNull());
+      expect(screen.getAllByText('CombatMod').length).toBeGreaterThan(0);
+    });
+  });
+
+  // ── Inactive-pack toggle hint ─────────────────────────────────────
+  describe('inactive-pack toggle hint', () => {
+    it('shows the hint with a Switch action on a non-active pack', async () => {
+      registerInvokeHandler('get_active_profile', () => 'Some Other Pack');
+      const profile = setupPack({ packName: 'Sample', inPack: [modInfo({ name: 'M', folder_name: 'M' })] });
+      const onSwitch = vi.fn();
+      render(<Wrap {...baseProps()} profile={profile} onSwitch={onSwitch} />);
+      const hint = await screen.findByText(/only available for the active modpack/i);
+      expect(hint).toBeInTheDocument();
+      // The hint's Switch control fires onSwitch for THIS pack.
+      const region = hint.closest('[data-testid="modpack-detail-inactive-hint"]') as HTMLElement;
+      fireEvent.click(within(region).getByRole('button', { name: /switch to/i }));
+      expect(onSwitch).toHaveBeenCalledWith('Sample');
+    });
+
+    it('hides the hint when the pack is active', async () => {
+      registerInvokeHandler('get_active_profile', () => 'Sample');
+      const profile = setupPack({ packName: 'Sample', inPack: [modInfo({ name: 'M', folder_name: 'M' })] });
+      render(<Wrap {...baseProps()} profile={profile} onSwitch={vi.fn()} />);
+      await screen.findByTestId('modpack-detail-in-pack');
+      expect(screen.queryByTestId('modpack-detail-inactive-hint')).toBeNull();
+    });
   });
 });

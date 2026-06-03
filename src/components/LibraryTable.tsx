@@ -125,6 +125,11 @@ export interface LibraryTableProps {
    *  rendering. Used by the Library view to apply tag / extra filters
    *  on top of the table's own search. */
   filterRow?: (row: ProfileMembershipMod) => boolean;
+  /** Tag to prioritise in the ordering (from the page Tag picker). When set,
+   *  mods carrying this tag sort to the top, then the rest order by their first
+   *  tag A–Z (untagged last); ties by display name. OVERRIDES the sort mode
+   *  while a tag is chosen, and hides nothing — it only reorders. */
+  priorityTag?: string;
 
   // ─── ModRow-style per-row action surface (optional) ──────────────
   // When supplied, these are forwarded to LibraryRow's kebab menu.
@@ -184,6 +189,28 @@ function compareMembershipDisplayName(
   });
 }
 
+/** Alphabetically-first tag of a row's ModInfo (lowercased), or null when
+ *  untagged. `null` sorts AFTER any tag. */
+function firstTagKey(
+  row: ProfileMembershipMod,
+  modInfoByKey?: Map<string, ModInfo>,
+): string | null {
+  const info = modInfoByKey?.get(membershipRowKey(row)) ?? modInfoByKey?.get(row.name);
+  const tags = (info?.tags ?? []).map((tg) => tg.trim().toLowerCase()).filter(Boolean);
+  if (tags.length === 0) return null;
+  return tags.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }))[0];
+}
+
+/** Whether a row's ModInfo carries the given (already case-folded) tag. */
+function rowHasTag(
+  row: ProfileMembershipMod,
+  lowerTag: string,
+  modInfoByKey?: Map<string, ModInfo>,
+): boolean {
+  const info = modInfoByKey?.get(membershipRowKey(row)) ?? modInfoByKey?.get(row.name);
+  return (info?.tags ?? []).some((tg) => tg.trim().toLocaleLowerCase() === lowerTag);
+}
+
 export function LibraryTable({
   modpackName,
   onMembershipChanged,
@@ -198,6 +225,7 @@ export function LibraryTable({
   bulkActionsBar,
   reloadToken,
   filterRow,
+  priorityTag = '',
   modInfoByKey,
   auditByKey,
   gameRunning,
@@ -406,6 +434,24 @@ export function LibraryTable({
     sorted.sort((a, b) => {
       const aIn = inPackRowKeys.has(membershipRowKey(a));
       const bIn = inPackRowKeys.has(membershipRowKey(b));
+      // Tag-priority ordering (the page Tag picker) OVERRIDES the sort mode
+      // while a tag is chosen: that tag's mods first, then the rest by first
+      // tag A–Z (untagged last); ties by display name. Nothing is hidden.
+      if (priorityTag) {
+        const key = priorityTag.toLocaleLowerCase();
+        const aHas = rowHasTag(a, key, modInfoByKey);
+        const bHas = rowHasTag(b, key, modInfoByKey);
+        if (aHas !== bHas) return aHas ? -1 : 1;
+        const at = firstTagKey(a, modInfoByKey);
+        const bt = firstTagKey(b, modInfoByKey);
+        if (at !== bt) {
+          if (at === null) return 1;   // untagged after tagged
+          if (bt === null) return -1;
+          const byTag = at.localeCompare(bt, undefined, { sensitivity: 'base', numeric: true });
+          if (byTag !== 0) return byTag;
+        }
+        return compareMembershipDisplayName(a, b);
+      }
       if (sort === 'nameDesc') return compareMembershipDisplayName(b, a);
       if (sort === 'inPackFirst') {
         if (aIn !== bIn) return Number(bIn) - Number(aIn);
@@ -426,7 +472,7 @@ export function LibraryTable({
       return compareMembershipDisplayName(a, b);
     });
     return sorted;
-  }, [effectiveGrid, filter, sort, inPackRowKeys, filterRow]);
+  }, [effectiveGrid, filter, sort, priorityTag, inPackRowKeys, filterRow, modInfoByKey]);
 
   const visibleItems = filteredRows.slice(0, visibleLimit);
 

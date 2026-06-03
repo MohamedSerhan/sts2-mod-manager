@@ -28,7 +28,7 @@
  * refreshAll so the parent's profile list / drift / share metadata and
  * the local `mods` array stay current.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ArrowLeft,
@@ -47,6 +47,7 @@ import {
   RefreshCw,
   Search,
   Share2,
+  SquarePen,
   ToggleLeft,
   ToggleRight,
   Trash2,
@@ -57,6 +58,7 @@ import { Card } from './Card';
 import { HelpHint } from './HelpHint';
 import { KebabDivider, KebabItem, KebabMenu, KebabSection } from './KebabMenu';
 import { EditModpackModal } from './EditModpackModal';
+import { RenameModpackModal } from './RenameModpackModal';
 import { AddModsMenu } from './AddModsMenu';
 import { LibraryTable } from './LibraryTable';
 import { useApp } from '../contexts/AppContext';
@@ -93,6 +95,14 @@ export interface ModpackDetailProps {
   /** Refreshes the underlying profile list after a membership
    *  mutation so the parent's drift / share metadata stays current. */
   onLibraryChanged?: () => void;
+  /** Called after a successful rename with (oldName, newName) so the
+   *  parent can reload the profile list, reselect the new name, and
+   *  follow the active pack when the renamed pack was active. */
+  onRenamed?: (oldName: string, newName: string) => void;
+  /** Full list of current modpack names, used by the rename modal for
+   *  inline case-insensitive collision validation. Falls back to just
+   *  this pack's own name when the parent doesn't supply it. */
+  renameExistingNames?: string[];
 }
 
 /** Identity key for a profile mod / installed mod: prefer the on-disk
@@ -137,6 +147,8 @@ export function ModpackDetail({
   shareInfo,
   drift,
   onLibraryChanged,
+  onRenamed,
+  renameExistingNames,
 }: ModpackDetailProps) {
   const { t } = useTranslation();
   const { activeProfile, auditResults, mods, refreshAll, gameRunning } = useApp();
@@ -158,6 +170,8 @@ export function ModpackDetail({
   const [libraryOpen, setLibraryOpen] = useState(false);
   // Bulk-edit membership via the wizard's checkbox picker.
   const [editing, setEditing] = useState(false);
+  // Rename this pack via the small inline-validation modal.
+  const [renaming, setRenaming] = useState(false);
 
   const isActive = activeProfile === profile.name;
   const isShared = !!shareInfo;
@@ -179,6 +193,31 @@ export function ModpackDetail({
   // Search for the "Add from your Library" section only — the in-pack
   // LibraryTable owns its own search (same as the All Mods view).
   const [availableQuery, setAvailableQuery] = useState('');
+  // Tag filter for the in-pack LibraryTable (packScoped mode).
+  // Options are derived from the tags on this pack's mods via lib.modInfoByKey.
+  const [tagFilter, setTagFilter] = useState('');
+  const packTagOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const pm of profile.mods) {
+      const info =
+        lib.modInfoByKey.get(pm.folder_name ?? pm.name) ??
+        lib.modInfoByKey.get(pm.name);
+      for (const tag of info?.tags ?? []) {
+        const trimmed = tag.trim();
+        if (trimmed && !seen.has(trimmed.toLocaleLowerCase()))
+          seen.set(trimmed.toLocaleLowerCase(), trimmed);
+      }
+    }
+    return [...seen.values()].sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }),
+    );
+  }, [profile.mods, lib.modInfoByKey]);
+
+  // Clear a stale tagFilter when the tag it references is no longer present
+  // among the pack's mods (e.g. after removing the last mod that carried it).
+  useEffect(() => {
+    if (tagFilter && !packTagOptions.includes(tagFilter)) setTagFilter('');
+  }, [packTagOptions, tagFilter]);
 
   // Build a set of mod-names that belong to this pack so the updates
   // affordance is scoped to the pack's own mods.
@@ -401,6 +440,23 @@ export function ModpackDetail({
   // methods are consolidated into the one dropdown to keep the row calm.
   const packToolbarActions = (
     <>
+      {packTagOptions.length > 0 && (
+        <label className="gf-sort-control">
+          <span>{t('mods.tags.label')}</span>
+          <select
+            aria-label={t('mods.tags.label')}
+            value={tagFilter}
+            onChange={(e) => setTagFilter(e.target.value)}
+          >
+            <option value="">{t('mods.tags.all')}</option>
+            {packTagOptions.map((tag) => (
+              <option key={tag} value={tag}>
+                {tag}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <AddModsMenu lib={lib} />
       <Button
         variant="secondary"
@@ -582,6 +638,15 @@ export function ModpackDetail({
                   {t('profiles.kebab.duplicate')}
                 </KebabItem>
               )}
+              {/* Gated on onRenamed (like Duplicate on onDuplicate) so a
+                  caller that can't rename — e.g. a placeholder/remote-only pack
+                  with no local manifest to load — doesn't offer an action that
+                  would only fail. */}
+              {onRenamed && (
+                <KebabItem icon={<SquarePen size={12} />} onClick={() => setRenaming(true)}>
+                  {t('profiles.kebab.rename')}
+                </KebabItem>
+              )}
               {onExportJson && (
                 <KebabItem icon={<Copy size={12} />} onClick={() => onExportJson(profile.name)}>
                   {t('profiles.kebab.exportJson')}
@@ -651,6 +716,35 @@ export function ModpackDetail({
         )}
       </div>
 
+      {/* Inactive-pack hint — explains why per-mod toggles are disabled and
+          offers an inline Switch action to activate this pack. Hidden when
+          the pack IS already active. */}
+      {!isActive && (
+        <div
+          className="gf-modpack-detail-inactive-hint"
+          data-testid="modpack-detail-inactive-hint"
+          role="note"
+        >
+          <span>{t('modpack.detail.inactiveToggleHint')}</span>
+          {onSwitch && (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => onSwitch(profile.name)}
+              disabled={switchingOther}
+              title={t('profiles.card.activateProfile')}
+            >
+              {switchingThis ? (
+                <RefreshCw size={14} className="animate-spin" />
+              ) : (
+                <Play size={14} fill="currentColor" />
+              )}
+              {t('profiles.card.switchTo')}
+            </Button>
+          )}
+        </div>
+      )}
+
       {/* Quick-add form (shown when "+ Add mods → Quick add URL" is picked). */}
       {lib.renderQuickAddForm()}
 
@@ -714,9 +808,19 @@ export function ModpackDetail({
           reloadToken={`${membershipSignature}|active:${activeProfile ?? ''}|bulk:${bulkReloadNonce}`}
           toolbarActions={packToolbarActions}
           bulkActionsBar={packBulkBar}
-          filterRow={(row) =>
-            !!row.profiles.find((p) => p.profile_name === profile.name)?.included
-          }
+          filterRow={(row) => {
+            const included = !!row.profiles.find(
+              (p) => p.profile_name === profile.name,
+            )?.included;
+            if (!included) return false;
+            if (!tagFilter) return true;
+            const info =
+              lib.modInfoByKey.get(row.folder_name ?? row.name) ??
+              lib.modInfoByKey.get(row.name);
+            return (info?.tags ?? []).some(
+              (tg) => tg.toLocaleLowerCase() === tagFilter.toLocaleLowerCase(),
+            );
+          }}
           onMembershipChanged={refreshAfterMutation}
           onLoadOrderChanged={refreshAfterMutation}
           {...lib.tableActionProps}
@@ -826,6 +930,19 @@ export function ModpackDetail({
           profile={profile}
           onClose={() => setEditing(false)}
           onSaved={refreshAfterMutation}
+        />
+      )}
+
+      {/* Rename this pack (inline-validated name modal). */}
+      {renaming && (
+        <RenameModpackModal
+          profile={profile}
+          existingNames={renameExistingNames ?? [profile.name]}
+          onClose={() => setRenaming(false)}
+          onRenamed={(oldName, newName) => {
+            setRenaming(false);
+            onRenamed?.(oldName, newName);
+          }}
         />
       )}
     </div>

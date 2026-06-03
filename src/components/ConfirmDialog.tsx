@@ -1,6 +1,8 @@
-import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useRef, useState, type MutableRefObject, type ReactNode, type RefObject } from 'react';
 import { useTranslation, Trans } from 'react-i18next';
 import { AlertTriangle, X } from 'lucide-react';
+
+import { useModalA11y } from '../hooks/useModalA11y';
 
 // v5 batch 4 — promise-based confirm dialog. Replaces window.confirm() with
 // a styled gf-modal. Supports an optional checkbox (returns its value too)
@@ -55,8 +57,162 @@ interface PendingConfirm extends ConfirmOptions {
   resolve: (value: ConfirmResult) => void;
 }
 
-export function ConfirmProvider({ children }: { children: ReactNode }) {
+interface ConfirmModalProps {
+  pending: PendingConfirm;
+  typed: string;
+  setTyped: (v: string) => void;
+  checked: boolean;
+  setChecked: (v: boolean) => void;
+  checkedRef: MutableRefObject<boolean>;
+  phraseOk: boolean;
+  close: (confirmed: boolean) => void;
+  resolveChoice: (value: string) => void;
+}
+
+function ConfirmModal({
+  pending,
+  typed,
+  setTyped,
+  checked,
+  setChecked,
+  checkedRef,
+  phraseOk,
+  close,
+  resolveChoice,
+}: ConfirmModalProps) {
   const { t } = useTranslation();
+  const modalRef = useRef<HTMLElement>(null);
+  useModalA11y(modalRef, () => close(false));
+
+  return (
+    <div className="gf-modal-back" onClick={() => close(false)}>
+      <div
+        ref={modalRef as RefObject<HTMLDivElement>}
+        className="gf-modal"
+        style={{ width: pending.width ?? 480 }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="gf-confirm-title"
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div
+          className="gf-modal-head"
+          style={pending.destructive ? { background: 'color-mix(in oklch, var(--danger) 6%, transparent)' } : undefined}
+        >
+          <div>
+            <div id="gf-confirm-title" className="gf-modal-title">{pending.title}</div>
+            {pending.body && <div className="gf-modal-sub">{pending.body}</div>}
+          </div>
+          <button
+            onClick={() => close(false)}
+            className="gf-btn-3 gf-btn-icon"
+            title={t('common.cancel')}
+            aria-label={t('common.cancel')}
+          >
+            <X size={14} />
+          </button>
+        </div>
+
+        {(pending.warning || pending.checkbox || pending.typedPhrase) && (
+          <div className="gf-modal-body">
+            {pending.warning && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 10,
+                  padding: 12,
+                  background: 'color-mix(in oklch, var(--danger-edge) 10%, transparent)',
+                  border: '1px solid color-mix(in oklch, var(--danger-edge) 30%, transparent)',
+                  borderRadius: 7,
+                  marginBottom: pending.checkbox || pending.typedPhrase ? 12 : 0,
+                }}
+              >
+                <AlertTriangle size={16} style={{ color: 'var(--danger-bright)', flexShrink: 0, marginTop: 1 }} />
+                <div style={{ fontSize: 12, color: 'var(--danger-msg)' }}>{pending.warning}</div>
+              </div>
+            )}
+            {pending.checkbox && (
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  fontSize: 12.5,
+                  color: 'var(--ink)',
+                  marginBottom: pending.typedPhrase ? 12 : 0,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(e) => {
+                    setChecked(e.target.checked);
+                    checkedRef.current = e.target.checked;
+                  }}
+                />
+                {pending.checkbox.label}
+              </label>
+            )}
+            {pending.typedPhrase && (
+              <div style={{ fontSize: 12.5, color: 'var(--danger-text)' }}>
+                <Trans i18nKey="confirm.typePhrase" values={{ phrase: pending.typedPhrase }}>
+                  Type <b>{pending.typedPhrase}</b> to confirm:
+                </Trans>
+                <input
+                  className={`gf-set-input ${typed && !phraseOk ? 'is-err' : phraseOk && typed ? 'is-ok' : ''}`}
+                  placeholder={pending.typedPhrase}
+                  value={typed}
+                  onChange={(e) => setTyped(e.target.value)}
+                  style={{ marginTop: 6, display: 'block', width: '100%' }}
+                  autoFocus
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="gf-modal-foot">
+          <button className="gf-btn-3" onClick={() => close(false)}>
+            {pending.cancelLabel || t('common.cancel')}
+          </button>
+          <div style={{ flex: 1 }} />
+          {pending.choices ? (
+            pending.choices.map((choice) => (
+              <button
+                key={choice.value}
+                disabled={pending.typedPhrase ? !phraseOk : undefined}
+                className={
+                  choice.variant === 'danger'
+                    ? 'gf-btn-3 gf-btn-danger'
+                    : choice.variant === 'secondary'
+                    ? 'gf-btn-2'
+                    : 'gf-btn'
+                }
+                onClick={() => resolveChoice(choice.value)}
+              >
+                {choice.label}
+              </button>
+            ))
+          ) : (
+            <button
+              className={pending.destructive ? 'gf-btn-3 gf-btn-danger' : 'gf-btn'}
+              onClick={() => close(true)}
+              disabled={!phraseOk}
+              autoFocus={!pending.typedPhrase}
+              style={pending.destructive && pending.typedPhrase ? { background: 'var(--danger)', color: '#fff', border: 0 } : undefined}
+            >
+              {pending.confirmLabel || (pending.destructive ? t('common.delete') : t('common.confirm'))}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function ConfirmProvider({ children }: { children: ReactNode }) {
   const [pending, setPending] = useState<PendingConfirm | null>(null);
   const [typed, setTyped] = useState('');
   const [checked, setChecked] = useState(false);
@@ -90,124 +246,17 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
     <ConfirmContext.Provider value={confirm}>
       {children}
       {pending && (
-        <div className="gf-modal-back" onClick={() => close(false)}>
-          <div
-            className="gf-modal"
-            style={{ width: pending.width ?? 480 }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div
-              className="gf-modal-head"
-              style={pending.destructive ? { background: 'color-mix(in oklch, var(--danger) 6%, transparent)' } : undefined}
-            >
-              <div>
-                <div className="gf-modal-title">{pending.title}</div>
-                {pending.body && <div className="gf-modal-sub">{pending.body}</div>}
-              </div>
-              <button
-                onClick={() => close(false)}
-                className="gf-btn-3 gf-btn-icon"
-                title={t('common.cancel')}
-                aria-label={t('common.cancel')}
-              >
-                <X size={14} />
-              </button>
-            </div>
-
-            {(pending.warning || pending.checkbox || pending.typedPhrase) && (
-              <div className="gf-modal-body">
-                {pending.warning && (
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: 10,
-                      padding: 12,
-                      background: 'color-mix(in oklch, var(--danger-edge) 10%, transparent)',
-                      border: '1px solid color-mix(in oklch, var(--danger-edge) 30%, transparent)',
-                      borderRadius: 7,
-                      marginBottom: pending.checkbox || pending.typedPhrase ? 12 : 0,
-                    }}
-                  >
-                    <AlertTriangle size={16} style={{ color: 'var(--danger-bright)', flexShrink: 0, marginTop: 1 }} />
-                    <div style={{ fontSize: 12, color: 'var(--danger-msg)' }}>{pending.warning}</div>
-                  </div>
-                )}
-                {pending.checkbox && (
-                  <label
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      fontSize: 12.5,
-                      color: 'var(--ink)',
-                      marginBottom: pending.typedPhrase ? 12 : 0,
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={(e) => {
-                        setChecked(e.target.checked);
-                        checkedRef.current = e.target.checked;
-                      }}
-                    />
-                    {pending.checkbox.label}
-                  </label>
-                )}
-                {pending.typedPhrase && (
-                  <div style={{ fontSize: 12.5, color: 'var(--danger-text)' }}>
-                    <Trans i18nKey="confirm.typePhrase" values={{ phrase: pending.typedPhrase }}>
-                      Type <b>{pending.typedPhrase}</b> to confirm:
-                    </Trans>
-                    <input
-                      className={`gf-set-input ${typed && !phraseOk ? 'is-err' : phraseOk && typed ? 'is-ok' : ''}`}
-                      placeholder={pending.typedPhrase}
-                      value={typed}
-                      onChange={(e) => setTyped(e.target.value)}
-                      style={{ marginTop: 6, display: 'block', width: '100%' }}
-                      autoFocus
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="gf-modal-foot">
-              <button className="gf-btn-3" onClick={() => close(false)}>
-                {pending.cancelLabel || t('common.cancel')}
-              </button>
-              <div style={{ flex: 1 }} />
-              {pending.choices ? (
-                pending.choices.map((choice) => (
-                  <button
-                    key={choice.value}
-                    className={
-                      choice.variant === 'danger'
-                        ? 'gf-btn-3 gf-btn-danger'
-                        : choice.variant === 'secondary'
-                        ? 'gf-btn-2'
-                        : 'gf-btn'
-                    }
-                    onClick={() => resolveChoice(choice.value)}
-                  >
-                    {choice.label}
-                  </button>
-                ))
-              ) : (
-                <button
-                  className={pending.destructive ? 'gf-btn-3 gf-btn-danger' : 'gf-btn'}
-                  onClick={() => close(true)}
-                  disabled={!phraseOk}
-                  autoFocus={!pending.typedPhrase}
-                  style={pending.destructive && pending.typedPhrase ? { background: 'var(--danger)', color: '#fff', border: 0 } : undefined}
-                >
-                  {pending.confirmLabel || (pending.destructive ? t('common.delete') : t('common.confirm'))}
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
+        <ConfirmModal
+          pending={pending}
+          typed={typed}
+          setTyped={setTyped}
+          checked={checked}
+          setChecked={setChecked}
+          checkedRef={checkedRef}
+          phraseOk={phraseOk}
+          close={close}
+          resolveChoice={resolveChoice}
+        />
       )}
     </ConfirmContext.Provider>
   );

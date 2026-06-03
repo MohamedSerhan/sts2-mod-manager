@@ -543,6 +543,40 @@ pub fn open_mods_folder(state: tauri::State<'_, AppState>) -> std::result::Resul
     Err("No game or mods folder found. Set the game path in Settings.".to_string())
 }
 
+/// Open a single mod's folder in the system file explorer (Bug 6). Looks in
+/// the active mods folder first, then the disabled-mods folder, so it works
+/// for both enabled and disabled mods. `folder_name` must be a single path
+/// segment — anything with separators or `..` is rejected to prevent escaping
+/// the mods directories.
+#[tauri::command]
+pub fn open_mod_folder(
+    folder_name: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
+    let trimmed = folder_name.trim();
+    if trimmed.is_empty()
+        || trimmed == "."
+        || trimmed == ".."
+        || trimmed.contains('/')
+        || trimmed.contains('\\')
+    {
+        return Err(format!("Invalid mod folder name: '{}'", folder_name));
+    }
+
+    let s = state.lock().map_err(|e| e.to_string())?;
+    for base in [s.mods_path.as_ref(), s.disabled_mods_path.as_ref()] {
+        if let Some(base) = base {
+            let dir = base.join(trimmed);
+            if dir.is_dir() {
+                crate::external_open::open_external_detached(&dir)
+                    .map_err(|e| format!("Failed to open mod folder: {}", e))?;
+                return Ok(true);
+            }
+        }
+    }
+    Err(format!("Mod folder '{}' not found on disk.", trimmed))
+}
+
 /// Open the game folder in the system file explorer.
 #[tauri::command]
 pub fn open_game_folder(state: tauri::State<'_, AppState>) -> std::result::Result<bool, String> {

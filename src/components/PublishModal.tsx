@@ -25,6 +25,10 @@ interface Props {
   isReshare?: boolean;
   onClose: () => void;
   onShared?: (result: ShareResult) => void;
+  /** Called after the public-listing toggle changes so the parent can
+   *  refresh — otherwise its cached profile.public goes stale and a reopen
+   *  would seed the toggle from the old value. State-sync audit. */
+  onListingChanged?: () => void;
   /** Called when the user clicks the "Open Settings" CTA on the missing-
    *  token pre-flight error. Parent navigates to Settings → Accounts so
    *  the curator doesn't have to figure out where the token field lives. */
@@ -39,7 +43,7 @@ interface ShareProgress {
   mod_name: string | null;
 }
 
-export function PublishModal({ open, profile, isReshare, onClose, onShared, onGoToSettings }: Props) {
+export function PublishModal({ open, profile, isReshare, onClose, onShared, onListingChanged, onGoToSettings }: Props) {
   const toast = useToast();
   const { t } = useTranslation();
   // Shared clipboard hook. PublishModal historically suppressed the
@@ -99,7 +103,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
         setProgress(event.payload);
       }
     });
-    return () => { unlisten.then((f) => f()); };
+    return () => { unlisten.then((f) => f()).catch(() => {}); };
   }, [busy]);
 
   if (!open || !profile) return null;
@@ -552,7 +556,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, fontSize: 12 }}>
                 <span style={{ color: 'var(--ink-mute)' }}>{t('publish.listedPublicly')}</span>
-                <ListingToggle profileName={profile.name} initial={visibility === 'public'} />
+                <ListingToggle profileName={profile.name} initial={visibility === 'public'} onChanged={onListingChanged} />
               </div>
             </>
           )}
@@ -594,7 +598,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onGo
   );
 }
 
-function ListingToggle({ profileName, initial }: { profileName: string; initial: boolean }) {
+function ListingToggle({ profileName, initial, onChanged }: { profileName: string; initial: boolean; onChanged?: () => void }) {
   const toast = useToast();
   const { t } = useTranslation();
   const [on, setOn] = useState(initial);
@@ -606,6 +610,8 @@ function ListingToggle({ profileName, initial }: { profileName: string; initial:
     try {
       await setModpackListing(profileName, next);
       setOn(next);
+      // Tell the parent so its cached profile.public refreshes (state-sync).
+      onChanged?.();
       toast.success(next ? t('publish.listedToast') : t('publish.hiddenToast'));
     } catch (e) {
       toast.error(t('publish.listingFailed', { error: e instanceof Error ? e.message : String(e) }));

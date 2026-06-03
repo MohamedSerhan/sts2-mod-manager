@@ -27,7 +27,7 @@
  * view can re-pull after a mutation without leaking into LibraryTable
  * state.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Search } from 'lucide-react';
 import { Card } from './Card';
@@ -39,6 +39,7 @@ import {
   membershipRowKey,
 } from './LibraryRow';
 import { ModViewToggle, useModListDensity } from './ModViewToggle';
+import { usePinScroll } from '../hooks/usePinScroll';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from './ConfirmDialog';
@@ -111,6 +112,10 @@ export interface LibraryTableProps {
    *  puts its "+ Add mods" / Edit / Load order actions here so they share
    *  the search row. */
   toolbarActions?: ReactNode;
+  /** A dedicated second row rendered UNDER the toolbar (search + toolbarActions)
+   *  for the pack's bulk actions, so they don't crowd or wrap into the search
+   *  row. (FB2-A.) */
+  bulkActionsBar?: ReactNode;
   /** External re-fetch trigger. When this value changes, the focused-mode
    *  membership grid is re-pulled. Lets a parent that mutates membership
    *  outside this table (e.g. the modpack view's "Add from your Library"
@@ -152,7 +157,7 @@ export interface LibraryTableProps {
   onRollback?: (mod: ModInfo) => void;
   onDelete?: (mod: ModInfo) => void;
   onCopyVersion?: (mod: ModInfo) => void;
-  onOpenModsFolder?: () => void;
+  onOpenThisModFolder?: (mod: ModInfo) => void;
   onEditSources?: (mod: ModInfo) => void;
   onFindGithubFromNexus?: (mod: ModInfo) => void;
   onOpenExternalUrl?: (url: string, mod: ModInfo) => void;
@@ -190,6 +195,7 @@ export function LibraryTable({
   coupleActiveStorage = false,
   packScoped = false,
   toolbarActions,
+  bulkActionsBar,
   reloadToken,
   filterRow,
   modInfoByKey,
@@ -209,7 +215,7 @@ export function LibraryTable({
   onRollback,
   onDelete,
   onCopyVersion,
-  onOpenModsFolder,
+  onOpenThisModFolder,
   onEditSources,
   onFindGithubFromNexus,
   onOpenExternalUrl,
@@ -234,37 +240,11 @@ export function LibraryTable({
   // Comfortable / compact row density (persisted, shared with the modpack view).
   const [density, setDensity] = useModListDensity();
 
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  // Safety net so the user is NEVER scrolled against their will when a row
-  // mutates. The root cause we know of is focus-loss on the toggled control
-  // (fixed in LibraryRow by not disabling it mid-save), but a row mutation
-  // triggers a refreshAll + full re-render, and we don't want ANY engine /
-  // layout quirk to be able to yank the page. This briefly re-pins the
-  // nearest scrollable ancestor to where it was when the mutation began.
-  // Inert under jsdom (scrollHeight/clientHeight are 0 there), so it doesn't
-  // touch the test suite.
-  const pinScroll = useCallback(() => {
-    let el: HTMLElement | null = rootRef.current?.parentElement ?? null;
-    while (el) {
-      const oy = getComputedStyle(el).overflowY;
-      if ((oy === 'auto' || oy === 'scroll' || oy === 'overlay') && el.scrollHeight > el.clientHeight) {
-        break;
-      }
-      el = el.parentElement;
-    }
-    if (!el) return;
-    const scroller = el;
-    const top = scroller.scrollTop;
-    let frame = 0;
-    const hold = () => {
-      if (scroller.scrollTop !== top) scroller.scrollTop = top;
-      // ~12 frames (~200ms) covers the synchronous re-render plus any async
-      // focus-driven scroll the engine schedules just after.
-      if (++frame < 12) requestAnimationFrame(hold);
-    };
-    requestAnimationFrame(hold);
-  }, []);
+  // Scroll-pin safety net (shared with ModpackDetail via usePinScroll):
+  // a row mutation triggers refreshAll + a full re-render, and we don't want
+  // any engine/layout quirk to yank the page. pinScroll() re-pins the nearest
+  // scrollable ancestor to where it was when the mutation began.
+  const { ref: rootRef, pinScroll } = usePinScroll<HTMLDivElement>();
 
   // Drag-and-drop reorder state for the in-pack mods. Indices refer
   // to the filtered "in this modpack" list, not the full grid.
@@ -762,6 +742,9 @@ export function LibraryTable({
           </div>
         )}
       </div>
+      {bulkActionsBar && (
+        <div className="gf-profile-library-bulk-bar">{bulkActionsBar}</div>
+      )}
       {/* The checkbox/drag explainer only applies to the All Mods view. The
           modpack view carries its own "listed in load order" note. */}
       {!packScoped && (
@@ -902,7 +885,7 @@ export function LibraryTable({
               onRollback={modInfo && onRollback ? () => onRollback(modInfo) : undefined}
               onDelete={modInfo && onDelete ? () => onDelete(modInfo) : undefined}
               onCopyVersion={modInfo && onCopyVersion ? () => onCopyVersion(modInfo) : undefined}
-              onOpenModsFolder={onOpenModsFolder}
+              onOpenThisModFolder={modInfo && onOpenThisModFolder ? () => onOpenThisModFolder(modInfo) : undefined}
               onEditSources={modInfo && onEditSources ? () => onEditSources(modInfo) : undefined}
               onFindGithubFromNexus={modInfo && onFindGithubFromNexus ? () => onFindGithubFromNexus(modInfo) : undefined}
               onOpenExternalUrl={modInfo && onOpenExternalUrl ? (url: string) => onOpenExternalUrl(url, modInfo) : undefined}

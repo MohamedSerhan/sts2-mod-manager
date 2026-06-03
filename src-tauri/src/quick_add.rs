@@ -245,6 +245,10 @@ pub async fn quick_add_mod(
         .await
         .map_err(|e| e.to_string())?;
 
+        // Fix M-13: snapshot config files after a fresh install so future
+        // updates can detect user edits and preserve them.
+        crate::mods::snapshot_after_fresh_install(&mod_info, &mods_path, &config_path);
+
         // Persist the GitHub source so the mod shows the link in audit/UI.
         // The user gave us this URL explicitly, so it's not auto-detected.
         let mut db = load_sources(&config_path);

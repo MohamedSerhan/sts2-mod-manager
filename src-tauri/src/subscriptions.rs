@@ -504,7 +504,7 @@ async fn apply_subscription_update_inner(
 
         // Prefer bundle_url (curator's bundled copy)
         if let Some(ref bundle_url) = pm.bundle_url {
-            match crate::sharing::download_bundle(bundle_url, &pm.name, &mods_path).await {
+            match crate::sharing::download_bundle(bundle_url, &pm.name, &mods_path, pm.bundle_sha256.as_deref()).await {
                 Ok(_) => {
                     // Re-scan to read the fresh manifest's min_game_version.
                     let after = crate::mods::scan_mods(&mods_path);

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Download, X } from 'lucide-react';
 import { openExternalUrl, quickAddMod } from '../hooks/useTauri';
@@ -53,6 +53,16 @@ export function QuickAddModal({ open, onClose }: Props) {
   const [busy, setBusy] = useState(false);
   const detected = useMemo(() => detect(url), [url]);
 
+  // State-sync audit: this modal is always mounted (open-prop-driven), so
+  // reset the input when it closes — otherwise a previously-typed URL is
+  // still sitting there the next time Quick Add opens.
+  useEffect(() => {
+    if (!open) {
+      setUrl('');
+      setBusy(false);
+    }
+  }, [open]);
+
   if (!open) return null;
 
   async function handleInstall() {
@@ -89,10 +99,17 @@ export function QuickAddModal({ open, onClose }: Props) {
 
   return (
     <div className="gf-modal-back" onClick={onClose}>
-      <div className="gf-modal" style={{ width: 540 }} onClick={(e) => e.stopPropagation()}>
+      <div
+        className="gf-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="gf-quick-add-title"
+        style={{ width: 540 }}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="gf-modal-head">
           <div>
-            <div className="gf-modal-title">{t('quickAdd.title')}</div>
+            <div id="gf-quick-add-title" className="gf-modal-title">{t('quickAdd.title')}</div>
             <div className="gf-modal-sub">
               {t('quickAdd.subtitle')}
             </div>

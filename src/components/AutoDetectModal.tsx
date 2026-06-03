@@ -93,10 +93,17 @@ export function AutoDetectModal({ open, onClose, onApplied, focusMod }: Props) {
 
   return (
     <div className="gf-modal-back" onClick={onClose}>
-      <div className="gf-modal" style={{ width: 640 }} onClick={(e) => e.stopPropagation()}>
+      <div
+        className="gf-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="gf-auto-detect-title"
+        style={{ width: 640 }}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="gf-modal-head">
           <div>
-            <div className="gf-modal-title">
+            <div id="gf-auto-detect-title" className="gf-modal-title">
               {focusMod ? t('autoDetect.scopedTitle', { name: focusMod }) : t('autoDetect.title')}
             </div>
             <div className="gf-modal-sub">

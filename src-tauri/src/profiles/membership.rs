@@ -20,10 +20,13 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::error::{AppError, Result};
-use crate::mods::{merge_active_disabled_mods, scan_disabled_mods, scan_mods, ModInfo};
+use crate::mods::{
+    merge_active_disabled_mods, move_mod_by_info, scan_disabled_mods, scan_mods, ModInfo,
+};
 
 use super::apply::disk_mod_matches_pin;
 use super::crud::{
@@ -149,6 +152,85 @@ pub(crate) fn set_profile_mod_membership_from_paths(
     profile.updated_at = chrono::Utc::now();
     save_profile(&profile, profiles_path)?;
     Ok(hide_app_created_by(profile))
+}
+
+/// Result of bulk enable/disable of a profile's mods.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetProfileModsEnabledResult {
+    pub enabled: bool,
+    /// Display names of mods actually moved into the requested state.
+    pub toggled: Vec<String>,
+    /// Profile mods with no matching installed mod (can't be toggled).
+    pub missing: Vec<String>,
+    /// Matched mods whose move failed.
+    pub failed: Vec<String>,
+}
+
+/// Enable or disable EVERY mod in a profile, resolving each manifest entry to
+/// its actual on-disk mod via the same matcher the membership grid uses.
+///
+/// The reported bug: the modpack view's "Enable all / Disable all" toggled by
+/// the manifest's `folder_name`, which can drift from the installed folder
+/// (e.g. Nexus version-stamped folders like `Foo-21-0-1-7-1778841224`), so
+/// `toggle_mod` hard-errored "No mod with folder …". Matching to the installed
+/// mod and moving its real folder fixes that. Idempotent (mods already in the
+/// requested state are skipped) and best-effort (an unmatched or unmovable mod
+/// is reported, not fatal) so one bad entry can't abort the whole operation.
+pub(crate) fn set_profile_mods_enabled_from_paths(
+    profile_name: &str,
+    enabled: bool,
+    mods_path: &Path,
+    disabled_path: &Path,
+    profiles_path: &Path,
+) -> Result<SetProfileModsEnabledResult> {
+    let profile = load_profile(profile_name, profiles_path)?;
+    let installed =
+        merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
+
+    let mut toggled = Vec::new();
+    let mut missing = Vec::new();
+    let mut failed = Vec::new();
+
+    for pm in &profile.mods {
+        match installed
+            .iter()
+            .find(|m| profile_mod_matches_installed(pm, m))
+        {
+            None => missing.push(pm.name.clone()),
+            Some(inst) => {
+                if inst.enabled == enabled {
+                    continue; // already in the requested state
+                }
+                // `inst.enabled` tells us where it currently lives; move it the
+                // other way. We use the INSTALLED folder/files (not the
+                // manifest's) so the move targets the real on-disk folder.
+                let (src, dest) = if inst.enabled {
+                    (mods_path, disabled_path)
+                } else {
+                    (disabled_path, mods_path)
+                };
+                let label = inst.display_name.clone().unwrap_or_else(|| inst.name.clone());
+                match move_mod_by_info(inst, src, dest) {
+                    Ok(()) => toggled.push(label),
+                    Err(e) => {
+                        log::error!(
+                            "set_profile_mods_enabled: failed to move '{}': {}",
+                            inst.name,
+                            e
+                        );
+                        failed.push(label);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(SetProfileModsEnabledResult {
+        enabled,
+        toggled,
+        missing,
+        failed,
+    })
 }
 
 fn order_key_identity(key: &ProfileModOrderKey) -> String {
@@ -541,6 +623,83 @@ mod profile_membership_tests {
             bundle_sha256: Some(format!("sha-{folder}")),
             bundle_members: vec![],
         }
+    }
+
+    #[test]
+    fn set_profile_mods_enabled_matches_by_id_when_manifest_folder_drifted() {
+        // Reported bug: the modpack "Enable all" toggled by the manifest's
+        // folder_name, which drifts from the installed folder, so toggle_mod
+        // hard-errored "No mod with folder …". Match by the installed mod
+        // instead and move its real folder.
+        let game_tmp = tempfile::tempdir().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let mods_path = game_tmp.path().join("mods");
+        let disabled_path = game_tmp.path().join("mods_disabled");
+        let profiles_path = config_tmp.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        // On disk (disabled): real folder "RealFolder" (write_mod sets id == folder).
+        write_mod(&disabled_path, "RealFolder", "Cool Mod", "1.0.0");
+
+        // Manifest entry: DRIFTED folder_name but the same mod_id.
+        let mut pack = empty_profile("Pack");
+        pack.mods.push(ProfileMod {
+            name: "Cool Mod".into(),
+            version: "1.0.0".into(),
+            source: None,
+            hash: None,
+            files: vec!["StaleFolder-21-0-1-7/StaleFolder.dll".into()],
+            folder_name: Some("StaleFolder-21-0-1-7".into()),
+            mod_id: Some("RealFolder".into()),
+            enabled: true,
+            bundle_url: None,
+            bundle_sha256: None,
+            bundle_members: vec![],
+        });
+        save_profile(&pack, &profiles_path).unwrap();
+
+        let result = set_profile_mods_enabled_from_paths(
+            "Pack", true, &mods_path, &disabled_path, &profiles_path,
+        )
+        .unwrap();
+
+        assert_eq!(result.toggled, vec!["Cool Mod".to_string()]);
+        assert!(result.missing.is_empty(), "missing={:?}", result.missing);
+        assert!(result.failed.is_empty(), "failed={:?}", result.failed);
+        // The REAL on-disk folder moved to active, not the drifted manifest name.
+        assert!(mods_path.join("RealFolder").join("RealFolder.dll").exists());
+        assert!(!disabled_path.join("RealFolder").exists());
+    }
+
+    #[test]
+    fn set_profile_mods_enabled_reports_missing_and_skips_already_in_state() {
+        let game_tmp = tempfile::tempdir().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let mods_path = game_tmp.path().join("mods");
+        let disabled_path = game_tmp.path().join("mods_disabled");
+        let profiles_path = config_tmp.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        // "Here" is already active; "Ghost" isn't installed at all.
+        write_mod(&mods_path, "Here", "Here", "1.0.0");
+        let mut pack = empty_profile("Pack");
+        pack.mods.push(profile_mod_entry("Here", "Here", "1.0.0", true));
+        pack.mods.push(profile_mod_entry("Ghost", "Ghost", "1.0.0", true));
+        save_profile(&pack, &profiles_path).unwrap();
+
+        let result = set_profile_mods_enabled_from_paths(
+            "Pack", true, &mods_path, &disabled_path, &profiles_path,
+        )
+        .unwrap();
+
+        // "Here" is already active → not re-toggled; "Ghost" is missing.
+        assert!(result.toggled.is_empty(), "toggled={:?}", result.toggled);
+        assert_eq!(result.missing, vec!["Ghost".to_string()]);
+        assert!(mods_path.join("Here").exists());
     }
 
     #[test]

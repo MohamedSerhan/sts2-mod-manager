@@ -53,6 +53,8 @@ A UX simplification release. The app feels like a launcher first: pick a modpack
 - "Report a bug" replaces the old support-bundle export: it builds a redacted report — app and game version, your installed mods, the active modpack's load order, and recent logs — and opens a prefilled GitHub issue. The full report is attached automatically so nothing important is cut off, and you never need a token. You see the full report and confirm it before anything is uploaded or linked publicly.
 - You can now choose which folder the app watches for Nexus mod downloads in Settings → General. The change takes effect after restarting the app.
 - Modpacks you shared before this update now show a "Re-share recommended" hint so you can re-publish them and pass along the new source links to people who install them. You can dismiss the hint per pack if you'd rather not.
+- Each mod row's kebab (⋯) menu now has an "Auto-detect source" item that runs a scoped GitHub search for just that one mod; selecting it on a bundle (pack of several mods) shows a toast explaining that auto-linking isn't supported for bundles.
+- Downloads that contain several mods (like the Alice Defect pack) now install and appear as a single pack — enable, disable, delete, or add it to a modpack as one unit, and rename it like any other mod.
 
 ### Changed
 
@@ -94,20 +96,6 @@ A UX simplification release. The app feels like a launcher first: pick a modpack
 - You can edit a modpack you published again. Sharing a pack quietly subscribed you to your own copy, which then locked it as if it belonged to someone else; modpacks you published now stay editable — including adding mods to them by pasting a URL or importing a file — while ones you only follow remain protected.
 - Adding a mod that's already active to a modpack with the bulk Edit dialog no longer fails with a "mod not found" error and silently drops the change; the edit now saves and the already-active mod is left as-is.
 - The modpack mod picker now shows each mod's on-disk folder name when it differs from the display name, and you can search by that folder name (or mod id) — so mods that install under an unusual folder are easy to find and tell apart.
-
-### Security
-
-- GitHub personal access tokens and query-string API keys are stripped from diagnostic bundles automatically.
-- The share-link parser now accepts only `import`, `install`, and `load` action prefixes; unknown actions are rejected rather than silently coerced.
-- Updated bundled dependencies to clear security advisories (the `openssl` library and the `tmp` test helper).
-
-### Added
-
-- Each mod row's kebab (⋯) menu now has an "Auto-detect source" item that runs a scoped GitHub search for just that one mod; selecting it on a bundle (pack of several mods) shows a toast explaining that auto-linking isn't supported for bundles.
-- Downloads that contain several mods (like the Alice Defect pack) now install and appear as a single pack — enable, disable, delete, or add it to a modpack as one unit, and rename it like any other mod.
-
-### Fixed
-
 - Fixed rare data-loss cases — a crash while the app was saving could wipe your saved mod sources, subscriptions, or profiles, and a failed backup-restore or modpack repair could leave your mods folder empty.
 - Auto-detect sources no longer silently shows "no candidates" for mods when GitHub's search quota runs out mid-scan; a banner now explains the rate-limit and mods that weren't searched are marked "not checked" so you know to run the scan again.
 - Bundled packs and Nexus-linked mods now show their real Nexus version (the file version) instead of an unrelated version number taken from one of the mods inside the pack. Existing packs correct themselves the next time you install or update them.
@@ -115,6 +103,9 @@ A UX simplification release. The app feels like a launcher first: pick a modpack
 
 ### Security
 
+- GitHub personal access tokens and query-string API keys are stripped from diagnostic bundles automatically.
+- The share-link parser now accepts only `import`, `install`, and `load` action prefixes; unknown actions are rejected rather than silently coerced.
+- Updated bundled dependencies to clear security advisories (the `openssl` library and the `tmp` test helper).
 - Hardened how shared modpacks are downloaded and how Nexus and dev-build links are validated, so a malicious modpack can't steer the app at unexpected addresses.
 
 ## [1.6.1] - 2026-05-23

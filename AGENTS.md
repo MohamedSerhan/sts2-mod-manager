@@ -35,6 +35,29 @@ Supported languages must be translated before a release can go out. The
 release script runs `npm run qa:i18n` outside `SKIP_QA`, so missing keys or
 English fallback prose block release even during emergency hotfixes.
 
+## Changelog fragments are required
+
+Every change a player would notice needs a changelog entry, and CI enforces
+it: the `changelog` gate fails any PR that touches app code without a new one.
+
+For each user-facing change, in the same PR:
+
+1. Add a fragment `changelog.d/<category>-<slug>.md`, where `<category>` is one
+   of `added`, `changed`, `fixed`, `security` (e.g.
+   `fixed-142-nexus-version.md`). Do **not** hand-edit `CHANGELOG.md` —
+   `scripts/release.sh` assembles the fragments into the version section at
+   release (one `### Added` / `### Changed` / `### Fixed` / `### Security`
+   heading each) and deletes the consumed fragments.
+2. The body is **one player-facing sentence** — describe what the player sees
+   or does, not how the code works. No file paths, no developer jargon
+   (`refactor`, `IPC`, `.tsx`, `cargo`, …), no internal type/function names.
+   See `changelog.d/README.md` for the full rules; the same dev-speak lint runs
+   at release via `node scripts/changelog-fragments.mjs lint`.
+
+An internal-only change with nothing a player would notice gets no fragment —
+put the detail in the commit message and label the PR `no-changelog` so the
+gate passes.
+
 ## Scalability is a feature requirement
 
 Design mod-management flows for large local libraries and many profiles, not

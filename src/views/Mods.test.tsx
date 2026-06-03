@@ -448,15 +448,17 @@ describe('<ModsView>', () => {
     await waitFor(() => { expect(screen.getAllByText('FreshMod').length).toBeGreaterThan(0); });
   });
 
-  it('Open folder triggers open_mods_folder', async () => {
-    seedMods([]);
+  it('Open mods folder button triggers open_mods_folder', async () => {
+    // FB3: the global open-folder moved out of the Add-mods dropdown into the
+    // bulk-action row (left of Enable all), shown once mods exist.
+    seedMods([baseMod()]);
+    registerInvokeHandler('open_mods_folder', () => true);
     const user = userEvent.setup();
     render(<Wrap />);
-    await waitFor(() => {
-      expect(screen.getByText(/0 installed/)).toBeInTheDocument();
-    });
-    await openAddMenu(user);
-    await user.click(screen.getByRole('menuitem', { name: /Open mods folder/ }));
+    await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
+    // It sits to the LEFT of "Enable all" in the bulk-action row.
+    expectTextBefore('Open mods folder', 'Enable all');
+    await user.click(screen.getByRole('button', { name: /Open mods folder/i }));
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'open_mods_folder')).toBe(true);
     });
@@ -1888,8 +1890,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
-    await openAddMenu(user);
-    await user.click(screen.getByRole('menuitem', { name: /Open mods folder/ }));
+    await user.click(screen.getByRole('button', { name: /Open mods folder/i }));
     await waitFor(() => {
       expect(screen.getByText('no path')).toBeInTheDocument();
     });
@@ -1902,8 +1903,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
-    await openAddMenu(user);
-    await user.click(screen.getByRole('menuitem', { name: /Open mods folder/ }));
+    await user.click(screen.getByRole('button', { name: /Open mods folder/i }));
     await waitFor(() => {
       expect(screen.getByText('plain-string-reason')).toBeInTheDocument();
     });

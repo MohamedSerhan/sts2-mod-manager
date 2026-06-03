@@ -32,7 +32,6 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ArrowLeft,
-  Ban,
   Camera,
   Check,
   ChevronDown,
@@ -48,6 +47,8 @@ import {
   RefreshCw,
   Search,
   Share2,
+  ToggleLeft,
+  ToggleRight,
   Trash2,
 } from 'lucide-react';
 import { Badge } from './Badge';
@@ -447,7 +448,7 @@ export function ModpackDetail({
         disabled={gameRunning || bulkToggling}
         title={gameRunning ? t('mods.closeSts2First') : t('mods.enableAll')}
       >
-        <Check size={14} />
+        <ToggleRight size={14} />
         {t('mods.enableAll')}
       </Button>
       <Button
@@ -457,7 +458,7 @@ export function ModpackDetail({
         disabled={gameRunning || bulkToggling}
         title={gameRunning ? t('mods.closeSts2First') : t('mods.disableAll')}
       >
-        <Ban size={14} />
+        <ToggleLeft size={14} />
         {t('mods.disableAll')}
       </Button>
     </>

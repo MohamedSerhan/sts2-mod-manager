@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  FolderOpen,
   Trash2,
   ToggleLeft,
   ToggleRight,
@@ -221,6 +222,10 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
           )}
           {mods.length > 0 && (
             <div className="flex gap-1.5">
+              <Button variant="ghost" size="sm" onClick={lib.handleOpenFolder} title={t('mods.openModsFolder')}>
+                <FolderOpen size={14} />
+                {t('mods.openModsFolder')}
+              </Button>
               <Button variant="ghost" size="sm" onClick={handleEnableAll} disabled={gameRunning} title={gameRunning ? t('mods.closeSts2First') : t('mods.enableAll')}>
                 <ToggleRight size={14} />
                 {t('mods.enableAll')}

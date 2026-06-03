@@ -292,6 +292,12 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--indigo-line); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--indigo-elev); }
 
+/* Text selection — themed to the gold accent instead of the OS-default blue,
+   which clashes with the indigo/gold palette (in both light and dark).
+   Translucent so the selected text keeps its own colour and stays readable on
+   either surface; --gf is theme-reactive, so this re-themes automatically. */
+::selection { background-color: color-mix(in oklch, var(--gf) 45%, transparent); }
+
 /* ── Custom titlebar ─────────────────────────────────────────────── */
 .gf-titlebar {
   height: 30px;

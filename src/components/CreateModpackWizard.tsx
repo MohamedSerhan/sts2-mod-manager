@@ -100,13 +100,18 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
   // user's current state. If they have any active mods, "from active"
   // is the path with least surprise; otherwise "empty" wins.
   useEffect(() => {
-    if (touchedSelection) return;
+    // Don't override an explicit choice: if the user has touched the
+    // selection, or deliberately picked Clone (which needs a follow-up
+    // pick before it advances), stop auto-defaulting the strategy —
+    // otherwise a re-render (e.g. a new `mods` array reference) could
+    // re-fire this and wipe the in-progress Clone selection.
+    if (touchedSelection || strategy === 'clone') return;
     if (mods.some((m) => m.enabled)) {
       setStrategy('fromActive');
     } else {
       setStrategy('empty');
     }
-  }, [mods, touchedSelection]);
+  }, [mods, touchedSelection, strategy]);
 
   // Apply the chosen strategy when leaving step 1 — this seeds
   // `selectedMods`. The strategy is committed by clicking the strategy

@@ -697,6 +697,7 @@ async fn scenario_005_install_from_release_url() {
         "https://github.com/qa-fixture/sts2mm-profiles/releases/download/bundles/TheCursedMod_v0.2.7.zip",
         "TheCursedMod",
         tmp.path(),
+        None, // cassette fixture: no published bundle hash to verify
     )
     .await
     .expect("cassette-backed release download must succeed");

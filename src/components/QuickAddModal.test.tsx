@@ -62,6 +62,22 @@ describe('<QuickAddModal>', () => {
     expect(screen.getByRole('button', { name: /Add & install/i })).toBeDisabled();
   });
 
+  it('clears the typed URL when reopened (no stale input across open/close)', async () => {
+    // QuickAddModal is always mounted (open-prop-driven, not conditionally
+    // rendered), so without a reset-on-close a previously-typed URL would
+    // still be there next time the user opens Quick Add. State-sync audit.
+    const user = userEvent.setup();
+    const { rerender } = render(<Wrap open />);
+    const field = screen.getByPlaceholderText(/github\.com\/owner\/repo/) as HTMLInputElement;
+    await user.type(field, 'github.com/foo/bar');
+    expect(field.value).toBe('github.com/foo/bar');
+    // Close, then reopen.
+    rerender(<Wrap open={false} />);
+    rerender(<Wrap open />);
+    const reopened = screen.getByPlaceholderText(/github\.com\/owner\/repo/) as HTMLInputElement;
+    expect(reopened.value).toBe('');
+  });
+
   it('Cancel button calls onClose', async () => {
     const onClose = vi.fn();
     const user = userEvent.setup();

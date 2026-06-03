@@ -36,6 +36,7 @@ import {
   installModFromFile,
   quickAddMod,
   openModsFolder,
+  openModFolder,
   openExternalUrl,
   setModSource,
   setModSourcesFull,
@@ -400,6 +401,16 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     }
   }
 
+  // Bug 6: open ONE mod's folder (vs. the global mods dir). Backend resolves
+  // the folder against the active then disabled mods directories.
+  async function handleOpenThisModFolder(mod: ModInfo) {
+    try {
+      await openModFolder(mod.folder_name ?? mod.name);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   async function handleClearSource(modName: string, folderName: string | null) {
     try {
       await setModSource(modName, '', folderName);
@@ -417,7 +428,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     });
   }
 
-  async function handleFindGithubFromNexus(mod: ModInfo) {
+  async function handleFindGithubFromNexus(mod: ModInfo): Promise<string | null> {
     const key = mod.folder_name ?? mod.name;
     try {
       setFindingGithub(key);
@@ -425,11 +436,17 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
       if (repo) {
         await refreshMods();
         toast.success(t('mods.toast.foundGitHub', { repo }));
+        // Return the repo so an open SourceEditor can reflect it into its
+        // field (Bug 1) — refreshMods alone can't reach the editor's
+        // mount-seeded local state.
+        return repo;
       } else {
         toast.info(t('mods.toast.noGitHubInNexus', { name: mod.name }));
+        return null;
       }
     } catch (e) {
       toast.error(t('mods.toast.allFailed', { error: e instanceof Error ? e.message : String(e) }));
+      return null;
     } finally {
       setFindingGithub(null);
     }
@@ -627,7 +644,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     onRollback: handleRollback,
     onDelete: handleDelete,
     onCopyVersion: handleCopyVersion,
-    onOpenModsFolder: handleOpenFolder,
+    onOpenThisModFolder: handleOpenThisModFolder,
     onEditSources,
     onFindGithubFromNexus: handleFindGithubFromNexus,
     onOpenExternalUrl: handleOpenExternalUrl,

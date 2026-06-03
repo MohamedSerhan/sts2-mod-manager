@@ -708,6 +708,19 @@ describe('<ModpackDetail>', () => {
     expect(await screen.findByRole('dialog', { name: /rename/i })).toBeInTheDocument();
   });
 
+  it('does not offer Rename when onRenamed is not provided (e.g. a placeholder pack)', async () => {
+    const user = userEvent.setup();
+    const profile = setupPack({ packName: 'Sample', inPack: [modInfo({ name: 'M', folder_name: 'M' })] });
+    // baseProps() omits onRenamed, so the kebab must not surface a Rename item.
+    render(<Wrap {...baseProps()} profile={profile} />);
+    await screen.findByRole('heading', { level: 2, name: 'Sample' });
+    await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
+    // The kebab opens (Auto-detect / Refresh are always present)…
+    expect(await screen.findByRole('menuitem', { name: /Auto-detect sources/i })).toBeInTheDocument();
+    // …but Rename is gated off.
+    expect(screen.queryByRole('menuitem', { name: /^rename$/i })).toBeNull();
+  });
+
   it('Auto-detect sources lives in the header kebab (not "+ Add mods") and opens the scan modal', async () => {
     const user = userEvent.setup();
     render(<Wrap {...baseProps()} />);

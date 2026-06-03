@@ -527,9 +527,15 @@ export function ModpackDetail({
                   {t('profiles.kebab.duplicate')}
                 </KebabItem>
               )}
-              <KebabItem icon={<SquarePen size={12} />} onClick={() => setRenaming(true)}>
-                {t('profiles.kebab.rename')}
-              </KebabItem>
+              {/* Gated on onRenamed (like Duplicate on onDuplicate) so a
+                  caller that can't rename — e.g. a placeholder/remote-only pack
+                  with no local manifest to load — doesn't offer an action that
+                  would only fail. */}
+              {onRenamed && (
+                <KebabItem icon={<SquarePen size={12} />} onClick={() => setRenaming(true)}>
+                  {t('profiles.kebab.rename')}
+                </KebabItem>
+              )}
               {onExportJson && (
                 <KebabItem icon={<Copy size={12} />} onClick={() => onExportJson(profile.name)}>
                   {t('profiles.kebab.exportJson')}

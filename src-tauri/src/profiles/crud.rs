@@ -167,6 +167,16 @@ pub fn rename_profile(old: &str, new: &str, profiles_path: &Path) -> Result<Prof
         )));
     }
 
+    // Write the renamed profile's .json FIRST, before touching the .share
+    // sidecar. Ordering matters for crash-safety: if a later step fails, the
+    // new name is already a complete pack (manifest present) rather than a
+    // phantom .share with no .json. Full atomicity across two files isn't
+    // possible without a transaction, but anchoring on the manifest keeps a
+    // mid-failure recoverable (a stray duplicate/sidecar, never a lost pack).
+    profile.name = new_trimmed.to_string();
+    profile.updated_at = chrono::Utc::now();
+    save_profile(&profile, profiles_path)?;
+
     // Move the .share sidecar (raw old → raw new), mirroring delete_profile's
     // raw+sanitized lookup. Preserve bytes verbatim so the share code stays.
     let share_candidates = [
@@ -187,10 +197,6 @@ pub fn rename_profile(old: &str, new: &str, profiles_path: &Path) -> Result<Prof
             }
         }
     }
-
-    profile.name = new_trimmed.to_string();
-    profile.updated_at = chrono::Utc::now();
-    save_profile(&profile, profiles_path)?;
 
     // Remove the stale .json only if it's a genuinely different file. On a
     // case-insensitive FS ("Pack" → "pack") the old and new names alias the

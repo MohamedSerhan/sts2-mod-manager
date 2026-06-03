@@ -350,8 +350,15 @@ pub fn rename_profile(
         .map_err(|e| e.to_string())?;
     let new = renamed.name.clone();
 
-    // (c) If the renamed pack was active, follow it.
-    if s.active_profile.as_deref() == Some(old_name.as_str()) {
+    // (c) If the renamed pack was active, follow it. Compare case-insensitively
+    // so a casing difference between the stored active-profile pointer and the
+    // requested old name doesn't strand active_profile.txt at the gone name
+    // (mirrors the case-insensitive active-pointer handling on the delete path).
+    if s
+        .active_profile
+        .as_deref()
+        .is_some_and(|active| active.eq_ignore_ascii_case(&old_name))
+    {
         s.active_profile = Some(new.clone());
         persist_active_profile(&s.config_path, &new);
     }

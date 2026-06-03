@@ -34,7 +34,7 @@ describe('<HelpHint>', () => {
     const btn = screen.getByRole('button', { name: /what does this mean/i });
     fireEvent.click(btn);
 
-    const tip = screen.getByRole('tooltip');
+    const tip = screen.getByTestId('help-hint-popover');
     expect(tip).toBeInTheDocument();
     // The popover should source from help.faq.modpackWhat.a — that
     // answer mentions "modpack" in plain language.
@@ -46,9 +46,9 @@ describe('<HelpHint>', () => {
     mount('modpackWhat');
     const btn = screen.getByRole('button', { name: /what does this mean/i });
     fireEvent.click(btn);
-    expect(screen.getByRole('tooltip')).toBeInTheDocument();
+    expect(screen.getByTestId('help-hint-popover')).toBeInTheDocument();
     fireEvent.click(btn);
-    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('help-hint-popover')).not.toBeInTheDocument();
   });
 
   it('closes the popover when clicking outside the hint', () => {
@@ -62,23 +62,23 @@ describe('<HelpHint>', () => {
     );
     const trigger = screen.getByRole('button', { name: /what does this mean/i });
     fireEvent.click(trigger);
-    expect(screen.getByRole('tooltip')).toBeInTheDocument();
+    expect(screen.getByTestId('help-hint-popover')).toBeInTheDocument();
 
     // mousedown is what HelpHint listens for (so React onClick handlers
     // on outside elements don't fire first and re-open it).
     const outside = screen.getByTestId('outside');
     fireEvent.mouseDown(outside);
-    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('help-hint-popover')).not.toBeInTheDocument();
   });
 
   it('closes the popover on Escape key', () => {
     mount('modpackWhat');
     const btn = screen.getByRole('button', { name: /what does this mean/i });
     fireEvent.click(btn);
-    expect(screen.getByRole('tooltip')).toBeInTheDocument();
+    expect(screen.getByTestId('help-hint-popover')).toBeInTheDocument();
 
     fireEvent.keyDown(document, { key: 'Escape' });
-    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('help-hint-popover')).not.toBeInTheDocument();
   });
 
   it('multiple instances do not collide — opening one leaves the other closed', () => {
@@ -96,7 +96,7 @@ describe('<HelpHint>', () => {
     fireEvent.click(buttons[0]);
     // Only one tooltip should be visible — the other instance stays
     // closed since each owns its own open state.
-    expect(screen.getAllByRole('tooltip')).toHaveLength(1);
+    expect(screen.getAllByTestId('help-hint-popover')).toHaveLength(1);
     expect(buttons[0]).toHaveAttribute('aria-expanded', 'true');
     expect(buttons[1]).toHaveAttribute('aria-expanded', 'false');
   });
@@ -108,7 +108,7 @@ describe('<HelpHint>', () => {
       </AllProviders>,
     );
     fireEvent.click(screen.getByRole('button', { name: /what does this mean/i }));
-    const modpackText = screen.getByRole('tooltip').textContent ?? '';
+    const modpackText = screen.getByTestId('help-hint-popover').textContent ?? '';
     unmount();
 
     render(
@@ -117,7 +117,7 @@ describe('<HelpHint>', () => {
       </AllProviders>,
     );
     fireEvent.click(screen.getByRole('button', { name: /what does this mean/i }));
-    const githubText = screen.getByRole('tooltip').textContent ?? '';
+    const githubText = screen.getByTestId('help-hint-popover').textContent ?? '';
 
     expect(modpackText).not.toBe(githubText);
     expect(githubText.toLowerCase()).toContain('github');
@@ -132,7 +132,7 @@ describe('<HelpHint>', () => {
     // Now Escape should be a no-op — nothing to dismiss. This catches
     // a regression where the effect cleanup function isn't returned.
     fireEvent.keyDown(document, { key: 'Escape' });
-    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('help-hint-popover')).not.toBeInTheDocument();
     expect(btn).toHaveAttribute('aria-expanded', 'false');
   });
 
@@ -143,9 +143,9 @@ describe('<HelpHint>', () => {
     // assert it stays open.
     mount('modpackWhat');
     fireEvent.click(screen.getByRole('button', { name: /what does this mean/i }));
-    const tip = screen.getByRole('tooltip');
+    const tip = screen.getByTestId('help-hint-popover');
     fireEvent.mouseDown(tip);
-    expect(screen.getByRole('tooltip')).toBeInTheDocument();
+    expect(screen.getByTestId('help-hint-popover')).toBeInTheDocument();
   });
 
   it('non-Escape keydown does NOT dismiss the popover (covers the e.key === "Escape" guard)', () => {
@@ -154,8 +154,8 @@ describe('<HelpHint>', () => {
     // typing into a textbox elsewhere, etc., don't trigger a dismiss.
     mount('modpackWhat');
     fireEvent.click(screen.getByRole('button', { name: /what does this mean/i }));
-    expect(screen.getByRole('tooltip')).toBeInTheDocument();
+    expect(screen.getByTestId('help-hint-popover')).toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'a' });
-    expect(screen.getByRole('tooltip')).toBeInTheDocument();
+    expect(screen.getByTestId('help-hint-popover')).toBeInTheDocument();
   });
 });

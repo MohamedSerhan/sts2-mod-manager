@@ -53,10 +53,10 @@ export function KebabMenu({
       }
     }
     window.addEventListener('keydown', onKey);
-    const t = setTimeout(() => document.addEventListener('mousedown', onClick), 0);
+    const closeTimer = setTimeout(() => document.addEventListener('mousedown', onClick), 0);
     return () => {
       window.removeEventListener('keydown', onKey);
-      clearTimeout(t);
+      clearTimeout(closeTimer);
       document.removeEventListener('mousedown', onClick);
     };
   }, [open]);

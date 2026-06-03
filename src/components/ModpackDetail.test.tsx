@@ -13,7 +13,7 @@
  * sections, and the wiring.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { ModpackDetail } from './ModpackDetail';
@@ -150,7 +150,8 @@ describe('<ModpackDetail>', () => {
       await screen.findByRole('heading', { level: 2, name: 'Sample' }),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Back to modpacks/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Switch to/i })).toBeInTheDocument();
+    // Both the header CTA and the inactive-hint have a "Switch to" button for a non-active pack.
+    expect(screen.getAllByRole('button', { name: /Switch to/i })).toHaveLength(2);
   });
 
   it('omits the Switch button when the modpack is already active', async () => {
@@ -204,7 +205,9 @@ describe('<ModpackDetail>', () => {
     await openAddMods(user);
     expect(screen.getByRole('menuitem', { name: /Quick add URL/i })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: /Import mod/i })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: /Open mods folder/i })).toBeInTheDocument();
+    // FB3: "Open mods folder" was removed from this dropdown (it lives on the
+    // bulk-action bar now), so it must NOT be here.
+    expect(screen.queryByRole('menuitem', { name: /Open mods folder/i })).toBeNull();
     // Auto-detect sources is NOT an install action — it lives in the header
     // "Advanced actions" kebab, not this dropdown.
     expect(screen.queryByRole('menuitem', { name: /Auto-detect sources/i })).toBeNull();
@@ -420,6 +423,226 @@ describe('<ModpackDetail>', () => {
       included: true,
     });
     await waitFor(() => expect(onLibraryChanged).toHaveBeenCalled());
+  });
+
+  // ── Bug 2: adding from the library must not yank the scroll to the top ──
+  // The available list shrinks on each add, so without a scroll pin the page
+  // collapses upward and the user loses their place. handleAdd reuses the
+  // same pinScroll safety net the LibraryTable rows already use.
+  it('pins the scroll position when adding a mod from the library', async () => {
+    const profile = setupPack({
+      inPack: [modInfo({ name: 'PackMod', folder_name: 'PackMod', mod_id: 'PackMod' })],
+      available: [
+        modInfo({ name: 'LibA', folder_name: 'LibA', mod_id: 'LibA' }),
+        modInfo({ name: 'LibB', folder_name: 'LibB', mod_id: 'LibB' }),
+      ],
+    });
+    registerInvokeHandler('set_profile_mod_membership', () => baseProfile());
+    const user = userEvent.setup();
+    const { container } = render(
+      <AllProviders>
+        <div data-scroller="yes">
+          <ModpackDetail profile={profile} onBack={vi.fn()} />
+        </div>
+      </AllProviders>,
+    );
+    const available = await expandLibrary(user);
+
+    // jsdom reports 0 layout, so fake a real scroll container around the
+    // detail view so pinScroll can find it and engage.
+    const scroller = container.querySelector('[data-scroller="yes"]') as HTMLElement;
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 4000 });
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 400 });
+    let scrollTopVal = 1800;
+    Object.defineProperty(scroller, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopVal,
+      set: (v: number) => { scrollTopVal = v; },
+    });
+    const realGCS = window.getComputedStyle.bind(window);
+    const gcs = vi
+      .spyOn(window, 'getComputedStyle')
+      .mockImplementation((el: Element, pe?: string | null) =>
+        (el === scroller
+          ? ({ overflowY: 'auto' } as CSSStyleDeclaration)
+          : realGCS(el, pe)));
+    const rafCbs: FrameRequestCallback[] = [];
+    const raf = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((cb: FrameRequestCallback) => { rafCbs.push(cb); return rafCbs.length; });
+
+    try {
+      await user.click(within(available).getAllByRole('button', { name: /^Add$/i })[0]);
+      // Simulate the engine collapsing the list to the top mid-add…
+      scrollTopVal = 0;
+      // …the pin re-asserts the captured position on the following frames.
+      let guard = 0;
+      while (rafCbs.length && guard++ < 50) {
+        rafCbs.shift()!(0);
+      }
+      expect(scrollTopVal).toBe(1800);
+    } finally {
+      gcs.mockRestore();
+      raf.mockRestore();
+    }
+  });
+
+  // ── Bug 5: the header count must reconcile with the on-disk scan ──────
+  // profile.mods.length counts manifest membership; the in-pack list shows
+  // mods actually on disk. When the manifest references mods that aren't
+  // installed (drift.removed), the header surfaces "(N missing)" so the two
+  // numbers stop disagreeing.
+  it('shows "(N missing)" when the manifest references mods not installed on disk (Bug 5)', async () => {
+    const profile = setupPack({
+      inPack: [modInfo({ name: 'OnDisk1', folder_name: 'OnDisk1', mod_id: 'OnDisk1' })],
+    });
+    const drift: ProfileDrift = {
+      added: [],
+      removed: ['Gone1', 'Gone2', 'Gone3'],
+      toggled: [],
+      version_changed: [],
+      has_drift: true,
+    };
+    render(<Wrap profile={profile} onBack={vi.fn()} drift={drift} />);
+    await waitFor(() => {
+      expect(screen.getByText(/3 missing/)).toBeInTheDocument();
+    });
+  });
+
+  it('the "(N missing)" indicator lists the missing mod names on hover (FB-D)', async () => {
+    const profile = setupPack({
+      inPack: [modInfo({ name: 'OnDisk1', folder_name: 'OnDisk1', mod_id: 'OnDisk1' })],
+    });
+    const drift: ProfileDrift = {
+      added: [],
+      removed: ['Gone1', 'Gone2', 'Gone3'],
+      toggled: [],
+      version_changed: [],
+      has_drift: true,
+    };
+    render(<Wrap profile={profile} onBack={vi.fn()} drift={drift} />);
+    await waitFor(() => {
+      expect(screen.getByText(/3 missing/)).toBeInTheDocument();
+    });
+    // The names are in the tooltip (present in the DOM, shown on hover/focus).
+    expect(screen.getByText('Gone1')).toBeInTheDocument();
+    expect(screen.getByText('Gone2')).toBeInTheDocument();
+    expect(screen.getByText('Gone3')).toBeInTheDocument();
+  });
+
+  it('shows no missing indicator when nothing in the manifest is missing (Bug 5)', async () => {
+    const profile = setupPack({
+      inPack: [modInfo({ name: 'OnDisk1', folder_name: 'OnDisk1', mod_id: 'OnDisk1' })],
+    });
+    const drift: ProfileDrift = {
+      added: [],
+      removed: [],
+      toggled: [],
+      version_changed: [],
+      has_drift: false,
+    };
+    render(<Wrap profile={profile} onBack={vi.fn()} drift={drift} />);
+    await screen.findByRole('heading', { level: 2, name: 'Sample' });
+    expect(screen.queryByText(/missing/i)).toBeNull();
+  });
+
+  // ── Bug 7 / FB-A: enable-all / disable-all scoped to THIS modpack ─────
+  // Visible toolbar buttons that call set_profile_mods_enabled, which resolves
+  // each manifest entry to its real on-disk mod backend-side (the manifest
+  // folder_name can drift) — fixing the reported "mod not found in
+  // mods_disabled" error from the old per-manifest-folder toggle loop.
+  it('Enable all calls set_profile_mods_enabled with enabled=true (Bug 7 / FB-A)', async () => {
+    const profile = setupPack({
+      inPack: [
+        modInfo({ name: 'PackA', folder_name: 'PackA', mod_id: 'PackA', enabled: false }),
+        modInfo({ name: 'PackB', folder_name: 'PackB', mod_id: 'PackB', enabled: false }),
+      ],
+    });
+    registerInvokeHandler('set_profile_mods_enabled', () => ({
+      enabled: true, toggled: ['PackA', 'PackB'], missing: [], failed: [],
+    }));
+    const user = userEvent.setup();
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+    await screen.findAllByText('PackA');
+    await user.click(await screen.findByRole('button', { name: /^Enable all$/i }));
+    await waitFor(() => {
+      const call = getInvokeCalls().find((c) => c.cmd === 'set_profile_mods_enabled');
+      expect(call?.args).toMatchObject({ name: 'Sample', enabled: true });
+    });
+  });
+
+  it('Disable all calls set_profile_mods_enabled with enabled=false (Bug 7 / FB-A)', async () => {
+    const profile = setupPack({
+      inPack: [modInfo({ name: 'PackA', folder_name: 'PackA', mod_id: 'PackA', enabled: true })],
+    });
+    registerInvokeHandler('set_profile_mods_enabled', () => ({
+      enabled: false, toggled: ['PackA'], missing: [], failed: [],
+    }));
+    const user = userEvent.setup();
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+    await screen.findAllByText('PackA');
+    await user.click(await screen.findByRole('button', { name: /^Disable all$/i }));
+    await waitFor(() => {
+      const call = getInvokeCalls().find((c) => c.cmd === 'set_profile_mods_enabled');
+      expect(call?.args).toMatchObject({ name: 'Sample', enabled: false });
+    });
+  });
+
+  it('the modpack toolbar exposes a visible "Open mods folder" button (FB-E)', async () => {
+    const profile = setupPack({
+      inPack: [modInfo({ name: 'PackA', folder_name: 'PackA', mod_id: 'PackA' })],
+    });
+    registerInvokeHandler('open_mods_folder', () => true);
+    const user = userEvent.setup();
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+    await screen.findAllByText('PackA');
+    // A real toolbar button (not the AddModsMenu dropdown item, which is a
+    // hidden menuitem) sits next to Enable all / Disable all.
+    await user.click(screen.getByRole('button', { name: /^Open mods folder$/i }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'open_mods_folder')).toBe(true);
+    });
+  });
+
+  it('Enable all surfaces mods that could not be toggled by name (FB-A/FB-C)', async () => {
+    const profile = setupPack({
+      inPack: [modInfo({ name: 'PackA', folder_name: 'PackA', mod_id: 'PackA', enabled: false })],
+    });
+    registerInvokeHandler('set_profile_mods_enabled', () => ({
+      enabled: true, toggled: [], missing: ['GhostMod'], failed: [],
+    }));
+    const user = userEvent.setup();
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+    await screen.findAllByText('PackA');
+    await user.click(await screen.findByRole('button', { name: /^Enable all$/i }));
+    // The toast names the mod that couldn't be toggled (it's not installed).
+    await waitFor(() => {
+      expect(screen.getByText(/GhostMod/)).toBeInTheDocument();
+    });
+  });
+
+  it('Enable all in the pack re-fetches the membership grid so the row toggles refresh (Bug 8)', async () => {
+    // A bulk toggle changes enabled state but not membership/identity, so
+    // without a reload nonce the focused in-pack grid wouldn't re-pull and the
+    // row toggles stayed stale. Assert the grid is re-fetched after Enable all.
+    const profile = setupPack({
+      inPack: [modInfo({ name: 'PackA', folder_name: 'PackA', mod_id: 'PackA', enabled: false })],
+    });
+    registerInvokeHandler('set_profile_mods_enabled', () => ({
+      enabled: true, toggled: ['PackA'], missing: [], failed: [],
+    }));
+    const user = userEvent.setup();
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+    await screen.findAllByText('PackA');
+    const before = getInvokeCalls().filter((c) => c.cmd === 'get_profile_memberships').length;
+    await user.click(await screen.findByRole('button', { name: /^Enable all$/i }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'set_profile_mods_enabled')).toBe(true);
+    });
+    await waitFor(() => {
+      expect(getInvokeCalls().filter((c) => c.cmd === 'get_profile_memberships').length)
+        .toBeGreaterThan(before);
+    });
   });
 
   it('Add on the ACTIVE pack also calls toggle_mod with enable=true', async () => {
@@ -697,6 +920,29 @@ describe('<ModpackDetail>', () => {
     expect(onDelete).toHaveBeenCalledWith('Sample');
   });
 
+  it('opens the Rename modal from the header kebab', async () => {
+    const user = userEvent.setup();
+    const profile = setupPack({ packName: 'Sample', inPack: [modInfo({ name: 'M', folder_name: 'M' })] });
+    render(<Wrap {...baseProps()} profile={profile} renameExistingNames={['Sample']} onRenamed={vi.fn()} />);
+    await screen.findByRole('heading', { level: 2, name: 'Sample' });
+    await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /^rename$/i }));
+    expect(await screen.findByRole('dialog', { name: /rename/i })).toBeInTheDocument();
+  });
+
+  it('does not offer Rename when onRenamed is not provided (e.g. a placeholder pack)', async () => {
+    const user = userEvent.setup();
+    const profile = setupPack({ packName: 'Sample', inPack: [modInfo({ name: 'M', folder_name: 'M' })] });
+    // baseProps() omits onRenamed, so the kebab must not surface a Rename item.
+    render(<Wrap {...baseProps()} profile={profile} />);
+    await screen.findByRole('heading', { level: 2, name: 'Sample' });
+    await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
+    // The kebab opens (Auto-detect / Refresh are always present)…
+    expect(await screen.findByRole('menuitem', { name: /Auto-detect sources/i })).toBeInTheDocument();
+    // …but Rename is gated off.
+    expect(screen.queryByRole('menuitem', { name: /^rename$/i })).toBeNull();
+  });
+
   it('Auto-detect sources lives in the header kebab (not "+ Add mods") and opens the scan modal', async () => {
     const user = userEvent.setup();
     render(<Wrap {...baseProps()} />);
@@ -793,5 +1039,51 @@ describe('<ModpackDetail>', () => {
     render(<Wrap profile={profile} onBack={vi.fn()} />);
     const available = await expandLibrary(user);
     expect(within(available).getByText(/^Local$/i)).toBeInTheDocument();
+  });
+
+  // ── In-pack tag filter ───────────────────────────────────────────
+  describe('in-pack tag filter', () => {
+    it('filters the pack rows to the chosen tag', async () => {
+      const profile = setupPack({
+        packName: 'Sample',
+        inPack: [
+          modInfo({ name: 'CombatMod', folder_name: 'CombatMod', tags: ['combat'] }),
+          modInfo({ name: 'UiMod', folder_name: 'UiMod', tags: ['ui'] }),
+        ],
+      });
+      render(<Wrap {...baseProps()} profile={profile} />);
+      // Both rows present initially.
+      expect((await screen.findAllByText('CombatMod')).length).toBeGreaterThan(0);
+      expect(screen.getAllByText('UiMod').length).toBeGreaterThan(0);
+      // Filter to "combat".
+      const tagSelect = screen.getByLabelText(/tag/i) as HTMLSelectElement;
+      fireEvent.change(tagSelect, { target: { value: 'combat' } });
+      await waitFor(() => expect(screen.queryByText('UiMod')).toBeNull());
+      expect(screen.getAllByText('CombatMod').length).toBeGreaterThan(0);
+    });
+  });
+
+  // ── Inactive-pack toggle hint ─────────────────────────────────────
+  describe('inactive-pack toggle hint', () => {
+    it('shows the hint with a Switch action on a non-active pack', async () => {
+      registerInvokeHandler('get_active_profile', () => 'Some Other Pack');
+      const profile = setupPack({ packName: 'Sample', inPack: [modInfo({ name: 'M', folder_name: 'M' })] });
+      const onSwitch = vi.fn();
+      render(<Wrap {...baseProps()} profile={profile} onSwitch={onSwitch} />);
+      const hint = await screen.findByText(/only available for the active modpack/i);
+      expect(hint).toBeInTheDocument();
+      // The hint's Switch control fires onSwitch for THIS pack.
+      const region = hint.closest('[data-testid="modpack-detail-inactive-hint"]') as HTMLElement;
+      fireEvent.click(within(region).getByRole('button', { name: /switch to/i }));
+      expect(onSwitch).toHaveBeenCalledWith('Sample');
+    });
+
+    it('hides the hint when the pack is active', async () => {
+      registerInvokeHandler('get_active_profile', () => 'Sample');
+      const profile = setupPack({ packName: 'Sample', inPack: [modInfo({ name: 'M', folder_name: 'M' })] });
+      render(<Wrap {...baseProps()} profile={profile} onSwitch={vi.fn()} />);
+      await screen.findByTestId('modpack-detail-in-pack');
+      expect(screen.queryByTestId('modpack-detail-inactive-hint')).toBeNull();
+    });
   });
 });

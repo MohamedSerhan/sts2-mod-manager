@@ -203,7 +203,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
   // webview's drag events — so reordering uses pointer events instead.
   const loadOrderListRef = useRef<HTMLDivElement>(null);
   const { t, i18n } = useTranslation();
-  const { refreshAll, setActiveProfile, activeProfile, subUpdates, refreshSubUpdates } = useApp();
+  const { refreshAll, setActiveProfile, activeProfile, subUpdates, refreshSubUpdates, mods } = useApp();
   const toastCtx = useToast();
   // Shared clipboard hook — same one Home + PublishModal use, so a
   // wording change for "Couldn't copy" propagates everywhere without
@@ -312,6 +312,43 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     if (profiles.length === 0) return;
     refreshShareAndDrift();
   }, [profiles, activeProfile, refreshShareAndDrift]);
+
+  // FB2-C: drift (the banner + the modpack's "(N missing)" indicator) is a
+  // function of the INSTALLED mods, but the effect above only re-runs when the
+  // profile list or active pack changes. A per-row toggle/delete refreshes the
+  // mods array (not the profiles), so drift stayed stale until you navigated
+  // away and back. Recompute drift for the active pack whenever the installed
+  // set / versions / enabled-state change — drift-only, so it doesn't re-fetch
+  // share info on every toggle.
+  const installedDriftSignature = useMemo(
+    () =>
+      mods
+        .map((m) => `${m.folder_name ?? m.name} ${m.version} ${m.enabled ? 1 : 0}`)
+        .sort()
+        .join('|'),
+    [mods],
+  );
+  useEffect(() => {
+    if (!activeProfile) {
+      setDriftMap((prev) => (Object.keys(prev).length > 0 ? {} : prev));
+      return;
+    }
+    let cancelled = false;
+    getProfileDrift(activeProfile)
+      .then((drift) => {
+        if (cancelled || !drift) return;
+        setDriftMap((prev) => {
+          const next = { ...prev };
+          if (drift.has_drift) next[activeProfile] = drift;
+          else delete next[activeProfile];
+          return next;
+        });
+      })
+      .catch(() => { /* ignore */ });
+    return () => {
+      cancelled = true;
+    };
+  }, [installedDriftSignature, activeProfile]);
 
   // The active pack is a followed one when it shows up in our subscriptions.
   // A followed manifest isn't ours to write, so the drift banner drops its
@@ -566,6 +603,14 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       if (result.missing_mods.length > 0) {
         parts.push(t('common.parts.stillMissingWithList', { count: result.missing_mods.length, list: result.missing_mods.join(', ') }));
       }
+      // Bug 4: name the mods we replaced and the ones whose update failed but
+      // whose old version we kept (so the user knows nothing was lost).
+      if (result.replaced_mods && result.replaced_mods.length > 0) {
+        parts.push(t('common.parts.replacedWithList', { count: result.replaced_mods.length, list: result.replaced_mods.join(', ') }));
+      }
+      if (result.replace_failures && result.replace_failures.length > 0) {
+        parts.push(t('common.parts.replaceFailedWithList', { count: result.replace_failures.length, list: result.replace_failures.join(', ') }));
+      }
 
       if (parts.length > 0) {
         toastCtx.info(t('profiles.toast.switchedWithDetails', { name, details: parts.join('. ') }));
@@ -622,17 +667,28 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       await refreshAll();
       await loadProfiles();
 
+      // Bug 4: report mods by NAME (not just counts) — which orphans were
+      // disabled, which mods were updated, and which kept their old version
+      // because the update failed (so the user knows nothing was lost).
       const summary: string[] = [];
       const disabledOrphans = result.disabled_orphans ?? [];
       if (disabledOrphans.length > 0) {
-        summary.push(t('common.parts.disabledOrphans', { count: disabledOrphans.length }));
+        summary.push(t('common.parts.disabledOrphansWithList', { count: disabledOrphans.length, list: disabledOrphans.join(', ') }));
+      }
+      const replaced = result.replaced_mods ?? [];
+      if (replaced.length > 0) {
+        summary.push(t('common.parts.replacedWithList', { count: replaced.length, list: replaced.join(', ') }));
       }
       if (result.downloaded > 0) summary.push(t('common.parts.downloadedNum', { count: result.downloaded }));
+      const replaceFailures = result.replace_failures ?? [];
+      if (replaceFailures.length > 0) {
+        summary.push(t('common.parts.replaceFailedWithList', { count: replaceFailures.length, list: replaceFailures.join(', ') }));
+      }
       if (result.failed_downloads.length > 0) {
-        summary.push(t('common.parts.downloadsFailed', { count: result.failed_downloads.length }));
+        summary.push(t('common.parts.failedWithList', { count: result.failed_downloads.length, list: result.failed_downloads.join(', ') }));
       }
       if (result.missing_mods.length > 0) {
-        summary.push(t('common.parts.stillMissing', { count: result.missing_mods.length }));
+        summary.push(t('common.parts.stillMissingWithList', { count: result.missing_mods.length, list: result.missing_mods.join(', ') }));
       }
       toastCtx.success(
         summary.length > 0
@@ -648,6 +704,11 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
 
   async function handleSaveDrift(name: string) {
     if (savingProfile) return;
+    // Capture the drift BEFORE the save clears it, so the toast can name what
+    // changed (FB-C: "I can't see what Save removed"). added = mods folded into
+    // the manifest; removed = manifest entries dropped because they're missing
+    // on disk (the "disappearing" mods).
+    const drift = driftMap[name];
     try {
       setSavingProfile(name);
       // Apply only the drift diff — NOT a full re-snapshot. snapshotProfile
@@ -669,11 +730,19 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       });
       await refreshAll();
       await loadProfiles();
-      toastCtx.success(
-        shareInfoMap[name]
-          ? t('profiles.toast.savedChangesWithReShare', { name })
-          : t('profiles.toast.savedChanges', { name })
-      );
+      const base = shareInfoMap[name]
+        ? t('profiles.toast.savedChangesWithReShare', { name })
+        : t('profiles.toast.savedChanges', { name });
+      const parts: string[] = [];
+      const added = drift?.added ?? [];
+      const removed = drift?.removed ?? [];
+      if (added.length > 0) {
+        parts.push(t('common.parts.addedWithList', { count: added.length, list: added.join(', ') }));
+      }
+      if (removed.length > 0) {
+        parts.push(t('common.parts.removedWithList', { count: removed.length, list: removed.join(', ') }));
+      }
+      toastCtx.success(parts.length > 0 ? `${base} ${parts.join(', ')}` : base);
     } catch (e) {
       toastCtx.error(t('profiles.toast.saveFailed', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
@@ -709,6 +778,15 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     try {
       await deleteProfile(name);
       setProfiles((prev) => prev.filter((p) => p.name !== name));
+      // Bug 3: if we just deleted the active pack, clear the AppContext
+      // active pointer too (the backend clears active_profile.txt) so nothing
+      // keeps flagging the now-gone pack as active until an app restart.
+      // Case-insensitive to match the backend clear (profile names collide
+      // case-insensitively on Windows/macOS) — otherwise a case-mismatched
+      // active pointer would stay stale until restart.
+      if (activeProfile && name.toLowerCase() === activeProfile.toLowerCase()) {
+        setActiveProfile(null);
+      }
       toastCtx.success(t('profiles.toast.deleted', { name }));
     } catch (e) {
       toastCtx.error(t('profiles.toast.deleteFailed', { error: e instanceof Error ? e.message : String(e) }));
@@ -1096,6 +1174,12 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
             onOpenLoadOrder={openLoadOrderEditor}
             onRepairDrift={handleRepairDrift}
             onLibraryChanged={handleLibraryChanged}
+            renameExistingNames={profiles.map((p) => p.name)}
+            onRenamed={async (oldName, newName) => {
+              if (activeProfile === oldName) setActiveProfile(newName);
+              await loadProfiles();
+              setSelectedModpack(newName);
+            }}
           />
         );
       })()}
@@ -1485,6 +1569,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
         isReshare={publishTarget?.isReshare ?? false}
         onGoToSettings={onGoToSettings}
         onClose={() => setPublishTarget(null)}
+        onListingChanged={() => { void loadProfiles(); }}
         onShared={(result) => {
           // Optimistically patch share info so the row flips Share→Re-share
           // immediately even before the reload below settles. Capture the name

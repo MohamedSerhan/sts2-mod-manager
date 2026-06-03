@@ -20,7 +20,10 @@ interface Props {
   findingGithub: boolean;
   onClose: () => void;
   onClear: () => void;
-  onFindGithub: () => void;
+  /** Runs the "find GitHub from Nexus" lookup. Resolves to the discovered
+   *  repo (bare `owner/repo` or a full URL) so the editor can reflect it into
+   *  the GitHub field, or `null` when nothing was found. */
+  onFindGithub: () => Promise<string | null>;
   onSave: (
     githubRepo: string,
     nexusUrl: string,
@@ -62,6 +65,16 @@ export function SourceEditor({
   const nxOk = nexus.trim().length > 0;
   const onlyNexus = nxOk && !ghOk;
   const titleName = mod.display_name?.trim() || mod.name;
+
+  // Bug 1: reflect a successful lookup straight into the field. Without
+  // this the field stayed empty (seeded from props only at mount), the
+  // Nexus-only banner lingered, and a follow-up Save compared the stale
+  // empty field against the refreshed mod.github_url and wrote null over
+  // the just-found repo.
+  async function handleFind() {
+    const repo = await onFindGithub();
+    if (repo) setGithub(ghRepoFromUrl(repo));
+  }
 
   function statusBadge(ok: boolean) {
     return ok ? (
@@ -293,10 +306,10 @@ export function SourceEditor({
             marginTop: 12,
             padding: '8px 11px',
             borderRadius: 7,
-            background: 'oklch(0.55 0.13 250 / 0.10)',
-            border: '1px solid oklch(0.55 0.13 250 / 0.3)',
+            background: 'color-mix(in oklch, var(--info) 10%, transparent)',
+            border: '1px solid color-mix(in oklch, var(--info) 30%, transparent)',
             fontSize: 11.5,
-            color: 'oklch(0.85 0.07 250)',
+            color: 'var(--info-text)',
             display: 'flex',
             alignItems: 'center',
             gap: 9,
@@ -306,7 +319,7 @@ export function SourceEditor({
           <span style={{ flex: 1 }}>
             {t('sourceEditor.nexusOnlyMessage')}
           </span>
-          <button className="gf-btn-3 gf-btn-2-sm" onClick={onFindGithub} disabled={findingGithub}>
+          <button className="gf-btn-3 gf-btn-2-sm" onClick={handleFind} disabled={findingGithub}>
             {findingGithub ? t('sourceEditor.searching') : t('sourceEditor.findGitHub')}
           </button>
         </div>

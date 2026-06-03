@@ -393,7 +393,11 @@ fs.writeFileSync(clPath, txt);
 
 # Delete consumed fragment files (staged by git rm — picked up by the commit
 # below). .gitkeep and README.md are intentionally excluded from these globs.
-git rm -q changelog.d/added-*.md changelog.d/changed-*.md changelog.d/fixed-*.md changelog.d/security-*.md 2>/dev/null || true
+FRAGS=$(find changelog.d -maxdepth 1 \( -name 'added-*.md' -o -name 'changed-*.md' -o -name 'fixed-*.md' -o -name 'security-*.md' \) 2>/dev/null | sort)
+if [ -n "$FRAGS" ]; then
+  # shellcheck disable=SC2086
+  git rm -q -- $FRAGS
+fi
 
 # --- Commit, tag, push ---
 

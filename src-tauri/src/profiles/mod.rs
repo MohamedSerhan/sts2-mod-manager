@@ -37,12 +37,14 @@ pub use crud::{
     save_profile,
 };
 pub use drift::{ProfileDrift, RepairProfileResult, VersionMismatch};
+pub use membership::SetProfileModsEnabledResult;
 
 use apply::switch_profile_from_paths;
 use crud::delete_profile;
 use membership::{
     profile_membership_matrix, set_profile_load_order_from_paths,
-    set_profile_mod_membership_from_paths, sync_profile_load_order_to_settings,
+    set_profile_mod_membership_from_paths, set_profile_mods_enabled_from_paths,
+    sync_profile_load_order_to_settings,
 };
 
 pub(super) const APP_CREATED_BY: &str = "sts2-mod-manager";
@@ -219,6 +221,31 @@ pub fn set_profile_mod_membership(
     .map_err(|e| e.to_string())
 }
 
+/// Enable or disable every mod in a profile at once (the modpack view's
+/// "Enable all" / "Disable all"). Resolves each manifest entry to its real
+/// on-disk mod, so it works even when the manifest folder name has drifted.
+#[tauri::command]
+pub fn set_profile_mods_enabled(
+    name: String,
+    enabled: bool,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<SetProfileModsEnabledResult, String> {
+    crate::game::ensure_game_not_running()?;
+    let (mods_path, disabled_path, profiles_path) = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        (
+            s.mods_path.as_ref().ok_or("Game path not set")?.clone(),
+            s.disabled_mods_path
+                .as_ref()
+                .ok_or("Game path not set")?
+                .clone(),
+            s.profiles_path.clone(),
+        )
+    };
+    set_profile_mods_enabled_from_paths(&name, enabled, &mods_path, &disabled_path, &profiles_path)
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn set_profile_load_order(
     profile_name: String,
@@ -294,10 +321,46 @@ pub fn delete_profile_cmd(
     name: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<bool, String> {
-    let s = state.lock().map_err(|e| e.to_string())?;
+    let mut s = state.lock().map_err(|e| e.to_string())?;
     let config_path = s.config_path.clone();
+    let mods_path = s.mods_path.clone();
+    let disabled_path = s.disabled_mods_path.clone();
+    // FB2-D: deleting the ACTIVE pack resets the game folder to vanilla (moves
+    // its mods out), which can't happen with the game holding the files. Lock
+    // the action down rather than half-doing it — the running-game state
+    // already tells the user mods can't be changed. (A non-active pack is just
+    // a manifest delete, so it stays allowed while the game runs.)
+    let is_active = s
+        .active_profile
+        .as_deref()
+        .is_some_and(|a| a.eq_ignore_ascii_case(&name));
+    if is_active {
+        crate::game::ensure_game_not_running()?;
+    }
     delete_profile(&name, &s.profiles_path).map_err(|e| e.to_string())?;
+    // Bug 3: if the deleted pack was the active one, drop the active-profile
+    // pointer (in-memory + active_profile.txt). Without this the UI keeps the
+    // gone pack flagged "active" and the next launch tries to restore it.
+    let was_active = clear_active_profile_if_deleted(&mut s.active_profile, &config_path, &name);
     drop(s);
+
+    if was_active {
+        log::info!("Cleared active profile after deleting active pack '{}'", name);
+        // FB-B: clearing the pointer left the deleted pack's mods sitting in the
+        // active folder, so a "modded" launch loaded them with errors. Empty the
+        // active folder (move everything to disabled) so the post-delete state is
+        // genuinely vanilla. The game is guaranteed closed by the guard above.
+        if let (Some(mods_path), Some(disabled_path)) = (mods_path, disabled_path) {
+            let moved = crate::mods::move_all_mods_between(&mods_path, &disabled_path);
+            if !moved.is_empty() {
+                log::info!(
+                    "Reset active mods folder to vanilla after deleting active pack '{}': stored {} mod(s)",
+                    name,
+                    moved.len()
+                );
+            }
+        }
+    }
 
     // Also clean up any matching subscription
     let mut db = crate::subscriptions::load_subscriptions(&config_path);
@@ -335,6 +398,43 @@ pub fn duplicate_profile(
     save_profile(&profile, &s.profiles_path).map_err(|e| e.to_string())?;
     log::info!("Duplicated profile '{}' as '{}'", name, profile.name);
     Ok(profile)
+}
+
+/// Rename a profile, preserving its `.share` code, active state, and any
+/// subscriptions pointing at it.
+#[tauri::command]
+pub fn rename_profile(
+    old_name: String,
+    new_name: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Profile, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let renamed = crud::rename_profile(&old_name, &new_name, &s.profiles_path)
+        .map_err(|e| e.to_string())?;
+    let new = renamed.name.clone();
+
+    // (c) If the renamed pack was active, follow it. Compare case-insensitively
+    // so a casing difference between the stored active-profile pointer and the
+    // requested old name doesn't strand active_profile.txt at the gone name
+    // (mirrors the case-insensitive active-pointer handling on the delete path).
+    if s
+        .active_profile
+        .as_deref()
+        .is_some_and(|active| active.eq_ignore_ascii_case(&old_name))
+    {
+        s.active_profile = Some(new.clone());
+        persist_active_profile(&s.config_path, &new);
+    }
+    let config_path = s.config_path.clone();
+    drop(s);
+
+    // (d) Re-point subscriptions, mirroring delete_profile_cmd's cleanup.
+    let mut db = crate::subscriptions::load_subscriptions(&config_path);
+    if crate::subscriptions::rename_profile_name(&mut db, &old_name, &new) {
+        let _ = crate::subscriptions::save_subscriptions(&db, &config_path);
+    }
+    log::info!("Renamed profile '{}' to '{}'", old_name, new);
+    Ok(renamed)
 }
 
 #[tauri::command]
@@ -388,6 +488,39 @@ fn persist_active_profile(config_path: &std::path::Path, name: &str) {
             e
         );
     }
+}
+
+/// Bug 3: when a profile is deleted, clear the active-profile pointer iff it
+/// names the deleted pack (case-insensitive — profile names collide
+/// case-insensitively on Windows/macOS filesystems). Clears both the
+/// in-memory `active_profile` and `active_profile.txt` (mirroring
+/// `set_active_profile(None)`), so neither the UI nor the next app launch
+/// keeps treating a now-deleted pack as active. Returns whether it matched.
+///
+/// Pulled out of `delete_profile_cmd` so the matching + file-clearing logic
+/// is unit-testable without a live `tauri::State`.
+fn clear_active_profile_if_deleted(
+    active_profile: &mut Option<String>,
+    config_path: &std::path::Path,
+    deleted: &str,
+) -> bool {
+    let was_active = active_profile
+        .as_deref()
+        .is_some_and(|a| a.eq_ignore_ascii_case(deleted));
+    if was_active {
+        *active_profile = None;
+        let path = config_path.join("active_profile.txt");
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => log::error!(
+                "Failed to clear active_profile.txt after deleting active profile '{}': {}",
+                deleted,
+                e
+            ),
+        }
+    }
+    was_active
 }
 
 #[tauri::command]
@@ -500,4 +633,80 @@ pub async fn repair_profile(
     persist_active_profile(&s.config_path, &name);
 
     Ok(result)
+}
+
+#[cfg(test)]
+mod active_profile_clear_tests {
+    //! Bug 3: deleting the active modpack must clear the active-profile
+    //! pointer (in-memory + active_profile.txt) so the UI / next launch
+    //! don't keep showing a deleted pack as active.
+    use super::*;
+    use tempfile::tempdir;
+
+    fn write_active(config: &std::path::Path, name: &str) {
+        std::fs::write(config.join("active_profile.txt"), name).unwrap();
+    }
+
+    #[test]
+    fn clears_pointer_and_file_when_deleting_the_active_pack() {
+        let tmp = tempdir().unwrap();
+        let config = tmp.path();
+        write_active(config, "MyPack");
+        let mut active = Some("MyPack".to_string());
+
+        let was_active = clear_active_profile_if_deleted(&mut active, config, "MyPack");
+
+        assert!(was_active, "deleting the active pack must report it was active");
+        assert_eq!(active, None, "in-memory active pointer must be cleared");
+        assert!(
+            !config.join("active_profile.txt").exists(),
+            "active_profile.txt must be removed so the next launch has no active pack"
+        );
+    }
+
+    #[test]
+    fn matches_case_insensitively() {
+        let tmp = tempdir().unwrap();
+        let config = tmp.path();
+        write_active(config, "MyPack");
+        let mut active = Some("MyPack".to_string());
+
+        // The user deletes "mypack" (different case). On a case-insensitive
+        // filesystem it's the same pack, so the pointer must still clear.
+        let was_active = clear_active_profile_if_deleted(&mut active, config, "mypack");
+
+        assert!(was_active);
+        assert_eq!(active, None);
+        assert!(!config.join("active_profile.txt").exists());
+    }
+
+    #[test]
+    fn leaves_pointer_and_file_intact_for_a_different_pack() {
+        let tmp = tempdir().unwrap();
+        let config = tmp.path();
+        write_active(config, "MyPack");
+        let mut active = Some("MyPack".to_string());
+
+        let was_active = clear_active_profile_if_deleted(&mut active, config, "OtherPack");
+
+        assert!(!was_active, "deleting a non-active pack must not report a match");
+        assert_eq!(active, Some("MyPack".to_string()), "active pointer untouched");
+        assert!(config.join("active_profile.txt").exists());
+        assert_eq!(
+            std::fs::read_to_string(config.join("active_profile.txt")).unwrap(),
+            "MyPack"
+        );
+    }
+
+    #[test]
+    fn no_active_profile_is_a_noop() {
+        let tmp = tempdir().unwrap();
+        let config = tmp.path();
+        let mut active: Option<String> = None;
+
+        let was_active = clear_active_profile_if_deleted(&mut active, config, "Whatever");
+
+        assert!(!was_active);
+        assert_eq!(active, None);
+    }
 }

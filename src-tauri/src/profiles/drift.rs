@@ -58,6 +58,20 @@ fn versions_match(profile_v: &str, disk_v: &str) -> bool {
     pv == dv || version_is_wildcard(pv) || version_is_wildcard(dv)
 }
 
+/// Whether the on-disk content matches the manifest's recorded content, so a
+/// version-STRING difference with identical content isn't reported as drift.
+/// Both hashes must be present and equal; a missing hash means "unknown
+/// content", keeping the conservative version-only behaviour. (FB2-B: a pure
+/// version-label difference can't be repaired, so flagging it left the drift
+/// banner stuck forever even after a successful Repair. Aligns drift with the
+/// content check the switch/repair path already uses.)
+fn contents_match(profile_hash: Option<&str>, disk_hash: Option<&str>) -> bool {
+    match (profile_hash, disk_hash) {
+        (Some(p), Some(d)) => !p.is_empty() && p.eq_ignore_ascii_case(d),
+        _ => false,
+    }
+}
+
 pub(super) fn compute_drift_for_profile(
     name: &str,
     mods_path: &Path,
@@ -74,26 +88,29 @@ pub(super) fn compute_profile_drift(
     disabled_path: &Path,
 ) -> ProfileDrift {
     // Build a map of profile mods: key -> (enabled, version, display_name)
-    let mut profile_map: std::collections::HashMap<String, (bool, String, String)> =
+    let mut profile_map: std::collections::HashMap<String, (bool, String, String, Option<String>)> =
         std::collections::HashMap::new();
     for pm in &profile.mods {
         let key = mod_key(&pm.name, pm.folder_name.as_deref(), pm.mod_id.as_deref());
-        profile_map.insert(key, (pm.enabled, pm.version.clone(), pm.name.clone()));
+        profile_map.insert(
+            key,
+            (pm.enabled, pm.version.clone(), pm.name.clone(), pm.hash.clone()),
+        );
     }
 
     // Build a map of installed mods: key -> (display_name, enabled, version)
     let enabled_mods = crate::mods::scan_mods(mods_path);
     let disabled_mods = crate::mods::scan_disabled_mods(disabled_path);
 
-    let mut installed_map: std::collections::HashMap<String, (String, bool, String)> =
+    let mut installed_map: std::collections::HashMap<String, (String, bool, String, Option<String>)> =
         std::collections::HashMap::new();
     for m in &enabled_mods {
         let key = mod_key(&m.name, m.folder_name.as_deref(), m.mod_id.as_deref());
-        installed_map.insert(key, (m.name.clone(), true, m.version.clone()));
+        installed_map.insert(key, (m.name.clone(), true, m.version.clone(), m.hash.clone()));
     }
     for m in &disabled_mods {
         let key = mod_key(&m.name, m.folder_name.as_deref(), m.mod_id.as_deref());
-        installed_map.insert(key, (m.name.clone(), false, m.version.clone()));
+        installed_map.insert(key, (m.name.clone(), false, m.version.clone(), m.hash.clone()));
     }
 
     let mut added = Vec::new();
@@ -119,12 +136,16 @@ pub(super) fn compute_profile_drift(
     }
 
     // Mods whose enabled state OR version differs
-    for (key, (profile_enabled, profile_version, profile_display)) in &profile_map {
-        if let Some((disk_display, installed_enabled, disk_version)) = installed_map.get(key) {
+    for (key, (profile_enabled, profile_version, profile_display, profile_hash)) in &profile_map {
+        if let Some((disk_display, installed_enabled, disk_version, disk_hash)) =
+            installed_map.get(key)
+        {
             if profile_enabled != installed_enabled {
                 toggled.push(disk_display.clone());
             }
-            if !versions_match(profile_version, disk_version) {
+            if !versions_match(profile_version, disk_version)
+                && !contents_match(profile_hash.as_deref(), disk_hash.as_deref())
+            {
                 version_changed.push(VersionMismatch {
                     name: if disk_display.is_empty() {
                         profile_display.clone()
@@ -268,6 +289,14 @@ pub struct RepairProfileResult {
     /// Deprecated compatibility field. Repair no longer deletes orphans.
     #[serde(default)]
     pub deleted_orphans: Vec<String>,
+    /// Mods whose mismatched on-disk copy was replaced with the profile's
+    /// version (passed through from the switch step). (Bug 4.)
+    #[serde(default)]
+    pub replaced_mods: Vec<String>,
+    /// Mods whose replace failed; the old on-disk version was rolled back and
+    /// kept. (Bug 4.)
+    #[serde(default)]
+    pub replace_failures: Vec<String>,
 }
 
 pub(super) async fn repair_profile_from_paths(
@@ -324,6 +353,8 @@ pub(super) async fn repair_profile_from_paths(
         failed_downloads: switch_result.failed_downloads,
         disabled_orphans,
         deleted_orphans: Vec::new(),
+        replaced_mods: switch_result.replaced_mods,
+        replace_failures: switch_result.replace_failures,
     })
 }
 
@@ -371,6 +402,58 @@ mod reconcile_tests {
             updated_at: chrono::Utc::now(),
             public: None,
         }
+    }
+
+    #[test]
+    fn version_label_difference_with_matching_content_is_not_drift() {
+        // FB2-B: a version-STRING diff where the on-disk content matches the
+        // manifest hash isn't actionable drift (Repair can't change a label),
+        // so it must NOT show as version-changed — otherwise the banner stays
+        // stuck even after a successful Repair.
+        let game = tempfile::tempdir().unwrap();
+        let mods = game.path().join("mods");
+        let disabled = game.path().join("mods_disabled");
+        fs::create_dir_all(&mods).unwrap();
+        fs::create_dir_all(&disabled).unwrap();
+
+        write_mod(&mods, "Foo", "Foo", "2.0.0");
+        let disk_hash = crate::mods::scan_mods(&mods)[0].hash.clone();
+        assert!(disk_hash.is_some(), "scan must produce a content hash");
+
+        // Manifest records v1.0.0 but the SAME content hash → label-only diff.
+        let mut pm = pack_mod("Foo", "Foo", "1.0.0", true);
+        pm.hash = disk_hash;
+        let profile = base_profile("Pack", vec![pm]);
+
+        let drift = compute_profile_drift(&profile, &mods, &disabled);
+        assert!(
+            drift.version_changed.is_empty(),
+            "matching content must not be version drift; got {:?}",
+            drift.version_changed
+        );
+        assert!(!drift.has_drift, "no other drift expected");
+    }
+
+    #[test]
+    fn version_difference_with_different_content_is_drift() {
+        let game = tempfile::tempdir().unwrap();
+        let mods = game.path().join("mods");
+        let disabled = game.path().join("mods_disabled");
+        fs::create_dir_all(&mods).unwrap();
+        fs::create_dir_all(&disabled).unwrap();
+
+        write_mod(&mods, "Foo", "Foo", "2.0.0");
+        // Different version AND a different hash → genuine drift.
+        let mut pm = pack_mod("Foo", "Foo", "1.0.0", true);
+        pm.hash = Some("a-different-content-hash".into());
+        let profile = base_profile("Pack", vec![pm]);
+
+        let drift = compute_profile_drift(&profile, &mods, &disabled);
+        assert_eq!(
+            drift.version_changed.len(),
+            1,
+            "different content + version is real drift"
+        );
     }
 
     /// The core bug: "Save changes" used to re-snapshot the whole install,

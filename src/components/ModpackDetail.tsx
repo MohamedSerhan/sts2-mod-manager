@@ -28,7 +28,7 @@
  * refreshAll so the parent's profile list / drift / share metadata and
  * the local `mods` array stay current.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ArrowLeft,
@@ -39,6 +39,7 @@ import {
   Copy,
   Download,
   Files,
+  FolderOpen,
   ListOrdered,
   Pencil,
   Play,
@@ -46,6 +47,9 @@ import {
   RefreshCw,
   Search,
   Share2,
+  SquarePen,
+  ToggleLeft,
+  ToggleRight,
   Trash2,
 } from 'lucide-react';
 import { Badge } from './Badge';
@@ -54,13 +58,15 @@ import { Card } from './Card';
 import { HelpHint } from './HelpHint';
 import { KebabDivider, KebabItem, KebabMenu, KebabSection } from './KebabMenu';
 import { EditModpackModal } from './EditModpackModal';
+import { RenameModpackModal } from './RenameModpackModal';
 import { AddModsMenu } from './AddModsMenu';
 import { LibraryTable } from './LibraryTable';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from './ConfirmDialog';
 import { useModLibrary } from '../hooks/useModLibrary';
-import { deleteMod, setProfileModMembership, toggleMod } from '../hooks/useTauri';
+import { usePinScroll } from '../hooks/usePinScroll';
+import { deleteMod, setProfileModMembership, setProfileModsEnabled, toggleMod } from '../hooks/useTauri';
 import type { ModInfo, Profile, ShareResult } from '../types';
 import type { ProfileDrift } from '../hooks/useTauri';
 
@@ -89,6 +95,14 @@ export interface ModpackDetailProps {
   /** Refreshes the underlying profile list after a membership
    *  mutation so the parent's drift / share metadata stays current. */
   onLibraryChanged?: () => void;
+  /** Called after a successful rename with (oldName, newName) so the
+   *  parent can reload the profile list, reselect the new name, and
+   *  follow the active pack when the renamed pack was active. */
+  onRenamed?: (oldName: string, newName: string) => void;
+  /** Full list of current modpack names, used by the rename modal for
+   *  inline case-insensitive collision validation. Falls back to just
+   *  this pack's own name when the parent doesn't supply it. */
+  renameExistingNames?: string[];
 }
 
 /** Identity key for a profile mod / installed mod: prefer the on-disk
@@ -133,6 +147,8 @@ export function ModpackDetail({
   shareInfo,
   drift,
   onLibraryChanged,
+  onRenamed,
+  renameExistingNames,
 }: ModpackDetailProps) {
   const { t } = useTranslation();
   const { activeProfile, auditResults, mods, refreshAll, gameRunning } = useApp();
@@ -145,15 +161,29 @@ export function ModpackDetail({
     targetPack: profile.name,
     auditScope: () => profile.mods.map((m) => m.name),
   });
+  // Scroll-pin safety net (shared with LibraryTable via usePinScroll). The
+  // Add-from-library and enable/disable-all actions shrink/refresh the list;
+  // pinning keeps the user where they were instead of collapsing to the top.
+  const { ref: rootRef, pinScroll } = usePinScroll<HTMLDivElement>();
   // "Add from your Library" is collapsed by default to keep the focus on
   // the pack's own mods; the user expands it to browse the rest.
   const [libraryOpen, setLibraryOpen] = useState(false);
   // Bulk-edit membership via the wizard's checkbox picker.
   const [editing, setEditing] = useState(false);
+  // Rename this pack via the small inline-validation modal.
+  const [renaming, setRenaming] = useState(false);
 
   const isActive = activeProfile === profile.name;
   const isShared = !!shareInfo;
   const hasDrift = !!drift?.has_drift;
+  // Bug 5: the header count is manifest membership (profile.mods.length) while
+  // the list shows mods actually on disk. Drift's `removed` set is exactly the
+  // manifest entries with no installed mod, so surfacing its size as
+  // "(N missing)" makes the header agree with the scan instead of silently
+  // over-counting. (Empty folders are deliberately not scanned as mods, so we
+  // never go the other way.)
+  const missingMods = drift?.removed ?? [];
+  const missingCount = missingMods.length;
   const switchingThis = switchingProfile === profile.name;
   const switchingOther = !!switchingProfile && switchingProfile !== profile.name;
 
@@ -163,6 +193,31 @@ export function ModpackDetail({
   // Search for the "Add from your Library" section only — the in-pack
   // LibraryTable owns its own search (same as the All Mods view).
   const [availableQuery, setAvailableQuery] = useState('');
+  // Tag filter for the in-pack LibraryTable (packScoped mode).
+  // Options are derived from the tags on this pack's mods via lib.modInfoByKey.
+  const [tagFilter, setTagFilter] = useState('');
+  const packTagOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const pm of profile.mods) {
+      const info =
+        lib.modInfoByKey.get(pm.folder_name ?? pm.name) ??
+        lib.modInfoByKey.get(pm.name);
+      for (const tag of info?.tags ?? []) {
+        const trimmed = tag.trim();
+        if (trimmed && !seen.has(trimmed.toLocaleLowerCase()))
+          seen.set(trimmed.toLocaleLowerCase(), trimmed);
+      }
+    }
+    return [...seen.values()].sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }),
+    );
+  }, [profile.mods, lib.modInfoByKey]);
+
+  // Clear a stale tagFilter when the tag it references is no longer present
+  // among the pack's mods (e.g. after removing the last mod that carried it).
+  useEffect(() => {
+    if (tagFilter && !packTagOptions.includes(tagFilter)) setTagFilter('');
+  }, [packTagOptions, tagFilter]);
 
   // Build a set of mod-names that belong to this pack so the updates
   // affordance is scoped to the pack's own mods.
@@ -250,6 +305,10 @@ export function ModpackDetail({
   const handleAdd = async (mod: ModInfo) => {
     const key = modKey(mod);
     if (busyKeys.has(key)) return;
+    // Bug 2: the available list shrinks when this mod joins the pack and the
+    // refresh re-renders both sections — pin the scroll so the page doesn't
+    // collapse upward and lose the user's place.
+    pinScroll();
     setBusy(key, true);
     try {
       // Flip the mod ON in the game folder FIRST when this is the active
@@ -323,11 +382,81 @@ export function ModpackDetail({
     }
   };
 
+  // Bug 7: enable/disable EVERY mod in THIS pack (vs. the whole library).
+  // Iterates the pack's mods and toggles each on disk, reusing pinScroll so
+  // the list doesn't collapse upward (Bug 2) as rows re-render.
+  const [bulkToggling, setBulkToggling] = useState(false);
+  // Bumped after a bulk toggle so the in-pack LibraryTable re-fetches its
+  // membership grid — a toggle changes enabled state but not the installed
+  // set or membership, so the grid wouldn't otherwise re-pull and the row
+  // toggles would stay stale (the bug the reporter hit). See reloadToken below.
+  const [bulkReloadNonce, setBulkReloadNonce] = useState(0);
+  const handleToggleAllInPack = async (enabled: boolean) => {
+    if (bulkToggling || gameRunning || profile.mods.length === 0) return;
+    pinScroll();
+    setBulkToggling(true);
+    try {
+      // FB-A: resolve each pack mod to its real on-disk folder backend-side
+      // (the manifest folder_name can drift), best-effort, and report which
+      // couldn't be toggled — instead of looping toggleMod by manifest folder,
+      // which hard-errored on the first drifted entry.
+      const result = await setProfileModsEnabled(profile.name, enabled);
+      await refreshAfterMutation();
+      setBulkReloadNonce((n) => n + 1);
+      const base = enabled
+        ? t('modpack.detail.enabledAllInPack', { pack: profile.name })
+        : t('modpack.detail.disabledAllInPack', { pack: profile.name });
+      const issues: string[] = [];
+      if (result.missing.length > 0) {
+        issues.push(t('modpack.detail.toggleAllMissing', {
+          count: result.missing.length,
+          list: result.missing.join(', '),
+        }));
+      }
+      if (result.failed.length > 0) {
+        issues.push(t('modpack.detail.toggleAllSomeFailed', {
+          count: result.failed.length,
+          list: result.failed.join(', '),
+        }));
+      }
+      if (issues.length > 0) {
+        toast.info(`${base} ${issues.join(' ')}`);
+      } else {
+        toast.success(base);
+      }
+    } catch (e) {
+      toast.error(
+        t('modpack.detail.toggleAllFailed', {
+          error: e instanceof Error ? e.message : String(e),
+        }),
+      );
+    } finally {
+      setBulkToggling(false);
+    }
+  };
+
   // "+ Add mods ▾" dropdown + Edit + Load order — these share the search
   // row inside the LibraryTable (via its toolbarActions slot). All install
   // methods are consolidated into the one dropdown to keep the row calm.
   const packToolbarActions = (
     <>
+      {packTagOptions.length > 0 && (
+        <label className="gf-sort-control">
+          <span>{t('mods.tags.label')}</span>
+          <select
+            aria-label={t('mods.tags.label')}
+            value={tagFilter}
+            onChange={(e) => setTagFilter(e.target.value)}
+          >
+            <option value="">{t('mods.tags.all')}</option>
+            {packTagOptions.map((tag) => (
+              <option key={tag} value={tag}>
+                {tag}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <AddModsMenu lib={lib} />
       <Button
         variant="secondary"
@@ -352,6 +481,44 @@ export function ModpackDetail({
       )}
     </>
   );
+
+  // FB2-A: the pack's bulk actions sit on their OWN bar under the toolbar
+  // (search + Add mods / Edit / Load order), so they never crowd the search
+  // row or clip on a narrow window. "Open mods folder" sits next to Enable /
+  // Disable all (it was removed from each mod's kebab to declutter).
+  const packBulkBar = profile.mods.length > 0 ? (
+    <>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={lib.handleOpenFolder}
+        title={t('mods.openModsFolder')}
+      >
+        <FolderOpen size={14} />
+        {t('mods.openModsFolder')}
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => handleToggleAllInPack(true)}
+        disabled={gameRunning || bulkToggling}
+        title={gameRunning ? t('mods.closeSts2First') : t('mods.enableAll')}
+      >
+        <ToggleRight size={14} />
+        {t('mods.enableAll')}
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => handleToggleAllInPack(false)}
+        disabled={gameRunning || bulkToggling}
+        title={gameRunning ? t('mods.closeSts2First') : t('mods.disableAll')}
+      >
+        <ToggleLeft size={14} />
+        {t('mods.disableAll')}
+      </Button>
+    </>
+  ) : null;
 
   // Updates affordance shown beside the section title. Mirrors the audit
   // button's states but scoped to this pack: not-yet-checked → "Check for
@@ -395,7 +562,7 @@ export function ModpackDetail({
   );
 
   return (
-    <div className="gf-modpack-detail" data-testid="modpack-detail">
+    <div className="gf-modpack-detail" data-testid="modpack-detail" ref={rootRef}>
       <div className="gf-modpack-detail-head">
         <Button
           variant="ghost"
@@ -471,6 +638,15 @@ export function ModpackDetail({
                   {t('profiles.kebab.duplicate')}
                 </KebabItem>
               )}
+              {/* Gated on onRenamed (like Duplicate on onDuplicate) so a
+                  caller that can't rename — e.g. a placeholder/remote-only pack
+                  with no local manifest to load — doesn't offer an action that
+                  would only fail. */}
+              {onRenamed && (
+                <KebabItem icon={<SquarePen size={12} />} onClick={() => setRenaming(true)}>
+                  {t('profiles.kebab.rename')}
+                </KebabItem>
+              )}
               {onExportJson && (
                 <KebabItem icon={<Copy size={12} />} onClick={() => onExportJson(profile.name)}>
                   {t('profiles.kebab.exportJson')}
@@ -540,6 +716,35 @@ export function ModpackDetail({
         )}
       </div>
 
+      {/* Inactive-pack hint — explains why per-mod toggles are disabled and
+          offers an inline Switch action to activate this pack. Hidden when
+          the pack IS already active. */}
+      {!isActive && (
+        <div
+          className="gf-modpack-detail-inactive-hint"
+          data-testid="modpack-detail-inactive-hint"
+          role="note"
+        >
+          <span>{t('modpack.detail.inactiveToggleHint')}</span>
+          {onSwitch && (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => onSwitch(profile.name)}
+              disabled={switchingOther}
+              title={t('profiles.card.activateProfile')}
+            >
+              {switchingThis ? (
+                <RefreshCw size={14} className="animate-spin" />
+              ) : (
+                <Play size={14} fill="currentColor" />
+              )}
+              {t('profiles.card.switchTo')}
+            </Button>
+          )}
+        </div>
+      )}
+
       {/* Quick-add form (shown when "+ Add mods → Quick add URL" is picked). */}
       {lib.renderQuickAddForm()}
 
@@ -556,6 +761,27 @@ export function ModpackDetail({
             <span className="gf-modpack-detail-count" aria-hidden>
               {profile.mods.length}
             </span>
+            {missingCount > 0 && (
+              <span
+                className="gf-modpack-detail-missing"
+                tabIndex={0}
+                aria-label={t('modpack.detail.missingTitle')}
+              >
+                <span className="gf-modpack-detail-count-missing">
+                  {t('modpack.detail.missingCount', { count: missingCount })}
+                </span>
+                <span className="gf-modpack-detail-missing-tip" role="tooltip">
+                  <span className="gf-modpack-detail-missing-tip-head">
+                    {t('modpack.detail.missingTipHead')}
+                  </span>
+                  {missingMods.map((name) => (
+                    <span key={name} className="gf-modpack-detail-missing-tip-item">
+                      {name}
+                    </span>
+                  ))}
+                </span>
+              </span>
+            )}
             <HelpHint helpKey="modpackWhat" />
           </div>
           {/* Updates affordance — scoped to this pack's mods. */}
@@ -579,11 +805,22 @@ export function ModpackDetail({
           modpackName={profile.name}
           packScoped
           coupleActiveStorage
-          reloadToken={`${membershipSignature}|active:${activeProfile ?? ''}`}
+          reloadToken={`${membershipSignature}|active:${activeProfile ?? ''}|bulk:${bulkReloadNonce}`}
           toolbarActions={packToolbarActions}
-          filterRow={(row) =>
-            !!row.profiles.find((p) => p.profile_name === profile.name)?.included
-          }
+          bulkActionsBar={packBulkBar}
+          filterRow={(row) => {
+            const included = !!row.profiles.find(
+              (p) => p.profile_name === profile.name,
+            )?.included;
+            if (!included) return false;
+            if (!tagFilter) return true;
+            const info =
+              lib.modInfoByKey.get(row.folder_name ?? row.name) ??
+              lib.modInfoByKey.get(row.name);
+            return (info?.tags ?? []).some(
+              (tg) => tg.toLocaleLowerCase() === tagFilter.toLocaleLowerCase(),
+            );
+          }}
           onMembershipChanged={refreshAfterMutation}
           onLoadOrderChanged={refreshAfterMutation}
           {...lib.tableActionProps}
@@ -693,6 +930,19 @@ export function ModpackDetail({
           profile={profile}
           onClose={() => setEditing(false)}
           onSaved={refreshAfterMutation}
+        />
+      )}
+
+      {/* Rename this pack (inline-validated name modal). */}
+      {renaming && (
+        <RenameModpackModal
+          profile={profile}
+          existingNames={renameExistingNames ?? [profile.name]}
+          onClose={() => setRenaming(false)}
+          onRenamed={(oldName, newName) => {
+            setRenaming(false);
+            onRenamed?.(oldName, newName);
+          }}
         />
       )}
     </div>

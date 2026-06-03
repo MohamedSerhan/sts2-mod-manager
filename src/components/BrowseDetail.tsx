@@ -38,15 +38,15 @@ export function BrowseDetail(props: Props) {
               width: '100%',
               background:
                 props.kind === 'nexus' && props.mod.picture_url
-                  ? `linear-gradient(135deg, oklch(0.10 0.04 280 / 0.55), oklch(0.10 0.04 280 / 0.95)), url('${props.mod.picture_url}') center/cover`
-                  : 'linear-gradient(135deg, oklch(0.40 0.10 30), oklch(0.30 0.06 280))',
+                  ? `linear-gradient(135deg, color-mix(in oklch, var(--indigo-deep) 55%, transparent), color-mix(in oklch, var(--indigo-deep) 95%, transparent)), url('${props.mod.picture_url}') center/cover`
+                  : 'linear-gradient(135deg, var(--hero-fill-warm), var(--indigo-shimmer))',
             }}
           />
           <button
             className="gf-btn-3 gf-btn-icon"
             onClick={props.onClose}
             title={t('common.close')}
-            style={{ position: 'absolute', top: 12, insetInlineEnd: 12, background: 'oklch(0.10 0.04 280 / 0.6)' }}
+            style={{ position: 'absolute', top: 12, insetInlineEnd: 12, background: 'color-mix(in oklch, var(--indigo-deep) 60%, transparent)' }}
           >
             <X size={14} />
           </button>

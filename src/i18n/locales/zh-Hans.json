@@ -43,7 +43,12 @@
       "disabledOrphans_other": "已禁用 {{count}} 个多余模组",
       "downloadedNum": "已下载 {{count}} 个",
       "downloadsFailed_one": "{{count}} 个下载失败",
-      "downloadsFailed_other": "{{count}} 个下载失败"
+      "downloadsFailed_other": "{{count}} 个下载失败",
+      "disabledOrphansWithList": "{{count}} 个已移至禁用：{{list}}",
+      "addedWithList": "已添加 {{count}} 个：{{list}}",
+      "removedWithList": "已移除 {{count}} 个：{{list}}",
+      "replacedWithList": "已更新 {{count}} 个：{{list}}",
+      "replaceFailedWithList": "保留 {{count}} 个原版本（更新失败）：{{list}}"
     }
   },
   "confirm": {
@@ -61,6 +66,14 @@
     "detail": {
       "inPackHeading": "此模组包中的模组",
       "statusCounts": "{{active}} 个激活 / 此模组包共 {{total}} 个模组",
+      "missingCount": "（缺少 {{count}} 个）",
+      "missingTitle": "在该模组包清单中，但未安装到磁盘。修复或保存该模组包即可同步数量。",
+      "missingTipHead": "在清单中但未安装：",
+      "enabledAllInPack": "已启用 {{pack}} 中的所有模组",
+      "disabledAllInPack": "已禁用 {{pack}} 中的所有模组",
+      "toggleAllFailed": "无法更新所有模组：{{error}}",
+      "toggleAllMissing": "{{count}} 个未安装：{{list}}。",
+      "toggleAllSomeFailed": "{{count}} 个无法移动：{{list}}。",
       "runningNow": "正在游戏中运行",
       "addMods": "添加模组",
       "checkUpdates": "检查更新",
@@ -90,7 +103,8 @@
       "add": "添加",
       "allInPack": "所有已安装的模组都已加入此模组包。",
       "added": "已将 {{mod}} 添加到 {{pack}}",
-      "addFailed": "无法添加 {{mod}}：{{error}}"
+      "addFailed": "无法添加 {{mod}}：{{error}}",
+      "inactiveToggleHint": "此模组包当前未激活——只有激活的模组包才能在游戏中启用或禁用模组。切换到该模组包即可管理加载内容。"
     },
     "edit": {
       "title": "编辑“{{name}}”",
@@ -100,6 +114,19 @@
       "cancel": "取消",
       "saved": "已更新“{{name}}”（+{{added}} / −{{removed}}）",
       "failed": "无法保存更改：{{error}}"
+    },
+    "rename": {
+      "title": "重命名“{{name}}”",
+      "label": "新名称",
+      "placeholder": "输入新的模组包名称",
+      "save": "重命名",
+      "saving": "正在重命名…",
+      "cancel": "取消",
+      "collision": "已存在同名模组包。",
+      "empty": "名称不能为空。",
+      "unchanged": "新名称与当前名称相同。",
+      "success": "已将“{{old}}”重命名为“{{new}}”。",
+      "failed": "重命名失败：{{error}}"
     },
     "storage": {
       "active": "已激活于游戏",
@@ -142,6 +169,9 @@
     "step2SelectAll": "全选",
     "step2DeselectAll": "取消全选",
     "step2NoMods": "未找到匹配的已安装模组。",
+    "step2ShowSelected": "查看已选",
+    "step2HideSelected": "收起",
+    "step2NoneSelected": "尚未选择模组",
     "step3Subtitle": "快速浏览所选模组的状态。",
     "step3Checking": "正在检查所选模组...",
     "step3Linked_one": "{{count}} 个模组已链接更新来源",
@@ -152,6 +182,8 @@
     "step3Blocked_other": "{{count}} 个模组需要更新的游戏版本",
     "step3Frozen_one": "{{count}} 个已冻结模组将保持当前版本",
     "step3Frozen_other": "{{count}} 个已冻结模组将保持当前版本",
+    "step3Show": "查看模组",
+    "step3Hide": "收起",
     "step3ContinueAnyway": "仍然继续",
     "step4Subtitle": "为模组包命名,然后创建它。",
     "step4NameLabel": "模组包名称",
@@ -324,6 +356,7 @@
     "kebab": {
       "snapshotFromCurrent": "从当前安装创建快照",
       "duplicate": "复制",
+      "rename": "重命名",
       "exportJson": "导出 JSON...",
       "copyShareCode": "复制分享码",
       "copyShareLink": "复制分享链接",
@@ -1104,6 +1137,12 @@
       "ru": "Русский",
       "ar": "العربية"
     },
+    "theme": {
+      "label": "主题",
+      "dark": "深色",
+      "light": "浅色",
+      "auto": "自动"
+    },
     "accounts": {
       "nexusKey": "Nexus Mods API 密钥",
       "saved": "已保存 ✓",
@@ -1212,7 +1251,6 @@
     "repairDesc": "从 GitHub 强制重装。当版本显示\"未知\"、游戏拒绝加载此模组、或安装看起来有问题时使用。",
     "repairNeedSource": "请先通过\"编辑来源…\"链接 GitHub 源 — 修复从 GitHub 获取。",
     "subtitle": "{{total}} 个已安装 · {{enabled}} 个已启用{{disabled}}",
-    "openFolder": "打开模组文件夹",
     "importMod": "导入模组",
     "quickAddUrl": "快速添加 URL",
     "autoDetectSources": "自动检测来源",
@@ -1240,6 +1278,7 @@
     "modActions": "模组操作",
     "copyVersion": "复制版本 (v{{version}})",
     "openModsFolder": "打开模组文件夹",
+    "openThisModFolder": "打开此模组的文件夹",
     "unsnoozeDesc": "再次显示当前上游版本的更新建议。",
     "unsnoozeUpdate": "再次显示更新",
     "snoozeDesc": "跳过此更新，直到上游出现新版本（当前为 v{{version}}）。当网站公布的版本与文件实际版本不匹配时使用此选项。",

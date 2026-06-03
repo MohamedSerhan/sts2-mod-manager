@@ -93,10 +93,17 @@ export function AutoDetectModal({ open, onClose, onApplied, focusMod }: Props) {
 
   return (
     <div className="gf-modal-back" onClick={onClose}>
-      <div className="gf-modal" style={{ width: 640 }} onClick={(e) => e.stopPropagation()}>
+      <div
+        className="gf-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="gf-auto-detect-title"
+        style={{ width: 640 }}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="gf-modal-head">
           <div>
-            <div className="gf-modal-title">
+            <div id="gf-auto-detect-title" className="gf-modal-title">
               {focusMod ? t('autoDetect.scopedTitle', { name: focusMod }) : t('autoDetect.title')}
             </div>
             <div className="gf-modal-sub">
@@ -129,11 +136,11 @@ export function AutoDetectModal({ open, onClose, onApplied, focusMod }: Props) {
                   style={{
                     marginBottom: 14,
                     padding: '10px 14px',
-                    background: 'oklch(0.25 0.08 25 / 0.18)',
-                    border: '1px solid oklch(0.55 0.16 25 / 0.45)',
+                    background: 'color-mix(in oklch, var(--danger-fill-deep) 18%, transparent)',
+                    border: '1px solid color-mix(in oklch, var(--danger-edge) 45%, transparent)',
                     borderRadius: 6,
                     fontSize: 12.5,
-                    color: 'oklch(0.82 0.12 25)',
+                    color: 'var(--danger-ink-soft)',
                     lineHeight: 1.55,
                   }}
                 >
@@ -174,11 +181,11 @@ export function AutoDetectModal({ open, onClose, onApplied, focusMod }: Props) {
                   style={{
                     margin: '0 0 10px',
                     padding: '10px 14px',
-                    background: 'oklch(0.25 0.08 25 / 0.18)',
-                    border: '1px solid oklch(0.55 0.16 25 / 0.45)',
+                    background: 'color-mix(in oklch, var(--danger-fill-deep) 18%, transparent)',
+                    border: '1px solid color-mix(in oklch, var(--danger-edge) 45%, transparent)',
                     borderRadius: 6,
                     fontSize: 12.5,
-                    color: 'oklch(0.82 0.12 25)',
+                    color: 'var(--danger-ink-soft)',
                     lineHeight: 1.55,
                   }}
                 >
@@ -238,7 +245,7 @@ export function AutoDetectModal({ open, onClose, onApplied, focusMod }: Props) {
                     <span className="gf-detect-led" />
                     <span className="gf-detect-name">{m.mod_name}</span>
                     <span className="gf-detect-match">{m.github_repo}</span>
-                    <span style={{ fontSize: 10.5, color: 'oklch(0.85 0.14 70)' }}>{m.confidence}</span>
+                    <span style={{ fontSize: 10.5, color: 'var(--amber-ink-2)' }}>{m.confidence}</span>
                   </div>
                 ))}
                 {unmatched.map((name) => (
@@ -246,7 +253,7 @@ export function AutoDetectModal({ open, onClose, onApplied, focusMod }: Props) {
                     <span className="gf-detect-led" />
                     <span className="gf-detect-name">{name}</span>
                     <span className="gf-detect-match">{t('autoDetect.noCandidates')}</span>
-                    <span style={{ fontSize: 10.5, color: 'oklch(0.82 0.16 25)' }}>—</span>
+                    <span style={{ fontSize: 10.5, color: 'var(--danger-ink)' }}>—</span>
                   </div>
                 ))}
                 {notChecked.map((name) => (

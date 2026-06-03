@@ -7,7 +7,7 @@
  */
 import { useState } from 'react';
 import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { ModMultiSelect, type ModMultiSelectLabels } from './ModMultiSelect';
@@ -122,6 +122,86 @@ describe('<ModMultiSelect> windowing', () => {
     await user.type(screen.getByRole('textbox', { name: /search mods/i }), 'Mod 0');
     expect(screen.getByText('Showing 50 of 99')).toBeInTheDocument();
     expect(screen.getAllByRole('checkbox')).toHaveLength(50);
+  });
+});
+
+describe('<ModMultiSelect> selected peek', () => {
+  it('expands the selected-count toggle to list chosen mod names', async () => {
+    const user = userEvent.setup();
+    const mods = [
+      modInfo({ name: 'Alpha', folder_name: 'alpha' }),
+      modInfo({ name: 'Beta', folder_name: 'beta' }),
+      modInfo({ name: 'Gamma', folder_name: 'gamma' }),
+    ];
+
+    function PeekHarness() {
+      const [selected, setSelected] = useState<Set<string>>(new Set(['alpha', 'gamma']));
+      return (
+        <ModMultiSelect mods={mods} selected={selected} onChange={setSelected} labels={labels} />
+      );
+    }
+
+    render(
+      <AllProviders>
+        <PeekHarness />
+      </AllProviders>,
+    );
+
+    // Peek is closed by default — the panel doesn't exist yet.
+    expect(screen.queryByTestId('mod-multiselect-selected-peek')).not.toBeInTheDocument();
+
+    // Click the "Selected 2" toggle button to open the peek.
+    await user.click(screen.getByRole('button', { name: /Selected 2/i }));
+
+    const peek = screen.getByTestId('mod-multiselect-selected-peek');
+    // Alpha and Gamma are selected — both should appear.
+    expect(peek).toHaveTextContent('Alpha');
+    expect(peek).toHaveTextContent('Gamma');
+    // Beta is NOT selected — should not appear in the peek panel.
+    expect(peek).not.toHaveTextContent('Beta');
+  });
+
+  it('shows the empty hint when nothing is selected', async () => {
+    const user = userEvent.setup();
+    renderPicker([modInfo({ name: 'Alpha', folder_name: 'alpha' })]);
+
+    // Nothing is selected initially; click the "Selected 0" toggle.
+    await user.click(screen.getByRole('button', { name: /Selected 0/i }));
+
+    const peek = screen.getByTestId('mod-multiselect-selected-peek');
+    expect(peek).toHaveTextContent(/no mods selected/i);
+    expect(peek).not.toHaveTextContent('Alpha');
+  });
+
+  it('shows both items when two mods share the same display_name but have different folder_names', async () => {
+    // Regression: with the old key={name} both <li>s had key="Dup", React
+    // silently dropped the second one and only one "Dup" would render.
+    // Now key={folder_name} is stable and unique, so both items appear.
+    const user = userEvent.setup();
+    const mods = [
+      modInfo({ name: 'Dup', display_name: 'Dup', folder_name: 'a' }),
+      modInfo({ name: 'Dup', display_name: 'Dup', folder_name: 'b' }),
+    ];
+
+    function DupHarness() {
+      const [selected, setSelected] = useState<Set<string>>(new Set(['a', 'b']));
+      return (
+        <ModMultiSelect mods={mods} selected={selected} onChange={setSelected} labels={labels} />
+      );
+    }
+
+    render(
+      <AllProviders>
+        <DupHarness />
+      </AllProviders>,
+    );
+
+    // Open the peek.
+    await user.click(screen.getByRole('button', { name: /Selected 2/i }));
+
+    const peek = screen.getByTestId('mod-multiselect-selected-peek');
+    // Both mods must appear — duplicate display names must not be silently dropped.
+    expect(within(peek).getAllByText('Dup')).toHaveLength(2);
   });
 });
 

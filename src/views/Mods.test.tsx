@@ -202,7 +202,7 @@ describe('<ModsView>', () => {
     expect(screen.queryByText('CardArtEditor')).toBeNull();
   });
 
-  it('manager tags render on rows and can filter large libraries by category', async () => {
+  it('manager tags render on rows and the Tag picker brings a category to the top (hides nothing)', async () => {
     seedMods([
       baseMod({ name: 'BaseLib', folder_name: 'BaseLib', tags: ['utility', 'beta'] }),
       baseMod({ name: 'CardArtEditor', folder_name: 'CardArtEditor', tags: ['visual'] }),
@@ -216,10 +216,18 @@ describe('<ModsView>', () => {
     expect(screen.getAllByText('utility').length).toBeGreaterThan(0);
     expect(screen.getAllByText('visual').length).toBeGreaterThan(0);
 
+    // Choosing a tag REORDERS (does not hide): the utility mod floats to the
+    // top, every mod stays visible, and untagged sorts last.
     await user.selectOptions(screen.getByRole('combobox', { name: /Tag/i }), 'utility');
     expect(screen.getByText('BaseLib')).toBeInTheDocument();
-    expect(screen.queryByText('CardArtEditor')).toBeNull();
-    expect(screen.queryByText('NoTag')).toBeNull();
+    expect(screen.getByText('CardArtEditor')).toBeInTheDocument();
+    expect(screen.getByText('NoTag')).toBeInTheDocument();
+    const order = screen
+      .getAllByRole('heading', { level: 3 })
+      .map((h) => h.textContent)
+      .filter((tt) => ['BaseLib', 'CardArtEditor', 'NoTag'].includes(tt ?? ''));
+    expect(order[0]).toBe('BaseLib');
+    expect(order[order.length - 1]).toBe('NoTag');
   });
 
   it('sort dropdown supports common mod-library orders', async () => {
@@ -448,15 +456,17 @@ describe('<ModsView>', () => {
     await waitFor(() => { expect(screen.getAllByText('FreshMod').length).toBeGreaterThan(0); });
   });
 
-  it('Open folder triggers open_mods_folder', async () => {
-    seedMods([]);
+  it('Open mods folder button triggers open_mods_folder', async () => {
+    // FB3: the global open-folder moved out of the Add-mods dropdown into the
+    // bulk-action row (left of Enable all), shown once mods exist.
+    seedMods([baseMod()]);
+    registerInvokeHandler('open_mods_folder', () => true);
     const user = userEvent.setup();
     render(<Wrap />);
-    await waitFor(() => {
-      expect(screen.getByText(/0 installed/)).toBeInTheDocument();
-    });
-    await openAddMenu(user);
-    await user.click(screen.getByRole('menuitem', { name: /Open mods folder/ }));
+    await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
+    // It sits to the LEFT of "Enable all" in the bulk-action row.
+    expectTextBefore('Open mods folder', 'Enable all');
+    await user.click(screen.getByRole('button', { name: /Open mods folder/i }));
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'open_mods_folder')).toBe(true);
     });
@@ -526,6 +536,41 @@ describe('<ModsView>', () => {
     await user.click(screen.getByRole('button', { name: /Disable all/ }));
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'disable_all_mods')).toBe(true);
+    });
+  });
+
+  it('Enable all with an active modpack updates the row toggle, not just the header', async () => {
+    // The All Mods table runs FOCUSED when a modpack is active
+    // (modpackName=activeProfile). Its rows come from the membership grid,
+    // which re-fetches only on identity/reloadToken change — so a bulk
+    // enable/disable used to leave the row toggles stale while the header
+    // count (from appMods) updated. A reload nonce now forces the grid
+    // re-fetch after a bulk op.
+    registerInvokeHandler('get_active_profile', () => 'Active');
+    let enabled = false;
+    registerInvokeHandler('get_installed_mods', () =>
+      [baseMod({ name: 'Solo', folder_name: 'Solo', enabled })]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Active', editable: true }],
+      mods: [{
+        name: 'Solo', version: '3.1.2', folder_name: 'Solo', mod_id: 'Solo',
+        installed_enabled: enabled,
+        profiles: [{ profile_name: 'Active', included: true, enabled, editable: true }],
+      }],
+    }));
+    registerInvokeHandler('enable_all_mods', () => { enabled = true; return true; });
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await screen.findAllByText('Solo');
+    expect(screen.getByRole('switch', { name: /toggle whether Solo is active in game/i }))
+      .toHaveAttribute('aria-checked', 'false');
+    await user.click(screen.getByRole('button', { name: /Enable all/ }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'enable_all_mods')).toBe(true);
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: /toggle whether Solo is active in game/i }))
+        .toHaveAttribute('aria-checked', 'true');
     });
   });
 
@@ -917,18 +962,6 @@ describe('<ModsView>', () => {
     await user.click(screen.getByRole('menuitem', { name: /Copy version/ }));
     // The handler awaits the clipboard promise; whether it succeeds or fails
     // (in jsdom without a clipboard mock) we just verify no crash.
-  });
-
-  it('Open mods folder from kebab triggers open_mods_folder', async () => {
-    seedMods([baseMod()]);
-    const user = userEvent.setup();
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    await user.click(screen.getByRole('menuitem', { name: /Open mods folder/ }));
-    await waitFor(() => {
-      expect(getInvokeCalls().some((c) => c.cmd === 'open_mods_folder')).toBe(true);
-    });
   });
 
   it('advanced kebab → Repair fires repair_mod when github_url exists', async () => {
@@ -1865,8 +1898,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
-    await openAddMenu(user);
-    await user.click(screen.getByRole('menuitem', { name: /Open mods folder/ }));
+    await user.click(screen.getByRole('button', { name: /Open mods folder/i }));
     await waitFor(() => {
       expect(screen.getByText('no path')).toBeInTheDocument();
     });
@@ -1879,8 +1911,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
-    await openAddMenu(user);
-    await user.click(screen.getByRole('menuitem', { name: /Open mods folder/ }));
+    await user.click(screen.getByRole('button', { name: /Open mods folder/i }));
     await waitFor(() => {
       expect(screen.getByText('plain-string-reason')).toBeInTheDocument();
     });
@@ -3263,12 +3294,10 @@ describe('<ModsView> source editor inline lifecycle', () => {
 // The filter row matches by tag substring (Mods.tsx ~531). Without a
 // tag-search test, the `tags.some((tag) => tag.toLowerCase().includes(...))`
 // arm sits uncovered.
-describe('<ModsView> filter by tag substring', () => {
-  it('tag dropdown narrows visible mods to ones carrying the chosen tag', async () => {
-    // Post-1.7.0 T18 unification: tag filtering moved from the search
-    // input (substring match) to a dropdown that exact-matches a single
-    // tag (filterRow on LibraryTable). The dropdown is the canonical
-    // surface; the search input no longer matches against tags.
+describe('<ModsView> tag priority picker', () => {
+  it('tag dropdown brings the chosen tag to the top without hiding the rest', async () => {
+    // The Tag dropdown reorders rather than filters: the chosen tag's mods
+    // float to the top, and every mod stays visible.
     seedMods([
       baseMod({
         name: 'TaggedMod', folder_name: 'TaggedMod',
@@ -3284,10 +3313,14 @@ describe('<ModsView> filter by tag substring', () => {
     await screen.findAllByText('TaggedMod');
     expect(screen.getByText('OtherMod')).toBeInTheDocument();
     await user.selectOptions(screen.getByRole('combobox', { name: /Tag/i }), 'Combat');
-    await waitFor(() => {
-      expect(screen.queryByText('OtherMod')).toBeNull();
-    });
+    // Both stay visible; the Combat mod is ordered before the other.
     expect(screen.getByText('TaggedMod')).toBeInTheDocument();
+    expect(screen.getByText('OtherMod')).toBeInTheDocument();
+    const order = screen
+      .getAllByRole('heading', { level: 3 })
+      .map((h) => h.textContent)
+      .filter((tt) => ['TaggedMod', 'OtherMod'].includes(tt ?? ''));
+    expect(order).toEqual(['TaggedMod', 'OtherMod']);
   });
 });
 
@@ -3326,6 +3359,151 @@ describe('<ModsView> SourceEditor saves note + custom URL via setModExtras', () 
           && c.args?.note === 'My personal note',
       )).toBe(true);
     });
+  });
+});
+
+// ── Bug 1: Find GitHub → Save must not clobber the found repo ─────────
+// A Nexus-only mod's "Find GitHub" persists the discovered repo and
+// refreshes. The open editor must reflect that repo in its field so the
+// follow-up Save is a no-op instead of writing null over the just-found
+// source (set_mod_sources_full with githubRepo=null).
+describe('<ModsView> Find GitHub then Save does not null out the found repo', () => {
+  it('populates the GitHub field on find and does not save a null github afterward', async () => {
+    let mods = [baseMod({
+      name: 'NexusOnly', folder_name: 'NexusOnly',
+      github_url: null,
+      nexus_url: 'https://www.nexusmods.com/sts2/mods/103',
+    })];
+    registerInvokeHandler('get_installed_mods', () => mods);
+    // The backend persists the repo to disk; the refresh that follows the
+    // find re-reads it, so the mod now carries a github_url.
+    registerInvokeHandler('find_github_from_nexus', () => {
+      mods = [{ ...mods[0], github_url: 'https://github.com/owner/repo' }];
+      return 'owner/repo';
+    });
+    registerInvokeHandler('set_mod_sources_full', () => null);
+
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await waitFor(() => { expect(screen.getByText('NexusOnly')).toBeInTheDocument(); });
+
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    const items = screen.getAllByRole('menuitem', { name: /Edit sources/ });
+    await user.click(items[0]);
+    await waitFor(() => {
+      expect(screen.getByText('Sources for NexusOnly')).toBeInTheDocument();
+    });
+
+    // Find GitHub → field gets the repo, banner drops.
+    await user.click(screen.getByRole('button', { name: 'Find GitHub' }));
+    const ghInput = await screen.findByPlaceholderText('owner/repo') as HTMLInputElement;
+    await waitFor(() => { expect(ghInput.value).toBe('owner/repo'); });
+    expect(screen.queryByRole('button', { name: 'Find GitHub' })).toBeNull();
+
+    // Save → editor closes on success; the guard sees the field == stored
+    // repo, so set_mod_sources_full is never called with a null github.
+    await user.click(screen.getByRole('button', { name: /Save sources/ }));
+    await waitFor(() => {
+      expect(screen.queryByText('Sources for NexusOnly')).toBeNull();
+    });
+    expect(getInvokeCalls().some(
+      (c) => c.cmd === 'set_mod_sources_full' && c.args?.githubRepo == null,
+    )).toBe(false);
+  });
+});
+
+// ── Bug 6: per-mod "Open this mod's folder" ──────────────────────────
+// The kebab gained a per-mod open-folder action (alongside the global
+// "Open mods folder"). It threads onOpenThisModFolder all the way down to
+// the backend open_mod_folder command with the mod's folder name.
+describe('<ModsView> per-mod open folder', () => {
+  it('kebab "Open this mod\'s folder" invokes open_mod_folder with the mod folder', async () => {
+    seedMods([baseMod({ name: 'OpenMe', folder_name: 'OpenMe' })]);
+    registerInvokeHandler('open_mod_folder', () => true);
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await waitFor(() => { expect(screen.getByText('OpenMe')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    const items = await screen.findAllByRole('menuitem', { name: /Open this mod's folder/i });
+    await user.click(items[0]);
+    await waitFor(() => {
+      expect(getInvokeCalls().some(
+        (c) => c.cmd === 'open_mod_folder' && c.args?.folderName === 'OpenMe',
+      )).toBe(true);
+    });
+    // FB-E: the GLOBAL "Open mods folder" was removed from the per-row kebab
+    // (it moved to the modpack toolbar bar); only the per-mod action remains.
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    expect(screen.queryByRole('menuitem', { name: /^Open mods folder$/i })).toBeNull();
+    expect(screen.getByRole('menuitem', { name: /Open this mod's folder/i })).toBeInTheDocument();
+  });
+});
+
+// ── Regression guards: source edits persist across the refresh ───────
+// Both behaviors are already fixed; these lock the FE refresh wiring so a
+// future change can't reintroduce stale-after-save. If the save handler
+// stopped calling refreshMods, the editor/list would keep showing the old
+// value and these would fail.
+describe('<ModsView> source-edit persistence regressions', () => {
+  it('a typed GitHub repo persists across refresh — user override wins over the manifest', async () => {
+    let mods = [baseMod({
+      name: 'GhMod', folder_name: 'GhMod',
+      github_url: 'https://github.com/wrong/manifest',
+    })];
+    registerInvokeHandler('get_installed_mods', () => mods);
+    registerInvokeHandler('set_mod_sources_full', () => {
+      // Backend persists the user's repo; the enrich on the next scan makes
+      // the user link win over the manifest URL (covered in Rust too).
+      mods = [{ ...mods[0], github_url: 'https://github.com/user/typed' }];
+      return null;
+    });
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await waitFor(() => { expect(screen.getByText('GhMod')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    await user.click(screen.getAllByRole('menuitem', { name: /Edit sources/ })[0]);
+    await waitFor(() => { expect(screen.getByText('Sources for GhMod')).toBeInTheDocument(); });
+
+    const ghInput = screen.getByPlaceholderText('owner/repo') as HTMLInputElement;
+    expect(ghInput.value).toBe('wrong/manifest'); // seeded from the manifest
+    await user.clear(ghInput);
+    await user.type(ghInput, 'user/typed');
+    await user.click(screen.getByRole('button', { name: /Save sources/ }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls().some(
+        (c) => c.cmd === 'set_mod_sources_full' && c.args?.githubRepo === 'user/typed',
+      )).toBe(true);
+    });
+    // Editor closes on save; reopen — the field reflects the persisted user
+    // override (not the manifest), proving it survived the refresh.
+    await waitFor(() => { expect(screen.queryByText('Sources for GhMod')).toBeNull(); });
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    await user.click(screen.getAllByRole('menuitem', { name: /Edit sources/ })[0]);
+    const ghInput2 = await screen.findByPlaceholderText('owner/repo') as HTMLInputElement;
+    await waitFor(() => { expect(ghInput2.value).toBe('user/typed'); });
+  });
+
+  it('editing a display name updates the in-memory list on the same refresh (no restart)', async () => {
+    let mods = [baseMod({ name: 'Foo', folder_name: 'Foo', display_name: null })];
+    registerInvokeHandler('get_installed_mods', () => mods);
+    registerInvokeHandler('set_mod_display_overrides', () => {
+      mods = [{ ...mods[0], display_name: 'Friendly Foo' }];
+      return null;
+    });
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await waitFor(() => { expect(screen.getByText('Foo')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
+    await user.click(screen.getAllByRole('menuitem', { name: /Edit sources/ })[0]);
+    await waitFor(() => { expect(screen.getByText('Sources for Foo')).toBeInTheDocument(); });
+
+    const nameInput = screen.getByPlaceholderText('Foo') as HTMLInputElement; // display-name field
+    await user.type(nameInput, 'Friendly Foo');
+    await user.click(screen.getByRole('button', { name: /Save sources/ }));
+
+    // The list reflects the new display name immediately — no app restart.
+    await waitFor(() => { expect(screen.getByText('Friendly Foo')).toBeInTheDocument(); });
   });
 });
 

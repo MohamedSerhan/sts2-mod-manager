@@ -27,7 +27,7 @@
  * view can re-pull after a mutation without leaking into LibraryTable
  * state.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Search } from 'lucide-react';
 import { Card } from './Card';
@@ -39,6 +39,7 @@ import {
   membershipRowKey,
 } from './LibraryRow';
 import { ModViewToggle, useModListDensity } from './ModViewToggle';
+import { usePinScroll } from '../hooks/usePinScroll';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from './ConfirmDialog';
@@ -111,6 +112,10 @@ export interface LibraryTableProps {
    *  puts its "+ Add mods" / Edit / Load order actions here so they share
    *  the search row. */
   toolbarActions?: ReactNode;
+  /** A dedicated second row rendered UNDER the toolbar (search + toolbarActions)
+   *  for the pack's bulk actions, so they don't crowd or wrap into the search
+   *  row. (FB2-A.) */
+  bulkActionsBar?: ReactNode;
   /** External re-fetch trigger. When this value changes, the focused-mode
    *  membership grid is re-pulled. Lets a parent that mutates membership
    *  outside this table (e.g. the modpack view's "Add from your Library"
@@ -120,6 +125,11 @@ export interface LibraryTableProps {
    *  rendering. Used by the Library view to apply tag / extra filters
    *  on top of the table's own search. */
   filterRow?: (row: ProfileMembershipMod) => boolean;
+  /** Tag to prioritise in the ordering (from the page Tag picker). When set,
+   *  mods carrying this tag sort to the top, then the rest order by their first
+   *  tag A–Z (untagged last); ties by display name. OVERRIDES the sort mode
+   *  while a tag is chosen, and hides nothing — it only reorders. */
+  priorityTag?: string;
 
   // ─── ModRow-style per-row action surface (optional) ──────────────
   // When supplied, these are forwarded to LibraryRow's kebab menu.
@@ -152,7 +162,7 @@ export interface LibraryTableProps {
   onRollback?: (mod: ModInfo) => void;
   onDelete?: (mod: ModInfo) => void;
   onCopyVersion?: (mod: ModInfo) => void;
-  onOpenModsFolder?: () => void;
+  onOpenThisModFolder?: (mod: ModInfo) => void;
   onEditSources?: (mod: ModInfo) => void;
   onFindGithubFromNexus?: (mod: ModInfo) => void;
   onOpenExternalUrl?: (url: string, mod: ModInfo) => void;
@@ -179,6 +189,28 @@ function compareMembershipDisplayName(
   });
 }
 
+/** Alphabetically-first tag of a row's ModInfo (lowercased), or null when
+ *  untagged. `null` sorts AFTER any tag. */
+function firstTagKey(
+  row: ProfileMembershipMod,
+  modInfoByKey?: Map<string, ModInfo>,
+): string | null {
+  const info = modInfoByKey?.get(membershipRowKey(row)) ?? modInfoByKey?.get(row.name);
+  const tags = (info?.tags ?? []).map((tg) => tg.trim().toLowerCase()).filter(Boolean);
+  if (tags.length === 0) return null;
+  return tags.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }))[0];
+}
+
+/** Whether a row's ModInfo carries the given (already case-folded) tag. */
+function rowHasTag(
+  row: ProfileMembershipMod,
+  lowerTag: string,
+  modInfoByKey?: Map<string, ModInfo>,
+): boolean {
+  const info = modInfoByKey?.get(membershipRowKey(row)) ?? modInfoByKey?.get(row.name);
+  return (info?.tags ?? []).some((tg) => tg.trim().toLocaleLowerCase() === lowerTag);
+}
+
 export function LibraryTable({
   modpackName,
   onMembershipChanged,
@@ -190,8 +222,10 @@ export function LibraryTable({
   coupleActiveStorage = false,
   packScoped = false,
   toolbarActions,
+  bulkActionsBar,
   reloadToken,
   filterRow,
+  priorityTag = '',
   modInfoByKey,
   auditByKey,
   gameRunning,
@@ -209,7 +243,7 @@ export function LibraryTable({
   onRollback,
   onDelete,
   onCopyVersion,
-  onOpenModsFolder,
+  onOpenThisModFolder,
   onEditSources,
   onFindGithubFromNexus,
   onOpenExternalUrl,
@@ -234,37 +268,11 @@ export function LibraryTable({
   // Comfortable / compact row density (persisted, shared with the modpack view).
   const [density, setDensity] = useModListDensity();
 
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  // Safety net so the user is NEVER scrolled against their will when a row
-  // mutates. The root cause we know of is focus-loss on the toggled control
-  // (fixed in LibraryRow by not disabling it mid-save), but a row mutation
-  // triggers a refreshAll + full re-render, and we don't want ANY engine /
-  // layout quirk to be able to yank the page. This briefly re-pins the
-  // nearest scrollable ancestor to where it was when the mutation began.
-  // Inert under jsdom (scrollHeight/clientHeight are 0 there), so it doesn't
-  // touch the test suite.
-  const pinScroll = useCallback(() => {
-    let el: HTMLElement | null = rootRef.current?.parentElement ?? null;
-    while (el) {
-      const oy = getComputedStyle(el).overflowY;
-      if ((oy === 'auto' || oy === 'scroll' || oy === 'overlay') && el.scrollHeight > el.clientHeight) {
-        break;
-      }
-      el = el.parentElement;
-    }
-    if (!el) return;
-    const scroller = el;
-    const top = scroller.scrollTop;
-    let frame = 0;
-    const hold = () => {
-      if (scroller.scrollTop !== top) scroller.scrollTop = top;
-      // ~12 frames (~200ms) covers the synchronous re-render plus any async
-      // focus-driven scroll the engine schedules just after.
-      if (++frame < 12) requestAnimationFrame(hold);
-    };
-    requestAnimationFrame(hold);
-  }, []);
+  // Scroll-pin safety net (shared with ModpackDetail via usePinScroll):
+  // a row mutation triggers refreshAll + a full re-render, and we don't want
+  // any engine/layout quirk to yank the page. pinScroll() re-pins the nearest
+  // scrollable ancestor to where it was when the mutation began.
+  const { ref: rootRef, pinScroll } = usePinScroll<HTMLDivElement>();
 
   // Drag-and-drop reorder state for the in-pack mods. Indices refer
   // to the filtered "in this modpack" list, not the full grid.
@@ -426,6 +434,24 @@ export function LibraryTable({
     sorted.sort((a, b) => {
       const aIn = inPackRowKeys.has(membershipRowKey(a));
       const bIn = inPackRowKeys.has(membershipRowKey(b));
+      // Tag-priority ordering (the page Tag picker) OVERRIDES the sort mode
+      // while a tag is chosen: that tag's mods first, then the rest by first
+      // tag A–Z (untagged last); ties by display name. Nothing is hidden.
+      if (priorityTag) {
+        const key = priorityTag.toLocaleLowerCase();
+        const aHas = rowHasTag(a, key, modInfoByKey);
+        const bHas = rowHasTag(b, key, modInfoByKey);
+        if (aHas !== bHas) return aHas ? -1 : 1;
+        const at = firstTagKey(a, modInfoByKey);
+        const bt = firstTagKey(b, modInfoByKey);
+        if (at !== bt) {
+          if (at === null) return 1;   // untagged after tagged
+          if (bt === null) return -1;
+          const byTag = at.localeCompare(bt, undefined, { sensitivity: 'base', numeric: true });
+          if (byTag !== 0) return byTag;
+        }
+        return compareMembershipDisplayName(a, b);
+      }
       if (sort === 'nameDesc') return compareMembershipDisplayName(b, a);
       if (sort === 'inPackFirst') {
         if (aIn !== bIn) return Number(bIn) - Number(aIn);
@@ -446,7 +472,7 @@ export function LibraryTable({
       return compareMembershipDisplayName(a, b);
     });
     return sorted;
-  }, [effectiveGrid, filter, sort, inPackRowKeys, filterRow]);
+  }, [effectiveGrid, filter, sort, priorityTag, inPackRowKeys, filterRow, modInfoByKey]);
 
   const visibleItems = filteredRows.slice(0, visibleLimit);
 
@@ -762,6 +788,9 @@ export function LibraryTable({
           </div>
         )}
       </div>
+      {bulkActionsBar && (
+        <div className="gf-profile-library-bulk-bar">{bulkActionsBar}</div>
+      )}
       {/* The checkbox/drag explainer only applies to the All Mods view. The
           modpack view carries its own "listed in load order" note. */}
       {!packScoped && (
@@ -902,7 +931,7 @@ export function LibraryTable({
               onRollback={modInfo && onRollback ? () => onRollback(modInfo) : undefined}
               onDelete={modInfo && onDelete ? () => onDelete(modInfo) : undefined}
               onCopyVersion={modInfo && onCopyVersion ? () => onCopyVersion(modInfo) : undefined}
-              onOpenModsFolder={onOpenModsFolder}
+              onOpenThisModFolder={modInfo && onOpenThisModFolder ? () => onOpenThisModFolder(modInfo) : undefined}
               onEditSources={modInfo && onEditSources ? () => onEditSources(modInfo) : undefined}
               onFindGithubFromNexus={modInfo && onFindGithubFromNexus ? () => onFindGithubFromNexus(modInfo) : undefined}
               onOpenExternalUrl={modInfo && onOpenExternalUrl ? (url: string) => onOpenExternalUrl(url, modInfo) : undefined}

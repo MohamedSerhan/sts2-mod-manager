@@ -504,7 +504,7 @@ async fn apply_subscription_update_inner(
 
         // Prefer bundle_url (curator's bundled copy)
         if let Some(ref bundle_url) = pm.bundle_url {
-            match crate::sharing::download_bundle(bundle_url, &pm.name, &mods_path).await {
+            match crate::sharing::download_bundle(bundle_url, &pm.name, &mods_path, pm.bundle_sha256.as_deref()).await {
                 Ok(_) => {
                     // Re-scan to read the fresh manifest's min_game_version.
                     let after = crate::mods::scan_mods(&mods_path);
@@ -653,4 +653,39 @@ async fn apply_subscription_update_inner(
     save_subscriptions(&db, &config_path).map_err(|e| e.to_string())?;
 
     Ok(remote)
+}
+
+/// Re-point every subscription whose `profile_name` matches `old` at `new`.
+/// Returns true if any entry changed (caller decides whether to save).
+pub fn rename_profile_name(db: &mut SubscriptionsDb, old: &str, new: &str) -> bool {
+    let mut changed = false;
+    for sub in db.subscriptions.values_mut() {
+        if sub.profile_name == old {
+            sub.profile_name = new.to_string();
+            changed = true;
+        }
+    }
+    changed
+}
+
+#[cfg(test)]
+mod rename_helper_tests {
+    use super::*;
+    #[test]
+    fn repoints_matching_subscriptions() {
+        let mut db = SubscriptionsDb::default();
+        let now = chrono::Utc::now();
+        db.subscriptions.insert("id1".into(), Subscription {
+            share_id: "id1".into(), share_url: "o/c".into(),
+            profile_name: "Old".into(), curator: Some("o".into()),
+            last_synced_profile: crate::profiles::Profile {
+                name: "Old".into(), game_version: None, created_by: None,
+                mods: vec![], created_at: now, updated_at: now, public: None,
+            },
+            last_checked: now, last_synced: now,
+        });
+        assert!(rename_profile_name(&mut db, "Old", "New"));
+        assert_eq!(db.subscriptions["id1"].profile_name, "New");
+        assert!(!rename_profile_name(&mut db, "Nope", "X"));
+    }
 }

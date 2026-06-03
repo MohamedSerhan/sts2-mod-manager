@@ -43,7 +43,12 @@
       "disabledOrphans_other": "disabled {{count}} extra mods",
       "downloadedNum": "downloaded {{count}}",
       "downloadsFailed_one": "{{count}} download failed",
-      "downloadsFailed_other": "{{count}} downloads failed"
+      "downloadsFailed_other": "{{count}} downloads failed",
+      "disabledOrphansWithList": "{{count}} moved to disabled: {{list}}",
+      "addedWithList": "added {{count}}: {{list}}",
+      "removedWithList": "removed {{count}}: {{list}}",
+      "replacedWithList": "{{count}} updated: {{list}}",
+      "replaceFailedWithList": "{{count}} kept (update failed): {{list}}"
     }
   },
   "confirm": {
@@ -61,6 +66,14 @@
     "detail": {
       "inPackHeading": "In this modpack",
       "statusCounts": "{{active}} active / {{total}} mods in this modpack",
+      "missingCount": "({{count}} missing)",
+      "missingTitle": "In this modpack's manifest but not installed on disk. Repair or save the modpack to reconcile.",
+      "missingTipHead": "In the manifest but not installed:",
+      "enabledAllInPack": "Enabled all mods in {{pack}}",
+      "disabledAllInPack": "Disabled all mods in {{pack}}",
+      "toggleAllFailed": "Couldn't update all mods: {{error}}",
+      "toggleAllMissing": "{{count}} not installed: {{list}}.",
+      "toggleAllSomeFailed": "{{count}} couldn't be moved: {{list}}.",
       "runningNow": "running in game now",
       "addMods": "Add mods",
       "checkUpdates": "Check for updates",
@@ -90,7 +103,8 @@
       "add": "Add",
       "allInPack": "Every installed mod is already in this modpack.",
       "added": "Added {{mod}} to {{pack}}",
-      "addFailed": "Couldn't add {{mod}}: {{error}}"
+      "addFailed": "Couldn't add {{mod}}: {{error}}",
+      "inactiveToggleHint": "This modpack isn't active — enabling/disabling mods in-game is only available for the active modpack. Switch to it to manage what loads."
     },
     "edit": {
       "title": "Edit \"{{name}}\"",
@@ -100,6 +114,19 @@
       "cancel": "Cancel",
       "saved": "Updated \"{{name}}\" (+{{added}} / −{{removed}})",
       "failed": "Couldn't save changes: {{error}}"
+    },
+    "rename": {
+      "title": "Rename \"{{name}}\"",
+      "label": "New name",
+      "placeholder": "Enter a new modpack name",
+      "save": "Rename",
+      "saving": "Renaming…",
+      "cancel": "Cancel",
+      "collision": "A modpack with that name already exists.",
+      "empty": "Name can't be empty.",
+      "unchanged": "That's already the current name.",
+      "success": "Renamed \"{{old}}\" to \"{{new}}\".",
+      "failed": "Rename failed: {{error}}"
     },
     "storage": {
       "active": "Active in game",
@@ -142,6 +169,9 @@
     "step2SelectAll": "Select all",
     "step2DeselectAll": "Deselect all",
     "step2NoMods": "No installed mods match your search.",
+    "step2ShowSelected": "Show selected",
+    "step2HideSelected": "Hide",
+    "step2NoneSelected": "No mods selected",
     "step3Subtitle": "A quick look at the mods you've chosen.",
     "step3Checking": "Checking selected mods...",
     "step3Linked_one": "{{count}} mod has a linked source for updates",
@@ -152,6 +182,8 @@
     "step3Blocked_other": "{{count}} mods need a newer game version",
     "step3Frozen_one": "{{count}} frozen mod will stay at its current version",
     "step3Frozen_other": "{{count}} frozen mods will stay at their current version",
+    "step3Show": "Show mods",
+    "step3Hide": "Hide",
     "step3ContinueAnyway": "Continue anyway",
     "step4Subtitle": "Name your modpack, then create it.",
     "step4NameLabel": "Modpack name",
@@ -394,6 +426,7 @@
     "kebab": {
       "snapshotFromCurrent": "Snapshot from current install",
       "duplicate": "Duplicate",
+      "rename": "Rename",
       "exportJson": "Export JSON...",
       "copyShareCode": "Copy share code",
       "copyShareLink": "Copy share link",
@@ -1104,6 +1137,12 @@
       "ru": "Русский",
       "ar": "العربية"
     },
+    "theme": {
+      "label": "Theme",
+      "dark": "Dark",
+      "light": "Light",
+      "auto": "Auto"
+    },
     "accounts": {
       "nexusKey": "Nexus Mods API Key",
       "saved": "Saved ✓",
@@ -1212,7 +1251,6 @@
     "repairDesc": "Force-reinstall from GitHub. Use when version reads \"unknown\", the game refuses to load this mod, or the install otherwise looks broken.",
     "repairNeedSource": "Link a GitHub source first via \"Edit sources…\" — repair fetches from GitHub.",
     "subtitle": "{{total}} installed · {{enabled}} active{{disabled}}",
-    "openFolder": "Open mods folder",
     "importMod": "Import mod",
     "quickAddUrl": "Quick add URL",
     "autoDetectSources": "Auto-detect sources",
@@ -1240,6 +1278,7 @@
     "modActions": "Mod actions",
     "copyVersion": "Copy version (v{{version}})",
     "openModsFolder": "Open mods folder",
+    "openThisModFolder": "Open this mod's folder",
     "unsnoozeDesc": "Show the update suggestion again for the current upstream release.",
     "unsnoozeUpdate": "Show update again",
     "snoozeDesc": "Skip this update until a newer release appears upstream (currently v{{version}}). Use this when the website's announced version doesn't match the file's actual version.",

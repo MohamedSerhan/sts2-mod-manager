@@ -179,7 +179,7 @@ export function ProfileSwitcher({ onClose, onAddPack, onManageAll }: Props) {
                   width: 30,
                   height: 30,
                   borderRadius: 7,
-                  background: isActive ? 'var(--gf)' : 'oklch(0.30 0.05 280)',
+                  background: isActive ? 'var(--gf)' : 'var(--indigo-shimmer)',
                   color: isActive ? 'var(--gf-ink)' : 'var(--ink-mute)',
                   display: 'grid',
                   placeItems: 'center',

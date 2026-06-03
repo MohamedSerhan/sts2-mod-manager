@@ -804,6 +804,10 @@ pub(super) fn scan_mods_inner(dir: &Path, enabled: bool) -> Vec<ModInfo> {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
+                // Bug 5 diagnosability: remember the mod count so we can flag a
+                // non-empty folder that produced no installed mod below — that
+                // gap is exactly what makes a manifest count exceed the scan.
+                let mods_before = mods.len();
                 // A sidecar-tagged bundle container is represented as ONE
                 // ModInfo for the whole container (Model A). The container's
                 // folder_name == container dir name; files includes every file
@@ -948,6 +952,21 @@ pub(super) fn scan_mods_inner(dir: &Path, enabled: bool) -> Vec<ModInfo> {
                             }
                         }
                     }
+                }
+                // Bug 5: a folder that holds files yet yielded no mod is the
+                // diagnosable cause of a manifest-vs-scan count gap. (Empty /
+                // file-less folders are intentionally not mods — content-gating
+                // — so we stay silent on those to avoid noise.)
+                if mods.len() == mods_before
+                    && WalkDir::new(&path)
+                        .into_iter()
+                        .flatten()
+                        .any(|e| e.file_type().is_file())
+                {
+                    log::warn!(
+                        "scan: '{}' contains files but yielded no installed mod; manifest membership may exceed the on-disk count",
+                        path.display()
+                    );
                 }
             }
         }

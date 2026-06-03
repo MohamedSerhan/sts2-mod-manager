@@ -1,4 +1,4 @@
-import { ChevronDown, FolderOpen, Link, Plus, Search, Upload } from 'lucide-react';
+import { ChevronDown, Link, Plus, Search, Upload } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { KebabMenu, KebabSection, KebabItem } from './KebabMenu';
@@ -51,9 +51,6 @@ export function AddModsMenu({
             {t('mods.autoDetectSources')}
           </KebabItem>
         )}
-        <KebabItem icon={<FolderOpen size={12} />} onClick={lib.handleOpenFolder}>
-          {t('mods.openFolder')}
-        </KebabItem>
       </KebabSection>
     </KebabMenu>
   );

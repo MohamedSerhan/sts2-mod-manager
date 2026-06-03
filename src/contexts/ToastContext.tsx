@@ -120,8 +120,8 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
   const Icon = { success: Check, error: AlertCircle, info: Info }[toast.type];
   const iconColor = {
     success: 'var(--ok)',
-    error: 'oklch(0.75 0.13 25)',
-    info: 'oklch(0.75 0.10 250)',
+    error: 'var(--danger-bright)',
+    info: 'var(--info-ink-2)',
   }[toast.type];
 
   const shown = visible && !leaving;

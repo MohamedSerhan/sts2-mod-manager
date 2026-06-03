@@ -370,6 +370,38 @@ describe('<CreateModpackWizard>', () => {
   });
 
   describe('step 3 health summary', () => {
+    it('expands a health row to list exactly the mods it counts', async () => {
+      seed({
+        mods: [
+          baseMod({ name: 'Linked Update', enabled: true, folder_name: 'linked-update', github_url: 'https://github.com/o/l' }),
+          baseMod({ name: 'Plain One', enabled: true, folder_name: 'plain-one' }),
+        ],
+        audit: [
+          baseAudit({ mod_name: 'Linked Update', folder_name: 'linked-update', needs_update: true }),
+        ],
+      });
+      render(<Wrap />);
+      await chooseFromActive();
+      await clickNext();
+      // "1 mod has updates available" row is a disclosure button.
+      const updatesRow = await screen.findByRole('button', { name: /1 mod has updates available/i });
+      // Collapsed: the mod name is not yet listed.
+      expect(screen.queryByText('Linked Update')).toBeNull();
+      fireEvent.click(updatesRow);
+      // Expanded: exactly the updating mod is listed.
+      expect(await screen.findByText('Linked Update')).toBeInTheDocument();
+      expect(screen.queryByText('Plain One')).toBeNull(); // not an updating mod
+    });
+
+    it('does not make a zero-count row expandable', async () => {
+      seed({ mods: [baseMod({ name: 'Plain', enabled: true, folder_name: 'plain' })], audit: [] });
+      render(<Wrap />);
+      await chooseFromActive();
+      await clickNext();
+      await screen.findByText(/0 mods have updates available/i);
+      expect(screen.queryByRole('button', { name: /0 mods have updates available/i })).toBeNull();
+    });
+
     it('reads counts from the mocked audit_mod_versions response', async () => {
       seed({
         mods: [

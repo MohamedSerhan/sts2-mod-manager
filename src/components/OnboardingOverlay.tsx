@@ -252,7 +252,7 @@ export function OnboardingOverlay({
           {step === 'detect-game' && (!detected || gameSub === 'gameNotFound') && (
             <>
               <div className="gf-wiz-detect err">
-                <span className="gf-wiz-detect-ico" style={{ color: 'oklch(0.82 0.16 25)' }}>
+                <span className="gf-wiz-detect-ico" style={{ color: 'var(--danger-ink)' }}>
                   <AlertTriangle size={22} />
                 </span>
                 <div style={{ flex: 1 }}>
@@ -315,8 +315,8 @@ export function OnboardingOverlay({
                   textAlign: 'left',
                   padding: '14px 16px',
                   borderRadius: 10,
-                  background: 'oklch(0.62 0.14 145 / 0.10)',
-                  border: '1px solid oklch(0.62 0.14 145 / 0.5)',
+                  background: 'color-mix(in oklch, var(--green-edge) 10%, transparent)',
+                  border: '1px solid color-mix(in oklch, var(--green-edge) 50%, transparent)',
                   color: 'var(--ink)',
                   fontFamily: 'inherit',
                   cursor: 'pointer',

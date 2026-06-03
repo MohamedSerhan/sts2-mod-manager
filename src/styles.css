@@ -29,12 +29,12 @@
   --color-text-dim: oklch(0.55 0.02 285);
 }
 
-/* v5 raw tokens — used by the .gf-* utility classes below */
-:root {
-  /* Render every native control (select popups, scrollbars, date pickers)
-     in dark mode so OS-drawn widgets like <select> option lists aren't a
-     light popup with near-invisible text. */
-  color-scheme: dark;
+/* v5 raw tokens — now scoped per theme so .gf-* classes re-theme.
+   data-theme is always present (set pre-paint by the inline script in
+   index.html), so these are never undefined at runtime. */
+:root[data-theme="dark"] {
+  --app-color-scheme: dark;
+
   --gf:        oklch(0.78 0.13 80);
   --gf-hov:    oklch(0.83 0.13 80);
   --gf-ink:    oklch(0.18 0.04 285);
@@ -61,6 +61,222 @@
   /* Aliases used by batch 4 CSS — gold ramp for progress bars / wizard rail */
   --gold:       var(--gf);
   --gold-2:     oklch(0.83 0.13 80);
+
+  /* accent ramps — gold / amber support */
+  --gf-text:            oklch(0.86 0.13 82);
+  --gf-glow:            oklch(0.78 0.16 78);
+  --gf-shadow-hi:       oklch(0.85 0.13 78 / 0.7);
+  /* amber / warn ramp */
+  --warn-led:           oklch(0.72 0.15 70);
+  --warn-ink:           oklch(0.82 0.14 70);
+  --warn-pill-ink:      oklch(0.86 0.13 75);
+  --amber-ink:          oklch(0.85 0.12 70);
+  --amber-ink-2:        oklch(0.85 0.14 70);
+  --amber-glow:         oklch(0.78 0.16 60);
+  --ember-bright:       oklch(0.85 0.16 60);
+  --ember-edge:         oklch(0.60 0.16 60);
+  --gold-tint-base:     oklch(0.65 0.13 70);
+  --gold-pill-glow:     oklch(0.70 0.14 85);
+  /* danger / red ramp */
+  --danger-bright:      oklch(0.75 0.13 25);
+  --danger-strong:      oklch(0.78 0.13 25);
+  --danger-ink:         oklch(0.82 0.16 25);
+  --danger-ink-soft:    oklch(0.82 0.12 25);
+  --danger-ink-2:       oklch(0.85 0.12 25);
+  --danger-ink-3:       oklch(0.85 0.13 25);
+  --danger-msg:         var(--danger-text); /* alias: imperceptible dup of --danger-text */
+  --danger-text:        oklch(0.86 0.10 25);
+  --danger-edge:        oklch(0.55 0.16 25);
+  --danger-edge2:       oklch(0.55 0.18 25);
+  --danger-deep:        oklch(0.55 0.13 25);
+  --hero-fill-warm:     oklch(0.40 0.10 30); /* GitHub hero gradient warm stop */
+  --danger-fill-deep:   oklch(0.25 0.08 25);
+  --danger-line-strong: oklch(0.65 0.18 25 / 0.6);
+  /* success / green ramp */
+  --ok-bright:          oklch(0.66 0.13 165);
+  --ok-deep:            oklch(0.30 0.06 165);
+  --green-edge:         oklch(0.62 0.14 145);
+  --green-line:         oklch(0.62 0.14 145 / 0.6);
+  /* info / blue ramp */
+  --info:               oklch(0.55 0.13 250);
+  --info-ink:           oklch(0.78 0.10 250);
+  --info-ink-2:         oklch(0.75 0.10 250);
+  --info-text:          oklch(0.85 0.07 250);
+  /* nexus / source pill */
+  --nexus-ink:          oklch(0.78 0.13 55);
+  --nexus-base:         oklch(0.55 0.16 50);
+  /* indigo surface ramp (chrome, hovers, lines) */
+  --indigo-panel-2:     oklch(0.18 0.04 280);
+  --indigo-nav-hover:   oklch(0.20 0.05 280);
+  --indigo-hover:       oklch(0.22 0.04 280);
+  --indigo-hover2:      oklch(0.22 0.05 280);
+  --indigo-chip:        oklch(0.24 0.03 280);
+  --indigo-chip2:       oklch(0.28 0.04 280);
+  --indigo-btn-hover:   oklch(0.30 0.04 270);
+  --indigo-pill:        oklch(0.30 0.04 280);
+  --indigo-shimmer:     oklch(0.30 0.05 280);
+  --indigo-line2:       oklch(0.34 0.06 280);
+  --indigo-line3:       oklch(0.40 0.06 280);
+  /* blue surface ramp (copy / launch cards, H250) */
+  --blue-panel:         oklch(0.19 0.045 250);
+  --blue-hover:         oklch(0.22 0.04 250);
+  --blue-hover2:        oklch(0.22 0.05 250);
+  --blue-drag:          oklch(0.22 0.06 250);
+  --blue-line:          oklch(0.55 0.05 250);
+  /* dark wells / panel scrims (semi-transparent overlays) */
+  --panel-deep:         oklch(0.20 0.025 270);
+  --well-base:          oklch(0.10 0.02 270);
+  --well-deepest:       oklch(0.06 0.02 270);
+  --scrim-panel:        oklch(0.18 0.035 280);
+  /* pure-black scrims (do not theme) */
+  --scrim:              oklch(0 0 0 / 0.25);
+  --scrim-strong:       oklch(0 0 0 / 0.45);
+
+  /* Tailwind @theme tokens, re-pointed at the raw tokens so bg-surface /
+     text-text utilities re-theme. Overriding the emitted --color-* here wins
+     over the @theme :root defaults (higher specificity). */
+  --color-background: var(--indigo-bg);
+  --color-surface: var(--indigo-panel);
+  --color-surface-hover: var(--indigo-elev);
+  --color-border: var(--indigo-line);
+  --color-primary: var(--gf);
+  --color-primary-hover: var(--gf-hov);
+  --color-primary-ink: var(--gf-ink);
+  --color-accent: var(--ember);
+  --color-success: var(--ok);
+  --color-warning: var(--warn);
+  --color-danger: var(--danger);
+  --color-text: var(--ink);
+  --color-text-muted: var(--ink-mute);
+  --color-text-dim: var(--ink-dim);
+}
+
+/* Light palette — hand-authored. Surfaces invert to cool off-white, text to
+   near-black indigo, accent bases darken / de-chroma for AA contrast on light,
+   and pure-black scrims stay dark in both themes. Accent "ink/text" tokens
+   (light text on dark tints in dark mode) flip to dark so they read on the
+   light tints (which derive from the bases via color-mix). */
+:root[data-theme="light"] {
+  --app-color-scheme: light;
+
+  --gf:        oklch(0.70 0.14 78);
+  --gf-hov:    oklch(0.64 0.14 78);
+  --gf-ink:    oklch(0.22 0.03 285);
+  --gf-tint:   oklch(0.70 0.14 78 / 0.20);
+  --gf-line:   oklch(0.62 0.14 78 / 0.55);
+
+  --indigo-bg:    oklch(0.965 0.006 280);
+  --indigo-side:  oklch(0.945 0.008 280);
+  --indigo-top:   oklch(0.970 0.005 280);
+  --indigo-panel: oklch(0.995 0.003 280);
+  --indigo-elev:  oklch(0.970 0.007 280);
+  --indigo-deep:  oklch(0.920 0.012 280);
+  --indigo-line:  oklch(0.870 0.012 280);
+
+  --ink:        oklch(0.25 0.02 285);
+  --ink-mute:   oklch(0.45 0.02 285);
+  --ink-dim:    oklch(0.56 0.015 285);
+
+  --ember:      oklch(0.58 0.17 50);
+  --ok:         oklch(0.55 0.13 160);
+  --warn:       oklch(0.55 0.14 68);
+  --danger:     oklch(0.55 0.20 25);
+
+  --gold:       var(--gf);
+  --gold-2:     oklch(0.76 0.13 82);
+
+  /* accent ramps — gold / amber support (text/ink tokens flip dark) */
+  --gf-text:            oklch(0.50 0.12 78);
+  --gf-glow:            oklch(0.70 0.15 78);
+  --gf-shadow-hi:       oklch(0.92 0.07 82 / 0.6);
+  /* amber / warn ramp */
+  --warn-led:           oklch(0.62 0.16 70);
+  --warn-ink:           oklch(0.50 0.12 70);
+  --warn-pill-ink:      oklch(0.48 0.12 72);
+  --amber-ink:          oklch(0.48 0.12 70);
+  --amber-ink-2:        oklch(0.50 0.13 70);
+  --amber-glow:         oklch(0.70 0.16 60);
+  --ember-bright:       oklch(0.62 0.18 55);
+  --ember-edge:         oklch(0.58 0.16 60);
+  --gold-tint-base:     oklch(0.62 0.13 75);
+  --gold-pill-glow:     oklch(0.68 0.13 85);
+  /* danger / red ramp (ink/text flip dark for light tints) */
+  --danger-bright:      oklch(0.52 0.19 25);
+  --danger-strong:      oklch(0.50 0.19 25);
+  --danger-ink:         oklch(0.50 0.20 25);
+  --danger-ink-soft:    oklch(0.52 0.16 25);
+  --danger-ink-2:       oklch(0.52 0.17 25);
+  --danger-ink-3:       oklch(0.52 0.18 25);
+  --danger-msg:         var(--danger-text); /* alias: imperceptible dup of --danger-text */
+  --danger-text:        oklch(0.48 0.16 25);
+  --danger-edge:        oklch(0.55 0.18 25);
+  --danger-edge2:       oklch(0.55 0.20 25);
+  --danger-deep:        oklch(0.54 0.16 25);
+  --hero-fill-warm:     oklch(0.88 0.05 40); /* GitHub hero gradient warm stop */
+  --danger-fill-deep:   oklch(0.48 0.18 25); /* deeper than --danger */
+  --danger-line-strong: oklch(0.55 0.20 25 / 0.7);
+  /* success / green ramp */
+  --ok-bright:          oklch(0.52 0.14 160);
+  --ok-deep:            oklch(0.48 0.12 160); /* deeper than --ok-bright */
+  --green-edge:         oklch(0.55 0.15 145);
+  --green-line:         oklch(0.52 0.15 145 / 0.7);
+  /* info / blue ramp (ink/text flip dark) */
+  --info:               oklch(0.52 0.16 255);
+  --info-ink:           oklch(0.48 0.15 255);
+  --info-ink-2:         oklch(0.48 0.15 255);
+  --info-text:          oklch(0.45 0.14 255);
+  /* nexus / source pill */
+  --nexus-ink:          oklch(0.50 0.15 50);
+  --nexus-base:         oklch(0.55 0.16 50);
+  /* indigo surface ramp — surfaces lighten, lines darken for contrast */
+  --indigo-panel-2:     oklch(0.985 0.004 280);
+  --indigo-nav-hover:   oklch(0.930 0.012 280);
+  --indigo-hover:       oklch(0.950 0.008 280);
+  --indigo-hover2:      oklch(0.945 0.010 280);
+  --indigo-chip:        oklch(0.930 0.010 280);
+  --indigo-chip2:       oklch(0.900 0.012 280);
+  --indigo-btn-hover:   oklch(0.920 0.010 270);
+  --indigo-pill:        oklch(0.920 0.012 280);
+  --indigo-shimmer:     oklch(0.940 0.008 280);
+  --indigo-line2:       oklch(0.800 0.015 280);
+  --indigo-line3:       oklch(0.720 0.020 280);
+  /* blue surface ramp (copy / launch cards, H250) */
+  --blue-panel:         oklch(0.960 0.020 250);
+  --blue-hover:         oklch(0.940 0.025 250);
+  --blue-hover2:        oklch(0.930 0.030 250);
+  --blue-drag:          oklch(0.920 0.035 250);
+  --blue-line:          oklch(0.620 0.060 250);
+  /* light wells / panel scrims (semi-transparent overlays go light) */
+  --panel-deep:         oklch(0.920 0.010 270);
+  --well-base:          oklch(0.910 0.010 270);
+  --well-deepest:       oklch(0.900 0.010 270);
+  --scrim-panel:        oklch(0.970 0.006 280);
+  /* pure-black scrims (do not theme) */
+  --scrim:              oklch(0 0 0 / 0.25);
+  --scrim-strong:       oklch(0 0 0 / 0.45);
+
+  --color-background: var(--indigo-bg);
+  --color-surface: var(--indigo-panel);
+  --color-surface-hover: var(--indigo-elev);
+  --color-border: var(--indigo-line);
+  --color-primary: var(--gf);
+  --color-primary-hover: var(--gf-hov);
+  --color-primary-ink: var(--gf-ink);
+  --color-accent: var(--ember);
+  --color-success: var(--ok);
+  --color-warning: var(--warn);
+  --color-danger: var(--danger);
+  --color-text: var(--ink);
+  --color-text-muted: var(--ink-mute);
+  --color-text-dim: var(--ink-dim);
+}
+
+/* Drive native controls (select popups, scrollbars, date pickers) from the
+   active theme so OS-drawn widgets match. accent-color brands checkboxes/
+   radios with the gold instead of the OS default blue. */
+:root {
+  color-scheme: var(--app-color-scheme, dark);
+  accent-color: var(--gf, oklch(0.78 0.13 80));
 }
 
 body {
@@ -75,6 +291,12 @@ body {
 ::-webkit-scrollbar-track { background: var(--indigo-side); }
 ::-webkit-scrollbar-thumb { background: var(--indigo-line); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--indigo-elev); }
+
+/* Text selection — themed to the gold accent instead of the OS-default blue,
+   which clashes with the indigo/gold palette (in both light and dark).
+   Translucent so the selected text keeps its own colour and stays readable on
+   either surface; --gf is theme-reactive, so this re-themes automatically. */
+::selection { background-color: color-mix(in oklch, var(--gf) 45%, transparent); }
 
 /* ── Custom titlebar ─────────────────────────────────────────────── */
 .gf-titlebar {
@@ -111,7 +333,7 @@ body {
   font-size: 11px; cursor: pointer;
   display: grid; place-items: center;
 }
-.gf-titlebar-btn:hover { background: oklch(0.30 0.04 270); color: var(--ink); }
+.gf-titlebar-btn:hover { background: var(--indigo-btn-hover); color: var(--ink); }
 .gf-titlebar-close:hover { background: var(--danger); color: white; }
 
 .gf-resize-handle {
@@ -167,7 +389,7 @@ body {
   background: transparent; border: 0; width: 100%; text-align: left;
   font-family: inherit;
 }
-.gf-nav:hover { background: oklch(0.20 0.05 280); color: var(--ink); }
+.gf-nav:hover { background: var(--indigo-nav-hover); color: var(--ink); }
 .gf-nav.active {
   background: var(--indigo-elev);
   color: var(--ink);
@@ -324,7 +546,7 @@ body {
   align-items: center;
   gap: 4px;
   font-size: 11px;
-  color: var(--warn, #f59e0b);
+  color: var(--warn);
 }
 /* T16 review fix — Copy chips on shared modpack cards. Compact ghost
    icon-buttons that sit beside the share badge so users can copy the
@@ -353,7 +575,7 @@ body {
 .gf-modpack-card-copy-chip:hover {
   color: var(--ink);
   border-color: var(--accent, var(--ok));
-  background: oklch(0.22 0.04 250);
+  background: var(--blue-hover);
 }
 .gf-modpack-card-copy-chip:focus-visible {
   outline: 2px solid var(--accent, var(--ok));
@@ -376,15 +598,15 @@ body {
   gap: 4px;
   font-size: 11px;
   padding: 2px 8px;
-  border: 1px solid var(--warn, #f59e0b);
+  border: 1px solid var(--warn);
   border-radius: 999px 0 0 999px;
   background: transparent;
-  color: var(--warn, #f59e0b);
+  color: var(--warn);
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
 .gf-modpack-card-reshare-cta:hover {
-  background: color-mix(in oklch, var(--warn, #f59e0b) 16%, transparent);
+  background: color-mix(in oklch, var(--warn) 16%, transparent);
 }
 .gf-modpack-card-reshare-dismiss {
   display: inline-flex;
@@ -395,16 +617,16 @@ body {
   padding: 0;
   font-size: 14px;
   line-height: 1;
-  border: 1px solid var(--warn, #f59e0b);
+  border: 1px solid var(--warn);
   border-left: none;
   border-radius: 0 999px 999px 0;
   background: transparent;
-  color: var(--warn, #f59e0b);
+  color: var(--warn);
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
 .gf-modpack-card-reshare-dismiss:hover {
-  background: color-mix(in oklch, var(--warn, #f59e0b) 16%, transparent);
+  background: color-mix(in oklch, var(--warn) 16%, transparent);
 }
 .gf-modpack-card-reshare-cta:focus-visible,
 .gf-modpack-card-reshare-dismiss:focus-visible {
@@ -512,6 +734,57 @@ body {
   font-weight: 700;
   flex: 0 0 auto;
 }
+/* Bug 5: "(N missing)" note next to the manifest count when some manifest
+   entries have no mod on disk, so the header reconciles with the scan.
+   FB-D: hovering/focusing it reveals a tooltip listing the missing mods. */
+.gf-modpack-detail-missing {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: help;
+  flex: 0 0 auto;
+}
+.gf-modpack-detail-count-missing {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--warn);
+  white-space: nowrap;
+}
+.gf-modpack-detail-missing-tip {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  min-width: 160px;
+  max-width: 300px;
+  display: none;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  /* Theme tokens (no raw oklch literals) so it adapts with the theme. */
+  background: var(--indigo-elev);
+  border: 1px solid var(--indigo-line);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  font-size: 11.5px;
+  color: var(--ink);
+}
+.gf-modpack-detail-missing:hover .gf-modpack-detail-missing-tip,
+.gf-modpack-detail-missing:focus-within .gf-modpack-detail-missing-tip {
+  display: flex;
+}
+.gf-modpack-detail-missing-tip-head {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--ink-dim);
+  margin-bottom: 2px;
+}
+.gf-modpack-detail-missing-tip-item {
+  font-family: ui-monospace, monospace;
+  word-break: break-all;
+}
 .gf-modpack-detail-search {
   display: flex;
 }
@@ -533,7 +806,7 @@ body {
   transition: background 0.15s, border-color 0.15s;
 }
 .gf-modpack-detail-library-toggle:hover {
-  background: oklch(0.28 0.05 280);
+  background: var(--indigo-line);
   border-color: var(--gf-line);
 }
 .gf-modpack-detail-library-chevron {
@@ -694,7 +967,7 @@ body {
   border-left: 3px solid var(--ok);
 }
 .gf-profile-library-row.drag-over {
-  background: oklch(0.22 0.06 250);
+  background: var(--blue-drag);
 }
 
 .gf-profile-library-launch {
@@ -704,10 +977,10 @@ body {
   width: min(680px, 100%);
   min-height: 74px;
   padding: 12px 14px;
-  border: 1px solid oklch(0.74 0.11 165 / 0.50);
+  border: 1px solid color-mix(in oklch, var(--ok) 50%, transparent);
   border-left: 4px solid var(--ok);
   border-radius: 8px;
-  background: oklch(0.19 0.045 250);
+  background: var(--blue-panel);
   color: var(--ink);
   text-align: left;
   cursor: pointer;
@@ -715,7 +988,7 @@ body {
 }
 .gf-profile-library-launch:hover {
   border-color: var(--ok);
-  background: oklch(0.22 0.05 250);
+  background: var(--blue-hover2);
   transform: translateY(-1px);
 }
 .gf-profile-library-launch:focus-visible {
@@ -730,7 +1003,7 @@ body {
   width: 38px;
   height: 38px;
   border-radius: 8px;
-  background: oklch(0.74 0.11 165 / 0.16);
+  background: color-mix(in oklch, var(--ok) 16%, transparent);
   color: var(--ok);
 }
 .gf-profile-library-launch-copy {
@@ -766,7 +1039,7 @@ body {
 }
 /* 4.4 — the whole row is a click target that opens Edit sources. */
 .gf-profile-library-row.is-clickable { cursor: pointer; }
-.gf-profile-library-row.is-clickable:hover { background: oklch(0.22 0.05 280); }
+.gf-profile-library-row.is-clickable:hover { background: var(--indigo-hover2); }
 .gf-profile-library-row.is-clickable:focus-visible {
   outline: 2px solid var(--gf);
   outline-offset: -2px;
@@ -843,7 +1116,7 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.03em;
   color: var(--ink-mute);
-  background: oklch(0.28 0.04 280);
+  background: var(--indigo-chip2);
   border: 1px solid var(--indigo-line);
   border-radius: 4px;
   padding: 1px 6px;
@@ -872,14 +1145,14 @@ body {
   padding: 4px 9px;
   border-radius: 6px;
   color: var(--ink-dim);
-  background: oklch(0.24 0.03 280);
+  background: var(--indigo-chip);
   border: 1px solid var(--indigo-line);
   white-space: nowrap;
 }
 .gf-row-inpack.is-in {
   color: var(--ok);
-  background: oklch(0.74 0.11 165 / 0.12);
-  border-color: oklch(0.74 0.11 165 / 0.35);
+  background: color-mix(in oklch, var(--ok) 12%, transparent);
+  border-color: color-mix(in oklch, var(--ok) 35%, transparent);
 }
 /* Visible delete button — sits just left of the kebab. Reads as a quiet
    icon button until hover, which turns it danger-red. */
@@ -900,8 +1173,8 @@ body {
 }
 .gf-row-delete:hover:not(:disabled) {
   color: var(--danger);
-  border-color: oklch(0.65 0.18 25 / 0.5);
-  background: oklch(0.65 0.18 25 / 0.12);
+  border-color: color-mix(in oklch, var(--danger) 50%, transparent);
+  background: color-mix(in oklch, var(--danger) 12%, transparent);
 }
 .gf-row-delete:disabled { opacity: 0.4; cursor: not-allowed; }
 /* Modpack view: the visible row action is "Remove from pack" (membership,
@@ -926,8 +1199,8 @@ body {
 }
 .gf-row-remove:hover:not(:disabled) {
   color: var(--danger);
-  border-color: oklch(0.65 0.18 25 / 0.5);
-  background: oklch(0.65 0.18 25 / 0.12);
+  border-color: color-mix(in oklch, var(--danger) 50%, transparent);
+  background: color-mix(in oklch, var(--danger) 12%, transparent);
 }
 .gf-row-remove:disabled { opacity: 0.4; cursor: not-allowed; }
 .gf-profile-library-title {
@@ -964,6 +1237,16 @@ body {
   justify-content: space-between;
   gap: 10px;
   margin-bottom: 2px;
+}
+/* FB2-A: dedicated second row under the toolbar for the pack's bulk actions
+   (Open mods folder / Enable all / Disable all), so they never crowd the
+   search + Add mods / Edit / Load order row or get clipped. */
+.gf-profile-library-bulk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 6px;
 }
 .gf-profile-library-search {
   flex: 1 1 280px;
@@ -1063,7 +1346,7 @@ body {
 .gf-profile-library-help {
   border: 1px solid var(--indigo-line);
   border-radius: 7px;
-  background: oklch(0.18 0.035 280 / 0.70);
+  background: color-mix(in oklch, var(--scrim-panel) 70%, transparent);
   color: var(--ink-mute);
   font-size: 12px;
   line-height: 1.45;
@@ -1097,7 +1380,7 @@ body {
 .gf-load-order-note {
   flex: 0 0 auto;
   border: 1px solid var(--indigo-line);
-  background: oklch(0.18 0.035 280 / 0.72);
+  background: color-mix(in oklch, var(--scrim-panel) 72%, transparent);
   border-radius: 7px;
   padding: 9px 11px;
   margin-bottom: 12px;
@@ -1250,7 +1533,7 @@ body {
   font-family: inherit;
   color: var(--ink);
 }
-.gf-prof:hover { background: oklch(0.28 0.05 280); }
+.gf-prof:hover { background: var(--indigo-line); }
 .gf-prof-avatar {
   width: 24px; height: 24px;
   border-radius: 5px;
@@ -1286,20 +1569,20 @@ body {
 .gf-game-status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .gf-game-status.is-ok {
   color: var(--ok);
-  border-color: oklch(0.74 0.11 165 / 0.35);
-  background: oklch(0.74 0.11 165 / 0.10);
+  border-color: color-mix(in oklch, var(--ok) 35%, transparent);
+  background: color-mix(in oklch, var(--ok) 10%, transparent);
 }
 .gf-game-status.is-ok .gf-game-status-dot {
   background: var(--ok);
   box-shadow: 0 0 6px var(--ok);
 }
-.gf-game-status.is-ok:hover { background: oklch(0.74 0.11 165 / 0.18); }
+.gf-game-status.is-ok:hover { background: color-mix(in oklch, var(--ok) 18%, transparent); }
 .gf-game-status.is-warn {
   color: var(--warn);
-  border-color: oklch(0.78 0.13 75 / 0.40);
-  background: oklch(0.78 0.13 75 / 0.12);
+  border-color: color-mix(in oklch, var(--warn) 40%, transparent);
+  background: color-mix(in oklch, var(--warn) 12%, transparent);
 }
-.gf-game-status.is-warn:hover { background: oklch(0.78 0.13 75 / 0.20); }
+.gf-game-status.is-warn:hover { background: color-mix(in oklch, var(--warn) 20%, transparent); }
 
 /* ── Buttons (gold flat = primary, slate = secondary, ghost = tertiary) ── */
 .gf-btn {
@@ -1317,18 +1600,18 @@ body {
   gap: 8px;
   white-space: nowrap;
   transition: background 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease, filter 0.15s ease;
-  box-shadow: 0 1px 0 oklch(0.78 0.13 78 / 0.55) inset, 0 1px 2px oklch(0 0 0 / 0.25);
+  box-shadow: 0 1px 0 color-mix(in oklch, var(--gf) 55%, transparent) inset, 0 1px 2px var(--scrim);
 }
 .gf-btn:hover:not(:disabled) {
   background: var(--gf-hov);
   filter: brightness(1.06);
-  box-shadow: 0 1px 0 oklch(0.85 0.13 78 / 0.7) inset, 0 4px 12px oklch(0.78 0.16 78 / 0.35);
+  box-shadow: 0 1px 0 var(--gf-shadow-hi) inset, 0 4px 12px color-mix(in oklch, var(--gf-glow) 35%, transparent);
   transform: translateY(-1px);
 }
 .gf-btn:active:not(:disabled) {
   transform: translateY(0);
   filter: brightness(0.97);
-  box-shadow: 0 1px 0 oklch(0.78 0.13 78 / 0.55) inset, 0 1px 2px oklch(0 0 0 / 0.25);
+  box-shadow: 0 1px 0 color-mix(in oklch, var(--gf) 55%, transparent) inset, 0 1px 2px var(--scrim);
 }
 .gf-btn:focus-visible {
   outline: 2px solid var(--gf);
@@ -1370,7 +1653,7 @@ body {
   white-space: nowrap;
   transition: background 0.15s;
 }
-.gf-btn-2:hover:not(:disabled) { background: oklch(0.28 0.05 280); }
+.gf-btn-2:hover:not(:disabled) { background: var(--indigo-line); }
 .gf-btn-2:disabled { opacity: 0.4; cursor: not-allowed; }
 .gf-btn-2-sm { padding: 6px 11px; font-size: 12px; gap: 6px; }
 
@@ -1392,15 +1675,15 @@ body {
 .gf-btn-3:disabled { opacity: 0.4; cursor: not-allowed; }
 .gf-btn-icon { padding: 7px; width: 30px; justify-content: center; }
 
-.gf-btn-danger { color: oklch(0.75 0.13 25); border-color: oklch(0.55 0.16 25 / 0.4); }
-.gf-btn-danger:hover:not(:disabled) { background: oklch(0.55 0.16 25 / 0.15); color: oklch(0.85 0.13 25); }
+.gf-btn-danger { color: var(--danger-bright); border-color: color-mix(in oklch, var(--danger-edge) 40%, transparent); }
+.gf-btn-danger:hover:not(:disabled) { background: color-mix(in oklch, var(--danger-edge) 15%, transparent); color: var(--danger-ink-3); }
 
 /* Accent (gold) outline — the library's "Auto-detect sources" shortcut. Same
    shape as .gf-btn-3 (ghost) with a gold border/text so it draws the eye
    without the weight of the filled-yellow primary action. Defined after
    .gf-btn-3 so its border/colour win at equal specificity. */
-.gf-btn-accent { color: var(--gold-2); border-color: oklch(0.83 0.13 80 / 0.5); }
-.gf-btn-accent:hover:not(:disabled) { background: oklch(0.83 0.13 80 / 0.12); color: var(--gold); }
+.gf-btn-accent { color: var(--gold-2); border-color: color-mix(in oklch, var(--gold-2) 50%, transparent); }
+.gf-btn-accent:hover:not(:disabled) { background: color-mix(in oklch, var(--gold-2) 12%, transparent); color: var(--gold); }
 
 /* ── Card / panel ─────────────────────────────────────────────────── */
 .gf-card {
@@ -1413,7 +1696,7 @@ body {
   transition: border-color 0.15s ease, background 0.15s ease;
 }
 .gf-pack-row:hover, .gf-backup:hover, .gf-set-row:hover {
-  border-color: oklch(0.34 0.06 280);
+  border-color: var(--indigo-line2);
 }
 
 /* Home page footer — sits below the hero so the launcher doesn't feel
@@ -1530,7 +1813,7 @@ body {
   padding: 0 28px 0 10px;
   outline: none;
   /* Render the native <option> popup dark to match the dropdown. */
-  color-scheme: dark;
+  color-scheme: var(--app-color-scheme);
 }
 .gf-sort-control select:focus { border-color: var(--gf-line); }
 .gf-sort-control select option {
@@ -1612,13 +1895,13 @@ body {
   gap: 4px;
   transition: filter 0.12s ease, transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
 }
-.gf-pill-github { background: oklch(0.30 0.04 280); color: var(--ink-mute); }
-.gf-pill-nexus { background: oklch(0.55 0.16 50 / 0.18); color: oklch(0.78 0.13 55); }
+.gf-pill-github { background: var(--indigo-pill); color: var(--ink-mute); }
+.gf-pill-nexus { background: color-mix(in oklch, var(--nexus-base) 18%, transparent); color: var(--nexus-ink); }
 .gf-pill-update { background: var(--gf-tint); color: var(--gf); border: 1px solid var(--gf-line); }
 /* The update pill is a button — make it read as clickable. */
 .gf-pill-update { cursor: pointer; }
 .gf-pill-update:hover:not(:disabled) {
-  background: oklch(0.78 0.13 80 / 0.30);
+  background: color-mix(in oklch, var(--gf) 30%, transparent);
   filter: brightness(1.06);
   transform: translateY(-1px);
 }
@@ -1642,10 +1925,10 @@ body {
 .gf-source-link .gf-pill { cursor: pointer; }
 /* "Active" means active-in-game everywhere — render it in the --ok green
    (matching the modpack-detail ACTIVE badge), not the gold update tint. */
-.gf-pill-active { background: oklch(0.74 0.11 165 / 0.18); color: var(--ok); border: 1px solid oklch(0.74 0.11 165 / 0.30); }
-.gf-pill-ok { background: oklch(0.74 0.11 165 / 0.18); color: var(--ok); }
-.gf-pill-warn { background: oklch(0.78 0.16 60 / 0.18); color: oklch(0.86 0.13 75); border: 1px solid oklch(0.78 0.16 60 / 0.28); }
-.gf-pill-beta { background: oklch(0.70 0.14 85 / 0.16); color: oklch(0.86 0.13 82); border: 1px solid oklch(0.70 0.14 85 / 0.28); }
+.gf-pill-active { background: color-mix(in oklch, var(--ok) 18%, transparent); color: var(--ok); border: 1px solid color-mix(in oklch, var(--ok) 30%, transparent); }
+.gf-pill-ok { background: color-mix(in oklch, var(--ok) 18%, transparent); color: var(--ok); }
+.gf-pill-warn { background: color-mix(in oklch, var(--amber-glow) 18%, transparent); color: var(--warn-pill-ink); border: 1px solid color-mix(in oklch, var(--amber-glow) 28%, transparent); }
+.gf-pill-beta { background: color-mix(in oklch, var(--gold-pill-glow) 16%, transparent); color: var(--gf-text); border: 1px solid color-mix(in oklch, var(--gold-pill-glow) 28%, transparent); }
 .gf-pill-toolbar { padding: 6px 10px; font-size: 13px; }
 
 /* 1.7.0 T17 — Library row simplification. The row is a click-to-expand
@@ -1660,7 +1943,7 @@ body {
   overflow: hidden;
   transition: border-color 120ms ease;
 }
-.gf-modrow:hover { border-color: oklch(0.55 0.05 250 / 0.5); }
+.gf-modrow:hover { border-color: color-mix(in oklch, var(--blue-line) 50%, transparent); }
 .gf-modrow.gf-mod-pinned { border-left: 2px solid var(--gf); }
 .gf-modrow-meta {
   /* Description/note sit in the identity column — align flush-left with
@@ -1727,14 +2010,14 @@ body {
 }
 .gf-banner-icon { font-size: 16px; flex-shrink: 0; display: inline-flex; }
 .gf-banner-warn {
-  background: oklch(0.60 0.16 60 / 0.12);
-  border-color: oklch(0.60 0.16 60 / 0.4);
-  color: oklch(0.85 0.12 70);
+  background: color-mix(in oklch, var(--ember-edge) 12%, transparent);
+  border-color: color-mix(in oklch, var(--ember-edge) 40%, transparent);
+  color: var(--amber-ink);
 }
 .gf-banner-info {
-  background: oklch(0.55 0.13 250 / 0.14);
-  border-color: oklch(0.55 0.13 250 / 0.4);
-  color: oklch(0.85 0.07 250);
+  background: color-mix(in oklch, var(--info) 14%, transparent);
+  border-color: color-mix(in oklch, var(--info) 40%, transparent);
+  color: var(--info-text);
 }
 
 /* ── Settings sub-tabs ────────────────────────────────────────────── */
@@ -1769,7 +2052,7 @@ body {
 
 /* ── Hero (single-hero home) ──────────────────────────────────────── */
 .gf-hero {
-  background: linear-gradient(180deg, oklch(0.22 0.05 280), oklch(0.18 0.04 280));
+  background: linear-gradient(180deg, var(--indigo-hover2), var(--indigo-panel-2));
   border: 1px solid var(--indigo-line);
   border-radius: 14px;
   padding: 28px;
@@ -1866,8 +2149,8 @@ body {
   font-family: inherit;
 }
 .gf-sharecode-chip:hover {
-  background: oklch(0.30 0.06 165 / 0.18);
-  border-color: oklch(0.66 0.13 165 / 0.55);
+  background: color-mix(in oklch, var(--ok-deep) 18%, transparent);
+  border-color: color-mix(in oklch, var(--ok-bright) 55%, transparent);
 }
 .gf-sharecode-chip:focus-visible {
   outline: 2px solid var(--gf);
@@ -2001,11 +2284,11 @@ body {
   border-color: var(--gf);
 }
 @keyframes gf-quickadd-pulse {
-  0%   { box-shadow: 0 0 0 0 oklch(0.78 0.16 78 / 0); border-color: var(--indigo-line); }
-  20%  { box-shadow: 0 0 0 6px oklch(0.78 0.16 78 / 0.35); border-color: var(--gf); }
-  50%  { box-shadow: 0 0 0 2px oklch(0.78 0.16 78 / 0.15); border-color: var(--gf); }
-  80%  { box-shadow: 0 0 0 6px oklch(0.78 0.16 78 / 0.25); border-color: var(--gf); }
-  100% { box-shadow: 0 0 0 0 oklch(0.78 0.16 78 / 0); border-color: var(--indigo-line); }
+  0%   { box-shadow: 0 0 0 0 color-mix(in oklch, var(--gf-glow) 0%, transparent); border-color: var(--indigo-line); }
+  20%  { box-shadow: 0 0 0 6px color-mix(in oklch, var(--gf-glow) 35%, transparent); border-color: var(--gf); }
+  50%  { box-shadow: 0 0 0 2px color-mix(in oklch, var(--gf-glow) 15%, transparent); border-color: var(--gf); }
+  80%  { box-shadow: 0 0 0 6px color-mix(in oklch, var(--gf-glow) 25%, transparent); border-color: var(--gf); }
+  100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--gf-glow) 0%, transparent); border-color: var(--indigo-line); }
 }
 
 /* Inline link styled as text. Used for "View all in Profiles" etc. */
@@ -2023,7 +2306,7 @@ body {
   gap: 2px;
   transition: color 0.15s ease, background 0.15s ease;
 }
-.gf-link-button:hover { color: var(--gf); background: oklch(0.22 0.04 280); }
+.gf-link-button:hover { color: var(--gf); background: var(--indigo-hover); }
 .gf-link-button:focus-visible {
   outline: 2px solid var(--gf);
   outline-offset: 2px;
@@ -2039,7 +2322,7 @@ body {
   background: var(--indigo-panel);
   border: 1px solid var(--indigo-line);
   border-radius: 10px;
-  box-shadow: 0 18px 50px oklch(0 0 0 / 0.45);
+  box-shadow: 0 18px 50px var(--scrim-strong);
   padding: 6px;
   z-index: 50;
 }
@@ -2110,11 +2393,11 @@ body {
 }
 .gf-kebab-item:hover .gf-kebab-desc { color: var(--ink-mute); }
 .gf-kebab-divider { height: 1px; background: var(--indigo-line); margin: 4px 0; }
-.gf-kebab-danger { color: oklch(0.75 0.13 25); }
-.gf-kebab-danger:hover { background: oklch(0.55 0.16 25 / 0.18); color: oklch(0.85 0.13 25); }
+.gf-kebab-danger { color: var(--danger-bright); }
+.gf-kebab-danger:hover { background: color-mix(in oklch, var(--danger-edge) 18%, transparent); color: var(--danger-ink-3); }
 
 .gf-src-edit {
-  background: oklch(0.20 0.025 270 / 0.7);
+  background: color-mix(in oklch, var(--panel-deep) 70%, transparent);
   border: 1px solid var(--indigo-line);
   border-top: 0;
   border-radius: 0 0 9px 9px;
@@ -2136,7 +2419,7 @@ body {
   cursor: pointer; text-decoration: underline;
   background: transparent; border: 0; font-family: inherit;
 }
-.gf-src-edit-clear:hover { color: oklch(0.75 0.13 25); }
+.gf-src-edit-clear:hover { color: var(--danger-bright); }
 .gf-src-edit-input {
   display: flex; align-items: center; gap: 8px;
   background: var(--indigo-deep); border: 1px solid var(--indigo-line);
@@ -2171,7 +2454,7 @@ body {
   font-size: 10.5px; padding: 2px 7px; border-radius: 999px;
   white-space: nowrap;
 }
-.gf-src-edit-status-ok { color: var(--ok); background: oklch(0.74 0.11 165 / 0.18); }
+.gf-src-edit-status-ok { color: var(--ok); background: color-mix(in oklch, var(--ok) 18%, transparent); }
 .gf-src-edit-status-empty { color: var(--ink-dim); background: var(--indigo-line); }
 .gf-src-edit-hint { font-size: 10.5px; color: var(--ink-dim); }
 .gf-src-edit-hint code {
@@ -2188,7 +2471,7 @@ body {
 /* ── Batch 3: modals / banners / patterns ─────────────────────────────── */
 .gf-modal-back {
   position: absolute; inset: 0; z-index: 50;
-  background: oklch(0.10 0.02 270 / 0.6);
+  background: color-mix(in oklch, var(--well-base) 60%, transparent);
   backdrop-filter: blur(4px);
   display: grid; place-items: center;
   animation: gf-fade-in 0.18s ease-out;
@@ -2230,7 +2513,7 @@ body {
   display: flex; flex-direction: column;
   border: 1px solid var(--indigo-line);
   border-radius: 7px; overflow: hidden;
-  background: oklch(0.20 0.025 270 / 0.5);
+  background: color-mix(in oklch, var(--panel-deep) 50%, transparent);
 }
 .gf-mod-row {
   display: flex; align-items: center; justify-content: space-between;
@@ -2242,7 +2525,7 @@ body {
 
 .gf-field { margin-bottom: 12px; }
 .gf-field-label { display: block; font-size: 11.5px; color: var(--ink-mute); margin-bottom: 5px; font-weight: 500; }
-.gf-includes { background: oklch(0.20 0.025 270 / 0.5); border: 1px solid var(--indigo-line); border-radius: 7px; padding: 9px 12px; }
+.gf-includes { background: color-mix(in oklch, var(--panel-deep) 50%, transparent); border: 1px solid var(--indigo-line); border-radius: 7px; padding: 9px 12px; }
 .gf-includes-row { font-size: 12.5px; color: var(--ink-mute); padding: 3px 0; }
 .gf-includes-stat { display: inline-block; min-width: 24px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
 
@@ -2267,15 +2550,15 @@ body {
   display: grid; grid-template-columns: 100px 1fr auto;
   gap: 10px; align-items: center;
   padding: 8px 10px; border-radius: 6px;
-  background: oklch(0.20 0.025 270 / 0.5);
+  background: color-mix(in oklch, var(--panel-deep) 50%, transparent);
   font-size: 12.5px;
 }
 .gf-cl-tag { font-size: 10.5px; font-weight: 700; letter-spacing: 0.4px; padding: 2px 7px; border-radius: 4px; text-align: center; }
 .gf-cl-name { color: var(--ink); font-weight: 600; }
 .gf-cl-meta { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; color: var(--ink-dim); }
-.gf-cl-add .gf-cl-tag { background: oklch(0.74 0.11 165 / 0.2); color: var(--ok); }
-.gf-cl-upd .gf-cl-tag { background: oklch(0.65 0.13 70 / 0.2); color: var(--gf); }
-.gf-cl-rem .gf-cl-tag { background: oklch(0.55 0.16 25 / 0.18); color: oklch(0.75 0.13 25); }
+.gf-cl-add .gf-cl-tag { background: color-mix(in oklch, var(--ok) 20%, transparent); color: var(--ok); }
+.gf-cl-upd .gf-cl-tag { background: color-mix(in oklch, var(--gold-tint-base) 20%, transparent); color: var(--gf); }
+.gf-cl-rem .gf-cl-tag { background: color-mix(in oklch, var(--danger-edge) 18%, transparent); color: var(--danger-bright); }
 .gf-cl-tog .gf-cl-tag { background: var(--indigo-line); color: var(--ink-mute); }
 
 /* Browse mod detail */
@@ -2287,7 +2570,7 @@ body {
 /* Drag-drop overlay */
 .gf-dropzone {
   position: absolute; inset: 0; z-index: 60;
-  background: oklch(0.10 0.02 270 / 0.7);
+  background: color-mix(in oklch, var(--well-base) 70%, transparent);
   backdrop-filter: blur(2px);
   display: grid; place-items: center;
   pointer-events: none;
@@ -2317,18 +2600,18 @@ body {
   display: flex; align-items: baseline; gap: 8px;
 }
 .gf-detect-stat span { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
-.gf-detect-stat.ok { background: oklch(0.74 0.11 165 / 0.15); color: var(--ok); }
-.gf-detect-stat.warn { background: oklch(0.60 0.16 60 / 0.15); color: oklch(0.85 0.12 70); }
-.gf-detect-stat.err { background: oklch(0.55 0.16 25 / 0.15); color: oklch(0.85 0.13 25); }
+.gf-detect-stat.ok { background: color-mix(in oklch, var(--ok) 15%, transparent); color: var(--ok); }
+.gf-detect-stat.warn { background: color-mix(in oklch, var(--ember-edge) 15%, transparent); color: var(--amber-ink); }
+.gf-detect-stat.err { background: color-mix(in oklch, var(--danger-edge) 15%, transparent); color: var(--danger-ink-3); }
 .gf-detect-list { display: flex; flex-direction: column; gap: 4px; }
 .gf-detect-row {
   display: flex; align-items: center; gap: 10px;
   padding: 8px 12px; border-radius: 6px;
-  background: oklch(0.20 0.025 270 / 0.5); font-size: 12.5px;
+  background: color-mix(in oklch, var(--panel-deep) 50%, transparent); font-size: 12.5px;
 }
 .gf-detect-led { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex-shrink: 0; }
-.gf-detect-warn .gf-detect-led { background: oklch(0.72 0.15 70); }
-.gf-detect-err .gf-detect-led { background: oklch(0.65 0.18 25); }
+.gf-detect-warn .gf-detect-led { background: var(--warn-led); }
+.gf-detect-err .gf-detect-led { background: var(--danger); }
 .gf-detect-name { font-weight: 600; color: var(--ink); min-width: 130px; }
 .gf-detect-match { flex: 1; font-family: ui-monospace, monospace; font-size: 11.5px; color: var(--ink-dim); }
 
@@ -2382,12 +2665,12 @@ body {
 .gf-toast button { pointer-events: auto; }
 .gf-toast-ico { font-size: 14px; width: 18px; text-align: center; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; }
 .gf-toast-success { border-left: 3px solid var(--ok); }
-.gf-toast-info { border-left: 3px solid oklch(0.55 0.13 250); }
-.gf-toast-error { border-left: 3px solid oklch(0.65 0.18 25); }
+.gf-toast-info { border-left: 3px solid var(--info); }
+.gf-toast-error { border-left: 3px solid var(--danger); }
 @keyframes gfspin { to { transform: rotate(360deg); } }
 
 /* Onboarding wizard chrome */
-.gf-wiz-back { position: absolute; inset: 0; z-index: 50; background: oklch(0.10 0.02 270 / 0.85); display: grid; place-items: center; }
+.gf-wiz-back { position: absolute; inset: 0; z-index: 50; background: color-mix(in oklch, var(--well-base) 85%, transparent); display: grid; place-items: center; }
 .gf-wiz {
   width: 640px; max-width: 90%; max-height: 90%;
   background: var(--indigo-panel); border: 1px solid var(--indigo-line);
@@ -2413,8 +2696,8 @@ body {
   padding: 14px; background: var(--indigo-deep); border-radius: 10px;
   border: 1px solid var(--indigo-line);
 }
-.gf-wiz-detect.ok { border-color: oklch(0.62 0.14 145 / 0.5); background: oklch(0.62 0.14 145 / 0.08); }
-.gf-wiz-detect.err { border-color: oklch(0.65 0.18 25 / 0.5); background: oklch(0.65 0.18 25 / 0.08); }
+.gf-wiz-detect.ok { border-color: color-mix(in oklch, var(--green-edge) 50%, transparent); background: color-mix(in oklch, var(--green-edge) 8%, transparent); }
+.gf-wiz-detect.err { border-color: color-mix(in oklch, var(--danger) 50%, transparent); background: color-mix(in oklch, var(--danger) 8%, transparent); }
 .gf-wiz-detect-ico { font-size: 22px; width: 36px; text-align: center; }
 .gf-wiz-detect-t { font-size: 14px; font-weight: 600; color: var(--ink); }
 .gf-wiz-detect-s { font-size: 12px; color: var(--ink-mute); margin-top: 3px; font-family: ui-monospace, monospace; }
@@ -2422,12 +2705,12 @@ body {
 /* Validation states (input + helper text) */
 .gf-input-row { display: flex; gap: 6px; align-items: stretch; }
 .gf-input-row .gf-set-input { flex: 1; }
-.gf-set-input.is-ok { border-color: oklch(0.62 0.14 145 / 0.6); }
-.gf-set-input.is-err { border-color: oklch(0.65 0.18 25 / 0.6); }
+.gf-set-input.is-ok { border-color: var(--green-line); }
+.gf-set-input.is-err { border-color: var(--danger-line-strong); }
 /* Render native control chrome dark so <select> popups show light,
    readable <option> text instead of the OS default (light popup + faint
    text) — same reason .gf-sort-control select sets this. */
-.gf-set-input { color-scheme: dark; }
+.gf-set-input { color-scheme: var(--app-color-scheme); }
 /* Belt-and-suspenders for browsers that honor option styling: dark popup
    rows with readable text (matches .gf-sort-control select option). */
 .gf-set-input option {
@@ -2436,23 +2719,27 @@ body {
 }
 .gf-help { font-size: 11.5px; margin-top: 6px; display: flex; align-items: center; gap: 6px; }
 .gf-help.ok { color: var(--ok); }
-.gf-help.err { color: oklch(0.82 0.16 25); }
-.gf-help.warn { color: oklch(0.85 0.14 70); }
+.gf-help.err { color: var(--danger-ink); }
+.gf-help.warn { color: var(--amber-ink-2); }
 .gf-help.muted { color: var(--ink-mute); }
 
-.gf-language-select {
+.gf-language-select,
+.gf-theme-select {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 5px;
   max-width: 220px;
 }
-.gf-language-select .gf-field-label { margin-bottom: 0; }
-.gf-language-select select { min-width: 180px; }
+.gf-language-select .gf-field-label,
+.gf-theme-select .gf-field-label { margin-bottom: 0; }
+.gf-language-select select,
+.gf-theme-select select { min-width: 180px; }
 /* Native <option> elements inherit unpredictable system colors on
    Windows/Linux against the dark panel background — the dropdown
    list rendered nearly invisible. Force readable contrast. */
-.gf-language-select select option {
+.gf-language-select select option,
+.gf-theme-select select option {
   background-color: var(--indigo-panel);
   color: var(--ink);
 }
@@ -2505,16 +2792,16 @@ body {
 .gf-log-line .ts { color: var(--ink-mute); }
 .gf-log-line .lvl { font-weight: 600; }
 .gf-log-line .msg { color: var(--ink); white-space: pre-wrap; word-break: break-word; }
-.gf-log-line.info .lvl { color: oklch(0.78 0.10 250); }
-.gf-log-line.warn .lvl { color: oklch(0.82 0.14 70); }
-.gf-log-line.err  .lvl { color: oklch(0.82 0.16 25); }
+.gf-log-line.info .lvl { color: var(--info-ink); }
+.gf-log-line.warn .lvl { color: var(--warn-ink); }
+.gf-log-line.err  .lvl { color: var(--danger-ink); }
 .gf-log-line.dbg  .lvl { color: var(--ink-mute); }
-.gf-log-line.err .msg { color: oklch(0.86 0.10 25); }
+.gf-log-line.err .msg { color: var(--danger-text); }
 .gf-chip-filter { font-size: 11px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--indigo-line); background: transparent; color: var(--ink-mute); cursor: pointer; }
 .gf-chip-filter.on { background: var(--gold); color: #1a1306; border-color: var(--gold); font-weight: 600; }
 
 /* Game-launch states */
-.gf-launch-back { position: absolute; inset: 0; z-index: 60; background: oklch(0.06 0.02 270 / 0.92); display: grid; place-items: center; }
+.gf-launch-back { position: absolute; inset: 0; z-index: 60; background: color-mix(in oklch, var(--well-deepest) 92%, transparent); display: grid; place-items: center; }
 .gf-launch-card { text-align: center; max-width: 460px; padding: 24px; }
 .gf-launch-t { font-size: 22px; font-weight: 700; color: var(--ink); margin-bottom: 6px; }
 .gf-launch-s { font-size: 13px; color: var(--ink-mute); margin-bottom: 18px; }
@@ -2566,7 +2853,7 @@ body {
 
 /* What's-new card — shown on Home after release. Calm gold accent so it
    stands out without screaming. Per-version dismiss via localStorage. */
-.gf-whatsnew { border: 1px solid var(--gf-line); background: linear-gradient(180deg, oklch(0.78 0.13 80 / 0.06), transparent 50%); }
+.gf-whatsnew { border: 1px solid var(--gf-line); background: linear-gradient(180deg, color-mix(in oklch, var(--gf) 6%, transparent), transparent 50%); }
 .gf-whatsnew-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 12px; flex-wrap: wrap; }
 .gf-whatsnew-title { display: flex; align-items: center; gap: 8px; font-weight: 700; color: var(--ink); font-size: 13px; }
 .gf-whatsnew-title svg { color: var(--gf); }
@@ -2575,7 +2862,7 @@ body {
 .gf-whatsnew-link { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 6px; background: transparent; border: 1px solid var(--indigo-line); color: var(--ink-mute); font-size: 11px; cursor: pointer; }
 .gf-whatsnew-link:hover { color: var(--ink); border-color: var(--gf-line); background: var(--gf-tint); }
 .gf-whatsnew-close { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 6px; border: 0; background: transparent; color: var(--ink-mute); cursor: pointer; }
-.gf-whatsnew-close:hover { background: oklch(0.28 0.05 280); color: var(--ink); }
+.gf-whatsnew-close:hover { background: var(--indigo-line); color: var(--ink); }
 .gf-whatsnew-body { font-size: 12.5px; color: var(--ink-mute); line-height: 1.5; }
 .gf-whatsnew-body p { margin: 0 0 8px 0; }
 .gf-whatsnew-body p:last-child { margin-bottom: 0; }
@@ -2592,7 +2879,7 @@ body {
   display: flex; align-items: flex-start; gap: 8px;
   padding: 8px 10px; margin-bottom: 12px;
   border: 1px solid var(--indigo-line);
-  background: oklch(0.22 0.05 280 / 0.5);
+  background: color-mix(in oklch, var(--indigo-hover2) 50%, transparent);
   border-radius: 6px;
   font-size: 11.5px; color: var(--ink-mute); line-height: 1.45;
 }
@@ -2609,9 +2896,9 @@ body {
 .gf-view-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .gf-view-title { font-size: 18px; font-weight: 700; color: var(--ink); margin: 0; }
 .gf-banner-error {
-  background: oklch(0.55 0.18 25 / 0.12);
-  border-color: oklch(0.55 0.18 25 / 0.4);
-  color: oklch(0.85 0.12 25);
+  background: color-mix(in oklch, var(--danger-edge2) 12%, transparent);
+  border-color: color-mix(in oklch, var(--danger-edge2) 40%, transparent);
+  color: var(--danger-ink-2);
 }
 .gf-card-list { display: flex; flex-direction: column; gap: 10px; }
 .gf-card-clickable {
@@ -2620,11 +2907,11 @@ body {
   color: var(--ink); padding: 12px 14px; border-radius: 8px;
   display: flex; flex-direction: column; gap: 4px;
 }
-.gf-card-clickable:hover { border-color: oklch(0.40 0.06 280); }
+.gf-card-clickable:hover { border-color: var(--indigo-line3); }
 .gf-card-title { font-size: 13.5px; font-weight: 600; color: var(--ink); }
 .gf-card-sub { font-size: 12px; color: var(--ink-mute); }
 .gf-skeleton {
-  background: linear-gradient(90deg, var(--indigo-elev) 0%, oklch(0.30 0.05 280) 50%, var(--indigo-elev) 100%);
+  background: linear-gradient(90deg, var(--indigo-elev) 0%, var(--indigo-shimmer) 50%, var(--indigo-elev) 100%);
   background-size: 200% 100%;
   animation: gf-skeleton-shimmer 1.4s linear infinite;
   border-radius: 8px;
@@ -2657,7 +2944,7 @@ body {
  * --help-accent / --help-accent-soft custom props. */
 .gf-help-card {
   --help-accent: var(--gf);
-  --help-accent-soft: oklch(0.78 0.13 80 / 0.16);
+  --help-accent-soft: color-mix(in oklch, var(--gf) 16%, transparent);
   border-left: 3px solid var(--help-accent);
 }
 
@@ -2818,11 +3105,11 @@ body {
 }
 .gf-share-setup-field input:focus { border-color: var(--gf-line); }
 .gf-share-setup-error {
-  color: oklch(0.82 0.16 25);
+  color: var(--danger-ink);
   font-size: 12.5px;
   padding: 8px 12px;
-  background: oklch(0.55 0.13 25 / 0.10);
-  border: 1px solid oklch(0.55 0.13 25 / 0.35);
+  background: color-mix(in oklch, var(--danger-deep) 10%, transparent);
+  border: 1px solid color-mix(in oklch, var(--danger-deep) 35%, transparent);
   border-radius: 7px;
 }
 .gf-share-setup-actions {
@@ -2879,7 +3166,7 @@ body {
   max-height: 320px; overflow-y: auto;
   border: 1px solid var(--indigo-line);
   border-radius: 8px;
-  background: oklch(0.20 0.025 270 / 0.5);
+  background: color-mix(in oklch, var(--panel-deep) 50%, transparent);
 }
 .gf-create-wizard-list-row {
   display: flex; align-items: center; gap: 10px;
@@ -2925,7 +3212,7 @@ body {
 }
 .gf-create-wizard-health-list li {
   padding: 10px 14px;
-  background: oklch(0.20 0.025 270 / 0.5);
+  background: color-mix(in oklch, var(--panel-deep) 50%, transparent);
   border: 1px solid var(--indigo-line);
   border-radius: 8px;
   font-size: 13px; color: var(--ink);
@@ -2978,14 +3265,14 @@ body {
 .gf-create-wizard-share-hint {
   font-size: 12px; color: var(--ink-mute); line-height: 1.5;
   padding: 8px 12px;
-  background: oklch(0.20 0.025 270 / 0.4);
+  background: color-mix(in oklch, var(--panel-deep) 40%, transparent);
   border-radius: 6px;
 }
 .gf-create-wizard-error {
-  font-size: 12.5px; color: oklch(0.82 0.16 25);
+  font-size: 12.5px; color: var(--danger-ink);
   padding: 8px 12px;
-  background: oklch(0.55 0.13 25 / 0.10);
-  border: 1px solid oklch(0.55 0.13 25 / 0.35);
+  background: color-mix(in oklch, var(--danger-deep) 10%, transparent);
+  border: 1px solid color-mix(in oklch, var(--danger-deep) 35%, transparent);
   border-radius: 7px;
 }
 
@@ -2997,7 +3284,7 @@ body {
  * action triggers one. */
 .gf-drawer-backdrop {
   position: fixed; inset: 0;
-  background: oklch(0.10 0.02 270 / 0.6);
+  background: color-mix(in oklch, var(--well-base) 60%, transparent);
   backdrop-filter: blur(4px);
   z-index: 200;
   animation: gf-fade-in 0.18s ease-out;
@@ -3055,14 +3342,14 @@ body {
   align-items: flex-start;
   gap: 10px;
   padding: 12px 14px;
-  background: oklch(0.55 0.13 25 / 0.10);
-  border: 1px solid oklch(0.55 0.13 25 / 0.35);
+  background: color-mix(in oklch, var(--danger-deep) 10%, transparent);
+  border: 1px solid color-mix(in oklch, var(--danger-deep) 35%, transparent);
   border-radius: 7px;
 }
 .gf-missing-bundles-icon {
   flex-shrink: 0;
   margin-top: 2px;
-  color: oklch(0.78 0.13 25);
+  color: var(--danger-strong);
 }
 .gf-missing-bundles-title {
   margin: 0;
@@ -3089,13 +3376,13 @@ body {
   align-items: center;
   gap: 10px;
   padding: 8px 12px;
-  background: oklch(0.20 0.025 270 / 0.5);
+  background: color-mix(in oklch, var(--panel-deep) 50%, transparent);
   border: 1px solid var(--indigo-line);
   border-radius: 6px;
   font-size: 12.5px;
 }
-.gf-missing-bundles-item.status-success { border-color: oklch(0.74 0.11 165 / 0.4); }
-.gf-missing-bundles-item.status-failed  { border-color: oklch(0.55 0.16 25 / 0.45); }
+.gf-missing-bundles-item.status-success { border-color: color-mix(in oklch, var(--ok) 40%, transparent); }
+.gf-missing-bundles-item.status-failed  { border-color: color-mix(in oklch, var(--danger-edge) 45%, transparent); }
 .gf-missing-bundles-name {
   flex: 1;
   min-width: 0;
@@ -3116,7 +3403,7 @@ body {
 .gf-missing-bundles-status.status-pending { color: var(--ink-dim); }
 .gf-missing-bundles-status.status-repairing { color: var(--gf); }
 .gf-missing-bundles-status.status-success { color: var(--ok); }
-.gf-missing-bundles-status.status-failed { color: oklch(0.75 0.13 25); }
+.gf-missing-bundles-status.status-failed { color: var(--danger-bright); }
 .gf-missing-bundles-status-icon { flex-shrink: 0; }
 .gf-missing-bundles-folder {
   padding: 4px 8px;
@@ -3157,7 +3444,7 @@ body {
 .gf-help-hint-btn:hover,
 .gf-help-hint.open .gf-help-hint-btn {
   opacity: 1;
-  background: oklch(0.22 0.04 280);
+  background: var(--indigo-hover);
 }
 .gf-help-hint-btn:focus-visible {
   outline: 2px solid var(--gf);

@@ -802,6 +802,15 @@ fn bundle_url_is_allowed(raw: &str) -> bool {
     }
 }
 
+/// Compute the SHA256 hex digest of `bytes`. Used for bundle integrity
+/// verification (Fix M-1) and upload content-addressing.
+fn sha256_hex_bytes(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(bytes);
+    hex::encode(h.finalize())
+}
+
 /// Whether `raw` points at a loopback host. Used only to widen the bundle
 /// download guard under `cfg!(test)` so the modpack flow tests can fetch from a
 /// local mock server; never relied on in shipped builds.
@@ -813,7 +822,7 @@ fn url_host_is_loopback(raw: &str) -> bool {
         .unwrap_or(false)
 }
 
-pub async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::Path) -> Result<()> {
+pub async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::Path, expected_sha256: Option<&str>) -> Result<()> {
     // SSRF guard: the bundle URL comes from an untrusted modpack manifest.
     // Refuse anything that isn't an https GitHub asset URL before any fetch so
     // a malicious manifest can't make us hit an internal/arbitrary address.
@@ -827,6 +836,13 @@ pub async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::P
             "Refusing to download bundle for '{}' from a disallowed URL: {}",
             mod_name, url
         )));
+    }
+
+    if expected_sha256.is_none() {
+        log::warn!(
+            "download_bundle: no bundle_sha256 for '{}' — integrity check skipped (legacy profile)",
+            mod_name
+        );
     }
 
     let client = reqwest::Client::builder()
@@ -853,6 +869,16 @@ pub async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::P
                 mod_name,
                 cached.len()
             );
+            // Fix M-1: verify SHA256 before extracting (cassette path).
+            if let Some(expected) = expected_sha256 {
+                let actual = sha256_hex_bytes(&cached);
+                if actual != expected {
+                    return Err(AppError::Other(format!(
+                        "SHA256 mismatch for '{}': expected {}, got {}",
+                        mod_name, expected, actual
+                    )));
+                }
+            }
             let cursor = std::io::Cursor::new(cached);
             let mut archive = zip::ZipArchive::new(cursor).map_err(|e| {
                 AppError::Other(format!("Invalid bundle zip for '{}': {}", mod_name, e))
@@ -984,6 +1010,16 @@ pub async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::P
         mod_name,
         bytes.len()
     );
+    // Fix M-1: verify SHA256 before extracting (network path).
+    if let Some(expected) = expected_sha256 {
+        let actual = sha256_hex_bytes(&bytes);
+        if actual != expected {
+            return Err(AppError::Other(format!(
+                "SHA256 mismatch for '{}': expected {}, got {}",
+                mod_name, expected, actual
+            )));
+        }
+    }
     let cursor = std::io::Cursor::new(bytes);
     let mut archive = zip::ZipArchive::new(cursor)
         .map_err(|e| AppError::Other(format!("Invalid bundle zip for '{}': {}", mod_name, e)))?;
@@ -2089,6 +2125,7 @@ mod download_bundle_url_routing_tests {
             "https://raw.githubusercontent.com/owner/sts2mm-profiles/main/mods/OldMod_v1.zip",
             "OldMod",
             tmp.path(),
+            None,
         )
         .await
         .expect("legacy URL must still work");
@@ -2117,6 +2154,7 @@ mod download_bundle_url_routing_tests {
             "https://github.com/owner/sts2mm-profiles/releases/download/bundles/NewMod_v1.zip",
             "NewMod",
             tmp.path(),
+            None,
         )
         .await
         .expect("release URL must work");
@@ -2135,6 +2173,7 @@ mod download_bundle_url_routing_tests {
             "https://evil.example.com/some/path/ExternalMod.zip",
             "ExternalMod",
             tmp.path(),
+            None,
         )
         .await;
 
@@ -2145,6 +2184,44 @@ mod download_bundle_url_routing_tests {
         assert!(
             !tmp.path().join("ExternalMod.json").exists(),
             "nothing should be written for a rejected URL"
+        );
+    }
+
+    #[tokio::test]
+    async fn download_bundle_rejects_sha256_mismatch() {
+        // Fix M-1: a wrong expected_sha256 must cause an error before extraction.
+        let _env_guard = super::release_upload_tests::ENV_LOCK.lock().await;
+        let server = MockServer::start().await;
+        std::env::set_var("STS2_GITHUB_RELEASES_BASE", server.uri());
+
+        let zip_bytes = make_tiny_zip("MismatchMod.json");
+        Mock::given(method("GET"))
+            .and(path(
+                "/owner/sts2mm-profiles/releases/download/bundles/MismatchMod_v1.zip",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(zip_bytes))
+            .mount(&server)
+            .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let res = download_bundle(
+            "https://github.com/owner/sts2mm-profiles/releases/download/bundles/MismatchMod_v1.zip",
+            "MismatchMod",
+            tmp.path(),
+            Some("0000000000000000000000000000000000000000000000000000000000000000"),
+        )
+        .await;
+
+        assert!(res.is_err(), "a SHA256 mismatch must be rejected");
+        let err_msg = res.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("SHA256 mismatch"),
+            "error message must mention SHA256 mismatch, got: {}",
+            err_msg
+        );
+        assert!(
+            !tmp.path().join("MismatchMod.json").exists(),
+            "nothing should be extracted when the hash mismatches"
         );
     }
 }

@@ -135,6 +135,7 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
   // wizard run — no caching, no debouncing; the audit can take a
   // moment but the typical pack size makes it tolerable.
   async function goToHealth() {
+    if (auditing) return; // guard against concurrent call (back-then-next race)
     setStep(3);
     setHealth(null);
     setAuditing(true);
@@ -255,20 +256,20 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
   return (
     <div
       className="gf-modal-back"
-      role="dialog"
-      aria-modal="true"
-      aria-label={t('createModpack.title')}
       onClick={creating ? undefined : onClose}
     >
       <div
         className="gf-modal gf-create-wizard"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="gf-create-wizard-title"
         ref={modalRef}
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="gf-modal-head">
           <div>
-            <div className="gf-modal-title">{t('createModpack.title')}</div>
+            <div id="gf-create-wizard-title" className="gf-modal-title">{t('createModpack.title')}</div>
             <div className="gf-modal-sub">
               {step === 1 && t('createModpack.step1Subtitle')}
               {step === 2 && t('createModpack.step2Subtitle')}
@@ -363,7 +364,9 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
                 onClick={() => handleCreate(true)}
                 disabled={!canCreate}
               >
-                {t('createModpack.step4ShareNowBtn')}
+                {creating
+                  ? t('createModpack.step4Creating')
+                  : t('createModpack.step4ShareNowBtn')}
               </button>
               <button
                 type="button"

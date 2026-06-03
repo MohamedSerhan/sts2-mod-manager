@@ -43,7 +43,12 @@
       "disabledOrphans_other": "disabled {{count}} extra mods",
       "downloadedNum": "downloaded {{count}}",
       "downloadsFailed_one": "{{count}} download failed",
-      "downloadsFailed_other": "{{count}} downloads failed"
+      "downloadsFailed_other": "{{count}} downloads failed",
+      "disabledOrphansWithList": "{{count}} moved to disabled: {{list}}",
+      "addedWithList": "added {{count}}: {{list}}",
+      "removedWithList": "removed {{count}}: {{list}}",
+      "replacedWithList": "{{count}} updated: {{list}}",
+      "replaceFailedWithList": "{{count}} kept (update failed): {{list}}"
     }
   },
   "confirm": {
@@ -61,6 +66,14 @@
     "detail": {
       "inPackHeading": "In this modpack",
       "statusCounts": "{{active}} active / {{total}} mods in this modpack",
+      "missingCount": "({{count}} missing)",
+      "missingTitle": "In this modpack's manifest but not installed on disk. Repair or save the modpack to reconcile.",
+      "missingTipHead": "In the manifest but not installed:",
+      "enabledAllInPack": "Enabled all mods in {{pack}}",
+      "disabledAllInPack": "Disabled all mods in {{pack}}",
+      "toggleAllFailed": "Couldn't update all mods: {{error}}",
+      "toggleAllMissing": "{{count}} not installed: {{list}}.",
+      "toggleAllSomeFailed": "{{count}} couldn't be moved: {{list}}.",
       "runningNow": "running in game now",
       "addMods": "Add mods",
       "checkUpdates": "Check for updates",
@@ -1122,6 +1135,12 @@
       "auto": "Auto",
       "zhHans": "Simplified Chinese"
     },
+    "theme": {
+      "label": "Theme",
+      "dark": "Dark",
+      "light": "Light",
+      "auto": "Auto"
+    },
     "accounts": {
       "nexusKey": "Nexus Mods API Key",
       "saved": "Saved ✓",
@@ -1230,7 +1249,6 @@
     "repairDesc": "Force-reinstall from GitHub. Use when version reads \"unknown\", the game refuses to load this mod, or the install otherwise looks broken.",
     "repairNeedSource": "Link a GitHub source first via \"Edit sources…\" — repair fetches from GitHub.",
     "subtitle": "{{total}} installed · {{enabled}} active{{disabled}}",
-    "openFolder": "Open mods folder",
     "importMod": "Import mod",
     "quickAddUrl": "Quick add URL",
     "autoDetectSources": "Auto-detect sources",
@@ -1258,6 +1276,7 @@
     "modActions": "Mod actions",
     "copyVersion": "Copy version (v{{version}})",
     "openModsFolder": "Open mods folder",
+    "openThisModFolder": "Open this mod's folder",
     "unsnoozeDesc": "Show the update suggestion again for the current upstream release.",
     "unsnoozeUpdate": "Show update again",
     "snoozeDesc": "Skip this update until a newer release appears upstream (currently v{{version}}). Use this when the website's announced version doesn't match the file's actual version.",

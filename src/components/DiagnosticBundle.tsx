@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState, type RefObject } from 'react';
 import { AlertTriangle, Bug, Check, Copy, Upload, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { getVersion } from '@tauri-apps/api/app';
@@ -13,6 +13,7 @@ import {
   bugReportEndpointHost,
 } from '../hooks/useTauri';
 import { buildGitHubIssueUrl } from '../lib/githubLinks';
+import { useModalA11y } from '../hooks/useModalA11y';
 
 // 1.7.0 — "Report a bug". Reworked from the old support-bundle: builds a
 // single redacted text report (description + app/game version + the
@@ -39,6 +40,11 @@ interface Props {
 }
 
 export function DiagnosticBundle({ open, onClose }: Props) {
+  if (!open) return null;
+  return <DiagnosticBundlePanel onClose={onClose} />;
+}
+
+function DiagnosticBundlePanel({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const toast = useToast();
   const { gameInfo, mods, activeProfile } = useApp();
@@ -50,8 +56,8 @@ export function DiagnosticBundle({ open, onClose }: Props) {
   // pause on a consent banner (`awaitingConsent`) before any upload happens.
   const [uploadHost, setUploadHost] = useState<string | null>(null);
   const [awaitingConsent, setAwaitingConsent] = useState(false);
-
-  if (!open) return null;
+  const modalRef = useRef<HTMLElement>(null);
+  useModalA11y(modalRef, onClose);
 
   function redact(s: string): string {
     // Tokens/secrets are ALWAYS stripped (an auth concern); home-folder
@@ -290,10 +296,19 @@ export function DiagnosticBundle({ open, onClose }: Props) {
 
   return (
     <div className="gf-modal-back" onClick={onClose}>
-      <div className="gf-modal" style={{ width: 600 }} onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={modalRef as RefObject<HTMLDivElement>}
+        className="gf-modal"
+        style={{ width: 600 }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="gf-diagnostic-title"
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="gf-modal-head">
           <div>
-            <div className="gf-modal-title">{t('diagnosticBundle.title')}</div>
+            <div id="gf-diagnostic-title" className="gf-modal-title">{t('diagnosticBundle.title')}</div>
             <div className="gf-modal-sub">{t('diagnosticBundle.subtitle')}</div>
           </div>
           <button className="gf-btn-3 gf-btn-icon" onClick={onClose} title={t('common.close')}>

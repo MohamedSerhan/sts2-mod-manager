@@ -31,6 +31,7 @@ import userEvent from '@testing-library/user-event';
 
 import { ProfilesView } from './Profiles';
 import { AllProviders } from '../__test__/providers';
+import { useApp } from '../contexts/AppContext';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
 import type { LoadOrderSettingsStatus, Profile } from '../types';
 
@@ -40,6 +41,13 @@ function Wrap(props: React.ComponentProps<typeof ProfilesView> = {}) {
       <ProfilesView {...props} />
     </AllProviders>
   );
+}
+
+/** Reads the shared AppContext active-profile pointer so a test can assert
+ *  it from outside ProfilesView (the deleted card itself unmounts). */
+function ActiveProbe() {
+  const { activeProfile } = useApp();
+  return <div data-testid="active-probe">{`active:${activeProfile ?? 'none'}`}</div>;
 }
 
 /**
@@ -693,12 +701,69 @@ describe('<ProfilesView>', () => {
       expect(getInvokeCalls().some((c) => c.cmd === 'repair_profile')).toBe(true);
     });
     expect(getInvokeCalls().some((c) => c.cmd === 'create_backup_cmd')).toBe(false);
-    // Success toast with summary — parts joined by ", " with i18next
-    // plurals so the singular reads "1 download failed" instead of the
-    // old "1 download(s) failed" lazy-form.
+    // Success toast with summary — now name-bearing (Bug 4): which orphans
+    // were disabled, plus downloads/failures/missing each list their mods.
     await waitFor(() => {
       const found = document.body.textContent ?? '';
-      expect(found).toContain('disabled 2 extra mods, downloaded 1, 1 download failed, 1 still missing');
+      expect(found).toContain('2 moved to disabled: Orphan1, Orphan2, downloaded 1, 1 failed: FailedX, 1 still missing: StillMissing');
+    });
+  });
+
+  it('repair toast lists replaced + kept-old + disabled mod names, not just counts (Bug 4)', async () => {
+    seedProfiles([baseProfile({ name: 'DriftedPack' })]);
+    registerInvokeHandler('get_active_profile', () => 'DriftedPack');
+    registerInvokeHandler('get_profile_drift', () => ({
+      added: ['Orphan1'], removed: [], toggled: [], version_changed: [], has_drift: true,
+    }));
+    registerInvokeHandler('repair_profile', () => ({
+      applied: true,
+      downloaded: 1,
+      missing_mods: [],
+      failed_downloads: [],
+      disabled_orphans: ['Orphan1'],
+      deleted_orphans: [],
+      replaced_mods: ['UpgradedMod'],
+      replace_failures: ['KeptOldMod'],
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('DriftedPack')).toBeInTheDocument(); });
+    const repairBanner = await screen.findByTitle('Re-apply manifest and store extra active mods');
+    await user.click(repairBanner);
+    const modal = await confirmModal();
+    await user.click(modal.getByRole('button', { name: 'Repair' }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'repair_profile')).toBe(true);
+    });
+    await waitFor(() => {
+      const text = document.body.textContent ?? '';
+      expect(text).toContain('UpgradedMod'); // a replaced mod, named
+      expect(text).toContain('KeptOldMod');  // a kept-old (failed update) mod, named
+      expect(text).toContain('Orphan1');     // a disabled orphan, named
+    });
+  });
+
+  it('switch toast lists replaced + kept-old mod names (Bug 4)', async () => {
+    seedProfiles([baseProfile({ name: 'A' }), baseProfile({ name: 'B' })]);
+    registerInvokeHandler('get_active_profile', () => 'A');
+    registerInvokeHandler('switch_profile', () => ({
+      applied: true,
+      downloaded: 1,
+      missing_mods: [],
+      failed_downloads: [],
+      replaced_mods: ['UpgradedX'],
+      replace_failures: ['KeptY'],
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await openDetailFor(user, 'B');
+    // Inactive packs now render two "Switch to" affordances (header CTA + the
+    // inactive-pack hint, #114); either triggers the same switch. Click the first.
+    await user.click(screen.getAllByRole('button', { name: /Switch to/i })[0]);
+    await waitFor(() => {
+      const text = document.body.textContent ?? '';
+      expect(text).toContain('UpgradedX');
+      expect(text).toContain('KeptY');
     });
   });
 
@@ -783,6 +848,68 @@ describe('<ProfilesView>', () => {
     await waitFor(() => {
       expect(screen.getByText(/Saved changes to "DriftedPack"/)).toBeInTheDocument();
     });
+  });
+
+  it('drift banner Save changes names the mods dropped from the pack (FB-C)', async () => {
+    // The user couldn't tell what Save removed. The toast now lists the mods
+    // dropped from the manifest (drift.removed — missing on disk) by name.
+    seedProfiles([baseProfile({ name: 'DriftedPack' })]);
+    registerInvokeHandler('get_active_profile', () => 'DriftedPack');
+    registerInvokeHandler('get_profile_drift', () => ({
+      added: [],
+      removed: ['GoneA', 'GoneB'],
+      toggled: [],
+      version_changed: [],
+      has_drift: true,
+    }));
+    registerInvokeHandler('save_profile_drift', (args) => baseProfile({ name: String(args?.name) }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('DriftedPack')).toBeInTheDocument(); });
+    await user.click(await screen.findByRole('button', { name: /Save changes/i }));
+    await waitFor(() => {
+      const text = document.body.textContent ?? '';
+      expect(text).toContain('GoneA');
+      expect(text).toContain('GoneB');
+    });
+  });
+
+  it('the modpack "(N missing)" updates live on a mods change, without navigating away (FB2-C)', async () => {
+    // The drift indicator used to go stale until you left to Mod Library and
+    // back. A plain Refresh (which changes the installed mods but does NOT go
+    // through the membership-change callback) must now update drift live.
+    seedProfiles([baseProfile({
+      name: 'A',
+      mods: [profileMod({ name: 'Gone', folder_name: 'Gone', mod_id: 'Gone' })],
+    })]);
+    registerInvokeHandler('get_active_profile', () => 'A');
+    let installed: unknown[] = [];
+    registerInvokeHandler('get_installed_mods', () => installed);
+    let missing = true;
+    registerInvokeHandler('get_profile_drift', () => ({
+      added: [],
+      removed: missing ? ['Gone'] : [],
+      toggled: [],
+      version_changed: [],
+      has_drift: missing,
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('A')).toBeInTheDocument(); });
+    await openDetailFor(user, 'A');
+    await waitFor(() => { expect(screen.getByText(/1 missing/)).toBeInTheDocument(); });
+
+    // The mod becomes installed and the drift clears. Refresh re-pulls the mods.
+    installed = [{
+      name: 'Gone', version: '1.0', folder_name: 'Gone', mod_id: 'Gone',
+      enabled: true, files: [], source: null, hash: null, dependencies: [],
+      size_bytes: 0, pinned: false,
+    }];
+    missing = false;
+    await openAdvancedMenu(user);
+    await user.click(await screen.findByRole('menuitem', { name: /^Refresh$/i }));
+
+    await waitFor(() => { expect(screen.queryByText(/1 missing/)).toBeNull(); });
   });
 
   it('drift banner Repair with no active extras renders the safe body', async () => {
@@ -1601,6 +1728,104 @@ describe('<ProfilesView>', () => {
     await waitFor(() => {
       expect(screen.getByText(/Modpack "Doomed" deleted/)).toBeInTheDocument();
     });
+  });
+
+  it('deleting the ACTIVE modpack clears the active-profile pointer (Bug 3)', async () => {
+    seedProfiles([baseProfile({ name: 'A' }), baseProfile({ name: 'B' })]);
+    registerInvokeHandler('get_active_profile', () => 'A');
+    registerInvokeHandler('delete_profile_cmd', () => null);
+    const user = userEvent.setup();
+    render(
+      <AllProviders>
+        <ActiveProbe />
+        <ProfilesView />
+      </AllProviders>,
+    );
+    // Pointer starts at the active pack.
+    await waitFor(() => {
+      expect(screen.getByTestId('active-probe')).toHaveTextContent('active:A');
+    });
+
+    // Delete the active pack 'A' via its detail Advanced menu.
+    await openDetailFor(user, 'A');
+    await openAdvancedMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Delete modpack/i }));
+    const modal = await confirmModal();
+    await user.click(modal.getByRole('button', { name: /Delete modpack/i }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some(
+        (c) => c.cmd === 'delete_profile_cmd' && c.args?.name === 'A',
+      )).toBe(true);
+    });
+
+    // The active pointer must be cleared so nothing keeps showing the
+    // now-deleted pack as active.
+    await waitFor(() => {
+      expect(screen.getByTestId('active-probe')).toHaveTextContent('active:none');
+    });
+  });
+
+  it('deleting the active pack clears the pointer even on a case-mismatch (review nit)', async () => {
+    // The backend clears active_profile.txt case-insensitively; the FE must
+    // too, or a case-mismatched active pointer would stay stale until restart.
+    seedProfiles([baseProfile({ name: 'mypack' })]);
+    registerInvokeHandler('get_active_profile', () => 'MyPack');
+    registerInvokeHandler('delete_profile_cmd', () => null);
+    const user = userEvent.setup();
+    render(
+      <AllProviders>
+        <ActiveProbe />
+        <ProfilesView />
+      </AllProviders>,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('active-probe')).toHaveTextContent('active:MyPack');
+    });
+
+    await openDetailFor(user, 'mypack');
+    await openAdvancedMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Delete modpack/i }));
+    const modal = await confirmModal();
+    await user.click(modal.getByRole('button', { name: /Delete modpack/i }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some(
+        (c) => c.cmd === 'delete_profile_cmd' && c.args?.name === 'mypack',
+      )).toBe(true);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('active-probe')).toHaveTextContent('active:none');
+    });
+  });
+
+  it('deleting a NON-active modpack leaves the active pointer intact', async () => {
+    seedProfiles([baseProfile({ name: 'A' }), baseProfile({ name: 'B' })]);
+    registerInvokeHandler('get_active_profile', () => 'A');
+    registerInvokeHandler('delete_profile_cmd', () => null);
+    const user = userEvent.setup();
+    render(
+      <AllProviders>
+        <ActiveProbe />
+        <ProfilesView />
+      </AllProviders>,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('active-probe')).toHaveTextContent('active:A');
+    });
+
+    // Delete the inactive pack 'B'.
+    await openDetailFor(user, 'B');
+    await openAdvancedMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Delete modpack/i }));
+    const modal = await confirmModal();
+    await user.click(modal.getByRole('button', { name: /Delete modpack/i }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some(
+        (c) => c.cmd === 'delete_profile_cmd' && c.args?.name === 'B',
+      )).toBe(true);
+    });
+
+    // 'A' is still the active pack.
+    expect(screen.getByTestId('active-probe')).toHaveTextContent('active:A');
   });
 
   it('Advanced → Delete profile Cancel skips invoke', async () => {

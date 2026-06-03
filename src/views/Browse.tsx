@@ -284,7 +284,7 @@ export function BrowseView({ onGoToSettings }: BrowseViewProps = {}) {
             </div>
           ) : nexusError ? (
             <div className="gf-empty">
-              <div className="gf-empty-art" style={{ color: 'oklch(0.65 0.18 25)' }}>!</div>
+              <div className="gf-empty-art" style={{ color: 'var(--danger)' }}>!</div>
               <div className="gf-empty-title">{t('browse.nexus.couldntReach')}</div>
               <div className="gf-empty-sub">{nexusError}</div>
             </div>

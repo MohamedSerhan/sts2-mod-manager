@@ -121,6 +121,23 @@ export interface SwitchProfileResult {
   missing_mods: string[];
   downloaded: number;
   failed_downloads: string[];
+  /** Mods whose mismatched on-disk copy was replaced with the profile's
+   *  version (non-destructively). Surfaced by name in the toast. */
+  replaced_mods?: string[];
+  /** Mods whose update/replace failed; the old on-disk version was rolled
+   *  back and kept, so they are not lost (vs. `failed_downloads`). */
+  replace_failures?: string[];
+}
+
+/** Result of bulk enable/disable of a modpack's mods. */
+export interface SetProfileModsEnabledResult {
+  enabled: boolean;
+  /** Display names of mods actually moved into the requested state. */
+  toggled: string[];
+  /** Pack mods with no matching installed mod (can't be toggled). */
+  missing: string[];
+  /** Matched mods whose move failed. */
+  failed: string[];
 }
 
 export interface RepairProfileResult extends SwitchProfileResult {

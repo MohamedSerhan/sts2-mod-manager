@@ -613,45 +613,60 @@ pub fn enable_all_mods(state: tauri::State<'_, AppState>) -> std::result::Result
         .clone();
     drop(s);
 
-    let _ = fs::create_dir_all(&mods_path);
-    let mut errors = Vec::new();
+    move_all_mods_between(&disabled_path, &mods_path);
+    Ok(true)
+}
 
-    if let Ok(entries) = fs::read_dir(&disabled_path) {
+/// Move every entry from `src` to `dest` — the shared body of enable-all /
+/// disable-all / reset-to-vanilla (used when deleting the active modpack so
+/// the active folder is emptied). Returns the entry names that moved; per-entry
+/// errors are logged, not fatal, so one stuck folder can't block the rest.
+pub(crate) fn move_all_mods_between(src: &Path, dest: &Path) -> Vec<String> {
+    let _ = fs::create_dir_all(dest);
+    let mut moved = Vec::new();
+
+    if let Ok(entries) = fs::read_dir(src) {
         for entry in entries.flatten() {
-            let src = entry.path();
-            let dest = mods_path.join(entry.file_name());
+            let src_path = entry.path();
+            let dest_path = dest.join(entry.file_name());
             let name = entry.file_name().to_string_lossy().to_string();
 
-            // Remove destination if it already exists (handles stale/partial state)
-            if dest.exists() {
-                if dest.is_dir() {
-                    let _ = fs::remove_dir_all(&dest);
+            // Remove destination if it already exists (stale/partial state).
+            if dest_path.exists() {
+                if dest_path.is_dir() {
+                    let _ = fs::remove_dir_all(&dest_path);
                 } else {
-                    let _ = fs::remove_file(&dest);
+                    let _ = fs::remove_file(&dest_path);
                 }
             }
 
-            let result = if src.is_dir() {
-                move_directory(&src, &dest).and_then(|_| {
-                    let _ = fs::remove_dir_all(&src);
+            let result = if src_path.is_dir() {
+                move_directory(&src_path, &dest_path).and_then(|_| {
+                    let _ = fs::remove_dir_all(&src_path);
                     Ok(())
                 })
             } else {
-                fs::rename(&src, &dest)
-                    .or_else(|_| fs::copy(&src, &dest).and_then(|_| fs::remove_file(&src)))
+                fs::rename(&src_path, &dest_path)
+                    .or_else(|_| {
+                        fs::copy(&src_path, &dest_path).and_then(|_| fs::remove_file(&src_path))
+                    })
                     .map(|_| ())
             };
 
-            if let Err(e) = result {
-                errors.push(format!("{}: {}", name, e));
+            match result {
+                Ok(()) => moved.push(name),
+                Err(e) => log::error!(
+                    "Failed to move '{}' from {} to {}: {}",
+                    name,
+                    src.display(),
+                    dest.display(),
+                    e
+                ),
             }
         }
     }
 
-    if !errors.is_empty() {
-        log::error!("Some mods failed to enable: {:?}", errors);
-    }
-    Ok(true)
+    moved
 }
 
 /// Disable all currently enabled mods.
@@ -668,44 +683,7 @@ pub fn disable_all_mods(state: tauri::State<'_, AppState>) -> std::result::Resul
         .clone();
     drop(s);
 
-    let _ = fs::create_dir_all(&disabled_path);
-    let mut errors = Vec::new();
-
-    if let Ok(entries) = fs::read_dir(&mods_path) {
-        for entry in entries.flatten() {
-            let src = entry.path();
-            let dest = disabled_path.join(entry.file_name());
-            let name = entry.file_name().to_string_lossy().to_string();
-
-            // Remove destination if it already exists (handles stale/partial state)
-            if dest.exists() {
-                if dest.is_dir() {
-                    let _ = fs::remove_dir_all(&dest);
-                } else {
-                    let _ = fs::remove_file(&dest);
-                }
-            }
-
-            let result = if src.is_dir() {
-                move_directory(&src, &dest).and_then(|_| {
-                    let _ = fs::remove_dir_all(&src);
-                    Ok(())
-                })
-            } else {
-                fs::rename(&src, &dest)
-                    .or_else(|_| fs::copy(&src, &dest).and_then(|_| fs::remove_file(&src)))
-                    .map(|_| ())
-            };
-
-            if let Err(e) = result {
-                errors.push(format!("{}: {}", name, e));
-            }
-        }
-    }
-
-    if !errors.is_empty() {
-        log::error!("Some mods failed to disable: {:?}", errors);
-    }
+    move_all_mods_between(&mods_path, &disabled_path);
     Ok(true)
 }
 
@@ -862,7 +840,10 @@ pub fn get_mod_dependents(
 #[cfg(test)]
 mod user_scenario_tests {
     use super::scan::parse_manifest;
-    use super::{delete_mod_files_by_info, move_mod_by_info, scan_disabled_mods, scan_mods};
+    use super::{
+        delete_mod_files_by_info, move_all_mods_between, move_mod_by_info, scan_disabled_mods,
+        scan_mods,
+    };
     use std::fs;
     use tempfile::TempDir;
 
@@ -871,6 +852,27 @@ mod user_scenario_tests {
             fs::create_dir_all(parent).unwrap();
         }
         fs::write(path, content).unwrap();
+    }
+
+    #[test]
+    fn move_all_mods_between_moves_every_entry_and_reports_names() {
+        // Shared body of enable-all / disable-all / reset-to-vanilla (the
+        // delete-active-pack folder clear). Every entry moves; names returned.
+        let tmp = TempDir::new().unwrap();
+        let src = tmp.path().join("mods");
+        let dest = tmp.path().join("mods_disabled");
+        fs::create_dir_all(&src).unwrap();
+        for f in ["A", "B"] {
+            write(&src.join(f).join(format!("{f}.dll")), "x");
+        }
+
+        let moved = move_all_mods_between(&src, &dest);
+
+        assert_eq!(moved.len(), 2, "moved={moved:?}");
+        assert!(dest.join("A").join("A.dll").exists());
+        assert!(dest.join("B").join("B.dll").exists());
+        assert!(!src.join("A").exists());
+        assert!(!src.join("B").exists());
     }
 
     /// Set up a mods/ directory containing two distinct mods that both

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Download, X } from 'lucide-react';
 import { openExternalUrl, quickAddMod } from '../hooks/useTauri';
@@ -52,6 +52,16 @@ export function QuickAddModal({ open, onClose }: Props) {
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const detected = useMemo(() => detect(url), [url]);
+
+  // State-sync audit: this modal is always mounted (open-prop-driven), so
+  // reset the input when it closes — otherwise a previously-typed URL is
+  // still sitting there the next time Quick Add opens.
+  useEffect(() => {
+    if (!open) {
+      setUrl('');
+      setBusy(false);
+    }
+  }, [open]);
 
   if (!open) return null;
 

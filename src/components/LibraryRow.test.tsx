@@ -426,13 +426,16 @@ describe('<LibraryRow> kebab + audit pills', () => {
     expect(onCopyVersion).toHaveBeenCalledTimes(1);
   });
 
-  it('kebab → Open mods folder fires onOpenModsFolder', async () => {
-    const onOpenModsFolder = vi.fn();
+  it('kebab → Open this mod\'s folder fires onOpenThisModFolder', async () => {
+    // FB-E: the global "Open mods folder" was removed from the per-row kebab;
+    // the per-mod "Open this mod's folder" (Bug 6) is what remains.
+    const onOpenThisModFolder = vi.fn();
     const user = userEvent.setup();
-    renderRow({ mod: baseModInfo(), onOpenModsFolder });
+    renderRow({ mod: baseModInfo(), onOpenThisModFolder });
     await user.click(screen.getByRole('button', { name: /mod actions/i }));
-    await user.click(screen.getByRole('menuitem', { name: /open mods folder/i }));
-    expect(onOpenModsFolder).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('menuitem', { name: /^open mods folder$/i })).toBeNull();
+    await user.click(screen.getByRole('menuitem', { name: /open this mod's folder/i }));
+    expect(onOpenThisModFolder).toHaveBeenCalledTimes(1);
   });
 
   it('kebab → Edit sources fires onEditSources', async () => {

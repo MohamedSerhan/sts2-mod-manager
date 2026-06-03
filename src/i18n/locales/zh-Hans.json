@@ -43,7 +43,12 @@
       "disabledOrphans_other": "已禁用 {{count}} 个多余模组",
       "downloadedNum": "已下载 {{count}} 个",
       "downloadsFailed_one": "{{count}} 个下载失败",
-      "downloadsFailed_other": "{{count}} 个下载失败"
+      "downloadsFailed_other": "{{count}} 个下载失败",
+      "disabledOrphansWithList": "{{count}} 个已移至禁用：{{list}}",
+      "addedWithList": "已添加 {{count}} 个：{{list}}",
+      "removedWithList": "已移除 {{count}} 个：{{list}}",
+      "replacedWithList": "已更新 {{count}} 个：{{list}}",
+      "replaceFailedWithList": "保留 {{count}} 个原版本（更新失败）：{{list}}"
     }
   },
   "confirm": {
@@ -61,6 +66,14 @@
     "detail": {
       "inPackHeading": "此模组包中的模组",
       "statusCounts": "{{active}} 个激活 / 此模组包共 {{total}} 个模组",
+      "missingCount": "（缺少 {{count}} 个）",
+      "missingTitle": "在该模组包清单中，但未安装到磁盘。修复或保存该模组包即可同步数量。",
+      "missingTipHead": "在清单中但未安装：",
+      "enabledAllInPack": "已启用 {{pack}} 中的所有模组",
+      "disabledAllInPack": "已禁用 {{pack}} 中的所有模组",
+      "toggleAllFailed": "无法更新所有模组：{{error}}",
+      "toggleAllMissing": "{{count}} 个未安装：{{list}}。",
+      "toggleAllSomeFailed": "{{count}} 个无法移动：{{list}}。",
       "runningNow": "正在游戏中运行",
       "addMods": "添加模组",
       "checkUpdates": "检查更新",
@@ -1210,7 +1223,6 @@
     "repairDesc": "从 GitHub 强制重装。当版本显示\"未知\"、游戏拒绝加载此模组、或安装看起来有问题时使用。",
     "repairNeedSource": "请先通过\"编辑来源…\"链接 GitHub 源 — 修复从 GitHub 获取。",
     "subtitle": "{{total}} 个已安装 · {{enabled}} 个已启用{{disabled}}",
-    "openFolder": "打开模组文件夹",
     "importMod": "导入模组",
     "quickAddUrl": "快速添加 URL",
     "autoDetectSources": "自动检测来源",
@@ -1238,6 +1250,7 @@
     "modActions": "模组操作",
     "copyVersion": "复制版本 (v{{version}})",
     "openModsFolder": "打开模组文件夹",
+    "openThisModFolder": "打开此模组的文件夹",
     "unsnoozeDesc": "再次显示当前上游版本的更新建议。",
     "unsnoozeUpdate": "再次显示更新",
     "snoozeDesc": "跳过此更新，直到上游出现新版本（当前为 v{{version}}）。当网站公布的版本与文件实际版本不匹配时使用此选项。",

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { listFragments, assemble, count, suggestedBump, lint } from "./changelog-fragments.mjs";
+import { listFragments, assemble, count, suggestedBump, lint, mergeCategorySections } from "./changelog-fragments.mjs";
 
 // Helper: create a temp dir, write named files, return dir path
 function makeTempDir(files = {}) {
@@ -286,4 +286,72 @@ test("lint flags bare 'ts' word (no dot prefix)", () => {
 test("lint flags bare parse_manifest without backticks", () => {
   const violations = lint("bare parse_manifest mention");
   assert.ok(violations.includes("internal type/function name"), JSON.stringify(violations));
+});
+
+// ─── mergeCategorySections ──────────────────────────────────────────────────
+// Regression guard for the 1.7.0 release bug: legacy [Unreleased] sections
+// concatenated with the assembled fragment block produced duplicate
+// "### Fixed" / "### Added" / "### Security" headers in one version.
+
+test("mergeCategorySections collapses duplicate same-category headers into one", () => {
+  const input = [
+    "### Fixed", "", "- Legacy fix.", "",
+    "### Fixed", "", "- Fragment fix.", "",
+  ].join("\n");
+  const out = mergeCategorySections(input);
+  assert.equal((out.match(/^### Fixed$/gm) || []).length, 1, "exactly one ### Fixed");
+  assert.ok(out.includes("- Legacy fix."), "keeps legacy bullet");
+  assert.ok(out.includes("- Fragment fix."), "keeps fragment bullet");
+});
+
+test("mergeCategorySections preserves bullet order within a merged section", () => {
+  const input = "### Fixed\n\n- First.\n\n### Fixed\n\n- Second.";
+  const out = mergeCategorySections(input);
+  assert.ok(out.indexOf("- First.") < out.indexOf("- Second."), "encounter order preserved");
+});
+
+test("mergeCategorySections re-emits sections in canonical order", () => {
+  const input = "### Security\n\n- S.\n\n### Added\n\n- A.\n\n### Fixed\n\n- F.";
+  const out = mergeCategorySections(input);
+  const lines = out.split("\n");
+  const added = lines.indexOf("### Added");
+  const fixed = lines.indexOf("### Fixed");
+  const security = lines.indexOf("### Security");
+  assert.ok(added < fixed && fixed < security, `Added<Fixed<Security, got ${out}`);
+});
+
+test("mergeCategorySections preserves preamble text before the first heading", () => {
+  const input = "An intro paragraph for this release.\n\n### Added\n\n- A.";
+  const out = mergeCategorySections(input);
+  assert.ok(out.startsWith("An intro paragraph for this release."), "preamble kept at top");
+  assert.equal((out.match(/^### Added$/gm) || []).length, 1);
+});
+
+test("mergeCategorySections is idempotent on an already-clean body", () => {
+  const clean = "### Added\n\n- A.\n\n### Fixed\n\n- F.";
+  assert.equal(mergeCategorySections(clean), clean);
+  assert.equal(mergeCategorySections(mergeCategorySections(clean)), clean);
+});
+
+test("mergeCategorySections handles the legacy-plus-fragment release shape", () => {
+  // Mirrors release.sh: legacy [Unreleased] body (Added/Changed/Fixed/Security)
+  // joined with the assembled fragment block (Added/Fixed/Security).
+  const legacy = "### Added\n\n- Legacy added.\n\n### Changed\n\n- Legacy changed.\n\n### Fixed\n\n- Legacy fixed.\n\n### Security\n\n- Legacy security.";
+  const assembled = "### Added\n\n- Fragment added.\n\n### Fixed\n\n- Fragment fixed.\n\n### Security\n\n- Fragment security.";
+  const out = mergeCategorySections([legacy, assembled].join("\n\n"));
+  for (const h of ["Added", "Changed", "Fixed", "Security"]) {
+    assert.equal((out.match(new RegExp(`^### ${h}$`, "gm")) || []).length, 1, `one ### ${h}`);
+  }
+  // All eight bullets survive.
+  for (const b of [
+    "- Legacy added.", "- Fragment added.", "- Legacy changed.",
+    "- Legacy fixed.", "- Fragment fixed.", "- Legacy security.", "- Fragment security.",
+  ]) {
+    assert.ok(out.includes(b), `keeps ${b}`);
+  }
+});
+
+test("mergeCategorySections returns empty string for empty input", () => {
+  assert.equal(mergeCategorySections(""), "");
+  assert.equal(mergeCategorySections("\n\n"), "");
 });

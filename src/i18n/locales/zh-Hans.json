@@ -1223,7 +1223,6 @@
     "repairDesc": "从 GitHub 强制重装。当版本显示\"未知\"、游戏拒绝加载此模组、或安装看起来有问题时使用。",
     "repairNeedSource": "请先通过\"编辑来源…\"链接 GitHub 源 — 修复从 GitHub 获取。",
     "subtitle": "{{total}} 个已安装 · {{enabled}} 个已启用{{disabled}}",
-    "openFolder": "打开模组文件夹",
     "importMod": "导入模组",
     "quickAddUrl": "快速添加 URL",
     "autoDetectSources": "自动检测来源",

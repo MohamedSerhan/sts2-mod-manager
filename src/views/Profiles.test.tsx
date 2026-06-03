@@ -1763,6 +1763,38 @@ describe('<ProfilesView>', () => {
     });
   });
 
+  it('deleting the active pack clears the pointer even on a case-mismatch (review nit)', async () => {
+    // The backend clears active_profile.txt case-insensitively; the FE must
+    // too, or a case-mismatched active pointer would stay stale until restart.
+    seedProfiles([baseProfile({ name: 'mypack' })]);
+    registerInvokeHandler('get_active_profile', () => 'MyPack');
+    registerInvokeHandler('delete_profile_cmd', () => null);
+    const user = userEvent.setup();
+    render(
+      <AllProviders>
+        <ActiveProbe />
+        <ProfilesView />
+      </AllProviders>,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('active-probe')).toHaveTextContent('active:MyPack');
+    });
+
+    await openDetailFor(user, 'mypack');
+    await openAdvancedMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Delete modpack/i }));
+    const modal = await confirmModal();
+    await user.click(modal.getByRole('button', { name: /Delete modpack/i }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some(
+        (c) => c.cmd === 'delete_profile_cmd' && c.args?.name === 'mypack',
+      )).toBe(true);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('active-probe')).toHaveTextContent('active:none');
+    });
+  });
+
   it('deleting a NON-active modpack leaves the active pointer intact', async () => {
     seedProfiles([baseProfile({ name: 'A' }), baseProfile({ name: 'B' })]);
     registerInvokeHandler('get_active_profile', () => 'A');

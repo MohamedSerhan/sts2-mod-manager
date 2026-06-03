@@ -1223,7 +1223,6 @@
     "repairDesc": "Force-reinstall from GitHub. Use when version reads \"unknown\", the game refuses to load this mod, or the install otherwise looks broken.",
     "repairNeedSource": "Link a GitHub source first via \"Edit sources…\" — repair fetches from GitHub.",
     "subtitle": "{{total}} installed · {{enabled}} active{{disabled}}",
-    "openFolder": "Open mods folder",
     "importMod": "Import mod",
     "quickAddUrl": "Quick add URL",
     "autoDetectSources": "Auto-detect sources",

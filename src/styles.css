@@ -511,7 +511,7 @@ body {
 .gf-modpack-detail-count-missing {
   font-size: 11.5px;
   font-weight: 600;
-  color: var(--gf-warn, var(--ink-dim, #c9a23a));
+  color: var(--warn);
   white-space: nowrap;
 }
 .gf-modpack-detail-missing-tip {
@@ -526,11 +526,12 @@ body {
   gap: 3px;
   padding: 8px 10px;
   border-radius: 8px;
-  background: oklch(0.18 0.03 270 / 0.98);
-  border: 1px solid var(--indigo-line, oklch(0.45 0.03 270 / 0.5));
-  box-shadow: 0 6px 20px oklch(0 0 0 / 0.35);
+  /* Theme tokens (no raw oklch literals) so it adapts with the theme. */
+  background: var(--indigo-elev);
+  border: 1px solid var(--indigo-line);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
   font-size: 11.5px;
-  color: var(--ink-bright, #e8e8f0);
+  color: var(--ink);
 }
 .gf-modpack-detail-missing:hover .gf-modpack-detail-missing-tip,
 .gf-modpack-detail-missing:focus-within .gf-modpack-detail-missing-tip {
@@ -541,7 +542,7 @@ body {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--ink-dim, #9aa);
+  color: var(--ink-dim);
   margin-bottom: 2px;
 }
 .gf-modpack-detail-missing-tip-item {

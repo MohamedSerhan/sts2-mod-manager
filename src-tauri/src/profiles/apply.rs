@@ -1972,6 +1972,61 @@ mod modpack_flow_tests {
         assert_no_root_artifacts(&paths);
     }
 
+    #[tokio::test]
+    async fn disabled_mod_version_mismatch_replaces_in_place_without_loss() {
+        // Review nit: the happy-path replace test only covered the ENABLED
+        // path. A pack mod that's DISABLED on disk and version-mismatched must
+        // also be replaced safely — the new content lands in mods_disabled
+        // (the profile keeps it disabled), nothing is stranded in the active
+        // folder, and no empty swap dirs are left behind.
+        let paths = flow_paths();
+        let server = MockServer::start().await;
+        save_pack(
+            "Pack",
+            &paths.profiles,
+            vec![
+                publish_mod(
+                    &server,
+                    "/d/dis.zip",
+                    "DisMod",
+                    "dismod",
+                    "DisMod",
+                    "2.0.0",
+                    "new-v2",
+                    false, // disabled in the manifest
+                    None,
+                )
+                .await,
+            ],
+        );
+        // On disk (DISABLED): the old v1.0.0.
+        install_loose_mod(&paths.disabled, "DisMod", "old-v1");
+
+        let result = switch_profile_from_paths(
+            "Pack",
+            &paths.mods,
+            &paths.disabled,
+            &paths.profiles,
+            &paths.config,
+            &paths.cache,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            result.replaced_mods.contains(&"DisMod".to_string()),
+            "replaced={:?}",
+            result.replaced_mods
+        );
+        assert!(result.replace_failures.is_empty());
+        // New content landed in mods_disabled, nothing stranded in active, and
+        // no stray empty folders.
+        assert_marker(&paths.disabled, "DisMod", "new-v2");
+        assert!(!paths.mods.join("DisMod").exists());
+        assert_no_root_artifacts(&paths);
+    }
+
     #[test]
     fn drift_ignores_disabled_mods_that_are_not_part_of_the_profile() {
         let paths = flow_paths();

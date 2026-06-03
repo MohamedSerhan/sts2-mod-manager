@@ -105,20 +105,20 @@ export function EditModpackModal({ profile, onClose, onSaved }: Props) {
   return (
     <div
       className="gf-modal-back"
-      role="dialog"
-      aria-modal="true"
-      aria-label={t('modpack.edit.title', { name: profile.name })}
       onClick={saving ? undefined : onClose}
     >
       <div
         className="gf-modal gf-create-wizard"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="gf-edit-modpack-title"
         ref={modalRef}
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="gf-modal-head">
           <div>
-            <div className="gf-modal-title">{t('modpack.edit.title', { name: profile.name })}</div>
+            <div id="gf-edit-modpack-title" className="gf-modal-title">{t('modpack.edit.title', { name: profile.name })}</div>
             <div className="gf-modal-sub">{t('modpack.edit.subtitle')}</div>
           </div>
         </div>

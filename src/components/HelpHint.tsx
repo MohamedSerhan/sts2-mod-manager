@@ -62,7 +62,7 @@ export function HelpHint({ helpKey, className }: Props) {
         <HelpCircle size={14} />
       </button>
       {open && (
-        <div className="gf-help-hint-popover" role="tooltip">
+        <div className="gf-help-hint-popover" data-testid="help-hint-popover">
           {t(`help.faq.${helpKey}.a`)}
         </div>
       )}

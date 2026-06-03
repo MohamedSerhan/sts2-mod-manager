@@ -276,8 +276,8 @@ pub(crate) async fn cleanup_orphan_bundle_assets(token: &str, owner: &str) -> Re
 }
 
 /// Download a bundled mod zip from a URL and extract into mods_path.
-pub async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::Path) -> Result<()> {
-    github_download_bundle(url, mod_name, mods_path).await
+pub async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::Path, expected_sha256: Option<&str>) -> Result<()> {
+    github_download_bundle(url, mod_name, mods_path, expected_sha256).await
 }
 
 /// Fetch a profile from any user's profiles repo.
@@ -1751,7 +1751,7 @@ mod share_orchestration_tests {
 
         let friend_mods = tmpdir.path().join("friend-mods");
         std::fs::create_dir_all(&friend_mods).unwrap();
-        download_bundle(bundle_url, "TestMod", &friend_mods)
+        download_bundle(bundle_url, "TestMod", &friend_mods, None)
             .await
             .expect("release asset bundle should download through the GitHub release URL path");
 

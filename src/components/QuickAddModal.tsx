@@ -89,10 +89,17 @@ export function QuickAddModal({ open, onClose }: Props) {
 
   return (
     <div className="gf-modal-back" onClick={onClose}>
-      <div className="gf-modal" style={{ width: 540 }} onClick={(e) => e.stopPropagation()}>
+      <div
+        className="gf-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="gf-quick-add-title"
+        style={{ width: 540 }}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="gf-modal-head">
           <div>
-            <div className="gf-modal-title">{t('quickAdd.title')}</div>
+            <div id="gf-quick-add-title" className="gf-modal-title">{t('quickAdd.title')}</div>
             <div className="gf-modal-sub">
               {t('quickAdd.subtitle')}
             </div>

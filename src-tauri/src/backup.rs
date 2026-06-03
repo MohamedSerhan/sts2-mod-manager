@@ -38,6 +38,18 @@ pub fn create_backup(mods_path: &Path, backup_dir: &Path) -> Result<String> {
 /// Create a backup while keeping a named restore target safe from retention
 /// pruning. Used by the pre-restore safety backup flow: creating the safety
 /// backup must not delete the backup the user is actively trying to restore.
+///
+/// Backup layout:
+/// ```text
+/// backup_YYYY-MM-DD_HH-MM-SS/
+///   mods/         (copy of mods_path)
+///   config/
+///     mod_sources.json
+///     subscriptions.json
+///     profiles/
+///     active_profile.txt
+///     launch_mode.txt
+/// ```
 pub fn create_backup_preserving(
     mods_path: &Path,
     backup_dir: &Path,
@@ -49,11 +61,43 @@ pub fn create_backup_preserving(
 
     fs::create_dir_all(&dest)?;
 
+    // Copy mods into mods/ subdirectory.
+    let dest_mods = dest.join("mods");
     if mods_path.exists() {
         log::info!("Creating backup '{}' from {}", backup_name, mods_path.display());
-        copy_dir_recursive(mods_path, &dest)?;
+        copy_dir_recursive(mods_path, &dest_mods)?;
     } else {
-        log::warn!("create_backup: mods_path {} does not exist; backup will be empty", mods_path.display());
+        log::warn!("create_backup: mods_path {} does not exist; backup mods/ will be empty", mods_path.display());
+        fs::create_dir_all(&dest_mods)?;
+    }
+
+    // Copy config files from the app data directory (parent of mods_path).
+    if let Some(app_data_dir) = mods_path.parent() {
+        let dest_config = dest.join("config");
+        fs::create_dir_all(&dest_config)?;
+
+        let config_items = [
+            "mod_sources.json",
+            "subscriptions.json",
+            "profiles",
+            "active_profile.txt",
+            "launch_mode.txt",
+        ];
+        for item in &config_items {
+            let src = app_data_dir.join(item);
+            if src.exists() {
+                let dst = dest_config.join(item);
+                if src.is_dir() {
+                    copy_dir_recursive(&src, &dst)?;
+                } else {
+                    fs::copy(&src, &dst)?;
+                }
+            } else {
+                log::warn!("create_backup: config item '{}' not found; skipping", item);
+            }
+        }
+    } else {
+        log::warn!("create_backup: mods_path has no parent; config backup skipped");
     }
 
     log::info!("Backup created: {}", dest.display());
@@ -159,14 +203,33 @@ pub fn list_backups(backup_dir: &Path) -> Vec<BackupInfo> {
             .replace('_', "T")
             .replacen('-', ":", 2); // rough ISO conversion for display
 
-        // Count files and total size
+        // Count mods (files under mods/ subdirectory) and total backup size.
+        // Fix M-11: backups now have mods/ + config/ subdirectories.
+        // mod_count reflects mods only; size_bytes covers the whole backup.
         let mut mod_count: usize = 0;
         let mut size_bytes: u64 = 0;
 
-        for file_entry in WalkDir::new(&path).into_iter().flatten() {
-            if file_entry.file_type().is_file() {
-                mod_count += 1;
-                size_bytes += file_entry.metadata().map(|m| m.len()).unwrap_or(0);
+        let mods_subdir = path.join("mods");
+        if mods_subdir.exists() {
+            // New-style backup: count files under mods/ only.
+            for file_entry in WalkDir::new(&mods_subdir).into_iter().flatten() {
+                if file_entry.file_type().is_file() {
+                    mod_count += 1;
+                }
+            }
+            // Size: entire backup (mods/ + config/).
+            for file_entry in WalkDir::new(&path).into_iter().flatten() {
+                if file_entry.file_type().is_file() {
+                    size_bytes += file_entry.metadata().map(|m| m.len()).unwrap_or(0);
+                }
+            }
+        } else {
+            // Legacy backup (flat structure): every file is a mod file.
+            for file_entry in WalkDir::new(&path).into_iter().flatten() {
+                if file_entry.file_type().is_file() {
+                    mod_count += 1;
+                    size_bytes += file_entry.metadata().map(|m| m.len()).unwrap_or(0);
+                }
             }
         }
 
@@ -214,14 +277,52 @@ pub fn restore_backup(backup_name: &str, backup_dir: &Path, mods_path: &Path) ->
 
     log::info!("Restoring backup '{}' into {}", backup_name, mods_path.display());
 
+    // Detect new-style backup (has mods/ subdirectory, Fix M-11) vs legacy flat backup.
+    let src_mods = src.join("mods");
+    let is_new_style = src_mods.exists();
+
+    // The mods source to restore from.
+    let mods_src = if is_new_style { &src_mods } else { &src };
+
     // Move the current mods aside first so a failure mid-copy rolls back to the
     // pre-restore state instead of leaving the user with an empty mods folder.
     // (Audit H-4)
     let swap = crate::fs_safety::swap_dirs_aside(&[mods_path])?;
-    match copy_dir_recursive(&src, mods_path) {
+    match copy_dir_recursive(mods_src, mods_path) {
         Ok(()) => {
             swap.discard()?;
-            log::info!("Backup '{}' restored successfully", backup_name);
+            log::info!("Backup '{}' mods restored successfully", backup_name);
+
+            // Fix M-11: also restore config files if this is a new-style backup.
+            if is_new_style {
+                if let Some(app_data_dir) = mods_path.parent() {
+                    let src_config = src.join("config");
+                    if src_config.exists() {
+                        let config_items = [
+                            "mod_sources.json",
+                            "subscriptions.json",
+                            "profiles",
+                            "active_profile.txt",
+                            "launch_mode.txt",
+                        ];
+                        for item in &config_items {
+                            let item_src = src_config.join(item);
+                            if item_src.exists() {
+                                let item_dst = app_data_dir.join(item);
+                                if item_src.is_dir() {
+                                    if let Err(e) = copy_dir_recursive(&item_src, &item_dst) {
+                                        log::warn!("restore_backup: failed to restore config item '{}': {}", item, e);
+                                    }
+                                } else if let Err(e) = fs::copy(&item_src, &item_dst) {
+                                    log::warn!("restore_backup: failed to restore config item '{}': {}", item, e);
+                                }
+                            }
+                        }
+                        log::info!("Backup '{}' config restored successfully", backup_name);
+                    }
+                }
+            }
+
             Ok(())
         }
         Err(e) => {
@@ -290,31 +391,36 @@ mod backup_pure_tests {
 
     #[test]
     fn create_backup_copies_all_files_recursively() {
-        let mods = tempfile::tempdir().unwrap();
-        let backups = tempfile::tempdir().unwrap();
+        // Fix M-11: backups now use mods/ subdirectory layout.
+        // mods_path must have a parent (app_data_dir) for the config items to be looked up.
+        let root = tempfile::tempdir().unwrap();
+        let mods = root.path().join("mods");
+        let backups = root.path().join("backups");
         // Set up: one mod folder with a manifest + dll.
-        let modfolder = mods.path().join("MyMod");
+        let modfolder = mods.join("MyMod");
         fs::create_dir_all(&modfolder).unwrap();
         fs::write(modfolder.join("MyMod.json"), b"{}").unwrap();
         fs::write(modfolder.join("MyMod.dll"), b"binary").unwrap();
 
-        let backup_name = create_backup(mods.path(), backups.path()).unwrap();
-        let backup_dir = backups.path().join(&backup_name);
+        let backup_name = create_backup(&mods, &backups).unwrap();
+        let backup_dir = backups.join(&backup_name);
         assert!(backup_dir.exists());
-        assert!(backup_dir.join("MyMod/MyMod.json").exists());
-        assert!(backup_dir.join("MyMod/MyMod.dll").exists());
+        // Mods are under mods/ subdirectory now.
+        assert!(backup_dir.join("mods/MyMod/MyMod.json").exists());
+        assert!(backup_dir.join("mods/MyMod/MyMod.dll").exists());
     }
 
     #[test]
     fn create_backup_handles_missing_mods_path_with_empty_dir() {
-        let backups = tempfile::tempdir().unwrap();
-        let missing = backups.path().join("does-not-exist");
-        let name = create_backup(&missing, backups.path()).unwrap();
-        let dir = backups.path().join(&name);
+        let root = tempfile::tempdir().unwrap();
+        let backups = root.path().join("backups");
+        // mods_path doesn't exist but its parent (root) does.
+        let missing = root.path().join("mods");
+        let name = create_backup(&missing, &backups).unwrap();
+        let dir = backups.join(&name);
         assert!(dir.exists());
-        // No files copied (mods_path didn't exist), but the named dir is created.
-        let entries: Vec<_> = fs::read_dir(&dir).unwrap().collect();
-        assert!(entries.is_empty() || entries.iter().all(|e| e.is_ok()));
+        // mods/ subdirectory is created even when mods_path doesn't exist.
+        assert!(dir.join("mods").exists());
     }
 
     #[test]
@@ -379,11 +485,14 @@ mod backup_pure_tests {
 
     #[test]
     fn restore_backup_restores_named_backup_and_replaces_current() {
+        // Fix M-11: test new-style backup (has mods/ subdirectory).
         let root = tempfile::tempdir().unwrap();
         let backup_dir = root.path().join("backups");
         let snap = backup_dir.join("backup_2026-01-01_00-00-00");
-        fs::create_dir_all(&snap).unwrap();
-        fs::write(snap.join("ModA.dll"), "a").unwrap();
+        // New-style: mods are under mods/ subdirectory.
+        let snap_mods = snap.join("mods");
+        fs::create_dir_all(&snap_mods).unwrap();
+        fs::write(snap_mods.join("ModA.dll"), "a").unwrap();
 
         let mods = root.path().join("mods");
         fs::create_dir_all(&mods).unwrap();
@@ -396,6 +505,25 @@ mod backup_pure_tests {
             !mods.join("stale.txt").exists(),
             "pre-restore contents replaced by the backup"
         );
+    }
+
+    #[test]
+    fn restore_backup_legacy_flat_structure_still_works() {
+        // Legacy backups (flat, without mods/ subdirectory) should still restore correctly.
+        let root = tempfile::tempdir().unwrap();
+        let backup_dir = root.path().join("backups");
+        let snap = backup_dir.join("backup_2026-01-01_00-00-00");
+        fs::create_dir_all(&snap).unwrap();
+        fs::write(snap.join("LegacyMod.dll"), "legacy").unwrap();
+
+        let mods = root.path().join("mods");
+        fs::create_dir_all(&mods).unwrap();
+        fs::write(mods.join("stale.txt"), "stale").unwrap();
+
+        restore_backup("backup_2026-01-01_00-00-00", &backup_dir, &mods).unwrap();
+
+        assert!(mods.join("LegacyMod.dll").exists(), "legacy backup contents restored");
+        assert!(!mods.join("stale.txt").exists(), "stale contents replaced");
     }
 
     #[test]
@@ -453,10 +581,11 @@ mod backup_pure_tests {
 
     #[test]
     fn pre_restore_backup_pruning_preserves_restore_target() {
-        let mods = tempfile::tempdir().unwrap();
-        let backups = tempfile::tempdir().unwrap();
-        fs::create_dir_all(mods.path().join("CurrentMod")).unwrap();
-        fs::write(mods.path().join("CurrentMod/CurrentMod.json"), b"{}").unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let mods = root.path().join("mods");
+        let backups = root.path().join("backups");
+        fs::create_dir_all(mods.join("CurrentMod")).unwrap();
+        fs::write(mods.join("CurrentMod/CurrentMod.json"), b"{}").unwrap();
 
         let restore_target = "backup_2026-01-01_10-00-00";
         for ts in [
@@ -466,20 +595,108 @@ mod backup_pure_tests {
             "2026-04-01_10-00-00",
             "2026-05-01_10-00-00",
         ] {
-            let dir = backups.path().join(format!("backup_{}", ts));
+            let dir = backups.join(format!("backup_{}", ts));
             fs::create_dir_all(&dir).unwrap();
         }
 
-        create_backup_preserving(mods.path(), backups.path(), Some(restore_target)).unwrap();
+        create_backup_preserving(&mods, &backups, Some(restore_target)).unwrap();
 
         assert!(
-            backups.path().join(restore_target).exists(),
+            backups.join(restore_target).exists(),
             "creating the pre-restore backup must not prune the backup being restored"
         );
         assert!(
-            list_backups(backups.path()).len() <= MAX_BACKUPS,
+            list_backups(&backups).len() <= MAX_BACKUPS,
             "retention should still keep the list bounded by pruning another old backup"
         );
+    }
+
+    #[test]
+    fn create_backup_includes_config_files() {
+        // Fix M-11: config files are backed up into config/ subdirectory.
+        let root = tempfile::tempdir().unwrap();
+        let app_data_dir = root.path(); // acts as the app data directory
+        let mods = app_data_dir.join("mods");
+        let backups = app_data_dir.join("backups");
+
+        // Set up a mod.
+        let modfolder = mods.join("ConfigMod");
+        fs::create_dir_all(&modfolder).unwrap();
+        fs::write(modfolder.join("ConfigMod.json"), b"{}").unwrap();
+
+        // Set up config files.
+        fs::write(app_data_dir.join("mod_sources.json"), b"{}").unwrap();
+        fs::write(app_data_dir.join("subscriptions.json"), b"[]").unwrap();
+        fs::write(app_data_dir.join("active_profile.txt"), b"default").unwrap();
+        fs::write(app_data_dir.join("launch_mode.txt"), b"standard").unwrap();
+        let profiles_dir = app_data_dir.join("profiles");
+        fs::create_dir_all(&profiles_dir).unwrap();
+        fs::write(profiles_dir.join("default.json"), b"{}").unwrap();
+
+        let backup_name = create_backup(&mods, &backups).unwrap();
+        let backup_dir = backups.join(&backup_name);
+
+        // Mods are under mods/.
+        assert!(backup_dir.join("mods/ConfigMod/ConfigMod.json").exists());
+        // Config files are under config/.
+        assert!(backup_dir.join("config/mod_sources.json").exists());
+        assert!(backup_dir.join("config/subscriptions.json").exists());
+        assert!(backup_dir.join("config/active_profile.txt").exists());
+        assert!(backup_dir.join("config/launch_mode.txt").exists());
+        assert!(backup_dir.join("config/profiles/default.json").exists());
+    }
+
+    #[test]
+    fn restore_backup_restores_config_files() {
+        // Fix M-11: restoring a new-style backup also restores config files.
+        let root = tempfile::tempdir().unwrap();
+        let app_data_dir = root.path();
+        let mods = app_data_dir.join("mods");
+        fs::create_dir_all(&mods).unwrap();
+
+        let backup_dir = app_data_dir.join("backups");
+        let snap = backup_dir.join("backup_2026-01-01_00-00-00");
+
+        // New-style backup with mods/ and config/.
+        let snap_mods = snap.join("mods");
+        fs::create_dir_all(&snap_mods).unwrap();
+        fs::write(snap_mods.join("Mod.dll"), "x").unwrap();
+
+        let snap_config = snap.join("config");
+        fs::create_dir_all(&snap_config).unwrap();
+        fs::write(snap_config.join("mod_sources.json"), b"{\"from\":\"backup\"}").unwrap();
+        fs::write(snap_config.join("active_profile.txt"), b"restored-profile").unwrap();
+
+        restore_backup("backup_2026-01-01_00-00-00", &backup_dir, &mods).unwrap();
+
+        // Mods restored.
+        assert!(mods.join("Mod.dll").exists(), "mod file must be restored");
+        // Config restored.
+        assert!(app_data_dir.join("mod_sources.json").exists(), "mod_sources.json must be restored");
+        let content = fs::read_to_string(app_data_dir.join("mod_sources.json")).unwrap();
+        assert!(content.contains("backup"), "restored config content must match backup");
+        assert!(app_data_dir.join("active_profile.txt").exists(), "active_profile.txt must be restored");
+    }
+
+    #[test]
+    fn list_backups_counts_mods_from_mods_subdir_not_config() {
+        // Fix M-11: mod_count should only count files under mods/, not config/.
+        let backups = tempfile::tempdir().unwrap();
+        let snap = backups.path().join("backup_2026-01-01_10-00-00");
+        let snap_mods = snap.join("mods");
+        fs::create_dir_all(&snap_mods).unwrap();
+        fs::write(snap_mods.join("ModA.dll"), b"a").unwrap();
+        fs::write(snap_mods.join("ModB.dll"), b"b").unwrap();
+        let snap_config = snap.join("config");
+        fs::create_dir_all(&snap_config).unwrap();
+        fs::write(snap_config.join("mod_sources.json"), b"{}").unwrap();
+
+        let list = list_backups(backups.path());
+        assert_eq!(list.len(), 1);
+        // mod_count should be 2 (only mods), not 3 (mods + config).
+        assert_eq!(list[0].mod_count, 2, "mod_count must count only files in mods/ subdir");
+        // size_bytes should include the config file too (1 + 1 + 2 = 4 bytes minimum).
+        assert!(list[0].size_bytes >= 4, "size_bytes must include config files");
     }
 }
 

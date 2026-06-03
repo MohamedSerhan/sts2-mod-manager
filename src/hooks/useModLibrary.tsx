@@ -23,6 +23,7 @@ import { X } from 'lucide-react';
 
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
+import { useClipboard } from './useClipboard';
 import { useConfirm } from '../components/ConfirmDialog';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
@@ -118,6 +119,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     refreshAuditEntries,
   } = useApp();
   const toast = useToast();
+  const { copy: copyToClipboard } = useClipboard();
 
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [showAutoDetect, setShowAutoDetect] = useState(false);
@@ -409,12 +411,10 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
   }
 
   async function handleCopyVersion(mod: ModInfo) {
-    try {
-      await navigator.clipboard.writeText(mod.version);
-      toast.success(t('mods.toast.versionCopied', { version: mod.version }));
-    } catch {
-      toast.error(t('mods.toast.couldNotCopy'));
-    }
+    await copyToClipboard(mod.version, 'version', {
+      successMessage: t('mods.toast.versionCopied', { version: mod.version }),
+      failureMessage: 'mods.toast.couldNotCopy',
+    });
   }
 
   async function handleFindGithubFromNexus(mod: ModInfo) {

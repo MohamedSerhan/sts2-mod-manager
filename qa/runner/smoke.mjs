@@ -1459,6 +1459,9 @@ async function specSkippedModAbsentFromSnapshot(driver) {
     driver,
     By.xpath("//*[normalize-space(text())='SkippedMod']"),
     'SkippedMod row (post-seed re-scan)',
+    // A backend disk re-scan + render after Refresh can exceed the 10s
+    // default under release-machine load; give it headroom (was a flaky miss).
+    30_000,
   );
   await waitForElement(
     driver,
@@ -1467,7 +1470,7 @@ async function specSkippedModAbsentFromSnapshot(driver) {
         "//*[contains(., 'needs game') and contains(., '999.0.0')]",
     ),
     'SkippedMod incompatibility pill ("needs game ≥ v999.0.0")',
-    10_000,
+    30_000,
   );
 
   // Step 3: nav to Profiles + override window.prompt. handleSnapshot in

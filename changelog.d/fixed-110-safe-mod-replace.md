@@ -1,1 +1,0 @@
-Switching or repairing a modpack no longer risks losing a mod if a re-download fails — your installed copy is kept and restored, and the summary now names the mods that were updated, kept, or couldn't be downloaded.

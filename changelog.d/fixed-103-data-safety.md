@@ -1,1 +1,0 @@
-Fixed rare data-loss cases — a crash while the app was saving could wipe your saved mod sources, subscriptions, or profiles, and a failed backup-restore or modpack repair could leave your mods folder empty.

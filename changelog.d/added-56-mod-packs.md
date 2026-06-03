@@ -1,1 +1,0 @@
-Downloads that contain several mods (like the Alice Defect pack) now install and appear as a single pack — enable, disable, delete, or add it to a modpack as one unit, and rename it like any other mod.

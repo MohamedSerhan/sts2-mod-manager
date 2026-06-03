@@ -1,1 +1,0 @@
-Bundled packs and Nexus-linked mods now show their real Nexus version (the file version) instead of an unrelated version number taken from one of the mods inside the pack. Existing packs correct themselves the next time you install or update them.

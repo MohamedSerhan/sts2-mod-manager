@@ -37,6 +37,50 @@ _Changes are tracked as fragments in [`changelog.d/`](changelog.d/) and assemble
 
 ---
 
+## [1.7.1] - 2026-06-03
+
+### Added
+
+- Added Russian and Arabic as language options in Settings → Language, and the app now lays out right-to-left when Arabic is selected.
+- Modpacks now have "Enable all" and "Disable all" buttons to switch every mod in the pack on or off at once.
+- Each mod's ⋯ menu now has "Open this mod's folder" to open just that mod's folder.
+- The app now has a light theme — open Settings → General and choose Light, Dark, or Auto (match your system), and your choice is remembered the next time you launch.
+- A modpack that isn't active now explains why its per-mod on/off switches are hidden, with a one-click way to switch to it so you can manage what loads.
+- You can now rename a modpack from its menu — its share link keeps working and your active modpack follows the new name.
+- On the mod library, picking a tag now floats that tag's mods to the top (with the rest ordered by tag) instead of hiding the others; inside a modpack you can still filter its mods by tag.
+- On the Create-modpack screen you can now expand each summary count to see exactly which mods it refers to, and peek the full list of mods you've selected.
+- Each mod row's kebab (⋯) menu now has an "Auto-detect source" item that runs a scoped GitHub search for just that one mod; selecting it on a bundle (pack of several mods) shows a toast explaining that auto-linking isn't supported for bundles.
+- Downloads that contain several mods (like the Alice Defect pack) now install and appear as a single pack — enable, disable, delete, or add it to a modpack as one unit, and rename it like any other mod.
+
+### Fixed
+
+- Fixed rare data-loss cases — a crash while the app was saving could wipe your saved mod sources, subscriptions, or profiles, and a failed backup-restore or modpack repair could leave your mods folder empty.
+- Fixed a bug where a mod that appeared in both the active and disabled folders would show up twice in a saved modpack, causing the mod count to be higher than the number of installed mods.
+- Adding a mod from "Add from your library" no longer jumps the list back to the top.
+- Deleting the modpack that's currently active no longer leaves it still marked as active.
+- Deleting the active modpack now clears its mods out of the game folder, so the next launch is genuinely mod-free instead of loading leftover mods with errors.
+- A modpack's "drifted" banner no longer stays stuck after a successful Repair when a mod's content matches the modpack but only its version label differs.
+- A modpack's drift banner and "(N missing)" indicator now update as soon as you change its mods, instead of only after leaving the page and coming back.
+- Fixed "Enable all" / "Disable all" so the mod switches update right away instead of only after you leave and come back to the page.
+- Fixed "Find GitHub from Nexus" — the repo it finds now appears in the source editor right away and is no longer wiped out when you save.
+- Hovering the "(N missing)" count on a modpack now shows exactly which mods are listed in the pack but not installed.
+- A modpack that lists mods which aren't installed now shows "(N missing)" next to its count, so the header matches the mods actually on disk.
+- Fixed "Enable all" / "Disable all" inside a modpack failing with a "mod not found" error — it now reliably switches every mod in the pack and tells you by name if any couldn't be found.
+- A modpack's bulk actions (Open mods folder, Enable all, Disable all) now sit on their own bar under the toolbar, so they no longer crowd the search row or get cut off on a narrow window.
+- "Open mods folder" moved out of the "+ Add mods" menu and now sits as a button next to Enable all / Disable all in both the Mod Library and a modpack.
+- The public/private listing toggle for a published modpack now stays correct when you reopen the publish dialog.
+- Quick Add no longer keeps a previously-typed link in the box when you reopen it.
+- Switching or repairing a modpack no longer risks losing a mod if a re-download fails — your installed copy is kept and restored, and the summary now names the mods that were updated, kept, or couldn't be downloaded.
+- "Save changes" on a modpack now lists the mods it added to or dropped from the pack, so you can see exactly what changed.
+- Auto-detect sources no longer silently shows "no candidates" for mods when GitHub's search quota runs out mid-scan; a banner now explains the rate-limit and mods that weren't searched are marked "not checked" so you know to run the scan again.
+- Bundled packs and Nexus-linked mods now show their real Nexus version (the file version) instead of an unrelated version number taken from one of the mods inside the pack. Existing packs correct themselves the next time you install or update them.
+- Clicking Update on a Nexus-only mod now opens the mod's Nexus page so you can download the new version — the app auto-installs it when the zip lands in your Downloads folder, instead of showing an error.
+
+### Security
+
+- Hardened how shared modpacks are downloaded and how Nexus and dev-build links are validated, so a malicious modpack can't steer the app at unexpected addresses.
+- Backups now include your profiles and settings alongside your mods, and shared modpack bundles are verified for integrity before being installed.
+
 ## [1.7.0] - 2026-06-02
 
 A UX simplification release. The app feels like a launcher first: pick a modpack, click Play. Power-user tools are still there, just behind progressive disclosure so they don't compete with the normal flow.

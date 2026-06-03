@@ -1219,6 +1219,38 @@ describe('<LibraryTable modpackName={null}>', () => {
       expect(titles.slice(0, 50).every((tt) => suffix(tt) % 2 === 1)).toBe(true);   // first 50 are the tagged (odd) mods
       expect(titles.slice(50).every((tt) => suffix(tt) % 2 === 0)).toBe(true);      // last 50 are the untagged (even) mods
     });
+
+    it('brings the chosen tag to the top via the secondary picker', async () => {
+      gridFromInstalled(['Apple', 'Zeta', 'Mid']);
+      const modInfoByKey = new Map([
+        ['Apple', mkModInfo({ name: 'Apple', folder_name: 'Apple', tags: ['ui'] })],
+        ['Zeta', mkModInfo({ name: 'Zeta', folder_name: 'Zeta', tags: ['combat'] })],
+        ['Mid', mkModInfo({ name: 'Mid', folder_name: 'Mid', tags: ['combat'] })],
+      ]);
+      render(<Wrap modpackName={null} modInfoByKey={modInfoByKey} />);
+      const sortSelect = await screen.findByLabelText(/sort/i) as HTMLSelectElement;
+      fireEvent.change(sortSelect, { target: { value: 'tagAsc' } });
+      // Pick "combat" → combat-tagged mods float up (Mid, Zeta by name), then Apple.
+      const tagPicker = await screen.findByLabelText(/bring to the top/i) as HTMLSelectElement;
+      fireEvent.change(tagPicker, { target: { value: 'combat' } });
+      const titles = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent);
+      const order = titles.filter((tt) => ['Apple', 'Zeta', 'Mid'].includes(tt ?? ''));
+      expect(order).toEqual(['Mid', 'Zeta', 'Apple']);
+    });
+
+    it('shows the secondary tag picker only for the By tag sort', async () => {
+      gridFromInstalled(['Apple', 'Zeta']);
+      const modInfoByKey = new Map([
+        ['Apple', mkModInfo({ name: 'Apple', folder_name: 'Apple', tags: ['ui'] })],
+        ['Zeta', mkModInfo({ name: 'Zeta', folder_name: 'Zeta', tags: ['combat'] })],
+      ]);
+      render(<Wrap modpackName={null} modInfoByKey={modInfoByKey} />);
+      const sortSelect = await screen.findByLabelText(/sort/i) as HTMLSelectElement;
+      fireEvent.change(sortSelect, { target: { value: 'nameAsc' } });
+      expect(screen.queryByLabelText(/bring to the top/i)).toBeNull();
+      fireEvent.change(sortSelect, { target: { value: 'tagAsc' } });
+      expect(screen.getByLabelText(/bring to the top/i)).toBeInTheDocument();
+    });
   });
 
   it('pins the scroll position when a row mutates, so the user is never yanked to the top', async () => {

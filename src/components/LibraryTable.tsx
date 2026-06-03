@@ -192,6 +192,16 @@ function firstTagKey(
   return tags.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }))[0];
 }
 
+/** Whether a row's ModInfo carries the given (already case-folded) tag. */
+function rowHasTag(
+  row: ProfileMembershipMod,
+  lowerTag: string,
+  modInfoByKey?: Map<string, ModInfo>,
+): boolean {
+  const info = modInfoByKey?.get(membershipRowKey(row)) ?? modInfoByKey?.get(row.name);
+  return (info?.tags ?? []).some((tg) => tg.trim().toLocaleLowerCase() === lowerTag);
+}
+
 export function LibraryTable({
   modpackName,
   onMembershipChanged,
@@ -241,6 +251,9 @@ export function LibraryTable({
   const [sort, setSort] = useState<LibrarySortMode>(
     initialSort ?? (modpackName ? 'inPackFirst' : 'nameAsc'),
   );
+  // When sort === 'tagAsc', which tag to prioritise. '' = A–Z (order by each
+  // mod's first tag); a specific tag = bring that tag's mods to the top.
+  const [tagSortKey, setTagSortKey] = useState('');
   const [visibleLimit, setVisibleLimit] = useState(pageSize);
   const [membershipSaving, setMembershipSaving] = useState<string | null>(null);
   const [storageSaving, setStorageSaving] = useState<string | null>(null);
@@ -457,6 +470,15 @@ export function LibraryTable({
         );
       }
       if (sort === 'tagAsc') {
+        // A specific tag chosen → that tag's mods float to the top.
+        if (tagSortKey) {
+          const key = tagSortKey.toLocaleLowerCase();
+          const aHas = rowHasTag(a, key, modInfoByKey);
+          const bHas = rowHasTag(b, key, modInfoByKey);
+          if (aHas !== bHas) return aHas ? -1 : 1;
+          return compareMembershipDisplayName(a, b);
+        }
+        // A–Z → order by each mod's alphabetically-first tag, untagged last.
         const at = firstTagKey(a, modInfoByKey);
         const bt = firstTagKey(b, modInfoByKey);
         if (at !== bt) {
@@ -470,9 +492,33 @@ export function LibraryTable({
       return compareMembershipDisplayName(a, b);
     });
     return sorted;
-  }, [effectiveGrid, filter, sort, inPackRowKeys, filterRow, modInfoByKey]);
+  }, [effectiveGrid, filter, sort, tagSortKey, inPackRowKeys, filterRow, modInfoByKey]);
 
   const visibleItems = filteredRows.slice(0, visibleLimit);
+
+  // Distinct tags across known mods, for the "By tag → which tag" secondary
+  // picker. Derived from modInfoByKey (supplied by the All-Mods view).
+  const tagOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    if (modInfoByKey) {
+      for (const info of modInfoByKey.values()) {
+        for (const tag of info.tags ?? []) {
+          const trimmed = tag.trim();
+          if (trimmed && !seen.has(trimmed.toLocaleLowerCase())) {
+            seen.set(trimmed.toLocaleLowerCase(), trimmed);
+          }
+        }
+      }
+    }
+    return [...seen.values()].sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }),
+    );
+  }, [modInfoByKey]);
+
+  // If the chosen sort-tag disappears (mods removed / refreshed), fall back to A–Z.
+  useEffect(() => {
+    if (tagSortKey && !tagOptions.includes(tagSortKey)) setTagSortKey('');
+  }, [tagOptions, tagSortKey]);
 
   function patchRowMembership(
     rowKey: string,
@@ -784,6 +830,23 @@ export function LibraryTable({
                 <option value="tagAsc">{t('profiles.library.sort.tagAsc')}</option>
               </select>
             </label>
+            {/* When "By tag" is active, a secondary picker chooses A–Z or a
+                specific tag to bring to the top. Only shown when tags exist. */}
+            {sort === 'tagAsc' && tagOptions.length > 0 && (
+              <label className="gf-sort-control gf-profile-library-sort">
+                <span>{t('mods.tags.label')}</span>
+                <select
+                  value={tagSortKey}
+                  onChange={(event) => setTagSortKey(event.target.value)}
+                  aria-label={t('profiles.library.sort.tagWhichAria')}
+                >
+                  <option value="">{t('profiles.library.sort.tagAToZ')}</option>
+                  {tagOptions.map((tag) => (
+                    <option key={tag} value={tag}>{tag}</option>
+                  ))}
+                </select>
+              </label>
+            )}
           </div>
         )}
       </div>

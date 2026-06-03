@@ -423,7 +423,9 @@
         "nameDesc": "名称 Z-A",
         "activeFirst": "活跃优先",
         "storedFirst": "已存储优先",
-        "tagAsc": "按标签（A–Z）"
+        "tagAsc": "按标签",
+        "tagAToZ": "字母 A–Z",
+        "tagWhichAria": "优先置顶的标签"
       },
       "empty": {
         "title": "未安装任何模组",

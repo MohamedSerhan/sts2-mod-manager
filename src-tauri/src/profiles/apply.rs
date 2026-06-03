@@ -821,11 +821,20 @@ pub(crate) async fn switch_profile_from_paths(
         // source may be wrong/unreliable (e.g., wrong game's repo)
         if let Some(ref bundle_url) = pm.bundle_url {
             log::info!("Downloading bundled mod '{}' from profiles repo", pm.name);
-            match crate::sharing::download_bundle(bundle_url, &pm.name, mods_path).await {
+            match crate::sharing::download_bundle(bundle_url, &pm.name, mods_path, pm.bundle_sha256.as_deref()).await {
                 Ok(_) => {
                     log::info!("Installed bundled mod '{}'", pm.name);
                     downloaded_count += 1;
                     downloaded = true;
+                    // Fix M-13: snapshot config files after fresh bundle install.
+                    // download_bundle returns () so we re-scan to get a ModInfo.
+                    let after_scan = scan_mods(mods_path);
+                    if let Some(installed) = after_scan
+                        .iter()
+                        .find(|m| m.name == pm.name || pm.folder_name.as_deref() == Some(m.name.as_str()))
+                    {
+                        crate::mods::snapshot_after_fresh_install(installed, mods_path, config_path);
+                    }
                 }
                 Err(e) => {
                     log::warn!(
@@ -880,6 +889,8 @@ pub(crate) async fn switch_profile_from_paths(
                             log::info!("Downloaded mod '{}' from GitHub", info.name);
                             downloaded_count += 1;
                             downloaded = true;
+                            // Fix M-13: snapshot config files after fresh install.
+                            crate::mods::snapshot_after_fresh_install(&info, mods_path, config_path);
                         }
                         Err(e) => {
                             log::error!("GitHub download also failed for '{}': {}", pm.name, e);

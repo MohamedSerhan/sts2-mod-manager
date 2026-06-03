@@ -103,7 +103,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onLi
         setProgress(event.payload);
       }
     });
-    return () => { unlisten.then((f) => f()); };
+    return () => { unlisten.then((f) => f()).catch(() => {}); };
   }, [busy]);
 
   if (!open || !profile) return null;

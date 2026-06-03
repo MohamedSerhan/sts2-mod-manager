@@ -1057,6 +1057,10 @@ pub async fn download_github_mod(
         info
     };
 
+    // Fix M-13: snapshot config files after a fresh install so future updates
+    // can detect user edits and preserve them.
+    crate::mods::snapshot_after_fresh_install(&mod_info, &mods_path, &config_path);
+
     // Auto-save the GitHub source link so updates work later. Key by
     // folder_name when available so two same-named mods with different
     // GitHub origins each retain their own source link.

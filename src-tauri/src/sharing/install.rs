@@ -247,7 +247,7 @@ pub async fn install_shared_profile(
                 Some(&pm.name),
             );
             log::info!("Downloading bundled mod '{}' from profiles repo", pm.name);
-            match download_bundle(bundle_url, &pm.name, &mods_path).await {
+            match download_bundle(bundle_url, &pm.name, &mods_path, pm.bundle_sha256.as_deref()).await {
                 Ok(_) => {
                     // Re-scan to find the just-installed mod's parsed manifest.
                     // We need this to read its min_game_version field —

@@ -47,7 +47,7 @@ tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", features = ["json", "stream", "blocking"] }
 sha2 = "0.11"
 hex = "0.4"
-zip = "2"
+zip = "4"
 # Multi-format archive support. STS2 mods get shared as .zip most of the
 # time but Patreon/Discord drops sometimes use .7z (smaller) or .rar (older
 # packagers); without these the install gives users a "not a supported

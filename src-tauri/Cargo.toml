@@ -91,7 +91,7 @@ urlencoding = "2"
 # The hardcoded Program Files paths miss those, which was the primary
 # cause of "Auto-detect always fails" reports in v1.1.x.
 [target.'cfg(windows)'.dependencies]
-winreg = "0.55"
+winreg = "0.56"
 
 [dev-dependencies]
 tempfile = "3"

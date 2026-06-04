@@ -1140,7 +1140,7 @@ dependencies = [
  "rustc_version",
  "toml 1.1.2+spec-1.1.0",
  "vswhom",
- "winreg",
+ "winreg 0.55.0",
 ]
 
 [[package]]
@@ -4254,7 +4254,7 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "sts2-mod-manager"
-version = "1.7.0"
+version = "1.7.1"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -4290,7 +4290,7 @@ dependencies = [
  "url",
  "urlencoding",
  "walkdir",
- "winreg",
+ "winreg 0.56.0",
  "wiremock",
  "zip 2.4.2",
 ]
@@ -6340,6 +6340,16 @@ checksum = "cb5a765337c50e9ec252c2069be9bf91c7df47afb103b642ba3a53bf8101be97"
 dependencies = [
  "cfg-if",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "winreg"
+version = "0.56.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d6f32a0ff4a9f6f01231eb2059cc85479330739333e0e58cadf03b6af2cca10"
+dependencies = [
+ "cfg-if",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

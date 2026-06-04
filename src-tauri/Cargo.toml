@@ -64,7 +64,7 @@ unrar = "0.5"
 # extractions to a self-cleaning temp dir before re-packaging them as a
 # zip for the existing install_mod_from_zip pipeline to consume.
 tempfile = "3"
-dirs = "5"
+dirs = "6"
 url = "2"
 thiserror = "2"
 log = "0.4"

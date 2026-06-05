@@ -102,4 +102,24 @@ describe('useModalA11y', () => {
     expect(prevented).toBe(true);
     expect(document.activeElement).toBe(getByTestId('dialog'));
   });
+
+  it('no-ops both effects when the ref is never attached to an element', () => {
+    // Defensive guard: both effects bail at `if (!node) return` when
+    // ref.current is null (the dialog never mounted). Must not focus
+    // anything or attach a keydown listener. (useModalA11y.ts lines 27, 37.)
+    const onClose = vi.fn();
+    const before = document.activeElement;
+    // The ref is created but never passed to a rendered element, so it
+    // stays null through both effects.
+    function Detached() {
+      const ref = useRef<HTMLDivElement>(null);
+      useModalA11y(ref, onClose);
+      return <span>no dialog</span>;
+    }
+    render(<Detached />);
+    // No focus moved, and an Escape anywhere doesn't reach a listener.
+    expect(document.activeElement).toBe(before);
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+  });
 });

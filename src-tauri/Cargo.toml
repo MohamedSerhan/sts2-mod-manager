@@ -44,10 +44,15 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.12", features = ["json", "stream", "blocking"] }
+# reqwest 0.13 made `query`/`form` opt-in features and flipped the default TLS
+# backend to rustls. We pin native-tls (default-features = false + re-adding the
+# previous defaults: charset/http2/system-proxy) so the shipped app's HTTPS/cert
+# behavior is unchanged from the 0.12 line, and add `query` for the calls in
+# download.rs / sharing/github.rs that use RequestBuilder::query().
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "blocking", "query", "charset", "http2", "system-proxy", "native-tls"] }
 sha2 = "0.11"
 hex = "0.4"
-zip = "2"
+zip = "4"
 # Multi-format archive support. STS2 mods get shared as .zip most of the
 # time but Patreon/Discord drops sometimes use .7z (smaller) or .rar (older
 # packagers); without these the install gives users a "not a supported
@@ -64,7 +69,7 @@ unrar = "0.5"
 # extractions to a self-cleaning temp dir before re-packaging them as a
 # zip for the existing install_mod_from_zip pipeline to consume.
 tempfile = "3"
-dirs = "5"
+dirs = "6"
 url = "2"
 thiserror = "2"
 log = "0.4"
@@ -91,7 +96,7 @@ urlencoding = "2"
 # The hardcoded Program Files paths miss those, which was the primary
 # cause of "Auto-detect always fails" reports in v1.1.x.
 [target.'cfg(windows)'.dependencies]
-winreg = "0.55"
+winreg = "0.56"
 
 [dev-dependencies]
 tempfile = "3"

@@ -124,7 +124,7 @@ pub(crate) fn build_client(token: &str) -> reqwest::Client {
     if let Ok(val) = format!("Bearer {}", token).parse() {
         headers.insert(reqwest::header::AUTHORIZATION, val);
     }
-    reqwest::Client::builder()
+    crate::http::https_client_builder()
         .default_headers(headers)
         .timeout(HTTP_TOTAL_TIMEOUT)
         .connect_timeout(HTTP_CONNECT_TIMEOUT)
@@ -845,7 +845,7 @@ pub async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::P
         );
     }
 
-    let client = reqwest::Client::builder()
+    let client = crate::http::https_client_builder()
         .user_agent(concat!("sts2-mod-manager/", env!("CARGO_PKG_VERSION")))
         .timeout(HTTP_TOTAL_TIMEOUT)
         .connect_timeout(HTTP_CONNECT_TIMEOUT)
@@ -1071,7 +1071,7 @@ pub async fn fetch_shared_profile(
     token: Option<&str>,
     repo: &str,
 ) -> Result<Profile> {
-    let client = reqwest::Client::builder()
+    let client = crate::http::https_client_builder()
         .user_agent(concat!("sts2-mod-manager/", env!("CARGO_PKG_VERSION")))
         .timeout(HTTP_TOTAL_TIMEOUT)
         .connect_timeout(HTTP_CONNECT_TIMEOUT)

@@ -891,7 +891,9 @@ fn fetch_nexus_version_blocking(
         s.nexus_api_key.clone()?
     };
 
-    let client = reqwest::blocking::Client::new();
+    let client = crate::http::https_blocking_client_builder()
+        .build()
+        .unwrap_or_else(|_| reqwest::blocking::Client::new());
     let mk_get = |url: &str| {
         client
             .get(url)

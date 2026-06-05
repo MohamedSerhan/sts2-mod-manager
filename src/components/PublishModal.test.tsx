@@ -864,6 +864,16 @@ describe('<PublishModal>', () => {
     return user;
   }
 
+  it('success state: share code value and all three copy buttons are present', async () => {
+    await renderInSuccess();
+    // Share code value.
+    expect(screen.getByText(`${shareOk.owner}/${shareOk.code}`)).toBeInTheDocument();
+    // All three copy buttons — loud lookups; silent-skip pattern not used.
+    expect(screen.getByRole('button', { name: /Copy code/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Copy link/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Copy message/ })).toBeInTheDocument();
+  });
+
   it('Copy code writes the raw owner/code to clipboard and flips to "Copied"', async () => {
     const writeFn = patchClipboard();
     await renderInSuccess();

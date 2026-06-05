@@ -465,30 +465,32 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onLi
                     {shared.owner}/{shared.code}
                   </div>
                 </div>
-                <button
-                  className="gf-btn-2 gf-btn-2-sm"
-                  onClick={() => handleCopy('code')}
-                  title={t('publish.copyCodeTitle')}
-                >
-                  {copied === 'code' ? <Check size={12} /> : <Copy size={12} />}
-                  {copied === 'code' ? t('publish.codeCopied') : t('publish.copyCode')}
-                </button>
-                <button
-                  className="gf-btn-2 gf-btn-2-sm"
-                  onClick={() => handleCopy('link')}
-                  title={t('publish.copyLinkTitle')}
-                >
-                  {copied === 'link' ? <Check size={12} /> : <LinkIcon size={12} />}
-                  {copied === 'link' ? t('publish.linkCopied') : t('publish.copyLink')}
-                </button>
-                <button
-                  className="gf-btn-2 gf-btn-2-sm"
-                  onClick={() => handleCopy('msg')}
-                  title={t('publish.copyMessageTitle')}
-                >
-                  {copied === 'msg' ? <Check size={12} /> : <MessageSquare size={12} />}
-                  {copied === 'msg' ? t('publish.messageCopied') : t('publish.copyMessage')}
-                </button>
+                <div className="gf-share-code-actions">
+                  <button
+                    className="gf-btn-2 gf-btn-2-sm"
+                    onClick={() => handleCopy('code')}
+                    title={t('publish.copyCodeTitle')}
+                  >
+                    {copied === 'code' ? <Check size={12} /> : <Copy size={12} />}
+                    {copied === 'code' ? t('publish.codeCopied') : t('publish.copyCode')}
+                  </button>
+                  <button
+                    className="gf-btn-2 gf-btn-2-sm"
+                    onClick={() => handleCopy('link')}
+                    title={t('publish.copyLinkTitle')}
+                  >
+                    {copied === 'link' ? <Check size={12} /> : <LinkIcon size={12} />}
+                    {copied === 'link' ? t('publish.linkCopied') : t('publish.copyLink')}
+                  </button>
+                  <button
+                    className="gf-btn-2 gf-btn-2-sm"
+                    onClick={() => handleCopy('msg')}
+                    title={t('publish.copyMessageTitle')}
+                  >
+                    {copied === 'msg' ? <Check size={12} /> : <MessageSquare size={12} />}
+                    {copied === 'msg' ? t('publish.messageCopied') : t('publish.copyMessage')}
+                  </button>
+                </div>
               </div>
 
               <div

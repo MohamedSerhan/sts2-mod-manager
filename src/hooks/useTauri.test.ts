@@ -67,7 +67,6 @@ import {
   setModSourcesFull,
   setNexusApiKey,
   shareProfile,
-  snapshotProfile,
   switchProfile,
   toggleMod,
   unpinMod,
@@ -206,9 +205,6 @@ describe('useTauri wrappers — command names + arg shapes', () => {
 
     await repairProfile('My Pack');
     expect(lastCall()).toEqual({ cmd: 'repair_profile', args: { name: 'My Pack' } });
-
-    await snapshotProfile('Snap-2026');
-    expect(lastCall()).toEqual({ cmd: 'snapshot_profile', args: { name: 'Snap-2026' } });
 
     await deleteProfile('Old');
     expect(lastCall()).toEqual({ cmd: 'delete_profile_cmd', args: { name: 'Old' } });

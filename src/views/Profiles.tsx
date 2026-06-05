@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Plus,
-  Camera,
   Copy,
   Download,
   Link as LinkIcon,
@@ -32,7 +31,6 @@ import {
   listProfiles,
   switchProfile,
   repairProfile,
-  snapshotProfile,
   saveProfileDrift,
   deleteProfile,
   duplicateProfile,
@@ -564,18 +562,6 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     refreshShareAndDrift();
   }
 
-  async function handleSnapshot() {
-    const name = prompt(t('profiles.prompt.snapshotName'));
-    if (!name?.trim()) return;
-    try {
-      const profile = await snapshotProfile(name.trim());
-      setProfiles((prev) => [...prev, profile]);
-      toastCtx.success(t('profiles.toast.snapshotCreated', { name: profile.name, count: profile.mods.length }));
-    } catch (e) {
-      toastCtx.error(t('profiles.toast.snapshotFailed', { error: e instanceof Error ? e.message : String(e) }));
-    }
-  }
-
   async function handleSwitch(name: string) {
     if (activeProfile && activeProfile !== name && driftMap[activeProfile]?.has_drift) {
       const ok = await confirm({
@@ -1069,10 +1055,6 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
             <Upload size={14} />
             {t('profiles.actions.importJson')}
           </Button>
-          <Button variant="secondary" size="sm" onClick={handleSnapshot}>
-            <Camera size={14} />
-            {t('profiles.actions.snapshotCurrent')}
-          </Button>
           <Button size="sm" onClick={() => {
             // Open the guided wizard. Close any inline panels that
             // would otherwise compete for vertical space behind the
@@ -1089,8 +1071,8 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
 
       {/* 1.7.0 v7 — always-visible Quick-Add code paste row.
           Relocated from Home (which is now the single-block launcher).
-          The Modpacks toolbar already owns Create / Import-JSON /
-          Snapshot, so Quick-Add lives here next to those affordances.
+          The Modpacks toolbar already owns Create / Import-JSON,
+          so Quick-Add lives here next to those affordances.
           Shown on the Yours tab — the Browse tab is for public packs
           which install via the row CTAs, not via a typed code.
           The toggle-able "Add modpack code" panel above remains for
@@ -1170,7 +1152,6 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
             }}
             onDuplicate={handleDuplicate}
             onExportJson={handleExport}
-            onSnapshot={() => handleSnapshot()}
             onOpenLoadOrder={openLoadOrderEditor}
             onRepairDrift={handleRepairDrift}
             onLibraryChanged={handleLibraryChanged}

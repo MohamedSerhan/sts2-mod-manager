@@ -335,7 +335,6 @@ pub fn run() {
             profiles::rename_profile,
             profiles::switch_profile,
             profiles::repair_profile,
-            profiles::snapshot_profile,
             profiles::export_profile_cmd,
             profiles::import_profile_cmd,
             profiles::get_profile_drift,

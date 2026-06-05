@@ -278,11 +278,9 @@
     },
     "actions": {
       "importJson": "导入模组包 JSON",
-      "snapshotCurrent": "快照当前模组包",
       "newProfile": "创建模组包"
     },
     "prompt": {
-      "snapshotName": "输入快照名称：",
       "duplicateAs": "将「{{name}}」复制为：",
       "duplicateDefault": "{{name}}（副本）"
     },
@@ -354,7 +352,6 @@
       "dismissAria": "忽略对 {{name}} 的重新分享建议"
     },
     "kebab": {
-      "snapshotFromCurrent": "从当前安装创建快照",
       "duplicate": "复制",
       "rename": "重命名",
       "exportJson": "导出 JSON...",
@@ -388,8 +385,6 @@
       "synced": "已同步 \"{{name}}\" — 你已是最新版本。",
       "syncFailed": "同步失败：{{error}}",
       "created": "模组包 \"{{name}}\" 已创建",
-      "snapshotCreated": "快照 \"{{name}}\" 已创建，包含 {{count}} 个模组",
-      "snapshotFailed": "创建快照失败：{{error}}",
       "switched": "已切换到模组包 \"{{name}}\"",
       "switchedWithDetails": "已切换到 \"{{name}}\"。{{details}}",
       "switchFailed": "切换失败：{{error}}",

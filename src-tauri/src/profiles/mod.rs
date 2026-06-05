@@ -524,26 +524,6 @@ fn clear_active_profile_if_deleted(
 }
 
 #[tauri::command]
-pub fn snapshot_profile(
-    name: String,
-    state: tauri::State<'_, AppState>,
-) -> std::result::Result<Profile, String> {
-    let s = state.lock().map_err(|e| e.to_string())?;
-    let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
-    // Explicit user action (kebab → Snapshot) — apply the bug-#21
-    // filter using the cached game_version (macOS-correct source).
-    let game_version = s.game_version.clone();
-    snapshot_current_with_sources(
-        &name,
-        mods_path,
-        &s.profiles_path,
-        Some(&s.config_path),
-        game_version.as_deref(),
-    )
-    .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
 pub fn export_profile_cmd(
     name: String,
     state: tauri::State<'_, AppState>,
@@ -582,7 +562,7 @@ pub fn get_profile_drift(
 
 /// Save the drift: reconcile the manifest to the current loadout by applying
 /// only the diff (add enabled extras, drop missing mods, sync toggled/version
-/// for mods still present). Unlike `snapshot_profile`, this preserves the
+/// for mods still present). Unlike a full re-snapshot of the install, this preserves the
 /// pack's curated set instead of pulling the whole install into it.
 #[tauri::command]
 pub fn save_profile_drift(

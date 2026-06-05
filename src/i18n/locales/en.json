@@ -278,11 +278,9 @@
     },
     "actions": {
       "importJson": "Import modpack JSON",
-      "snapshotCurrent": "Snapshot active modpack",
       "newProfile": "Create modpack"
     },
     "prompt": {
-      "snapshotName": "Enter snapshot name:",
       "duplicateAs": "Duplicate \"{{name}}\" as:",
       "duplicateDefault": "{{name}} (copy)"
     },
@@ -424,7 +422,6 @@
       "dismissAria": "Dismiss the re-share recommendation for {{name}}"
     },
     "kebab": {
-      "snapshotFromCurrent": "Snapshot from current install",
       "duplicate": "Duplicate",
       "rename": "Rename",
       "exportJson": "Export JSON...",
@@ -458,8 +455,6 @@
       "synced": "Synced \"{{name}}\" — you're up to date.",
       "syncFailed": "Sync failed: {{error}}",
       "created": "Modpack \"{{name}}\" created",
-      "snapshotCreated": "Snapshot \"{{name}}\" created with {{count}} mods",
-      "snapshotFailed": "Failed to snapshot: {{error}}",
       "switched": "Switched to modpack \"{{name}}\"",
       "switchedWithDetails": "Switched to \"{{name}}\". {{details}}",
       "switchFailed": "Failed to switch: {{error}}",

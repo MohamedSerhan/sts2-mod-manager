@@ -328,49 +328,6 @@ describe('<ProfilesView>', () => {
     });
   });
 
-  it('Snapshot active modpack invokes snapshot_profile via the prompt + success toast', async () => {
-    seedProfiles([baseProfile({ name: 'X' })]);
-    registerInvokeHandler('snapshot_profile', (args) =>
-      baseProfile({ name: String(args?.name), mods: [{ name: 'a' } as any, { name: 'b' } as any] }),
-    );
-    const origPrompt = window.prompt;
-    window.prompt = () => 'Snap-1';
-    try {
-      const user = userEvent.setup();
-      render(<Wrap />);
-      await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-      await user.click(screen.getByRole('button', { name: /Snapshot active modpack/ }));
-      await waitFor(() => {
-        expect(getInvokeCalls().some(
-          (c) => c.cmd === 'snapshot_profile' && c.args?.name === 'Snap-1',
-        )).toBe(true);
-      });
-      await waitFor(() => {
-        expect(screen.getByText(/Snapshot "Snap-1" created with 2 mods/)).toBeInTheDocument();
-      });
-    } finally {
-      window.prompt = origPrompt;
-    }
-  });
-
-  it('snapshot_profile error surfaces a toast', async () => {
-    seedProfiles([baseProfile({ name: 'X' })]);
-    registerInvokeHandler('snapshot_profile', () => { throw new Error('readonly'); });
-    const origPrompt = window.prompt;
-    window.prompt = () => 'BadSnap';
-    try {
-      const user = userEvent.setup();
-      render(<Wrap />);
-      await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-      await user.click(screen.getByRole('button', { name: /Snapshot active modpack/ }));
-      await waitFor(() => {
-        expect(screen.getByText(/Failed to snapshot.*readonly/)).toBeInTheDocument();
-      });
-    } finally {
-      window.prompt = origPrompt;
-    }
-  });
-
   // T16 — Switch is now reached via card → detail view, not from
   // inline row buttons. The detail header shows "Switch to" for
   // non-active modpacks and the activation flow is identical.
@@ -545,13 +502,12 @@ describe('<ProfilesView>', () => {
   // kebabs no longer exist. Post-rework the Advanced panel is an
   // always-visible divided section (no disclosure), so the action set is
   // reachable without a toggle.
-  it('detail Advanced kebab shows Snapshot/Export/Delete options', async () => {
+  it('detail Advanced kebab shows Export/Delete options', async () => {
     seedProfiles([baseProfile({ name: 'Pack' })]);
     const user = userEvent.setup();
     render(<Wrap />);
     await openDetailFor(user, 'Pack');
     await openAdvancedMenu(user);
-    expect(screen.getByRole('menuitem', { name: /Snapshot from current/i })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: /Export JSON/i })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: /Delete modpack/i })).toBeInTheDocument();
   });
@@ -842,8 +798,7 @@ describe('<ProfilesView>', () => {
         ),
       ).toBe(true);
     });
-    // Must NOT fall back to the whole-install snapshot, and must not repair disk.
-    expect(getInvokeCalls().some((c) => c.cmd === 'snapshot_profile')).toBe(false);
+    // Must NOT fall back to repair disk.
     expect(getInvokeCalls().some((c) => c.cmd === 'repair_profile')).toBe(false);
     await waitFor(() => {
       expect(screen.getByText(/Saved changes to "DriftedPack"/)).toBeInTheDocument();
@@ -1082,36 +1037,6 @@ describe('<ProfilesView>', () => {
     });
   });
 
-  it('handles snapshot prompt cancel gracefully', async () => {
-    seedProfiles([baseProfile({ name: 'X' })]);
-    const origPrompt = window.prompt;
-    window.prompt = () => null;
-    try {
-      const user = userEvent.setup();
-      render(<Wrap />);
-      await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-      await user.click(screen.getByRole('button', { name: /Snapshot active modpack/ }));
-      expect(getInvokeCalls().some((c) => c.cmd === 'snapshot_profile')).toBe(false);
-    } finally {
-      window.prompt = origPrompt;
-    }
-  });
-
-  it('handles snapshot prompt empty string as cancel', async () => {
-    seedProfiles([baseProfile({ name: 'X' })]);
-    const origPrompt = window.prompt;
-    window.prompt = () => '   ';
-    try {
-      const user = userEvent.setup();
-      render(<Wrap />);
-      await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-      await user.click(screen.getByRole('button', { name: /Snapshot active modpack/ }));
-      expect(getInvokeCalls().some((c) => c.cmd === 'snapshot_profile')).toBe(false);
-    } finally {
-      window.prompt = origPrompt;
-    }
-  });
-
   it('All packs / Published tabs toggle profile filters', async () => {
     seedProfiles([baseProfile({ name: 'Alpha' })]);
     const user = userEvent.setup();
@@ -1161,7 +1086,7 @@ describe('<ProfilesView>', () => {
   });
 
   // The detail view's Advanced section holds power actions (Delete,
-  // Duplicate, Snapshot, Export, Repair). Post-rework it's an
+  // Duplicate, Export, Repair). Post-rework it's an
   // always-visible divided section (no disclosure), so the actions are
   // present as soon as the detail view opens. Each action is tested in
   // detail in ModpackDetail.test.tsx; here we only assert the section
@@ -1688,25 +1613,6 @@ describe('<ProfilesView>', () => {
     });
   });
 
-  it('Advanced → Snapshot from current install fires snapshot_profile after prompt', async () => {
-    seedProfiles([baseProfile({ name: 'A' })]);
-    registerInvokeHandler('snapshot_profile', (args) => baseProfile({ name: String(args?.name) }));
-    const origPrompt = window.prompt;
-    window.prompt = () => 'Snap-X';
-    try {
-      const user = userEvent.setup();
-      render(<Wrap />);
-      await openDetailFor(user, 'A');
-      await openAdvancedMenu(user);
-      await user.click(screen.getByRole('menuitem', { name: /Snapshot from current/i }));
-      await waitFor(() => {
-        expect(getInvokeCalls().some((c) => c.cmd === 'snapshot_profile')).toBe(true);
-      });
-    } finally {
-      window.prompt = origPrompt;
-    }
-  });
-
   it('Advanced → Delete profile opens confirm modal → confirms → invokes delete_profile_cmd + toast', async () => {
     seedProfiles([baseProfile({ name: 'Doomed' })]);
     registerInvokeHandler('delete_profile_cmd', () => null);
@@ -2077,13 +1983,6 @@ describe('<ProfilesView>', () => {
     // what's already active). The active badge replaces it.
     await openDetailFor(user, 'ActiveP');
     expect(screen.queryByRole('button', { name: /Switch to/i })).toBeNull();
-  });
-
-  it('Snapshot button is in the page header', async () => {
-    seedProfiles([baseProfile({ name: 'X' })]);
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    expect(screen.getByRole('button', { name: /Snapshot active modpack/ })).toBeInTheDocument();
   });
 
   it('header toolbar: Create modpack opens the guided wizard while the Quick-Add row stays put', async () => {

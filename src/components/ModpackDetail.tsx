@@ -17,8 +17,8 @@
  *   - Section 2 "Add from your library": installed mods not yet in the
  *     pack, each with a low-key "+ Add".
  *   - Advanced: a clearly-divided section (heading + divider) holding the
- *     power-user / destructive actions (Snapshot, Duplicate, Export,
- *     Repair, Delete). No longer buried in a collapsible.
+ *     power-user / destructive actions (Duplicate, Export, Repair, Delete).
+ *     No longer buried in a collapsible.
  *
  * State is owned by the parent (ProfilesView). The detail view is a
  * controlled component for the profile-level actions — every action
@@ -32,7 +32,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ArrowLeft,
-  Camera,
   Check,
   ChevronDown,
   ClipboardCheck,
@@ -83,7 +82,6 @@ export interface ModpackDetailProps {
   onDelete?: (name: string) => void;
   onDuplicate?: (name: string) => void;
   onExportJson?: (name: string) => void;
-  onSnapshot?: (name: string) => void;
   onOpenLoadOrder?: (profile: Profile) => void;
   onRepairDrift?: (name: string) => void;
   /** Optional snapshot of the active "switching..." state so the
@@ -140,7 +138,6 @@ export function ModpackDetail({
   onDelete,
   onDuplicate,
   onExportJson,
-  onSnapshot,
   onOpenLoadOrder,
   onRepairDrift,
   switchingProfile,
@@ -628,11 +625,6 @@ export function ModpackDetail({
               Destructive items sit below a divider with danger styling. */}
           <KebabMenu title={t('modpack.advancedActions')} size="sm">
             <KebabSection head={t('modpack.advanced')}>
-              {onSnapshot && (
-                <KebabItem icon={<Camera size={12} />} onClick={() => onSnapshot(profile.name)}>
-                  {t('profiles.kebab.snapshotFromCurrent')}
-                </KebabItem>
-              )}
               {onDuplicate && (
                 <KebabItem icon={<Files size={12} />} onClick={() => onDuplicate(profile.name)}>
                   {t('profiles.kebab.duplicate')}

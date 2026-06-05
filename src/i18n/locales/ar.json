@@ -278,11 +278,9 @@
     },
     "actions": {
       "importJson": "استيراد JSON للحزمة",
-      "snapshotCurrent": "لقطة للحزمة النشطة",
       "newProfile": "إنشاء حزمة"
     },
     "prompt": {
-      "snapshotName": "أدخل اسم اللقطة:",
       "duplicateAs": "تكرار «{{name}}» باسم:",
       "duplicateDefault": "{{name}} (نسخة)"
     },
@@ -424,7 +422,6 @@
       "dismissAria": "إخفاء توصية إعادة المشاركة لـ {{name}}"
     },
     "kebab": {
-      "snapshotFromCurrent": "لقطة من التثبيت الحالي",
       "duplicate": "تكرار",
       "exportJson": "تصدير JSON…",
       "copyShareCode": "نسخ رمز المشاركة",
@@ -458,8 +455,6 @@
       "synced": "تمت مزامنة «{{name}}» — أنت محدَّث.",
       "syncFailed": "فشلت المزامنة: {{error}}",
       "created": "تم إنشاء الحزمة «{{name}}»",
-      "snapshotCreated": "تم إنشاء اللقطة «{{name}}» بـ {{count}} مود",
-      "snapshotFailed": "فشل إنشاء اللقطة: {{error}}",
       "switched": "تم التبديل إلى الحزمة «{{name}}»",
       "switchedWithDetails": "تم التبديل إلى «{{name}}». {{details}}",
       "switchFailed": "فشل التبديل: {{error}}",

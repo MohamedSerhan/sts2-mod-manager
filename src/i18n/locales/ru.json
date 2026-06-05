@@ -278,11 +278,9 @@
     },
     "actions": {
       "importJson": "Импорт JSON сборки",
-      "snapshotCurrent": "Снимок активной сборки",
       "newProfile": "Создать сборку"
     },
     "prompt": {
-      "snapshotName": "Введите имя снимка:",
       "duplicateAs": "Дублировать «{{name}}» как:",
       "duplicateDefault": "{{name}} (копия)"
     },
@@ -424,7 +422,6 @@
       "dismissAria": "Скрыть рекомендацию поделиться заново для {{name}}"
     },
     "kebab": {
-      "snapshotFromCurrent": "Снимок текущей установки",
       "duplicate": "Дублировать",
       "exportJson": "Экспорт JSON…",
       "copyShareCode": "Копировать код для обмена",
@@ -458,8 +455,6 @@
       "synced": "«{{name}}» синхронизирована — у вас всё актуально.",
       "syncFailed": "Синхронизация не удалась: {{error}}",
       "created": "Сборка «{{name}}» создана",
-      "snapshotCreated": "Снимок «{{name}}» создан с {{count}} модами",
-      "snapshotFailed": "Не удалось создать снимок: {{error}}",
       "switched": "Переключено на сборку «{{name}}»",
       "switchedWithDetails": "Переключено на «{{name}}». {{details}}",
       "switchFailed": "Не удалось переключиться: {{error}}",

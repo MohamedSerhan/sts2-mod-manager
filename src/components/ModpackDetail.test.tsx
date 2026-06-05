@@ -888,7 +888,6 @@ describe('<ModpackDetail>', () => {
     const onDelete = vi.fn();
     const onDuplicate = vi.fn();
     const onExportJson = vi.fn();
-    const onSnapshot = vi.fn();
     const user = userEvent.setup();
     render(
       <Wrap
@@ -896,7 +895,6 @@ describe('<ModpackDetail>', () => {
         onDelete={onDelete}
         onDuplicate={onDuplicate}
         onExportJson={onExportJson}
-        onSnapshot={onSnapshot}
       />,
     );
     await screen.findByRole('heading', { level: 2, name: 'Sample' });
@@ -910,10 +908,6 @@ describe('<ModpackDetail>', () => {
     await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
     await user.click(screen.getByRole('menuitem', { name: /Export JSON/i }));
     expect(onExportJson).toHaveBeenCalledWith('Sample');
-
-    await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
-    await user.click(screen.getByRole('menuitem', { name: /Snapshot/i }));
-    expect(onSnapshot).toHaveBeenCalledWith('Sample');
 
     await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
     await user.click(screen.getByRole('menuitem', { name: /Delete modpack/i }));

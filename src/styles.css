@@ -429,20 +429,6 @@ body {
   color: var(--gf-ink);
   line-height: 1;
 }
-.gf-nav .gf-nav-beta {
-  /* Inline next to the label — was absolutely positioned which broke
-     once labels wider than "Browse Modpacks" (e.g. Chinese) shifted
-     past the hardcoded offset. */
-  font-size: 9px;
-  line-height: 1.1;
-  letter-spacing: 0.06em;
-  padding: 1px 4px;
-  border-radius: 3px;
-  pointer-events: none;
-  flex: 0 0 auto;
-  gap: 0;
-}
-
 /* Activity feed on the Profiles view — followed packs with pending
    updates. Reads as a focused worklist: header pill, then one row per
    update with a quick "Apply" affordance. Yellow accent matches the
@@ -900,7 +886,6 @@ body {
   font-size: 11.5px;
   color: var(--ink-mute);
 }
-.gf-modpack-mod-row-remove,
 .gf-modpack-mod-row-add {
   flex: 0 0 auto;
 }
@@ -1692,10 +1677,10 @@ body {
   border-radius: 10px;
   transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 }
-.gf-pack-row, .gf-mod, .gf-backup, .gf-set-row {
+.gf-backup {
   transition: border-color 0.15s ease, background 0.15s ease;
 }
-.gf-pack-row:hover, .gf-backup:hover, .gf-set-row:hover {
+.gf-backup:hover {
   border-color: var(--indigo-line2);
 }
 
@@ -2559,7 +2544,6 @@ body {
 .gf-cl-add .gf-cl-tag { background: color-mix(in oklch, var(--ok) 20%, transparent); color: var(--ok); }
 .gf-cl-upd .gf-cl-tag { background: color-mix(in oklch, var(--gold-tint-base) 20%, transparent); color: var(--gf); }
 .gf-cl-rem .gf-cl-tag { background: color-mix(in oklch, var(--danger-edge) 18%, transparent); color: var(--danger-bright); }
-.gf-cl-tog .gf-cl-tag { background: var(--indigo-line); color: var(--ink-mute); }
 
 /* Browse mod detail */
 .gf-detail { background: var(--indigo-deep); height: 100%; overflow-y: auto; }
@@ -2847,9 +2831,6 @@ body {
   color: var(--ink-dim);
   margin-bottom: 7px;
 }
-.gf-empty-pad .gf-empty-art { font-size: 48px; margin-bottom: 12px; opacity: 0.6; width: auto; height: auto; background: transparent; border: 0; display: inline-grid; }
-.gf-empty-pad .gf-empty-t { font-size: 16px; font-weight: 600; color: var(--ink); margin-bottom: 6px; }
-.gf-empty-pad .gf-empty-s { font-size: 12.5px; color: var(--ink-mute); max-width: 360px; margin: 0 auto 14px; }
 
 /* What's-new card — shown on Home after release. Calm gold accent so it
    stands out without screaming. Per-version dismiss via localStorage. */

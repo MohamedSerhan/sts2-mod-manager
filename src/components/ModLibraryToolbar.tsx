@@ -1,7 +1,7 @@
 /**
  * ModLibraryToolbar — the action cluster for the Mod Library page header: one
- * prominent "+ Add mods" dropdown (paste URL · import file · auto-detect ·
- * open folder), the Audit / Update-all state machine, and Refresh.
+ * prominent "+ Add mods" dropdown (paste URL · import file), the Audit /
+ * Update-all state machine, and Refresh.
  *
  * The per-modpack view builds its own toolbar around the same shared
  * <AddModsMenu>, so the two surfaces offer the exact same add affordances.
@@ -34,7 +34,7 @@ export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
     <div className="gf-page-actions">
       {/* One prominent (yellow) entry point for every way to add a mod —
           matches the modpack view's "+ Add mods" dropdown. */}
-      <AddModsMenu lib={lib} buttonClassName="gf-btn gf-btn-sm" includeAutoDetect />
+      <AddModsMenu lib={lib} buttonClassName="gf-btn gf-btn-sm" />
       {(() => {
         const ghUpdateCount = auditResults ? countGithubUpdates(auditResults) : 0;
         const ghUpdateNames = auditResults

@@ -21,6 +21,7 @@ const updateModCalls = () => getInvokeCalls().filter((c) => c.cmd === 'update_mo
 /** Minimal ModInfo shape used by update tests. */
 function makeMod(overrides: Partial<{
   name: string;
+  version: string;
   folder_name: string | null;
   github_url: string | null;
   nexus_url: string | null;
@@ -409,5 +410,26 @@ describe('useModLibrary — renderAutoDetectModal callbacks', () => {
     // onApplied saw a non-null auditResults → ran runAudit() again, so a
     // SECOND audit_mod_versions call lands.
     await waitFor(() => expect(auditCalls()).toHaveLength(2));
+  });
+});
+
+describe('useModLibrary — handleCopyVersion', () => {
+  it('handleCopyVersion copies the raw version but shows a single-v toast', async () => {
+    // jsdom 27: patch Clipboard.prototype.writeText, not navigator.clipboard.
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const proto = (globalThis.Clipboard && globalThis.Clipboard.prototype) as Clipboard | undefined;
+    if (proto) {
+      Object.defineProperty(proto, 'writeText', { configurable: true, value: writeText });
+    } else {
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    }
+
+    const { result } = renderHook(() => useModLibrary(), { wrapper: AllProviders });
+    await act(async () => {
+      await result.current.tableActionProps.onCopyVersion(makeMod({ version: 'v1.0.0' }) as Parameters<typeof result.current.tableActionProps.onCopyVersion>[0]);
+    });
+
+    expect(writeText).toHaveBeenCalledWith('v1.0.0'); // clipboard unchanged: raw version
+    await waitFor(() => expect(screen.getByText('Copied v1.0.0')).toBeInTheDocument());
   });
 });

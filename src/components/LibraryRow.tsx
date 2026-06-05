@@ -824,7 +824,7 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
             {mod.pinned ? t('mods.unpinThisMod') : t('mods.pinThisMod')}
           </KebabItem>
           <KebabItem icon={<Copy size={12} />} onClick={onCopyVersion}>
-            {t('mods.copyVersion', { version: mod.version })}
+            {t('mods.copyVersion', { version: mod.version.replace(/^v/i, '') })}
           </KebabItem>
           <KebabItem icon={<FolderOpen size={12} />} onClick={onOpenThisModFolder}>
             {t('mods.openThisModFolder')}

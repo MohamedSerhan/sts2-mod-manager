@@ -490,13 +490,22 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
   }, [loadOrderQuery, loadOrderDraft]);
 
   // Scroll the matched row into view as the user types — the list itself
-  // is never filtered, so order stays intact.
+  // is never filtered, so order stays intact. Scroll ONLY the list: a plain
+  // scrollIntoView({ block: 'center' }) bubbles to every scrollable ancestor,
+  // including the .gf-modal-back backdrop, which dragged the dimmed app behind
+  // the modal into view when searching for a row lower down (#140).
   useEffect(() => {
     if (loadOrderMatchIndex < 0) return;
     const list = loadOrderListRef.current;
     if (!list) return;
     const rows = list.querySelectorAll<HTMLElement>('.gf-load-order-row');
-    rows[loadOrderMatchIndex]?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    const row = rows[loadOrderMatchIndex];
+    if (!row) return;
+    const delta =
+      row.getBoundingClientRect().top -
+      list.getBoundingClientRect().top -
+      (list.clientHeight - row.clientHeight) / 2;
+    list.scrollBy?.({ top: delta, behavior: 'smooth' });
   }, [loadOrderMatchIndex]);
 
   function loadOrderToastKey(status: LoadOrderSettingsStatus): string {

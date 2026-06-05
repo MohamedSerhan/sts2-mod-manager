@@ -245,6 +245,13 @@
     "updateAvailable": "Доступна v{{version}} — установка…",
     "updateCheckFailed": "Не удалось проверить обновления: {{error}}"
   },
+  "feedback": {
+    "sendFeedback": "Отправить отзыв",
+    "noGitHubPrompt": "Нет аккаунта GitHub?",
+    "nexusCta": "Оставьте отзыв на странице Nexus",
+    "translatedNote": "Пишите на своём языке — мы читаем каждый комментарий (он автоматически переводится на английский).",
+    "couldntOpen": "Не удалось открыть страницу Nexus: {{error}}"
+  },
   "profileSwitcher": {
     "title": "Сборки",
     "empty": "Пока нет сборок. Добавьте одну, чтобы начать.",

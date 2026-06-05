@@ -4,19 +4,19 @@
     {
       "id": 1,
       "subject": "Task 1: Remove the Snapshot feature",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Delete every Snapshot affordance (UI, command, wrapper, i18n keys, tests) while leaving the shared snapshot_current_* helpers create_profile depends on.\n\n**Verify:** cargo test + npm test + npm run qa:i18n green.\n\n```json:metadata\n{\"files\": [\"src-tauri/src/profiles/mod.rs\", \"src-tauri/src/lib.rs\", \"src/hooks/useTauri.ts\", \"src/views/Profiles.tsx\", \"src/components/ModpackDetail.tsx\", \"src/i18n/locales/en.json\", \"src/i18n/locales/ru.json\", \"src/i18n/locales/zh-Hans.json\", \"src/i18n/locales/ar.json\", \"src-tauri/tests/qa_scenarios.rs\"], \"verifyCommand\": \"npm run qa:i18n && npm test && cd src-tauri && cargo test\", \"acceptanceCriteria\": [\"No Snapshot UI anywhere\", \"snapshot_profile removed from backend + invoke_handler\", \"create_profile/wizard still work\", \"no snapshot* i18n keys; qa:i18n green\", \"npm test + cargo test green\"]}\n```"
     },
     {
       "id": 2,
       "subject": "Task 2: 'Start with all installed mods' wizard option",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Add a 4th Create-Modpack wizard strategy that pre-selects every installed mod (enabled + disabled) — the Snapshot replacement.\n\n**Verify:** npx vitest run src/components/CreateModpackWizard.test.tsx && npm run qa:i18n.\n\n```json:metadata\n{\"files\": [\"src/components/CreateModpackWizard.tsx\", \"src/components/CreateModpackWizard.test.tsx\", \"src/i18n/locales/en.json\", \"src/i18n/locales/ru.json\", \"src/i18n/locales/zh-Hans.json\", \"src/i18n/locales/ar.json\"], \"verifyCommand\": \"npx vitest run src/components/CreateModpackWizard.test.tsx && npm run qa:i18n\", \"acceptanceCriteria\": [\"Tile renders between fromActive and empty\", \"selects enabled AND disabled mods on step 2\", \"qa:i18n green\"]}\n```"
     },
     {
       "id": 3,
       "subject": "Task 3: Dedupe Auto-detect in the Mod Library",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Auto-detect appears once in the Mod Library — keep the standalone button, drop the '+ Add mods' menu item, delete the dead includeAutoDetect prop.\n\n**Verify:** npx vitest run src/views/Mods.test.tsx src/components/AddModsMenu.test.tsx.\n\n```json:metadata\n{\"files\": [\"src/components/ModLibraryToolbar.tsx\", \"src/components/AddModsMenu.tsx\", \"src/views/Mods.test.tsx\"], \"verifyCommand\": \"npx vitest run src/views/Mods.test.tsx src/components/AddModsMenu.test.tsx\", \"acceptanceCriteria\": [\"Auto-detect appears once (standalone) in Mod Library\", \"includeAutoDetect prop removed from AddModsMenu\", \"npm test green\"]}\n```"
     },
     {
@@ -59,5 +59,5 @@
       "description": "**Goal:** Confirm the whole branch is green and the visual fixes (items 1, 4) hold in light theme + RTL.\n\n**Verify:** npm run qa:i18n && npm test && npm run build && cd src-tauri && cargo test; plus manual QA.\n\n```json:metadata\n{\"files\": [], \"verifyCommand\": \"npm run qa:i18n && npm test && npm run build && cd src-tauri && cargo test\", \"acceptanceCriteria\": [\"npm test/qa:i18n/build green\", \"cargo test green\", \"manual: share-code layout ok en/ru/ar light+dark\", \"manual: out-of-sync banner + reshare\", \"manual: .sts2pack round-trip\"]}\n```"
     }
   ],
-  "lastUpdated": "2026-06-04"
+  "lastUpdated": "2026-06-05"
 }

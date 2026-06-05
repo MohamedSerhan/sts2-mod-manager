@@ -1143,6 +1143,29 @@
       "light": "Light",
       "auto": "Auto"
     },
+    "rowMenu": {
+      "title": "Mod menu",
+      "desc": "Choose which actions appear in each mod's ⋯ menu, and drag to reorder them.",
+      "reset": "Reset to default",
+      "lockedCaption": "Delete and Customize are always pinned to the bottom.",
+      "visibleAria": "Show {{item}} in the menu",
+      "dragAria": "Drag to reorder {{item}}",
+      "items": {
+        "membership": "Add / remove from modpack",
+        "copyVersion": "Copy version",
+        "openFolder": "Open mod folder",
+        "snooze": "Snooze update",
+        "autoDetect": "Auto-detect source",
+        "viewGithub": "View on GitHub",
+        "viewNexus": "View on Nexus",
+        "findGithub": "Find GitHub from Nexus",
+        "freeze": "Freeze",
+        "repair": "Repair",
+        "rollback": "Roll back one version",
+        "delete": "Delete from disk",
+        "customize": "Customize menu"
+      }
+    },
     "accounts": {
       "nexusKey": "Nexus Mods API Key",
       "saved": "Saved ✓",

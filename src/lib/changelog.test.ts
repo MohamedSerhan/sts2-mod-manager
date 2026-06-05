@@ -4,6 +4,7 @@ import {
   getAllEntries,
   getEntryForVersion,
   getLatestReleasedEntry,
+  getTranslatedBody,
   parseChangelog,
 } from './changelog';
 
@@ -151,5 +152,35 @@ describe('changelog convenience wrappers (bundled CHANGELOG.md)', () => {
 
   it('getEntryForVersion returns null for a version not in the changelog', () => {
     expect(getEntryForVersion('0.0.0-does-not-exist')).toBeNull();
+  });
+});
+
+describe('getTranslatedBody', () => {
+  const MAPS = {
+    ru: { '9.9.9': '### Добавлено\n- Переведено' },
+    ar: { '9.9.9': '### تمت الإضافة\n- مترجم' },
+    'zh-Hans': { '9.9.9': '### 新增\n- 已翻译' },
+  };
+
+  it('returns the translated body for a present version + locale', () => {
+    expect(getTranslatedBody('9.9.9', 'ru', MAPS)).toBe('### Добавлено\n- Переведено');
+    expect(getTranslatedBody('9.9.9', 'zh-Hans', MAPS)).toBe('### 新增\n- 已翻译');
+  });
+
+  it('normalizes region subtags and zh variants to the file key', () => {
+    expect(getTranslatedBody('9.9.9', 'ru-RU', MAPS)).toBe('### Добавлено\n- Переведено');
+    expect(getTranslatedBody('9.9.9', 'zh-Hant', MAPS)).toBe('### 新增\n- 已翻译'); // zh-Hant falls back to zh-Hans bundle
+  });
+
+  it('returns null for English, unknown locale, or missing version', () => {
+    expect(getTranslatedBody('9.9.9', 'en', MAPS)).toBeNull();
+    expect(getTranslatedBody('9.9.9', 'en-US', MAPS)).toBeNull();
+    expect(getTranslatedBody('9.9.9', 'de', MAPS)).toBeNull();
+    expect(getTranslatedBody('0.0.0-absent', 'ru', MAPS)).toBeNull();
+  });
+
+  it('never throws against the real bundled maps (default arg)', () => {
+    expect(() => getTranslatedBody('0.0.0-absent', 'ru')).not.toThrow();
+    expect(getTranslatedBody('0.0.0-absent', 'ru')).toBeNull();
   });
 });

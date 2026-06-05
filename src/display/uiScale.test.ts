@@ -88,4 +88,24 @@ describe('ui scale', () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it('treats storage as unavailable when accessing localStorage throws', () => {
+    // Privacy modes can make even *touching* localStorage throw. getStorage()
+    // must catch that so load/save degrade to the default instead of crashing.
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      get() { throw new Error('localStorage access blocked'); },
+    });
+    try {
+      expect(loadUiScale()).toBe(DEFAULT_UI_SCALE);
+      expect(() => saveUiScale(1.2)).not.toThrow();
+    } finally {
+      if (original) {
+        Object.defineProperty(globalThis, 'localStorage', original);
+      } else {
+        delete (globalThis as { localStorage?: unknown }).localStorage;
+      }
+    }
+  });
 });

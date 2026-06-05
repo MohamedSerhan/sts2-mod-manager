@@ -27,7 +27,7 @@ releases them at once.
    - Publishes a GitHub Release with all bundles attached (NSIS, MSI, DMG, deb, rpm, AppImage, portable zip).
    - `publish-updater` assembles `latest.json` for the in-app Tauri updater (NSIS / MSI based).
    - `format-release` rewrites the release notes with download links.
-   - `publish-nexus` uploads the portable zip to Nexus Mods (mod 856).
+   - `publish-nexus` uploads the Windows portable zip, the macOS `.dmg`, and the Linux `.AppImage` to Nexus Mods (mod 856) — one matrix leg per file, each into its own Nexus file group. A leg whose group-id secret is unset is skipped, so mac/Linux stay inert until the one-time setup below is done.
 
 A failed `publish-nexus` does not block the GitHub Release or the in-app updater (the jobs run in parallel). Re-run just that job from the Actions UI if Nexus is flaky.
 
@@ -48,20 +48,41 @@ Set these once at <https://github.com/MohamedSerhan/sts2-mod-manager/settings/se
 | `TAURI_SIGNING_PRIVATE_KEY` | `build` | Tauri minisign key (already configured). |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | `build` | Password for the above (already configured). |
 | `NEXUS_API_KEY` | `publish-nexus` | Generate or copy the **Personal API Key** at <https://www.nexusmods.com/users/myaccount?tab=api>. Treat like a password. |
-| `NEXUS_FILE_GROUP_ID` | `publish-nexus` | On the mod page, Files tab → "API Info" → copy the integer. Tied to mod 856. |
+| `NEXUS_FILE_GROUP_ID` | `publish-nexus` (Windows) | On the mod page, Files tab → "API Info" → copy the integer. Tied to mod 856's Windows portable zip. |
+| `NEXUS_FILE_GROUP_ID_MACOS` | `publish-nexus` (macOS) | The macOS `.dmg` file's group id — see "One-time setup: macOS + Linux Nexus files" below. Leave unset to skip macOS uploads. |
+| `NEXUS_FILE_GROUP_ID_LINUX` | `publish-nexus` (Linux) | The Linux `.AppImage` file's group id — see "One-time setup: macOS + Linux Nexus files" below. Leave unset to skip Linux uploads. |
 
-If `NEXUS_API_KEY` or `NEXUS_FILE_GROUP_ID` is missing, `publish-nexus` will fail loudly. That's intentional — a silent skip would let Nexus drift out of sync without anyone noticing.
+If `NEXUS_API_KEY` or `NEXUS_FILE_GROUP_ID` is missing, the Windows leg of `publish-nexus` fails loudly. That's intentional — a silent skip would let Nexus drift out of sync without anyone noticing. The macOS/Linux group secrets behave differently: if `NEXUS_FILE_GROUP_ID_MACOS` / `NEXUS_FILE_GROUP_ID_LINUX` are unset, those legs **skip** (with a workflow notice) instead of failing — they are opt-in until you create the files (next section).
+
+### One-time setup: macOS + Linux Nexus files
+
+`publish-nexus` rolls a new version into one Nexus *file group* per platform. A
+file group is a single file's version chain — the upload action can only
+**update** an existing group, not create one. So the macOS `.dmg` and Linux
+`.AppImage` must exist on the mod page once before CI can keep them current:
+
+1. From any release, download the `…_universal.dmg` and `…_amd64.AppImage` off the GitHub Release.
+2. On the Nexus mod page (856) → **Files** → **Manage files**, upload each as a **Main file** with a clear name (e.g. "STS2 Mod Manager (macOS Universal)" and "(Linux AppImage)").
+3. For each new file, open **Files tab → "API Info"** and copy its integer group id.
+4. Store them as repo secrets:
+
+       gh secret set NEXUS_FILE_GROUP_ID_MACOS --repo MohamedSerhan/sts2-mod-manager
+       gh secret set NEXUS_FILE_GROUP_ID_LINUX --repo MohamedSerhan/sts2-mod-manager
+
+From the next tagged release on, each leg uploads a new version into its own
+group and archives the prior one (`archive_existing_file: true`). Until the
+secrets are set, the mac/Linux legs skip with a notice and only Windows uploads —
+no red CI.
 
 ## What is not automated
 
 - The **mod page description / "About this mod"** on Nexus — the public API doesn't expose it. Update manually if the copy needs to change.
 - The **Posts tab** announcements on Nexus — also not API-accessible.
-- **macOS / Linux** uploads to Nexus — the Nexus page currently hosts Windows only.
 
 ## Re-running a release
 
 - A failed individual job: Actions UI → workflow run → "Re-run failed jobs".
-- A full re-build for an existing tag: Actions UI → workflow_dispatch (Run workflow). Note this re-triggers every job including `publish-nexus`, which would upload a duplicate to Nexus (the upload API has no "if not exists" guard). If you only need to re-run Nexus, use "Re-run failed jobs" instead.
+- A full re-build for an existing tag: Actions UI → workflow_dispatch (Run workflow). Note this re-triggers every job including `publish-nexus`, which would roll a fresh version into each configured Nexus file group (the upload API has no "if not exists" guard; the prior version is archived via `archive_existing_file`). If you only need to re-run Nexus, use "Re-run failed jobs" instead.
 
 ## Smoke-testing the portable build
 
@@ -70,6 +91,28 @@ After the first release that ships the portable zip:
 2. Extract it.
 3. Run `STS2 Mod Manager.exe` and confirm the UI loads.
 4. If WebView2 is missing, the README in the zip points at the Evergreen Bootstrapper.
+
+## Smoke-testing the macOS build
+
+macOS has no automated UI smoke: Apple ships no WebDriver for the embedded
+WKWebView, so `tauri-driver` cannot drive a macOS build (Windows uses WebView2 +
+msedgedriver; Linux uses WebKitGTK + WebKitWebDriver). Run this manual pass on a
+Mac when a release changes OS-divergent surface — file moves, archive
+extraction, path handling, the downloads watcher. Requires a Mac (Intel or
+Apple Silicon; the build is a universal binary).
+
+1. Download `STS2.Mod.Manager_<version>_universal.dmg` from the GitHub Release.
+2. Open the `.dmg`, drag the app to Applications. First launch: right-click →
+   Open to clear Gatekeeper (the build is ad-hoc signed).
+3. **Game-path detection** — the app auto-detects the STS2 install, or accepts a
+   manually picked path without error.
+4. **Switch a modpack** — pick one and Switch; the active set applies cleanly.
+5. **Drag-drop install** — drag a mod `.zip` onto the window; it extracts and the
+   mod appears in the Library.
+6. **Toggle a mod off** — confirm the folder physically moves from `mods/` to
+   `mods_disabled/` on disk (a move, not a copy — the rename→copy fallback path).
+7. **Report a bug** — trigger Report a bug from the UI and confirm it produces a
+   report (clipboard text or an issue link).
 
 ---
 

@@ -212,7 +212,9 @@
     "dismissAria": "Dismiss what's new",
     "devNote": "(Showing the latest released notes — your build is v{{version}}.)",
     "localeNotice": "Release notes are English-only. The maintainer doesn't speak this language and can't verify translation accuracy on their own.",
-    "localeNoticeReport": "Report a translation mistake"
+    "localeNoticeReport": "Report a translation mistake",
+    "translatedNotice": "The developer doesn't speak this language —",
+    "translatedNoticeViewOriginal": "view the original English changelog here"
   },
   "about": {
     "title": "Slay the Spire 2 Mod Manager",

@@ -212,7 +212,9 @@
     "dismissAria": "إخفاء «ما الجديد»",
     "devNote": "(تُعرض ملاحظات آخر إصدار — نسختك هي v{{version}}.)",
     "localeNotice": "ملاحظات الإصدار بالإنجليزية فقط. لا يتحدّث المشرف هذه اللغة ولا يمكنه التحقّق من دقة الترجمة بمفرده.",
-    "localeNoticeReport": "الإبلاغ عن خطأ في الترجمة"
+    "localeNoticeReport": "الإبلاغ عن خطأ في الترجمة",
+    "translatedNotice": "المطوّر لا يتحدّث هذه اللغة —",
+    "translatedNoticeViewOriginal": "اعرض سجل التغييرات الأصلي بالإنجليزية"
   },
   "about": {
     "title": "مدير مودات Slay the Spire 2",

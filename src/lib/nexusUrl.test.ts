@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { isNexusModsHost, nexusFilesUrl, parseNexusModInput } from './nexusUrl';
+import { isNexusModsHost, nexusFilesUrl, parseNexusModInput, FEEDBACK_NEXUS_POSTS_URL } from './nexusUrl';
 
 describe('nexus URL helpers', () => {
   it.each([
@@ -69,5 +69,13 @@ describe('nexus URL helpers', () => {
     // throws on the bare authority, exercising the catch branch.
     expect(parseNexusModInput(input)).toBeNull();
     expect(nexusFilesUrl(input)).toBeNull();
+  });
+});
+
+describe('FEEDBACK_NEXUS_POSTS_URL', () => {
+  it('points at the mod-manager Nexus Posts tab the triage polls', () => {
+    expect(FEEDBACK_NEXUS_POSTS_URL).toBe(
+      'https://www.nexusmods.com/slaythespire2/mods/856?tab=posts',
+    );
   });
 });

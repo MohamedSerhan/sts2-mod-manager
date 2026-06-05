@@ -52,3 +52,12 @@ export function nexusFilesUrl(input: string): string | null {
   if (!ref) return null;
   return `https://www.nexusmods.com/${ref.gameDomain}/mods/${ref.modId}?tab=files`;
 }
+
+// The mod manager's OWN Nexus mod page (Slay the Spire 2, mod 856). Used by the
+// non-GitHub feedback path (#116): the Posts tab is polled, translated, and
+// filed by the Nexus->GitHub triage automation, so users without a GitHub
+// account can leave feedback there. Kept in sync with scripts/nexus-triage.mjs
+// (GAME_DOMAIN='slaythespire2', MOD_ID=856). Distinct from the parser helpers
+// above, which handle arbitrary user-supplied Nexus references.
+export const FEEDBACK_NEXUS_POSTS_URL =
+  'https://www.nexusmods.com/slaythespire2/mods/856?tab=posts';

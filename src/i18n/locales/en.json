@@ -225,6 +225,13 @@
     "updateAvailable": "v{{version}} available — installing...",
     "updateCheckFailed": "Update check failed: {{error}}"
   },
+  "feedback": {
+    "sendFeedback": "Send feedback",
+    "noGitHubPrompt": "No GitHub account?",
+    "nexusCta": "Post feedback on the Nexus page",
+    "translatedNote": "Write in your own language — we read every comment (translated to English automatically).",
+    "couldntOpen": "Couldn't open the Nexus page: {{error}}"
+  },
   "profileSwitcher": {
     "title": "Modpacks",
     "empty": "No modpacks yet. Add one to get started.",

@@ -225,6 +225,13 @@
     "updateAvailable": "v{{version}} 可用 — 安装中...",
     "updateCheckFailed": "更新检查失败：{{error}}"
   },
+  "feedback": {
+    "sendFeedback": "发送反馈",
+    "noGitHubPrompt": "没有 GitHub 账号？",
+    "nexusCta": "在 Nexus 页面留言反馈",
+    "translatedNote": "用你的母语留言即可——我们会阅读每一条评论（自动翻译成英文）。",
+    "couldntOpen": "无法打开 Nexus 页面：{{error}}"
+  },
   "profileSwitcher": {
     "title": "模组包",
     "empty": "暂无模组包。添加一个以开始。",

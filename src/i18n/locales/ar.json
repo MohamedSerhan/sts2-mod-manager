@@ -225,6 +225,13 @@
     "updateAvailable": "تتوفّر v{{version}} — جارٍ التثبيت…",
     "updateCheckFailed": "فشل التحقّق من التحديثات: {{error}}"
   },
+  "feedback": {
+    "sendFeedback": "إرسال ملاحظات",
+    "noGitHubPrompt": "ليس لديك حساب GitHub؟",
+    "nexusCta": "انشر ملاحظاتك على صفحة Nexus",
+    "translatedNote": "اكتب بلغتك — نقرأ كل تعليق (يُترجَم تلقائيًا إلى الإنجليزية).",
+    "couldntOpen": "تعذّر فتح صفحة Nexus: {{error}}"
+  },
   "profileSwitcher": {
     "title": "الحزم",
     "empty": "لا توجد حزم بعد. أضِف واحدة للبدء.",

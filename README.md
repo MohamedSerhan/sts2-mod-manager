@@ -472,6 +472,10 @@ Adding a new language:
   [#45](https://github.com/MohamedSerhan/sts2-mod-manager/pull/45),
   reworked onto current `main` and extended for new strings by the
   maintainer.
+- **Russian localization, QA & feature ideas:**
+  [@Solomag](https://github.com/Solomag) — *Chief Bug-Hunter &
+  Idea-Smith.* Relentless playtesting, a steady stream of ideas that
+  shaped the manager, and the full Russian translation.
 
 ---
 

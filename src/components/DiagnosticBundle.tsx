@@ -14,6 +14,7 @@ import {
 } from '../hooks/useTauri';
 import { buildGitHubIssueUrl } from '../lib/githubLinks';
 import { useModalA11y } from '../hooks/useModalA11y';
+import { useOpenFeedback } from '../hooks/useOpenFeedback';
 
 // 1.7.0 — "Report a bug". Reworked from the old support-bundle: builds a
 // single redacted text report (description + app/game version + the
@@ -58,6 +59,7 @@ function DiagnosticBundlePanel({ onClose }: { onClose: () => void }) {
   const [awaitingConsent, setAwaitingConsent] = useState(false);
   const modalRef = useRef<HTMLElement>(null);
   useModalA11y(modalRef, onClose);
+  const openFeedback = useOpenFeedback();
 
   function redact(s: string): string {
     // Tokens/secrets are ALWAYS stripped (an auth concern); home-folder
@@ -414,6 +416,22 @@ function DiagnosticBundlePanel({ onClose }: { onClose: () => void }) {
               </span>
             </div>
           )}
+
+          <div
+            style={{
+              marginTop: 14,
+              paddingTop: 12,
+              borderTop: '1px dashed var(--indigo-line)',
+            }}
+          >
+            <div style={{ fontSize: 12, color: 'var(--ink-mute)', marginBottom: 6 }}>
+              <b style={{ color: 'var(--ink)' }}>{t('feedback.noGitHubPrompt')}</b>{' '}
+              {t('feedback.translatedNote')}
+            </div>
+            <button type="button" className="gf-btn-3 gf-btn-2-sm" onClick={openFeedback}>
+              {t('feedback.nexusCta')}
+            </button>
+          </div>
         </div>
         <div className="gf-modal-foot">
           <button className="gf-btn-3" onClick={onClose}>{t('common.close')}</button>

@@ -4,6 +4,7 @@ import { AppProvider } from '../contexts/AppContext';
 import { ConfirmProvider } from '../components/ConfirmDialog';
 import { ToastProvider } from '../contexts/ToastContext';
 import { ThemeProvider } from '../theme/ThemeContext';
+import { UiScaleProvider } from '../display/UiScaleContext';
 
 /**
  * Wraps children in the full provider stack the production app uses.
@@ -18,11 +19,13 @@ import { ThemeProvider } from '../theme/ThemeContext';
 export function AllProviders({ children }: { children: ReactNode }) {
   return (
     <ThemeProvider>
-      <ToastProvider>
-        <ConfirmProvider>
-          <AppProvider>{children}</AppProvider>
-        </ConfirmProvider>
-      </ToastProvider>
+      <UiScaleProvider>
+        <ToastProvider>
+          <ConfirmProvider>
+            <AppProvider>{children}</AppProvider>
+          </ConfirmProvider>
+        </ToastProvider>
+      </UiScaleProvider>
     </ThemeProvider>
   );
 }

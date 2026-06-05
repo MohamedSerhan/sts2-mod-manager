@@ -277,6 +277,9 @@
 :root {
   color-scheme: var(--app-color-scheme, dark);
   accent-color: var(--gf, oklch(0.78 0.13 80));
+  /* Global UI scale (#119). The Display-size slider drives --ui-scale; the
+     whole page zooms uniformly, scaling the hardcoded-px type + layout. */
+  zoom: var(--ui-scale, 1);
 }
 
 body {
@@ -441,6 +444,15 @@ body {
   pointer-events: none;
   flex: 0 0 auto;
   gap: 0;
+}
+
+/* ── Display-size slider (Settings → General) ─────────────────────── */
+.gf-ui-scale { display: flex; flex-direction: column; gap: 8px; }
+.gf-ui-scale-row { display: flex; align-items: center; gap: 12px; }
+.gf-range { flex: 1; accent-color: var(--gf); cursor: pointer; }
+.gf-ui-scale-value {
+  font-size: 12px; color: var(--ink-mute);
+  min-width: 42px; text-align: end; font-variant-numeric: tabular-nums;
 }
 
 /* Activity feed on the Profiles view — followed packs with pending

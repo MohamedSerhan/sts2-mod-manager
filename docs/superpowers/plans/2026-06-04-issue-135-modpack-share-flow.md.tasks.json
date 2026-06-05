@@ -22,7 +22,7 @@
     {
       "id": 4,
       "subject": "Task 4: Fix share-code layout in non-English locales",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Keep the share code readable (no one-char-per-line wrap) by letting copy buttons wrap to their own row.\n\n**Verify:** npx vitest run src/components/PublishModal.test.tsx.\n\n```json:metadata\n{\"files\": [\"src/components/PublishModal.tsx\", \"src/styles.css\", \"src/components/PublishModal.test.tsx\"], \"verifyCommand\": \"npx vitest run src/components/PublishModal.test.tsx\", \"acceptanceCriteria\": [\"code on one line, copy buttons wrap\", \"no word-break:break-all on .gf-share-code-value\", \"npm test green\"]}\n```"
     },
     {

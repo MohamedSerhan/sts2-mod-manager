@@ -662,6 +662,9 @@
     "skippedMod": "跳过了 1 个模组：{{name}} 需要游戏 v{{version}}（你当前为 v{{gameVersion}}）。",
     "skippedMods": "跳过了 {{n}} 个模组（需要比你更新的游戏版本）：{{names}}。",
     "vanillaInitials": "VA",
+    "sidebar": {
+      "resizeLabel": "调整侧边栏宽度"
+    },
     "dragDrop": {
       "textActive": "拖放以安装",
       "text": ".zip - 我们会自动检测来源"
@@ -1142,6 +1145,12 @@
       "dark": "深色",
       "light": "浅色",
       "auto": "自动"
+    },
+    "display": {
+      "label": "显示大小",
+      "desc": "缩放整个界面，同时影响文字和布局。",
+      "scaleLabel": "界面缩放",
+      "reset": "重置为 100%"
     },
     "accounts": {
       "nexusKey": "Nexus Mods API 密钥",

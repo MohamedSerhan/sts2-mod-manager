@@ -89,10 +89,20 @@ jobs:
   test-rust:
     needs: changes
     if: ${{ needs.changes.outputs.app == 'true' }}
-    runs-on: ubuntu-22.04
+    # cargo test on all three OSes. The redesign touches OS-divergent surface
+    # (file moves with rename->copy fallback, archive extraction, path
+    # normalization, the notify watcher, case-sensitive-FS matching) that a
+    # Linux-only leg never exercised. fail-fast: false so one OS failing still
+    # reports the others.
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ubuntu-22.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v5
-      - name: Install system dependencies
+      - name: Install system dependencies (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
@@ -100,6 +110,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          key: test-rust-${{ matrix.platform }}
       - name: Rust tests (default features)
         run: cargo test --manifest-path=src-tauri/Cargo.toml
       - name: Rust tests (qa-cassette feature)

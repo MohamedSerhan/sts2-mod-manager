@@ -57,7 +57,7 @@ interface Props {
 }
 
 type Step = 1 | 2 | 3 | 4;
-type Strategy = 'fromActive' | 'empty' | 'clone';
+type Strategy = 'fromActive' | 'allInstalled' | 'empty' | 'clone';
 
 interface HealthSummary {
   linked: string[];
@@ -121,6 +121,9 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
     setStrategy(chosen);
     if (chosen === 'fromActive') {
       setSelectedMods(new Set(mods.filter((m) => m.enabled).map((m) => m.folder_name ?? m.name)));
+    } else if (chosen === 'allInstalled') {
+      // Snapshot replacement: every installed mod, enabled OR disabled.
+      setSelectedMods(new Set(mods.map((m) => m.folder_name ?? m.name)));
     } else if (chosen === 'empty') {
       setSelectedMods(new Set());
     } else if (chosen === 'clone' && cloneFrom) {
@@ -423,6 +426,12 @@ function StepStart({
         title={t('createModpack.step1FromActive')}
         desc={t('createModpack.step1FromActiveDesc')}
         onClick={() => onPick('fromActive')}
+      />
+      <StrategyOption
+        active={strategy === 'allInstalled'}
+        title={t('createModpack.step1AllInstalled')}
+        desc={t('createModpack.step1AllInstalledDesc')}
+        onClick={() => onPick('allInstalled')}
       />
       <StrategyOption
         active={strategy === 'empty'}

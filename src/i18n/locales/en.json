@@ -153,6 +153,8 @@
     "step1Subtitle": "Pick how this modpack should begin.",
     "step1FromActive": "Start from my active mods",
     "step1FromActiveDesc": "Use the mods currently in your game folder as a starting point.",
+    "step1AllInstalled": "Start with all installed mods",
+    "step1AllInstalledDesc": "Begin from every mod you have installed, enabled or not.",
     "step1Empty": "Start empty",
     "step1EmptyDesc": "Begin with no mods. Add them later.",
     "step1Clone": "Clone an existing modpack",

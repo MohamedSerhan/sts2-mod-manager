@@ -153,6 +153,8 @@
     "step1Subtitle": "选择此模组包的起始方式。",
     "step1FromActive": "从当前激活的模组开始",
     "step1FromActiveDesc": "使用当前游戏文件夹中的模组作为起点。",
+    "step1AllInstalled": "从所有已安装的模组开始",
+    "step1AllInstalledDesc": "从你已安装的每个模组开始，无论是否启用。",
     "step1Empty": "从空白开始",
     "step1EmptyDesc": "不含任何模组,稍后再添加。",
     "step1Clone": "克隆已有模组包",

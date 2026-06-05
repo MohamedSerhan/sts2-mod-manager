@@ -134,6 +134,15 @@ Expected: the `test-rust` matrix shows three legs (ubuntu/windows/macos), all gr
 
 ### Task 2: `publish-nexus` → 3-file matrix (`build.yml`)
 
+> **Correction (2026-06-04, implemented):** the YAML sketched below is WRONG — a
+> Nexus `file_group_id` is one file's version chain, not a category, so all three
+> legs sharing `NEXUS_FILE_GROUP_ID` would collapse them into a single file. The
+> shipped job uses three SEPARATE group-id secrets (`NEXUS_FILE_GROUP_ID`,
+> `NEXUS_FILE_GROUP_ID_MACOS`, `NEXUS_FILE_GROUP_ID_LINUX`) via `matrix.group_secret`
+> and skips a leg whose secret is unset. See the shipped `.github/workflows/build.yml`
+> and the one-time setup added to `RELEASING.md` (Task 3). The sketch below is kept
+> for the record.
+
 **Goal:** Upload the Windows portable zip, macOS universal `.dmg`, and Linux `.AppImage` to Nexus (mod 856), one matrix leg per file, instead of Windows only.
 
 **Files:**

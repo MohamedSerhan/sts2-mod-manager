@@ -118,6 +118,21 @@ Rationale / invariants:
 
 ## Part 2 — `publish-nexus` → 3-file matrix (`.github/workflows/build.yml`)
 
+> **Correction (2026-06-04, during implementation).** The mechanism below is
+> **wrong about the Nexus model** and was not shipped as written. The
+> `Nexus-Mods/upload-action` source + Nexus OpenAPI schema show a `file_group_id`
+> identifies **one file's version chain** (`POST /mod-file-update-groups/{group_id}/versions`),
+> not a category bucket — so uploading all three platforms into the single
+> `NEXUS_FILE_GROUP_ID` would make them successive *versions of one file* (last
+> wins; others archived). **Shipped design:** three SEPARATE group-id secrets —
+> `NEXUS_FILE_GROUP_ID` (Windows), `NEXUS_FILE_GROUP_ID_MACOS`,
+> `NEXUS_FILE_GROUP_ID_LINUX` — selected per leg via `matrix.group_secret`, with
+> a **graceful skip** when a leg's secret is unset (Windows keeps shipping before
+> the mac/Linux files exist). `file_category: main` + `archive_existing_file: true`
+> still stand (archive now scopes to each file's own chain). One-time setup is in
+> `RELEASING.md`; the authoritative version is `.github/workflows/build.yml`. The
+> original sketch is kept below for the record.
+
 Replace the single Windows upload (lines 383–410) with a matrix over the three
 release assets. Filenames match what `format-release` links (build.yml:317–329):
 

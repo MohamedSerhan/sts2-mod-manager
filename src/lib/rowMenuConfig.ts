@@ -60,7 +60,7 @@ export const DEFAULT_ROW_MENU_CONFIG: RowMenuConfig = {
  * boundary: unknown ids dropped, duplicates removed, any known id missing
  * from `order` appended in default-order position (so a future release's new
  * item appears rather than being silently hidden), `hidden` clamped to known
- * ids actually present in `order`.
+ * customizable ids.
  */
 export function normalizeConfig(raw: unknown): RowMenuConfig {
   const rawOrder = (raw as { order?: unknown })?.order;

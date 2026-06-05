@@ -3,6 +3,7 @@ import { describe, expect, it, beforeEach } from 'vitest';
 import {
   DEFAULT_ROW_MENU_CONFIG,
   DEFAULT_ROW_MENU_ORDER,
+  ROW_MENU_OPEN_EVENT,
   ROW_MENU_STORAGE_KEY,
   loadRowMenuConfig,
   moveItem,
@@ -15,6 +16,12 @@ import {
 
 beforeEach(() => {
   try { localStorage.clear(); } catch { /* jsdom quirk */ }
+});
+
+describe('constants', () => {
+  it('ROW_MENU_OPEN_EVENT has the canonical value', () => {
+    expect(ROW_MENU_OPEN_EVENT).toBe('sts2mm:open-row-menu-settings');
+  });
 });
 
 describe('normalizeConfig', () => {
@@ -50,6 +57,11 @@ describe('moveItem', () => {
   it('returns the same order when indices are out of range', () => {
     const order: RowMenuItemId[] = ['copyVersion', 'openFolder'];
     expect(moveItem(order, -1, 5)).toEqual(order);
+  });
+
+  it('returns an equal array when from === to', () => {
+    const order: RowMenuItemId[] = ['copyVersion', 'openFolder'];
+    expect(moveItem([...order], 0, 0)).toEqual([...order]);
   });
 });
 

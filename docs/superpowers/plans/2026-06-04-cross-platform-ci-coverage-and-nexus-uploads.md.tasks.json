@@ -7,27 +7,27 @@
     {
       "id": 1,
       "subject": "Task 1: test-rust → 3-platform matrix (ci.yml)",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Run both `cargo test` invocations on ubuntu-22.04, windows-latest, and macos-latest instead of Linux only.\n\n**Files:** Modify `.github/workflows/ci.yml` (test-rust job, lines 89–109).\n\n**Acceptance Criteria:** matrix [ubuntu-22.04, windows-latest, macos-latest] w/ fail-fast:false + runs-on: matrix.platform; apt-get guarded `if: matrix.platform == 'ubuntu-22.04'`; rust-cache key `test-rust-${{ matrix.platform }}`; both cargo test steps run on all; ci-gate unchanged; valid YAML + actionlint.\n\n**Verify:** `python -c \"import yaml; yaml.safe_load(open('.github/workflows/ci.yml')); print('YAML OK')\"`; then `gh workflow run ci.yml --ref claude/hardcore-sanderson-01a980` → 3 green test-rust legs (PR is app:false so test-rust does NOT auto-run — dispatch is the macOS proof).\n\n```json:metadata\n{\"files\": [\".github/workflows/ci.yml\"], \"verifyCommand\": \"python -c \\\"import yaml; yaml.safe_load(open('.github/workflows/ci.yml')); print('YAML OK')\\\"\", \"acceptanceCriteria\": [\"test-rust matrix over [ubuntu-22.04, windows-latest, macos-latest], fail-fast:false, runs-on: matrix.platform\", \"apt-get guarded if: matrix.platform == 'ubuntu-22.04'\", \"rust-cache key test-rust-${{ matrix.platform }}\", \"both cargo test steps on every platform\", \"ci-gate unchanged\", \"valid YAML + actionlint\", \"dispatched ci.yml shows 3 green test-rust legs\"]}\n```"
     },
     {
       "id": 2,
       "subject": "Task 2: publish-nexus → 3-file matrix (build.yml)",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Upload Windows zip + macOS universal .dmg + Linux .AppImage to Nexus (mod 856), one matrix leg per file.\n\n**Files:** Modify `.github/workflows/build.yml` (publish-nexus job + lead comment, lines 379–410).\n\n**Acceptance Criteria:** strategy fail-fast:false + max-parallel:1 + matrix.include of 3 assets (suffix+label); meta filename = `STS2.Mod.Manager_${VERSION}_${{ matrix.suffix }}`; upload file_category:main, archive_existing_file:true, display_name w/ matrix.label; job still `if: tags/v` + `needs: build`; valid YAML + actionlint.\n\n**Verify:** `python -c \"import yaml; yaml.safe_load(open('.github/workflows/build.yml')); print('YAML OK')\"` + logic review (suffixes → exact format-release filenames). Live validation only at next v* release — state limitation when reporting done.\n\n```json:metadata\n{\"files\": [\".github/workflows/build.yml\"], \"verifyCommand\": \"python -c \\\"import yaml; yaml.safe_load(open('.github/workflows/build.yml')); print('YAML OK')\\\"\", \"acceptanceCriteria\": [\"publish-nexus matrix fail-fast:false + max-parallel:1 over 3 assets (suffix+label)\", \"meta filename = STS2.Mod.Manager_${VERSION}_${{ matrix.suffix }}\", \"upload file_category:main, archive_existing_file:true, display_name with matrix.label\", \"job still if: tags/v and needs: build\", \"valid YAML + actionlint\"]}\n```"
     },
     {
       "id": 3,
       "subject": "Task 3: macOS smoke checklist + Nexus doc fixes (RELEASING.md)",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Add a manual macOS release smoke checklist and update runbook lines the Nexus change makes stale.\n\n**Files:** Modify `RELEASING.md` (line 30 release-flow bullet; line 59 not-automated bullet; line 64 re-run caveat; new section after the Windows smoke section).\n\n**Acceptance Criteria:** release-flow bullet lists all 3 Nexus files; stale 'Nexus hosts Windows only' bullet removed; re-run caveat updated for 3 files + archive_existing_file; new `## Smoke-testing the macOS build` section w/ 7-step checklist + no-WebDriver note; renders cleanly.\n\n**Verify:** `grep -n \"Smoke-testing the macOS build\" RELEASING.md` (1 match); `grep -c \"the Nexus page currently hosts Windows only\" RELEASING.md` (0); `grep -n \"universal.dmg\" RELEASING.md`.\n\n```json:metadata\n{\"files\": [\"RELEASING.md\"], \"verifyCommand\": \"grep -n \\\"Smoke-testing the macOS build\\\" RELEASING.md; grep -c \\\"the Nexus page currently hosts Windows only\\\" RELEASING.md\", \"acceptanceCriteria\": [\"release-flow bullet lists all 3 Nexus files\", \"stale Windows-only Nexus bullet removed\", \"re-run caveat updated for 3 files + archive\", \"new macOS smoke section with 7-step checklist + no-WebDriver note\", \"renders cleanly\"]}\n```"
     },
     {
       "id": 4,
       "subject": "Task 4: File the deferred Linux-smoke follow-up issue",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Capture the deferred Linux automated WebDriver smoke work as a tracked GitHub issue so #95 closes cleanly.\n\n**Files:** None (GitHub action only).\n\n**Acceptance Criteria:** new open issue 'CI: Linux automated WebDriver smoke leg (deferred from #95)' with a body summarizing the spec's Out-of-scope approach (platform-aware smoke.mjs + xvfb + WebKitWebDriver leg + ci-gate wiring).\n\n**Verify:** `gh issue list --search \"Linux automated WebDriver smoke\" --state open` → the new issue appears.\n\n```json:metadata\n{\"files\": [], \"verifyCommand\": \"gh issue list --search \\\"Linux automated WebDriver smoke\\\" --state open\", \"acceptanceCriteria\": [\"open issue 'CI: Linux automated WebDriver smoke leg (deferred from #95)' exists with the deferred-approach body\"]}\n```"
     }
   ],
-  "lastUpdated": "2026-06-04T00:00:00Z"
+  "lastUpdated": "2026-06-05T14:05:00Z"
 }

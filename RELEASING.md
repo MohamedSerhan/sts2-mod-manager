@@ -109,8 +109,9 @@ Apple Silicon; the build is a universal binary).
 4. **Switch a modpack** — pick one and Switch; the active set applies cleanly.
 5. **Drag-drop install** — drag a mod `.zip` onto the window; it extracts and the
    mod appears in the Library.
-6. **Toggle a mod off** — confirm the folder physically moves from `mods/` to
-   `mods_disabled/` on disk (a move, not a copy — the rename→copy fallback path).
+6. **Toggle a mod off** — confirm the folder leaves `mods/` and appears in
+   `mods_disabled/` with no leftover duplicate (exercises the on-disk move:
+   a fast `rename`, or copy-then-delete as the cross-volume fallback).
 7. **Report a bug** — trigger Report a bug from the UI and confirm it produces a
    report (clipboard text or an issue link).
 

@@ -1,8 +1,10 @@
 // src/contexts/RowMenuContext.tsx
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   DEFAULT_ROW_MENU_CONFIG,
+  DEFAULT_ROW_MENU_ORDER,
   loadRowMenuConfig,
+  normalizeConfig,
   saveRowMenuConfig,
   toggleHidden as toggleHiddenPure,
   type RowMenuConfig,
@@ -32,12 +34,22 @@ export function RowMenuProvider({ children }: { children: ReactNode }) {
     saveRowMenuConfig(config);
   }, [config]);
 
-  const value: RowMenuContextValue = {
-    config,
-    setOrder: (order) => setConfig((c) => ({ ...c, order })),
-    toggleHidden: (id) => setConfig((c) => toggleHiddenPure(c, id)),
-    reset: () => setConfig({ ...DEFAULT_ROW_MENU_CONFIG, order: [...DEFAULT_ROW_MENU_CONFIG.order] }),
-  };
+  const setOrder = useCallback(
+    (order: RowMenuItemId[]) => setConfig((c) => normalizeConfig({ ...c, order })),
+    [],
+  );
+  const toggleHidden = useCallback(
+    (id: RowMenuItemId) => setConfig((c) => toggleHiddenPure(c, id)),
+    [],
+  );
+  const reset = useCallback(
+    () => setConfig({ ...DEFAULT_ROW_MENU_CONFIG, order: [...DEFAULT_ROW_MENU_ORDER] }),
+    [],
+  );
+  const value = useMemo(
+    () => ({ config, setOrder, toggleHidden, reset }),
+    [config, setOrder, toggleHidden, reset],
+  );
 
   return <RowMenuContext.Provider value={value}>{children}</RowMenuContext.Provider>;
 }

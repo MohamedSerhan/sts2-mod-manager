@@ -5,7 +5,7 @@ import { RowMenuProvider, useRowMenu } from './RowMenuContext';
 import { DEFAULT_ROW_MENU_CONFIG, loadRowMenuConfig } from '../lib/rowMenuConfig';
 
 beforeEach(() => {
-  try { localStorage.clear(); } catch { /* jsdom quirk */ }
+  try { localStorage.clear(); } catch { /* storage may be unavailable in some environments */ }
 });
 
 const wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -38,6 +38,7 @@ describe('useRowMenu', () => {
     act(() => result.current.toggleHidden('freeze'));
     act(() => result.current.reset());
     expect(result.current.config).toEqual(DEFAULT_ROW_MENU_CONFIG);
+    expect(loadRowMenuConfig()).toEqual(DEFAULT_ROW_MENU_CONFIG);
   });
 
   it('falls back to default config when used without a provider', () => {

@@ -435,6 +435,14 @@ describe('<LibraryRow> kebab + audit pills', () => {
     expect(item).not.toHaveTextContent('vv1.2.3');
   });
 
+  it('kebab → Copy version label prepends v for a bare version (no leading v in source)', async () => {
+    const user = userEvent.setup();
+    renderRow({ mod: baseModInfo({ version: '1.2.3' }) });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    const item = screen.getByRole('menuitem', { name: /copy version/i });
+    expect(item).toHaveTextContent('Copy version (v1.2.3)');
+  });
+
   it('kebab → Open this mod\'s folder fires onOpenThisModFolder', async () => {
     // FB-E: the global "Open mods folder" was removed from the per-row kebab;
     // the per-mod "Open this mod's folder" (Bug 6) is what remains.

@@ -413,16 +413,41 @@ describe('useModLibrary — renderAutoDetectModal callbacks', () => {
   });
 });
 
+// ── handleCopyVersion clipboard helper (mirrors DiagnosticBundle / useClipboard pattern) ──
+//
+// jsdom 27 gotcha: when jsdom exposes a real Clipboard prototype a
+// defineProperty on `navigator.clipboard` itself is shadowed by the proto
+// getter.  Install on the proto when present; fall back to defining
+// `navigator.clipboard` directly.  Called in beforeEach so the spy is fresh
+// for every test and the patch is properly overwritten between tests.
+
+let copyVersionSpy: ReturnType<typeof vi.fn>;
+
+function setCopyVersionClipboard(impl: (text: string) => Promise<void> = async () => {}) {
+  copyVersionSpy = vi.fn(impl);
+  const proto = navigator.clipboard ? Object.getPrototypeOf(navigator.clipboard) : null;
+  if (proto && 'writeText' in proto) {
+    Object.defineProperty(proto, 'writeText', {
+      value: copyVersionSpy,
+      configurable: true,
+      writable: true,
+    });
+  } else {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: copyVersionSpy },
+      configurable: true,
+    });
+  }
+  return copyVersionSpy;
+}
+
 describe('useModLibrary — handleCopyVersion', () => {
+  beforeEach(() => {
+    setCopyVersionClipboard();
+  });
+
   it('handleCopyVersion copies the raw version but shows a single-v toast', async () => {
-    // jsdom 27: patch Clipboard.prototype.writeText, not navigator.clipboard.
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    const proto = (globalThis.Clipboard && globalThis.Clipboard.prototype) as Clipboard | undefined;
-    if (proto) {
-      Object.defineProperty(proto, 'writeText', { configurable: true, value: writeText });
-    } else {
-      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
-    }
+    const writeText = setCopyVersionClipboard();
 
     const { result } = renderHook(() => useModLibrary(), { wrapper: AllProviders });
     await act(async () => {

@@ -399,7 +399,7 @@ jobs:
         run: gh release download "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" -p "${{ steps.meta.outputs.filename }}"
 
       - name: Upload to Nexus Mods
-        uses: Nexus-Mods/upload-action@v1.0.0-beta.6
+        uses: Nexus-Mods/upload-action@v1.0.0-beta.7
         with:
           api_key:                      ${{ secrets.NEXUS_API_KEY }}
           file_group_id:                ${{ secrets.NEXUS_FILE_GROUP_ID }}
@@ -436,7 +436,7 @@ jobs:
           node-version: "22"
 
       - name: Download all build artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         continue-on-error: true
         with:
           path: dev-artifacts

@@ -160,7 +160,7 @@ impl NexusClient {
             concat!("sts2-mod-manager/", env!("CARGO_PKG_VERSION")).parse().unwrap(),
         );
 
-        let client = reqwest::Client::builder()
+        let client = crate::http::https_client_builder()
             .default_headers(headers)
             .timeout(HTTP_TOTAL_TIMEOUT)
             .connect_timeout(HTTP_CONNECT_TIMEOUT)

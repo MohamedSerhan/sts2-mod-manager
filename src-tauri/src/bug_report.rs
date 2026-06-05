@@ -60,7 +60,7 @@ pub async fn upload_bug_report(content: String) -> Result<String, String> {
         return Err("Empty report".to_string());
     }
 
-    let client = reqwest::Client::builder()
+    let client = crate::http::https_client_builder()
         .user_agent(concat!("sts2-mod-manager/", env!("CARGO_PKG_VERSION")))
         .timeout(UPLOAD_TIMEOUT)
         .connect_timeout(CONNECT_TIMEOUT)

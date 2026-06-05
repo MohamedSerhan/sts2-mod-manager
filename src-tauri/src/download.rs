@@ -83,7 +83,7 @@ fn build_client(token: Option<&str>) -> reqwest::Client {
             headers.insert(reqwest::header::AUTHORIZATION, val);
         }
     }
-    reqwest::Client::builder()
+    crate::http::https_client_builder()
         .default_headers(headers)
         .timeout(HTTP_TOTAL_TIMEOUT)
         .connect_timeout(HTTP_CONNECT_TIMEOUT)
@@ -507,7 +507,7 @@ where
         on_progress(total, total);
         return Ok(());
     }
-    let client = reqwest::Client::builder()
+    let client = crate::http::https_client_builder()
         .user_agent(concat!("sts2-mod-manager/", env!("CARGO_PKG_VERSION")))
         .timeout(HTTP_TOTAL_TIMEOUT)
         .connect_timeout(HTTP_CONNECT_TIMEOUT)

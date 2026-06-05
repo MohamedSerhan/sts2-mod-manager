@@ -23,6 +23,19 @@ describe('damerauLevenshtein', () => {
     expect(damerauLevenshtein('hello', 'world', 2)).toBe(Infinity);
   });
 
+  it('weights only the first three fields, defaulting any extra to 1x', () => {
+    // fuzzyRerank uses weights [3, 2, 1] and falls back to 1 for a 4th+
+    // field (weights[i] ?? 1). Match only in the 4th field so that
+    // fallback path is what surfaces the item. (fuzzy.ts line 124.)
+    const items = [{ id: 'a' }, { id: 'b' }];
+    const ranked = fuzzyRerank(
+      items,
+      'zebra',
+      (it) => ['', '', '', it.id === 'a' ? 'zebra' : 'nomatch'],
+    );
+    expect(ranked).toEqual([{ id: 'a' }]);
+  });
+
   it('handles empty strings', () => {
     expect(damerauLevenshtein('', '')).toBe(0);
     expect(damerauLevenshtein('', 'abc')).toBe(3);

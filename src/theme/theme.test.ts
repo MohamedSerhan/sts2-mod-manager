@@ -91,6 +91,32 @@ describe('theme preference', () => {
     expect(loadThemePreference(hostileStorage)).toBe(DEFAULT_THEME_PREFERENCE);
   });
 
+  it('treats storage as unavailable when localStorage is absent (not just throwing)', () => {
+    // getStorage()'s `typeof localStorage === 'undefined'` guard: some
+    // embedded/stripped webviews expose no localStorage at all. load/save
+    // must degrade to the default rather than crash. (theme.ts line 16.)
+    // Restore in finally so the afterEach's localStorage.clear() still works.
+    vi.stubGlobal('localStorage', undefined);
+    try {
+      expect(loadThemePreference()).toBe(DEFAULT_THEME_PREFERENCE);
+      expect(() => saveThemePreference('light')).not.toThrow();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('applyTheme is a no-op when there is no document', () => {
+    // Guard for non-DOM contexts importing the theme module — applyTheme
+    // must early-return instead of touching document. (theme.ts line 59.)
+    // Restore document before the test ends so cleanup/afterEach are safe.
+    vi.stubGlobal('document', undefined);
+    try {
+      expect(() => applyTheme('light')).not.toThrow();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('treats storage as unavailable when the localStorage global access throws', () => {
     // Privacy modes can make even *touching* `localStorage` throw a
     // SecurityError. getStorage() must catch that and report "no storage",

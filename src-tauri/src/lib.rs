@@ -6,6 +6,7 @@ mod error;
 mod external_open;
 mod fs_safety;
 mod game;
+mod http;
 // `mod_sources` and `mods` are pub so `tests/qa_scenarios.rs` can call
 // scan_mods / install_mod_from_zip / load_sources / lookup_entry the
 // same way Tauri commands do. Everything exposed here was already

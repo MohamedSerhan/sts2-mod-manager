@@ -1277,6 +1277,8 @@
     "unlinked": "غير مرتبط",
     "modActions": "إجراءات المود",
     "copyVersion": "نسخ النسخة (v{{version}})",
+    "customizeMenu": "تخصيص القائمة…",
+    "customizeMenuDesc": "اختر العناصر التي تظهر وأعد ترتيبها",
     "openModsFolder": "فتح مجلد المودات",
     "unsnoozeDesc": "إظهار اقتراح التحديث مجددًا للإصدار الحالي من المصدر.",
     "unsnoozeUpdate": "إظهار التحديث مجددًا",

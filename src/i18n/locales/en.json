@@ -1277,6 +1277,8 @@
     "unlinked": "Unlinked",
     "modActions": "Mod actions",
     "copyVersion": "Copy version (v{{version}})",
+    "customizeMenu": "Customize menu…",
+    "customizeMenuDesc": "Choose which items show and reorder them",
     "openModsFolder": "Open mods folder",
     "openThisModFolder": "Open this mod's folder",
     "unsnoozeDesc": "Show the update suggestion again for the current upstream release.",

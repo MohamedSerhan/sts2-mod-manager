@@ -1277,6 +1277,8 @@
     "unlinked": "未链接",
     "modActions": "模组操作",
     "copyVersion": "复制版本 (v{{version}})",
+    "customizeMenu": "自定义菜单…",
+    "customizeMenuDesc": "选择显示哪些项目并重新排序",
     "openModsFolder": "打开模组文件夹",
     "openThisModFolder": "打开此模组的文件夹",
     "unsnoozeDesc": "再次显示当前上游版本的更新建议。",

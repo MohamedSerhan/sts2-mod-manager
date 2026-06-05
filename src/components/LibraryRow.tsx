@@ -31,10 +31,10 @@ import {
   GitBranch,
   GripVertical,
   Layers,
-  Link as LinkIcon,
   RefreshCw,
   RotateCcw,
   Search,
+  SlidersHorizontal,
   Snowflake,
   Sun,
   ToggleLeft,
@@ -54,7 +54,13 @@ import {
   KebabSection,
 } from './KebabMenu';
 import { Toggle } from './Toggle';
+import { useRowMenu } from '../contexts/RowMenuContext';
 import { isUpToDate } from '../lib/auditState';
+import {
+  resolveRowMenuOrder,
+  ROW_MENU_OPEN_EVENT,
+  type RowMenuItemId,
+} from '../lib/rowMenuConfig';
 import type {
   ModAuditEntry,
   ModInfo,
@@ -747,6 +753,7 @@ interface LibraryRowKebabProps {
 
 function LibraryRowKebab(props: LibraryRowKebabProps) {
   const { t } = useTranslation();
+  const { config } = useRowMenu();
   const {
     mod,
     audit,
@@ -765,7 +772,6 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
     onUnsnooze,
     onCopyVersion,
     onOpenThisModFolder,
-    onEditSources,
     onFindGithubFromNexus,
     onAutoDetectSource,
     onRepair,
@@ -774,9 +780,7 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
     onOpenExternalUrl,
   } = props;
 
-  // Derive membership classification (in / includedOff / notIn). When
-  // modpackName is null OR there's no state row, we just hide the
-  // membership kebab item entirely.
+  // Membership classification (in / includedOff / notIn) — null hides the item.
   let membershipChip: 'in' | 'includedOff' | 'notIn' | null = null;
   if (modpackName && state) {
     if (!state.included) membershipChip = 'notIn';
@@ -784,146 +788,166 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
     else membershipChip = 'includedOff';
   }
 
+  const canSnooze =
+    !!audit?.snoozed ||
+    (!!audit?.needs_update && !!audit.latest_release_with_assets_tag);
+
+  // One descriptor per customizable id: contextual availability + how to render.
+  const descriptors: Record<RowMenuItemId, { available: boolean; render: () => ReactNode }> = {
+    membership: {
+      available: !packScoped && !!modpackName && !!membershipChip,
+      render: () => (
+        <KebabItem
+          key="membership"
+          icon={membershipChip === 'notIn' ? <ToggleRight size={12} /> : <ToggleLeft size={12} />}
+          onClick={onToggleMembership}
+          disabled={membershipSaving || !state?.editable}
+          description={
+            membershipChip === 'notIn'
+              ? t('mods.kebab.addToModpackDesc', { pack: modpackName })
+              : t('mods.kebab.removeFromModpackDesc', { pack: modpackName })
+          }
+        >
+          {membershipChip === 'notIn'
+            ? t('mods.kebab.addToModpack', { pack: modpackName })
+            : t('mods.kebab.removeFromModpack', { pack: modpackName })}
+        </KebabItem>
+      ),
+    },
+    copyVersion: {
+      available: true,
+      render: () => (
+        <KebabItem key="copyVersion" icon={<Copy size={12} />} onClick={onCopyVersion}>
+          {t('mods.copyVersion', { version: mod.version.replace(/^v/i, '') })}
+        </KebabItem>
+      ),
+    },
+    openFolder: {
+      available: true,
+      render: () => (
+        <KebabItem key="openFolder" icon={<FolderOpen size={12} />} onClick={onOpenThisModFolder}>
+          {t('mods.openThisModFolder')}
+        </KebabItem>
+      ),
+    },
+    snooze: {
+      available: canSnooze,
+      render: () =>
+        audit?.snoozed ? (
+          <KebabItem
+            key="snooze"
+            icon={<Check size={12} />}
+            onClick={onUnsnooze}
+            description={t('mods.unsnoozeDesc')}
+          >
+            {t('mods.unsnoozeUpdate')}
+          </KebabItem>
+        ) : (
+          <KebabItem
+            key="snooze"
+            icon={<Clock size={12} />}
+            onClick={onSnooze}
+            description={t('mods.snoozeDesc', {
+              version: audit?.latest_release_with_assets_tag?.replace(/^v/, '') ?? '?',
+            })}
+          >
+            {t('mods.snoozeUpdate')}
+          </KebabItem>
+        ),
+    },
+    autoDetect: {
+      available: true,
+      render: () => (
+        <KebabItem key="autoDetect" icon={<Search size={12} />} onClick={onAutoDetectSource}>
+          {t('mods.autoDetectSourceOne')}
+        </KebabItem>
+      ),
+    },
+    viewGithub: {
+      available: !!mod.github_url,
+      render: () => (
+        <KebabItem
+          key="viewGithub"
+          icon={<GitBranch size={12} />}
+          onClick={() => onOpenExternalUrl(mod.github_url!)}
+        >
+          {t('mods.viewOnGitHubKebab')}
+        </KebabItem>
+      ),
+    },
+    viewNexus: {
+      available: !!mod.nexus_url,
+      render: () => (
+        <KebabItem
+          key="viewNexus"
+          icon={<ExternalLink size={12} />}
+          onClick={() => onOpenExternalUrl(mod.nexus_url!)}
+        >
+          {t('mods.viewOnNexusKebab')}
+        </KebabItem>
+      ),
+    },
+    findGithub: {
+      available: !!mod.nexus_url && !mod.github_url,
+      render: () => (
+        <KebabItem key="findGithub" icon={<GitBranch size={12} />} onClick={onFindGithubFromNexus}>
+          {t('mods.findGitHubFromNexus')}
+        </KebabItem>
+      ),
+    },
+    freeze: {
+      available: true,
+      render: () => (
+        <KebabItem
+          key="freeze"
+          icon={mod.pinned ? <Sun size={12} /> : <Snowflake size={12} />}
+          onClick={onTogglePin}
+          description={mod.pinned ? t('mods.unpinDesc') : t('mods.pinDesc')}
+        >
+          {mod.pinned ? t('mods.unpinThisMod') : t('mods.pinThisMod')}
+        </KebabItem>
+      ),
+    },
+    repair: {
+      available: true,
+      render: () => (
+        <KebabItem
+          key="repair"
+          icon={isRepairing ? <RefreshCw size={12} className="animate-spin" /> : <Wrench size={12} />}
+          onClick={onRepair}
+          disabled={gameRunning || anyRecoveryInFlight || !mod.github_url || isUpdating}
+          description={mod.github_url ? t('mods.repairDesc') : t('mods.repairNeedSource')}
+        >
+          {isRepairing ? t('mods.repairing') : t('mods.repairThisMod')}
+        </KebabItem>
+      ),
+    },
+    rollback: {
+      available: true,
+      render: () => (
+        <KebabItem
+          key="rollback"
+          icon={isRollingBack ? <RefreshCw size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+          onClick={onRollback}
+          disabled={gameRunning || anyRecoveryInFlight || !mod.github_url || isUpdating}
+          description={mod.github_url ? t('mods.rollbackDesc') : t('mods.rollbackNeedSource')}
+        >
+          {isRollingBack ? t('mods.rollingBack') : t('mods.rollBackOneVersion')}
+        </KebabItem>
+      ),
+    },
+  };
+
+  const availableIds = new Set<RowMenuItemId>(
+    (Object.keys(descriptors) as RowMenuItemId[]).filter((id) => descriptors[id].available),
+  );
+  const orderedIds = resolveRowMenuOrder(config, availableIds);
+
   return (
     <div onClick={(e) => e.stopPropagation()}>
       <KebabMenu title={t('mods.modActions')}>
-        <KebabSection>
-          {/* Membership toggle — only in the All Mods view. In the modpack
-              view the visible "Remove from pack" button covers it. */}
-          {!packScoped && modpackName && membershipChip && (
-            <KebabItem
-              icon={
-                membershipChip === 'notIn' ? (
-                  <ToggleRight size={12} />
-                ) : (
-                  <ToggleLeft size={12} />
-                )
-              }
-              onClick={onToggleMembership}
-              disabled={membershipSaving || !state?.editable}
-              description={
-                membershipChip === 'notIn'
-                  ? t('mods.kebab.addToModpackDesc', { pack: modpackName })
-                  : t('mods.kebab.removeFromModpackDesc', { pack: modpackName })
-              }
-            >
-              {membershipChip === 'notIn'
-                ? t('mods.kebab.addToModpack', { pack: modpackName })
-                : t('mods.kebab.removeFromModpack', { pack: modpackName })}
-            </KebabItem>
-          )}
-          {/* Active/stored is no longer a kebab item — it lives on the
-              row itself as a dedicated switch (see <Toggle> in the
-              storage-actions cluster). Keeping it out of the kebab
-              avoids two controls for the same action. */}
-          <KebabItem
-            icon={mod.pinned ? <Sun size={12} /> : <Snowflake size={12} />}
-            onClick={onTogglePin}
-            description={mod.pinned ? t('mods.unpinDesc') : t('mods.pinDesc')}
-          >
-            {mod.pinned ? t('mods.unpinThisMod') : t('mods.pinThisMod')}
-          </KebabItem>
-          <KebabItem icon={<Copy size={12} />} onClick={onCopyVersion}>
-            {t('mods.copyVersion', { version: mod.version.replace(/^v/i, '') })}
-          </KebabItem>
-          <KebabItem icon={<FolderOpen size={12} />} onClick={onOpenThisModFolder}>
-            {t('mods.openThisModFolder')}
-          </KebabItem>
-          {audit?.snoozed ? (
-            <KebabItem
-              icon={<Check size={12} />}
-              onClick={onUnsnooze}
-              description={t('mods.unsnoozeDesc')}
-            >
-              {t('mods.unsnoozeUpdate')}
-            </KebabItem>
-          ) : (
-            audit?.needs_update && !!audit.latest_release_with_assets_tag && (
-              <KebabItem
-                icon={<Clock size={12} />}
-                onClick={onSnooze}
-                description={t('mods.snoozeDesc', {
-                  version:
-                    audit.latest_release_with_assets_tag?.replace(/^v/, '') ?? '?',
-                })}
-              >
-                {t('mods.snoozeUpdate')}
-              </KebabItem>
-            )
-          )}
-        </KebabSection>
-        <KebabDivider />
-        <KebabSection head={t('mods.sources')}>
-          <KebabItem icon={<LinkIcon size={12} />} onClick={onEditSources}>
-            {t('mods.editSources')}
-          </KebabItem>
-          <KebabItem icon={<Search size={12} />} onClick={onAutoDetectSource}>
-            {t('mods.autoDetectSourceOne')}
-          </KebabItem>
-          {mod.github_url && (
-            <KebabItem
-              icon={<GitBranch size={12} />}
-              onClick={() => onOpenExternalUrl(mod.github_url!)}
-            >
-              {t('mods.viewOnGitHubKebab')}
-            </KebabItem>
-          )}
-          {mod.nexus_url && (
-            <KebabItem
-              icon={<ExternalLink size={12} />}
-              onClick={() => onOpenExternalUrl(mod.nexus_url!)}
-            >
-              {t('mods.viewOnNexusKebab')}
-            </KebabItem>
-          )}
-          {mod.nexus_url && !mod.github_url && (
-            <KebabItem
-              icon={<GitBranch size={12} />}
-              onClick={onFindGithubFromNexus}
-            >
-              {t('mods.findGitHubFromNexus')}
-            </KebabItem>
-          )}
-        </KebabSection>
-        <KebabDivider />
-        <KebabSection head={t('mods.recovery')}>
-          <KebabItem
-            icon={
-              isRepairing ? (
-                <RefreshCw size={12} className="animate-spin" />
-              ) : (
-                <Wrench size={12} />
-              )
-            }
-            onClick={onRepair}
-            disabled={gameRunning || anyRecoveryInFlight || !mod.github_url || isUpdating}
-            description={
-              mod.github_url ? t('mods.repairDesc') : t('mods.repairNeedSource')
-            }
-          >
-            {isRepairing ? t('mods.repairing') : t('mods.repairThisMod')}
-          </KebabItem>
-          <KebabItem
-            icon={
-              isRollingBack ? (
-                <RefreshCw size={12} className="animate-spin" />
-              ) : (
-                <RotateCcw size={12} />
-              )
-            }
-            onClick={onRollback}
-            disabled={gameRunning || anyRecoveryInFlight || !mod.github_url || isUpdating}
-            description={
-              mod.github_url ? t('mods.rollbackDesc') : t('mods.rollbackNeedSource')
-            }
-          >
-            {isRollingBack ? t('mods.rollingBack') : t('mods.rollBackOneVersion')}
-          </KebabItem>
-        </KebabSection>
-        {/* In the modpack view, deleting the mod from disk lives here (the
-            visible row button is "Remove from pack"). In All Mods the
-            visible trash handles disk-delete, so this stays out of the
-            kebab there. */}
+        <KebabSection>{orderedIds.map((id) => descriptors[id].render())}</KebabSection>
+        {/* Locked danger item — disk delete, modpack view only, pinned bottom. */}
         {packScoped && (
           <>
             <KebabDivider />
@@ -940,6 +964,17 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
             </KebabSection>
           </>
         )}
+        {/* Locked footer — always last; opens the Settings customizer. */}
+        <KebabDivider />
+        <KebabSection>
+          <KebabItem
+            icon={<SlidersHorizontal size={12} />}
+            onClick={() => window.dispatchEvent(new CustomEvent(ROW_MENU_OPEN_EVENT))}
+            description={t('mods.customizeMenuDesc')}
+          >
+            {t('mods.customizeMenu')}
+          </KebabItem>
+        </KebabSection>
       </KebabMenu>
     </div>
   );

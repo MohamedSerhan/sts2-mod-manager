@@ -120,6 +120,9 @@ function AppInner() {
   // the guided CreateModpackWizard. Same one-shot signal pattern as
   // the focus pump above.
   const [openCreateWizardSignal, setOpenCreateWizardSignal] = useState(0);
+  // Bumped by the top-bar "STS2 detected" status to force Settings back to
+  // its General sub-tab even when Settings is already open (#138).
+  const [settingsGeneralSignal, setSettingsGeneralSignal] = useState(0);
   const [launching, setLaunching] = useState<null | 'modded' | 'vanilla'>(null);
   const [isDev, setIsDev] = useState(false);
   useEffect(() => {
@@ -799,7 +802,10 @@ function AppInner() {
                 status (see the @container rule in styles.css), so the
                 status ends up directly above the launch button. */}
             <button
-              onClick={() => setActiveView('settings')}
+              onClick={() => {
+                setActiveView('settings');
+                setSettingsGeneralSignal((n) => n + 1);
+              }}
               title={
                 gameInfo?.valid
                   ? t('topbar.gameDetectedTitle', { path: gameInfo.game_path })
@@ -968,7 +974,7 @@ function AppInner() {
                 initialTab={activeView === 'browse-mods' ? 'browse' : 'installed'}
               />
             )}
-            {activeView === 'settings' && <SettingsView />}
+            {activeView === 'settings' && <SettingsView goToGeneralSignal={settingsGeneralSignal} />}
 
             {/* 1.7.0 T8 — branched first-launch onboarding. The flow
                 asks the user ONE question (Play vs Make/Share) then

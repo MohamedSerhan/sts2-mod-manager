@@ -55,12 +55,19 @@ type Tab = 'general' | 'accounts' | 'backups' | 'advanced';
 
 // v5 — tabbed Settings shell. Tabs are stateful; tab content is rendered
 // inline beneath the tab strip. All existing handlers preserved.
-export function SettingsView() {
+export function SettingsView({ goToGeneralSignal }: { goToGeneralSignal?: number }) {
   const { gameInfo, refreshAll } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
   const { t } = useTranslation();
   const [tab, setTab] = useState<Tab>('general');
+
+  // The top-bar "STS2 detected" status jumps here; when Settings is already
+  // open on another sub-tab, this signal pulls the user back to General
+  // (where the game path lives) instead of the click doing nothing (#138).
+  useEffect(() => {
+    if (goToGeneralSignal) setTab('general');
+  }, [goToGeneralSignal]);
 
   // ── General ─────────────────────────────────────────
   const [gamePath, setGamePathValue] = useState('');

@@ -39,6 +39,7 @@ describe('<UiScaleSlider>', () => {
     await user.click(screen.getByText('Reset to 100%'));
     const slider = screen.getByLabelText('Interface scale') as HTMLInputElement;
     expect(slider.value).toBe('100');
+    expect(screen.getByText('100%')).toBeInTheDocument();
     expect(document.documentElement.style.getPropertyValue('--ui-scale')).toBe('');
   });
 });

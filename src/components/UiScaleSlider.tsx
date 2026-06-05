@@ -35,7 +35,6 @@ export function UiScaleSlider() {
           max={MAX_PERCENT}
           step={STEP_PERCENT}
           value={percent}
-          aria-label={t('settings.display.scaleLabel')}
           aria-valuetext={`${percent}%`}
           onChange={(event) => setScale(Number(event.target.value) / 100)}
         />

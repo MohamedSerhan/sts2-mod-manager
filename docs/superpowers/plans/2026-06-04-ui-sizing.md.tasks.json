@@ -1,0 +1,60 @@
+{
+  "planPath": "docs/superpowers/plans/2026-06-04-ui-sizing.md",
+  "tasks": [
+    {
+      "id": 10,
+      "subject": "Task 1: i18n keys for all four locales",
+      "status": "pending",
+      "description": "**Goal:** Add Display-size + sidebar-resize strings to en/zh-Hans/ru/ar so later tasks can reference them and the parity gate stays green.\n\n**Files:** src/i18n/locales/{en,zh-Hans,ru,ar}.json\n\n**Verify:** npm run qa:i18n\n\n```json:metadata\n{\"files\": [\"src/i18n/locales/en.json\",\"src/i18n/locales/zh-Hans.json\",\"src/i18n/locales/ru.json\",\"src/i18n/locales/ar.json\"], \"verifyCommand\": \"npm run qa:i18n\", \"acceptanceCriteria\": [\"all 4 locales have settings.display.* + app.sidebar.resizeLabel\",\"non-English values are real translations\",\"qa:i18n passes\"]}\n```"
+    },
+    {
+      "id": 11,
+      "subject": "Task 2: UI scale logic module + safe-storage helper",
+      "status": "pending",
+      "description": "**Goal:** Pure module clamping/loading/saving the UI scale factor + applying it via a --ui-scale custom property, plus a shared safe-storage helper.\n\n**Files:** src/lib/safeStorage.ts, src/display/uiScale.ts, src/display/uiScale.test.ts\n\n**Verify:** npx vitest run src/display/uiScale.test.ts\n\n```json:metadata\n{\"files\": [\"src/lib/safeStorage.ts\",\"src/display/uiScale.ts\",\"src/display/uiScale.test.ts\"], \"verifyCommand\": \"npx vitest run src/display/uiScale.test.ts\", \"acceptanceCriteria\": [\"clampUiScale clamps [0.8,1.5] rounds 2dp defaults non-finite\",\"load/save round-trip + degrade on hostile/absent storage\",\"applyUiScale sets/clears --ui-scale, no-ops without document\"]}\n```"
+    },
+    {
+      "id": 12,
+      "subject": "Task 3: UiScale context provider",
+      "status": "pending",
+      "blockedBy": [11],
+      "description": "**Goal:** Provider holding the scale factor, applying + persisting on every change and on mount, exposing useUiScale() — mirrors ThemeProvider.\n\n**Files:** src/display/UiScaleContext.tsx, src/display/UiScaleContext.test.tsx\n\n**Verify:** npx vitest run src/display/UiScaleContext.test.tsx\n\n```json:metadata\n{\"files\": [\"src/display/UiScaleContext.tsx\",\"src/display/UiScaleContext.test.tsx\"], \"verifyCommand\": \"npx vitest run src/display/UiScaleContext.test.tsx\", \"acceptanceCriteria\": [\"defaults to 100% applies on mount\",\"setScale clamps/applies/persists\",\"useUiScale throws outside provider\"]}\n```"
+    },
+    {
+      "id": 13,
+      "subject": "Task 4: UiScaleSlider control",
+      "status": "pending",
+      "blockedBy": [12, 10],
+      "description": "**Goal:** Settings range slider (80-150%, step 5%) with live % readout + Reset-to-100% button, wired to useUiScale.\n\n**Files:** src/components/UiScaleSlider.tsx, src/components/UiScaleSlider.test.tsx\n\n**Verify:** npx vitest run src/components/UiScaleSlider.test.tsx\n\n```json:metadata\n{\"files\": [\"src/components/UiScaleSlider.tsx\",\"src/components/UiScaleSlider.test.tsx\"], \"verifyCommand\": \"npx vitest run src/components/UiScaleSlider.test.tsx\", \"acceptanceCriteria\": [\"labelled slider defaults to 100% with % readout\",\"moving slider scales + persists\",\"reset returns to 100% and clears scale\"]}\n```"
+    },
+    {
+      "id": 14,
+      "subject": "Task 5: Wire UI scale into the app",
+      "status": "pending",
+      "blockedBy": [13],
+      "description": "**Goal:** Mount UiScaleProvider (app + test providers), add :root zoom rule + slider styles, surface the slider as a Display-size card in Settings → General.\n\n**Files:** src/App.tsx, src/__test__/providers.tsx, src/styles.css, src/views/Settings.tsx, src/views/Settings.test.tsx\n\n**Verify:** npm run build && npx vitest run src/views/Settings.test.tsx (+ manual smoke)\n\n```json:metadata\n{\"files\": [\"src/App.tsx\",\"src/__test__/providers.tsx\",\"src/styles.css\",\"src/views/Settings.tsx\",\"src/views/Settings.test.tsx\"], \"verifyCommand\": \"npm run build && npx vitest run src/views/Settings.test.tsx\", \"acceptanceCriteria\": [\"UiScaleProvider in app + AllProviders\",\"zoom rule + slider styles in styles.css\",\"Display size card with slider in Settings\",\"build clean + Settings test passes\",\"manual: scaling works + persists\"]}\n```"
+    },
+    {
+      "id": 15,
+      "subject": "Task 6: Sidebar width logic module",
+      "status": "pending",
+      "blockedBy": [11],
+      "description": "**Goal:** Pure module clamping/loading/saving the sidebar width (px), mirroring the uiScale module.\n\n**Files:** src/display/sidebarWidth.ts, src/display/sidebarWidth.test.ts\n\n**Verify:** npx vitest run src/display/sidebarWidth.test.ts\n\n```json:metadata\n{\"files\": [\"src/display/sidebarWidth.ts\",\"src/display/sidebarWidth.test.ts\"], \"verifyCommand\": \"npx vitest run src/display/sidebarWidth.test.ts\", \"acceptanceCriteria\": [\"clampSidebarWidth clamps [200,420] rounds int defaults non-finite\",\"load/save round-trip + degrade on hostile/absent storage\",\"default width is 248\"]}\n```"
+    },
+    {
+      "id": 16,
+      "subject": "Task 7: Resizable-sidebar hook + handle component",
+      "status": "pending",
+      "blockedBy": [15, 10],
+      "description": "**Goal:** useResizableSidebar hook (drag + keyboard + double-click-reset, RTL-aware, persists on commit) + a role=separator handle component.\n\n**Files:** src/hooks/useResizableSidebar.ts, src/components/SidebarResizeHandle.tsx, src/hooks/useResizableSidebar.test.tsx\n\n**Verify:** npx vitest run src/hooks/useResizableSidebar.test.tsx\n\n```json:metadata\n{\"files\": [\"src/hooks/useResizableSidebar.ts\",\"src/components/SidebarResizeHandle.tsx\",\"src/hooks/useResizableSidebar.test.tsx\"], \"verifyCommand\": \"npx vitest run src/hooks/useResizableSidebar.test.tsx\", \"acceptanceCriteria\": [\"drag changes width clamps persists on mouseup\",\"arrow keys nudge + persist; double-click resets\",\"RTL flips direction\",\"handle exposes separator + aria-value*\"]}\n```"
+    },
+    {
+      "id": 17,
+      "subject": "Task 8: Wire the resizable sidebar into the app",
+      "status": "pending",
+      "blockedBy": [16, 14],
+      "description": "**Goal:** Drive .gf-sidebar width from the hook, render the handle, add handle + width-var CSS — completing the resizable sidebar.\n\n**Files:** src/App.tsx, src/styles.css, src/App.test.tsx\n\n**Verify:** npm run build && npx vitest run src/App.test.tsx (+ manual smoke + npm run qa:unit)\n\n```json:metadata\n{\"files\": [\"src/App.tsx\",\"src/styles.css\",\"src/App.test.tsx\"], \"verifyCommand\": \"npm run build && npx vitest run src/App.test.tsx\", \"acceptanceCriteria\": [\"sidebar width from --gf-sidebar-width set by hook\",\"handle renders with col-resize + hover/focus, below window handles\",\"build clean + App.test passes\",\"manual: drag resizes + persists, long labels fit\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-06-04"
+}

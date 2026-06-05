@@ -9,7 +9,10 @@ import { Toggle } from './Toggle';
 import { useRowMenu } from '../contexts/RowMenuContext';
 import { moveItem, type RowMenuItemId } from '../lib/rowMenuConfig';
 
-const ITEM_ICONS: Record<string, ReactNode> = {
+type LockedRowMenuItemId = 'delete' | 'customize';
+
+// Mirrors the kebab's lucide icons (LibraryRow.tsx); size 13 matches the settings-row density.
+const ITEM_ICONS: Record<RowMenuItemId | LockedRowMenuItemId, ReactNode> = {
   membership: <ToggleRight size={13} />,
   copyVersion: <Copy size={13} />,
   openFolder: <FolderOpen size={13} />,
@@ -25,7 +28,7 @@ const ITEM_ICONS: Record<string, ReactNode> = {
   customize: <SlidersHorizontal size={13} />,
 };
 
-const LOCKED_IDS = ['delete', 'customize'] as const;
+const LOCKED_IDS: readonly LockedRowMenuItemId[] = ['delete', 'customize'];
 
 export function RowMenuCustomizer() {
   const { t } = useTranslation();
@@ -78,7 +81,7 @@ export function RowMenuCustomizer() {
 
       <div className="gf-row-menu-locked" data-testid="row-menu-locked">
         {LOCKED_IDS.map((id) => (
-          <div key={id} className="gf-row-menu-item is-locked" aria-disabled>
+          <div key={id} className="gf-row-menu-item is-locked">
             <span className="gf-row-menu-grip" aria-hidden><GripVertical size={14} /></span>
             <span className="gf-row-menu-ico">{ITEM_ICONS[id]}</span>
             <span className="gf-row-menu-label">{label(id)}</span>

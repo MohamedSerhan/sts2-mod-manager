@@ -50,6 +50,17 @@ describe('<RowMenuCustomizer>', () => {
     expect(order.indexOf(firstId as never)).toBeGreaterThan(order.indexOf(thirdId as never));
   });
 
+  it('dragEnd resets drag state so a stray later drop does not reorder', () => {
+    renderCustomizer();
+    const rows = screen.getAllByTestId(/^row-menu-item-/);
+    const before = loadRowMenuConfig().order;
+    const dt = { setData: () => {}, getData: () => '', dropEffect: '', effectAllowed: '' };
+    fireEvent.dragStart(rows[0], { dataTransfer: dt });
+    fireEvent.dragEnd(rows[0], { dataTransfer: dt });      // resets dragIndex → null
+    fireEvent.drop(rows[2], { dataTransfer: dt });          // no active drag → no-op
+    expect(loadRowMenuConfig().order).toEqual(before);
+  });
+
   it('shows locked items as a disabled footer', () => {
     renderCustomizer();
     const locked = screen.getByTestId('row-menu-locked');

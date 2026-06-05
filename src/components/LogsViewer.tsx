@@ -4,6 +4,7 @@ import { readLogTail, openLogFile, openExternalUrl } from '../hooks/useTauri';
 import { useTranslation } from 'react-i18next';
 import { useToast } from '../contexts/ToastContext';
 import { buildGitHubIssueUrl } from '../lib/githubLinks';
+import { useOpenFeedback } from '../hooks/useOpenFeedback';
 
 // v5 batch 4 — in-app logs viewer (Settings → Advanced).
 // Tails the last 500 lines of sts2mm.log, parses common levels, and
@@ -51,6 +52,7 @@ interface Props {
 export function LogsViewer({ onClose }: Props) {
   const { t } = useTranslation();
   const toast = useToast();
+  const openFeedback = useOpenFeedback();
   const [raw, setRaw] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | Level>('all');
@@ -160,6 +162,9 @@ export function LogsViewer({ onClose }: Props) {
         </button>
         <button className="gf-btn-2 gf-btn-2-sm" onClick={sendToSupport}>
           <Upload size={11} /> {t('logsViewer.sendToSupport')}
+        </button>
+        <button className="gf-btn-3 gf-btn-2-sm" onClick={openFeedback} title={t('feedback.nexusCta')}>
+          {t('feedback.sendFeedback')}
         </button>
         {onClose && (
           <button className="gf-btn-3 gf-btn-2-sm" onClick={onClose}>{t('common.close')}</button>

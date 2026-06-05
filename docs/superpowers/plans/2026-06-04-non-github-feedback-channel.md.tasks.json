@@ -1,0 +1,39 @@
+{
+  "planPath": "docs/superpowers/plans/2026-06-04-non-github-feedback-channel.md",
+  "tasks": [
+    {
+      "id": 1,
+      "status": "pending",
+      "subject": "Task 1: Feedback mechanism — URL constant, hook, i18n",
+      "description": "**Goal:** Tested single source of truth for the Nexus feedback URL, a shared useOpenFeedback hook (opens it, toasts on failure), and feedback.* strings in all four locales.\n\n**Files:** src/lib/nexusUrl.ts(+test), src/hooks/useOpenFeedback.ts(+test), src/i18n/locales/{en,zh-Hans,ru,ar}.json\n\n**Verify:** npx vitest run src/lib/nexusUrl.test.ts src/hooks/useOpenFeedback.test.tsx src/i18n/locales/parity.test.ts\n\n```json:metadata\n{\"files\":[\"src/lib/nexusUrl.ts\",\"src/lib/nexusUrl.test.ts\",\"src/hooks/useOpenFeedback.ts\",\"src/hooks/useOpenFeedback.test.tsx\",\"src/i18n/locales/en.json\",\"src/i18n/locales/zh-Hans.json\",\"src/i18n/locales/ru.json\",\"src/i18n/locales/ar.json\"],\"verifyCommand\":\"npx vitest run src/lib/nexusUrl.test.ts src/hooks/useOpenFeedback.test.tsx src/i18n/locales/parity.test.ts\",\"acceptanceCriteria\":[\"FEEDBACK_NEXUS_POSTS_URL resolves to slaythespire2/mods/856?tab=posts\",\"useOpenFeedback calls invoke open_external_url with that URL\",\"hook toasts feedback.couldntOpen on failure\",\"all four locales have feedback.* keys, parity passes\"]}\n```"
+    },
+    {
+      "id": 2,
+      "status": "pending",
+      "blockedBy": [
+        1
+      ],
+      "subject": "Task 2: Send feedback button in About footer",
+      "description": "**Goal:** Discoverable Send feedback action in the About footer that opens the Nexus Posts page.\n\n**Files:** src/components/AboutCard.tsx(+test)\n\n**Verify:** npx vitest run src/components/AboutCard.test.tsx\n\n```json:metadata\n{\"files\":[\"src/components/AboutCard.tsx\",\"src/components/AboutCard.test.tsx\"],\"verifyCommand\":\"npx vitest run src/components/AboutCard.test.tsx\",\"acceptanceCriteria\":[\"footer renders a Send feedback button\",\"clicking calls invoke open_external_url with FEEDBACK_NEXUS_POSTS_URL\",\"existing AboutCard tests still pass\"]}\n```"
+    },
+    {
+      "id": 3,
+      "status": "pending",
+      "blockedBy": [
+        1
+      ],
+      "subject": "Task 3: No-GitHub Nexus row in bug-report modal",
+      "description": "**Goal:** Offer the Nexus feedback alternative inside the Report a bug modal without changing the existing GitHub/diagnostic flow.\n\n**Files:** src/components/DiagnosticBundle.tsx(+test)\n\n**Verify:** npx vitest run src/components/DiagnosticBundle.test.tsx\n\n```json:metadata\n{\"files\":[\"src/components/DiagnosticBundle.tsx\",\"src/components/DiagnosticBundle.test.tsx\"],\"verifyCommand\":\"npx vitest run src/components/DiagnosticBundle.test.tsx\",\"acceptanceCriteria\":[\"modal renders the Post feedback on the Nexus page button + note\",\"clicking calls invoke open_external_url with FEEDBACK_NEXUS_POSTS_URL\",\"existing DiagnosticBundle tests still pass\"]}\n```"
+    },
+    {
+      "id": 4,
+      "status": "pending",
+      "blockedBy": [
+        1
+      ],
+      "subject": "Task 4: Send feedback button in logs viewer",
+      "description": "**Goal:** Offer the Nexus feedback alternative next to Send to support in the logs viewer (Settings > Advanced).\n\n**Files:** src/components/LogsViewer.tsx(+test)\n\n**Verify:** npx vitest run src/components/LogsViewer.test.tsx\n\n```json:metadata\n{\"files\":[\"src/components/LogsViewer.tsx\",\"src/components/LogsViewer.test.tsx\"],\"verifyCommand\":\"npx vitest run src/components/LogsViewer.test.tsx\",\"acceptanceCriteria\":[\"logs bar renders a Send feedback button\",\"clicking calls invoke open_external_url with FEEDBACK_NEXUS_POSTS_URL\",\"existing LogsViewer tests still pass\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-06-05T02:47:39.256Z"
+}

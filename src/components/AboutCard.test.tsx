@@ -4,7 +4,8 @@ import userEvent from '@testing-library/user-event';
 
 import { AboutCard } from './AboutCard';
 import { AllProviders } from '../__test__/providers';
-import { setMockAppVersion } from '../__test__/setup';
+import { getInvokeCalls, setMockAppVersion } from '../__test__/setup';
+import { FEEDBACK_NEXUS_POSTS_URL } from '../lib/nexusUrl';
 
 /** Wrap in the full provider stack so DiagnosticBundle's useApp resolves. */
 function Wrapped() {
@@ -149,5 +150,14 @@ describe('<AboutCard>', () => {
     });
     expect(downloadAndInstall).toHaveBeenCalled();
     expect(proc.relaunch).toHaveBeenCalled();
+  });
+
+  it('"Send feedback" opens the Nexus Posts page (no GitHub needed)', async () => {
+    const user = userEvent.setup();
+    render(<Wrapped />);
+    await user.click(screen.getByRole('button', { name: 'Send feedback' }));
+    const opened = getInvokeCalls().filter((c) => c.cmd === 'open_external_url');
+    expect(opened).toHaveLength(1);
+    expect(opened[0].args).toEqual({ url: FEEDBACK_NEXUS_POSTS_URL });
   });
 });

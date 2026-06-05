@@ -6,6 +6,7 @@ import { relaunch } from '@tauri-apps/plugin-process';
 import { Button } from './Button';
 import { useToast } from '../contexts/ToastContext';
 import { DiagnosticBundle } from './DiagnosticBundle';
+import { useOpenFeedback } from '../hooks/useOpenFeedback';
 
 /**
  * "About" footer for the Home screen. Lives below all primary content as a
@@ -19,6 +20,7 @@ export function AboutCard() {
   const [appVersion, setAppVersion] = useState('');
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [showDiag, setShowDiag] = useState(false);
+  const openFeedback = useOpenFeedback();
 
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => {});
@@ -71,6 +73,9 @@ export function AboutCard() {
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setShowDiag(true)}>
               {t('about.generateSupportBundle')}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={openFeedback}>
+              {t('feedback.sendFeedback')}
             </Button>
           </span>
         </div>

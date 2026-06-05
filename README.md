@@ -86,15 +86,12 @@ truncated; otherwise the full report is copied to your clipboard to paste in.
 ## Features
 
 ### Modpacks & sharing
-- **Modpack import — code or link.** Paste a friend's `username/CODE` share
-  code into the **Modpacks** page (Quick-Add), or click an
-  `sts2mm://import/username/CODE` link they sent you. The app installs the
-  pack: bundled mods and GitHub releases pull automatically; Nexus-only mods
-  that weren't bundled surface as pending so you know what to grab.
-- **Smart link handling.** A click on a share link routes through the same
-  logic as paste: brand-new pack installs after a confirm; pack you
-  already have asks to switch or apply a pending update; pack you're
-  already on shows a friendly "you're up to date" toast.
+- **Import by code or link.** Paste a friend's `username/CODE` into the
+  **Modpacks** page, or click their `sts2mm://import/...` link. Bundled mods +
+  GitHub releases pull automatically; un-bundled Nexus mods surface as pending.
+- **Smart import.** A code or link routes to the right action — install a new
+  pack, switch to one you already have, apply a pending update, or just a
+  "you're up to date" toast.
 - **Same-code re-share.** Re-publishing a profile reuses the same share code —
   followers see "update available" instead of having to follow a new code.
 - **Modpack switcher.** Top-bar modpack chip → popover with every pack;
@@ -115,54 +112,36 @@ truncated; otherwise the full report is copied to your clipboard to paste in.
 
 ### About modpack sharing
 
-The Share / Re-share flow uploads your pack to a public GitHub repo on
-**your** account (`<your-username>/sts2mm-profiles`). The manager creates
-that repo on first share using your OAuth login. The bundle exists so
-profile-switching, repair, and recovery all work locally without
-redownloading anything — sharing reuses the same bundle.
+Share / Re-share uploads your pack to a public `<your-username>/sts2mm-profiles`
+repo the manager creates on first share (via your GitHub OAuth login). It lives
+on **your** account — nothing is hosted centrally, and no list of who's sharing
+what is kept anywhere.
 
-A few practical notes:
-
-- The repo lives on **your** GitHub, not somewhere central. The manager's
-  author doesn't host anything and keeps no list of who's sharing what.
-- To remove a pack later: delete its `.json` from your `sts2mm-profiles`
-  repo, or delete the whole repo from GitHub → Settings.
-- The publish dialog has a Visibility option — Friends only (default) or
-  Public. Friends only keeps the pack share-code-only — friends with the
-  code can still install, but it won't appear in Browse Modpacks.
-
-If you're sharing mods you didn't write yourself, glancing at the mod's
-permissions page is good practice. Most authors are happy for their work
-to travel; a few mark mods "do not redistribute" and respecting that
-keeps the modding scene friendly. The manager won't check this for you.
-
-**For mod authors:** the manager's author has no access to other users'
-personal `sts2mm-profiles` repos and can't remove content from them. To
-request removal of a specific share, open an issue on the curator's repo
-at `https://github.com/<owner>/sts2mm-profiles`, or use GitHub's standard
-process at <https://github.com/contact/dmca>. Requests sent to the
-manager project repo can't be acted on from here.
+- **Remove a pack later:** delete its `.json` from your `sts2mm-profiles` repo,
+  or delete the whole repo on GitHub.
+- **Visibility:** the publish dialog offers Friends only (default — code-only)
+  or Public (also listed in Browse Modpacks); switch anytime.
+- **Sharing others' mods:** a glance at the mod's permissions page is good
+  practice — a few authors mark mods "do not redistribute." The manager won't
+  check for you.
+- **Mod authors:** to request removal of a share, open an issue on the curator's
+  `https://github.com/<owner>/sts2mm-profiles` repo or use GitHub's
+  [DMCA process](https://github.com/contact/dmca) — the manager project can't
+  act on content in other users' repos.
 
 ### Languages
 
-- **English** and **Simplified Chinese (简体中文)** are bundled.
-- The picker lives in **Settings → General → Language** and in the
-  onboarding header (top-right). `Auto` follows your system locale; any
-  `zh-*` locale routes to Simplified Chinese until a Traditional
-  translation exists.
-- **The maintainer doesn't read Chinese.** Translation accuracy depends
-  on community contributors — the first Chinese translation came from
-  [@xiatinfeng](https://github.com/xiatinfeng) (PR
-  [#45](https://github.com/MohamedSerhan/sts2-mod-manager/pull/45)),
-  reworked by the maintainer for current `main`. Non-English users see a
-  small notice on the What's New card pointing them at the translation
-  issue tracker when they install a new version.
-- **Spotted a translation mistake?** Open an issue with the
-  [`translation` label](https://github.com/MohamedSerhan/sts2-mod-manager/issues/new?labels=translation)
-  or send a PR against `src/i18n/locales/zh-Hans.json`. Pull requests
-  adding new languages (`fr.json`, `ja.json`, `zh-Hant.json`, …) are
-  welcome — the routing in `src/i18n/language.ts` is already set up to
-  pick up additional locale codes.
+- **English**, **Simplified Chinese (简体中文)**, **Russian (Русский)** and
+  **Arabic (العربية)** are bundled — Arabic lays the UI out right-to-left.
+- The picker lives in **Settings → General → Language** and the onboarding
+  header. `Auto` follows your system locale (`zh-*` routes to Simplified
+  Chinese until a Traditional translation exists).
+- **The maintainer doesn't read most of these languages**, so accuracy depends
+  on community contributors; non-English users get a What's New notice pointing
+  at the translation tracker on each update. Spotted a mistake? Open an issue
+  with the [`translation` label](https://github.com/MohamedSerhan/sts2-mod-manager/issues/new?labels=translation)
+  or PR `src/i18n/locales/<code>.json`. New languages welcome — see
+  [Translations](#translations).
 
 ### Mods
 - **Toggle on/off** per-mod with instant effect.
@@ -195,21 +174,13 @@ manager project repo can't be acted on from here.
   Visibility option — Friends only (default) or Public. You can flip
   it anytime from the Publish dialog.
 
-> **Nexus integration is free-tier only.** When you install a Nexus mod
-> via Quick Add or the Browse Mods view, the app opens the mod's Files page
-> in your browser. From there: click Nexus's **Slow Download** /
-> **Manual** button (the free one), wait the few seconds, and your
-> browser saves the zip to `~/Downloads`. The app's downloads-folder
-> watcher picks the zip up automatically and installs it.
->
-> The app does NOT handle the **Mod Manager Download** button —
-> Nexus's nxm:// deep-link route isn't wired through to the install
-> pipeline. If you click Mod Manager Download, nothing happens.
-> Stick to Slow / Manual.
->
-> Nexus Premium's instant-download API isn't wired in either, so paid
-> subscribers don't get faster downloads here. Everything free-tier-
-> downloadable on Nexus works the same way for everyone.
+> **Nexus integration is free-tier only.** Installing a Nexus mod (via Quick
+> Add or Browse Mods) opens the mod's Files page in your browser — click
+> Nexus's **Slow Download** / **Manual** button (the free one) and the app's
+> downloads-folder watcher picks up the saved zip and installs it. The **Mod
+> Manager Download** (`nxm://`) button isn't wired in, and Nexus Premium's
+> instant-download API isn't either — so stick to Slow / Manual, and paid
+> subscribers don't get faster downloads here.
 
 ### Backups
 - **Auto-backup before every launch.** Keeps the last 5 by default.
@@ -241,18 +212,12 @@ manager project repo can't be acted on from here.
 - **Vanilla launch** — top-bar Vanilla button starts the game with all mods
   temporarily disabled (auto-backup runs first so the next launch puts
   everything back).
-- **Launch mode (Steam vs Direct).** Defaults to launching via Steam
-  (`steam://rungameid/...`). Settings → General → Launch lets you switch to
-  **Direct**, which runs the game executable itself and drops a
-  `steam_appid.txt` next to it so STS2's Steamworks init won't bail out.
-  Useful for **Steam Family Sharing borrowers** (the lender's library
-  lock blocks normal Steam launches) and **Steam offline mode**. Steam
-  itself still needs to be running — STS2 uses Steamworks for saves and
-  achievements, so Direct bypasses the Steam *launcher*, not Steam-as-a-
-  runtime. On Linux, Direct works only with a native binary; Proton-only
-  installs (a Windows `.exe` with no Linux binary alongside) get a clear
-  error pointing back at Steam launch mode rather than the manager trying
-  to drive Proton itself.
+- **Launch mode (Steam vs Direct).** Defaults to Steam; Settings → General →
+  Launch can switch to **Direct**, which runs the game executable itself (and
+  drops a `steam_appid.txt` so Steamworks still inits). Useful for **Family
+  Sharing borrowers** and **offline mode** — Steam still has to be running.
+  On Linux, Direct needs a native binary; Proton-only installs get a clear
+  error pointing back at Steam launch mode.
 
 ---
 
@@ -270,38 +235,21 @@ launch (at most once per day) and prompts you to install when one is available.
 
 ## macOS: First Launch Warning
 
-The app is not signed with an Apple Developer certificate, so on first launch
-macOS will show:
+The app isn't signed with an Apple Developer certificate, so on first launch
+Gatekeeper shows *"…cannot be opened because the developer cannot be verified."*
+To open it anyway:
 
-> "STS2 Mod Manager" cannot be opened because the developer cannot be verified.
+1. Try opening the app once (it'll be blocked — that's expected).
+2. **System Settings → Privacy & Security** → scroll to **Security** → click
+   **Open Anyway** next to the STS2 Mod Manager notice, then confirm with your
+   password / Touch ID.
 
-This is Gatekeeper protecting you from unsigned apps. To open it anyway:
-
-### Option 1 — System Settings (recommended on macOS Sequoia / Sonoma)
-
-1. Try opening the app once (it will be blocked — that's expected).
-2. Open **System Settings → Privacy & Security**.
-3. Scroll to the **Security** section. You'll see *"STS2 Mod Manager was
-   blocked to protect your Mac."*
-4. Click **Open Anyway** and confirm with your password / Touch ID.
-5. The app will launch. You only need to do this once.
-
-### Option 2 — Right-click Open
-
-1. In Finder, locate **STS2 Mod Manager.app**.
-2. **Right-click** (or Control-click) the app → **Open**.
-3. Click **Open** in the dialog that appears.
-
-### Option 3 — Terminal (advanced)
-
-If neither of the above works, strip the quarantine attribute manually:
+You only need this once; in-app auto-updates afterward won't re-trigger it. If
+it still won't open, strip the quarantine flag manually:
 
 ```bash
 xattr -dr com.apple.quarantine "/Applications/STS2 Mod Manager.app"
 ```
-
-After the first launch, future auto-updates from within the app will not
-re-trigger this warning.
 
 ## Linux Notes
 
@@ -332,26 +280,16 @@ link won't open the app — paste the code into Home instead.
       import a JSON.
 3. Hit the **Launch STS2** button in the top bar. An auto-backup runs first.
 
-That's it. Day-to-day usage from there:
+That's it. Day-to-day from there:
 
-- Friend sends you a code? Open the **Modpacks** page and paste it into
-  Quick-Add.
-- Friend sends you an `sts2mm://import/...` link? Just click it — the app
-  opens and routes you through the right action (install, switch, sync, or
-  "you're already on it").
-- Following someone's pack and they pushed an update? Home shows a **Sync**
-  button (with **View changes**) on the active pack, and the **Modpacks**
-  sidebar item carries a badge for any other followed pack with a pending
-  update.
-- Want newer GitHub releases for your own mods? Open the modpack and run its
-  updates check — pinned mods are skipped.
-- Something broke after a launch? Settings → Backups → **Restore** the most
-  recent.
-- Want to publish your own pack? Open it in **Modpacks** and hit **Share**
-  (or **Share this pack** on Home). The app gives you back both the share
-  code and a paste-ready message with the `sts2mm://` link so you can drop it
-  into Discord and friends with the manager installed can click straight
-  through.
+- **Got a friend's code or `sts2mm://` link?** Paste the code into the
+  **Modpacks** page, or just click the link — the app routes you to the right
+  action (install, switch, sync, or "you're already on it").
+- **Following a pack that updated?** Home shows a **Sync** button on the active
+  pack; the **Modpacks** sidebar badges any other followed pack with an update.
+- **Publishing your own?** Open it in **Modpacks** → **Share**; you get back a
+  code plus a paste-ready Discord message with the `sts2mm://` link.
+- **Something broke?** Settings → Backups → **Restore** the most recent.
 
 ---
 
@@ -378,92 +316,50 @@ and exposed to TS via [src/hooks/useTauri.ts](src/hooks/useTauri.ts).
 ```
 src/
   App.tsx                 # chrome (titlebar, sidebar, top bar, banners)
-  views/                  # Home / Profiles / Mods / Browse / BrowseModpacks / Settings / Help
-                          # (user-facing: Profiles = Modpacks, Mods = Mod Library;
-                          #  Help also opens as a top-bar drawer — HelpDrawer)
-  components/             # Button, Card, Toggle, Badge, Input,
-                          # ConfirmDialog, OnboardingOverlay,
-                          # ProfileSwitcher, KebabMenu, PublishModal,
-                          # AutoDetectModal, QuickAddModal, BrowseDetail,
-                          # SourceEditor, LogsViewer, DiagnosticBundle,
-                          # LaunchSpinner, AboutCard, SubUpdateDetail,
-                          # LanguageSelect, LibraryTable, LibraryRow,
-                          # HelpDrawer, HelpHint, WhatsNewCard
+  views/                  # Home / Profiles (Modpacks) / Mods (Mod Library) /
+                          #   Browse / BrowseModpacks / Settings / Help
+  components/             # shared UI — dialogs, modals, tables, onboarding, …
   contexts/               # ToastContext, AppContext
   hooks/useTauri.ts       # all Tauri command bindings (one place)
-  i18n/                   # i18next init, language detection/routing,
-                          # locales/en.json + locales/zh-Hans.json,
-                          # parity test (en ↔ zh-Hans keys must match)
+  i18n/                   # i18next init + locale routing;
+                          # locales/{en,zh-Hans,ru,ar}.json (parity-tested vs en)
   styles.css              # all theme tokens + utility classes (gf-*)
 src-tauri/
-  src/                    # Rust backend (game.rs, mods.rs, backup.rs,
-                          # download.rs, sharing.rs, etc.)
+  src/                    # Rust backend (game.rs, mods/, sharing/, backup.rs,
+                          # download.rs, updater.rs, etc.)
   tauri.conf.json         # window config, bundle settings, updater config
-.github/workflows/
-  build.yml               # CI: builds Win/Mac/Linux on tag push
+.github/workflows/        # CI + release (ci.yml, build.yml)
 ```
 
 ---
 
 ## Contributing
 
-Forks and PRs welcome. Some areas where the design canvas is ahead of the
-implementation (CSS classes are in `styles.css` already; the modals just need
-the React components + matching Rust events):
-
-- **Per-mod update progress** modal during "Update all" — needs a streaming
-  Tauri event from `download::download_github_mod`.
-- **Install conflict picker** when a Quick Add hits an existing mod —
-  needs the install path to detect collisions before extraction.
-- **Crash recovery prompt** when the game exits with a non-zero code — needs
-  a process-watcher event from the launcher.
-- **Dependency resolution** — needs a dependency field on the mod manifest.
-
-The CSS for all of those (`.gf-prog-*`, `.gf-conflict-*`, `.gf-dep-*`) is
-already wired so it's pure React work once the backend signals exist.
+Forks and PRs welcome — the codebase is small, so most additions are
+straightforward. The Rust backend lives in `src-tauri/`, the React frontend in
+`src/`. Wanted features (dependency auto-install + a dependency-tree view,
+conflict detection, per-mod update progress) are tracked in the
+[issues](https://github.com/MohamedSerhan/sts2-mod-manager/issues).
 
 ### Adding or changing user-visible strings
 
-Every user-facing string lives in `src/i18n/locales/en.json` and
-`src/i18n/locales/zh-Hans.json`. The two files must stay key-for-key in
-sync, and supported locales must be translated before release. The i18n
-gate fails on missing keys and copied-English fallback prose.
-
-When you add a string:
-
-1. Pick a key path that fits the surface it's on
-   (`settings.general.foo`, `mods.toast.bar`, etc.).
-2. Add the English value to `en.json` and a translation to
-   `zh-Hans.json`. If you don't speak Chinese, flag the PR for a human
-   translator before merge. Don't ship copied English placeholders or
-   machine-translated guesses.
-3. Reference the key from the component with `t('your.key')` or
-   `<Trans i18nKey="your.key" components={…} />` — never hardcode prose
-   in JSX, `toast.*`, `confirm({…})`, `title=`, `aria-label=`, or
-   `placeholder=`.
-4. Run `npm run qa:i18n` before pushing.
-
-Release is blocked until this check passes. `scripts/release.sh` runs it
-outside `SKIP_QA`, so emergency releases still cannot ship untranslated
-supported locales.
-
-The same rule applies to AI-assisted contributions — see `AGENTS.md`.
+Every user-facing string lives in `src/i18n/locales/*.json`, and all locales
+must stay key-for-key in sync with `en.json`. Add the English value, reference
+it with `t('your.key')` / `<Trans>` (never hardcode prose in JSX, toasts,
+`title=`, `aria-label=`, or `placeholder=`), and flag the PR for a human
+translator if you can't translate it yourself. The i18n gate (`npm run qa:i18n`)
+fails on missing keys or copied-English prose and **blocks release** — even
+emergency ones. Full rules, including for AI-assisted contributions, are in
+[`AGENTS.md`](AGENTS.md).
 
 ### Translations
 
-Pull requests against `src/i18n/locales/*.json` are the fastest path. The
-maintainer can't review translation accuracy, so PRs from native speakers
-get merged on trust + parity-test pass.
-
-Adding a new language:
-
-1. Copy `src/i18n/locales/en.json` to `src/i18n/locales/<code>.json`
-   (use IETF tags like `fr`, `ja`, `zh-Hant`).
-2. Register the code in `src/i18n/language.ts`'s `SUPPORTED_LANGUAGES`
-   array and import it in `src/i18n/index.ts`.
-3. If your language family needs custom routing (e.g. `zh-Hant` should
-   capture `zh-TW`, `zh-HK`, `zh-MO`), extend `resolveOneLocale` in
-   `language.ts` — the Simplified Chinese path there is the model.
+PRs against `src/i18n/locales/*.json` are the fastest path — the maintainer
+can't review accuracy, so PRs from native speakers merge on trust + parity-test
+pass. To add a language: copy `en.json` to `<code>.json` (IETF tags like `fr`,
+`ja`, `zh-Hant`), register the code in `src/i18n/language.ts` and import it in
+`src/i18n/index.ts`. Family routing (e.g. `zh-Hant` → `zh-TW/HK/MO`) extends
+`resolveOneLocale` in `language.ts`.
 
 ### Credits
 

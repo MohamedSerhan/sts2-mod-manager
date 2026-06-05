@@ -688,7 +688,6 @@ export function LibraryRow({
             onUnsnooze={onUnsnooze}
             onCopyVersion={onCopyVersion}
             onOpenThisModFolder={onOpenThisModFolder}
-            onEditSources={onEditSources}
             onFindGithubFromNexus={onFindGithubFromNexus}
             onAutoDetectSource={onAutoDetectSource}
             onRepair={onRepair}
@@ -742,7 +741,6 @@ interface LibraryRowKebabProps {
   onUnsnooze: () => void;
   onCopyVersion: () => void;
   onOpenThisModFolder: () => void;
-  onEditSources: () => void;
   onFindGithubFromNexus: () => void;
   onAutoDetectSource: () => void;
   onRepair: () => void;
@@ -792,6 +790,7 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
     !!audit?.snoozed ||
     (!!audit?.needs_update && !!audit.latest_release_with_assets_tag);
 
+  // Rebuilt per render — cheap, and the menu only mounts/opens on demand. Don't memoize (it would force listing every closure capture as a dep).
   // One descriptor per customizable id: contextual availability + how to render.
   const descriptors: Record<RowMenuItemId, { available: boolean; render: () => ReactNode }> = {
     membership: {

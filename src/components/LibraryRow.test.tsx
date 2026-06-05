@@ -15,7 +15,7 @@ import userEvent from '@testing-library/user-event';
 
 import { LibraryRow, type LibraryRowProps } from './LibraryRow';
 import { AllProviders } from '../__test__/providers';
-import { ROW_MENU_STORAGE_KEY } from '../lib/rowMenuConfig';
+import { ROW_MENU_STORAGE_KEY, ROW_MENU_OPEN_EVENT } from '../lib/rowMenuConfig';
 import type {
   ModAuditEntry,
   ModInfo,
@@ -511,7 +511,7 @@ describe('<LibraryRow> kebab + audit pills', () => {
     expect(items[items.length - 1]).toMatch(/customize menu/i);
     await user.click(screen.getByRole('menuitem', { name: /customize menu/i }));
     expect(dispatch).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'sts2mm:open-row-menu-settings' }),
+      expect.objectContaining({ type: ROW_MENU_OPEN_EVENT }),
     );
     dispatch.mockRestore();
   });

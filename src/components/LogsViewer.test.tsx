@@ -6,6 +6,7 @@ import { LogsViewer } from './LogsViewer';
 import { AllProviders } from '../__test__/providers';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import { FEEDBACK_NEXUS_POSTS_URL } from '../lib/nexusUrl';
 
 /**
  * jsdom 27 gotcha: when jsdom exposes a real Clipboard prototype, a
@@ -373,5 +374,18 @@ describe('<LogsViewer>', () => {
     expect(screen.queryByText(/Boom — disk write failed/)).toBeNull();
     expect(screen.queryByText(/Cache hit qa-fixture/)).toBeNull();
     expect(screen.getByText(/Could not load Nexus key/)).toBeInTheDocument();
+  });
+
+  it('"Send feedback" opens the Nexus Posts page (no GitHub needed)', async () => {
+    registerInvokeHandler('read_log_tail', () => SAMPLE_LOG);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Send feedback' })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: 'Send feedback' }));
+    const opened = getInvokeCalls().filter((c) => c.cmd === 'open_external_url');
+    expect(opened).toHaveLength(1);
+    expect(opened[0].args).toEqual({ url: FEEDBACK_NEXUS_POSTS_URL });
   });
 });

@@ -26,11 +26,12 @@
  *    against `useEffect` cleanup, which is fragile and low-value.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import App from './App';
 import { getInvokeCalls, registerInvokeHandler, setMockAppVersion } from './__test__/setup';
+import { ROW_MENU_OPEN_EVENT } from './lib/rowMenuConfig';
 
 // Stub getCurrentWindow used by the top-bar (move/minimize/etc.) so the
 // App shell can mount in jsdom without throwing. The fns are shared
@@ -2247,5 +2248,12 @@ describe('<App>', () => {
     render(<App />);
     await waitFor(() => expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument());
     expect(screen.queryByText('DEV')).not.toBeInTheDocument();
+  });
+
+  it('opening the row-menu customizer event navigates to Settings', async () => {
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument());
+    act(() => { window.dispatchEvent(new CustomEvent(ROW_MENU_OPEN_EVENT)); });
+    expect(await screen.findByRole('heading', { name: /mod menu/i })).toBeInTheDocument();
   });
 });

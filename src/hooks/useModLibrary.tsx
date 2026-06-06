@@ -423,7 +423,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
 
   async function handleCopyVersion(mod: ModInfo) {
     await copyToClipboard(mod.version, 'version', {
-      successMessage: t('mods.toast.versionCopied', { version: mod.version }),
+      successMessage: t('mods.toast.versionCopied', { version: mod.version.replace(/^v/i, '') }),
       failureMessage: 'mods.toast.couldNotCopy',
     });
   }

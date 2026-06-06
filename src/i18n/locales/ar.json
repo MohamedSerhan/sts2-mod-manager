@@ -1285,6 +1285,29 @@
       "dark": "داكنة",
       "light": "فاتحة",
       "auto": "تلقائي"
+    },
+    "rowMenu": {
+      "title": "قائمة التعديل",
+      "desc": "اختر الإجراءات التي تظهر في قائمة ⋯ لكل تعديل، واسحب لإعادة الترتيب.",
+      "reset": "إعادة التعيين إلى الافتراضي",
+      "lockedCaption": "‏«حذف» و«تخصيص» مثبّتان دائمًا في الأسفل.",
+      "visibleAria": "إظهار {{item}} في القائمة",
+      "dragAria": "اسحب لإعادة ترتيب {{item}}",
+      "items": {
+        "membership": "إضافة / إزالة من الحزمة",
+        "copyVersion": "نسخ النسخة",
+        "openFolder": "فتح مجلد التعديل",
+        "snooze": "تأجيل التحديث",
+        "autoDetect": "اكتشاف المصدر تلقائيًا",
+        "viewGithub": "عرض على GitHub",
+        "viewNexus": "عرض على Nexus",
+        "findGithub": "البحث عن GitHub من Nexus",
+        "freeze": "تجميد",
+        "repair": "إصلاح",
+        "rollback": "التراجع نسخة واحدة",
+        "delete": "حذف من القرص",
+        "customize": "تخصيص القائمة"
+      }
     }
   },
   "mods": {
@@ -1352,6 +1375,8 @@
     "unlinked": "غير مرتبط",
     "modActions": "إجراءات المود",
     "copyVersion": "نسخ النسخة (v{{version}})",
+    "customizeMenu": "تخصيص القائمة…",
+    "customizeMenuDesc": "اختر العناصر التي تظهر وأعد ترتيبها",
     "openModsFolder": "فتح مجلد المودات",
     "unsnoozeDesc": "إظهار اقتراح التحديث مجددًا للإصدار الحالي من المصدر.",
     "unsnoozeUpdate": "إظهار التحديث مجددًا",

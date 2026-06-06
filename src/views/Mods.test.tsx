@@ -79,6 +79,22 @@ async function openAddMenu(user: ReturnType<typeof userEvent.setup>): Promise<vo
   await user.click(screen.getByRole('button', { name: /add mods/i }));
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+async function openSourceEditor(
+  user: ReturnType<typeof userEvent.setup>,
+  modName: string,
+): Promise<void> {
+  await user.click(screen.getByRole('button', {
+    name: new RegExp(`^Edit sources for ${escapeRegExp(modName)}$`, 'i'),
+  }));
+  await waitFor(() => {
+    expect(screen.getByText(`Sources for ${modName}`)).toBeInTheDocument();
+  });
+}
+
 describe('<ModsView>', () => {
   it('toolbar "Auto-detect sources" button opens the auto-detect scan', async () => {
     seedMods([baseMod()]);
@@ -1088,19 +1104,12 @@ describe('<ModsView>', () => {
     expect(repair).toBeDisabled();
   });
 
-  it('advanced kebab → Edit sources… opens the inline source editor', async () => {
+  it('clicking the mod row opens the inline source editor', async () => {
     seedMods([baseMod({ name: 'SrcMod', folder_name: 'SrcMod' })]);
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText('SrcMod')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    // Two kebab items may include "Edit sources" text (open + already-open
-    // toggle). Use the one with the exact "…" suffix.
-    const items = screen.getAllByRole('menuitem', { name: /Edit sources/ });
-    await user.click(items[0]);
-    await waitFor(() => {
-      expect(screen.getByText('Sources for SrcMod')).toBeInTheDocument();
-    });
+    await openSourceEditor(user, 'SrcMod');
   });
 
   it('clicking a mod row toggles its inline source editor open, then closed', async () => {
@@ -1306,10 +1315,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText('SrcMod')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    const items = screen.getAllByRole('menuitem', { name: /Edit sources/ });
-    await user.click(items[0]);
-    await waitFor(() => { expect(screen.getByText('Sources for SrcMod')).toBeInTheDocument(); });
+    await openSourceEditor(user, 'SrcMod');
     await user.type(screen.getByPlaceholderText('owner/repo'), 'foo/bar');
     await user.click(screen.getByRole('button', { name: /Save sources/ }));
     await waitFor(() => {
@@ -1348,8 +1354,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText('SrcMod')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    await user.click(screen.getAllByRole('menuitem', { name: /Edit sources/ })[0]);
+    await openSourceEditor(user, 'SrcMod');
 
     await user.type(screen.getByPlaceholderText('SrcMod'), 'Friendly Src');
     await user.type(screen.getByPlaceholderText('Base library'), 'Clear description');
@@ -1376,8 +1381,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText('SrcMod')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    await user.click(screen.getAllByRole('menuitem', { name: /Edit sources/ })[0]);
+    await openSourceEditor(user, 'SrcMod');
 
     await user.type(screen.getByPlaceholderText(/utility, beta/i), 'utility, beta');
     await user.click(screen.getByRole('button', { name: /Save sources/ }));
@@ -1414,8 +1418,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText('Readable Name')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    await user.click(screen.getAllByRole('menuitem', { name: /Edit sources/ })[0]);
+    await openSourceEditor(user, 'Readable Name');
 
     await user.type(screen.getByPlaceholderText('owner/repo'), 'owner/repo');
     await user.click(screen.getByRole('button', { name: /Save sources/ }));
@@ -1448,8 +1451,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText('Readable Name')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    await user.click(screen.getAllByRole('menuitem', { name: /Edit sources/ })[0]);
+    await openSourceEditor(user, 'Readable Name');
 
     await user.click(screen.getByRole('button', { name: /Clear all links/ }));
 
@@ -1506,12 +1508,7 @@ describe('<ModsView>', () => {
 
     // Open editor — input should show the converted manifest value (the
     // current stored "wrong" repo).
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    let editItems = screen.getAllByRole('menuitem', { name: /Edit sources/ });
-    await user.click(editItems[0]);
-    await waitFor(() => {
-      expect(screen.getByText('Sources for Multiplayer Potion View')).toBeInTheDocument();
-    });
+    await openSourceEditor(user, 'Multiplayer Potion View');
     const inputBeforeSave = screen.getByPlaceholderText('owner/repo') as HTMLInputElement;
     expect(inputBeforeSave.value).toBe('wrong/wrong-manifest-url');
 
@@ -1531,12 +1528,7 @@ describe('<ModsView>', () => {
 
     // Reopen the editor — input now reads the saved value, not the stale
     // manifest. This is the bug fix the user was asking about.
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    editItems = screen.getAllByRole('menuitem', { name: /Edit sources/ });
-    await user.click(editItems[0]);
-    await waitFor(() => {
-      expect(screen.getByText('Sources for Multiplayer Potion View')).toBeInTheDocument();
-    });
+    await openSourceEditor(user, 'Multiplayer Potion View');
     const inputAfterSave = screen.getByPlaceholderText('owner/repo') as HTMLInputElement;
     expect(inputAfterSave.value).toBe('BAKAOLC/STS2-MultiPlayerPotionView');
   });
@@ -2196,10 +2188,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText('CloseMe')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    const items = screen.getAllByRole('menuitem', { name: /Edit sources/ });
-    await user.click(items[0]);
-    await waitFor(() => { expect(screen.getByText('Sources for CloseMe')).toBeInTheDocument(); });
+    await openSourceEditor(user, 'CloseMe');
     // The editor's Cancel button closes it.
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     await waitFor(() => {
@@ -2213,10 +2202,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText('ClearMe')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    const items = screen.getAllByRole('menuitem', { name: /Edit sources/ });
-    await user.click(items[0]);
-    await waitFor(() => { expect(screen.getByText('Sources for ClearMe')).toBeInTheDocument(); });
+    await openSourceEditor(user, 'ClearMe');
     await user.click(screen.getByRole('button', { name: /Clear all links/ }));
     await waitFor(() => {
       expect(getInvokeCalls().some(
@@ -2232,9 +2218,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText('ClearFail')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    const items = screen.getAllByRole('menuitem', { name: /Edit sources/ });
-    await user.click(items[0]);
+    await openSourceEditor(user, 'ClearFail');
     await user.click(screen.getByRole('button', { name: /Clear all links/ }));
     await waitFor(() => {
       expect(screen.getByText(/Failed: locked/)).toBeInTheDocument();
@@ -2247,12 +2231,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('OnlyNex')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    const labels = screen.getAllByText(/^Edit sources/);
-    const labelEl = labels.find((el) => el.className.includes('gf-kebab-label'));
-    expect(labelEl).toBeDefined();
-    await user.click(labelEl!.closest('button')!);
-    await waitFor(() => { expect(screen.getByText('Sources for OnlyNex')).toBeInTheDocument(); });
+    await openSourceEditor(user, 'OnlyNex');
     // Scope the Find GitHub button click to the source editor (the
     // drawer also surfaces a "Find GitHub from Nexus" action button
     // when nexus is linked but github is not).
@@ -2270,12 +2249,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('NoFind')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    const labels = screen.getAllByText(/^Edit sources/);
-    const labelEl = labels.find((el) => el.className.includes('gf-kebab-label'));
-    expect(labelEl).toBeDefined();
-    await user.click(labelEl!.closest('button')!);
-    await waitFor(() => { expect(screen.getByText('Sources for NoFind')).toBeInTheDocument(); });
+    await openSourceEditor(user, 'NoFind');
     const editor = screen.getByText('Sources for NoFind').closest('.gf-src-edit') as HTMLElement;
     await user.click(within(editor).getByRole('button', { name: /Find GitHub/ }));
     await waitFor(() => {
@@ -2289,12 +2263,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('FindFail')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    const labels = screen.getAllByText(/^Edit sources/);
-    const labelEl = labels.find((el) => el.className.includes('gf-kebab-label'));
-    expect(labelEl).toBeDefined();
-    await user.click(labelEl!.closest('button')!);
-    await waitFor(() => { expect(screen.getByText('Sources for FindFail')).toBeInTheDocument(); });
+    await openSourceEditor(user, 'FindFail');
     const editor = screen.getByText('Sources for FindFail').closest('.gf-src-edit') as HTMLElement;
     await user.click(within(editor).getByRole('button', { name: /Find GitHub/ }));
     await waitFor(() => {
@@ -2308,10 +2277,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText('SaveFail')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    const items = screen.getAllByRole('menuitem', { name: /Edit sources/ });
-    await user.click(items[0]);
-    await waitFor(() => { expect(screen.getByText('Sources for SaveFail')).toBeInTheDocument(); });
+    await openSourceEditor(user, 'SaveFail');
     await user.type(screen.getByPlaceholderText('owner/repo'), 'foo/bar');
     await user.click(screen.getByRole('button', { name: /Save sources/ }));
     await waitFor(() => {
@@ -2609,9 +2575,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText('CS')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    const items = screen.getAllByRole('menuitem', { name: /Edit sources/ });
-    await user.click(items[0]);
+    await openSourceEditor(user, 'CS');
     await user.click(screen.getByRole('button', { name: /Clear all links/ }));
     await waitFor(() => {
       expect(screen.getByText(/Failed: bare-cs/)).toBeInTheDocument();
@@ -2658,12 +2622,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('FE')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    const labels = screen.getAllByText(/^Edit sources/);
-    const labelEl = labels.find((el) => el.className.includes('gf-kebab-label'));
-    expect(labelEl).toBeDefined();
-    await user.click(labelEl!.closest('button')!);
-    await waitFor(() => { expect(screen.getByText('Sources for FE')).toBeInTheDocument(); });
+    await openSourceEditor(user, 'FE');
     const editor = screen.getByText('Sources for FE').closest('.gf-src-edit') as HTMLElement;
     await user.click(within(editor).getByRole('button', { name: /Find GitHub/ }));
     await waitFor(() => {
@@ -2677,9 +2636,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText('SE')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    const items = screen.getAllByRole('menuitem', { name: /Edit sources/ });
-    await user.click(items[0]);
+    await openSourceEditor(user, 'SE');
     await user.type(screen.getByPlaceholderText('owner/repo'), 'foo/bar');
     await user.click(screen.getByRole('button', { name: /Save sources/ }));
     await waitFor(() => {
@@ -2962,20 +2919,12 @@ describe('<ModsView>', () => {
 
   // ── Source editor "Close source editor" label after open ─────────
 
-  it('Source editor: clicking the editor\'s Cancel closes it inline (T17 dropped the kebab "Close source editor" label toggle)', async () => {
-    // T17 simplified the kebab Edit-sources affordance into a single
-    // label ("Edit sources"). The editor itself is closed via its
-    // built-in Cancel/X buttons — no kebab label flip.
+  it('Source editor: clicking the editor\'s Cancel closes it inline', async () => {
     seedMods([baseMod({ name: 'Reopen', folder_name: 'Reopen' })]);
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('Reopen')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    const labels = screen.getAllByText(/^Edit sources/);
-    const labelEl = labels.find((el) => el.className.includes('gf-kebab-label'));
-    expect(labelEl).toBeDefined();
-    await user.click(labelEl!.closest('button')!);
-    await waitFor(() => { expect(screen.getByText('Sources for Reopen')).toBeInTheDocument(); });
+    await openSourceEditor(user, 'Reopen');
     // The editor's Cancel button closes it.
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     await waitFor(() => {
@@ -2996,10 +2945,7 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText('EmptySave')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    const items = screen.getAllByRole('menuitem', { name: /Edit sources/ });
-    await user.click(items[0]);
-    await waitFor(() => { expect(screen.getByText('Sources for EmptySave')).toBeInTheDocument(); });
+    await openSourceEditor(user, 'EmptySave');
     await user.click(screen.getByRole('button', { name: /Save sources/ }));
     await waitFor(() => {
       expect(screen.queryByText('Sources for EmptySave')).toBeNull();
@@ -3265,19 +3211,15 @@ describe('<ModsView>', () => {
 
 // ── Source editor opens inline and closes via its Cancel button ────
 //
-// Post-1.7.0 T18 unification: the row no longer has a click-to-expand
-// drawer. The kebab Edit Sources item opens the SourceEditor inline
-// underneath the row, and the editor closes through its built-in
-// Cancel button (no drawer-collapse coupling needed).
+// Post-#134: the row itself opens the SourceEditor inline underneath the row,
+// and the editor closes through its built-in Cancel button.
 describe('<ModsView> source editor inline lifecycle', () => {
   it('source editor opens inline and closes when Cancel is clicked', async () => {
     seedMods([baseMod({ name: 'EditableMod', folder_name: 'EditableMod' })]);
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await screen.findAllByText('EditableMod');
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    const items = screen.getAllByRole('menuitem', { name: /Edit sources/ });
-    await user.click(items[0]);
+    await openSourceEditor(user, 'EditableMod');
     // Source editor heading appears.
     await waitFor(() => {
       expect(screen.getByText('Sources for EditableMod')).toBeInTheDocument();
@@ -3342,12 +3284,7 @@ describe('<ModsView> SourceEditor saves note + custom URL via setModExtras', () 
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText('NoteMod')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    const items = screen.getAllByRole('menuitem', { name: /Edit sources/ });
-    await user.click(items[0]);
-    await waitFor(() => {
-      expect(screen.getByText('Sources for NoteMod')).toBeInTheDocument();
-    });
+    await openSourceEditor(user, 'NoteMod');
     // Find the Note textarea by its placeholder.
     const noteInput = await screen.findByPlaceholderText(/downloaded from Patreon/i);
     await user.type(noteInput, 'My personal note');
@@ -3387,12 +3324,7 @@ describe('<ModsView> Find GitHub then Save does not null out the found repo', ()
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText('NexusOnly')).toBeInTheDocument(); });
 
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    const items = screen.getAllByRole('menuitem', { name: /Edit sources/ });
-    await user.click(items[0]);
-    await waitFor(() => {
-      expect(screen.getByText('Sources for NexusOnly')).toBeInTheDocument();
-    });
+    await openSourceEditor(user, 'NexusOnly');
 
     // Find GitHub → field gets the repo, banner drops.
     await user.click(screen.getByRole('button', { name: 'Find GitHub' }));
@@ -3460,9 +3392,7 @@ describe('<ModsView> source-edit persistence regressions', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText('GhMod')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    await user.click(screen.getAllByRole('menuitem', { name: /Edit sources/ })[0]);
-    await waitFor(() => { expect(screen.getByText('Sources for GhMod')).toBeInTheDocument(); });
+    await openSourceEditor(user, 'GhMod');
 
     const ghInput = screen.getByPlaceholderText('owner/repo') as HTMLInputElement;
     expect(ghInput.value).toBe('wrong/manifest'); // seeded from the manifest
@@ -3478,8 +3408,7 @@ describe('<ModsView> source-edit persistence regressions', () => {
     // Editor closes on save; reopen — the field reflects the persisted user
     // override (not the manifest), proving it survived the refresh.
     await waitFor(() => { expect(screen.queryByText('Sources for GhMod')).toBeNull(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    await user.click(screen.getAllByRole('menuitem', { name: /Edit sources/ })[0]);
+    await openSourceEditor(user, 'GhMod');
     const ghInput2 = await screen.findByPlaceholderText('owner/repo') as HTMLInputElement;
     await waitFor(() => { expect(ghInput2.value).toBe('user/typed'); });
   });
@@ -3494,9 +3423,7 @@ describe('<ModsView> source-edit persistence regressions', () => {
     const user = userEvent.setup();
     render(<Wrap advancedMode />);
     await waitFor(() => { expect(screen.getByText('Foo')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: 'Mod actions' }));
-    await user.click(screen.getAllByRole('menuitem', { name: /Edit sources/ })[0]);
-    await waitFor(() => { expect(screen.getByText('Sources for Foo')).toBeInTheDocument(); });
+    await openSourceEditor(user, 'Foo');
 
     const nameInput = screen.getByPlaceholderText('Foo') as HTMLInputElement; // display-name field
     await user.type(nameInput, 'Friendly Foo');

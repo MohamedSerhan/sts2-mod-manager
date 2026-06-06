@@ -3481,6 +3481,21 @@ body {
 .gf-link-btn { background: transparent; border: 0; color: var(--indigo, #8ab4f8); cursor: pointer; text-align: start; padding: 2px 0; font-size: 12px; }
 .gf-devbuilds-foot { margin-top: 10px; }
 
+/* ── Row-menu customizer (Settings → General) ────────────────────── */
+.gf-row-menu-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.gf-row-menu-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; border-radius: 7px;
+  border: 1px solid var(--indigo-line); background: var(--indigo-panel);
+}
+.gf-row-menu-item.is-hidden { opacity: 0.55; }
+.gf-row-menu-item.is-locked { opacity: 0.6; cursor: default; }
+.gf-row-menu-grip { display: inline-flex; cursor: grab; color: var(--ink-mute); }
+.gf-row-menu-item.is-locked .gf-row-menu-grip { cursor: default; visibility: hidden; }
+.gf-row-menu-ico { display: inline-flex; color: var(--ink-mute); }
+.gf-row-menu-label { flex: 1; min-width: 0; font-size: 13px; color: var(--ink); }
+.gf-row-menu-locked { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+
 /* ── Right-to-left (Arabic) ──────────────────────────────────────────
    Most of the UI mirrors automatically: the app shell is a flex row
    (sidebar ↔ content) that `dir="rtl"` reverses, and the physical
@@ -3507,3 +3522,9 @@ body {
   from { transform: translateX(-100%); opacity: 0.4; }
   to   { transform: translateX(0); opacity: 1; }
 }
+
+@keyframes gf-row-menu-flash {
+  0% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--gf) 55%, transparent); }
+  100% { box-shadow: 0 0 0 8px transparent; }
+}
+.gf-row-menu-card-flash { animation: gf-row-menu-flash 1.1s ease-out; }

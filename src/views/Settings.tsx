@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   FolderSearch,
@@ -12,6 +12,7 @@ import {
   Play,
   Download,
   Palette,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { GITHUB_TOKEN_TEMPLATE_URL } from '../lib/githubLinks';
 import { open } from '@tauri-apps/plugin-dialog';
@@ -27,6 +28,7 @@ import { LogsViewer } from '../components/LogsViewer';
 import { LanguageSelect } from '../components/LanguageSelect';
 import { ThemeSelect } from '../components/ThemeSelect';
 import { AboutCard } from '../components/AboutCard';
+import { RowMenuCustomizer } from '../components/RowMenuCustomizer';
 import { DevBuildsCard } from '../components/DevBuildsCard';
 import { isDevBuild } from '../lib/isDevBuild';
 import {
@@ -55,12 +57,20 @@ type Tab = 'general' | 'accounts' | 'backups' | 'advanced';
 
 // v5 — tabbed Settings shell. Tabs are stateful; tab content is rendered
 // inline beneath the tab strip. All existing handlers preserved.
-export function SettingsView({ goToGeneralSignal }: { goToGeneralSignal?: number }) {
+export function SettingsView({
+  goToGeneralSignal,
+  openRowMenuSettingsSignal = 0,
+}: {
+  goToGeneralSignal?: number;
+  openRowMenuSettingsSignal?: number;
+}) {
   const { gameInfo, refreshAll } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
   const { t } = useTranslation();
   const [tab, setTab] = useState<Tab>('general');
+  const rowMenuCardRef = useRef<HTMLDivElement>(null);
+  const [rowMenuFlash, setRowMenuFlash] = useState(false);
 
   // The top-bar "STS2 detected" status jumps here; when Settings is already
   // open on another sub-tab, this signal pulls the user back to General
@@ -98,6 +108,20 @@ export function SettingsView({ goToGeneralSignal }: { goToGeneralSignal?: number
   useEffect(() => {
     isDevBuild().then(setShowDevBuilds).catch(() => {});
   }, []);
+
+  // ── Deep-link from "Customize menu…" kebab item ──────
+  // When the signal bumps, switch to the General tab and scroll/highlight the customizer card.
+  useEffect(() => {
+    if (openRowMenuSettingsSignal === 0) return;
+    setTab('general');
+    // Defer one frame so the general tab content is mounted before we scroll.
+    const id = setTimeout(() => {
+      rowMenuCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setRowMenuFlash(true);
+      setTimeout(() => setRowMenuFlash(false), 1200);
+    }, 0);
+    return () => clearTimeout(id);
+  }, [openRowMenuSettingsSignal]);
 
   async function refreshBackups() {
     try {
@@ -525,7 +549,7 @@ export function SettingsView({ goToGeneralSignal }: { goToGeneralSignal?: number
               </div>
             </Card>
 
-            <Card className="space-y-4" style={{ marginTop: 8 }}>
+            <Card className="space-y-4" data-testid="nexus-download-dir-card" style={{ marginTop: 8 }}>
               <h3 className="text-base font-semibold text-text flex items-center gap-2">
                 <Download size={16} />
                 {t('settings.general.nexusDownloadDir')}
@@ -576,6 +600,20 @@ export function SettingsView({ goToGeneralSignal }: { goToGeneralSignal?: number
               </h3>
               <ThemeSelect />
             </Card>
+
+            <div
+              ref={rowMenuCardRef}
+              data-testid="row-menu-card"
+              className={rowMenuFlash ? 'gf-row-menu-card-flash' : undefined}
+            >
+              <Card className="space-y-4" style={{ marginTop: 8 }}>
+                <h3 className="text-base font-semibold text-text flex items-center gap-2">
+                  <SlidersHorizontal size={16} />
+                  {t('settings.rowMenu.title')}
+                </h3>
+                <RowMenuCustomizer />
+              </Card>
+            </div>
 
             {/* 1.7.0 v7 — About card relocated from the Home page footer.
                 Home is now the single-block launcher; reference info +

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { check as checkUpdate } from '@tauri-apps/plugin-updater';
@@ -1225,8 +1225,10 @@ describe('<SettingsView>', () => {
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'get_nexus_download_dir')).toBe(true);
     });
-    const allBtns = screen.getAllByRole('button');
-    expect(allBtns.some((b) => /Reset to default/i.test(b.textContent ?? ''))).toBe(false);
+    // Scope to the nexus download dir card so the RowMenuCustomizer's "Reset to default" is not matched.
+    const nexusCard = screen.getByTestId('nexus-download-dir-card');
+    const btnsInCard = within(nexusCard).queryAllByRole('button');
+    expect(btnsInCard.some((b) => /Reset to default/i.test(b.textContent ?? ''))).toBe(false);
   });
 
   it('Nexus Download Dir Browse button calls set_nexus_download_dir with chosen path', async () => {
@@ -1253,10 +1255,12 @@ describe('<SettingsView>', () => {
     registerInvokeHandler('set_nexus_download_dir', () => null);
     const user = userEvent.setup();
     render(<Wrap />);
+    // Scope to the nexus download dir card to disambiguate from RowMenuCustomizer's "Reset to default".
+    const nexusCard = await screen.findByTestId('nexus-download-dir-card');
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Reset to default/i })).toBeInTheDocument();
+      expect(within(nexusCard).getByRole('button', { name: /Reset to default/i })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole('button', { name: /Reset to default/i }));
+    await user.click(within(nexusCard).getByRole('button', { name: /Reset to default/i }));
     await waitFor(() => {
       expect(getInvokeCalls().some(
         (c) => c.cmd === 'set_nexus_download_dir' && c.args?.path === '',
@@ -1313,5 +1317,22 @@ describe('<SettingsView>', () => {
     // No custom path and no resolvable default → empty box, placeholder shows.
     const input = screen.getByPlaceholderText('OS default Downloads folder');
     expect(input).toHaveValue('');
+  });
+
+  it('scrolls + highlights the customizer card when the open signal bumps', async () => {
+    const scrollSpy = vi.fn();
+    Element.prototype.scrollIntoView = scrollSpy;
+    const { rerender } = render(
+      <AllProviders><SettingsView openRowMenuSettingsSignal={0} /></AllProviders>,
+    );
+    act(() => {
+      rerender(
+        <AllProviders><SettingsView openRowMenuSettingsSignal={1} /></AllProviders>,
+      );
+    });
+    await waitFor(() => {
+      expect(scrollSpy).toHaveBeenCalled();
+    });
+    expect(screen.getByTestId('row-menu-card')).toHaveClass('gf-row-menu-card-flash');
   });
 });

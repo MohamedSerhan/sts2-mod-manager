@@ -26,6 +26,8 @@ import { ToastProvider, useToast } from './contexts/ToastContext';
 import { AppProvider, useApp } from './contexts/AppContext';
 import { ConfirmProvider, useConfirm } from './components/ConfirmDialog';
 import { ThemeProvider } from './theme/ThemeContext';
+import { RowMenuProvider } from './contexts/RowMenuContext';
+import { ROW_MENU_OPEN_EVENT } from './lib/rowMenuConfig';
 import { importShareCodeSmart } from './lib/shareImport';
 import { getSubscriptions } from './hooks/useTauri';
 import { OnboardingOverlay } from './components/OnboardingOverlay';
@@ -78,13 +80,15 @@ const RESIZE_HANDLES: { direction: ResizeDirection; className: string }[] = [
 export default function App() {
   return (
     <ThemeProvider>
-      <ToastProvider>
-        <ConfirmProvider>
-          <AppProvider>
-            <AppInner />
-          </AppProvider>
-        </ConfirmProvider>
-      </ToastProvider>
+      <RowMenuProvider>
+        <ToastProvider>
+          <ConfirmProvider>
+            <AppProvider>
+              <AppInner />
+            </AppProvider>
+          </ConfirmProvider>
+        </ToastProvider>
+      </RowMenuProvider>
     </ThemeProvider>
   );
 }
@@ -123,10 +127,24 @@ function AppInner() {
   // Bumped by the top-bar "STS2 detected" status to force Settings back to
   // its General sub-tab even when Settings is already open (#138).
   const [settingsGeneralSignal, setSettingsGeneralSignal] = useState(0);
+  // Bumped when the kebab's "Customize menu…" item fires ROW_MENU_OPEN_EVENT.
+  // SettingsView observes the bump and scrolls/highlights the customizer card.
+  const [openRowMenuSettingsSignal, setOpenRowMenuSettingsSignal] = useState(0);
   const [launching, setLaunching] = useState<null | 'modded' | 'vanilla'>(null);
   const [isDev, setIsDev] = useState(false);
   useEffect(() => {
     isDevBuild().then(setIsDev).catch(() => {});
+  }, []);
+
+  // Deep-link: "Customize menu…" kebab item dispatches ROW_MENU_OPEN_EVENT →
+  // route to Settings and bump the signal so SettingsView scrolls/highlights the card.
+  useEffect(() => {
+    function onOpen() {
+      setActiveView('settings');
+      setOpenRowMenuSettingsSignal((n) => n + 1);
+    }
+    window.addEventListener(ROW_MENU_OPEN_EVENT, onOpen);
+    return () => window.removeEventListener(ROW_MENU_OPEN_EVENT, onOpen);
   }, []);
 
   // First-launch onboarding wizard (v5 batch 4). Shown once unless dismissed.
@@ -974,7 +992,12 @@ function AppInner() {
                 initialTab={activeView === 'browse-mods' ? 'browse' : 'installed'}
               />
             )}
-            {activeView === 'settings' && <SettingsView goToGeneralSignal={settingsGeneralSignal} />}
+            {activeView === 'settings' && (
+              <SettingsView
+                goToGeneralSignal={settingsGeneralSignal}
+                openRowMenuSettingsSignal={openRowMenuSettingsSignal}
+              />
+            )}
 
             {/* 1.7.0 T8 — branched first-launch onboarding. The flow
                 asks the user ONE question (Play vs Make/Share) then

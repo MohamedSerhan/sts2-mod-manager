@@ -15,6 +15,7 @@ import userEvent from '@testing-library/user-event';
 
 import { LibraryRow, type LibraryRowProps } from './LibraryRow';
 import { AllProviders } from '../__test__/providers';
+import { ROW_MENU_STORAGE_KEY, ROW_MENU_OPEN_EVENT } from '../lib/rowMenuConfig';
 import type {
   ModAuditEntry,
   ModInfo,
@@ -426,6 +427,23 @@ describe('<LibraryRow> kebab + audit pills', () => {
     expect(onCopyVersion).toHaveBeenCalledTimes(1);
   });
 
+  it('kebab → Copy version label strips a leading v (no double-v)', async () => {
+    const user = userEvent.setup();
+    renderRow({ mod: baseModInfo({ version: 'v1.2.3' }) });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    const item = screen.getByRole('menuitem', { name: /copy version/i });
+    expect(item).toHaveTextContent('Copy version (v1.2.3)');
+    expect(item).not.toHaveTextContent('vv1.2.3');
+  });
+
+  it('kebab → Copy version label prepends v for a bare version (no leading v in source)', async () => {
+    const user = userEvent.setup();
+    renderRow({ mod: baseModInfo({ version: '1.2.3' }) });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    const item = screen.getByRole('menuitem', { name: /copy version/i });
+    expect(item).toHaveTextContent('Copy version (v1.2.3)');
+  });
+
   it('kebab → Open this mod\'s folder fires onOpenThisModFolder', async () => {
     // FB-E: the global "Open mods folder" was removed from the per-row kebab;
     // the per-mod "Open this mod's folder" (Bug 6) is what remains.
@@ -438,16 +456,75 @@ describe('<LibraryRow> kebab + audit pills', () => {
     expect(onOpenThisModFolder).toHaveBeenCalledTimes(1);
   });
 
-  it('kebab → Edit sources fires onEditSources', async () => {
-    const onEditSources = vi.fn();
+  it('kebab no longer shows a legacy Edit sources item', async () => {
     const user = userEvent.setup();
-    renderRow({ mod: baseModInfo(), onEditSources });
+    renderRow({ mod: baseModInfo() });
     await user.click(screen.getByRole('button', { name: /mod actions/i }));
-    const labels = screen.getAllByText(/^Edit sources/);
-    const itemLabel = labels.find((el) => el.className.includes('gf-kebab-label'));
-    expect(itemLabel).toBeDefined();
-    await user.click(itemLabel!.closest('button')!);
-    expect(onEditSources).toHaveBeenCalledTimes(1);
+    // The "Edit sources…" entry was removed; its text should not appear as a
+    // gf-kebab-label (primary item label). Descriptions may still reference
+    // the feature by name, so we scope to the label class only.
+    const labels = screen.queryAllByText(/edit sources/i, { selector: '.gf-kebab-label' });
+    expect(labels).toHaveLength(0);
+  });
+
+  it('kebab hides an item the user has hidden', async () => {
+    localStorage.setItem(
+      ROW_MENU_STORAGE_KEY,
+      JSON.stringify({ order: ['copyVersion', 'freeze'], hidden: ['freeze'] }),
+    );
+    const user = userEvent.setup();
+    renderRow({ mod: baseModInfo() });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    expect(screen.getByRole('menuitem', { name: /copy version/i })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /freeze this mod/i })).toBeNull();
+  });
+
+  it('kebab renders items in the user-configured order', async () => {
+    localStorage.setItem(
+      ROW_MENU_STORAGE_KEY,
+      JSON.stringify({ order: ['freeze', 'copyVersion'], hidden: [] }),
+    );
+    const user = userEvent.setup();
+    renderRow({ mod: baseModInfo() });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    const items = screen.getAllByRole('menuitem').map((el) => el.textContent ?? '');
+    const freezeIdx = items.findIndex((t) => /freeze this mod/i.test(t));
+    const copyIdx = items.findIndex((t) => /copy version/i.test(t));
+    expect(freezeIdx).toBeGreaterThanOrEqual(0);
+    expect(freezeIdx).toBeLessThan(copyIdx);
+  });
+
+  it('kebab omits contextual items when their predicate is false', async () => {
+    const user = userEvent.setup();
+    renderRow({ mod: baseModInfo({ github_url: null, nexus_url: null }) });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    expect(screen.queryByRole('menuitem', { name: /view on github/i })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: /view on nexus/i })).toBeNull();
+  });
+
+  it('Customize menu… is always present, last, and dispatches the open event', async () => {
+    const dispatch = vi.spyOn(window, 'dispatchEvent');
+    const user = userEvent.setup();
+    renderRow({ mod: baseModInfo() });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    const items = screen.getAllByRole('menuitem').map((el) => el.textContent ?? '');
+    expect(items[items.length - 1]).toMatch(/customize menu/i);
+    await user.click(screen.getByRole('menuitem', { name: /customize menu/i }));
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({ type: ROW_MENU_OPEN_EVENT }),
+    );
+    dispatch.mockRestore();
+  });
+
+  it('packScoped pins Delete from disk just above Customize menu…', async () => {
+    const user = userEvent.setup();
+    renderRow({ mod: baseModInfo(), packScoped: true, onDelete: vi.fn() });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    const items = screen.getAllByRole('menuitem').map((el) => el.textContent ?? '');
+    const delIdx = items.findIndex((t) => /delete from disk/i.test(t));
+    const custIdx = items.findIndex((t) => /customize menu/i.test(t));
+    expect(delIdx).toBeGreaterThanOrEqual(0);
+    expect(delIdx).toBe(custIdx - 1);
   });
 
   it('kebab → View on GitHub opens the github_url', async () => {

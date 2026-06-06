@@ -1216,6 +1216,29 @@
       "light": "浅色",
       "auto": "自动"
     },
+    "rowMenu": {
+      "title": "模组菜单",
+      "desc": "选择每个模组的 ⋯ 菜单中显示哪些操作，并拖动以重新排序。",
+      "reset": "恢复默认",
+      "lockedCaption": "「删除」和「自定义」始终固定在底部。",
+      "visibleAria": "在菜单中显示{{item}}",
+      "dragAria": "拖动以重新排序{{item}}",
+      "items": {
+        "membership": "添加/移出整合包",
+        "copyVersion": "复制版本",
+        "openFolder": "打开模组文件夹",
+        "snooze": "暂缓更新",
+        "autoDetect": "自动检测来源",
+        "viewGithub": "在 GitHub 上查看",
+        "viewNexus": "在 Nexus 上查看",
+        "findGithub": "从 Nexus 查找 GitHub",
+        "freeze": "冻结",
+        "repair": "修复",
+        "rollback": "回滚一个版本",
+        "delete": "从磁盘删除",
+        "customize": "自定义菜单"
+      }
+    },
     "accounts": {
       "nexusKey": "Nexus Mods API 密钥",
       "saved": "已保存 ✓",
@@ -1352,6 +1375,8 @@
     "unlinked": "未链接",
     "modActions": "模组操作",
     "copyVersion": "复制版本 (v{{version}})",
+    "customizeMenu": "自定义菜单…",
+    "customizeMenuDesc": "选择显示哪些项目并重新排序",
     "openModsFolder": "打开模组文件夹",
     "openThisModFolder": "打开此模组的文件夹",
     "unsnoozeDesc": "再次显示当前上游版本的更新建议。",

@@ -21,6 +21,7 @@ const updateModCalls = () => getInvokeCalls().filter((c) => c.cmd === 'update_mo
 /** Minimal ModInfo shape used by update tests. */
 function makeMod(overrides: Partial<{
   name: string;
+  version: string;
   folder_name: string | null;
   github_url: string | null;
   nexus_url: string | null;
@@ -409,5 +410,51 @@ describe('useModLibrary — renderAutoDetectModal callbacks', () => {
     // onApplied saw a non-null auditResults → ran runAudit() again, so a
     // SECOND audit_mod_versions call lands.
     await waitFor(() => expect(auditCalls()).toHaveLength(2));
+  });
+});
+
+// ── handleCopyVersion clipboard helper (mirrors DiagnosticBundle / useClipboard pattern) ──
+//
+// jsdom 27 gotcha: when jsdom exposes a real Clipboard prototype a
+// defineProperty on `navigator.clipboard` itself is shadowed by the proto
+// getter.  Install on the proto when present; fall back to defining
+// `navigator.clipboard` directly.  Called in beforeEach so the spy is fresh
+// for every test and the patch is properly overwritten between tests.
+
+let copyVersionSpy: ReturnType<typeof vi.fn>;
+
+function setCopyVersionClipboard(impl: (text: string) => Promise<void> = async () => {}) {
+  copyVersionSpy = vi.fn(impl);
+  const proto = navigator.clipboard ? Object.getPrototypeOf(navigator.clipboard) : null;
+  if (proto && 'writeText' in proto) {
+    Object.defineProperty(proto, 'writeText', {
+      value: copyVersionSpy,
+      configurable: true,
+      writable: true,
+    });
+  } else {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: copyVersionSpy },
+      configurable: true,
+    });
+  }
+  return copyVersionSpy;
+}
+
+describe('useModLibrary — handleCopyVersion', () => {
+  beforeEach(() => {
+    setCopyVersionClipboard();
+  });
+
+  it('handleCopyVersion copies the raw version but shows a single-v toast', async () => {
+    const writeText = setCopyVersionClipboard();
+
+    const { result } = renderHook(() => useModLibrary(), { wrapper: AllProviders });
+    await act(async () => {
+      await result.current.tableActionProps.onCopyVersion(makeMod({ version: 'v1.0.0' }) as Parameters<typeof result.current.tableActionProps.onCopyVersion>[0]);
+    });
+
+    expect(writeText).toHaveBeenCalledWith('v1.0.0'); // clipboard unchanged: raw version
+    await waitFor(() => expect(screen.getByText('Copied v1.0.0')).toBeInTheDocument());
   });
 });

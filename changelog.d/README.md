@@ -33,6 +33,25 @@ Fixed an issue where mods with duplicate display names could disappear from
 the library after a sync.
 ```
 
+## Localized fragments
+
+Every player-facing fragment must also have a same-named translated fragment
+for each bundled changelog locale:
+
+```
+changelog.i18n/ru/<category>-<slug>.md
+changelog.i18n/ar/<category>-<slug>.md
+changelog.i18n/zh-Hans/<category>-<slug>.md
+```
+
+Translated fragments contain only the translated body. Do not add `###`
+category headings there; the release script adds localized headings and writes
+the assembled release body into `src/i18n/changelog/<locale>.json`.
+
+If you use Codex Cloud for this step, ask it to preserve Markdown bullets,
+product names, version numbers, file extensions, and UI labels that remain in
+English in the app.
+
 ## Player-language rules (same as CHANGELOG.md)
 
 - **No file paths** — `src/`, `src-tauri/`, `scripts/`, etc.

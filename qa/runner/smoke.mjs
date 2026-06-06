@@ -1161,6 +1161,34 @@ async function waitForElement(driver, locator, label, timeoutMs = 10_000) {
   return driver.findElement(locator);
 }
 
+async function invokeTauri(driver, cmd, args = {}) {
+  const result = await driver.executeAsyncScript(
+    `
+      const done = arguments[arguments.length - 1];
+      const cmd = arguments[0];
+      const args = arguments[1];
+      const invoke =
+        window.__TAURI_INTERNALS__?.invoke ||
+        window.__TAURI__?.core?.invoke ||
+        window.__TAURI__?.invoke;
+      if (typeof invoke !== 'function') {
+        done({ ok: false, error: 'Tauri invoke bridge is unavailable in the WebDriver session' });
+        return;
+      }
+      Promise.resolve(invoke(cmd, args)).then(
+        (value) => done({ ok: true, value }),
+        (error) => done({ ok: false, error: error?.message || String(error) })
+      );
+    `,
+    cmd,
+    args,
+  );
+  if (!result?.ok) {
+    throw new Error(`Tauri command ${cmd} failed: ${result?.error || 'unknown error'}`);
+  }
+  return result.value;
+}
+
 async function waitForToastContaining(driver, parts, label, timeoutMs = 10_000) {
   return driver.wait(async () => {
     const toasts = await driver.findElements(By.css('.gf-toast'));
@@ -1439,8 +1467,9 @@ async function specRepairWalkback(driver) {
  *      '999.0.0', fixture game reports v0.105.0).
  *   2. Nav to Mods → Refresh → assert the "needs game ≥ v999.0.0" pill renders,
  *      proving the manager sees this mod as incompatible at the UI layer.
- *   3. Create a modpack through the guided wizard using "Start from my active
- *      mods", the current replacement for the old snapshot-style entry point.
+ *   3. Invoke the same backend create_profile command used by the Create
+ *      Modpack wizard. The old page-level Snapshot button was removed in the
+ *      1.7 UI, but create_profile still exercises the explicit snapshot path.
  *   4. Read the profile JSON off disk and assert SkippedMod is NOT in the
  *      mods array at all. The filter must drop it entirely (matching
  *      build_synced_profile_snapshot's semantics) — not record it as
@@ -1501,10 +1530,11 @@ async function specIncompatibleModAbsentFromCreatedModpack(driver) {
     30_000,
   );
 
-  // Step 3: create through the current guided flow. It auto-seeds from active
-  // mods, so this is the modern equivalent of the old snapshot entry point.
-  await waitForToastsToClear(driver);
-  await createModpackNamed(driver, modpackName);
+  // Step 3: invoke the backend snapshot path through the live Tauri bridge.
+  // The page-level Snapshot button this smoke originally clicked no longer
+  // exists in the 1.7 UI; the Create Modpack wizard now uses this same command
+  // before applying any optional membership edits.
+  await invokeTauri(driver, 'create_profile', { name: modpackName });
 
   // Step 4: read the saved profile JSON off disk. save_profile writes to
   // <profiles_path>/<sanitized_name>.json. sanitize_filename replaces

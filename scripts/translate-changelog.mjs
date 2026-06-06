@@ -7,8 +7,10 @@
  *
  * Design goals:
  *   - Idempotent: skips a version already translated (unless --force).
- *   - Non-blocking: missing OPENAI_API_KEY or an API error warns and exits 0
- *     so a release is never blocked; the app falls back to English.
+ *   - Non-blocking by default: missing OPENAI_API_KEY or an API error warns
+ *     and exits 0, so ad-hoc local runs can fall back to English.
+ *   - Release-strict when requested: --require-complete fails if any bundled
+ *     locale is missing the target version after the run.
  *   - Testable: run() accepts an injected translateFn so node:test never needs
  *     the SDK or a network.
  *
@@ -16,6 +18,7 @@
  *   node scripts/translate-changelog.mjs            # latest released entry
  *   node scripts/translate-changelog.mjs --version 1.7.1
  *   node scripts/translate-changelog.mjs --force    # re-translate even if present
+ *   node scripts/translate-changelog.mjs --require-complete
  */
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -132,16 +135,20 @@ export async function run({
   rootDir = REPO_ROOT,
   version,
   force = false,
+  requireComplete = false,
   log = console,
 } = {}) {
   const usingRealApi = translateFn === openaiTranslate;
-  if (usingRealApi && !process.env[API_KEY_ENV]) {
+  if (usingRealApi && !process.env[API_KEY_ENV] && !requireComplete) {
     log.warn(`translate-changelog: ${API_KEY_ENV} not set — skipping (app falls back to English).`);
     return { version: null, written: [], skipped: [] };
   }
 
   const changelogPath = join(rootDir, 'CHANGELOG.md');
   if (!existsSync(changelogPath)) {
+    if (requireComplete) {
+      throw new Error(`translate-changelog: ${changelogPath} not found`);
+    }
     log.warn(`translate-changelog: ${changelogPath} not found — nothing to do.`);
     return { version: null, written: [], skipped: [] };
   }
@@ -151,12 +158,16 @@ export async function run({
     ? { version, body: sectionBodyFor(changelog, version) }
     : latest;
   if (!entry || !entry.body) {
+    if (requireComplete) {
+      throw new Error(`translate-changelog: no changelog entry found${version ? ` for ${version}` : ''}`);
+    }
     log.warn(`translate-changelog: no changelog entry found${version ? ` for ${version}` : ''} — nothing to do.`);
     return { version: null, written: [], skipped: [] };
   }
 
   const written = [];
   const skipped = [];
+  const pending = [];
   for (const { key, name } of LOCALES) {
     const path = localePath(rootDir, key);
     const map = readMap(path);
@@ -164,6 +175,17 @@ export async function run({
       skipped.push(key);
       continue;
     }
+    pending.push({ key, name, path, map });
+  }
+
+  if (usingRealApi && pending.length > 0 && !process.env[API_KEY_ENV]) {
+    const missing = pending.map(({ key }) => key).join(', ');
+    throw new Error(
+      `${API_KEY_ENV} not set; missing changelog translations for ${entry.version}: ${missing}`,
+    );
+  }
+
+  for (const { key, name, path, map } of pending) {
     try {
       const translated = await translateFn(entry.body, name);
       if (!translated || !translated.trim()) throw new Error('empty translation');
@@ -176,7 +198,9 @@ export async function run({
       writeFileSync(path, JSON.stringify(ordered, null, 2) + '\n', 'utf8');
       written.push(key);
     } catch (err) {
-      // Non-blocking: warn for this locale, keep going.
+      if (requireComplete) {
+        throw new Error(`translate-changelog: ${key} failed (${err.message})`);
+      }
       log.warn(`translate-changelog: ${key} failed (${err.message}) — leaving English fallback.`);
     }
   }
@@ -200,9 +224,10 @@ export function sectionBodyFor(raw, version) {
 }
 
 function parseArgs(argv) {
-  const args = { force: false, version: undefined, help: false };
+  const args = { force: false, version: undefined, help: false, requireComplete: false };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--force') args.force = true;
+    else if (argv[i] === '--require-complete') args.requireComplete = true;
     else if (argv[i] === '--version') { args.version = argv[i + 1]; i += 1; }
     else if (argv[i] === '--help' || argv[i] === '-h') args.help = true;
   }
@@ -215,16 +240,17 @@ function parseArgs(argv) {
 if (fileURLToPath(import.meta.url) === process.argv[1]) {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
-    console.log('Usage: node scripts/translate-changelog.mjs [--version X.Y.Z] [--force]');
+    console.log('Usage: node scripts/translate-changelog.mjs [--version X.Y.Z] [--force] [--require-complete]');
     process.exit(0);
   }
-  run({ version: args.version, force: args.force })
+  run({ version: args.version, force: args.force, requireComplete: args.requireComplete })
     .then((r) => {
       if (r.version) console.log(`translate-changelog: ${r.version} — wrote [${r.written.join(', ')}], skipped [${r.skipped.join(', ')}]`);
-      process.exit(0); // always non-blocking
+      process.exit(0);
     })
     .catch((err) => {
-      console.warn(`translate-changelog: unexpected error (${err.message}) — continuing.`);
-      process.exit(0);
+      const suffix = args.requireComplete ? '' : ' — continuing.';
+      console.warn(`translate-changelog: unexpected error (${err.message})${suffix}`);
+      process.exit(args.requireComplete ? 1 : 0);
     });
 }

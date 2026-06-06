@@ -401,10 +401,10 @@ fi
 
 # --- Translate the new changelog entry for non-English locales ---
 #
-# Non-blocking: a missing OPENAI_API_KEY or API hiccup warns and continues,
-# and the app falls back to the English body. The generated JSON joins THIS
-# release commit so the translation ships in the exact build for this tag.
-node scripts/translate-changelog.mjs || echo "(changelog translation skipped — continuing)"
+# Blocking for releases: every bundled changelog locale must contain THIS
+# release's version before we commit/tag. The translator may skip API calls only
+# when the JSON files already have the version (for example, a manual prefill).
+node scripts/translate-changelog.mjs --require-complete
 git add src/i18n/changelog/ru.json src/i18n/changelog/ar.json src/i18n/changelog/zh-Hans.json
 
 # --- Commit, tag, push ---

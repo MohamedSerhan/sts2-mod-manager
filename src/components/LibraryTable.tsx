@@ -860,6 +860,7 @@ export function LibraryTable({
               packScoped={packScoped}
               packActive={modpackName != null && modpackName === activeProfile}
               isDragOver={dragOverIndex === inPackIndex && inPack}
+              isDragging={draggedIndex === inPackIndex && inPack}
               loadOrderSaving={loadOrderSaving}
               membershipSaving={membershipSaving}
               storageSaving={storageSaving}

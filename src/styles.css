@@ -997,6 +997,13 @@ body {
 }
 .gf-profile-library-row.drag-over {
   background: var(--blue-drag);
+  border-color: var(--gf-line);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--gf) 34%, transparent) inset;
+  transform: translateY(-2px);
+}
+.gf-profile-library-row.dragging {
+  opacity: 0.72;
+  transform: scale(0.992);
 }
 
 .gf-profile-library-launch {
@@ -1064,7 +1071,8 @@ body {
      scans as a compact list, not a stack of fat cards. */
   padding: 11px 14px;
   /* Smooth the clickable-row hover + active-border changes. */
-  transition: background 0.13s ease, border-color 0.13s ease;
+  transition: background 0.13s ease, border-color 0.13s ease, box-shadow 0.13s ease, opacity 0.13s ease, transform 0.13s ease;
+  will-change: transform;
 }
 /* 4.4 — the whole row is a click target that opens Edit sources. */
 .gf-profile-library-row.is-clickable { cursor: pointer; }
@@ -1445,6 +1453,8 @@ body {
   border: 1px solid var(--indigo-line);
   border-radius: 7px;
   background: var(--indigo-side);
+  transition: background 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease, opacity 0.14s ease, transform 0.14s ease;
+  will-change: transform;
 }
 /* Search highlight — the matched row gets a gold ring; the list is never
    filtered so the row stays in its real position. */
@@ -1455,10 +1465,13 @@ body {
 .gf-load-order-row.drag-over {
   border-color: var(--gf-line);
   background: var(--indigo-elev);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--gf) 32%, transparent) inset;
+  transform: translateY(-2px);
 }
 .gf-load-order-row.dragging {
-  opacity: 0.55;
+  opacity: 0.68;
   border-color: var(--gf-line);
+  transform: scale(0.99);
 }
 .gf-load-order-drag {
   display: inline-flex;
@@ -3548,14 +3561,73 @@ body {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 8px; border-radius: 7px;
   border: 1px solid var(--indigo-line); background: var(--indigo-panel);
+  transition: background 0.13s ease, border-color 0.13s ease, box-shadow 0.13s ease, opacity 0.13s ease, transform 0.13s ease;
+  will-change: transform;
 }
 .gf-row-menu-item.is-hidden { opacity: 0.55; }
 .gf-row-menu-item.is-locked { opacity: 0.6; cursor: default; }
+.gf-row-menu-item.is-dragging {
+  opacity: 0.72;
+  transform: scale(0.985);
+  border-color: var(--gf-line);
+  box-shadow: 0 8px 18px color-mix(in oklch, var(--indigo-deep) 55%, transparent);
+}
+.gf-row-menu-item.is-drop-target {
+  border-color: var(--gf-line);
+  background: var(--indigo-elev);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--gf) 30%, transparent) inset;
+  transform: translateY(-1px);
+}
 .gf-row-menu-grip { display: inline-flex; cursor: grab; color: var(--ink-mute); }
+.gf-row-menu-grip:active { cursor: grabbing; }
 .gf-row-menu-item.is-locked .gf-row-menu-grip { cursor: default; visibility: hidden; }
 .gf-row-menu-ico { display: inline-flex; color: var(--ink-mute); }
 .gf-row-menu-label { flex: 1; min-width: 0; font-size: 13px; color: var(--ink); }
+.gf-row-menu-reorder-actions { display: inline-flex; align-items: center; gap: 2px; }
+.gf-row-menu-reorder-btn {
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--indigo-line);
+  border-radius: 5px;
+  background: var(--indigo-side);
+  color: var(--ink-mute);
+  cursor: pointer;
+  padding: 0;
+}
+.gf-row-menu-reorder-btn:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--gf-line);
+  background: var(--indigo-elev);
+}
+.gf-row-menu-reorder-btn:focus-visible {
+  outline: 2px solid var(--gf);
+  outline-offset: 2px;
+}
+.gf-row-menu-reorder-btn:disabled {
+  cursor: default;
+  opacity: 0.38;
+}
 .gf-row-menu-locked { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .gf-profile-library-row,
+  .gf-load-order-row,
+  .gf-row-menu-item {
+    transition: none;
+    will-change: auto;
+  }
+
+  .gf-profile-library-row.drag-over,
+  .gf-profile-library-row.dragging,
+  .gf-load-order-row.drag-over,
+  .gf-load-order-row.dragging,
+  .gf-row-menu-item.is-dragging,
+  .gf-row-menu-item.is-drop-target {
+    transform: none;
+  }
+}
 
 /* ── Right-to-left (Arabic) ──────────────────────────────────────────
    Most of the UI mirrors automatically: the app shell is a flex row

@@ -1303,6 +1303,66 @@ describe('<ProfilesView>', () => {
     expect(screen.getByRole('dialog', { name: /Load order for Stable/i })).toBeInTheDocument();
   });
 
+  it('saving drift does not clear the local Re-share warning before upload', async () => {
+    let driftPresent = true;
+    seedProfiles([baseProfile({ name: 'SharedPack', mods: [] })]);
+    registerInvokeHandler('get_share_info', () => ({
+      owner: 'alice',
+      code: 'AA5A-315D-61AE',
+      file_path: 'SharedPack.json',
+      url: 'https://github.com/alice/sts2mm-profiles/blob/main/SharedPack.json',
+      repo_url: 'https://github.com/alice/sts2mm-profiles',
+      failed_uploads: [],
+      out_of_sync: false,
+    }));
+    registerInvokeHandler('get_active_profile', () => 'SharedPack');
+    registerInvokeHandler('get_profile_drift', () => ({
+      added: [],
+      removed: driftPresent ? ['MissingBeta'] : [],
+      toggled: [],
+      version_changed: [],
+      has_drift: driftPresent,
+    }));
+    registerInvokeHandler('get_installed_mods', () => [{
+      name: 'NewLocalMod',
+      version: '1.0.0',
+      description: '',
+      enabled: true,
+      files: [],
+      source: null,
+      hash: null,
+      dependencies: [],
+      size_bytes: 0,
+      github_url: null,
+      nexus_url: null,
+      folder_name: 'NewLocalMod',
+      mod_id: 'NewLocalMod',
+      pinned: false,
+    }]);
+    registerInvokeHandler('set_profile_mod_membership', () => baseProfile({ name: 'SharedPack' }));
+    registerInvokeHandler('save_profile_drift', () => {
+      driftPresent = false;
+      return baseProfile({ name: 'SharedPack', mods: [] });
+    });
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await openDetailFor(user, 'SharedPack');
+    const available = await screen.findByTestId('modpack-detail-available');
+    await user.click(within(available).getByRole('button', { name: /Add from Mod Library/i }));
+    await user.click(within(available).getByRole('button', { name: /^Add$/i }));
+    expect(await screen.findByRole('status', { name: /out of sync/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Back to modpacks/i }));
+    await user.click(screen.getByRole('button', { name: /^Save changes$/i }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some((call) => call.cmd === 'save_profile_drift')).toBe(true);
+    });
+
+    await openDetailFor(user, 'SharedPack');
+    expect(await screen.findByRole('status', { name: /out of sync/i })).toBeInTheDocument();
+  });
+
   it('Share button opens the publish modal when profile is unpublished', async () => {
     seedProfiles([baseProfile({ name: 'Unpublished' })]);
     registerInvokeHandler('get_share_info', () => null);

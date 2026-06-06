@@ -146,6 +146,20 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
   const quickAddRowRef = useRef<HTMLDivElement | null>(null);
   const [quickAddPulse, setQuickAddPulse] = useState(false);
   const [shareInfoMap, setShareInfoMap] = useState<Record<string, ShareResult>>({});
+  const [localOutOfSyncMap, setLocalOutOfSyncMap] = useState<Record<string, boolean>>({});
+  const markLocalOutOfSync = useCallback((profileName: string) => {
+    setLocalOutOfSyncMap((prev) =>
+      prev[profileName] ? prev : { ...prev, [profileName]: true },
+    );
+  }, []);
+  const clearLocalOutOfSync = useCallback((profileName: string) => {
+    setLocalOutOfSyncMap((prev) => {
+      if (!prev[profileName]) return prev;
+      const next = { ...prev };
+      delete next[profileName];
+      return next;
+    });
+  }, []);
   // Followed (subscribed) packs aren't yours to edit — tracked so the drift
   // banner offers Repair but not Save changes for them.
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
@@ -711,6 +725,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       // adds just the enabled extras, drops missing mods, and syncs
       // toggled/version for mods still present.
       const profile = await saveProfileDrift(name);
+      if (shareInfoMap[name]) markLocalOutOfSync(name);
       setProfiles((prev) => {
         const exists = prev.some((p) => p.name === profile.name);
         return exists
@@ -770,6 +785,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     try {
       await deleteProfile(name);
       setProfiles((prev) => prev.filter((p) => p.name !== name));
+      clearLocalOutOfSync(name);
       // Bug 3: if we just deleted the active pack, clear the AppContext
       // active pointer too (the backend clears active_profile.txt) so nothing
       // keeps flagging the now-gone pack as active until an app restart.
@@ -1147,6 +1163,8 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
             profile={profile}
             shareInfo={shareInfoMap[profile.name] ?? null}
             drift={driftMap[profile.name] ?? null}
+            localOutOfSync={!!localOutOfSyncMap[profile.name]}
+            onLocalOutOfSync={markLocalOutOfSync}
             switchingProfile={switchingProfile}
             onBack={() => setSelectedModpack(null)}
             onSwitch={handleSwitch}
@@ -1166,6 +1184,13 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
             renameExistingNames={profiles.map((p) => p.name)}
             onRenamed={async (oldName, newName) => {
               if (activeProfile === oldName) setActiveProfile(newName);
+              setLocalOutOfSyncMap((prev) => {
+                if (!prev[oldName]) return prev;
+                const next = { ...prev };
+                delete next[oldName];
+                next[newName] = true;
+                return next;
+              });
               await loadProfiles();
               setSelectedModpack(newName);
             }}
@@ -1539,6 +1564,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
           const sharedName = publishTarget?.profile.name;
           if (sharedName) {
             setShareInfoMap((prev) => ({ ...prev, [sharedName]: result }));
+            clearLocalOutOfSync(sharedName);
           }
           // Share/Re-share enriches the saved profile manifest with bundle
           // URLs and listing state. Reload the profile list so the row shows

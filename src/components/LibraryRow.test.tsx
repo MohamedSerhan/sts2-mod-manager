@@ -257,6 +257,12 @@ describe('<LibraryRow>', () => {
     expect(card.className).toContain('drag-over');
   });
 
+  it('isDragging=true applies the dragging class', () => {
+    const { container } = renderRow({ isDragging: true });
+    const card = container.querySelector('.gf-profile-library-row') as HTMLElement;
+    expect(card.className).toContain('dragging');
+  });
+
   it('shows a saving spinner on the in-pack indicator while membership is mutating', () => {
     const { container } = renderRow({
       row: baseMod({ folder_name: 'BaseLib' }),

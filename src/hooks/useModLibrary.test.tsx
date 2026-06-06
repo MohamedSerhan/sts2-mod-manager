@@ -6,6 +6,7 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import { useModLibrary } from './useModLibrary';
 import { AllProviders } from '../__test__/providers';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
+import { AUTO_ADD_INSTALLS_TO_MODPACK_KEY } from '../lib/installPolicy';
 import type { ModInfo } from '../types';
 
 /**
@@ -16,6 +17,7 @@ import type { ModInfo } from '../types';
  */
 const importCalls = () => getInvokeCalls().filter((c) => c.cmd === 'install_mod_from_file');
 const quickAddCalls = () => getInvokeCalls().filter((c) => c.cmd === 'quick_add_mod');
+const membershipCalls = () => getInvokeCalls().filter((c) => c.cmd === 'set_profile_mod_membership');
 const updateModCalls = () => getInvokeCalls().filter((c) => c.cmd === 'update_mod');
 
 /** Minimal ModInfo shape used by update tests. */
@@ -74,6 +76,40 @@ describe('useModLibrary', () => {
 
     await waitFor(() => expect(importCalls()).toHaveLength(1));
     expect(importCalls()[0].args?.path).toBe('C:\\downloads\\Cool.zip');
+  });
+
+  it('handleImportFile adds the picked archive to the target pack by default', async () => {
+    vi.mocked(open).mockResolvedValueOnce('C:\\downloads\\Cool.zip');
+    registerInvokeHandler('install_mod_from_file', () => makeMod({ name: 'Cool', folder_name: 'Cool' }));
+    registerInvokeHandler('set_profile_mod_membership', () => ({}));
+    const { result } = renderHook(() => useModLibrary({ targetPack: 'MyPack' }), {
+      wrapper: AllProviders,
+    });
+
+    await act(async () => { await result.current.handleImportFile(); });
+
+    await waitFor(() => expect(membershipCalls()).toHaveLength(1));
+    expect(membershipCalls()[0].args).toMatchObject({
+      profileName: 'MyPack',
+      modName: 'Cool',
+      folderName: 'Cool',
+      included: true,
+    });
+  });
+
+  it('handleImportFile installs to the Library only when target-pack auto-add is disabled', async () => {
+    localStorage.setItem(AUTO_ADD_INSTALLS_TO_MODPACK_KEY, 'false');
+    followPack('MyPack');
+    vi.mocked(open).mockResolvedValueOnce('C:\\downloads\\Cool.zip');
+    registerInvokeHandler('install_mod_from_file', () => makeMod({ name: 'Cool', folder_name: 'Cool' }));
+    const { result } = renderHook(() => useModLibrary({ targetPack: 'MyPack' }), {
+      wrapper: AllProviders,
+    });
+
+    await act(async () => { await result.current.handleImportFile(); });
+
+    await waitFor(() => expect(importCalls()).toHaveLength(1));
+    expect(membershipCalls()).toHaveLength(0);
   });
 
   it('handleImportFile does nothing when the picker is cancelled', async () => {
@@ -145,6 +181,24 @@ describe('useModLibrary', () => {
 
     // Owned → not blocked → the install actually runs.
     await waitFor(() => expect(quickAddCalls()).toHaveLength(1));
+  });
+
+  it('handleQuickAdd installs to the Library only when target-pack auto-add is disabled', async () => {
+    localStorage.setItem(AUTO_ADD_INSTALLS_TO_MODPACK_KEY, 'false');
+    followPack('MyPack');
+    registerInvokeHandler('quick_add_mod', () => ({
+      type: 'github_installed',
+      mod_info: makeMod({ name: 'Cool', folder_name: 'Cool' }),
+    }));
+    const { result } = renderHook(() => useModLibrary({ targetPack: 'MyPack' }), {
+      wrapper: AllProviders,
+    });
+    act(() => result.current.setQuickAddUrl('https://github.com/a/b'));
+
+    await act(async () => { await result.current.handleQuickAdd(); });
+
+    await waitFor(() => expect(quickAddCalls()).toHaveLength(1));
+    expect(membershipCalls()).toHaveLength(0);
   });
 
   it('toggling the quick-add form is reflected in returned state', () => {

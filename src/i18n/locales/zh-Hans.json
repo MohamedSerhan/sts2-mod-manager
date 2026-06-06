@@ -1199,6 +1199,11 @@
       "launchModeSetDirect": "启动模式已设为直接启动",
       "failedUpdateLaunchMode": "更新启动模式失败：{{error}}",
       "launchModeAria": "启动模式",
+      "installPolicy": "安装行为",
+      "autoAddInstallsToModpack": "将新安装的模组添加到当前模组包",
+      "autoAddInstallsToModpackDesc": "适用于在模组包视图中使用的快速添加和压缩包导入。稍后捕获的 Nexus 下载仍会进入模组库。",
+      "autoAddInstallsToModpackOn": "新安装的模组会立即加入当前打开的模组包。",
+      "autoAddInstallsToModpackOff": "新安装的模组会留在模组库，直到你手动添加。",
       "nexusDownloadDir": "Nexus 下载监控文件夹",
       "nexusDownloadDirDesc": "应用将监控此文件夹中的 Nexus 模组压缩包并自动安装。重启应用后生效。",
       "nexusDownloadDirDefault": "系统默认下载文件夹",
@@ -1422,6 +1427,8 @@
       "deleted": "已删除：{{name}}",
       "deleteFailed": "删除 {{name}} 失败：{{error}}",
       "installed": "已安装：{{name}}",
+      "installedAndAddedToPack": "已安装 {{name}} 并添加到“{{pack}}”。",
+      "installedLibraryOnly": "已将 {{name}} 安装到模组库。",
       "importFailed": "导入失败：{{error}}",
       "followedPackNoAdd": "无法向\"{{pack}}\"添加模组——它是关注的模组包。请先复制一份以创建你自己的可编辑副本。",
       "allEnabled": "所有模组已启用",
@@ -1448,7 +1455,8 @@
     "manageActiveModpackLink": "管理当前模组包 →",
     "tags": {
       "label": "标签",
-      "all": "所有标签"
+      "all": "所有标签",
+      "noTags": "无标签"
     },
     "audit": {
       "run": "审计模组",
@@ -1470,6 +1478,9 @@
     "updateAllLabel_other": "更新 {{count}} 个模组",
     "notePrefix": "📝",
     "versionLabel": "版本",
+    "manifestVersion": "清单 v{{version}}",
+    "nexusEffectiveVersion": "Nexus v{{version}}",
+    "nexusEffectiveVersionTitle": "管理器按 Nexus v{{nexus}} 审计，但此模组清单仍显示 v{{manifest}}。",
     "onDiskFolderTitle": "磁盘上的文件夹：{{folder}}",
     "rowClickEditSources": "点击编辑来源、链接和标签",
     "rowEditSourcesAria": "编辑 {{mod}} 的来源",

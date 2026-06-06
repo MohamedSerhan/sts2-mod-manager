@@ -189,15 +189,10 @@ Path to higher backend coverage: the big untested chunks are
 
 ## Linux + macOS support
 
-The WebDriver harness is Windows-only today because it uses
-`msedgedriver` directly. To run in CI on Linux:
-
-- Use `tauri-driver` on Linux, which forwards to `WebKitWebDriver`.
-- The capability shape is identical (`browserName: 'wry'` +
-  `tauri:options.application`) — `smoke.mjs` doesn't need changes.
-- CI must install WebKitGTK + WebKitWebDriver in the runner image.
-
-macOS isn't supported by `tauri-driver` at all; skip.
+The WebDriver harness runs on Windows and Linux in CI. Windows uses
+`msedgedriver` for WebView2; Linux uses `WebKitWebDriver` from
+WebKitGTK under Xvfb. macOS isn't supported by `tauri-driver` at all;
+skip it.
 
 ## Profile sharing / subscription flows
 
@@ -229,24 +224,10 @@ behave correctly) — purely UX. ~2 hours.
 
 ## CI integration
 
-The WebDriver smoke is currently local-only. A reasonable CI lane:
-
-```yaml
-qa-smoke:
-  runs-on: windows-latest
-  steps:
-    - uses: actions/checkout@v4
-    - run: cargo install tauri-driver --version "^2"
-    - run: npm install
-    - run: npm run tauri build -- --no-bundle --features qa-cassette
-    - run: node qa/runner/scripts/download-msedgedriver.mjs
-    - run: node qa/runner/smoke.mjs
-    - run: CASSETTE=1 node qa/runner/smoke.mjs
-```
-
-`scripts/release.sh` already runs the equivalent locally before
-every version bump — see the QA gate section there. The CI lane is
-just for catching regressions on PR branches before they hit `main`.
+The WebDriver smoke now runs in `.github/workflows/ci.yml` on Windows
+and Ubuntu when app or QA files change. `scripts/release.sh` still runs
+the local Windows smoke before every version bump; CI catches the Linux
+WebKitGTK path on PR branches before they hit `main`.
 
 ## Notes for the agent who picks this up
 

@@ -20,7 +20,18 @@ import { Builder, By, until } from 'selenium-webdriver';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..', '..');
 
+const IS_WINDOWS = process.platform === 'win32';
 const MSEDGEDRIVER = resolve(__dirname, 'msedgedriver.exe');
+
+function findOnPath(command) {
+  const res = spawnSync('sh', ['-lc', `command -v ${command}`], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  return res.status === 0 && res.stdout.trim() ? res.stdout.trim() : command;
+}
+
+const NATIVE_DRIVER = IS_WINDOWS ? MSEDGEDRIVER : findOnPath('WebKitWebDriver');
 // Resolve cargo's actual target directory so we find the binary even when a
 // machine-wide shared target is configured (CARGO_TARGET_DIR or a
 // .cargo/config `build.target-dir`). `cargo metadata` honors all of those;
@@ -49,10 +60,14 @@ function cargoTargetDir() {
   return resolve(REPO_ROOT, 'src-tauri', 'target');
 }
 
-const APP_BINARY = resolve(cargoTargetDir(), 'release', 'sts2-mod-manager.exe');
+const APP_BINARY = resolve(
+  cargoTargetDir(),
+  'release',
+  IS_WINDOWS ? 'sts2-mod-manager.exe' : 'sts2-mod-manager',
+);
 // tauri-driver intermediary port (the WebDriver client connects here).
 const DRIVER_PORT = 4444;
-// msedgedriver port (tauri-driver forwards to here).
+// Native driver port (msedgedriver on Windows, WebKitWebDriver on Linux).
 const NATIVE_PORT = 4445;
 
 // Cassette mode — set CASSETTE=1 to play GitHub + Nexus HTTP calls back
@@ -262,10 +277,17 @@ function seedSkippedMod(dir) {
 
 function preflight() {
   const problems = [];
-  if (!existsSync(MSEDGEDRIVER)) {
+  if (IS_WINDOWS && !existsSync(MSEDGEDRIVER)) {
     problems.push(
       `msedgedriver not found at ${MSEDGEDRIVER}.\n  Run: node qa/runner/scripts/download-msedgedriver.mjs`,
     );
+  }
+  if (!IS_WINDOWS) {
+    if (!existsSync(NATIVE_DRIVER)) {
+      problems.push(
+        `${NATIVE_DRIVER} not found or not runnable.\n  Install WebKitGTK's WebDriver package (Ubuntu: sudo apt-get install webkit2gtk-driver).`,
+      );
+    }
   }
   if (!existsSync(APP_BINARY)) {
     problems.push(
@@ -326,9 +348,9 @@ async function waitForPort(port, timeoutMs) {
 
 function startTauriDriver() {
   // tauri-driver 2.0.6 is the intermediary: it launches the app, spawns
-  // msedgedriver, and rewrites capabilities to match what the current
-  // msedgedriver expects (the schema changed in WebView2 147, which
-  // broke older tauri-driver 0.1.x).
+  // the platform-native WebDriver, and rewrites capabilities to match what
+  // that driver expects. On Windows, the WebView2 schema changed in 147,
+  // which broke older tauri-driver 0.1.x.
   //
   // Env propagation: tauri-driver inherits this process's env, then
   // spawns the app binary which inherits tauri-driver's env. So setting
@@ -351,7 +373,7 @@ function startTauriDriver() {
     [
       '--port', String(DRIVER_PORT),
       '--native-port', String(NATIVE_PORT),
-      '--native-driver', MSEDGEDRIVER,
+      '--native-driver', NATIVE_DRIVER,
     ],
     { stdio: ['ignore', 'pipe', 'pipe'], env },
   );

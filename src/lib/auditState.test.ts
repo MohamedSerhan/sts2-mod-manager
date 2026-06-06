@@ -82,6 +82,22 @@ describe('isUpToDate', () => {
     ).toBe(false);
   });
 
+  it('returns true when Nexus is current even if GitHub has no installable assets', () => {
+    expect(
+      isUpToDate(
+        entry({
+          github_repo: 'a/b',
+          nexus_url: 'https://nexusmods.com/x',
+          latest_release_tag: 'v2',
+          latest_release_with_assets_tag: null,
+          nexus_version: '1.0.0',
+          nexus_update_available: false,
+          needs_update: false,
+        }),
+      ),
+    ).toBe(true);
+  });
+
   it('returns false when the mod is incompatible with the installed game version', () => {
     expect(
       isUpToDate(entry({ github_repo: 'a/b', game_version_too_old: true })),

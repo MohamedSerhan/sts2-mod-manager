@@ -3,6 +3,7 @@ import en from './en.json';
 import zhHans from './zh-Hans.json';
 import ru from './ru.json';
 import ar from './ar.json';
+import humanReviewed from './human-reviewed.json';
 
 type LocaleTree = Record<string, unknown>;
 
@@ -19,6 +20,7 @@ const SAME_AS_ENGLISH_ALLOWED = new Set([
   'modpacks.quickAdd.placeholder',
   'mods.gitHub',
   'mods.nexus',
+  'mods.nexusEffectiveVersion',
   'mods.notePrefix',
   'onboarding.step1.browsePlaceholderLinux',
   'onboarding.step1.browsePlaceholderMac',
@@ -43,9 +45,9 @@ const SAME_AS_ENGLISH_ALLOWED = new Set([
 ]);
 
 // Every non-English locale that must stay key-for-key in sync with en.json.
-// Russian and Arabic are AI-generated and pending human verification (see the
-// PR description) — that does not exempt them from the parity gate: they must
-// match en's key set exactly and must not ship copied English prose.
+// Some Russian keys are human-reviewed and pinned in human-reviewed.json. That
+// does not exempt the rest of the locale from the parity gate: every language
+// must match en's key set exactly and must not ship copied English prose.
 const NON_ENGLISH_LOCALES: ReadonlyArray<readonly [string, unknown]> = [
   ['Simplified Chinese', zhHans],
   ['Russian', ru],
@@ -72,6 +74,13 @@ function flattenLeaves(value: unknown, prefix = ''): [string, string][] {
     const childPrefix = prefix ? `${prefix}.${key}` : key;
     return flattenLeaves(child, childPrefix);
   });
+}
+
+function leafAt(value: unknown, keyPath: string): unknown {
+  return keyPath.split('.').reduce<unknown>((node, key) => {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) return undefined;
+    return (node as LocaleTree)[key];
+  }, value);
 }
 
 describe('locale resources', () => {
@@ -110,5 +119,24 @@ describe('locale resources', () => {
       .sort();
 
     expect(offenders).toEqual([]);
+  });
+
+  it('preserves human-reviewed locale strings exactly', () => {
+    const locales: Record<string, unknown> = { ru };
+
+    for (const [localeCode, groups] of Object.entries(humanReviewed)) {
+      const locale = locales[localeCode];
+      expect(locale, `unknown locale ${localeCode}`).toBeDefined();
+
+      for (const [groupName, group] of Object.entries(groups)) {
+        const entries = (group as { entries?: Record<string, string> }).entries ?? {};
+        expect(Object.keys(entries), `${localeCode}.${groupName} entries`).not.toHaveLength(0);
+
+        for (const [key, expected] of Object.entries(entries)) {
+          expect(leafAt(en, key), `English key missing for ${key}`).toBeDefined();
+          expect(leafAt(locale, key), `${localeCode}.${key}`).toBe(expected);
+        }
+      }
+    }
   });
 });

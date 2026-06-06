@@ -30,6 +30,7 @@ import { Card } from '../components/Card';
 import { SourceEditor } from '../components/SourceEditor';
 import { AutoDetectModal } from '../components/AutoDetectModal';
 import { nexusFilesUrl } from '../lib/nexusUrl';
+import { loadAutoAddInstallsToModpack } from '../lib/installPolicy';
 import type { ModAuditEntry, ModInfo } from '../types';
 import {
   deleteMod,
@@ -193,6 +194,18 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     onTargetPackChanged?.();
   }
 
+  function showInstallToast(mod: ModInfo, addedToPack: boolean) {
+    if (targetPack && addedToPack) {
+      toast.success(t('mods.toast.installedAndAddedToPack', { name: mod.name, pack: targetPack }));
+      return;
+    }
+    if (targetPack) {
+      toast.success(t('mods.toast.installedLibraryOnly', { name: mod.name }));
+      return;
+    }
+    toast.success(t('mods.toast.installed', { name: mod.name }));
+  }
+
   // A *followed* (subscribed but not owned) pack isn't ours to edit, so
   // installing a mod "into" it would fail server-side and strand the file in
   // the library. When the modpack view targets such a pack we stop BEFORE
@@ -342,7 +355,8 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
 
   async function handleImportFile() {
     try {
-      if (await targetPackIsFollowed()) {
+      const autoAddToTargetPack = !!targetPack && loadAutoAddInstallsToModpack();
+      if (autoAddToTargetPack && await targetPackIsFollowed()) {
         toast.info(t('mods.toast.followedPackNoAdd', { pack: targetPack }));
         return;
       }
@@ -354,9 +368,11 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
       // `open({ multiple: false })` resolves to a single path or null; the
       // guard above already ruled out null, so this is just the string.
       const mod = await installModFromFile(selected);
-      await addToTargetPack(mod);
+      if (autoAddToTargetPack) {
+        await addToTargetPack(mod);
+      }
       await refreshAll();
-      toast.success(t('mods.toast.installed', { name: mod.name }));
+      showInstallToast(mod, autoAddToTargetPack);
     } catch (e) {
       const impErrMsg = e instanceof Error ? e.message : String(e);
       toast.error(t('mods.toast.importFailed', { error: impErrMsg }));
@@ -365,7 +381,8 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
 
   async function handleQuickAdd() {
     if (!quickAddUrl.trim()) return;
-    if (await targetPackIsFollowed()) {
+    const autoAddToTargetPack = !!targetPack && loadAutoAddInstallsToModpack();
+    if (autoAddToTargetPack && await targetPackIsFollowed()) {
       toast.info(t('mods.toast.followedPackNoAdd', { pack: targetPack }));
       return;
     }
@@ -374,9 +391,11 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
       setQuickAdding(true);
       const result = await quickAddMod(input);
       if (result.type === 'github_installed') {
-        await addToTargetPack(result.mod_info);
+        if (autoAddToTargetPack) {
+          await addToTargetPack(result.mod_info);
+        }
         await refreshAll();
-        toast.success(t('mods.toast.installed', { name: result.mod_info.name }));
+        showInstallToast(result.mod_info, autoAddToTargetPack);
       } else {
         const filesUrl = nexusFilesUrl(input);
         if (filesUrl) {
@@ -641,7 +660,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     onUpdate: handleInlineUpdate,
     onTogglePin: handleTogglePin,
     onSnooze: (mod: ModInfo, audit: ModAuditEntry | undefined) =>
-      handleSnooze(mod, audit?.latest_release_with_assets_tag ?? null),
+      handleSnooze(mod, audit?.latest_release_with_assets_tag ?? audit?.nexus_version ?? null),
     onUnsnooze: handleUnsnooze,
     onRepair: handleRepair,
     onRollback: handleRollback,

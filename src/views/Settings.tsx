@@ -14,6 +14,7 @@ import {
   Palette,
   SlidersHorizontal,
   ALargeSmall,
+  Layers,
 } from 'lucide-react';
 import { GITHUB_TOKEN_TEMPLATE_URL } from '../lib/githubLinks';
 import { open } from '@tauri-apps/plugin-dialog';
@@ -29,10 +30,15 @@ import { LogsViewer } from '../components/LogsViewer';
 import { LanguageSelect } from '../components/LanguageSelect';
 import { ThemeSelect } from '../components/ThemeSelect';
 import { UiScaleSlider } from '../components/UiScaleSlider';
+import { Toggle } from '../components/Toggle';
 import { AboutCard } from '../components/AboutCard';
 import { RowMenuCustomizer } from '../components/RowMenuCustomizer';
 import { DevBuildsCard } from '../components/DevBuildsCard';
 import { isDevBuild } from '../lib/isDevBuild';
+import {
+  loadAutoAddInstallsToModpack,
+  saveAutoAddInstallsToModpack,
+} from '../lib/installPolicy';
 import {
   detectGamePath,
   setGamePath,
@@ -85,6 +91,9 @@ export function SettingsView({
   const [gamePath, setGamePathValue] = useState('');
   const [launchMode, setLaunchModeValue] = useState<LaunchMode>('steam');
   const [savingLaunchMode, setSavingLaunchMode] = useState(false);
+  const [autoAddInstallsToModpack, setAutoAddInstallsToModpack] = useState(
+    loadAutoAddInstallsToModpack,
+  );
   const [nexusDownloadDir, setNexusDownloadDirValue] = useState<string | null>(null);
   // The OS default Downloads folder, resolved once on mount. Shown in the
   // read-only path box when no custom folder is set, so the box always names
@@ -291,6 +300,11 @@ export function SettingsView({
     } finally {
       setSavingLaunchMode(false);
     }
+  }
+
+  function handleChangeAutoAddInstallsToModpack(enabled: boolean) {
+    setAutoAddInstallsToModpack(enabled);
+    saveAutoAddInstallsToModpack(enabled);
   }
 
   async function handleBrowseNexusDownloadDir() {
@@ -548,6 +562,45 @@ export function SettingsView({
                     </label>
                   );
                 })}
+              </div>
+            </Card>
+
+            <Card className="space-y-4" style={{ marginTop: 8 }}>
+              <h3 className="text-base font-semibold text-text flex items-center gap-2">
+                <Layers size={16} />
+                {t('settings.general.installPolicy')}
+              </h3>
+              <div className="gf-set-desc" style={{ marginTop: -6 }}>
+                {t('settings.general.autoAddInstallsToModpackDesc')}
+              </div>
+              <div
+                className="gf-launch-mode-row"
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 10,
+                  padding: '10px 12px',
+                  borderRadius: 7,
+                  border: '1px solid var(--indigo-line)',
+                  background: 'var(--indigo-panel)',
+                }}
+              >
+                <Toggle
+                  checked={autoAddInstallsToModpack}
+                  onChange={handleChangeAutoAddInstallsToModpack}
+                  ariaLabel={t('settings.general.autoAddInstallsToModpack')}
+                  title={t('settings.general.autoAddInstallsToModpack')}
+                />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>
+                    {t('settings.general.autoAddInstallsToModpack')}
+                  </span>
+                  <span style={{ fontSize: 12, color: 'var(--ink-mute)' }}>
+                    {autoAddInstallsToModpack
+                      ? t('settings.general.autoAddInstallsToModpackOn')
+                      : t('settings.general.autoAddInstallsToModpackOff')}
+                  </span>
+                </div>
               </div>
             </Card>
 

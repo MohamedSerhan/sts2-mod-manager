@@ -9,6 +9,7 @@ import { downloadDir as pathDownloadDir } from '@tauri-apps/api/path';
 import { SettingsView } from './Settings';
 import { AllProviders } from '../__test__/providers';
 import { getInvokeCalls, registerInvokeHandler, setMockAppVersion } from '../__test__/setup';
+import { AUTO_ADD_INSTALLS_TO_MODPACK_KEY } from '../lib/installPolicy';
 
 function Wrap() {
   return (
@@ -143,6 +144,21 @@ describe('<SettingsView>', () => {
   it('General tab renders without crashing', async () => {
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
+  });
+
+  it('General tab controls whether new installs auto-add to the current modpack', async () => {
+    const user = userEvent.setup();
+    render(<Wrap />);
+
+    const autoAdd = await screen.findByRole('switch', {
+      name: /Add new installs to the current modpack/i,
+    });
+    expect(autoAdd).toHaveAttribute('aria-checked', 'true');
+
+    await user.click(autoAdd);
+
+    expect(autoAdd).toHaveAttribute('aria-checked', 'false');
+    expect(localStorage.getItem(AUTO_ADD_INSTALLS_TO_MODPACK_KEY)).toBe('false');
   });
 
   it('shows AboutCard in the General tab (relocated from Home in 1.7.0 v7)', async () => {

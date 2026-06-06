@@ -49,9 +49,8 @@ use github::{
 // directly — orchestration always goes through `zip_profile_mod_files`
 // (which has the enabled-vs-disabled-path fallback baked in), so the
 // raw `zip_mod_files` lives in `upload.rs` as an implementation detail.
-use upload::{
-    ensure_profile_publish_complete, restore_profile_after_failed_publish, zip_profile_mod_files,
-};
+pub(crate) use upload::zip_profile_mod_files;
+use upload::{ensure_profile_publish_complete, restore_profile_after_failed_publish};
 
 /// One mod skipped during a modpack install because it declared a
 /// `min_game_version` higher than the user's STS2 build. Surfaced in

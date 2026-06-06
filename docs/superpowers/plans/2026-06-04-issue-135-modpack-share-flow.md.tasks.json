@@ -43,7 +43,7 @@
     {
       "id": 7,
       "subject": "Task 7: .sts2pack export/import — backend",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Tauri commands to export a modpack to a self-contained .sts2pack archive (manifest + bundled mod files) and import one back, reusing existing bundle/install functions.\n\n**Verify:** cd src-tauri && cargo test export_import::.\n\n```json:metadata\n{\"files\": [\"src-tauri/src/export_import.rs\", \"src-tauri/src/lib.rs\"], \"verifyCommand\": \"cd src-tauri && cargo test export_import::\", \"acceptanceCriteria\": [\"export writes profile.json + per-mod zips\", \"import installs mods + creates matching profile, auto-suffix collisions, no .share/subscribe\", \"round-trip yields same mods+pack\", \"cargo test green\"]}\n```"
     },
     {

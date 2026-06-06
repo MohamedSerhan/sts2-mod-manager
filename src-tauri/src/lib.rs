@@ -3,6 +3,7 @@ mod bug_report;
 mod download;
 mod downloads_watcher;
 mod error;
+pub mod export_import;
 mod external_open;
 mod fs_safety;
 mod game;
@@ -382,6 +383,8 @@ pub fn run() {
             sharing::fetch_shared_profile_cmd,
             sharing::install::install_shared_profile,
             modpack_browser::fetch_modpack_browser_page,
+            export_import::export_profile_to_file,
+            export_import::import_sts2pack,
             // Deep link
             consume_pending_deep_link,
             // Subscriptions (friend sync)

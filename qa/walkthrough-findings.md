@@ -150,20 +150,20 @@ This is a structured walk through the STS2 Mod Manager from a user's perspective
 
 ---
 
-## Flow 10 — Create a profile (snapshot)
-**User does:** Profiles → New → name it → snapshot of current mod state saved.
+## Flow 10 — Create a modpack
+**User does:** Modpacks → Create modpack → choose a starting strategy → name it → modpack manifest saved.
 
 **Can break:**
 - Folder-keyed source lookup in snapshot (fixed, **untested**)
 - Bundle URL inheritance from existing share
 - Disabled mods included in snapshot
 
-**Coverage:** 🔴
+**Coverage:** 🟢 `qa/runner/smoke.mjs::specCreateModpack`; see `qa/coverage-matrix.md`.
 
 ---
 
-## Flow 11 — Switch profiles
-**User does:** Profiles list → click another profile → apply.
+## Flow 11 — Switch modpacks
+**User does:** Modpacks list → open another modpack → click Switch to → apply.
 
 **Can break:**
 - Re-download of missing mods via folder-keyed `github_repo` (fixed, **untested**)
@@ -171,12 +171,12 @@ This is a structured walk through the STS2 Mod Manager from a user's perspective
 - Drift report (added/removed/version-changed)
 - Pinned-mod exclusion from apply
 
-**Coverage:** 🔴
+**Coverage:** 🟢 `qa/runner/smoke.mjs::specModpackSwitchPreservesFreeze`; see `qa/coverage-matrix.md`.
 
 ---
 
-## Flow 12 — Share a profile (curator path)
-**User does:** Profiles → Share → manager creates `sts2mm-profiles` repo on the curator's GitHub → uploads profile.json + mod bundles → returns share code.
+## Flow 12 — Share a modpack (curator path)
+**User does:** Modpacks → open a modpack → Share → manager creates `sts2mm-profiles` repo on the curator's GitHub → uploads profile.json + mod bundles → returns share code.
 
 **Can break:**
 - GitHub token validation
@@ -337,7 +337,7 @@ Mod authors use the manager differently from players. They iterate, break things
 **Coverage:** 🟡 `gameVersionSatisfies` is small and trivially correct, but the audit's walk-back path that uses it is 🔴.
 
 ### Flow A5 — Curate a modpack and share it
-**Curator does:** Installs the 12 mods they like → Profiles → New → name it → Share → manager creates `sts2mm-profiles` repo on their GitHub, uploads `profile.json` + bundles every mod whose source isn't reachable → returns share code → curator posts code in Discord.
+**Curator does:** Installs the 12 mods they like → Modpacks → Create modpack → name it → Share → manager creates `sts2mm-profiles` repo on their GitHub, uploads `profile.json` + bundles every mod whose source isn't reachable → returns share code → curator posts code in Discord.
 
 **Can break:**
 - GitHub repo creation (token scope, rate limits)
@@ -348,7 +348,7 @@ Mod authors use the manager differently from players. They iterate, break things
 **Coverage:** 🔴
 
 ### Flow A6 — Push an update to a published modpack
-**Curator does:** Updates a mod in their modpack → Profiles → re-share → friends who subscribed see "update available" → apply.
+**Curator does:** Updates a mod in their modpack → Modpacks → open the pack → re-share → friends who subscribed see "update available" → apply.
 
 **Can break:**
 - Re-share idempotency (overwrite existing share code's data, don't generate a new one)

@@ -1,41 +1,22 @@
-# What's left — QA backlog
+# What's left - QA backlog
 
-Snapshot of unfinished QA work at the time of the v1.3.4 cut. Each
-item lists what it costs to do and why we deferred it. Pick from
-here when there's a slow week or after a user reports something
-related.
+Historical snapshot of unfinished QA work from earlier release cuts. The current release-confidence source of truth is `qa/coverage-matrix.md`; use this file only for older context and deeper future-harness ideas.
 
 ## Tier 2 WebDriver scenarios (UI specs)
 
-**Updated 2026-05-13:** Phase 2 of the frontend-coverage-95 work
-landed `specProfileSwitchPreservesPins` and `specRepairWalkback`
-(see `qa/runner/smoke.mjs`). Walk-back uses a new cassette under
-`qa/fixtures/github/repos/qa-fixture/walkback-mod/`.
+**Updated 2026-06-06:** issue #156 added `qa/coverage-matrix.md` and wired `npm run qa:matrix` into `npm run qa`, so routine release-regression ownership now lives in the matrix instead of this backlog.
 
-What's covered today (per `qa/scenarios/INDEX.md` + the smoke
-harness):
-- Scenarios 006–010 — toggle / audit-count / pin / delete / create-
-  profile.
-- ~~Profile switch + apply (the v1.3.1 pin-preservation contract)~~
-  — **DONE (2026-05-13)**.
-- ~~Repair walk-back — newer-than-game cassette, click Repair,
-  verify the walk-back tag installs~~ — **DONE (2026-05-13)**.
+What's covered today (per `qa/scenarios/INDEX.md`, `qa/coverage-matrix.md`, and the smoke harness):
+- Scenarios 006-010 - toggle / audit-count / pin / delete / create modpack.
+- Modpack switch + apply (the v1.3.1 freeze/pin-preservation contracts).
+- Repair walk-back - newer-than-game cassette, click Repair, verify the walk-back tag installs.
+- Share-code import, share publish, restore backup, subscription updates, bulk operations, and the tier-1 historical bugs now have automated owners in the matrix.
 
-Still uncovered (priority order):
+Still manual or future-harness work:
 
-- **Drag-drop a `.zip` onto the window** — Selenium can dispatch the
-  Drop event but tauri's drag-drop intercept is at the OS level.
-  Likely requires computer-use MCP. Defer until reported.
-- **Click "Update available" pill → row refreshes** — exercises the
-  walk-back compat check + zip download + extraction. Needs a zip
-  cassette fixture (we'd cassette `github.com` redirects with a
-  Compress-Archive-built tiny manifest zip). ~2 hours.
-- **Share-code import flow** — needs a stateful GitHub mock (Profile
-  sharing item below).
-- **Subscription apply** — modpack curator pushes update, friend
-  applies. Needs the stateful mock.
-- **Drag-drop + launch + deep link** — all OS-level; either
-  computer-use MCP or new harness tier.
+- **Drag-drop a `.zip` onto the window** - Selenium can dispatch the Drop event but tauri's drag-drop intercept is at the OS level. Likely requires computer-use MCP. Defer until reported.
+- **Launch game from the packaged app** - Steam protocol/direct binary launch needs OS spot-checking.
+- **Deep-link OS registration and warm-start focus** - frontend routing is covered, but real protocol registration remains a desktop/OS boundary.
 
 ## Cassette playback — DONE (v1.3.4 + qa-cassette feature)
 
@@ -108,44 +89,18 @@ and `state.rs::new`.
 A shipped build (no feature, no env vars) behaves identically to
 v1.3.4 — these are pure escape hatches.
 
-## Tier 2 scenarios for historical bugs — DONE (2026-05-13)
+## Tier 2 scenarios for historical bugs - CURRENT
 
-These were tracked in `walkthrough-findings.md` as ⚠️ "fix shipped
-but no test guards it". All three now have WebDriver specs under
-`qa/runner/smoke.mjs`:
+The current owner list is in `qa/coverage-matrix.md`. The older WebDriver-only notes below were folded into the issue #156 matrix pass:
 
-- ~~**#20 — Profile Repair deletes orphan disabled files.**~~ —
-  covered by `specRepairRemovesOrphanDisabled`.
-- ~~**#21 — Game-version-skipped mods don't pollute the saved
-  snapshot.**~~ — covered by `specSkippedModAbsentFromSnapshot`.
-  **Caveat:** the spec drives the apply-time skip path
-  (`switch_profile` correctly disables incompatible mods on disk and
-  records `enabled: false` in the profile JSON). The companion
-  *manual-snapshot* path in `src-tauri/src/profiles.rs::snapshot_current_with_sources`
-  does NOT mirror the bug-#21 filter that landed in
-  `subscriptions.rs::build_synced_profile_snapshot`. A re-snapshot
-  via the Profiles kebab will still include incompatible mods. New
-  follow-up item logged in the `Phase 2 follow-ups` section below.
-- ~~**#22 — Profile state is sticky after toggle.**~~ — covered by
-  `specToggleStickyAcrossProfileSwitch`.
+- **#20 - Disabled library extras are preserved.** Current behavior preserves disabled library extras and keeps them out of drift; covered by `specDisabledLibraryExtrasArePreserved`.
+- **#21 - Game-version-incompatible active mods do not pollute created modpacks.** Covered by `specIncompatibleModAbsentFromCreatedModpack` plus `CreateModpackWizard.test.tsx`; the create-from-active wizard leaves incompatible active mods unselected and the saved modpack stays clean.
+- **#22 - Toggle state is sticky after a modpack switch.** Covered by `specToggleStickyAcrossModpackSwitch`.
 
 ## Phase 2 follow-ups (logged 2026-05-13)
 
-- **Bug #21 second half — manual snapshot doesn't filter
-  incompatible mods.** `snapshot_current_with_sources` (profiles.rs
-  ~L188) loops every on-disk mod and writes them into the snapshot
-  regardless of `min_game_version`. The `build_synced_profile_snapshot`
-  in subscriptions.rs has the correct filter (commit 37df97f). Mirror
-  the filter into the plain-snapshot path, then upgrade
-  `specSkippedModAbsentFromSnapshot` to drive the kebab → Snapshot
-  flow and assert the skipped mod is absent. ~1 hour.
-- **Cassette URL→path quirk with version tags.** `qa_cassette::url_to_path`
-  uses `PathBuf::extension()` to decide whether to append `.json`,
-  but `v3.0.0` has `Some("0")` as extension. Per-tag fixtures must
-  be stored without the `.json` suffix (see `qa/fixtures/github/repos/
-  qa-fixture/walkback-mod/releases/tags/v1.0.0` for the workaround).
-  Real fix: always append `.json` for the GitHub bucket unless the
-  path ends in `.zip` / `.tar.gz`. ~15 min.
+- **Bug #21 second half - incompatible active mods in the manual create path.** Resolved by the current create-from-active wizard coverage in issue #156.
+- **Cassette URL-to-path quirk with version tags.** `qa_cassette::url_to_path` uses `PathBuf::extension()` to decide whether to append `.json`, but `v3.0.0` has `Some("0")` as extension. Per-tag fixtures must be stored without the `.json` suffix (see `qa/fixtures/github/repos/qa-fixture/walkback-mod/releases/tags/v1.0.0` for the workaround). Real fix: always append `.json` for the GitHub bucket unless the path ends in `.zip` / `.tar.gz`. ~15 min.
 
 ## Frontend coverage gate — DONE (2026-05-13, 95/90/95/95 landed)
 

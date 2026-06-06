@@ -9,7 +9,7 @@ test('classifyPaths buckets app/scripts/workflows', () => {
   assert.deepEqual(classifyPaths(['package-lock.json']), { app: true, scripts: false, workflows: false, qa: false });
   assert.deepEqual(classifyPaths(['scripts/foo.mjs']), { app: false, scripts: true, workflows: false, qa: false });
   assert.deepEqual(classifyPaths(['.github/workflows/ci.yml']), { app: false, scripts: false, workflows: true, qa: false });
-  assert.deepEqual(classifyPaths(['README.md', 'docs/x.md', '.claude/y']), { app: false, scripts: false, workflows: false, qa: false });
+  assert.deepEqual(classifyPaths(['README.md', 'docs/x.md', '.codex/y']), { app: false, scripts: false, workflows: false, qa: false });
 });
 
 test('classifyPaths ignores src-tauri/target, handles mixed + empty/null', () => {

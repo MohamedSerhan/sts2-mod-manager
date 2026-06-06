@@ -1,7 +1,7 @@
 // scripts/nexus-triage.mjs
 // Nexus -> GitHub triage orchestrator. Hourly cron in CI fetches new Nexus
-// comments on mod 856, classifies each, files GitHub issues with an @claude
-// investigation prompt for non-kudos items.
+// comments on mod 856, classifies each, and files GitHub issues with a
+// maintainer-ready investigation checklist for non-kudos items.
 //
 // Spec: docs/superpowers/specs/2026-05-26-nexus-github-triage-design.md
 // Addendum 2026-05-27: pivoted from GraphQL to HTML widget scraping.
@@ -548,8 +548,8 @@ function bugToItem(b) {
     id: String(b.id),
     title: b.title,
     // The bug table doesn't expose the full description (it loads lazily via
-    // loadIssueReplies). The title is descriptive enough for triage; @claude
-    // investigates the codebase + the maintainer opens the Nexus link for detail.
+    // loadIssueReplies). The title is descriptive enough for triage; the
+    // maintainer can open the Nexus link for detail when needed.
     body: b.title,
     status: b.status,
     gameVersion: b.gameVersion,

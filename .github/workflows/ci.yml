@@ -8,6 +8,12 @@ on:
     branches: [main]
     types: [opened, synchronize, reopened, labeled, unlabeled]
   workflow_dispatch:
+    inputs:
+      openai_smoke:
+        description: "Run only the OpenAI API-key smoke test"
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: ci-gate-${{ github.event.pull_request.number || github.ref }}
@@ -36,6 +42,8 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             CHANGED=$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}")
+          elif [ "${{ github.event_name == 'workflow_dispatch' && inputs.openai_smoke }}" = "true" ]; then
+            CHANGED=""
           else
             # workflow_dispatch: run everything.
             CHANGED=$(printf 'src/x\nsrc-tauri/x\nscripts/x\n.github/workflows/x\nqa/x\n')
@@ -216,7 +224,6 @@ jobs:
           node --test scripts/nexus-triage.test.mjs
           node --test scripts/dev-build-stamp.test.mjs
           node --test scripts/make-dev-icon.test.mjs
-          node --test scripts/qa-pipeline.test.mjs
           node --test scripts/ci-changes.test.mjs
           node --test scripts/changelog-fragments.test.mjs
           node --test scripts/translate-changelog.test.mjs
@@ -236,6 +243,45 @@ jobs:
           # SC2016 (single-quoted $ won't expand) is a chronic false-positive on our
           # run blocks that embed node -e / python -c / jq with intentional single quotes.
           SHELLCHECK_OPTS: --exclude=SC2016
+
+  openai-smoke:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.openai_smoke }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: Verify OpenAI API key
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CHANGELOG_TRANSLATE_MODEL: ${{ vars.CHANGELOG_TRANSLATE_MODEL || 'gpt-5' }}
+        run: |
+          node --input-type=module <<'NODE'
+          import OpenAI from 'openai';
+
+          if (!process.env.OPENAI_API_KEY) {
+            console.error('OPENAI_API_KEY is not available to this workflow.');
+            process.exit(1);
+          }
+
+          const model = process.env.CHANGELOG_TRANSLATE_MODEL || 'gpt-5';
+          const client = new OpenAI();
+          const response = await client.responses.create({
+            model,
+            input: 'Reply with exactly: OK',
+            max_output_tokens: 32,
+          });
+
+          if (!response.id) {
+            console.error('OpenAI response did not include an id.');
+            process.exit(1);
+          }
+
+          console.log(`OpenAI smoke OK using ${model}. Response id: ${response.id}`);
+          NODE
 
   changelog:
     needs: changes

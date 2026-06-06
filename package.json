@@ -48,7 +48,6 @@
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
-    "@anthropic-ai/sdk": "^0.100.1",
     "@tailwindcss/vite": "^4.3.0",
     "@tauri-apps/cli": "^2",
     "@testing-library/jest-dom": "^6.9.1",
@@ -61,6 +60,7 @@
     "cross-env": "^10.1.0",
     "jimp": "^1.6.1",
     "jsdom": "^29.1.1",
+    "openai": "^6.42.0",
     "png-to-ico": "^3.0.1",
     "selenium-webdriver": "^4.44.0",
     "tailwindcss": "^4.3.0",

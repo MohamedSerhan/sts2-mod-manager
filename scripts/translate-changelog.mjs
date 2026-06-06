@@ -7,7 +7,7 @@
  *
  * Design goals:
  *   - Idempotent: skips a version already translated (unless --force).
- *   - Non-blocking: missing ANTHROPIC_API_KEY or an API error warns and exits 0
+ *   - Non-blocking: missing OPENAI_API_KEY or an API error warns and exits 0
  *     so a release is never blocked; the app falls back to English.
  *   - Testable: run() accepts an injected translateFn so node:test never needs
  *     the SDK or a network.
@@ -23,6 +23,9 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..');
+
+export const API_KEY_ENV = 'OPENAI_API_KEY';
+export const DEFAULT_MODEL = 'gpt-5';
 
 export const LOCALES = [
   { key: 'ru', name: 'Russian' },
@@ -74,24 +77,38 @@ const SYSTEM_PROMPT = [
   '- Output ONLY the translated Markdown body — no preamble, no code fence.',
 ].join('\n');
 
-/** Default translator: one Anthropic API call per locale (prompt-cached system). */
-async function anthropicTranslate(body, languageName) {
-  const { default: Anthropic } = await import('@anthropic-ai/sdk');
-  const client = new Anthropic(); // reads ANTHROPIC_API_KEY
-  const model = process.env.CHANGELOG_TRANSLATE_MODEL || 'claude-sonnet-4-6';
-  const resp = await client.messages.create({
-    model,
-    max_tokens: 4096,
-    system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
-    messages: [
-      { role: 'user', content: `Target language: ${languageName}\n\n<changelog>\n${body}\n</changelog>` },
-    ],
-  });
-  return resp.content
-    .filter((b) => b.type === 'text')
-    .map((b) => b.text)
+function responseOutputText(resp) {
+  if (typeof resp.output_text === 'string') return resp.output_text.trim();
+  return (resp.output ?? [])
+    .flatMap((item) => item.content ?? [])
+    .filter((part) => part.type === 'output_text' && typeof part.text === 'string')
+    .map((part) => part.text)
     .join('')
     .trim();
+}
+
+/** Default translator: one OpenAI Responses API call per locale. */
+async function openaiTranslate(body, languageName) {
+  const { default: OpenAI } = await import('openai');
+  const client = new OpenAI(); // reads OPENAI_API_KEY
+  const model = process.env.CHANGELOG_TRANSLATE_MODEL || DEFAULT_MODEL;
+  const resp = await client.responses.create({
+    model,
+    max_output_tokens: 4096,
+    instructions: SYSTEM_PROMPT,
+    input: [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'input_text',
+            text: `Target language: ${languageName}\n\n<changelog>\n${body}\n</changelog>`,
+          },
+        ],
+      },
+    ],
+  });
+  return responseOutputText(resp);
 }
 
 function localePath(rootDir, key) {
@@ -111,15 +128,15 @@ function readMap(path) {
  * Returns { version, written: [keys], skipped: [keys] }. Non-blocking.
  */
 export async function run({
-  translateFn = anthropicTranslate,
+  translateFn = openaiTranslate,
   rootDir = REPO_ROOT,
   version,
   force = false,
   log = console,
 } = {}) {
-  const usingRealApi = translateFn === anthropicTranslate;
-  if (usingRealApi && !process.env.ANTHROPIC_API_KEY) {
-    log.warn('translate-changelog: ANTHROPIC_API_KEY not set — skipping (app falls back to English).');
+  const usingRealApi = translateFn === openaiTranslate;
+  if (usingRealApi && !process.env[API_KEY_ENV]) {
+    log.warn(`translate-changelog: ${API_KEY_ENV} not set — skipping (app falls back to English).`);
     return { version: null, written: [], skipped: [] };
   }
 

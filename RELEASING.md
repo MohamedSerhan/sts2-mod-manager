@@ -117,320 +117,77 @@ Apple Silicon; the build is a universal binary).
 
 ---
 
-## Operator runbook — Nexus triage
+## Operator runbook - Nexus triage
 
-This section covers the hourly Nexus → GitHub triage automation introduced in `2026-05-26`. See [`docs/superpowers/specs/2026-05-26-nexus-github-triage-design.md`](docs/superpowers/specs/2026-05-26-nexus-github-triage-design.md) for the full design rationale.
+This section covers the Nexus -> GitHub triage automation introduced in `2026-05-26`. The automation now files normal maintainer/Codex-ready issues; it does **not** depend on a reactive Claude agent.
 
-### Day 0 setup (one-time, after merging the triage PR)
+### Day 0 setup
 
-1. **Generate a Claude Code OAuth token** (1-year validity, designed for CI):
+1. **Confirm GitHub CLI auth** so the local runner can create issues and push the updated state file:
 
-       claude setup-token
+       gh auth status
 
-   Follow the browser prompt. The CLI prints a token to stdout.
+2. **Create the dedicated Python venv** used by the Nexus fetch shim:
 
-2. **Store the token as a repo secret:**
+       python -m venv .nexus-triage-venv
+       .nexus-triage-venv\Scripts\python -m pip install curl_cffi
 
-       gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo MohamedSerhan/sts2-mod-manager
+   The runner prepends `.nexus-triage-venv\Scripts` to `PATH`; `.nexus-triage-venv/` is gitignored.
 
-   Paste the token when prompted.
+3. **Bootstrap the state file** locally so the first triage run does not refile old Nexus comments:
 
-3. **Confirm `NEXUS_API_KEY` is set** (required for both triage and the `publish-nexus` upload job):
-
-       gh secret list --repo MohamedSerhan/sts2-mod-manager | grep NEXUS_API_KEY
-
-   Triage fetches mod comments via `POST api.nexusmods.com/v2/graphql` using the `apikey:` header.
-   The same key already stored for `publish-nexus` is reused — no new secret needed.
-
-4. **Optionally override `NEXUSMODS_POSTS_THREAD_ID`** (defaults to `16866026` in code; set as repo
-   var only if the thread ID ever changes):
-
-       gh variable set NEXUSMODS_POSTS_THREAD_ID --body "16866026" --repo MohamedSerhan/sts2-mod-manager
-
-5. **Bootstrap the state file** locally so the first triage run doesn't refile months-old comments:
-
-       NEXUS_API_KEY=<your-key> node scripts/nexus-triage.mjs --bootstrap
+       node scripts/nexus-triage.mjs --bootstrap
        git add scripts/nexus-triage-state.json
        git commit -m "chore(triage): bootstrap Nexus triage state"
        git push
 
-7. **Run a dry-run from Actions UI** to verify the live classifier output:
+4. **Run a dry-run** and inspect what would be filed:
 
-   - Actions → `Nexus triage` → "Run workflow" with `dry_run: true`
-   - Read the run logs. If the classifications look right on real comments, proceed.
-   - If something looks wrong, open a follow-up PR with classifier tweaks and re-test before enabling cron.
+       node scripts/nexus-triage.mjs --dry-run
 
-8. **Enable the hourly cron** by uncommenting the `schedule:` block in `.github/workflows/nexus-triage.yml`:
+5. **Enable the local scheduled runner** if you want unattended triage:
 
-       schedule:
-         - cron: "0 * * * *"
-
-9. **Trigger the watchdog ping** manually once to confirm `@claude` is online:
-
-   - Actions → `Nexus watchdog — ping` → "Run workflow"
-   - Wait a few minutes for @claude to reply with PING-OK
-   - If no reply within 30 min, the OAuth token is bad — return to step 1
-
-### Annual token renewal
-
-`CLAUDE_CODE_OAUTH_TOKEN` is valid for ~1 year. Either the watchdog catches expiry (files an `ops:token-renewal` issue automatically) or you renew on your own schedule.
-
-To renew:
-
-1. `claude setup-token` (~30 seconds, browser auth)
-2. `gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo MohamedSerhan/sts2-mod-manager` and paste the new token
-3. Actions → `Nexus watchdog — ping` → "Run workflow" — confirms the new token
-4. If a renewal issue was open, close it with `gh issue close <num>`
-
-### Killswitches
-
-**To pause triage cleanly:**
-
-- Actions → `Nexus triage` → menu → "Disable workflow". State file frozen at last successful run. Re-enable when ready.
-
-**To pause from a phone (no terminal):**
-
-- GitHub web UI → `scripts/` → "Add file" → name it `nexus-triage.disabled` (any content). The next cron run will exit 0 with no work. Delete the file to resume.
-
-### When the watchdog files an `ops:token-renewal` issue
-
-The token expired. Follow the "Annual token renewal" steps above. The renewal issue includes the procedure inline.
-
-### When triage fails for a different reason
-
-- Open the failed workflow run in Actions UI
-- The script exits with specific codes:
-  - exit 1: transient (network, GitHub API). Re-run the failed workflow.
-  - exit 2: configuration drift (missing secret, missing state file, malformed state, hard schema drift). Read the error message — it names the missing piece.
-
-### Reliability note: GraphQL is reliable from CI
-
-The triage script fetches Nexus mod-page comments via the documented GraphQL API
-(`POST api.nexusmods.com/v2/graphql`) using `NEXUS_API_KEY`. This is a JSON API
-call — not a webpage — so Cloudflare's bot protection does not apply. Expect
-near-100% success rate from GitHub Actions runners, unlike the prior HTML scraping
-approach which was 100% Cloudflare-blocked from CI IP ranges.
-
-**Update 2026-05-27 — runtime moved to local Task Scheduler.** The "GraphQL is reliable" claim above was wrong: GraphQL's `commentThread` query covers collection comments only, not mod-page comments. Mod-page comments live behind the legacy `Core/Libs/Common/Widgets/CommentContainer` HTML widget endpoint, which Cloudflare challenges 100% of the time from GitHub Actions IPs. The triage script now runs from your residential IP via `scripts/run-nexus-triage-local.bat` + Windows Task Scheduler. See section below.
+   - Task Scheduler -> Create Task
+   - Name: `Nexus Triage`
+   - Trigger: daily, or whatever cadence you want
+   - Action: `C:\Users\xxsku\repos\sts2-mod-manager\scripts\run-nexus-triage-local.bat`
+   - Start in: `C:\Users\xxsku\repos\sts2-mod-manager`
 
 ### Local runtime via Task Scheduler
 
 `scripts/run-nexus-triage-local.bat` is the Windows runner:
-1. Prepends the `.nexus-triage-venv\Scripts` venv to `PATH` (see One-time setup)
-2. Sets the `NEXUSMODS_*` env vars (hard-coded for mod 856)
+
+1. Prepends the `.nexus-triage-venv\Scripts` venv to `PATH`
+2. Sets the `NEXUSMODS_*` env vars for mod 856
 3. Pulls `gh auth token` for `GITHUB_TOKEN`
 4. Honors the `scripts/nexus-triage.disabled` killswitch
-5. Updates the repo to `main` + pulls latest
-6. Preflights `python -c "import curl_cffi"` — bails loudly if the venv is missing/broken
+5. Updates the repo to `main` and pulls latest
+6. Preflights `python -c "import curl_cffi"`
 7. Runs `node scripts/nexus-triage.mjs`
 8. Commits and pushes the updated state file
-9. Logs each run to `.nexus-triage-runs/YYYY-MM-DD.log` (gitignored), and exits with
-   the script's real exit code so a failed run shows as non-zero in Task Scheduler
+9. Logs each run to `.nexus-triage-runs/YYYY-MM-DD.log` (gitignored)
 
-#### One-time setup
+The per-run cap is 5 issues. With a daily trigger, a backlog drains at 5/day; steady-state mod traffic is well under that. Bump `PER_RUN_CAP` in `scripts/nexus-triage.mjs` if you want faster catch-up.
 
-1. Create the dedicated venv the runner uses (holds `curl_cffi`, the Python
-   TLS-impersonate shim). **Do not `pip install --user`** — Task Scheduler logons
-   do not add the per-user site-packages to `sys.path`, so a `--user` install is
-   invisible to the scheduled run and every triage dies with
-   `ModuleNotFoundError: No module named 'curl_cffi'` — silently, since the runner
-   used to `exit /b 0` regardless (this is exactly what broke 2026-05-28→05-31).
-   From the repo root:
-   ```
-   python -m venv .nexus-triage-venv
-   .nexus-triage-venv\Scripts\python -m pip install curl_cffi
-   ```
-   The runner prepends `.nexus-triage-venv\Scripts` to `PATH` so the `python` it
-   spawns resolves here; `.nexus-triage-venv/` is gitignored.
-2. `gh auth status` — make sure you're logged in
-3. **Task Scheduler → Create Task…** (already created as "Nexus Triage" on
-   2026-05-27 — these are the settings if you ever need to recreate it):
-   - Name: `Nexus Triage`
-   - **Triggers:** Daily at 10:00
-   - **Actions:** Start a program → `C:\Users\xxsku\repos\sts2-mod-manager\scripts\run-nexus-triage-local.bat`
-   - Start in: `C:\Users\xxsku\repos\sts2-mod-manager`
-4. Double-click the .bat once to test. Check `.nexus-triage-runs\<today>.log`.
+### What still runs in CI
 
-The per-run cap is 5 issues. With a daily trigger, a backlog drains at 5/day;
-steady-state mod traffic is well under that. Bump `PER_RUN_CAP` in
-`scripts/nexus-triage.mjs` if you want faster catch-up.
+- `nexus-triage.yml` is kept for `workflow_dispatch` diagnostics only.
+- Its `schedule:` block stays commented out because GitHub-hosted runners are Cloudflare-blocked by Nexus.
+- The Claude watchdog and reactive Claude workflows were removed.
 
-> **`@claude` investigation requires the Claude GitHub App.** Filing issues
-> works without it, but the reactive investigation comments need the app
-> installed at <https://github.com/apps/claude> on this repo (one-time, separate
-> from the `CLAUDE_CODE_OAUTH_TOKEN` secret). Until then, `claude.yml` runs fail
-> with "Claude Code is not installed on this repository".
+### Killswitches
 
-#### What still runs in CI
+- Create `scripts/nexus-triage.disabled` with any content; the next run exits 0 with no work.
+- Disable the Task Scheduler entry from the Task Scheduler UI.
+- Both leave the state file frozen at the last successful run.
 
-- `claude.yml` — reactive `@claude` mention handler
-- `nexus-watchdog.yml` + `nexus-watchdog-check.yml` — weekly token-health probe
-- `nexus-triage.yml` — kept for `workflow_dispatch` diagnostics only; `schedule:` is commented out because CI runs always Cloudflare-block
+### Retired Claude automation
 
-#### Killswitches
+The previous reactive `@claude`, auto-fix, QA-Claude, watchdog, and conflict-watcher workflows were removed. Nexus triage issues are now ordinary GitHub issues with a checklist that a maintainer or Codex session can pick up manually.
 
-- Create `scripts/nexus-triage.disabled` (any content) — the .bat exits 0 immediately
-- Disable the Task Scheduler entry from the Task Scheduler UI
-- Both leave the state file frozen at the last successful run
+The old labels (`auto-fix`, `qa`, `qa-passed`, `qa-needs-human`, `watchdog-ping`, `ops:token-renewal`) can remain for historical issues, but they no longer trigger automation in this repository.
 
 ---
-
-## Operator runbook — auto-fix bot (sub-project C)
-
-The auto-fix bot lets the maintainer ask Claude to implement a fix for a
-GitHub issue and open a PR — all from the GitHub UI, without touching a
-terminal.  The underlying workflows live in `.github/workflows/claude-autofix.yml`.
-
-### How to use it
-
-**Start a fix** — label any issue `auto-fix` from the issue sidebar.
-Claude opens a branch named EXACTLY `auto-fix/<issue-number>` (no suffix or
-slug), implements a fix, and opens a PR with title/body referencing the issue
-(`Fixes #N`).  A workflow step then applies the `dev-build` + `auto-fix` labels
-via `DEV_BUILD_LABEL_TOKEN` so the dev-build trigger fires deterministically.
-
-The `dev-build` label triggers sub-project D to build a `dev-pr<N>` prerelease
-so you can install and test the fix immediately via Settings → Dev Builds (sub-project E).
-
-**Revise the PR** — post a comment on the PR:
-
-```
-@claude <your feedback here>
-```
-
-Claude updates the branch in-place.  Repeat as many times as needed.
-
-**Review and merge** — PRs are **never auto-merged**.  Inspect the diff,
-check that the `check` job passed (it runs automatically on every push to the
-PR branch), then merge when satisfied.
-
-### Auto-fix fanout (large issues)
-
-When an `auto-fix` issue is too large for a single pass, the bot fans out: it
-decomposes the work into up to `FANOUT_MAX_PIECES` (default 5) independent pieces,
-implements them with parallel subagents in a shared workspace, commits them onto `auto-fix/<issue>`,
-and opens ONE integrated PR. That PR goes through the same `qa` → your approval →
-CI Gate → merge path as any other auto-fix PR — nothing merges or releases without
-your approval. Tune the cap via the `FANOUT_MAX_PIECES` env in `claude-autofix.yml`.
-
-### One-time setup
-
-Run these once after merging this PR:
-
-**1. Create the `auto-fix` label**
-
-```bash
-gh label create auto-fix \
-  --color 5319e7 \
-  --description "Ask the Claude bot to implement a fix for this issue" \
-  --repo MohamedSerhan/sts2-mod-manager
-```
-
-**2. Enable Dependabot security updates**
-
-Go to **Settings → Code security** and turn on "Dependabot security updates".
-Dependabot PRs are automatically labeled `dev-build` by `.github/workflows/dependabot-label.yml`,
-so they flow through the same dev-build pipeline.
-
-**3. Create and store the `DEV_BUILD_LABEL_TOKEN` secret**
-
-After Claude opens the PR, a dedicated workflow step applies `dev-build` +
-`auto-fix` using this PAT.  The default `GITHUB_TOKEN` cannot trigger downstream
-workflows (GitHub prevents workflow-to-workflow triggers with the default token
-for security reasons), so the PAT is what makes sub-project D's dev build fire.
-
-Minimum PAT scopes — when creating the PAT at
-<https://github.com/settings/tokens?type=beta>:
-- Repository access: `MohamedSerhan/sts2-mod-manager` only
-- Permissions: **Contents: Read** + **Pull requests: Write**
-
-Store it:
-
-```bash
-gh secret set DEV_BUILD_LABEL_TOKEN \
-  --repo MohamedSerhan/sts2-mod-manager
-# paste the PAT when prompted
-```
-
-Without this secret the `dev-build` label is not applied and the dev-build
-pipeline does not trigger.  The PR itself is still opened — only the automatic
-test build is skipped.
-
-**4. Install the Claude GitHub App** (if not already done for `claude.yml`)
-
-<https://github.com/apps/claude> → Install on `MohamedSerhan/sts2-mod-manager`.
-Both the investigate flow (`claude.yml`) and the auto-fix flow
-(`claude-autofix.yml`) require the app.
-
-### Safety posture
-
-| Property | Detail |
-|---|---|
-| **Opt-in only** | The bot acts only when a maintainer explicitly labels an issue `auto-fix` or posts `@claude` on a PR. No automatic triggering on code push or PR open. |
-| **Actor gate** | Both the label-to-fix and the `@claude`-revise jobs check that the actor has `write`, `admin`, or `maintain` permission on the repo before doing any work. External contributors cannot trigger the bot. |
-| **CI gate** | Every push to an auto-fix PR branch runs the `check` job (lint + tests). The PR cannot be merged without it passing. |
-| **No auto-merge** | The bot opens PRs; you merge them. There is no auto-merge, no squash-on-approve, no bypass of branch-protection rules. |
-| **Read-only investigate flow unchanged** | `claude.yml` (the `@claude` mention handler on regular issues and PRs) is separate and read-only. It was not modified by sub-project C. |
-| **Write access scope** | The bot's write access is confined to creating branches and opening/updating PRs via the Claude GitHub App. It cannot modify secrets, settings, or workflows.
-
-### QA review + approval-merge (the `qa` label)
-
-#### How it works
-
-Add the `qa` label to any PR — including your own hand-written PRs — to enable
-the QA-review loop and approval-gated auto-merge.  When the auto-fix bot opens
-a fix PR it applies `qa` automatically, so the loop runs without any extra
-action on your part.
-
-Once labeled, a second adversarial QA-Claude reads the PR diff, the CI results,
-and the codebase context, then either approves or posts revision feedback.  If
-there is feedback the bot revises the branch in-place and QA re-checks —
-**including your own PRs**: the bot will commit revisions to whichever branch
-carries the `qa` label.  That is the point — it minimises back-and-forth before
-the PR ever reaches your desk.
-
-The loop continues for up to **5 rounds**.
-
-- **QA satisfied** → the PR receives the `qa-passed` label and a ping to you.
-  Do a single final read of the diff, then **approve** the PR.  Your approval
-  (`MohamedSerhan`) — and only yours — combined with a green CI run triggers
-  the auto-merge.
-- **Round cap reached without QA sign-off** → the PR is labeled `qa-needs-human`
-  and the loop stops.  Review it manually; merge (or close) at your discretion.
-
-A PR that does **not** carry the `qa` label is unaffected — it stays on the
-normal merge-manually path.
-
-#### One-time label setup
-
-Run these once after merging the QA-merge PR:
-
-```bash
-gh label create qa \
-  --color 1d76db \
-  --description "Run the QA-review loop + enable approval-merge" \
-  --repo MohamedSerhan/sts2-mod-manager
-
-gh label create qa-passed \
-  --color 0e8a16 \
-  --description "QA satisfied — ready for the maintainer's final check" \
-  --repo MohamedSerhan/sts2-mod-manager
-
-gh label create qa-needs-human \
-  --color b60205 \
-  --description "QA hit the round cap — needs the maintainer" \
-  --repo MohamedSerhan/sts2-mod-manager
-```
-
-#### Safety posture
-
-| Property | Detail |
-|---|---|
-| **Approval gate** | Only `MohamedSerhan`'s approval triggers the auto-merge. Another reviewer's approval has no effect. |
-| **Dual condition** | Auto-merge requires both `qa-passed` **and** a green CI run. Either condition alone is not enough. |
-| **5-round cap** | The loop escalates to `qa-needs-human` rather than running forever. You always get the final word. |
-| **Releases stay manual** | The bot adds a `changelog.d/` fragment as part of its fix work, but it never cuts or publishes a release. `scripts/release.sh` remains your manual step. |
-| **No-`qa` PRs unaffected** | Removing the `qa` label (or never adding it) leaves the PR on the normal manual-merge path with no QA loop and no auto-merge. |
 
 ### CI Gate (required checks)
 
@@ -451,16 +208,15 @@ checks it runs depend on what files a PR touches.
   `docs/`, `*.md`) run lighter checks or none, so they stay fast and do not
   require a full build.
 
-Because `CI Gate` is required on `main`, **nothing merges — the auto-fix bot's
-auto-merge or your own manual merge — until the check is green.**  This is the
-deterministic floor under QA-Claude's judgment: a broken change cannot ship to
-users autonomously, regardless of how the review loop resolves.
+Because `CI Gate` is required on `main`, **nothing should merge until the check
+is green.** This is the deterministic floor under manual review: a broken change
+cannot ship through the normal PR path.
 
 #### The `no-changelog` opt-out
 
 App PRs must add a changelog entry — a `changelog.d/<category>-<slug>.md` fragment
-(or a legacy `[Unreleased]` bullet).  The auto-fix bot adds a fragment
-automatically for user-facing fixes.
+(or a legacy `[Unreleased]` bullet). Codex or the maintainer should add the
+fragment in the same PR as the user-facing change.
 
 For genuinely internal app changes — refactors, test-only work, build tooling
 that users will never notice — label the PR `no-changelog` to skip just the

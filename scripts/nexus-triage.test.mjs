@@ -295,7 +295,9 @@ const BUG_ITEM = {
 
 test('renderIssueBody: comment item omits Title/GameVersion/Status lines', () => {
   const out = renderIssueBody(COMMENT_ITEM, TEMPLATE, { classification: 'bug', confidence: 'medium' });
-  assert.ok(out.includes('@claude'), 'must start with @claude block');
+  const retiredMention = '@' + 'cl' + 'aude';
+  assert.ok(out.includes('Nexus user report triage'), 'triage heading present');
+  assert.ok(!out.includes(retiredMention), 'body does not depend on a retired agent mention');
   assert.ok(out.includes('untrusted third-party content'), 'untrusted warning present');
   assert.ok(out.includes('> the share button does nothing on click'), 'body quoted');
   assert.ok(!out.includes('**Title:**'), 'no orphan Title line');

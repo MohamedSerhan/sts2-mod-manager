@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import * as translator from './translate-changelog.mjs';
 import { parseLatestReleasedEntry, sectionBodyFor, run, LOCALES } from './translate-changelog.mjs';
 
 const SAMPLE = `# Changelog
@@ -70,17 +71,22 @@ test('run is idempotent — skips a version already present unless force', async
   assert.deepEqual(forced.written.sort(), ['ar', 'ru', 'zh-Hans']);
 });
 
-test('run is non-blocking when ANTHROPIC_API_KEY is absent (default translator)', async () => {
+test('default translator is configured for OpenAI', () => {
+  assert.equal(translator.API_KEY_ENV, 'OPENAI_API_KEY');
+  assert.match(translator.DEFAULT_MODEL, /^gpt-/);
+});
+
+test('run is non-blocking when OPENAI_API_KEY is absent (default translator)', async () => {
   const dir = makeRepo();
-  const prev = process.env.ANTHROPIC_API_KEY;
-  delete process.env.ANTHROPIC_API_KEY;
+  const prev = process.env.OPENAI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
   try {
     const res = await run({ rootDir: dir, log: silent }); // default real translator
     assert.deepEqual(res, { version: null, written: [], skipped: [] });
     // No file was modified.
     assert.equal(readFileSync(join(dir, 'src/i18n/changelog/ru.json'), 'utf8').trim(), '{}');
   } finally {
-    if (prev !== undefined) process.env.ANTHROPIC_API_KEY = prev;
+    if (prev !== undefined) process.env.OPENAI_API_KEY = prev;
   }
 });
 

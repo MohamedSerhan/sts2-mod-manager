@@ -20,7 +20,7 @@ import {
   downloadUrlMod,
   duplicateProfile,
   enableAllMods,
-  exportProfile,
+  exportProfileToFile,
   fetchSharedProfile,
   findGithubFromNexus,
   getApiKeyStatus,
@@ -33,7 +33,7 @@ import {
   getProfileDrift,
   getShareInfo,
   getSubscriptions,
-  importProfile,
+  importSts2pack,
   installModFromFile,
   installSharedProfile,
   isGameRunning,
@@ -215,11 +215,17 @@ describe('useTauri wrappers — command names + arg shapes', () => {
       args: { name: 'Source', newName: 'Copy' },
     });
 
-    await exportProfile('Source');
-    expect(lastCall()).toEqual({ cmd: 'export_profile_cmd', args: { name: 'Source' } });
+    await exportProfileToFile('Source', '/tmp/Source.sts2pack');
+    expect(lastCall()).toEqual({
+      cmd: 'export_profile_to_file',
+      args: { name: 'Source', path: '/tmp/Source.sts2pack' },
+    });
 
-    await importProfile('{"name":"x"}');
-    expect(lastCall()).toEqual({ cmd: 'import_profile_cmd', args: { json: '{"name":"x"}' } });
+    await importSts2pack('/tmp/Source.sts2pack');
+    expect(lastCall()).toEqual({
+      cmd: 'import_sts2pack',
+      args: { path: '/tmp/Source.sts2pack' },
+    });
 
     await getProfileDrift('My Pack');
     expect(lastCall()).toEqual({ cmd: 'get_profile_drift', args: { name: 'My Pack' } });

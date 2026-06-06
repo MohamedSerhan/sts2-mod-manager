@@ -28,6 +28,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 
 import { ProfilesView } from './Profiles';
 import { AllProviders } from '../__test__/providers';
@@ -415,60 +416,46 @@ describe('<ProfilesView>', () => {
     expect(screen.getByLabelText(/Add a modpack by code/i)).toBeInTheDocument();
   });
 
-  it('Import from JSON form opens and submits to import_profile_cmd', async () => {
+  it('Import .sts2pack opens a file picker and submits to import_sts2pack', async () => {
     seedProfiles([baseProfile({ name: 'X' })]);
-    registerInvokeHandler('import_profile_cmd', () => baseProfile({ name: 'Imported' }));
+    vi.mocked(openDialog).mockResolvedValueOnce('/packs/Imported.sts2pack');
+    registerInvokeHandler('import_sts2pack', () => baseProfile({ name: 'Imported' }));
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Import modpack JSON/ }));
-    const textarea = await screen.findByPlaceholderText(/"name":/);
-    await user.click(textarea);
-    await user.paste('{"name":"X"}');
-    await user.click(screen.getByRole('button', { name: 'Import' }));
+    await user.click(screen.getByRole('button', { name: /Import .sts2pack/ }));
     await waitFor(() => {
-      expect(getInvokeCalls().some((c) => c.cmd === 'import_profile_cmd')).toBe(true);
+      expect(getInvokeCalls()).toContainEqual({
+        cmd: 'import_sts2pack',
+        args: { path: '/packs/Imported.sts2pack' },
+      });
     });
     await waitFor(() => {
       expect(screen.getByText(/Imported modpack "Imported"/)).toBeInTheDocument();
     });
   });
 
-  it('Import JSON refuses empty input (no invoke)', async () => {
+  it('Import .sts2pack cancel does not invoke import', async () => {
     seedProfiles([baseProfile({ name: 'X' })]);
+    vi.mocked(openDialog).mockResolvedValueOnce(null);
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Import modpack JSON/ }));
-    await user.click(screen.getByRole('button', { name: 'Import' }));
-    expect(getInvokeCalls().some((c) => c.cmd === 'import_profile_cmd')).toBe(false);
+    await user.click(screen.getByRole('button', { name: /Import .sts2pack/ }));
+    expect(getInvokeCalls().some((c) => c.cmd === 'import_sts2pack')).toBe(false);
   });
 
-  it('Import JSON error surfaces a toast', async () => {
+  it('Import .sts2pack error surfaces a toast', async () => {
     seedProfiles([baseProfile({ name: 'X' })]);
-    registerInvokeHandler('import_profile_cmd', () => { throw new Error('bad json'); });
+    vi.mocked(openDialog).mockResolvedValueOnce('/packs/bad.sts2pack');
+    registerInvokeHandler('import_sts2pack', () => { throw new Error('bad pack'); });
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Import modpack JSON/ }));
-    const textarea = await screen.findByPlaceholderText(/"name":/);
-    await user.click(textarea);
-    await user.paste('not json');
-    await user.click(screen.getByRole('button', { name: 'Import' }));
+    await user.click(screen.getByRole('button', { name: /Import .sts2pack/ }));
     await waitFor(() => {
-      expect(screen.getByText(/Failed to import.*bad json/)).toBeInTheDocument();
+      expect(screen.getByText(/Failed to import.*bad pack/)).toBeInTheDocument();
     });
-  });
-
-  it('Import JSON Cancel hides the form', async () => {
-    seedProfiles([baseProfile({ name: 'X' })]);
-    const user = userEvent.setup();
-    render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText('X')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Import modpack JSON/ }));
-    expect(screen.getByPlaceholderText(/"name":/)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(screen.queryByPlaceholderText(/"name":/)).toBeNull();
   });
 
   it('renders error banner when listProfiles fails', async () => {
@@ -508,7 +495,7 @@ describe('<ProfilesView>', () => {
     render(<Wrap />);
     await openDetailFor(user, 'Pack');
     await openAdvancedMenu(user);
-    expect(screen.getByRole('menuitem', { name: /Export JSON/i })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /Export .sts2pack/i })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: /Delete modpack/i })).toBeInTheDocument();
   });
 
@@ -1585,29 +1572,34 @@ describe('<ProfilesView>', () => {
 
   it('Advanced → Export JSON fires export_profile_cmd + success toast', async () => {
     seedProfiles([baseProfile({ name: 'Exportable' })]);
-    registerInvokeHandler('export_profile_cmd', () => '{"name":"Exportable","mods":[]}');
+    vi.mocked(saveDialog).mockResolvedValueOnce('/packs/Exportable.sts2pack');
+    registerInvokeHandler('export_profile_to_file', () => null);
     const user = setupUserWithClipboard();
     render(<Wrap />);
     await openDetailFor(user, 'Exportable');
     await openAdvancedMenu(user);
-    await user.click(screen.getByRole('menuitem', { name: /Export JSON/i }));
+    await user.click(screen.getByRole('menuitem', { name: /Export .sts2pack/i }));
     await waitFor(() => {
-      expect(getInvokeCalls().some((c) => c.cmd === 'export_profile_cmd')).toBe(true);
+      expect(getInvokeCalls()).toContainEqual({
+        cmd: 'export_profile_to_file',
+        args: { name: 'Exportable', path: '/packs/Exportable.sts2pack' },
+      });
     });
     await waitFor(() => {
-      expect(screen.getByText(/Modpack JSON copied to clipboard/)).toBeInTheDocument();
+      expect(screen.getByText(/Exported "Exportable" to a .sts2pack file/)).toBeInTheDocument();
     });
-    expect(clipboardWrite).toHaveBeenCalledWith('{"name":"Exportable","mods":[]}');
+    expect(clipboardWrite).not.toHaveBeenCalled();
   });
 
   it('Advanced → Export JSON error path surfaces a toast', async () => {
     seedProfiles([baseProfile({ name: 'X' })]);
-    registerInvokeHandler('export_profile_cmd', () => { throw new Error('locked'); });
+    vi.mocked(saveDialog).mockResolvedValueOnce('/packs/X.sts2pack');
+    registerInvokeHandler('export_profile_to_file', () => { throw new Error('locked'); });
     const user = setupUserWithClipboard();
     render(<Wrap />);
     await openDetailFor(user, 'X');
     await openAdvancedMenu(user);
-    await user.click(screen.getByRole('menuitem', { name: /Export JSON/i }));
+    await user.click(screen.getByRole('menuitem', { name: /Export .sts2pack/i }));
     await waitFor(() => {
       expect(screen.getByText(/Failed to export.*locked/)).toBeInTheDocument();
     });
@@ -2723,6 +2715,3 @@ describe('<ProfilesView> load-order editor close', () => {
     expect(rows[1]).toHaveTextContent('First');
   });
 });
-
-
-

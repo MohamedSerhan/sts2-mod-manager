@@ -283,6 +283,7 @@
     },
     "actions": {
       "importJson": "Import modpack JSON",
+      "importSts2pack": "Import .sts2pack",
       "newProfile": "Create modpack"
     },
     "prompt": {
@@ -430,6 +431,7 @@
       "duplicate": "Duplicate",
       "rename": "Rename",
       "exportJson": "Export JSON...",
+      "exportSts2pack": "Export .sts2pack...",
       "copyShareCode": "Copy share code",
       "copyShareLink": "Copy share link",
       "copyShareMessageLabel": "Copy share message",
@@ -471,6 +473,7 @@
       "savedChangesWithReShare": "Saved changes to \"{{name}}\". Re-share when you're ready to publish them.",
       "saveFailed": "Failed to save changes: {{error}}",
       "exported": "Modpack JSON copied to clipboard!",
+      "exportedFile": "Exported \"{{name}}\" to a .sts2pack file.",
       "exportFailed": "Failed to export: {{error}}",
       "deleted": "Modpack \"{{name}}\" deleted",
       "deleteFailed": "Failed to delete: {{error}}",

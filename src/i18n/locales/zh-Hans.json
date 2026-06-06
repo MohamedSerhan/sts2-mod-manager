@@ -284,6 +284,7 @@
     },
     "actions": {
       "importJson": "导入模组包 JSON",
+      "importSts2pack": "导入 .sts2pack",
       "newProfile": "创建模组包"
     },
     "prompt": {
@@ -361,6 +362,7 @@
       "duplicate": "复制",
       "rename": "重命名",
       "exportJson": "导出 JSON...",
+      "exportSts2pack": "导出 .sts2pack...",
       "copyShareCode": "复制分享码",
       "copyShareLink": "复制分享链接",
       "copyShareMessageLabel": "复制分享消息",
@@ -402,6 +404,7 @@
       "savedChangesWithReShare": "更改已保存到 \"{{name}}\"。准备好发布时请重新分享。",
       "saveFailed": "保存更改失败：{{error}}",
       "exported": "模组包 JSON 已复制到剪贴板！",
+      "exportedFile": "已将“{{name}}”导出为 .sts2pack 文件。",
       "exportFailed": "导出失败：{{error}}",
       "deleted": "模组包 \"{{name}}\" 已删除",
       "deleteFailed": "删除失败：{{error}}",

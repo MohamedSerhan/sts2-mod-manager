@@ -284,6 +284,7 @@
     },
     "actions": {
       "importJson": "استيراد JSON للحزمة",
+      "importSts2pack": "استيراد .sts2pack",
       "newProfile": "إنشاء حزمة"
     },
     "prompt": {
@@ -430,6 +431,7 @@
     "kebab": {
       "duplicate": "تكرار",
       "exportJson": "تصدير JSON…",
+      "exportSts2pack": "تصدير .sts2pack...",
       "copyShareCode": "نسخ رمز المشاركة",
       "copyShareLink": "نسخ رابط المشاركة",
       "copyShareMessageLabel": "نسخ رسالة المشاركة",
@@ -472,6 +474,7 @@
       "savedChangesWithReShare": "تم حفظ التغييرات في «{{name}}». أعد المشاركة عندما تكون جاهزًا لنشرها.",
       "saveFailed": "فشل حفظ التغييرات: {{error}}",
       "exported": "تم نسخ JSON الحزمة إلى الحافظة!",
+      "exportedFile": "تم تصدير «{{name}}» إلى ملف .sts2pack.",
       "exportFailed": "فشل التصدير: {{error}}",
       "deleted": "تم حذف الحزمة «{{name}}»",
       "deleteFailed": "فشل الحذف: {{error}}",

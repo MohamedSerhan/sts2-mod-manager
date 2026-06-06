@@ -284,6 +284,7 @@
     },
     "actions": {
       "importJson": "Импорт JSON сборки",
+      "importSts2pack": "Импорт .sts2pack",
       "newProfile": "Создать сборку"
     },
     "prompt": {
@@ -430,6 +431,7 @@
     "kebab": {
       "duplicate": "Дублировать",
       "exportJson": "Экспорт JSON…",
+      "exportSts2pack": "Экспорт .sts2pack...",
       "copyShareCode": "Копировать код для обмена",
       "copyShareLink": "Копировать ссылку для обмена",
       "copyShareMessageLabel": "Копировать сообщение для обмена",
@@ -472,6 +474,7 @@
       "savedChangesWithReShare": "Изменения в «{{name}}» сохранены. Поделитесь заново, когда будете готовы их опубликовать.",
       "saveFailed": "Не удалось сохранить изменения: {{error}}",
       "exported": "JSON сборки скопирован в буфер обмена!",
+      "exportedFile": "«{{name}}» экспортирована в файл .sts2pack.",
       "exportFailed": "Не удалось экспортировать: {{error}}",
       "deleted": "Сборка «{{name}}» удалена",
       "deleteFailed": "Не удалось удалить: {{error}}",

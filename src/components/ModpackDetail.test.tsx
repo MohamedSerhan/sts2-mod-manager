@@ -921,14 +921,14 @@ describe('<ModpackDetail>', () => {
   it('Advanced actions live in the header kebab and fire their handlers', async () => {
     const onDelete = vi.fn();
     const onDuplicate = vi.fn();
-    const onExportJson = vi.fn();
+    const onExportFile = vi.fn();
     const user = userEvent.setup();
     render(
       <Wrap
         {...baseProps()}
         onDelete={onDelete}
         onDuplicate={onDuplicate}
-        onExportJson={onExportJson}
+        onExportFile={onExportFile}
       />,
     );
     await screen.findByRole('heading', { level: 2, name: 'Sample' });
@@ -940,8 +940,8 @@ describe('<ModpackDetail>', () => {
     expect(onDuplicate).toHaveBeenCalledWith('Sample');
 
     await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
-    await user.click(screen.getByRole('menuitem', { name: /Export JSON/i }));
-    expect(onExportJson).toHaveBeenCalledWith('Sample');
+    await user.click(screen.getByRole('menuitem', { name: /Export .sts2pack/i }));
+    expect(onExportFile).toHaveBeenCalledWith('Sample');
 
     await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
     await user.click(screen.getByRole('menuitem', { name: /Delete modpack/i }));

@@ -36,7 +36,6 @@ import {
   Check,
   ChevronDown,
   ClipboardCheck,
-  Copy,
   Download,
   Files,
   FolderOpen,
@@ -82,7 +81,7 @@ export interface ModpackDetailProps {
   onShare?: (profile: Profile) => void;
   onDelete?: (name: string) => void;
   onDuplicate?: (name: string) => void;
-  onExportJson?: (name: string) => void;
+  onExportFile?: (name: string) => void;
   onOpenLoadOrder?: (profile: Profile) => void;
   onRepairDrift?: (name: string) => void;
   /** Optional snapshot of the active "switching..." state so the
@@ -138,7 +137,7 @@ export function ModpackDetail({
   onShare,
   onDelete,
   onDuplicate,
-  onExportJson,
+  onExportFile,
   onOpenLoadOrder,
   onRepairDrift,
   switchingProfile,
@@ -641,9 +640,9 @@ export function ModpackDetail({
                   {t('profiles.kebab.rename')}
                 </KebabItem>
               )}
-              {onExportJson && (
-                <KebabItem icon={<Copy size={12} />} onClick={() => onExportJson(profile.name)}>
-                  {t('profiles.kebab.exportJson')}
+              {onExportFile && (
+                <KebabItem icon={<Download size={12} />} onClick={() => onExportFile(profile.name)}>
+                  {t('profiles.kebab.exportSts2pack')}
                 </KebabItem>
               )}
               {/* Repair is always offered for the ACTIVE modpack (not only when

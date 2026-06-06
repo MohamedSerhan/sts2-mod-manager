@@ -187,12 +187,12 @@ export async function renameProfile(oldName: string, newName: string): Promise<P
   return invoke('rename_profile', { oldName, newName });
 }
 
-export async function exportProfile(name: string): Promise<string> {
-  return invoke('export_profile_cmd', { name });
+export async function exportProfileToFile(name: string, path: string): Promise<void> {
+  return invoke('export_profile_to_file', { name, path });
 }
 
-export async function importProfile(json: string): Promise<Profile> {
-  return invoke('import_profile_cmd', { json });
+export async function importSts2pack(path: string): Promise<Profile> {
+  return invoke('import_sts2pack', { path });
 }
 
 export async function getProfileMemberships(): Promise<ProfileMembershipGrid> {

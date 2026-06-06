@@ -98,8 +98,8 @@ const MAX_TITLE_CHARS = 60;
 export function sanitizeTitle(body) {
   if (!body) return '';
   let s = String(body);
-  // Strip HTML tags but keep their text content
-  s = s.replace(/<[^>]*>/g, '');
+  // Strip HTML tags but keep their text content.
+  s = stripTags(s);
   // Strip backticks
   s = s.replace(/`/g, '');
   // Strip @mentions (@ followed by word chars, including multiple @ symbols)
@@ -323,10 +323,35 @@ function buildBodyRe(id) {
 const TIME_RE = /<time\s[^>]*\bdata-date="(\d+)"[^>]*>/i;
 
 // Strip HTML tags for text extraction
+function decodeHtmlEntities(s) {
+  return String(s)
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&');
+}
+
+function removeHtmlTags(s) {
+  let out = '';
+  let inTag = false;
+  for (const ch of String(s)) {
+    if (ch === '<') {
+      inTag = true;
+      continue;
+    }
+    if (ch === '>' && inTag) {
+      inTag = false;
+      continue;
+    }
+    if (!inTag) out += ch;
+  }
+  return out;
+}
+
 function stripTags(s) {
-  return s.replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, ' ');
+  return removeHtmlTags(decodeHtmlEntities(s));
 }
 
 function unixToIso(unixStr) {

@@ -17,6 +17,10 @@ const DEV_IDENTIFIER = 'com.sts2mm.app.dev';
 const RELEASE_PRODUCT = 'STS2 Mod Manager';
 const DEV_PRODUCT = 'STS2 Mod Manager (Dev)';
 
+export function escapeRegExpLiteral(value) {
+  return String(value).replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
+}
+
 /** base="1.6.1", pr="42", sha="a1b2c3d" -> "1.6.1-dev.pr42.ga1b2c3d".
  *  The g-prefix on the sha guarantees a valid SemVer pre-release identifier
  *  even when the short sha is all digits with a leading zero. */
@@ -35,11 +39,11 @@ export function stampFiles(version, {
   // Intentionally no 'g' flag: replaces only the first (top-level) "version" key.
   conf = conf.replace(/("version"\s*:\s*")[^"]*(")/, `$1${version}$2`);
   conf = conf.replace(
-    new RegExp(`("identifier"\\s*:\\s*")${RELEASE_IDENTIFIER.replace(/\./g, '\\.')}(")`),
+    new RegExp(`("identifier"\\s*:\\s*")${escapeRegExpLiteral(RELEASE_IDENTIFIER)}(")`),
     `$1${DEV_IDENTIFIER}$2`,
   );
   conf = conf.replace(
-    new RegExp(`("productName"\\s*:\\s*")${RELEASE_PRODUCT}(")`),
+    new RegExp(`("productName"\\s*:\\s*")${escapeRegExpLiteral(RELEASE_PRODUCT)}(")`),
     `$1${DEV_PRODUCT}$2`,
   );
   // Dev builds skip the Windows MSI target: WiX/MSI requires a numeric-only

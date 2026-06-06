@@ -383,7 +383,7 @@ jobs:
   # a category. The three platforms therefore need three SEPARATE group ids —
   # uploading them into one group would make them successive versions of a
   # single file (the last one wins, the others get archived). Each leg selects
-  # its own group secret via matrix.group_secret; archive_existing_file then
+  # its own static group secret by platform; archive_existing_file then
   # replaces the prior version of THAT file each release. A leg whose secret is
   # unset is skipped, so Windows keeps shipping before the mac/Linux files exist
   # on the page. One-time setup for the mac/Linux groups is in RELEASING.md.
@@ -398,41 +398,101 @@ jobs:
         include:
           - suffix: "x64_portable.zip"
             label: "Windows Portable"
-            group_secret: "NEXUS_FILE_GROUP_ID"
+            group: "windows"
           - suffix: "universal.dmg"
             label: "macOS Universal"
-            group_secret: "NEXUS_FILE_GROUP_ID_MACOS"
+            group: "macos"
           - suffix: "amd64.AppImage"
             label: "Linux AppImage"
-            group_secret: "NEXUS_FILE_GROUP_ID_LINUX"
+            group: "linux"
     steps:
-      - name: Resolve upload config
+      - name: Resolve upload metadata
         id: cfg
-        env:
-          GID: ${{ secrets[matrix.group_secret] }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "filename=STS2.Mod.Manager_${VERSION}_${{ matrix.suffix }}" >> "$GITHUB_OUTPUT"
+
+      - name: Check Windows Nexus file group
+        id: cfg_windows
+        if: matrix.group == 'windows'
+        env:
+          GID: ${{ secrets.NEXUS_FILE_GROUP_ID }}
+        run: |
           if [ -n "$GID" ]; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
           else
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Nexus upload skipped::No file group for ${{ matrix.label }} — set the ${{ matrix.group_secret }} secret (see RELEASING.md). Skipping this platform."
+            echo "::notice title=Nexus upload skipped::No file group for Windows Portable - set the NEXUS_FILE_GROUP_ID secret (see RELEASING.md). Skipping this platform."
+          fi
+
+      - name: Check macOS Nexus file group
+        id: cfg_macos
+        if: matrix.group == 'macos'
+        env:
+          GID: ${{ secrets.NEXUS_FILE_GROUP_ID_MACOS }}
+        run: |
+          if [ -n "$GID" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Nexus upload skipped::No file group for macOS Universal - set the NEXUS_FILE_GROUP_ID_MACOS secret (see RELEASING.md). Skipping this platform."
+          fi
+
+      - name: Check Linux Nexus file group
+        id: cfg_linux
+        if: matrix.group == 'linux'
+        env:
+          GID: ${{ secrets.NEXUS_FILE_GROUP_ID_LINUX }}
+        run: |
+          if [ -n "$GID" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Nexus upload skipped::No file group for Linux AppImage - set the NEXUS_FILE_GROUP_ID_LINUX secret (see RELEASING.md). Skipping this platform."
           fi
 
       - name: Download asset from GitHub Release
-        if: steps.cfg.outputs.configured == 'true'
+        if: >-
+          ${{
+            steps.cfg_windows.outputs.configured == 'true' ||
+            steps.cfg_macos.outputs.configured == 'true' ||
+            steps.cfg_linux.outputs.configured == 'true'
+          }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release download "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" -p "${{ steps.cfg.outputs.filename }}"
 
-      - name: Upload to Nexus Mods
-        if: steps.cfg.outputs.configured == 'true'
+      - name: Upload Windows Portable to Nexus Mods
+        if: matrix.group == 'windows' && steps.cfg_windows.outputs.configured == 'true'
         uses: Nexus-Mods/upload-action@v1.0.0-beta.7
         with:
           api_key:                      ${{ secrets.NEXUS_API_KEY }}
-          file_group_id:                ${{ secrets[matrix.group_secret] }}
+          file_group_id:                ${{ secrets.NEXUS_FILE_GROUP_ID }}
+          filename:                     ${{ steps.cfg.outputs.filename }}
+          version:                      ${{ steps.cfg.outputs.version }}
+          file_category:                main
+          archive_existing_file:        true
+          display_name:                 STS2 Mod Manager ${{ steps.cfg.outputs.version }} (${{ matrix.label }})
+
+      - name: Upload macOS Universal to Nexus Mods
+        if: matrix.group == 'macos' && steps.cfg_macos.outputs.configured == 'true'
+        uses: Nexus-Mods/upload-action@v1.0.0-beta.7
+        with:
+          api_key:                      ${{ secrets.NEXUS_API_KEY }}
+          file_group_id:                ${{ secrets.NEXUS_FILE_GROUP_ID_MACOS }}
+          filename:                     ${{ steps.cfg.outputs.filename }}
+          version:                      ${{ steps.cfg.outputs.version }}
+          file_category:                main
+          archive_existing_file:        true
+          display_name:                 STS2 Mod Manager ${{ steps.cfg.outputs.version }} (${{ matrix.label }})
+
+      - name: Upload Linux AppImage to Nexus Mods
+        if: matrix.group == 'linux' && steps.cfg_linux.outputs.configured == 'true'
+        uses: Nexus-Mods/upload-action@v1.0.0-beta.7
+        with:
+          api_key:                      ${{ secrets.NEXUS_API_KEY }}
+          file_group_id:                ${{ secrets.NEXUS_FILE_GROUP_ID_LINUX }}
           filename:                     ${{ steps.cfg.outputs.filename }}
           version:                      ${{ steps.cfg.outputs.version }}
           file_category:                main

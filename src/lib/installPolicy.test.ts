@@ -30,4 +30,23 @@ describe('install policy preferences', () => {
     expect(localStorage.getItem(AUTO_ADD_INSTALLS_TO_MODPACK_KEY)).toBe('true');
     expect(loadAutoAddInstallsToModpack()).toBe(true);
   });
+
+  it('falls back to enabled when browser storage is unavailable', () => {
+    const originalStorage = Object.getOwnPropertyDescriptor(window, 'localStorage');
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      get() {
+        throw new Error('storage blocked');
+      },
+    });
+
+    try {
+      expect(loadAutoAddInstallsToModpack()).toBe(true);
+      expect(() => saveAutoAddInstallsToModpack(false)).not.toThrow();
+    } finally {
+      if (originalStorage) {
+        Object.defineProperty(window, 'localStorage', originalStorage);
+      }
+    }
+  });
 });

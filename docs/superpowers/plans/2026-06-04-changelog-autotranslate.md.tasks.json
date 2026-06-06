@@ -1,0 +1,33 @@
+{
+  "planPath": "docs/superpowers/plans/2026-06-04-changelog-autotranslate.md",
+  "tasks": [
+    {
+      "id": 7,
+      "subject": "Task 1: getTranslatedBody lookup + bundled locale maps",
+      "status": "completed",
+      "description": "**Goal:** Add a pure, never-throwing `getTranslatedBody(version, locale, maps?)` to the changelog lib, backed by three (initially empty `{}`) bundled per-locale JSON maps.\n\n**Files:** Create `src/i18n/changelog/{ru,ar,zh-Hans}.json` (`{}`); Modify `src/lib/changelog.ts`; Test `src/lib/changelog.test.ts`.\n\n**Acceptance Criteria:** returns body when present, null for en/unknown/missing, never throws; normalizes locale (ru-RU->ru, zh*->zh-Hans, en*->null); three JSON files exist so build passes.\n\n**Verify:** `npx vitest run src/lib/changelog.test.ts`; `npm run build`.\n\n```json:metadata\n{\"files\": [\"src/i18n/changelog/ru.json\", \"src/i18n/changelog/ar.json\", \"src/i18n/changelog/zh-Hans.json\", \"src/lib/changelog.ts\", \"src/lib/changelog.test.ts\"], \"verifyCommand\": \"npx vitest run src/lib/changelog.test.ts\", \"acceptanceCriteria\": [\"returns body/null/never-throws\", \"locale normalized\", \"three JSON files exist so build passes\"], \"planTask\": 1}\n```"
+    },
+    {
+      "id": 8,
+      "subject": "Task 2: Render translated body + disclaimer in WhatsNewCard",
+      "status": "completed",
+      "blockedBy": [7],
+      "description": "**Goal:** Non-English locale + translation present -> render translated body + literal #137 disclaimer linking to the version's GitHub release page; else English body + existing notice (or English, no notice).\n\n**Files:** Modify `src/components/WhatsNewCard.tsx`, `src/i18n/locales/{en,ru,ar,zh-Hans}.json`; Create `src/components/WhatsNewCard.translated.test.tsx`.\n\n**Acceptance Criteria:** ru+translation -> translated body + disclaimer + `/releases/tag/v<version>` link; ru+no-translation -> English + existing notice, no view-original link; en -> English no notice; parity passes with both new keys translated.\n\n**Verify:** `npx vitest run src/components/WhatsNewCard.translated.test.tsx src/components/WhatsNewCard.component.test.tsx src/i18n/locales/parity.test.ts`.\n\n```json:metadata\n{\"files\": [\"src/components/WhatsNewCard.tsx\", \"src/components/WhatsNewCard.translated.test.tsx\", \"src/i18n/locales/en.json\", \"src/i18n/locales/ru.json\", \"src/i18n/locales/ar.json\", \"src/i18n/locales/zh-Hans.json\"], \"verifyCommand\": \"npx vitest run src/components/WhatsNewCard.translated.test.tsx src/components/WhatsNewCard.component.test.tsx src/i18n/locales/parity.test.ts\", \"acceptanceCriteria\": [\"ru+translation: body+disclaimer+release link\", \"ru+no-translation: English+existing notice\", \"en: English no notice\", \"parity passes\"], \"planTask\": 2}\n```"
+    },
+    {
+      "id": 9,
+      "subject": "Task 3: Release-time translation generator + tests + CI wiring",
+      "status": "completed",
+      "blockedBy": [7],
+      "description": "**Goal:** `scripts/translate-changelog.mjs` translates the latest released CHANGELOG entry into ru/ar/zh-Hans via Anthropic API, merging bundled JSON. Idempotent, non-blocking, DI-testable.\n\n**Files:** Modify `package.json`/`package-lock.json`, `.github/workflows/ci.yml`; Create `scripts/translate-changelog.mjs`, `scripts/translate-changelog.test.mjs`.\n\n**Acceptance Criteria:** parseLatestReleasedEntry returns newest non-Unreleased {version,body}; run() merges without dropping existing, idempotent unless force; no API key + no injected translateFn -> warn, no write, exit 0; node:test passes (no network/SDK import).\n\n**Verify:** `node --test scripts/translate-changelog.test.mjs`; `node scripts/translate-changelog.mjs --help`. Step 0: invoke claude-api skill for prompt caching.\n\n```json:metadata\n{\"files\": [\"package.json\", \"package-lock.json\", \"scripts/translate-changelog.mjs\", \"scripts/translate-changelog.test.mjs\", \".github/workflows/ci.yml\"], \"verifyCommand\": \"node --test scripts/translate-changelog.test.mjs\", \"acceptanceCriteria\": [\"parseLatestReleasedEntry newest non-Unreleased\", \"run merges+idempotent unless force\", \"no key -> warn/no-write/exit0\", \"node:test passes no network\"], \"planTask\": 3}\n```"
+    },
+    {
+      "id": 10,
+      "subject": "Task 4: Seed v1.7.1 translations, wire release.sh, verify RTL/light",
+      "status": "completed",
+      "blockedBy": [7, 8, 9],
+      "description": "**Goal:** Backfill v1.7.1 translations (live now), hook generator into release.sh for future versions, confirm card renders in light theme + RTL (Arabic).\n\n**Files:** Modify `src/i18n/changelog/{ru,ar,zh-Hans}.json` (add real `1.7.1` body), `scripts/release.sh`.\n\n**Acceptance Criteria:** each JSON has non-empty `1.7.1` body preserving ###Added/Fixed/Security and leaving product names/quoted labels/versions intact; release.sh runs generator + git-adds JSONs non-blocking; `npx vitest run` + `npm run build` green; manual Arabic+light RTL card with disclaimer + working `/releases/tag/v1.7.1` link.\n\n**Verify:** `npx vitest run && npm run build`; manual screenshots via `run` skill.\n\n```json:metadata\n{\"files\": [\"src/i18n/changelog/ru.json\", \"src/i18n/changelog/ar.json\", \"src/i18n/changelog/zh-Hans.json\", \"scripts/release.sh\"], \"verifyCommand\": \"npx vitest run && npm run build\", \"acceptanceCriteria\": [\"1.7.1 body in each JSON, structure preserved\", \"release.sh wires generator non-blocking\", \"vitest + build green\", \"manual Arabic RTL + light verification\"], \"planTask\": 4}\n```"
+    }
+  ],
+  "lastUpdated": "2026-06-04"
+}

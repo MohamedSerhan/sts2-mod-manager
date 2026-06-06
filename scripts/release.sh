@@ -399,6 +399,14 @@ if [ -n "$FRAGS" ]; then
   git rm -q -- $FRAGS
 fi
 
+# --- Translate the new changelog entry for non-English locales ---
+#
+# Non-blocking: a missing ANTHROPIC_API_KEY or API hiccup warns and continues,
+# and the app falls back to the English body. The generated JSON joins THIS
+# release commit so the translation ships in the exact build for this tag.
+node scripts/translate-changelog.mjs || echo "(changelog translation skipped — continuing)"
+git add src/i18n/changelog/ru.json src/i18n/changelog/ar.json src/i18n/changelog/zh-Hans.json
+
 # --- Commit, tag, push ---
 
 git add package.json package-lock.json \

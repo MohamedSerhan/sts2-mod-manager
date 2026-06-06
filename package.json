@@ -30,7 +30,8 @@
     "qa:smoke:build": "npm run tauri build -- --no-bundle --features qa-cassette",
     "qa:smoke": "node qa/runner/smoke.mjs",
     "qa:smoke:cassette": "cross-env CASSETTE=1 node qa/runner/smoke.mjs",
-    "release": "bash scripts/release.sh"
+    "release": "bash scripts/release.sh",
+    "translate:changelog": "node scripts/translate-changelog.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
@@ -47,6 +48,7 @@
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "^0.100.1",
     "@tailwindcss/vite": "^4.3.0",
     "@tauri-apps/cli": "^2",
     "@testing-library/jest-dom": "^6.9.1",

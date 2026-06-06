@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { getVersion } from '@tauri-apps/api/app';
 import { Sparkles, X, ExternalLink, Info } from 'lucide-react';
 import { Card } from './Card';
-import { getEntryForVersion, getLatestReleasedEntry, type ChangelogEntry } from '../lib/changelog';
+import { getEntryForVersion, getLatestReleasedEntry, getTranslatedBody, type ChangelogEntry } from '../lib/changelog';
 import { openExternalUrl } from '../hooks/useTauri';
 
 /** localStorage key for "user dismissed the what's-new card for version X".
@@ -23,10 +23,6 @@ const DISMISS_PREFIX = 'sts2mm-whatsnew-seen:';
  */
 export function WhatsNewCard() {
   const { t, i18n } = useTranslation();
-  // Show a maintainer-can't-translate notice on top of the card whenever
-  // the active locale isn't English. Dismissed alongside the card itself
-  // (per-version) so users see it on every new release until they ack.
-  const showLocaleNotice = i18n.language && !i18n.language.startsWith('en');
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [entry, setEntry] = useState<ChangelogEntry | null>(null);
   const [dismissed, setDismissed] = useState(true); // start hidden until we know
@@ -72,11 +68,14 @@ export function WhatsNewCard() {
 
   if (dismissed || !entry) return null;
 
-  // The body is markdown — render a minimal subset (bullet lists +
-  // ### subheadings). We deliberately don't pull in a full markdown
-  // renderer for one card. Anything richer than this and the user
-  // should click through to the full changelog.
-  const blocks = parseSimpleMarkdown(entry.body);
+  // Non-English locales get a bundled machine translation of this version's
+  // notes when one exists; otherwise we show the English body with the
+  // existing "English-only" notice. English always uses the source body.
+  const locale = i18n.language || 'en';
+  const translatedBody = getTranslatedBody(entry.version, locale); // null for en / no translation
+  const showTranslated = translatedBody != null;
+  const showLocaleNotice = !locale.startsWith('en') && !showTranslated;
+  const blocks = parseSimpleMarkdown(translatedBody ?? entry.body);
 
   return (
     <Card className="gf-whatsnew">
@@ -106,6 +105,25 @@ export function WhatsNewCard() {
         </div>
       </div>
       <div className="gf-whatsnew-body">
+        {showTranslated && (
+          <div className="gf-whatsnew-locale-note">
+            <Info size={12} />
+            <span>
+              {t('whatsNew.translatedNotice')}{' '}
+              <button
+                type="button"
+                className="gf-whatsnew-locale-link"
+                onClick={() =>
+                  openExternalUrl(
+                    `https://github.com/MohamedSerhan/sts2-mod-manager/releases/tag/v${entry.version}`,
+                  ).catch(() => {})
+                }
+              >
+                {t('whatsNew.translatedNoticeViewOriginal')}
+              </button>
+            </span>
+          </div>
+        )}
         {showLocaleNotice && (
           <div className="gf-whatsnew-locale-note">
             <Info size={12} />

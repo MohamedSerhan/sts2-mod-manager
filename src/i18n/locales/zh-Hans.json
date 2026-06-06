@@ -232,7 +232,9 @@
     "dismissAria": "关闭更新内容",
     "devNote": "（显示最新发布说明 — 你的构建版本为 v{{version}}。）",
     "localeNotice": "更新说明仅提供英文。维护者不懂此语言，无法独自核对翻译准确性。",
-    "localeNoticeReport": "反馈翻译错误"
+    "localeNoticeReport": "反馈翻译错误",
+    "translatedNotice": "开发者不会说这种语言 —",
+    "translatedNoticeViewOriginal": "查看英文原始更新日志"
   },
   "about": {
     "title": "Slay the Spire 2 模组管理器",

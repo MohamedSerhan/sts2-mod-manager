@@ -37,6 +37,34 @@ _Changes are tracked as fragments in [`changelog.d/`](changelog.d/) and assemble
 
 ---
 
+## [1.7.2] - 2026-06-06
+
+### Added
+
+- Added a Send feedback option — in the About footer, the bug-report window, and the logs view — that opens the mod's Nexus page, so you can send feedback without a GitHub account.
+- Added display-size controls and a resizable sidebar so players can make the manager easier to read.
+- The Mod Library tag picker can now show only mods without manager tags.
+- Settings now lets you choose whether new installs are added to the current modpack automatically.
+
+### Changed
+
+- Changed modpack sharing so players can import and export local .sts2pack files and see when a shared pack needs re-sharing.
+- Clarified GitHub token setup and the choices shown when enabling a mod that is not saved in the active modpack.
+- The Mod Library now shows the Nexus version used for update checks when it differs from the mod manifest.
+
+### Fixed
+
+- Russian text now uses human-reviewed wording for modpacks, settings, update guidance, and help.
+- Russian mod counts now use the correct grammatical form — for example «2 мода» and «5 модов» — instead of falling back to the English wording for some numbers.
+- Clicking the "STS2 detected" status now opens Settings on the General tab even when another Settings tab is already open, instead of doing nothing.
+- Searching in the Load order window no longer drags the dimmed background into view as it jumps to a matching mod.
+- Nexus-only update suggestions can now be skipped until a newer version appears.
+- Linked mods now show a clear current status when one source has no installable update.
+- Active modpack rows now keep their active toggle and remove button when extra source details are unavailable.
+- Bundle rows now keep showing the pack version instead of falling back to unknown.
+- Reordering mod menus and load orders now feels smoother, and shared modpacks keep their Re-share warning until they are uploaded again.
+- Newly installed mods now stay in the Mod Library unless you turn on adding installs to the current modpack.
+
 ## [1.7.1] - 2026-06-03
 
 ### Added

@@ -28,6 +28,7 @@ import { ConfirmProvider, useConfirm } from './components/ConfirmDialog';
 import { ThemeProvider } from './theme/ThemeContext';
 import { RowMenuProvider } from './contexts/RowMenuContext';
 import { ROW_MENU_OPEN_EVENT } from './lib/rowMenuConfig';
+import { loadAutoAddInstallsToModpack } from './lib/installPolicy';
 import { UiScaleProvider } from './display/UiScaleContext';
 import { importShareCodeSmart } from './lib/shareImport';
 import { getSubscriptions } from './hooks/useTauri';
@@ -551,13 +552,12 @@ function AppInner() {
     };
 
     async function handleDroppedPaths(paths: string[]) {
-      // If a modpack detail view is open, the dropped mod joins that pack (and,
-      // on the active pack, loads in-game) — the same auto-add Quick add /
-      // Import do. But a FOLLOWED (subscribed) pack's manifest isn't yours to
-      // edit: don't install "into" it and strand the file in the library —
-      // explain and stop (duplicate the pack to add your own mods).
+      // Dropped archives install to the Library by default. If the user opted
+      // into target-pack auto-add, also join the viewed pack and block followed
+      // packs before the install starts.
       const pack = viewedPackRef.current;
-      if (pack) {
+      const autoAddToViewedPack = !!pack && loadAutoAddInstallsToModpack();
+      if (pack && autoAddToViewedPack) {
         try {
           const subs = await getSubscriptions();
           if (subs.some((s) => s.profile_name.toLowerCase() === pack.toLowerCase())) {
@@ -579,7 +579,7 @@ function AppInner() {
         }
         try {
           const mod = await installModFromFile(filePath);
-          if (pack) {
+          if (pack && autoAddToViewedPack) {
             try {
               // Enable it in the live game folder FIRST when dropping into the
               // active pack: toggle_mod guards on the game running (and can

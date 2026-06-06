@@ -153,12 +153,12 @@ describe('<SettingsView>', () => {
     const autoAdd = await screen.findByRole('switch', {
       name: /Add new installs to the current modpack/i,
     });
-    expect(autoAdd).toHaveAttribute('aria-checked', 'true');
+    expect(autoAdd).toHaveAttribute('aria-checked', 'false');
 
     await user.click(autoAdd);
 
-    expect(autoAdd).toHaveAttribute('aria-checked', 'false');
-    expect(localStorage.getItem(AUTO_ADD_INSTALLS_TO_MODPACK_KEY)).toBe('false');
+    expect(autoAdd).toHaveAttribute('aria-checked', 'true');
+    expect(localStorage.getItem(AUTO_ADD_INSTALLS_TO_MODPACK_KEY)).toBe('true');
   });
 
   it('shows AboutCard in the General tab (relocated from Home in 1.7.0 v7)', async () => {

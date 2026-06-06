@@ -408,6 +408,11 @@ describe('<LibraryTable>', () => {
     );
     expect(await screen.findByText(/Enable only keeps it active on disk, but it will not be saved in "Stable"/)).toBeInTheDocument();
     expect(screen.getByText(/Friends who install this shared modpack will not get enable-only mods/)).toBeInTheDocument();
+    const enableOnly = await screen.findByRole('button', { name: /^Enable only this time$/i });
+    const enableAndAdd = await screen.findByRole('button', { name: /Enable and add to "Stable"/i });
+    expect(enableOnly.classList.contains('gf-btn')).toBe(true);
+    expect(enableOnly.classList.contains('gf-btn-2')).toBe(false);
+    expect(enableAndAdd.classList.contains('gf-btn-2')).toBe(true);
     await user.click(await screen.findByRole('button', { name: /Enable and add to "Stable"/i }));
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'toggle_mod' && c.args?.enable === true)).toBe(true);

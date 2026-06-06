@@ -19,6 +19,7 @@ import userEvent from '@testing-library/user-event';
 import { ModpackDetail } from './ModpackDetail';
 import { AllProviders } from '../__test__/providers';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
+import { AUTO_ADD_INSTALLS_TO_MODPACK_KEY } from '../lib/installPolicy';
 import type { ModInfo, Profile, ProfileMod, ShareResult } from '../types';
 import type { ProfileDrift } from '../hooks/useTauri';
 
@@ -720,6 +721,7 @@ describe('<ModpackDetail>', () => {
   });
 
   it('Quick add URL in the modpack view auto-adds the installed mod to this pack', async () => {
+    localStorage.setItem(AUTO_ADD_INSTALLS_TO_MODPACK_KEY, 'true');
     registerInvokeHandler('quick_add_mod', () => ({
       type: 'github_installed',
       mod_info: modInfo({ name: 'NewMod', folder_name: 'NewMod', mod_id: 'NewMod' }),
@@ -748,6 +750,7 @@ describe('<ModpackDetail>', () => {
   });
 
   it('Quick add of an already-active mod does not try to re-enable it (no toggle_mod, no failure)', async () => {
+    localStorage.setItem(AUTO_ADD_INSTALLS_TO_MODPACK_KEY, 'true');
     // Regression: re-adding a mod that's already installed + active made
     // the auto-add call toggle_mod(enable=true), which errors ("not in
     // mods_disabled") and surfaced a bogus "Quick add failed" toast.
@@ -780,6 +783,7 @@ describe('<ModpackDetail>', () => {
   // the file in the library) and shows a friendly toast instead. The guard
   // only fires once get_subscriptions reports the target pack as followed.
   it('importing into a followed pack is blocked with a friendly message (no install)', async () => {
+    localStorage.setItem(AUTO_ADD_INSTALLS_TO_MODPACK_KEY, 'true');
     registerInvokeHandler('get_subscriptions', () => [
       { share_id: 'henry/AAAA', profile_name: 'Henry Pack' },
     ]);
@@ -797,6 +801,7 @@ describe('<ModpackDetail>', () => {
   });
 
   it('quick-adding into a followed pack is blocked with a friendly message (no install)', async () => {
+    localStorage.setItem(AUTO_ADD_INSTALLS_TO_MODPACK_KEY, 'true');
     registerInvokeHandler('get_subscriptions', () => [
       { share_id: 'henry/AAAA', profile_name: 'Henry Pack' },
     ]);

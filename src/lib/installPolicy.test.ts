@@ -11,8 +11,8 @@ describe('install policy preferences', () => {
     localStorage.clear();
   });
 
-  it('preserves current behavior by default', () => {
-    expect(loadAutoAddInstallsToModpack()).toBe(true);
+  it('keeps new installs in the Mod Library by default', () => {
+    expect(loadAutoAddInstallsToModpack()).toBe(false);
   });
 
   it('persists a disabled auto-add preference', () => {
@@ -31,7 +31,7 @@ describe('install policy preferences', () => {
     expect(loadAutoAddInstallsToModpack()).toBe(true);
   });
 
-  it('falls back to enabled when browser storage is unavailable', () => {
+  it('falls back to library-only when browser storage is unavailable', () => {
     const originalStorage = Object.getOwnPropertyDescriptor(window, 'localStorage');
     Object.defineProperty(window, 'localStorage', {
       configurable: true,
@@ -41,7 +41,7 @@ describe('install policy preferences', () => {
     });
 
     try {
-      expect(loadAutoAddInstallsToModpack()).toBe(true);
+      expect(loadAutoAddInstallsToModpack()).toBe(false);
       expect(() => saveAutoAddInstallsToModpack(false)).not.toThrow();
     } finally {
       if (originalStorage) {

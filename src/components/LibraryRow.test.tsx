@@ -1039,6 +1039,75 @@ describe('<LibraryRow> Nexus-only update pill', () => {
     });
     expect(screen.queryByRole('button', { name: /Update available/i })).toBeNull();
   });
+
+  it('offers Skip this update for a Nexus-only update and fires onSnooze', async () => {
+    const onSnooze = vi.fn();
+    const user = userEvent.setup();
+    renderRow({
+      mod: baseModInfo({ github_url: null, nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/99' }),
+      audit: baseAudit({
+        github_repo: null,
+        latest_release_tag: null,
+        latest_release_with_assets_tag: null,
+        latest_compatible_tag: null,
+        needs_update: true,
+        nexus_update_available: true,
+        nexus_version: '2.1.0',
+        update_source: 'nexus',
+      }),
+      onSnooze,
+    });
+
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /Skip this update/i }));
+
+    expect(onSnooze).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows Latest when Nexus is current and GitHub has no installable release assets', () => {
+    renderRow({
+      mod: baseModInfo({
+        github_url: 'https://github.com/x/y',
+        nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/99',
+      }),
+      audit: baseAudit({
+        latest_release_tag: 'v2.0.0',
+        latest_release_with_assets_tag: null,
+        latest_compatible_tag: null,
+        latest_has_assets: false,
+        needs_update: false,
+        nexus_update_available: false,
+        nexus_version: '1.0.0',
+        update_source: null,
+      }),
+    });
+
+    expect(screen.getByText(/Latest/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Update available/i })).toBeNull();
+  });
+
+  it('distinguishes the audited Nexus version from the manifest version when they differ', () => {
+    renderRow({
+      row: baseMod({ version: '1.0.0' }),
+      mod: baseModInfo({
+        version: '1.0.0',
+        nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/99',
+      }),
+      audit: baseAudit({
+        installed_version: '2.0.0',
+        latest_release_tag: null,
+        latest_release_with_assets_tag: null,
+        latest_compatible_tag: null,
+        needs_update: false,
+        nexus_update_available: false,
+        nexus_version: '2.0.0',
+        update_source: null,
+      }),
+    });
+
+    expect(screen.getByText('Nexus v2.0.0')).toBeInTheDocument();
+    expect(screen.getByText('manifest v1.0.0')).toBeInTheDocument();
+  });
 });
 
 // ── bundle_members rendering (T11) ───────────────────────────────────────

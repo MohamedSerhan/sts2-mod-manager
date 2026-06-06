@@ -8,7 +8,7 @@ import {
   Search,
 } from 'lucide-react';
 import { Button } from '../components/Button';
-import { LibraryTable } from '../components/LibraryTable';
+import { LibraryTable, NO_TAGS_FILTER_VALUE } from '../components/LibraryTable';
 import { ModLibraryToolbar } from '../components/ModLibraryToolbar';
 import { useModLibrary } from '../hooks/useModLibrary';
 import { useApp } from '../contexts/AppContext';
@@ -193,7 +193,7 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
           affordances (tag priority, enable/disable/delete-all). */}
       {(tagOptions.length > 0 || mods.length > 0) && (
         <div className="gf-toolbar">
-          {tagOptions.length > 0 && (
+          {mods.length > 0 && (
             <label className="gf-sort-control">
               <span>{t('mods.tags.label')}</span>
               <select
@@ -202,6 +202,7 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
                 onChange={(e) => setPriorityTag(e.target.value)}
               >
                 <option value="">{t('mods.tags.all')}</option>
+                <option value={NO_TAGS_FILTER_VALUE}>{t('mods.tags.noTags')}</option>
                 {tagOptions.map((tag) => (
                   <option key={tag} value={tag}>{tag}</option>
                 ))}

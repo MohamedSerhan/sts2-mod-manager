@@ -1199,6 +1199,11 @@
       "launchModeSetDirect": "تم تعيين وضع التشغيل إلى «مباشر»",
       "failedUpdateLaunchMode": "فشل تحديث وضع التشغيل: {{error}}",
       "launchModeAria": "وضع التشغيل",
+      "installPolicy": "سلوك التثبيت",
+      "autoAddInstallsToModpack": "إضافة التثبيتات الجديدة إلى الحزمة الحالية",
+      "autoAddInstallsToModpackDesc": "ينطبق على الإضافة السريعة واستيراد الأرشيفات من عرض الحزمة. تنزيلات Nexus التي تُلتقط لاحقًا تبقى في مكتبة المودات.",
+      "autoAddInstallsToModpackOn": "ستنضم التثبيتات الجديدة إلى الحزمة المفتوحة فورًا.",
+      "autoAddInstallsToModpackOff": "ستبقى التثبيتات الجديدة في مكتبة المودات حتى تضيفها يدويًا.",
       "nexusDownloadDir": "مجلد مراقبة تنزيلات Nexus",
       "nexusDownloadDirDesc": "يراقب التطبيق هذا المجلد بحثًا عن أرشيفات مودات Nexus ويثبّتها تلقائيًا. يسري المفعول بعد إعادة تشغيل التطبيق.",
       "nexusDownloadDirDefault": "مجلد التنزيلات الافتراضي للنظام",
@@ -1421,6 +1426,8 @@
       "deleted": "تم الحذف: {{name}}",
       "deleteFailed": "فشل حذف {{name}}: {{error}}",
       "installed": "تم التثبيت: {{name}}",
+      "installedAndAddedToPack": "تم تثبيت {{name}} وإضافته إلى «{{pack}}».",
+      "installedLibraryOnly": "تم تثبيت {{name}} في مكتبة المودات.",
       "importFailed": "فشل الاستيراد: {{error}}",
       "followedPackNoAdd": "لا يمكن إضافة مودات إلى «{{pack}}» — إنها حزمة متابَعة. كرّرها أولاً لإنشاء نسختك القابلة للتعديل.",
       "allEnabled": "تم تمكين جميع المودات",
@@ -1447,7 +1454,8 @@
     "manageActiveModpackLink": "إدارة الحزمة النشطة →",
     "tags": {
       "label": "وسم",
-      "all": "كل الوسوم"
+      "all": "كل الوسوم",
+      "noTags": "بلا وسوم"
     },
     "audit": {
       "run": "فحص المودات",
@@ -1469,6 +1477,9 @@
     "updateAllLabel_other": "تحديث {{count}} مودات",
     "notePrefix": "📝",
     "versionLabel": "النسخة",
+    "manifestVersion": "البيان v{{version}}",
+    "nexusEffectiveVersion": "Nexus v{{version}}",
+    "nexusEffectiveVersionTitle": "فحص المدير Nexus v{{nexus}} بينما لا يزال بيان هذا المود يعرض v{{manifest}}.",
     "onDiskFolderTitle": "المجلد على القرص: {{folder}}",
     "rowClickEditSources": "انقر لتعديل المصادر والروابط والوسوم",
     "rowEditSourcesAria": "تعديل مصادر {{mod}}",

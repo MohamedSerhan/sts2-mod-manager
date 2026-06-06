@@ -1221,6 +1221,21 @@ describe('<LibraryTable modpackName={null}>', () => {
       expect(order).toEqual(['Apple', 'Zeta']);
     });
 
+    it('filters to only untagged mods when the No-tags sentinel is selected', async () => {
+      gridFromInstalled(['Apple', 'Zeta', 'Plain']);
+      const modInfoByKey = new Map([
+        ['Apple', mkModInfo({ name: 'Apple', folder_name: 'Apple', tags: ['ui'] })],
+        ['Zeta', mkModInfo({ name: 'Zeta', folder_name: 'Zeta', tags: ['combat'] })],
+        ['Plain', mkModInfo({ name: 'Plain', folder_name: 'Plain', tags: [] })],
+      ]);
+      render(<Wrap modpackName={null} modInfoByKey={modInfoByKey} priorityTag="__no_tags__" />);
+      await screen.findByTestId('library-table');
+
+      expect(screen.getByText('Plain')).toBeInTheDocument();
+      expect(screen.queryByText('Apple')).toBeNull();
+      expect(screen.queryByText('Zeta')).toBeNull();
+    });
+
     it('with no priorityTag, uses the normal sort (no tag reordering)', async () => {
       gridFromInstalled(['Zeta', 'Apple']);
       const modInfoByKey = new Map([

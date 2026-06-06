@@ -1198,6 +1198,11 @@
       "launchModeSetDirect": "Launch mode set to Direct",
       "failedUpdateLaunchMode": "Failed to update launch mode: {{error}}",
       "launchModeAria": "Launch mode",
+      "installPolicy": "Install behavior",
+      "autoAddInstallsToModpack": "Add new installs to the current modpack",
+      "autoAddInstallsToModpackDesc": "Applies to Quick Add and archive imports from a modpack view. Nexus downloads caught later stay in the Mod Library.",
+      "autoAddInstallsToModpackOn": "New installs join the open modpack immediately.",
+      "autoAddInstallsToModpackOff": "New installs stay in the Mod Library until you add them yourself.",
       "nexusDownloadDir": "Nexus Download Watch Folder",
       "nexusDownloadDirDesc": "The app watches this folder for Nexus mod archives and auto-installs them. Takes effect after restarting the app.",
       "nexusDownloadDirDefault": "OS default Downloads folder",
@@ -1421,6 +1426,8 @@
       "deleted": "Deleted: {{name}}",
       "deleteFailed": "Failed to delete {{name}}: {{error}}",
       "installed": "Installed: {{name}}",
+      "installedAndAddedToPack": "Installed {{name}} and added it to \"{{pack}}\".",
+      "installedLibraryOnly": "Installed {{name}} to the Mod Library.",
       "importFailed": "Import failed: {{error}}",
       "followedPackNoAdd": "Can't add mods to \"{{pack}}\" — it's a followed modpack. Duplicate it first to make your own editable copy.",
       "allEnabled": "All mods enabled",
@@ -1447,7 +1454,8 @@
     "manageActiveModpackLink": "Manage active modpack →",
     "tags": {
       "label": "Tag",
-      "all": "All tags"
+      "all": "All tags",
+      "noTags": "No tags"
     },
     "audit": {
       "run": "Audit mods",
@@ -1469,6 +1477,9 @@
     "updateAllLabel_other": "Update {{count}} mods",
     "notePrefix": "📝",
     "versionLabel": "Version",
+    "manifestVersion": "manifest v{{version}}",
+    "nexusEffectiveVersion": "Nexus v{{version}}",
+    "nexusEffectiveVersionTitle": "The manager audited Nexus v{{nexus}} while this mod's manifest still says v{{manifest}}.",
     "onDiskFolderTitle": "Folder on disk: {{folder}}",
     "rowClickEditSources": "Click to edit sources, links, and tags",
     "rowEditSourcesAria": "Edit sources for {{mod}}",

@@ -3043,11 +3043,14 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
         latest_release_with_assets_tag.as_deref(),
         nexus_version.as_deref(),
     );
+    let installed_version = best_known_installed_version(m, &ctx.sources_db.mods)
+        .map(|version| version.to_string())
+        .unwrap_or_else(|| m.version.clone());
     ModAuditEntry {
         mod_name: m.name.clone(),
         folder_name: m.folder_name.clone(),
         github_repo: display_github,
-        installed_version: m.version.clone(),
+        installed_version,
         latest_release_tag,
         latest_release_with_assets_tag,
         latest_has_assets: latest_has_mod_assets,

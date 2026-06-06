@@ -300,6 +300,12 @@ export function LibraryRow({
   const auditError = audit?.error ?? null;
   const minGameViolated =
     !!mod?.min_game_version && !gameVersionSatisfies(gameVersion, mod.min_game_version);
+  const manifestVersion = (row.version || '').replace(/^v/i, '');
+  const effectiveInstalledVersion = audit?.installed_version?.replace(/^v/i, '') ?? null;
+  const showEffectiveNexusVersion =
+    !!effectiveInstalledVersion
+    && effectiveInstalledVersion !== manifestVersion
+    && !!(audit?.nexus_version || mod?.nexus_url);
 
   return (
     <Card
@@ -531,8 +537,21 @@ export function LibraryRow({
                 a folder glyph + tooltip, so version / folder / description
                 read as distinct things instead of three grey lookalikes. */}
             <span className="gf-meta-version" title={t('mods.versionLabel')}>
-              v{(row.version || '').replace(/^v/i, '')}
+              {showEffectiveNexusVersion
+                ? t('mods.manifestVersion', { version: manifestVersion })
+                : `v${manifestVersion}`}
             </span>
+            {showEffectiveNexusVersion && (
+              <span
+                className="gf-meta-version"
+                title={t('mods.nexusEffectiveVersionTitle', {
+                  nexus: effectiveInstalledVersion,
+                  manifest: manifestVersion,
+                })}
+              >
+                {t('mods.nexusEffectiveVersion', { version: effectiveInstalledVersion })}
+              </span>
+            )}
             {row.folder_name
               && (row.folder_name !== row.name || !!row.display_name?.trim())
               && (
@@ -786,9 +805,11 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
     else membershipChip = 'includedOff';
   }
 
+  const snoozeTargetVersion =
+    audit?.latest_release_with_assets_tag ?? audit?.nexus_version ?? null;
   const canSnooze =
     !!audit?.snoozed ||
-    (!!audit?.needs_update && !!audit.latest_release_with_assets_tag);
+    (!!audit?.needs_update && !!snoozeTargetVersion);
 
   // Rebuilt per render — cheap, and the menu only mounts/opens on demand. Don't memoize (it would force listing every closure capture as a dep).
   // One descriptor per customizable id: contextual availability + how to render.
@@ -847,7 +868,7 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
             icon={<Clock size={12} />}
             onClick={onSnooze}
             description={t('mods.snoozeDesc', {
-              version: audit?.latest_release_with_assets_tag?.replace(/^v/, '') ?? '?',
+              version: snoozeTargetVersion?.replace(/^v/, '') ?? '?',
             })}
           >
             {t('mods.snoozeUpdate')}

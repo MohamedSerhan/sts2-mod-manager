@@ -4,7 +4,7 @@ End-to-end UI tests for the Mod Manager. Drives a real Tauri window
 via the platform WebDriver. **Not shipped** — same as the rest of
 `qa/`, this lives outside `src/` and `src-tauri/`.
 
-## The driver stack (Windows)
+## The driver stack
 
 ```
    smoke.mjs (selenium-webdriver client)
@@ -13,16 +13,17 @@ via the platform WebDriver. **Not shipped** — same as the rest of
         tauri-driver                ← acts as a proxy + launches the app
               │ HTTP, port 4445
               ▼
-        msedgedriver                ← the real WebDriver against WebView2
+        native WebDriver            ← msedgedriver on Windows, WebKitWebDriver on Linux
               │
               ▼
-   built Tauri app (Edge WebView2)
+   built Tauri app
 ```
 
 `tauri-driver` is a small Rust binary you `cargo install` once. It
 launches the Tauri app under test, then forwards WebDriver commands
-from your test client to `msedgedriver` (which must match your
-WebView2 runtime version).
+from your test client to the platform-native driver. Windows uses
+`msedgedriver`, which must match your WebView2 runtime version. Linux
+uses `WebKitWebDriver` from the WebKitGTK driver package.
 
 ## One-time setup
 
@@ -33,7 +34,9 @@ WebView2 runtime version).
    cargo install tauri-driver
    ```
 
-2. **`msedgedriver`** — must match your WebView2 runtime EXACTLY.
+2. **Native WebDriver**
+
+   On Windows, `msedgedriver` must match your WebView2 runtime EXACTLY.
 
    Check the version that's on this machine:
 
@@ -61,6 +64,12 @@ WebView2 runtime version).
    and extract `msedgedriver.exe` to `qa/runner/msedgedriver.exe`. The
    runner expects it at exactly that path.
 
+   On Ubuntu/Linux, install WebKitGTK's driver:
+
+   ```bash
+   sudo apt-get install webkit2gtk-driver
+   ```
+
 3. **App build** — the runner drives the **release build** of the
    manager (not the dev server — webdriver against `tauri dev`
    doesn't work reliably because Vite HMR fights with the headless
@@ -71,7 +80,8 @@ WebView2 runtime version).
    ```
 
    The runner picks up
-   `src-tauri/target/release/sts2-mod-manager.exe`.
+   `src-tauri/target/release/sts2-mod-manager.exe` on Windows or
+   `src-tauri/target/release/sts2-mod-manager` on Linux.
 
 ## Running
 
@@ -111,7 +121,7 @@ to verify the intercept didn't regress.
 `smoke.mjs` covers the end-to-end "does the app launch and respond
 to clicks" check that no Rust unit test can ever catch:
 
-1. Spawns `tauri-driver` with `--native-driver qa/runner/msedgedriver.exe`.
+1. Spawns `tauri-driver` with `--native-driver qa/runner/msedgedriver.exe` on Windows or `--native-driver WebKitWebDriver` on Linux.
 2. Connects via `selenium-webdriver` over HTTP.
 3. Waits for the manager's main window to render.
 4. Finds the sidebar's "Mods" nav button and clicks it.
@@ -136,19 +146,12 @@ small and aligns with the upstream Tauri example at
 
 If the suite grows past ~20 specs, switch to WebdriverIO.
 
-## CI integration (when ready)
+## CI integration
 
-```yaml
-- run: cargo install tauri-driver --version "^0.1"
-- run: npm run tauri build
-- uses: ./.github/actions/install-msedgedriver
-  with:
-    webview2_version: ${{ env.WEBVIEW2_VERSION }}
-- run: node qa/runner/smoke.mjs
-```
-
-The `install-msedgedriver` composite action doesn't exist yet — for
-the local-only iteration phase, manual download is fine.
+`.github/workflows/ci.yml` runs the cassette smoke on both Windows
+(WebView2/msedgedriver) and Ubuntu (WebKitGTK/WebKitWebDriver). The
+Windows job downloads the matching `msedgedriver`; the Linux job
+installs `webkit2gtk-driver` and runs the smoke under `xvfb-run`.
 
 ## When tests fail
 

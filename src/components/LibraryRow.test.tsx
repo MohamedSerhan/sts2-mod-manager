@@ -818,7 +818,8 @@ describe('<LibraryRow> modpackName=null mode', () => {
 // The verbose "Store / Activate" button and the buried kebab item were
 // both retired in favour of a single compact switch on the row. ON = the
 // mod is active in the game folder; OFF = it's stored on disk. The switch
-// only renders when a ModInfo (`mod`) is supplied.
+// renders from the membership row itself; extra row actions still require a
+// matching ModInfo (`mod`).
 
 describe('<LibraryRow> active/stored switch', () => {
   it('renders a switch reflecting installed_enabled and a flipping label', () => {
@@ -844,9 +845,12 @@ describe('<LibraryRow> active/stored switch', () => {
     expect(screen.getByText('Stored')).toBeInTheDocument();
   });
 
-  it('does not render the switch when no mod prop is supplied', () => {
+  it('renders the switch when no mod prop is supplied', () => {
     renderRow({ mod: undefined });
-    expect(screen.queryByRole('switch')).toBeNull();
+    expect(
+      screen.getByRole('switch', { name: /toggle whether BaseLib is active in game/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /mod actions/i })).toBeNull();
   });
 
   it('clicking the switch fires onToggleStorage with the row', async () => {

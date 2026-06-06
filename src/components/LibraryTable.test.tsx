@@ -58,10 +58,9 @@ const baseProfile = (overrides: Partial<Profile> = {}): Profile =>
     ...overrides,
   } as Profile);
 
-// Membership is now changed from the per-row kebab, which only renders
-// when the row has a matching ModInfo (passed via modInfoByKey). This
-// factory builds that ModInfo so the kebab + its "Add/Remove from pack"
-// item are present in membership tests.
+// Many row-menu actions only render when the row has a matching ModInfo
+// (passed via modInfoByKey). This factory builds that ModInfo for tests that
+// exercise the kebab/source/update surface.
 const mkModInfo = (overrides: Partial<ModInfo> = {}): ModInfo =>
   ({
     name: 'Mod',
@@ -373,6 +372,44 @@ describe('<LibraryTable>', () => {
         args: { name: 'Idle', folderName: 'Idle', enable: false },
       });
     });
+  });
+
+  it('pack-scoped active rows keep core controls even when ModInfo lookup is missing', async () => {
+    registerInvokeHandler('get_active_profile', () => 'Stable');
+    registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [
+        {
+          name: 'RandomVision',
+          display_name: '[Cheats] RandomVision',
+          version: '0.2.0',
+          folder_name: 'RandomVision',
+          mod_id: 'RandomVision',
+          installed_enabled: true,
+          profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+        },
+      ],
+    }));
+
+    render(
+      <Wrap
+        modpackName="Stable"
+        packScoped
+        coupleActiveStorage
+        modInfoByKey={new Map()}
+      />,
+    );
+
+    expect(await screen.findByRole('heading', { name: '[Cheats] RandomVision' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('switch', {
+        name: /toggle whether \[Cheats\] RandomVision is active in game/i,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /Remove \[Cheats\] RandomVision from this modpack/i }),
+    ).toBeInTheDocument();
   });
 
   // ── Enabling a stored mod that isn't in the active pack ──────────────

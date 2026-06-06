@@ -365,7 +365,7 @@ export function LibraryRow({
         {/* Active/stored toggle — only where in-game state is meaningful:
             the All Mods view, or the ACTIVE pack's rows. A non-active pack's
             members aren't loaded, so showing a toggle there is misleading. */}
-        {mod && (!packScoped || packActive) && (
+        {(!packScoped || packActive) && (
           <div
             className="gf-row-status"
             role="presentation"
@@ -656,7 +656,7 @@ export function LibraryRow({
               (membership remove; on the active pack it also unloads the mod).
               All Mods view → the disk-delete trash. Delete-from-disk for the
               modpack view lives in the kebab. */}
-          {mod && packScoped ? (
+          {packScoped ? (
             <button
               type="button"
               className="gf-row-remove"

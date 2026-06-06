@@ -2048,6 +2048,21 @@ body {
   border-color: color-mix(in oklch, var(--info) 40%, transparent);
   color: var(--info-text);
 }
+.gf-modpack-out-sync {
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.gf-modpack-out-sync-text {
+  display: flex;
+  flex: 1 1 260px;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.gf-modpack-out-sync-text span {
+  color: var(--ink-mute);
+}
 
 /* ── Settings sub-tabs ────────────────────────────────────────────── */
 .gf-tabs-settings {
@@ -2560,18 +2575,20 @@ body {
 
 .gf-share-code {
   display: flex; align-items: center; gap: 12px;
+  flex-wrap: wrap;
   padding: 12px 14px;
   background: var(--indigo-deep); border: 1px solid var(--gf-line);
   border-radius: 8px; margin-bottom: 12px;
 }
-.gf-share-code-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.gf-share-code-text { display: flex; flex-direction: column; gap: 2px; flex: 1 1 160px; min-width: 0; }
 .gf-share-code-eyebrow { font-size: 10.5px; color: var(--ink-dim); text-transform: uppercase; letter-spacing: 0.6px; }
 .gf-share-code-value {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 17px; font-weight: 700; letter-spacing: 0.5px;
   color: var(--gf);
-  word-break: break-all;
+  overflow-wrap: anywhere;
 }
+.gf-share-code-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
 /* Subscription change list */
 .gf-changelist { display: flex; flex-direction: column; gap: 4px; }

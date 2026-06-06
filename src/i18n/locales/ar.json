@@ -112,6 +112,10 @@
       "toggleAllFailed": "تعذّر تحديث كل المودات: {{error}}",
       "toggleAllMissing": "{{count}} غير مثبّتة: {{list}}.",
       "toggleAllSomeFailed": "{{count}} تعذّر نقلها: {{list}}.",
+      "outOfSyncTitle": "غير متزامنة",
+      "outOfSyncBody": "تحتوي هذه الحزمة على تغييرات محلية لم تُدفَع بعد إلى رمز المشاركة.",
+      "outOfSyncAction": "إعادة المشاركة للدفع",
+
       "inactiveToggleHint": "هذه الحزمة غير نشطة — لا يمكن تفعيل/تعطيل المودات داخل اللعبة إلا للحزمة النشطة. بدّل إليها للتحكم بما يُحمَّل."
     },
     "edit": {
@@ -163,6 +167,8 @@
     "step1Subtitle": "اختر كيف تبدأ هذه الحزمة.",
     "step1FromActive": "البدء من موداتي النشطة",
     "step1FromActiveDesc": "استخدم المودات الموجودة حاليًا في مجلد لعبتك كنقطة بداية.",
+    "step1AllInstalled": "ابدأ بجميع الوحدات المثبتة",
+    "step1AllInstalledDesc": "ابدأ من كل وحدة مثبتة لديك، سواء كانت مفعّلة أم لا.",
     "step1Empty": "البدء فارغًا",
     "step1EmptyDesc": "ابدأ بدون مودات. أضِفها لاحقًا.",
     "step1Clone": "استنساخ حزمة موجودة",
@@ -313,11 +319,10 @@
     },
     "actions": {
       "importJson": "استيراد JSON للحزمة",
-      "snapshotCurrent": "لقطة للحزمة النشطة",
+      "importSts2pack": "استيراد .sts2pack",
       "newProfile": "إنشاء حزمة"
     },
     "prompt": {
-      "snapshotName": "أدخل اسم اللقطة:",
       "duplicateAs": "تكرار «{{name}}» باسم:",
       "duplicateDefault": "{{name}} (نسخة)"
     },
@@ -461,9 +466,9 @@
       "dismissAria": "إخفاء توصية إعادة المشاركة لـ {{name}}"
     },
     "kebab": {
-      "snapshotFromCurrent": "لقطة من التثبيت الحالي",
       "duplicate": "تكرار",
       "exportJson": "تصدير JSON…",
+      "exportSts2pack": "تصدير .sts2pack...",
       "copyShareCode": "نسخ رمز المشاركة",
       "copyShareLink": "نسخ رابط المشاركة",
       "copyShareMessageLabel": "نسخ رسالة المشاركة",
@@ -495,8 +500,6 @@
       "synced": "تمت مزامنة «{{name}}» — أنت محدَّث.",
       "syncFailed": "فشلت المزامنة: {{error}}",
       "created": "تم إنشاء الحزمة «{{name}}»",
-      "snapshotCreated": "تم إنشاء اللقطة «{{name}}» بـ {{count}} مود",
-      "snapshotFailed": "فشل إنشاء اللقطة: {{error}}",
       "switched": "تم التبديل إلى الحزمة «{{name}}»",
       "switchedWithDetails": "تم التبديل إلى «{{name}}». {{details}}",
       "switchFailed": "فشل التبديل: {{error}}",
@@ -508,6 +511,7 @@
       "savedChangesWithReShare": "تم حفظ التغييرات في «{{name}}». أعد المشاركة عندما تكون جاهزًا لنشرها.",
       "saveFailed": "فشل حفظ التغييرات: {{error}}",
       "exported": "تم نسخ JSON الحزمة إلى الحافظة!",
+      "exportedFile": "تم تصدير «{{name}}» إلى ملف .sts2pack.",
       "exportFailed": "فشل التصدير: {{error}}",
       "deleted": "تم حذف الحزمة «{{name}}»",
       "deleteFailed": "فشل الحذف: {{error}}",

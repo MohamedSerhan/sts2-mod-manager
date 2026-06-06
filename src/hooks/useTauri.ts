@@ -175,10 +175,6 @@ export async function repairProfile(name: string): Promise<RepairProfileResult> 
   return invoke('repair_profile', { name });
 }
 
-export async function snapshotProfile(name: string): Promise<Profile> {
-  return invoke('snapshot_profile', { name });
-}
-
 export async function deleteProfile(name: string): Promise<void> {
   return invoke('delete_profile_cmd', { name });
 }
@@ -191,12 +187,12 @@ export async function renameProfile(oldName: string, newName: string): Promise<P
   return invoke('rename_profile', { oldName, newName });
 }
 
-export async function exportProfile(name: string): Promise<string> {
-  return invoke('export_profile_cmd', { name });
+export async function exportProfileToFile(name: string, path: string): Promise<void> {
+  return invoke('export_profile_to_file', { name, path });
 }
 
-export async function importProfile(json: string): Promise<Profile> {
-  return invoke('import_profile_cmd', { json });
+export async function importSts2pack(path: string): Promise<Profile> {
+  return invoke('import_sts2pack', { path });
 }
 
 export async function getProfileMemberships(): Promise<ProfileMembershipGrid> {
@@ -253,7 +249,7 @@ export async function getProfileDrift(name: string): Promise<ProfileDrift> {
 
 /** Save the drift: reconcile the manifest to the current loadout by applying
  *  only the diff (add enabled extras, drop missing mods, sync toggled/version
- *  for present mods). Unlike snapshotProfile, this preserves the pack's
+ *  for present mods). Unlike a full re-snapshot, this preserves the pack's
  *  curated set rather than absorbing the whole install. */
 export async function saveProfileDrift(name: string): Promise<Profile> {
   return invoke('save_profile_drift', { name });

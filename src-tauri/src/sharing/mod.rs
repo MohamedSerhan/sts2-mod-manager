@@ -49,9 +49,8 @@ use github::{
 // directly — orchestration always goes through `zip_profile_mod_files`
 // (which has the enabled-vs-disabled-path fallback baked in), so the
 // raw `zip_mod_files` lives in `upload.rs` as an implementation detail.
-use upload::{
-    ensure_profile_publish_complete, restore_profile_after_failed_publish, zip_profile_mod_files,
-};
+pub(crate) use upload::zip_profile_mod_files;
+use upload::{ensure_profile_publish_complete, restore_profile_after_failed_publish};
 
 /// One mod skipped during a modpack install because it declared a
 /// `min_game_version` higher than the user's STS2 build. Surfaced in
@@ -157,6 +156,11 @@ pub struct ShareResult {
     /// leaves it false since it's already current.
     #[serde(default)]
     pub reshare_recommended: bool,
+    /// True when the local manifest differs from what was last published
+    /// (owned shares only). Drives the "Out of sync -- Re-share" banner.
+    /// Only set by `get_share_info`; fresh share/reshare leaves it false.
+    #[serde(default)]
+    pub out_of_sync: bool,
 }
 
 pub(crate) fn attribute_profile_to_owner(mut profile: Profile, owner: &str) -> Profile {
@@ -183,6 +187,11 @@ struct ShareInfo {
     /// than current" so they get a re-share nudge.
     #[serde(default)]
     share_format_version: u32,
+    /// Fingerprint of the publishable content at last share/re-share.
+    /// Lets the UI detect "this owned share has changes not yet pushed".
+    /// Absent in `.share` files written before this field existed.
+    #[serde(default)]
+    published_signature: Option<String>,
 }
 
 fn save_share_info(path: &Path, info: &ShareInfo) -> Result<()> {
@@ -466,6 +475,42 @@ fn backfill_profile_sources_from_db(profile: &mut Profile, config_path: &std::pa
     }
 }
 
+/// A stable fingerprint of the content that actually gets published, so the
+/// UI can tell when an owned share has un-pushed local edits. Deliberately
+/// excludes volatile / publish-side fields: timestamps and bundle_url/sha
+/// (those change on every re-share without the user changing anything).
+fn profile_publish_signature(profile: &Profile) -> String {
+    use sha2::{Digest, Sha256};
+    let mut entries: Vec<String> = profile
+        .mods
+        .iter()
+        .map(|m| {
+            format!(
+                "{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}",
+                m.name,
+                m.version,
+                m.folder_name.as_deref().unwrap_or(""),
+                m.mod_id.as_deref().unwrap_or(""),
+                m.enabled,
+                m.source.as_deref().unwrap_or(""),
+                m.hash.as_deref().unwrap_or(""),
+            )
+        })
+        .collect();
+    entries.sort();
+    let mut hasher = Sha256::new();
+    hasher.update(profile.name.as_bytes());
+    hasher.update([0x1e]);
+    hasher.update(profile.created_by.as_deref().unwrap_or("").as_bytes());
+    hasher.update([0x1e]);
+    hasher.update(match profile.public { Some(true) => b"1".as_slice(), _ => b"0".as_slice() });
+    for e in entries {
+        hasher.update([0x1d]);
+        hasher.update(e.as_bytes());
+    }
+    hex::encode(hasher.finalize())
+}
+
 // ── Tauri Commands ──────────────────────────────────────────────────────────
 
 /// Share a profile by uploading to a GitHub repo. Returns a short profile code.
@@ -692,6 +737,7 @@ pub(super) async fn share_profile_impl(
         owner: username.clone(),
         file_sha: Some(file_sha),
         share_format_version: SHARE_FORMAT_VERSION,
+        published_signature: Some(profile_publish_signature(&profile)),
     };
     let share_info_path = profiles_path.join(format!("{}.share", profile.name));
     save_share_info(&share_info_path, &share_info)?;
@@ -733,6 +779,8 @@ pub(super) async fn share_profile_impl(
         failed_uploads,
         // Just published under the current format — nothing to nudge.
         reshare_recommended: false,
+        // Just published — not out of sync.
+        out_of_sync: false,
     })
 }
 
@@ -763,6 +811,12 @@ pub fn get_share_info(
         filename
     );
     let repo_url = build_repo_url(&info.owner);
+    let out_of_sync = match info.published_signature.as_deref() {
+        Some(sig) => crate::profiles::load_profile(&name, &profiles_path)
+            .map(|p| profile_publish_signature(&p) != sig)
+            .unwrap_or(false),
+        None => false, // legacy .share with no baseline — don't nag until next share
+    };
     Ok(Some(ShareResult {
         code: info.code,
         owner: info.owner,
@@ -777,6 +831,7 @@ pub fn get_share_info(
         // re-share (e.g. to pick up source-link backfill). Packs already at
         // the current version — and any future-dated version — don't.
         reshare_recommended: info.share_format_version < SHARE_FORMAT_VERSION,
+        out_of_sync,
     }))
 }
 
@@ -958,6 +1013,7 @@ pub async fn reshare_profile(
         owner: share_info.owner,
         file_sha: Some(file_sha),
         share_format_version: SHARE_FORMAT_VERSION,
+        published_signature: Some(profile_publish_signature(&profile)),
     };
     save_share_info(&share_info_path, &updated_info).map_err(|e| e.to_string())?;
 
@@ -995,6 +1051,8 @@ pub async fn reshare_profile(
         failed_uploads,
         // Just re-published under the current format — nudge cleared.
         reshare_recommended: false,
+        // Just re-published — not out of sync.
+        out_of_sync: false,
     })
 }
 
@@ -1095,12 +1153,14 @@ mod listing_tests {
             owner: "alice".into(),
             file_sha: Some("old".into()),
             share_format_version: 1,
+            published_signature: None,
         };
         let second = ShareInfo {
             code: "AAAA-BBBB-CCCC".into(),
             owner: "alice".into(),
             file_sha: Some("new".into()),
             share_format_version: SHARE_FORMAT_VERSION,
+            published_signature: None,
         };
 
         save_share_info(&path, &first).unwrap();
@@ -1939,6 +1999,162 @@ mod bundle_share_roundtrip_tests {
             friend_bundle.folder_name.as_deref(),
             Some("PackContainer"),
             "folder_name must match the container directory"
+        );
+    }
+}
+
+#[cfg(test)]
+mod publish_signature_tests {
+    use super::*;
+    use chrono::Utc;
+
+    fn make_mod(name: &str, version: &str, enabled: bool) -> crate::profiles::ProfileMod {
+        crate::profiles::ProfileMod {
+            name: name.into(),
+            version: version.into(),
+            source: None,
+            hash: None,
+            files: vec![format!("{name}/{name}.dll")],
+            folder_name: Some(name.into()),
+            mod_id: Some(name.into()),
+            enabled,
+            bundle_url: None,
+            bundle_sha256: None,
+            bundle_members: vec![],
+        }
+    }
+
+    fn base_profile() -> Profile {
+        Profile {
+            name: "TestPack".into(),
+            game_version: None,
+            created_by: Some("alice".into()),
+            mods: vec![
+                make_mod("ModA", "1.0.0", true),
+                make_mod("ModB", "2.0.0", true),
+            ],
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            public: Some(false),
+        }
+    }
+
+    /// Step B test 1: signature is stable across updated_at and bundle fields.
+    #[test]
+    fn signature_stable_across_volatile_fields() {
+        let profile1 = base_profile();
+
+        // Build a profile that differs ONLY in updated_at and bundle_url/sha256.
+        let mut profile2 = base_profile();
+        // Shift updated_at by a second.
+        profile2.updated_at = profile1.updated_at + chrono::Duration::seconds(1);
+        // Set bundle_url and bundle_sha256 on every mod.
+        for m in &mut profile2.mods {
+            m.bundle_url = Some("https://example.com/bundle.zip".into());
+            m.bundle_sha256 = Some("deadbeef".into());
+        }
+
+        assert_eq!(
+            profile_publish_signature(&profile1),
+            profile_publish_signature(&profile2),
+            "signature must not change when only updated_at or bundle fields differ"
+        );
+    }
+
+    /// Step B test 2: signature changes when a meaningful field changes.
+    #[test]
+    fn signature_changes_on_real_field_change() {
+        let profile_original = base_profile();
+
+        // Flip enabled on ModA.
+        let mut profile_toggled = base_profile();
+        profile_toggled.mods[0].enabled = false;
+
+        assert_ne!(
+            profile_publish_signature(&profile_original),
+            profile_publish_signature(&profile_toggled),
+            "signature must differ when a mod's enabled state flips"
+        );
+
+        // Change version of ModB.
+        let mut profile_version_bumped = base_profile();
+        profile_version_bumped.mods[1].version = "3.0.0".into();
+
+        assert_ne!(
+            profile_publish_signature(&profile_original),
+            profile_publish_signature(&profile_version_bumped),
+            "signature must differ when a mod's version changes"
+        );
+
+        // Add a new mod.
+        let mut profile_extra_mod = base_profile();
+        profile_extra_mod.mods.push(make_mod("ModC", "1.0.0", true));
+
+        assert_ne!(
+            profile_publish_signature(&profile_original),
+            profile_publish_signature(&profile_extra_mod),
+            "signature must differ when a mod is added"
+        );
+    }
+
+    /// Step E: out_of_sync is false right after publish (signatures match),
+    /// true after the local manifest is mutated, and false for a legacy
+    /// .share with no published_signature.
+    #[test]
+    fn out_of_sync_detection_via_signature() {
+        let dir = tempfile::tempdir().unwrap();
+        let profiles_path = dir.path().join("profiles");
+        std::fs::create_dir_all(&profiles_path).unwrap();
+
+        let profile = base_profile();
+        crate::profiles::save_profile(&profile, &profiles_path).unwrap();
+
+        let sig = profile_publish_signature(&profile);
+
+        // --- Case 1: signature matches → not out of sync ---
+        let loaded = crate::profiles::load_profile(&profile.name, &profiles_path).unwrap();
+        let is_out_of_sync = profile_publish_signature(&loaded) != sig;
+        assert!(
+            !is_out_of_sync,
+            "freshly saved profile should not be out of sync"
+        );
+
+        // --- Case 2: modify the local profile → out of sync ---
+        let mut mutated = base_profile();
+        mutated.mods[0].enabled = false; // toggle a mod
+        crate::profiles::save_profile(&mutated, &profiles_path).unwrap();
+
+        let reloaded = crate::profiles::load_profile(&profile.name, &profiles_path).unwrap();
+        let is_out_of_sync_after_edit = profile_publish_signature(&reloaded) != sig;
+        assert!(
+            is_out_of_sync_after_edit,
+            "modified profile should be out of sync with original signature"
+        );
+
+        // --- Case 3: legacy .share (no published_signature) → never nag ---
+        let share_info_path = profiles_path.join(format!("{}.share", profile.name));
+        let legacy_info = ShareInfo {
+            code: "AAAA-BBBB-CCCC".into(),
+            owner: "alice".into(),
+            file_sha: Some("abc123".into()),
+            share_format_version: 1,
+            published_signature: None,
+        };
+        save_share_info(&share_info_path, &legacy_info).unwrap();
+
+        let content = std::fs::read_to_string(&share_info_path).unwrap();
+        let info: ShareInfo = serde_json::from_str(&content).unwrap();
+        let out_of_sync_legacy = match info.published_signature.as_deref() {
+            Some(saved_sig) => {
+                crate::profiles::load_profile(&profile.name, &profiles_path)
+                    .map(|p| profile_publish_signature(&p) != saved_sig)
+                    .unwrap_or(false)
+            }
+            None => false,
+        };
+        assert!(
+            !out_of_sync_legacy,
+            "legacy .share with no published_signature should return false (don't nag)"
         );
     }
 }

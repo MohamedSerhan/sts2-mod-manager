@@ -16,6 +16,8 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import i18n from '../i18n';
 
 import { CreateModpackWizard } from './CreateModpackWizard';
 import { AllProviders } from '../__test__/providers';
@@ -829,6 +831,22 @@ describe('<CreateModpackWizard>', () => {
         ).toBe(true);
         expect(calls.some((c) => c.args?.modName === 'NoFolder' && c.args?.included === false)).toBe(false);
       });
+    });
+  });
+
+  // ── All-installed strategy ────────────────────────────────────────
+  describe('all-installed strategy', () => {
+    it('selects enabled AND disabled mods', async () => {
+      seed({
+        mods: [
+          baseMod({ name: 'A', folder_name: 'A', enabled: true }),
+          baseMod({ name: 'B', folder_name: 'B', enabled: false }),
+        ],
+      });
+      const user = userEvent.setup();
+      render(<Wrap />);
+      await user.click(await screen.findByText(i18n.t('createModpack.step1AllInstalled')));
+      expect(screen.getByText(i18n.t('createModpack.step2SelectedCount', { count: 2 }))).toBeInTheDocument();
     });
   });
 

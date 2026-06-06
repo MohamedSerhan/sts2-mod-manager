@@ -145,7 +145,7 @@ pub(super) fn zip_entry_outpath(
 /// queued but before the bundler reaches it — without the fallback the
 /// share would fail mid-stream for a state change that doesn't actually
 /// change the mod's content.
-pub(super) fn zip_profile_mod_files(
+pub(crate) fn zip_profile_mod_files(
     pm: &crate::profiles::ProfileMod,
     mods_path: &std::path::Path,
     disabled_path: &std::path::Path,

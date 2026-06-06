@@ -112,6 +112,9 @@
       "allInPack": "Every installed mod is already in this modpack.",
       "added": "Added {{mod}} to {{pack}}",
       "addFailed": "Couldn't add {{mod}}: {{error}}",
+      "outOfSyncTitle": "Out of sync",
+      "outOfSyncBody": "This modpack has local changes that have not been pushed to its share code.",
+      "outOfSyncAction": "Re-share to push",
       "inactiveToggleHint": "This modpack isn't active — enabling/disabling mods in-game is only available for the active modpack. Switch to it to manage what loads."
     },
     "edit": {
@@ -163,6 +166,8 @@
     "step1Subtitle": "Pick how this modpack should begin.",
     "step1FromActive": "Start from my active mods",
     "step1FromActiveDesc": "Use the mods currently in your game folder as a starting point.",
+    "step1AllInstalled": "Start with all installed mods",
+    "step1AllInstalledDesc": "Begin from every mod you have installed, enabled or not.",
     "step1Empty": "Start empty",
     "step1EmptyDesc": "Begin with no mods. Add them later.",
     "step1Clone": "Clone an existing modpack",
@@ -313,11 +318,10 @@
     },
     "actions": {
       "importJson": "Import modpack JSON",
-      "snapshotCurrent": "Snapshot active modpack",
+      "importSts2pack": "Import .sts2pack",
       "newProfile": "Create modpack"
     },
     "prompt": {
-      "snapshotName": "Enter snapshot name:",
       "duplicateAs": "Duplicate \"{{name}}\" as:",
       "duplicateDefault": "{{name}} (copy)"
     },
@@ -461,10 +465,10 @@
       "dismissAria": "Dismiss the re-share recommendation for {{name}}"
     },
     "kebab": {
-      "snapshotFromCurrent": "Snapshot from current install",
       "duplicate": "Duplicate",
       "rename": "Rename",
       "exportJson": "Export JSON...",
+      "exportSts2pack": "Export .sts2pack...",
       "copyShareCode": "Copy share code",
       "copyShareLink": "Copy share link",
       "copyShareMessageLabel": "Copy share message",
@@ -495,8 +499,6 @@
       "synced": "Synced \"{{name}}\" — you're up to date.",
       "syncFailed": "Sync failed: {{error}}",
       "created": "Modpack \"{{name}}\" created",
-      "snapshotCreated": "Snapshot \"{{name}}\" created with {{count}} mods",
-      "snapshotFailed": "Failed to snapshot: {{error}}",
       "switched": "Switched to modpack \"{{name}}\"",
       "switchedWithDetails": "Switched to \"{{name}}\". {{details}}",
       "switchFailed": "Failed to switch: {{error}}",
@@ -508,6 +510,7 @@
       "savedChangesWithReShare": "Saved changes to \"{{name}}\". Re-share when you're ready to publish them.",
       "saveFailed": "Failed to save changes: {{error}}",
       "exported": "Modpack JSON copied to clipboard!",
+      "exportedFile": "Exported \"{{name}}\" to a .sts2pack file.",
       "exportFailed": "Failed to export: {{error}}",
       "deleted": "Modpack \"{{name}}\" deleted",
       "deleteFailed": "Failed to delete: {{error}}",

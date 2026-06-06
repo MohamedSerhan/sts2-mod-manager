@@ -1,7 +1,6 @@
 //! Profile snapshot + apply pipeline.
 //!
-//! The Tauri commands (`create_profile`, `snapshot_profile`,
-//! `switch_profile`) stay in `mod.rs` so the `#[tauri::command]`
+//! The Tauri commands (`create_profile`, `switch_profile`) stay in `mod.rs` so the `#[tauri::command]`
 //! proc-macro emits its `__cmd__*` companions at the path
 //! `crate::profiles::*` that `lib.rs` references. This module holds the
 //! compute layer they call into:

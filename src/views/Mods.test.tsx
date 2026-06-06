@@ -108,8 +108,8 @@ describe('<ModsView>', () => {
     // Toolbar (and its bulk-action row) only render once mods exist.
     await screen.findByText('BaseLib');
     const label = i18n.t('mods.autoDetectSources');
-    // The dedicated toolbar button — the Add-mods menu item with the same label
-    // is role="menuitem" and isn't in the DOM until that menu opens, so the
+    // The dedicated toolbar button is the only element carrying this label
+    // (the "+ Add mods" dropdown no longer offers auto-detect), so the
     // role="button" lookup is unambiguous.
     await user.click(screen.getByRole('button', { name: new RegExp(label, 'i') }));
     // Opening the modal kicks off a scan via the auto_detect_sources command.
@@ -298,11 +298,10 @@ describe('<ModsView>', () => {
     expect(screen.getByRole('menuitem', { name: /Quick add URL/ })).toBeInTheDocument();
   });
 
-  it('Auto-detect sources toolbar button opens the AutoDetectModal', async () => {
-    // The bulk "Auto-detect sources" action (scan unlinked mods for their
-    // GitHub repos) was relocated here from the old Settings → Audit tab.
-    // Clicking it mounts AutoDetectModal, which immediately scans via
-    // auto_detect_sources on open.
+  it('Auto-detect sources standalone button opens the AutoDetectModal (NOT in "+ Add mods" menu)', async () => {
+    // "Auto-detect sources" lives as a standalone bulk-action button in the
+    // Mod Library, NOT inside the "+ Add mods" dropdown. Opening that menu must
+    // not add a second instance of the label.
     seedMods([baseMod({ name: 'BaseLib', folder_name: 'BaseLib' })]);
     registerInvokeHandler('auto_detect_sources', () => ({
       matched: [],
@@ -312,9 +311,14 @@ describe('<ModsView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
+    const label = i18n.t('mods.autoDetectSources');
+    // Exactly one element with the auto-detect label before opening the menu.
+    expect(screen.getAllByText(label)).toHaveLength(1);
+    // Open the "+ Add mods" dropdown — must NOT add a second auto-detect entry.
     await openAddMenu(user);
-    const autoBtn = screen.getByRole('menuitem', { name: /Auto-detect sources/i });
-    await user.click(autoBtn);
+    expect(screen.getAllByText(label)).toHaveLength(1);
+    // Clicking the standalone button (role=button) triggers the modal.
+    await user.click(screen.getByRole('button', { name: new RegExp(label, 'i') }));
     // The modal scans on open — assert the command fired and the modal
     // backdrop materialised.
     await waitFor(() => {

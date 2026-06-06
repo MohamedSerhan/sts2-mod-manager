@@ -112,6 +112,10 @@
       "allInPack": "所有已安装的模组都已加入此模组包。",
       "added": "已将 {{mod}} 添加到 {{pack}}",
       "addFailed": "无法添加 {{mod}}：{{error}}",
+      "outOfSyncTitle": "未同步",
+      "outOfSyncBody": "此模组包有尚未推送到分享代码的本地更改。",
+      "outOfSyncAction": "重新分享以推送",
+
       "inactiveToggleHint": "此模组包当前未激活——只有激活的模组包才能在游戏中启用或禁用模组。切换到该模组包即可管理加载内容。"
     },
     "edit": {
@@ -163,6 +167,8 @@
     "step1Subtitle": "选择此模组包的起始方式。",
     "step1FromActive": "从当前激活的模组开始",
     "step1FromActiveDesc": "使用当前游戏文件夹中的模组作为起点。",
+    "step1AllInstalled": "从所有已安装的模组开始",
+    "step1AllInstalledDesc": "从你已安装的每个模组开始，无论是否启用。",
     "step1Empty": "从空白开始",
     "step1EmptyDesc": "不含任何模组,稍后再添加。",
     "step1Clone": "克隆已有模组包",
@@ -313,11 +319,10 @@
     },
     "actions": {
       "importJson": "导入模组包 JSON",
-      "snapshotCurrent": "快照当前模组包",
+      "importSts2pack": "导入 .sts2pack",
       "newProfile": "创建模组包"
     },
     "prompt": {
-      "snapshotName": "输入快照名称：",
       "duplicateAs": "将「{{name}}」复制为：",
       "duplicateDefault": "{{name}}（副本）"
     },
@@ -389,10 +394,10 @@
       "dismissAria": "忽略对 {{name}} 的重新分享建议"
     },
     "kebab": {
-      "snapshotFromCurrent": "从当前安装创建快照",
       "duplicate": "复制",
       "rename": "重命名",
       "exportJson": "导出 JSON...",
+      "exportSts2pack": "导出 .sts2pack...",
       "copyShareCode": "复制分享码",
       "copyShareLink": "复制分享链接",
       "copyShareMessageLabel": "复制分享消息",
@@ -423,8 +428,6 @@
       "synced": "已同步 \"{{name}}\" — 你已是最新版本。",
       "syncFailed": "同步失败：{{error}}",
       "created": "模组包 \"{{name}}\" 已创建",
-      "snapshotCreated": "快照 \"{{name}}\" 已创建，包含 {{count}} 个模组",
-      "snapshotFailed": "创建快照失败：{{error}}",
       "switched": "已切换到模组包 \"{{name}}\"",
       "switchedWithDetails": "已切换到 \"{{name}}\"。{{details}}",
       "switchFailed": "切换失败：{{error}}",
@@ -436,6 +439,7 @@
       "savedChangesWithReShare": "更改已保存到 \"{{name}}\"。准备好发布时请重新分享。",
       "saveFailed": "保存更改失败：{{error}}",
       "exported": "模组包 JSON 已复制到剪贴板！",
+      "exportedFile": "已将“{{name}}”导出为 .sts2pack 文件。",
       "exportFailed": "导出失败：{{error}}",
       "deleted": "模组包 \"{{name}}\" 已删除",
       "deleteFailed": "删除失败：{{error}}",

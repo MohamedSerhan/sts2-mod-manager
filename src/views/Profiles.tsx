@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import { open, save } from '@tauri-apps/plugin-dialog';
 import {
   Plus,
-  Camera,
   Copy,
   Download,
   Link as LinkIcon,
@@ -32,12 +32,11 @@ import {
   listProfiles,
   switchProfile,
   repairProfile,
-  snapshotProfile,
   saveProfileDrift,
   deleteProfile,
   duplicateProfile,
-  exportProfile,
-  importProfile,
+  exportProfileToFile,
+  importSts2pack,
   setProfileLoadOrder,
   getShareInfo,
   getProfileDrift,
@@ -48,6 +47,8 @@ import {
 import { importShareCodeSmart, buildShareLink, buildShareMessage } from '../lib/shareImport';
 import type { ProfileDrift } from '../hooks/useTauri';
 import type { LoadOrderSettingsStatus, Profile, ShareResult, Subscription } from '../types';
+
+const STS2PACK_DIALOG_FILTERS = [{ name: 'STS2 Modpack', extensions: ['sts2pack'] }];
 
 interface ProfilesViewProps {
   /** Navigates to Settings → Accounts. Passed down to PublishModal's
@@ -133,8 +134,6 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreateWizard, setShowCreateWizard] = useState(false);
-  const [showImport, setShowImport] = useState(false);
-  const [importJson, setImportJson] = useState('');
   const [importCode, setImportCode] = useState('');
   const [importingCode, setImportingCode] = useState(false);
   // 1.7.0 v7 — always-visible Quick-Add row above the tabs. Same import
@@ -363,7 +362,6 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
   useEffect(() => {
     if (openActiveModpackSignal > 0 && activeProfile) {
       setSelectedModpack(activeProfile);
-      setShowImport(false);
     }
   }, [openActiveModpackSignal, activeProfile]);
 
@@ -375,7 +373,6 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
   useEffect(() => {
     if (!openCreateWizardSignal) return;
     setOuterTab('yours');
-    setShowImport(false);
     setShowCreateWizard(true);
     // Reset the App-level signal so a later remount of this view (e.g.
     // navigating away and back to Modpacks) doesn't re-open the wizard.
@@ -573,18 +570,6 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     refreshShareAndDrift();
   }
 
-  async function handleSnapshot() {
-    const name = prompt(t('profiles.prompt.snapshotName'));
-    if (!name?.trim()) return;
-    try {
-      const profile = await snapshotProfile(name.trim());
-      setProfiles((prev) => [...prev, profile]);
-      toastCtx.success(t('profiles.toast.snapshotCreated', { name: profile.name, count: profile.mods.length }));
-    } catch (e) {
-      toastCtx.error(t('profiles.toast.snapshotFailed', { error: e instanceof Error ? e.message : String(e) }));
-    }
-  }
-
   async function handleSwitch(name: string) {
     if (activeProfile && activeProfile !== name && driftMap[activeProfile]?.has_drift) {
       const ok = await confirm({
@@ -761,16 +746,14 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
 
   async function handleExport(name: string) {
     try {
-      const json = await exportProfile(name);
-      // Use the shared hook for the clipboard write so the failure
-      // wording stays consistent with the rest of the app. The
-      // distinct export-failure message (when `exportProfile` itself
-      // rejects) stays as a separate toast — the export step failing
-      // is a different problem from the clipboard write failing.
-      await clipboard.copy(json, 'export', {
-        successMessage: t('profiles.toast.exported'),
-        failureMessage: 'profiles.toast.cantCopyToClipboard',
+      const safeName = name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_');
+      const path = await save({
+        defaultPath: `${safeName}.sts2pack`,
+        filters: STS2PACK_DIALOG_FILTERS,
       });
+      if (!path) return;
+      await exportProfileToFile(name, path);
+      toastCtx.success(t('profiles.toast.exportedFile', { name }));
     } catch (e) {
       toastCtx.error(t('profiles.toast.exportFailed', { error: e instanceof Error ? e.message : String(e) }));
     }
@@ -814,13 +797,18 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     }
   }
 
-  async function handleImport() {
-    if (!importJson.trim()) return;
+  async function handleImportFile() {
     try {
-      const profile = await importProfile(importJson.trim());
+      const selected = await open({
+        multiple: false,
+        directory: false,
+        filters: STS2PACK_DIALOG_FILTERS,
+      });
+      const path = Array.isArray(selected) ? selected[0] : selected;
+      if (!path) return;
+      const profile = await importSts2pack(path);
       setProfiles((prev) => [...prev, profile]);
-      setImportJson('');
-      setShowImport(false);
+      await refreshAll();
       toastCtx.success(t('profiles.toast.imported', { name: profile.name }));
     } catch (e) {
       toastCtx.error(t('profiles.toast.importFailed', { error: e instanceof Error ? e.message : String(e) }));
@@ -1071,23 +1059,16 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
           <Button
             variant="secondary"
             size="sm"
-            onClick={() => {
-              setShowImport(!showImport);
-            }}
+            onClick={handleImportFile}
           >
             <Upload size={14} />
-            {t('profiles.actions.importJson')}
-          </Button>
-          <Button variant="secondary" size="sm" onClick={handleSnapshot}>
-            <Camera size={14} />
-            {t('profiles.actions.snapshotCurrent')}
+            {t('profiles.actions.importSts2pack')}
           </Button>
           <Button size="sm" onClick={() => {
             // Open the guided wizard. Close any inline panels that
             // would otherwise compete for vertical space behind the
             // modal.
             setShowCreateWizard(true);
-            setShowImport(false);
           }}>
             <Plus size={14} />
             {t('profiles.actions.newProfile')}
@@ -1098,8 +1079,8 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
 
       {/* 1.7.0 v7 — always-visible Quick-Add code paste row.
           Relocated from Home (which is now the single-block launcher).
-          The Modpacks toolbar already owns Create / Import-JSON /
-          Snapshot, so Quick-Add lives here next to those affordances.
+          The Modpacks toolbar already owns Create / Import .sts2pack,
+          so Quick-Add lives here next to those affordances.
           Shown on the Yours tab — the Browse tab is for public packs
           which install via the row CTAs, not via a typed code.
           The toggle-able "Add modpack code" panel above remains for
@@ -1178,8 +1159,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
               if (name === selectedModpack) setSelectedModpack(null);
             }}
             onDuplicate={handleDuplicate}
-            onExportJson={handleExport}
-            onSnapshot={() => handleSnapshot()}
+            onExportFile={handleExport}
             onOpenLoadOrder={openLoadOrderEditor}
             onRepairDrift={handleRepairDrift}
             onLibraryChanged={handleLibraryChanged}
@@ -1304,34 +1284,6 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
             {t('profiles.drift.repair')}
           </Button>
         </div>
-      )}
-
-      {/* Import Profile JSON Form */}
-      {showImport && (
-        <Card className="space-y-2">
-          <label className="text-xs text-text-muted block">
-            {t('profiles.form.jsonLabel')}
-          </label>
-          <textarea
-            value={importJson}
-            onChange={(e) => setImportJson(e.target.value)}
-            placeholder={t('profiles.form.jsonPlaceholder')}
-            rows={4}
-            className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-text placeholder:text-text-dim focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none font-mono"
-          />
-          <div className="flex gap-2">
-            <Button size="sm" onClick={handleImport}>
-              {t('common.import')}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowImport(false)}
-            >
-              {t('common.cancel')}
-            </Button>
-          </div>
-        </Card>
       )}
 
       {/* Profiles List */}

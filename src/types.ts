@@ -229,6 +229,8 @@ export interface ShareResult {
    *  "Re-share recommended" nudge in the Profiles view. Optional so older
    *  cached results / tests without the field don't break. */
   reshare_recommended?: boolean;
+  /** True when local changes have not been pushed to the published share yet. */
+  out_of_sync?: boolean;
 }
 
 export interface ModSourceEntry {

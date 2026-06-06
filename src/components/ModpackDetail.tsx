@@ -17,8 +17,8 @@
  *   - Section 2 "Add from your library": installed mods not yet in the
  *     pack, each with a low-key "+ Add".
  *   - Advanced: a clearly-divided section (heading + divider) holding the
- *     power-user / destructive actions (Snapshot, Duplicate, Export,
- *     Repair, Delete). No longer buried in a collapsible.
+ *     power-user / destructive actions (Duplicate, Export, Repair, Delete).
+ *     No longer buried in a collapsible.
  *
  * State is owned by the parent (ProfilesView). The detail view is a
  * controlled component for the profile-level actions — every action
@@ -31,12 +31,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  AlertTriangle,
   ArrowLeft,
-  Camera,
   Check,
   ChevronDown,
   ClipboardCheck,
-  Copy,
   Download,
   Files,
   FolderOpen,
@@ -82,8 +81,7 @@ export interface ModpackDetailProps {
   onShare?: (profile: Profile) => void;
   onDelete?: (name: string) => void;
   onDuplicate?: (name: string) => void;
-  onExportJson?: (name: string) => void;
-  onSnapshot?: (name: string) => void;
+  onExportFile?: (name: string) => void;
   onOpenLoadOrder?: (profile: Profile) => void;
   onRepairDrift?: (name: string) => void;
   /** Optional snapshot of the active "switching..." state so the
@@ -139,8 +137,7 @@ export function ModpackDetail({
   onShare,
   onDelete,
   onDuplicate,
-  onExportJson,
-  onSnapshot,
+  onExportFile,
   onOpenLoadOrder,
   onRepairDrift,
   switchingProfile,
@@ -175,6 +172,7 @@ export function ModpackDetail({
 
   const isActive = activeProfile === profile.name;
   const isShared = !!shareInfo;
+  const isOutOfSync = !!shareInfo?.out_of_sync;
   const hasDrift = !!drift?.has_drift;
   // Bug 5: the header count is manifest membership (profile.mods.length) while
   // the list shows mods actually on disk. Drift's `removed` set is exactly the
@@ -628,11 +626,6 @@ export function ModpackDetail({
               Destructive items sit below a divider with danger styling. */}
           <KebabMenu title={t('modpack.advancedActions')} size="sm">
             <KebabSection head={t('modpack.advanced')}>
-              {onSnapshot && (
-                <KebabItem icon={<Camera size={12} />} onClick={() => onSnapshot(profile.name)}>
-                  {t('profiles.kebab.snapshotFromCurrent')}
-                </KebabItem>
-              )}
               {onDuplicate && (
                 <KebabItem icon={<Files size={12} />} onClick={() => onDuplicate(profile.name)}>
                   {t('profiles.kebab.duplicate')}
@@ -647,9 +640,9 @@ export function ModpackDetail({
                   {t('profiles.kebab.rename')}
                 </KebabItem>
               )}
-              {onExportJson && (
-                <KebabItem icon={<Copy size={12} />} onClick={() => onExportJson(profile.name)}>
-                  {t('profiles.kebab.exportJson')}
+              {onExportFile && (
+                <KebabItem icon={<Download size={12} />} onClick={() => onExportFile(profile.name)}>
+                  {t('profiles.kebab.exportSts2pack')}
                 </KebabItem>
               )}
               {/* Repair is always offered for the ACTIVE modpack (not only when
@@ -704,6 +697,28 @@ export function ModpackDetail({
           </KebabMenu>
         </div>
       </div>
+
+      {isOutOfSync && onShare && (
+        <div
+          className="gf-banner gf-banner-warn gf-modpack-out-sync"
+          role="status"
+          aria-label={t('modpack.detail.outOfSyncTitle')}
+        >
+          <AlertTriangle size={16} className="gf-banner-icon" aria-hidden />
+          <div className="gf-modpack-out-sync-text">
+            <strong>{t('modpack.detail.outOfSyncTitle')}</strong>
+            <span>{t('modpack.detail.outOfSyncBody')}</span>
+          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => onShare(profile)}
+          >
+            <Share2 size={14} />
+            {t('modpack.detail.outOfSyncAction')}
+          </Button>
+        </div>
+      )}
 
       {/* Status line — a quick read of what's loaded + game state. */}
       <div className="gf-modpack-detail-status">

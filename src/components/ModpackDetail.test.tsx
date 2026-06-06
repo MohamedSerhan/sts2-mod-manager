@@ -195,6 +195,40 @@ describe('<ModpackDetail>', () => {
     expect(screen.getByRole('button', { name: /Re-share/i })).toBeInTheDocument();
   });
 
+  it('shows an out-of-sync banner for shared packs with unpublished changes', async () => {
+    const user = userEvent.setup();
+    const onShare = vi.fn();
+    const shareInfo: ShareResult = {
+      owner: 'alice',
+      code: 'AA5A-315D-61AE',
+      url: 'https://github.com/alice/sts2mm-profiles',
+      file_path: 'Sample.json',
+      repo_url: 'https://github.com/alice/sts2mm-profiles',
+      failed_uploads: [],
+      out_of_sync: true,
+    };
+    const profile = baseProfile({ name: 'Sample' });
+    render(<Wrap profile={profile} onBack={vi.fn()} shareInfo={shareInfo} onShare={onShare} />);
+    expect(await screen.findByRole('status', { name: /out of sync/i })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Re-share to push/i }));
+    expect(onShare).toHaveBeenCalledWith(profile);
+  });
+
+  it('does not show the out-of-sync banner for current shared packs', async () => {
+    const shareInfo: ShareResult = {
+      owner: 'alice',
+      code: 'AA5A-315D-61AE',
+      url: 'https://github.com/alice/sts2mm-profiles',
+      file_path: 'Sample.json',
+      repo_url: 'https://github.com/alice/sts2mm-profiles',
+      failed_uploads: [],
+      out_of_sync: false,
+    };
+    render(<Wrap {...baseProps()} shareInfo={shareInfo} onShare={vi.fn()} />);
+    await screen.findByRole('heading', { level: 2, name: 'Sample' });
+    expect(screen.queryByRole('status', { name: /out of sync/i })).toBeNull();
+  });
+
   it('consolidates the install actions into the "+ Add mods" dropdown', async () => {
     const profile = setupPack({ inPack: [modInfo({ name: 'PackMod', folder_name: 'PackMod' })] });
     const user = userEvent.setup();
@@ -887,16 +921,14 @@ describe('<ModpackDetail>', () => {
   it('Advanced actions live in the header kebab and fire their handlers', async () => {
     const onDelete = vi.fn();
     const onDuplicate = vi.fn();
-    const onExportJson = vi.fn();
-    const onSnapshot = vi.fn();
+    const onExportFile = vi.fn();
     const user = userEvent.setup();
     render(
       <Wrap
         {...baseProps()}
         onDelete={onDelete}
         onDuplicate={onDuplicate}
-        onExportJson={onExportJson}
-        onSnapshot={onSnapshot}
+        onExportFile={onExportFile}
       />,
     );
     await screen.findByRole('heading', { level: 2, name: 'Sample' });
@@ -908,12 +940,8 @@ describe('<ModpackDetail>', () => {
     expect(onDuplicate).toHaveBeenCalledWith('Sample');
 
     await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
-    await user.click(screen.getByRole('menuitem', { name: /Export JSON/i }));
-    expect(onExportJson).toHaveBeenCalledWith('Sample');
-
-    await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
-    await user.click(screen.getByRole('menuitem', { name: /Snapshot/i }));
-    expect(onSnapshot).toHaveBeenCalledWith('Sample');
+    await user.click(screen.getByRole('menuitem', { name: /Export .sts2pack/i }));
+    expect(onExportFile).toHaveBeenCalledWith('Sample');
 
     await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
     await user.click(screen.getByRole('menuitem', { name: /Delete modpack/i }));

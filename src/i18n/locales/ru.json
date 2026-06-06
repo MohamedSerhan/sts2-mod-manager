@@ -112,6 +112,10 @@
       "toggleAllFailed": "Не удалось обновить все моды: {{error}}",
       "toggleAllMissing": "{{count}} не установлено: {{list}}.",
       "toggleAllSomeFailed": "{{count}} не удалось переместить: {{list}}.",
+      "outOfSyncTitle": "Не синхронизировано",
+      "outOfSyncBody": "В этой сборке есть локальные изменения, ещё не отправленные в её код доступа.",
+      "outOfSyncAction": "Поделиться заново",
+
       "inactiveToggleHint": "Эта сборка не активна — включать и отключать моды в игре можно только для активной сборки. Переключитесь на неё, чтобы управлять загрузкой."
     },
     "edit": {
@@ -163,6 +167,8 @@
     "step1Subtitle": "Выберите, с чего начать эту сборку.",
     "step1FromActive": "Начать с моих активных модов",
     "step1FromActiveDesc": "Использовать моды, которые сейчас в папке игры, как отправную точку.",
+    "step1AllInstalled": "Начать со всеми установленными модами",
+    "step1AllInstalledDesc": "Начните со всех установленных модов, включённых или нет.",
     "step1Empty": "Начать с пустого",
     "step1EmptyDesc": "Начать без модов. Добавите их позже.",
     "step1Clone": "Клонировать существующую сборку",
@@ -313,11 +319,10 @@
     },
     "actions": {
       "importJson": "Импорт JSON сборки",
-      "snapshotCurrent": "Снимок активной сборки",
+      "importSts2pack": "Импорт .sts2pack",
       "newProfile": "Создать сборку"
     },
     "prompt": {
-      "snapshotName": "Введите имя снимка:",
       "duplicateAs": "Дублировать «{{name}}» как:",
       "duplicateDefault": "{{name}} (копия)"
     },
@@ -461,9 +466,9 @@
       "dismissAria": "Скрыть рекомендацию поделиться заново для {{name}}"
     },
     "kebab": {
-      "snapshotFromCurrent": "Снимок текущей установки",
       "duplicate": "Дублировать",
       "exportJson": "Экспорт JSON…",
+      "exportSts2pack": "Экспорт .sts2pack...",
       "copyShareCode": "Копировать код для обмена",
       "copyShareLink": "Копировать ссылку для обмена",
       "copyShareMessageLabel": "Копировать сообщение для обмена",
@@ -495,8 +500,6 @@
       "synced": "«{{name}}» синхронизирована — у вас всё актуально.",
       "syncFailed": "Синхронизация не удалась: {{error}}",
       "created": "Сборка «{{name}}» создана",
-      "snapshotCreated": "Снимок «{{name}}» создан с {{count}} модами",
-      "snapshotFailed": "Не удалось создать снимок: {{error}}",
       "switched": "Переключено на сборку «{{name}}»",
       "switchedWithDetails": "Переключено на «{{name}}». {{details}}",
       "switchFailed": "Не удалось переключиться: {{error}}",
@@ -508,6 +511,7 @@
       "savedChangesWithReShare": "Изменения в «{{name}}» сохранены. Поделитесь заново, когда будете готовы их опубликовать.",
       "saveFailed": "Не удалось сохранить изменения: {{error}}",
       "exported": "JSON сборки скопирован в буфер обмена!",
+      "exportedFile": "«{{name}}» экспортирована в файл .sts2pack.",
       "exportFailed": "Не удалось экспортировать: {{error}}",
       "deleted": "Сборка «{{name}}» удалена",
       "deleteFailed": "Не удалось удалить: {{error}}",

@@ -1,6 +1,6 @@
 # Notes for AI coding agents
 
-This file is read by Claude Code, Codex, and other AI assistants. Humans
+This file is read by Codex and other AI assistants. Humans
 should follow the same conventions — see the `Contributing` section in
 [README.md](README.md) for the human-targeted version.
 

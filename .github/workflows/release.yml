@@ -39,4 +39,5 @@ jobs:
       - name: Cut release
         env:
           SKIP_QA: "1"
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: bash scripts/release.sh "${{ inputs.bump }}"

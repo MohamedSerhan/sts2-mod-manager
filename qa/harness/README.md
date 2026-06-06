@@ -1,6 +1,6 @@
 # Harness — how to execute QA scenarios
 
-Read this first if you're an agent (Claude Code or otherwise) about to run scenarios from `qa/scenarios/`. It's the operating manual for the QA role.
+Read this first if you're an agent (Codex or otherwise) about to run scenarios from `qa/scenarios/`. It's the operating manual for the QA role.
 
 ## Your job
 
@@ -13,7 +13,7 @@ For every scenario in `qa/scenarios/` whose `status` is `active`, run the **Setu
 | Bash / Rust toolchain | Tier 1 scenarios: invoke a small harness binary in `qa/harness/runner/` (TODO — see below) that calls Tauri commands directly. |
 | `tauri-driver` + WebDriver | Tier 2 scenarios: drive a real Tauri window with a hidden display. Catches frontend bugs. Setup is fragile on Windows; document failures and skip. |
 | `mcp__computer-use__*` | Tier 3 scenarios: drive the real desktop. Use sparingly — slow and nondeterministic. Reserved for drag-drop / Steam launch / deep-link / `sts2mm://` cases. |
-| `mcp__claude-in-chrome__*` | Currently unused. Could replace WebDriver if the Tauri WebView is unreachable on a given host. |
+| Browser / Chrome automation | Currently unused. Could replace WebDriver if the Tauri WebView is unreachable on a given host. |
 
 The runner binary doesn't exist yet — building it is the next concrete step (TODO #1 in `qa/harness/build-runner.md` once that's written). Until then, scenarios are exercised manually: an agent reads the markdown, performs the steps with available tools, and writes a report.
 

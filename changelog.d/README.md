@@ -10,9 +10,8 @@ assembler merges them into `CHANGELOG.md` and deletes the fragment files.
 ```
 
 - **`category`** must be one of: `added`, `changed`, `fixed`, `security`
-- **`slug`** is a short kebab-case label, e.g. `57-mod-source-sync`
-- The auto-fix bot prefixes the issue number automatically, e.g.
-  `fixed-57-mod-source-sync.md`
+- **`slug`** is a short kebab-case label, often prefixed with the issue number,
+  e.g. `57-mod-source-sync`
 
 Examples:
 

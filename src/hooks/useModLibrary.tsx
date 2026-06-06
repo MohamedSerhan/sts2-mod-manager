@@ -95,6 +95,8 @@ export interface UseModLibraryOptions {
   /** When set, installs (Quick add URL / Import) add the new mod to this
    *  pack's membership immediately. Unset = All Mods (install to disk only). */
   targetPack?: string | null;
+  /** Fired when a target-pack install changed that pack's local manifest. */
+  onTargetPackChanged?: () => void;
   /** When set, the Audit action checks ONLY these mods (the modpack view
    *  audits just its pack). Unset = audit everything (All Mods view).
    *  A function so callers can read the latest pack contents at click time. */
@@ -102,7 +104,7 @@ export interface UseModLibraryOptions {
 }
 
 export function useModLibrary(opts: UseModLibraryOptions = {}) {
-  const { targetPack, auditScope } = opts;
+  const { targetPack, onTargetPackChanged, auditScope } = opts;
   const { t } = useTranslation();
   const {
     mods,
@@ -188,6 +190,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
       mod.mod_id ?? null,
       true,
     );
+    onTargetPackChanged?.();
   }
 
   // A *followed* (subscribed but not owned) pack isn't ours to edit, so

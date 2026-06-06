@@ -90,6 +90,10 @@ export interface ModpackDetailProps {
   switchingProfile?: string | null;
   shareInfo?: ShareResult | null;
   drift?: ProfileDrift | null;
+  /** Local edits to a shared pack that have not been uploaded yet. */
+  localOutOfSync?: boolean;
+  /** Marks this shared pack as needing a Re-share after a local manifest edit. */
+  onLocalOutOfSync?: (name: string) => void;
   /** Refreshes the underlying profile list after a membership
    *  mutation so the parent's drift / share metadata stays current. */
   onLibraryChanged?: () => void;
@@ -143,6 +147,8 @@ export function ModpackDetail({
   switchingProfile,
   shareInfo,
   drift,
+  localOutOfSync = false,
+  onLocalOutOfSync,
   onLibraryChanged,
   onRenamed,
   renameExistingNames,
@@ -151,11 +157,18 @@ export function ModpackDetail({
   const { activeProfile, auditResults, mods, refreshAll, gameRunning } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
+  const isActive = activeProfile === profile.name;
+  const isShared = !!shareInfo;
+  const isOutOfSync = !!shareInfo?.out_of_sync || localOutOfSync;
+  const markSharedLocalEdit = () => {
+    if (isShared) onLocalOutOfSync?.(profile.name);
+  };
   // Shared mod-library surface (toolbar + install actions), scoped so a
   // mod installed from here auto-joins THIS pack, and the Audit action
   // checks only this pack's mods. The same hook powers the All Mods view.
   const lib = useModLibrary({
     targetPack: profile.name,
+    onTargetPackChanged: markSharedLocalEdit,
     auditScope: () => profile.mods.map((m) => m.name),
   });
   // Scroll-pin safety net (shared with LibraryTable via usePinScroll). The
@@ -170,9 +183,6 @@ export function ModpackDetail({
   // Rename this pack via the small inline-validation modal.
   const [renaming, setRenaming] = useState(false);
 
-  const isActive = activeProfile === profile.name;
-  const isShared = !!shareInfo;
-  const isOutOfSync = !!shareInfo?.out_of_sync;
   const hasDrift = !!drift?.has_drift;
   // Bug 5: the header count is manifest membership (profile.mods.length) while
   // the list shows mods actually on disk. Drift's `removed` set is exactly the
@@ -287,6 +297,7 @@ export function ModpackDetail({
   }, [availableMods, availableQuery]);
 
   const refreshAfterMutation = async () => {
+    markSharedLocalEdit();
     await refreshAll();
     onLibraryChanged?.();
   };
@@ -324,6 +335,7 @@ export function ModpackDetail({
         mod.mod_id ?? null,
         true,
       );
+      markSharedLocalEdit();
       await refreshAfterMutation();
       toast.success(
         t('modpack.detail.added', {

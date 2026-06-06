@@ -140,6 +140,8 @@ export interface LibraryRowProps {
   packActive?: boolean;
   /** Drag highlight target. */
   isDragOver: boolean;
+  /** The row currently being dragged. */
+  isDragging?: boolean;
   /** True while a setProfileLoadOrder commit is in flight. Disables
    *  draggable + early-returns drag handlers. */
   loadOrderSaving: boolean;
@@ -218,6 +220,7 @@ export function LibraryRow({
   packScoped = false,
   packActive = false,
   isDragOver,
+  isDragging = false,
   loadOrderSaving,
   membershipSaving,
   storageSaving,
@@ -303,7 +306,7 @@ export function LibraryRow({
 
   return (
     <Card
-      className={`gf-profile-library-row${(!packScoped || packActive) && row.installed_enabled ? ' is-active' : ''}${isDragOver ? ' drag-over' : ''}${mod?.pinned ? ' gf-mod-pinned' : ''}${mod ? ' is-clickable' : ''}`}
+      className={`gf-profile-library-row${(!packScoped || packActive) && row.installed_enabled ? ' is-active' : ''}${isDragOver ? ' drag-over' : ''}${isDragging ? ' dragging' : ''}${mod?.pinned ? ' gf-mod-pinned' : ''}${mod ? ' is-clickable' : ''}`}
       draggable={reorderable && !loadOrderSaving}
       onDragStart={(event) => onDragStart(event, inPackIndex)}
       onDragOver={(event) => onDragOver(event, inPackIndex)}

@@ -104,6 +104,10 @@
       "toggleAllFailed": "تعذّر تحديث كل المودات: {{error}}",
       "toggleAllMissing": "{{count}} غير مثبّتة: {{list}}.",
       "toggleAllSomeFailed": "{{count}} تعذّر نقلها: {{list}}.",
+      "outOfSyncTitle": "غير متزامنة",
+      "outOfSyncBody": "تحتوي هذه الحزمة على تغييرات محلية لم تُدفَع بعد إلى رمز المشاركة.",
+      "outOfSyncAction": "إعادة المشاركة للدفع",
+
       "inactiveToggleHint": "هذه الحزمة غير نشطة — لا يمكن تفعيل/تعطيل المودات داخل اللعبة إلا للحزمة النشطة. بدّل إليها للتحكم بما يُحمَّل."
     },
     "edit": {

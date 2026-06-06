@@ -104,6 +104,9 @@
       "allInPack": "Every installed mod is already in this modpack.",
       "added": "Added {{mod}} to {{pack}}",
       "addFailed": "Couldn't add {{mod}}: {{error}}",
+      "outOfSyncTitle": "Out of sync",
+      "outOfSyncBody": "This modpack has local changes that have not been pushed to its share code.",
+      "outOfSyncAction": "Re-share to push",
       "inactiveToggleHint": "This modpack isn't active — enabling/disabling mods in-game is only available for the active modpack. Switch to it to manage what loads."
     },
     "edit": {

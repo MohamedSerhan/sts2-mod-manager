@@ -104,6 +104,10 @@
       "allInPack": "所有已安装的模组都已加入此模组包。",
       "added": "已将 {{mod}} 添加到 {{pack}}",
       "addFailed": "无法添加 {{mod}}：{{error}}",
+      "outOfSyncTitle": "未同步",
+      "outOfSyncBody": "此模组包有尚未推送到分享代码的本地更改。",
+      "outOfSyncAction": "重新分享以推送",
+
       "inactiveToggleHint": "此模组包当前未激活——只有激活的模组包才能在游戏中启用或禁用模组。切换到该模组包即可管理加载内容。"
     },
     "edit": {

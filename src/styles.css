@@ -2019,6 +2019,21 @@ body {
   border-color: color-mix(in oklch, var(--info) 40%, transparent);
   color: var(--info-text);
 }
+.gf-modpack-out-sync {
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.gf-modpack-out-sync-text {
+  display: flex;
+  flex: 1 1 260px;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.gf-modpack-out-sync-text span {
+  color: var(--ink-mute);
+}
 
 /* ── Settings sub-tabs ────────────────────────────────────────────── */
 .gf-tabs-settings {

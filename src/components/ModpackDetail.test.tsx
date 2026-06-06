@@ -195,6 +195,40 @@ describe('<ModpackDetail>', () => {
     expect(screen.getByRole('button', { name: /Re-share/i })).toBeInTheDocument();
   });
 
+  it('shows an out-of-sync banner for shared packs with unpublished changes', async () => {
+    const user = userEvent.setup();
+    const onShare = vi.fn();
+    const shareInfo: ShareResult = {
+      owner: 'alice',
+      code: 'AA5A-315D-61AE',
+      url: 'https://github.com/alice/sts2mm-profiles',
+      file_path: 'Sample.json',
+      repo_url: 'https://github.com/alice/sts2mm-profiles',
+      failed_uploads: [],
+      out_of_sync: true,
+    };
+    const profile = baseProfile({ name: 'Sample' });
+    render(<Wrap profile={profile} onBack={vi.fn()} shareInfo={shareInfo} onShare={onShare} />);
+    expect(await screen.findByRole('status', { name: /out of sync/i })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Re-share to push/i }));
+    expect(onShare).toHaveBeenCalledWith(profile);
+  });
+
+  it('does not show the out-of-sync banner for current shared packs', async () => {
+    const shareInfo: ShareResult = {
+      owner: 'alice',
+      code: 'AA5A-315D-61AE',
+      url: 'https://github.com/alice/sts2mm-profiles',
+      file_path: 'Sample.json',
+      repo_url: 'https://github.com/alice/sts2mm-profiles',
+      failed_uploads: [],
+      out_of_sync: false,
+    };
+    render(<Wrap {...baseProps()} shareInfo={shareInfo} onShare={vi.fn()} />);
+    await screen.findByRole('heading', { level: 2, name: 'Sample' });
+    expect(screen.queryByRole('status', { name: /out of sync/i })).toBeNull();
+  });
+
   it('consolidates the install actions into the "+ Add mods" dropdown', async () => {
     const profile = setupPack({ inPack: [modInfo({ name: 'PackMod', folder_name: 'PackMod' })] });
     const user = userEvent.setup();

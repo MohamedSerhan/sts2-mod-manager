@@ -28,14 +28,16 @@
     {
       "id": 5,
       "subject": "Task 5: Out-of-sync detection — backend",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Record a published-content fingerprint in .share and expose out_of_sync via get_share_info.\n\n**Verify:** cd src-tauri && cargo test sharing::.\n\n```json:metadata\n{\"files\": [\"src-tauri/src/sharing/mod.rs\"], \"verifyCommand\": \"cd src-tauri && cargo test sharing::\", \"acceptanceCriteria\": [\"published_signature persisted (serde default)\", \"out_of_sync on ShareResult (serde default)\", \"signature ignores timestamps/bundle, reacts to real edits\", \"get_share_info computes out_of_sync correctly incl None->false\", \"cargo test green\"]}\n```"
     },
     {
       "id": 6,
       "subject": "Task 6: Out-of-sync detection — frontend",
-      "status": "pending",
-      "blockedBy": [5],
+      "status": "completed",
+      "blockedBy": [
+        5
+      ],
       "description": "**Goal:** Show an 'Out of sync — Re-share to push' banner in the modpack detail view when the shared pack has unpublished changes.\n\n**Verify:** npx vitest run src/components/ModpackDetail.test.tsx && npm run qa:i18n.\n\n```json:metadata\n{\"files\": [\"src/types.ts\", \"src/components/ModpackDetail.tsx\", \"src/components/ModpackDetail.test.tsx\", \"src/i18n/locales/en.json\", \"src/i18n/locales/ru.json\", \"src/i18n/locales/zh-Hans.json\", \"src/i18n/locales/ar.json\"], \"verifyCommand\": \"npx vitest run src/components/ModpackDetail.test.tsx && npm run qa:i18n\", \"acceptanceCriteria\": [\"banner + Re-share shown when out_of_sync true; calls onShare\", \"no banner when false/not shared\", \"npm test + qa:i18n green\"]}\n```"
     },
     {
@@ -48,16 +50,27 @@
       "id": 8,
       "subject": "Task 8: .sts2pack export/import — frontend (takeover)",
       "status": "pending",
-      "blockedBy": [7],
+      "blockedBy": [
+        7
+      ],
       "description": "**Goal:** Replace clipboard 'Export JSON' and paste 'Import JSON' with file-based .sts2pack export (detail Advanced kebab) and import (Modpacks list page).\n\n**Verify:** npx vitest run src/views/Profiles.test.tsx src/components/ModpackDetail.test.tsx && npm run qa:i18n.\n\n```json:metadata\n{\"files\": [\"src/hooks/useTauri.ts\", \"src/components/ModpackDetail.tsx\", \"src/views/Profiles.tsx\", \"src/i18n/locales/en.json\", \"src/i18n/locales/ru.json\", \"src/i18n/locales/zh-Hans.json\", \"src/i18n/locales/ar.json\", \"src/i18n/locales/parity.test.ts\", \"src/views/Profiles.test.tsx\", \"src/components/ModpackDetail.test.tsx\"], \"verifyCommand\": \"npx vitest run src/views/Profiles.test.tsx src/components/ModpackDetail.test.tsx && npm run qa:i18n\", \"acceptanceCriteria\": [\"Export to file uses save() + exportProfileToFile\", \"Import from file uses open() + importSts2pack + refresh\", \"old JSON clipboard/paste UIs removed\", \"npm test + qa:i18n green\"]}\n```"
     },
     {
       "id": 9,
       "subject": "Task 9: Cross-cutting verification & manual QA",
       "status": "pending",
-      "blockedBy": [1, 2, 3, 4, 5, 6, 7, 8],
+      "blockedBy": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
       "description": "**Goal:** Confirm the whole branch is green and the visual fixes (items 1, 4) hold in light theme + RTL.\n\n**Verify:** npm run qa:i18n && npm test && npm run build && cd src-tauri && cargo test; plus manual QA.\n\n```json:metadata\n{\"files\": [], \"verifyCommand\": \"npm run qa:i18n && npm test && npm run build && cd src-tauri && cargo test\", \"acceptanceCriteria\": [\"npm test/qa:i18n/build green\", \"cargo test green\", \"manual: share-code layout ok en/ru/ar light+dark\", \"manual: out-of-sync banner + reshare\", \"manual: .sts2pack round-trip\"]}\n```"
     }
   ],
-  "lastUpdated": "2026-06-05"
+  "lastUpdated": "2026-06-06"
 }

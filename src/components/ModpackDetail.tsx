@@ -31,6 +31,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  AlertTriangle,
   ArrowLeft,
   Check,
   ChevronDown,
@@ -172,6 +173,7 @@ export function ModpackDetail({
 
   const isActive = activeProfile === profile.name;
   const isShared = !!shareInfo;
+  const isOutOfSync = !!shareInfo?.out_of_sync;
   const hasDrift = !!drift?.has_drift;
   // Bug 5: the header count is manifest membership (profile.mods.length) while
   // the list shows mods actually on disk. Drift's `removed` set is exactly the
@@ -696,6 +698,28 @@ export function ModpackDetail({
           </KebabMenu>
         </div>
       </div>
+
+      {isOutOfSync && onShare && (
+        <div
+          className="gf-banner gf-banner-warn gf-modpack-out-sync"
+          role="status"
+          aria-label={t('modpack.detail.outOfSyncTitle')}
+        >
+          <AlertTriangle size={16} className="gf-banner-icon" aria-hidden />
+          <div className="gf-modpack-out-sync-text">
+            <strong>{t('modpack.detail.outOfSyncTitle')}</strong>
+            <span>{t('modpack.detail.outOfSyncBody')}</span>
+          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => onShare(profile)}
+          >
+            <Share2 size={14} />
+            {t('modpack.detail.outOfSyncAction')}
+          </Button>
+        </div>
+      )}
 
       {/* Status line — a quick read of what's loaded + game state. */}
       <div className="gf-modpack-detail-status">

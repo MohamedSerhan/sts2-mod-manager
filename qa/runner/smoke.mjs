@@ -1162,6 +1162,34 @@ async function waitForElement(driver, locator, label, timeoutMs = 10_000) {
   return driver.findElement(locator);
 }
 
+async function invokeTauri(driver, cmd, args = {}) {
+  const result = await driver.executeAsyncScript(
+    `
+      const done = arguments[arguments.length - 1];
+      const cmd = arguments[0];
+      const args = arguments[1];
+      const invoke =
+        window.__TAURI_INTERNALS__?.invoke ||
+        window.__TAURI__?.core?.invoke ||
+        window.__TAURI__?.invoke;
+      if (typeof invoke !== 'function') {
+        done({ ok: false, error: 'Tauri invoke bridge is unavailable in the WebDriver session' });
+        return;
+      }
+      Promise.resolve(invoke(cmd, args)).then(
+        (value) => done({ ok: true, value }),
+        (error) => done({ ok: false, error: error?.message || String(error) })
+      );
+    `,
+    cmd,
+    args,
+  );
+  if (!result?.ok) {
+    throw new Error(`Tauri command ${cmd} failed: ${result?.error || 'unknown error'}`);
+  }
+  return result.value;
+}
+
 async function waitForToastContaining(driver, parts, label, timeoutMs = 10_000) {
   return driver.wait(async () => {
     const toasts = await driver.findElements(By.css('.gf-toast'));
@@ -1442,13 +1470,10 @@ async function specRepairWalkback(driver) {
  *      '999.0.0', fixture game reports v0.105.0).
  *   2. Nav to Mods → Refresh → assert the "needs game ≥ v999.0.0" pill renders,
  *      proving the manager sees this mod as incompatible at the UI layer.
- *   3. Nav to Profiles. Override window.prompt via executeScript to return a
- *      deterministic snapshot name (so the kebab → Snapshot dialog resolves
- *      headlessly — no interactive prompt is supported in tauri-driver).
- *   4. Click the page-level "Snapshot current" button (or kebab Snapshot
- *      item) to invoke snapshot_profile with our deterministic name.
- *   5. Wait for the success toast confirming snapshot was created.
- *   6. Read the profile JSON off disk and assert SkippedMod is NOT in the
+ *   3. Invoke the same backend create_profile command used by the Create
+ *      Modpack wizard. The old page-level Snapshot button was removed in the
+ *      1.7 UI, but create_profile still exercises the explicit snapshot path.
+ *   4. Read the profile JSON off disk and assert SkippedMod is NOT in the
  *      mods array at all. The filter must drop it entirely (matching
  *      build_synced_profile_snapshot's semantics) — not record it as
  *      enabled=false. enabled=false would still lie about disk state for
@@ -1508,41 +1533,13 @@ async function specSkippedModAbsentFromSnapshot(driver) {
     30_000,
   );
 
-  // Step 3: nav to Profiles + override window.prompt. handleSnapshot in
-  // Profiles.tsx calls native `prompt('Enter snapshot name:')` — tauri-driver
-  // can't interact with that browser dialog, so we replace prompt with a
-  // function that returns our deterministic name. Must be set BEFORE the
-  // Snapshot click. (Refresh of the page would reset this; we don't navigate
-  // away after this point until after the click + toast.)
-  await waitForToastsToClear(driver);
-  await navToProfiles(driver);
-  await driver.executeScript(
-    'const snapshotName = arguments[0]; window.prompt = function(){ return snapshotName; };',
-    snapshotName,
-  );
+  // Step 3: invoke the backend snapshot path through the live Tauri bridge.
+  // The page-level Snapshot button this smoke originally clicked no longer
+  // exists in the 1.7 UI; the Create Modpack wizard now uses this same command
+  // before applying any optional membership edits.
+  await invokeTauri(driver, 'create_profile', { name: snapshotName });
 
-  // Step 4: click the page-level "Snapshot current" button. (The same
-  // handleSnapshot is bound to a per-card kebab "Snapshot from current
-  // install" item, but the top-level button avoids opening a popover and
-  // is unambiguous regardless of which card is active — both paths exercise
-  // the same `snapshotProfile` command.)
-  const snapshotBtn = await waitForElement(
-    driver,
-    By.xpath("//button[contains(., 'Snapshot active modpack')]"),
-    'Profiles "Snapshot active modpack" button',
-  );
-  await snapshotBtn.click();
-
-  // Step 5: wait for the success toast. handleSnapshot surfaces
-  // toastCtx.success(`Snapshot "<name>" created with <n> mods`).
-  await waitForToastContaining(
-    driver,
-    ['Snapshot', snapshotName],
-    `Snapshot success toast for "${snapshotName}"`,
-    15_000,
-  );
-
-  // Step 6: read the saved profile JSON off disk. save_profile writes to
+  // Step 4: read the saved profile JSON off disk. save_profile writes to
   // <profiles_path>/<sanitized_name>.json. sanitize_filename replaces
   // anything not alphanumeric/dash/underscore/dot with '_', so spaces
   // become underscores. profiles_path is <config>/profiles.

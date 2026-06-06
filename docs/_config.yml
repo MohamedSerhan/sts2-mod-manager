@@ -1,0 +1,4 @@
+exclude:
+  # Internal agent planning notes contain JSX/GitHub Actions snippets that
+  # GitHub Pages' Liquid renderer treats as template syntax.
+  - superpowers/

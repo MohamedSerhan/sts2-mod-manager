@@ -336,16 +336,28 @@ function decodeHtmlEntities(s) {
 function removeHtmlTags(s) {
   let out = '';
   let inTag = false;
-  for (const ch of String(s)) {
+  const text = String(s);
+  const isTagStart = (index) => {
+    if (text.indexOf('>', index + 1) === -1) return false;
+    const next = text[index + 1];
+    if (!next) return false;
+    if (next === '!' || next === '?') return true;
+    if (next === '/') return /[A-Za-z]/.test(text[index + 2] || '');
+    return /[A-Za-z]/.test(next);
+  };
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
     if (ch === '<') {
-      inTag = true;
-      continue;
-    }
-    if (ch === '>' && inTag) {
+      if (isTagStart(i)) {
+        inTag = true;
+        continue;
+      }
+      out += ch;
+    } else if (ch === '>' && inTag) {
       inTag = false;
-      continue;
+    } else if (!inTag) {
+      out += ch;
     }
-    if (!inTag) out += ch;
   }
   return out;
 }

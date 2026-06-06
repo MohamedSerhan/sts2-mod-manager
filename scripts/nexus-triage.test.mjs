@@ -130,6 +130,13 @@ test('sanitizeTitle decodes entities before stripping tags', () => {
   );
 });
 
+test('sanitizeTitle preserves encoded comparison operators', () => {
+  assert.equal(
+    sanitizeTitle('Cannot install with version &lt; 2.0 on Windows'),
+    'Cannot install with version < 2.0 on Windows',
+  );
+});
+
 test('sanitizeTitle strips @mentions', () => {
   assert.equal(sanitizeTitle('@everyone please check this'), 'please check this');
   assert.equal(sanitizeTitle('hey @MohamedSerhan and @ghost'), 'hey and');
@@ -437,6 +444,19 @@ test('parseCommentsFromHtml: encoded tags are decoded before tag stripping', () 
   const comments = parseCommentsFromHtml(html);
   assert.equal(comments.length, 1);
   assert.equal(comments[0].body, 'hi alert(1) bye');
+});
+
+test('parseCommentsFromHtml: encoded comparison operators survive tag stripping', () => {
+  const html = `
+    <li id="comment-100012" class="comment">
+      <span class="comment-name">ComparisonUser</span>
+      <div id="comment-content-100012">Cannot install with version &lt; 2.0 on Windows</div>
+      <time data-date="1748217600"></time>
+    </li>
+  `;
+  const comments = parseCommentsFromHtml(html);
+  assert.equal(comments.length, 1);
+  assert.equal(comments[0].body, 'Cannot install with version < 2.0 on Windows');
 });
 
 test('parseCommentsFromHtml: ampersand entities are decoded last', () => {

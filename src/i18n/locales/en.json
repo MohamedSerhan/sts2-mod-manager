@@ -416,10 +416,10 @@
       "toastStorageFailed": "Failed to move {{mod}}: {{error}}",
       "enableNotInPack": {
         "title": "Enable {{mod}}?",
-        "body": "This mod isn't in your active modpack \"{{pack}}\". Add it to the pack, or just enable it this time?",
-        "enableAndAdd": "Enable & add to \"{{pack}}\"",
-        "enableOnly": "Enable only",
-        "keepStored": "Keep it stored"
+        "body": "This mod is not in your active modpack \"{{pack}}\". Enable only keeps it active on disk, but it will not be saved in \"{{pack}}\" or shared with friends. Friends who install this shared modpack will not get enable-only mods, which can make their setup behave differently.",
+        "enableAndAdd": "Enable and add to \"{{pack}}\"",
+        "enableOnly": "Enable only this time",
+        "keepStored": "Keep stored (cancel)"
       }
     },
     "loadOrder": {
@@ -1268,6 +1268,7 @@
       "githubPlaceholder": "ghp_… (or leave empty)",
       "githubTokenSaved": "GitHub token saved.",
       "githubSavedHelp": "Saved · raises API rate limit to 5,000 req/hr.",
+      "githubPatIntro": "A GitHub token is a password-like key that lets the app publish your modpacks to your GitHub account. Use the button to create one with the recommended permissions, then paste it here.",
       "githubHelp": "Optional for browsing GitHub mods (raises rate limit to 5,000 req/hr from 60/hr without auth). Required if you want to publish modpacks.",
       "githubScopesTitle": "Required scopes:",
       "githubClassicPat": "Classic PAT — check the repo scope.",

@@ -500,10 +500,10 @@
       "toastStorageFailed": "移动 {{mod}} 失败：{{error}}",
       "enableNotInPack": {
         "title": "启用 {{mod}}？",
-        "body": "此模组不在你当前的模组包「{{pack}}」中。要将它添加到模组包，还是仅这次启用？",
+        "body": "此模组不在当前活跃模组包「{{pack}}」中。「仅本次启用」会把它留在磁盘上的启用状态，但不会保存到「{{pack}}」，也不会分享给好友。安装此共享模组包的好友不会获得仅本次启用的模组，可能导致他们的配置表现不同。",
         "enableAndAdd": "启用并添加到「{{pack}}」",
-        "enableOnly": "仅启用",
-        "keepStored": "保持存储"
+        "enableOnly": "仅本次启用",
+        "keepStored": "保持存储（取消）"
       }
     },
     "loadOrder": {
@@ -1269,6 +1269,7 @@
       "githubPlaceholder": "ghp_…（或留空）",
       "githubTokenSaved": "GitHub 令牌已保存。",
       "githubSavedHelp": "已保存 · 将 API 速率上限提高到 5,000 次/小时。",
+      "githubPatIntro": "GitHub 令牌类似密码，可让应用把你的模组包发布到你的 GitHub 帐号。使用按钮创建带推荐权限的令牌，然后粘贴到这里。",
       "githubHelp": "浏览 GitHub 模组时可选（将速率上限从未认证的 60 次/小时提高到 5,000 次/小时）。如要发布整合包则为必填。",
       "githubScopesTitle": "所需权限：",
       "githubClassicPat": "经典 PAT — 勾选 repo 权限。",

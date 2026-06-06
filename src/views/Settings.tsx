@@ -722,6 +722,8 @@ export function SettingsView({
                 )}
                 <div className="gf-help muted">
                   <span>
+                    {t('settings.accounts.githubPatIntro')}
+                    <br />
                     {t('settings.accounts.githubHelp')}
                     <br />
                     {t('settings.accounts.githubScopesTitle')}

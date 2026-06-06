@@ -61,6 +61,15 @@ export function ShareSetupPanel({ onSaved, onConfigureLater }: Props) {
       <p>{t('shareSetup.explainLine1')}</p>
       <p>{t('shareSetup.explainLine2')}</p>
       <p>{t('shareSetup.explainLine3')}</p>
+      <div className="gf-help muted">
+        <span>
+          {t('settings.accounts.githubScopesTitle')}
+          <ul style={{ margin: '4px 0 0 14px', padding: 0, listStyle: 'disc' }}>
+            <li><b>{t('settings.accounts.githubClassicPat')}</b></li>
+            <li><b>{t('settings.accounts.githubFinePat')}</b></li>
+          </ul>
+        </span>
+      </div>
       <button
         type="button"
         className="gf-btn-3"

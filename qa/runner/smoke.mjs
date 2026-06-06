@@ -22,7 +22,16 @@ const REPO_ROOT = resolve(__dirname, '..', '..');
 
 const IS_WINDOWS = process.platform === 'win32';
 const MSEDGEDRIVER = resolve(__dirname, 'msedgedriver.exe');
-const NATIVE_DRIVER = IS_WINDOWS ? MSEDGEDRIVER : 'WebKitWebDriver';
+
+function findOnPath(command) {
+  const res = spawnSync('sh', ['-lc', `command -v ${command}`], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  return res.status === 0 && res.stdout.trim() ? res.stdout.trim() : command;
+}
+
+const NATIVE_DRIVER = IS_WINDOWS ? MSEDGEDRIVER : findOnPath('WebKitWebDriver');
 // Resolve cargo's actual target directory so we find the binary even when a
 // machine-wide shared target is configured (CARGO_TARGET_DIR or a
 // .cargo/config `build.target-dir`). `cargo metadata` honors all of those;
@@ -274,11 +283,7 @@ function preflight() {
     );
   }
   if (!IS_WINDOWS) {
-    const res = spawnSync('sh', ['-lc', `command -v ${NATIVE_DRIVER}`], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    if (res.error || res.status !== 0) {
+    if (!existsSync(NATIVE_DRIVER)) {
       problems.push(
         `${NATIVE_DRIVER} not found or not runnable.\n  Install WebKitGTK's WebDriver package (Ubuntu: sudo apt-get install webkit2gtk-driver).`,
       );

@@ -406,7 +406,9 @@ describe('<LibraryTable>', () => {
     await user.click(
       await screen.findByRole('switch', { name: /toggle whether Loner is active in game/i }),
     );
-    await user.click(await screen.findByRole('button', { name: /Enable & add/i }));
+    expect(await screen.findByText(/Enable only keeps it active on disk, but it will not be saved in "Stable"/)).toBeInTheDocument();
+    expect(screen.getByText(/Friends who install this shared modpack will not get enable-only mods/)).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: /Enable and add to "Stable"/i }));
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'toggle_mod' && c.args?.enable === true)).toBe(true);
       expect(
@@ -422,7 +424,7 @@ describe('<LibraryTable>', () => {
     await user.click(
       await screen.findByRole('switch', { name: /toggle whether Loner is active in game/i }),
     );
-    await user.click(await screen.findByRole('button', { name: /^Enable only$/i }));
+    await user.click(await screen.findByRole('button', { name: /^Enable only this time$/i }));
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'toggle_mod' && c.args?.enable === true)).toBe(true);
     });
@@ -436,7 +438,7 @@ describe('<LibraryTable>', () => {
     await user.click(
       await screen.findByRole('switch', { name: /toggle whether Loner is active in game/i }),
     );
-    await user.click(await screen.findByRole('button', { name: /Keep it stored/i }));
+    await user.click(await screen.findByRole('button', { name: /Keep stored \(cancel\)/i }));
     expect(getInvokeCalls().some((c) => c.cmd === 'toggle_mod')).toBe(false);
   });
 
@@ -450,7 +452,7 @@ describe('<LibraryTable>', () => {
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'toggle_mod' && c.args?.enable === true)).toBe(true);
     });
-    expect(screen.queryByRole('button', { name: /^Enable only$/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Enable only this time$/i })).toBeNull();
   });
 
   it('enable not-in-pack with a FOLLOWED (non-editable) active pack: no prompt, explains via toast', async () => {
@@ -481,7 +483,7 @@ describe('<LibraryTable>', () => {
       await screen.findByRole('switch', { name: /toggle whether Loner is active in game/i }),
     );
     // No add-to-pack prompt for a followed pack.
-    expect(screen.queryByRole('button', { name: /^Enable only$/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Enable only this time$/i })).toBeNull();
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'toggle_mod' && c.args?.enable === true)).toBe(true);
     });

@@ -42,6 +42,18 @@ describe('<ShareSetupPanel>', () => {
     ).toBeInTheDocument();
   });
 
+  it('shows the exact GitHub token scopes for users who want to verify them', () => {
+    render(
+      <AllProviders>
+        <ShareSetupPanel onSaved={() => {}} onConfigureLater={() => {}} />
+      </AllProviders>,
+    );
+    expect(screen.getByText(/Required scopes:/)).toBeInTheDocument();
+    expect(screen.getByText(/Classic PAT/)).toHaveTextContent(/repo scope/);
+    expect(screen.getByText(/Fine-grained PAT/)).toHaveTextContent(/Contents: Read and write/);
+    expect(screen.getByText(/Fine-grained PAT/)).toHaveTextContent(/Administration: Read and write/);
+  });
+
   it('renders the "Open GitHub to create a token" button and opens the scoped URL', async () => {
     const opened: string[] = [];
     registerInvokeHandler('open_external_url', (args) => {

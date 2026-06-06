@@ -63,9 +63,7 @@ describe('<SettingsView>', () => {
     await waitFor(() => {
       expect(screen.getByText(/Nexus Mods API Key/i)).toBeInTheDocument();
     });
-    // Heading text "GitHub Token" — the "(optional)" suffix is a child span
-    // so we match by partial text not exact.
-    expect(screen.getByText(/GitHub Token/i)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /GitHub Token/i })).toBeInTheDocument();
   });
 
   it('Backups tab shows a Create backup button', async () => {
@@ -263,6 +261,21 @@ describe('<SettingsView>', () => {
     expect(url.searchParams.get('name')).toBe('STS2 Mod Manager');
     expect(url.searchParams.get('contents')).toBe('write');
     expect(url.searchParams.get('administration')).toBe('write');
+  });
+
+  it('Accounts tab explains what the GitHub token is while preserving exact scopes', async () => {
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: /Accounts/ }));
+
+    expect(
+      await screen.findByText(/A GitHub token is a password-like key that lets the app publish your modpacks/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Required scopes:/)).toBeInTheDocument();
+    expect(screen.getByText(/Classic PAT/)).toHaveTextContent(/repo scope/);
+    expect(screen.getByText(/Fine-grained PAT/)).toHaveTextContent(/Contents: Read and write/);
+    expect(screen.getByText(/Fine-grained PAT/)).toHaveTextContent(/Administration: Read and write/);
   });
 
   it('Accounts tab Save Nexus key invokes set_nexus_api_key', async () => {

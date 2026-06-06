@@ -11,7 +11,7 @@ function getStorage(storage?: Storage | null): Storage | null {
 }
 
 export function loadAutoAddInstallsToModpack(storage?: Storage | null): boolean {
-  return getStorage(storage)?.getItem(AUTO_ADD_INSTALLS_TO_MODPACK_KEY) !== 'false';
+  return getStorage(storage)?.getItem(AUTO_ADD_INSTALLS_TO_MODPACK_KEY) === 'true';
 }
 
 export function saveAutoAddInstallsToModpack(

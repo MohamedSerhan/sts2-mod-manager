@@ -604,13 +604,13 @@ export function LibraryTable({
         width: 560,
         choices: [
           {
-            value: 'enableAndAdd',
-            label: t('profiles.library.enableNotInPack.enableAndAdd', { pack: modpackName }),
+            value: 'enableOnly',
+            label: t('profiles.library.enableNotInPack.enableOnly'),
             variant: 'primary',
           },
           {
-            value: 'enableOnly',
-            label: t('profiles.library.enableNotInPack.enableOnly'),
+            value: 'enableAndAdd',
+            label: t('profiles.library.enableNotInPack.enableAndAdd', { pack: modpackName }),
             variant: 'secondary',
           },
         ],

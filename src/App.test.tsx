@@ -31,6 +31,7 @@ import userEvent from '@testing-library/user-event';
 
 import App from './App';
 import { getInvokeCalls, registerInvokeHandler, setMockAppVersion } from './__test__/setup';
+import { AUTO_ADD_INSTALLS_TO_MODPACK_KEY } from './lib/installPolicy';
 import { ROW_MENU_OPEN_EVENT } from './lib/rowMenuConfig';
 
 // Stub getCurrentWindow used by the top-bar (move/minimize/etc.) so the
@@ -431,7 +432,7 @@ describe('<App>', () => {
     });
   });
 
-  it('dropping a zip while viewing a modpack adds the installed mod to that pack', async () => {
+  it('dropping a zip while viewing a modpack installs to the Library by default', async () => {
     registerInvokeHandler('get_active_profile', () => 'Stable');
     registerInvokeHandler('list_profiles_cmd', () => [
       { name: 'Stable', mods: [], created_at: '2026-01-01T00:00:00Z', created_by: null, game_version: '0.105.0' },
@@ -459,7 +460,8 @@ describe('<App>', () => {
     await user.click(await screen.findByRole('button', { name: /Open Stable modpack/i }));
     await screen.findByRole('heading', { level: 2, name: 'Stable' });
 
-    // Drop a zip — the global handler installs it AND joins the viewed pack.
+    // Drop a zip: the global handler installs it, but the viewed pack is
+    // untouched unless the user explicitly enables auto-add in Settings.
     // Tauri hands us absolute file PATHS (not File objects); basename 'Mod.zip'.
     await fireTauriEvent('tauri://drag-drop', { paths: ['C:/downloads/Mod.zip'] });
 
@@ -468,6 +470,39 @@ describe('<App>', () => {
         (c) => c.cmd === 'install_mod_from_file' && c.args?.path === 'C:/downloads/Mod.zip',
       )).toBe(true);
     });
+    expect(getInvokeCalls().some((c) => c.cmd === 'set_profile_mod_membership')).toBe(false);
+  }, 10000);
+
+  it('dropping a zip while viewing a modpack adds to that pack when auto-add is enabled', async () => {
+    localStorage.setItem(AUTO_ADD_INSTALLS_TO_MODPACK_KEY, 'true');
+    registerInvokeHandler('get_active_profile', () => 'Stable');
+    registerInvokeHandler('list_profiles_cmd', () => [
+      { name: 'Stable', mods: [], created_at: '2026-01-01T00:00:00Z', created_by: null, game_version: '0.105.0' },
+    ]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [],
+    }));
+    registerInvokeHandler('install_mod_from_file', () => ({
+      name: 'Dropped', version: '1.0', description: '', enabled: true, files: [],
+      source: null, hash: null, dependencies: [], size_bytes: 0,
+      folder_name: 'Dropped', mod_id: 'Dropped', github_url: null, nexus_url: null,
+      pinned: false, min_game_version: null, author: null, tags: [],
+      display_name: null, display_description: null,
+    }));
+    registerInvokeHandler('set_profile_mod_membership', () => ({
+      name: 'Stable', mods: [], created_at: '2026-01-01T00:00:00Z', created_by: null, game_version: '0.105.0',
+    }));
+
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    await user.click(getNavButton('Modpacks'));
+    await user.click(await screen.findByRole('button', { name: /Open Stable modpack/i }));
+    await screen.findByRole('heading', { level: 2, name: 'Stable' });
+
+    await fireTauriEvent('tauri://drag-drop', { paths: ['C:/downloads/Mod.zip'] });
+
     await waitFor(() => {
       const call = getInvokeCalls().find(
         (c) => c.cmd === 'set_profile_mod_membership' && c.args?.modName === 'Dropped',
@@ -477,6 +512,7 @@ describe('<App>', () => {
   }, 10000);
 
   it('dropping a zip while viewing a FOLLOWED pack is blocked with a friendly message', async () => {
+    localStorage.setItem(AUTO_ADD_INSTALLS_TO_MODPACK_KEY, 'true');
     // A followed (subscribed) pack's manifest isn't ours to edit, so dropping
     // a mod "into" it must not install (which would strand the file in the
     // library) — the global handler shows a friendly toast and stops.

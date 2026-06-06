@@ -374,12 +374,30 @@ body {
 
 /* ── Sidebar ─────────────────────────────────────────────────────── */
 .gf-sidebar {
-  width: 230px;
+  width: var(--gf-sidebar-width, 248px);
   flex-shrink: 0;
+  position: relative;
   background: var(--indigo-side);
   border-inline-end: 1px solid var(--indigo-line);
   display: flex; flex-direction: column;
   padding: 14px 10px;
+}
+/* Drag handle on the sidebar's inner edge (#119). Sits below the Tauri
+   window-resize handles (z-index 80); inline-end so it mirrors in RTL. */
+.gf-sidebar-resize {
+  position: absolute;
+  inset-inline-end: 0;
+  top: 0; bottom: 0;
+  width: 6px;
+  z-index: 70;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.12s ease;
+}
+.gf-sidebar-resize:hover,
+.gf-sidebar-resize:focus-visible {
+  background: var(--gf-line);
+  outline: none;
 }
 .gf-nav {
   position: relative;

@@ -2248,4 +2248,14 @@ describe('<App>', () => {
     await waitFor(() => expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument());
     expect(screen.queryByText('DEV')).not.toBeInTheDocument();
   });
+
+  it('resizes the sidebar via the drag handle and persists the width', async () => {
+    render(<App />);
+    const handle = await screen.findByRole('separator', { name: 'Resize sidebar' });
+    fireEvent.mouseDown(handle, { clientX: 250 });
+    fireEvent.mouseMove(document, { clientX: 330 });
+    fireEvent.mouseUp(document);
+    expect(handle).toHaveAttribute('aria-valuenow', '328');
+    expect(localStorage.getItem('sts2mm-sidebar-width')).toBe('328');
+  });
 });

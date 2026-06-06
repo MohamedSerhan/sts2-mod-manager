@@ -123,6 +123,13 @@ test('sanitizeTitle strips HTML tags but keeps content', () => {
   assert.equal(sanitizeTitle('<b>bold</b> text'), 'bold text');
 });
 
+test('sanitizeTitle decodes entities before stripping tags', () => {
+  assert.equal(
+    sanitizeTitle('report &lt;script&gt;alert(1)&lt;/script&gt; still broken'),
+    'report alert(1) still broken',
+  );
+});
+
 test('sanitizeTitle strips @mentions', () => {
   assert.equal(sanitizeTitle('@everyone please check this'), 'please check this');
   assert.equal(sanitizeTitle('hey @MohamedSerhan and @ghost'), 'hey and');
@@ -417,6 +424,32 @@ test('parseCommentsFromHtml: comment missing body div is skipped, others extract
   assert.equal(comments.length, 1, `expected 1 comment, got ${comments.length}`);
   assert.equal(comments[0].id, '100001');
   assert.equal(comments[0].author, 'GoodUser');
+});
+
+test('parseCommentsFromHtml: encoded tags are decoded before tag stripping', () => {
+  const html = `
+    <li id="comment-100010" class="comment">
+      <span class="comment-name">EncodedUser</span>
+      <div id="comment-content-100010">hi &lt;script&gt;alert(1)&lt;/script&gt; bye</div>
+      <time data-date="1748217600"></time>
+    </li>
+  `;
+  const comments = parseCommentsFromHtml(html);
+  assert.equal(comments.length, 1);
+  assert.equal(comments[0].body, 'hi alert(1) bye');
+});
+
+test('parseCommentsFromHtml: ampersand entities are decoded last', () => {
+  const html = `
+    <li id="comment-100011" class="comment">
+      <span class="comment-name">AmpUser</span>
+      <div id="comment-content-100011">literal &amp;lt;script&amp;gt; text</div>
+      <time data-date="1748217600"></time>
+    </li>
+  `;
+  const comments = parseCommentsFromHtml(html);
+  assert.equal(comments.length, 1);
+  assert.equal(comments[0].body, 'literal &lt;script&gt; text');
 });
 
 test('isCloudflareChallenge: detects cf-chl marker', () => {

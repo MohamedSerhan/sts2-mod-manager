@@ -6,6 +6,7 @@ import { join } from 'node:path';
 
 import {
   computeDevVersion,
+  escapeRegExpLiteral,
   stampFiles,
   renderDevComment,
 } from './dev-build-stamp.mjs';
@@ -18,6 +19,13 @@ test('computeDevVersion keeps valid SemVer for all-digit shas', () => {
   // A bare numeric pre-release identifier with a leading zero is INVALID
   // SemVer; the g-prefix makes it alphanumeric and therefore valid.
   assert.equal(computeDevVersion('1.6.1', '42', '0123456'), '1.6.1-dev.pr42.g0123456');
+});
+
+test('escapeRegExpLiteral escapes every regex metacharacter including backslash', () => {
+  const escaped = escapeRegExpLiteral(String.raw`com.example\app.dev+(test)`);
+  const re = new RegExp(`^${escaped}$`);
+  assert.equal(re.test(String.raw`com.example\app.dev+(test)`), true);
+  assert.equal(re.test('com.example/app.dev+(test)'), false);
 });
 
 test('stampFiles rewrites version + identity in conf, version in cargo, nothing else', () => {

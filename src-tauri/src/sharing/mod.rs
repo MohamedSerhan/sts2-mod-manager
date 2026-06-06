@@ -38,10 +38,9 @@ use code::{code_to_filename, generate_code, parse_share_code};
 pub(crate) use github::build_client;
 use github::{
     cleanup_orphan_bundle_assets as github_cleanup_orphan_bundle_assets,
-    download_bundle as github_download_bundle,
-    ensure_profiles_repo as github_ensure_profiles_repo,
-    fetch_shared_profile as github_fetch_shared_profile,
-    get_github_username, upload_mod_bundle_via_release as github_upload_mod_bundle_via_release,
+    download_bundle as github_download_bundle, ensure_profiles_repo as github_ensure_profiles_repo,
+    fetch_shared_profile as github_fetch_shared_profile, get_github_username,
+    upload_mod_bundle_via_release as github_upload_mod_bundle_via_release,
     upsert_file as github_upsert_file,
 };
 // Asset-bundling helpers — sync filesystem walk + zip encoding +
@@ -256,8 +255,16 @@ async fn upsert_file(
     existing_sha: Option<&str>,
     message: &str,
 ) -> Result<(String, String)> {
-    github_upsert_file(token, username, &profiles_repo(), filename, content, existing_sha, message)
-        .await
+    github_upsert_file(
+        token,
+        username,
+        &profiles_repo(),
+        filename,
+        content,
+        existing_sha,
+        message,
+    )
+    .await
 }
 
 pub(crate) async fn upload_mod_bundle_via_release(
@@ -285,7 +292,12 @@ pub(crate) async fn cleanup_orphan_bundle_assets(token: &str, owner: &str) -> Re
 }
 
 /// Download a bundled mod zip from a URL and extract into mods_path.
-pub async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::Path, expected_sha256: Option<&str>) -> Result<()> {
+pub async fn download_bundle(
+    url: &str,
+    mod_name: &str,
+    mods_path: &std::path::Path,
+    expected_sha256: Option<&str>,
+) -> Result<()> {
     github_download_bundle(url, mod_name, mods_path, expected_sha256).await
 }
 
@@ -503,7 +515,10 @@ fn profile_publish_signature(profile: &Profile) -> String {
     hasher.update([0x1e]);
     hasher.update(profile.created_by.as_deref().unwrap_or("").as_bytes());
     hasher.update([0x1e]);
-    hasher.update(match profile.public { Some(true) => b"1".as_slice(), _ => b"0".as_slice() });
+    hasher.update(match profile.public {
+        Some(true) => b"1".as_slice(),
+        _ => b"0".as_slice(),
+    });
     for e in entries {
         hasher.update([0x1d]);
         hasher.update(e.as_bytes());
@@ -1081,7 +1096,6 @@ pub async fn fetch_shared_profile_cmd(
 // re-export near the top of this file. Keeping it in a sibling module
 // rather than inline keeps the orchestration in `mod.rs` focused on
 // the share/reshare/set-listing surface.
-
 
 /// Flip an already-shared profile's `public` flag and re-upload the
 /// manifest only (no mod re-bundling). Used by the post-share toggle
@@ -1946,8 +1960,7 @@ mod bundle_share_roundtrip_tests {
         // Extract into a FRESH mods dir (friend side — mirrors download_bundle).
         let friend_mods = tmpdir.path().join("friend_mods");
         std::fs::create_dir_all(&friend_mods).unwrap();
-        let mut archive =
-            zip::ZipArchive::new(std::io::Cursor::new(zip_data)).expect("valid zip");
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip_data)).expect("valid zip");
         for i in 0..archive.len() {
             let mut entry = archive.by_index(i).expect("valid entry");
             let name = entry.name().to_string();
@@ -1969,10 +1982,7 @@ mod bundle_share_roundtrip_tests {
             friend_installed.len(),
             1,
             "friend must see exactly one bundle entry, not multiple: {:?}",
-            friend_installed
-                .iter()
-                .map(|m| &m.name)
-                .collect::<Vec<_>>()
+            friend_installed.iter().map(|m| &m.name).collect::<Vec<_>>()
         );
 
         let friend_bundle = &friend_installed[0];
@@ -2145,11 +2155,9 @@ mod publish_signature_tests {
         let content = std::fs::read_to_string(&share_info_path).unwrap();
         let info: ShareInfo = serde_json::from_str(&content).unwrap();
         let out_of_sync_legacy = match info.published_signature.as_deref() {
-            Some(saved_sig) => {
-                crate::profiles::load_profile(&profile.name, &profiles_path)
-                    .map(|p| profile_publish_signature(&p) != saved_sig)
-                    .unwrap_or(false)
-            }
+            Some(saved_sig) => crate::profiles::load_profile(&profile.name, &profiles_path)
+                .map(|p| profile_publish_signature(&p) != saved_sig)
+                .unwrap_or(false),
             None => false,
         };
         assert!(

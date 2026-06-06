@@ -1429,26 +1429,20 @@ async function specRepairWalkback(driver) {
 
 /**
  * Regression spec for issue #21: when a mod's `min_game_version` is above the
- * current game version, the user's manual Snapshot (kebab → "Snapshot from
- * current install") must NOT include it in the saved profile JSON. The bug:
- * `snapshot_current_with_sources` scans `mods/` + `mods_disabled/` indiscriminately,
- * so an on-disk incompatible mod ended up pinned into the manifest as
- * enabled=true. That's the same footgun commit 37df97f fixed for the
- * subscription path (`build_synced_profile_snapshot`) — this spec exercises
- * the manual-snapshot path which was missed.
+ * current game version, a modpack created from the active install must NOT
+ * include it in the saved profile JSON. The bug: automatic snapshot-style
+ * creation could treat an on-disk incompatible mod as selected and write it
+ * back into the manifest as enabled=true. That's the same footgun commit
+ * 37df97f fixed for the subscription path (`build_synced_profile_snapshot`).
  *
  * Flow:
  *   1. Seed SkippedMod on disk in mods/ (manifest declares min_game_version:
  *      '999.0.0', fixture game reports v0.105.0).
  *   2. Nav to Mods → Refresh → assert the "needs game ≥ v999.0.0" pill renders,
  *      proving the manager sees this mod as incompatible at the UI layer.
- *   3. Nav to Profiles. Override window.prompt via executeScript to return a
- *      deterministic snapshot name (so the kebab → Snapshot dialog resolves
- *      headlessly — no interactive prompt is supported in tauri-driver).
- *   4. Click the page-level "Snapshot current" button (or kebab Snapshot
- *      item) to invoke snapshot_profile with our deterministic name.
- *   5. Wait for the success toast confirming snapshot was created.
- *   6. Read the profile JSON off disk and assert SkippedMod is NOT in the
+ *   3. Create a modpack through the guided wizard using "Start from my active
+ *      mods", the current replacement for the old snapshot-style entry point.
+ *   4. Read the profile JSON off disk and assert SkippedMod is NOT in the
  *      mods array at all. The filter must drop it entirely (matching
  *      build_synced_profile_snapshot's semantics) — not record it as
  *      enabled=false. enabled=false would still lie about disk state for
@@ -1508,41 +1502,12 @@ async function specSkippedModAbsentFromSnapshot(driver) {
     30_000,
   );
 
-  // Step 3: nav to Profiles + override window.prompt. handleSnapshot in
-  // Profiles.tsx calls native `prompt('Enter snapshot name:')` — tauri-driver
-  // can't interact with that browser dialog, so we replace prompt with a
-  // function that returns our deterministic name. Must be set BEFORE the
-  // Snapshot click. (Refresh of the page would reset this; we don't navigate
-  // away after this point until after the click + toast.)
+  // Step 3: create through the current guided flow. It auto-seeds from active
+  // mods, so this is the modern equivalent of the old snapshot entry point.
   await waitForToastsToClear(driver);
-  await navToProfiles(driver);
-  await driver.executeScript(
-    'const snapshotName = arguments[0]; window.prompt = function(){ return snapshotName; };',
-    snapshotName,
-  );
+  await createProfileNamed(driver, snapshotName);
 
-  // Step 4: click the page-level "Snapshot current" button. (The same
-  // handleSnapshot is bound to a per-card kebab "Snapshot from current
-  // install" item, but the top-level button avoids opening a popover and
-  // is unambiguous regardless of which card is active — both paths exercise
-  // the same `snapshotProfile` command.)
-  const snapshotBtn = await waitForElement(
-    driver,
-    By.xpath("//button[contains(., 'Snapshot active modpack')]"),
-    'Profiles "Snapshot active modpack" button',
-  );
-  await snapshotBtn.click();
-
-  // Step 5: wait for the success toast. handleSnapshot surfaces
-  // toastCtx.success(`Snapshot "<name>" created with <n> mods`).
-  await waitForToastContaining(
-    driver,
-    ['Snapshot', snapshotName],
-    `Snapshot success toast for "${snapshotName}"`,
-    15_000,
-  );
-
-  // Step 6: read the saved profile JSON off disk. save_profile writes to
+  // Step 4: read the saved profile JSON off disk. save_profile writes to
   // <profiles_path>/<sanitized_name>.json. sanitize_filename replaces
   // anything not alphanumeric/dash/underscore/dot with '_', so spaces
   // become underscores. profiles_path is <config>/profiles.
@@ -1563,21 +1528,21 @@ async function specSkippedModAbsentFromSnapshot(driver) {
     );
   }
 
-  // The load-bearing assertion: SkippedMod must NOT be in the snapshot at
+  // The load-bearing assertion: SkippedMod must NOT be in the modpack at
   // all (neither enabled nor disabled). The mod's min_game_version (999.0.0)
-  // is above the fixture game v0.105.0, so the filter in
-  // snapshot_current_inner must drop it entirely — matching
-  // build_synced_profile_snapshot's semantics on the subscription path.
+  // is above the fixture game v0.105.0, so the automatic create flow must
+  // leave it out entirely - matching build_synced_profile_snapshot's
+  // semantics on the subscription path.
   // Match on `name` OR `folder_name` since either could carry the label.
   const stillPresent = profile.mods.find(
     (m) => m.name === 'SkippedMod' || m.folder_name === 'SkippedMod',
   );
   if (stillPresent) {
     throw new Error(
-      `bug #21 regression: kebab→Snapshot profile at ${profilePath} contains SkippedMod ` +
+      `bug #21 regression: modpack created from active mods at ${profilePath} contains SkippedMod ` +
         `(min_game_version 999.0.0, fixture game v0.105.0). Entry: ` +
-        `${JSON.stringify(stillPresent)}. snapshot_current_with_sources must filter ` +
-        `mods whose min_game_version exceeds the current game version — see ` +
+        `${JSON.stringify(stillPresent)}. Create-from-active must not re-add ` +
+        `mods whose min_game_version exceeds the current game version - see ` +
         `build_synced_profile_snapshot in subscriptions.rs (commit 37df97f) for ` +
         `the matching fix on the subscription path.`,
     );

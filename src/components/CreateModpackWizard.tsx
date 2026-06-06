@@ -66,9 +66,30 @@ interface HealthSummary {
   frozen: string[];
 }
 
+function gameVersionSatisfies(
+  current: string | null | undefined,
+  required: string | null | undefined,
+): boolean {
+  if (!current || !required) return true;
+  const parse = (v: string): [number, number, number] | null => {
+    const parts = v.trim().replace(/^v/i, '').split('.').slice(0, 3);
+    const numbers = parts.map((part) => Number.parseInt(part, 10));
+    if (numbers.length === 0 || numbers.some((n) => Number.isNaN(n))) return null;
+    return [numbers[0] ?? 0, numbers[1] ?? 0, numbers[2] ?? 0];
+  };
+  const currentParts = parse(current);
+  const requiredParts = parse(required);
+  if (!currentParts || !requiredParts) return true;
+  const [cMaj, cMin, cPatch] = currentParts;
+  const [rMaj, rMin, rPatch] = requiredParts;
+  if (cMaj !== rMaj) return cMaj > rMaj;
+  if (cMin !== rMin) return cMin > rMin;
+  return cPatch >= rPatch;
+}
+
 export function CreateModpackWizard({ onClose, onCreated }: Props) {
   const { t } = useTranslation();
-  const { mods } = useApp();
+  const { mods, gameInfo } = useApp();
   const [step, setStep] = useState<Step>(1);
   const [strategy, setStrategy] = useState<Strategy>('fromActive');
   const [cloneFrom, setCloneFrom] = useState<string | null>(null);
@@ -119,11 +140,17 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
   // a redundant "Next" on a step that's already a single-choice screen.
   function applyStrategyAndAdvance(chosen: Strategy) {
     setStrategy(chosen);
+    const gameVersion = gameInfo?.game_version ?? null;
+    const keyFor = (m: typeof mods[number]) => m.folder_name ?? m.name;
+    const compatibleKeys = (candidates: typeof mods) =>
+      candidates
+        .filter((m) => gameVersionSatisfies(gameVersion, m.min_game_version))
+        .map(keyFor);
     if (chosen === 'fromActive') {
-      setSelectedMods(new Set(mods.filter((m) => m.enabled).map((m) => m.folder_name ?? m.name)));
+      setSelectedMods(new Set(compatibleKeys(mods.filter((m) => m.enabled))));
     } else if (chosen === 'allInstalled') {
       // Snapshot replacement: every installed mod, enabled OR disabled.
-      setSelectedMods(new Set(mods.map((m) => m.folder_name ?? m.name)));
+      setSelectedMods(new Set(compatibleKeys(mods)));
     } else if (chosen === 'empty') {
       setSelectedMods(new Set());
     } else if (chosen === 'clone' && cloneFrom) {

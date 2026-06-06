@@ -145,7 +145,12 @@ async fn cassette_reports_pending_nexus_update_with_dummy_api_key() {
         .await
         .expect("check_all_updates against Nexus cassette should succeed");
 
-    assert_eq!(updates.len(), 1, "expected 1 Nexus update, got {:?}", updates);
+    assert_eq!(
+        updates.len(),
+        1,
+        "expected 1 Nexus update, got {:?}",
+        updates
+    );
     let u = &updates[0];
     assert_eq!(u.mod_name, "NexusQaMod");
     assert_eq!(u.latest_version, "3.0.0");

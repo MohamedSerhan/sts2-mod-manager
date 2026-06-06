@@ -80,7 +80,9 @@ pub fn build_synced_profile_snapshot(
         skipped.iter().map(|s| s.mod_name.as_str()).collect();
     let mut snapshot = profile.clone();
     let before = snapshot.mods.len();
-    snapshot.mods.retain(|m| !skipped_names.contains(m.name.as_str()));
+    snapshot
+        .mods
+        .retain(|m| !skipped_names.contains(m.name.as_str()));
     let removed = before - snapshot.mods.len();
     if removed > 0 {
         log::info!(
@@ -148,7 +150,10 @@ pub fn save_subscriptions(db: &SubscriptionsDb, config_path: &Path) -> Result<()
 // ── Core Logic ──────────────────────────────────────────────────────────────
 
 /// Compare two profiles and return what changed.
-fn diff_profiles(local: &Profile, remote: &Profile) -> (Vec<String>, Vec<String>, Vec<ModVersionChange>) {
+fn diff_profiles(
+    local: &Profile,
+    remote: &Profile,
+) -> (Vec<String>, Vec<String>, Vec<ModVersionChange>) {
     let local_mods: HashMap<&str, &str> = local
         .mods
         .iter()
@@ -284,7 +289,10 @@ pub async fn check_subscription_updates(
             fetch_shared_profile(owner, &filename, token.as_deref()).await
         } else {
             // Legacy format - try as direct ID
-            Err(crate::error::AppError::Other(format!("Invalid subscription ID: {}", share_id)))
+            Err(crate::error::AppError::Other(format!(
+                "Invalid subscription ID: {}",
+                share_id
+            )))
         };
         match fetch_result {
             Ok(remote) => {
@@ -380,7 +388,15 @@ async fn apply_subscription_update_inner(
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Profile, String> {
     use tauri::Emitter;
-    let (config_path, mods_path, disabled_path, profiles_path, cache_path, token, user_game_version) = {
+    let (
+        config_path,
+        mods_path,
+        disabled_path,
+        profiles_path,
+        cache_path,
+        token,
+        user_game_version,
+    ) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         (
             s.config_path.clone(),
@@ -417,12 +433,14 @@ async fn apply_subscription_update_inner(
     // ── STEP 1: Download missing mods and restore version-mismatched mods ──
     let local_mods = crate::mods::scan_mods(&mods_path);
     let local_disabled = crate::mods::scan_disabled_mods(&disabled_path);
-    let all_on_disk: Vec<crate::mods::ModInfo> = local_mods.into_iter()
+    let all_on_disk: Vec<crate::mods::ModInfo> = local_mods
+        .into_iter()
         .chain(local_disabled.into_iter())
         .collect();
 
     // Build a map from identifiers to on-disk mod info (for version comparison)
-    let mut on_disk_by_id: std::collections::HashMap<String, &crate::mods::ModInfo> = std::collections::HashMap::new();
+    let mut on_disk_by_id: std::collections::HashMap<String, &crate::mods::ModInfo> =
+        std::collections::HashMap::new();
     for m in &all_on_disk {
         on_disk_by_id.insert(m.name.clone(), m);
         if let Some(ref folder) = m.folder_name {
@@ -438,22 +456,31 @@ async fn apply_subscription_update_inner(
 
     for pm in &remote.mods {
         // Find matching on-disk mod
-        let on_disk_mod = on_disk_by_id.get(&pm.name)
+        let on_disk_mod = on_disk_by_id
+            .get(&pm.name)
             .or_else(|| pm.folder_name.as_ref().and_then(|f| on_disk_by_id.get(f)))
             .or_else(|| pm.mod_id.as_ref().and_then(|id| on_disk_by_id.get(id)))
             .copied();
 
         // Pinned mods keep their installed version — don't replace files.
         let is_pinned = pinned_set.contains(&pm.name)
-            || pm.folder_name.as_ref().map_or(false, |f| pinned_set.contains(f))
+            || pm
+                .folder_name
+                .as_ref()
+                .map_or(false, |f| pinned_set.contains(f))
             || pm.mod_id.as_ref().map_or(false, |i| pinned_set.contains(i))
             || on_disk_mod.map_or(false, |d| {
                 pinned_set.contains(&d.name)
-                    || d.folder_name.as_ref().map_or(false, |f| pinned_set.contains(f))
+                    || d.folder_name
+                        .as_ref()
+                        .map_or(false, |f| pinned_set.contains(f))
                     || d.mod_id.as_ref().map_or(false, |i| pinned_set.contains(i))
             });
         if is_pinned {
-            log::info!("Subscription update: skipping frozen mod '{}' (preserving installed version)", pm.name);
+            log::info!(
+                "Subscription update: skipping frozen mod '{}' (preserving installed version)",
+                pm.name
+            );
             continue;
         }
 
@@ -462,8 +489,10 @@ async fn apply_subscription_update_inner(
             let profile_ver = pm.version.trim_start_matches('v');
 
             let version_ok = disk_ver == profile_ver
-                || profile_ver == "unknown" || profile_ver == "0.0.0"
-                || disk_ver == "unknown" || disk_ver == "0.0.0";
+                || profile_ver == "unknown"
+                || profile_ver == "0.0.0"
+                || disk_ver == "unknown"
+                || disk_ver == "0.0.0";
 
             if version_ok {
                 continue;
@@ -472,28 +501,56 @@ async fn apply_subscription_update_inner(
             // Version mismatch -- reinstall from bundle or cache
             log::info!(
                 "Subscription update: mod '{}' version mismatch (disk: {}, remote: {})",
-                pm.name, disk_mod.version, pm.version
+                pm.name,
+                disk_mod.version,
+                pm.version
             );
 
             // Cache current version before deleting
-            crate::mods::cache_mod_version(disk_mod, if disk_mod.enabled { &mods_path } else { &disabled_path }, &cache_path);
+            crate::mods::cache_mod_version(
+                disk_mod,
+                if disk_mod.enabled {
+                    &mods_path
+                } else {
+                    &disabled_path
+                },
+                &cache_path,
+            );
 
             // Try local cache first
             if crate::mods::get_cached_mod_path(&cache_path, &pm.name, &pm.version).is_some() {
-                let base = if disk_mod.enabled { &mods_path } else { &disabled_path };
+                let base = if disk_mod.enabled {
+                    &mods_path
+                } else {
+                    &disabled_path
+                };
                 crate::mods::delete_mod_files_by_info(disk_mod, base);
-                if crate::mods::restore_mod_from_cache(&cache_path, &pm.name, &pm.version, &mods_path).is_ok() {
+                if crate::mods::restore_mod_from_cache(
+                    &cache_path,
+                    &pm.name,
+                    &pm.version,
+                    &mods_path,
+                )
+                .is_ok()
+                {
                     log::info!("Restored '{}' v{} from local cache", pm.name, pm.version);
                     continue;
                 }
             }
 
             if pm.bundle_url.is_some() {
-                let base = if disk_mod.enabled { &mods_path } else { &disabled_path };
+                let base = if disk_mod.enabled {
+                    &mods_path
+                } else {
+                    &disabled_path
+                };
                 crate::mods::delete_mod_files_by_info(disk_mod, base);
                 // Fall through to download
             } else {
-                log::info!("Mod '{}' version mismatch but no bundle or cache -- keeping disk version", pm.name);
+                log::info!(
+                    "Mod '{}' version mismatch but no bundle or cache -- keeping disk version",
+                    pm.name
+                );
                 continue;
             }
         }
@@ -504,12 +561,25 @@ async fn apply_subscription_update_inner(
 
         // Prefer bundle_url (curator's bundled copy)
         if let Some(ref bundle_url) = pm.bundle_url {
-            match crate::sharing::download_bundle(bundle_url, &pm.name, &mods_path, pm.bundle_sha256.as_deref()).await {
+            match crate::sharing::download_bundle(
+                bundle_url,
+                &pm.name,
+                &mods_path,
+                pm.bundle_sha256.as_deref(),
+            )
+            .await
+            {
                 Ok(_) => {
                     // Re-scan to read the fresh manifest's min_game_version.
                     let after = crate::mods::scan_mods(&mods_path);
-                    if let Some(installed) = after.iter().find(|m| m.name == pm.name || Some(&m.name) == pm.folder_name.as_ref()) {
-                        if crate::updater::install_is_incompatible(installed, user_game_version.as_deref()) {
+                    if let Some(installed) = after
+                        .iter()
+                        .find(|m| m.name == pm.name || Some(&m.name) == pm.folder_name.as_ref())
+                    {
+                        if crate::updater::install_is_incompatible(
+                            installed,
+                            user_game_version.as_deref(),
+                        ) {
                             log::info!(
                                 "Subscription update: skipping '{}' — needs game v{}, user has v{}",
                                 installed.name,
@@ -519,21 +589,34 @@ async fn apply_subscription_update_inner(
                             crate::mods::delete_mod_files_by_info(installed, &mods_path);
                             skipped_incompatible.push(crate::sharing::SkippedMod {
                                 mod_name: installed.name.clone(),
-                                min_game_version: installed.min_game_version.clone().unwrap_or_default(),
+                                min_game_version: installed
+                                    .min_game_version
+                                    .clone()
+                                    .unwrap_or_default(),
                                 user_game_version: user_game_version.clone().unwrap_or_default(),
                             });
                             skipped_this_mod = true;
                         } else {
-                            log::info!("Installed bundled mod '{}' from subscription update", pm.name);
+                            log::info!(
+                                "Installed bundled mod '{}' from subscription update",
+                                pm.name
+                            );
                             downloaded = true;
                         }
                     } else {
-                        log::info!("Installed bundled mod '{}' from subscription update", pm.name);
+                        log::info!(
+                            "Installed bundled mod '{}' from subscription update",
+                            pm.name
+                        );
                         downloaded = true;
                     }
                 }
                 Err(e) => {
-                    log::warn!("Bundle download failed for '{}': {} -- trying GitHub fallback", pm.name, e);
+                    log::warn!(
+                        "Bundle download failed for '{}': {} -- trying GitHub fallback",
+                        pm.name,
+                        e
+                    );
                 }
             }
         }
@@ -541,38 +624,53 @@ async fn apply_subscription_update_inner(
         // Fallback: try GitHub source (only if bundle didn't install AND we
         // didn't already skip this mod for incompatibility above).
         if !downloaded && !skipped_this_mod {
-            let github_repo = pm.source.as_ref().and_then(|s| {
-                if let Some(repo) = s.strip_prefix("github:") {
-                    return Some(repo.to_string());
-                }
-                if s.contains("github.com/") {
-                    let parts: Vec<&str> = s.split("github.com/").collect();
-                    if parts.len() > 1 {
-                        let repo_path = parts[1].trim_end_matches('/');
-                        let segs: Vec<&str> = repo_path.splitn(3, '/').collect();
-                        if segs.len() >= 2 {
-                            return Some(format!("{}/{}", segs[0], segs[1]));
+            let github_repo = pm
+                .source
+                .as_ref()
+                .and_then(|s| {
+                    if let Some(repo) = s.strip_prefix("github:") {
+                        return Some(repo.to_string());
+                    }
+                    if s.contains("github.com/") {
+                        let parts: Vec<&str> = s.split("github.com/").collect();
+                        if parts.len() > 1 {
+                            let repo_path = parts[1].trim_end_matches('/');
+                            let segs: Vec<&str> = repo_path.splitn(3, '/').collect();
+                            if segs.len() >= 2 {
+                                return Some(format!("{}/{}", segs[0], segs[1]));
+                            }
                         }
                     }
-                }
-                None
-            }).or_else(|| {
-                crate::mod_sources::lookup_entry(
-                    &mod_sources_db.mods,
-                    pm.folder_name.as_deref(),
-                    &pm.name,
-                    pm.mod_id.as_deref(),
-                ).and_then(|e| e.github_repo.clone())
-            });
+                    None
+                })
+                .or_else(|| {
+                    crate::mod_sources::lookup_entry(
+                        &mod_sources_db.mods,
+                        pm.folder_name.as_deref(),
+                        &pm.name,
+                        pm.mod_id.as_deref(),
+                    )
+                    .and_then(|e| e.github_repo.clone())
+                });
 
             if let Some(repo) = github_repo {
                 let parts: Vec<&str> = repo.splitn(2, '/').collect();
                 if parts.len() == 2 {
                     match crate::download::download_and_install_github_mod(
-                        parts[0], parts[1], None, &mods_path, &cache_path, token.as_deref(),
-                    ).await {
+                        parts[0],
+                        parts[1],
+                        None,
+                        &mods_path,
+                        &cache_path,
+                        token.as_deref(),
+                    )
+                    .await
+                    {
                         Ok(info) => {
-                            if crate::updater::install_is_incompatible(&info, user_game_version.as_deref()) {
+                            if crate::updater::install_is_incompatible(
+                                &info,
+                                user_game_version.as_deref(),
+                            ) {
                                 log::info!(
                                     "Subscription update: skipping GitHub-installed '{}' — needs game v{}, user has v{}",
                                     info.name,
@@ -582,11 +680,19 @@ async fn apply_subscription_update_inner(
                                 crate::mods::delete_mod_files_by_info(&info, &mods_path);
                                 skipped_incompatible.push(crate::sharing::SkippedMod {
                                     mod_name: info.name.clone(),
-                                    min_game_version: info.min_game_version.clone().unwrap_or_default(),
-                                    user_game_version: user_game_version.clone().unwrap_or_default(),
+                                    min_game_version: info
+                                        .min_game_version
+                                        .clone()
+                                        .unwrap_or_default(),
+                                    user_game_version: user_game_version
+                                        .clone()
+                                        .unwrap_or_default(),
                                 });
                             } else {
-                                log::info!("Downloaded mod '{}' from GitHub for subscription", info.name);
+                                log::info!(
+                                    "Downloaded mod '{}' from GitHub for subscription",
+                                    info.name
+                                );
                                 downloaded = true;
                             }
                         }
@@ -599,7 +705,10 @@ async fn apply_subscription_update_inner(
         }
 
         if !downloaded && !skipped_this_mod {
-            log::error!("No download source for mod '{}' in subscription update", pm.name);
+            log::error!(
+                "No download source for mod '{}' in subscription update",
+                pm.name
+            );
         }
     }
 
@@ -623,7 +732,11 @@ async fn apply_subscription_update_inner(
     }
 
     // ── STEP 2: Apply profile AFTER downloads ──
-    log::info!("Subscription update: applying profile '{}' ({} mods)", remote.name, remote.mods.len());
+    log::info!(
+        "Subscription update: applying profile '{}' ({} mods)",
+        remote.name,
+        remote.mods.len()
+    );
     crate::profiles::apply_profile_with_pins(&remote, &mods_path, &disabled_path, &pinned_set)
         .map_err(|e| e.to_string())?;
 
@@ -634,9 +747,15 @@ async fn apply_subscription_update_inner(
         let mut s = state.lock().map_err(|e| e.to_string())?;
         s.active_profile = Some(remote.name.clone());
         if let Err(e) = std::fs::write(s.config_path.join("active_profile.txt"), &remote.name) {
-            log::error!("Failed to persist active_profile.txt after subscription update: {}", e);
+            log::error!(
+                "Failed to persist active_profile.txt after subscription update: {}",
+                e
+            );
         }
-        log::info!("Subscription update: active profile set to '{}'", remote.name);
+        log::info!(
+            "Subscription update: active profile set to '{}'",
+            remote.name
+        );
     }
 
     // Update subscription record. Use the filtered snapshot so the
@@ -675,15 +794,26 @@ mod rename_helper_tests {
     fn repoints_matching_subscriptions() {
         let mut db = SubscriptionsDb::default();
         let now = chrono::Utc::now();
-        db.subscriptions.insert("id1".into(), Subscription {
-            share_id: "id1".into(), share_url: "o/c".into(),
-            profile_name: "Old".into(), curator: Some("o".into()),
-            last_synced_profile: crate::profiles::Profile {
-                name: "Old".into(), game_version: None, created_by: None,
-                mods: vec![], created_at: now, updated_at: now, public: None,
+        db.subscriptions.insert(
+            "id1".into(),
+            Subscription {
+                share_id: "id1".into(),
+                share_url: "o/c".into(),
+                profile_name: "Old".into(),
+                curator: Some("o".into()),
+                last_synced_profile: crate::profiles::Profile {
+                    name: "Old".into(),
+                    game_version: None,
+                    created_by: None,
+                    mods: vec![],
+                    created_at: now,
+                    updated_at: now,
+                    public: None,
+                },
+                last_checked: now,
+                last_synced: now,
             },
-            last_checked: now, last_synced: now,
-        });
+        );
         assert!(rename_profile_name(&mut db, "Old", "New"));
         assert_eq!(db.subscriptions["id1"].profile_name, "New");
         assert!(!rename_profile_name(&mut db, "Nope", "X"));

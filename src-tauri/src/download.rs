@@ -288,7 +288,10 @@ pub fn parse_rate_limit_headers(headers: &reqwest::header::HeaderMap) -> Option<
         .get("x-ratelimit-reset")
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.parse::<i64>().ok())?;
-    Some(RateLimitInfo { remaining, reset_at })
+    Some(RateLimitInfo {
+        remaining,
+        reset_at,
+    })
 }
 
 /// Infer a `reset_at` timestamp from a `Retry-After` header (seconds delta)
@@ -348,8 +351,7 @@ pub async fn search_github_repos_relevance_outcome(
     // 403/429 → treat as rate-limited regardless of body content.
     // GitHub may return 403 for burst violations in addition to the
     // primary-rate-limit 429. Both carry X-RateLimit-Reset or Retry-After.
-    if status == reqwest::StatusCode::TOO_MANY_REQUESTS
-        || status == reqwest::StatusCode::FORBIDDEN
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status == reqwest::StatusCode::FORBIDDEN
     {
         let info = parse_rate_limit_headers(&headers).unwrap_or_else(|| {
             let reset_at = retry_after_reset_at(&headers).unwrap_or_else(|| {
@@ -360,7 +362,10 @@ pub async fn search_github_repos_relevance_outcome(
                     .as_secs() as i64;
                 now + 60
             });
-            RateLimitInfo { remaining: 0, reset_at }
+            RateLimitInfo {
+                remaining: 0,
+                reset_at,
+            }
         });
         log::warn!(
             "Auto-detect: rate-limited (HTTP {}) for query '{}'; reset_at={} ({}s away)",
@@ -1413,8 +1418,7 @@ mod asset_selection_tests {
             ("x-ratelimit-remaining", "5"),
             ("x-ratelimit-reset", "1800000000"),
         ]);
-        let info = parse_rate_limit_headers(&headers)
-            .expect("headers present — should parse");
+        let info = parse_rate_limit_headers(&headers).expect("headers present — should parse");
         assert_eq!(info.remaining, 5);
         assert_eq!(info.reset_at, 1_800_000_000);
     }
@@ -1434,25 +1438,37 @@ mod asset_selection_tests {
 
     #[test]
     fn quota_is_low_true_at_zero() {
-        let info = RateLimitInfo { remaining: 0, reset_at: 9_999_999_999 };
+        let info = RateLimitInfo {
+            remaining: 0,
+            reset_at: 9_999_999_999,
+        };
         assert!(quota_is_low(&info));
     }
 
     #[test]
     fn quota_is_low_true_at_three() {
-        let info = RateLimitInfo { remaining: 3, reset_at: 9_999_999_999 };
+        let info = RateLimitInfo {
+            remaining: 3,
+            reset_at: 9_999_999_999,
+        };
         assert!(quota_is_low(&info));
     }
 
     #[test]
     fn quota_is_low_false_at_four() {
-        let info = RateLimitInfo { remaining: 4, reset_at: 9_999_999_999 };
+        let info = RateLimitInfo {
+            remaining: 4,
+            reset_at: 9_999_999_999,
+        };
         assert!(!quota_is_low(&info));
     }
 
     #[test]
     fn rate_limit_info_secs_until_reset_returns_zero_for_past_timestamp() {
-        let info = RateLimitInfo { remaining: 0, reset_at: 1 }; // epoch + 1s = long ago
+        let info = RateLimitInfo {
+            remaining: 0,
+            reset_at: 1,
+        }; // epoch + 1s = long ago
         assert_eq!(info.secs_until_reset(), 0);
     }
 
@@ -1463,7 +1479,10 @@ mod asset_selection_tests {
             .unwrap()
             .as_secs() as i64
             + 120;
-        let info = RateLimitInfo { remaining: 0, reset_at: far_future };
+        let info = RateLimitInfo {
+            remaining: 0,
+            reset_at: far_future,
+        };
         let secs = info.secs_until_reset();
         // Should be between 119 and 120 (tiny clock drift tolerance).
         assert!((119..=120).contains(&secs), "expected ~120s, got {}", secs);

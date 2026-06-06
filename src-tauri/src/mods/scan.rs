@@ -284,7 +284,11 @@ pub(super) fn parse_manifest_lenient(content: &str) -> Option<RawManifest> {
 }
 
 /// Parse a single manifest JSON into a ModInfo.
-pub(crate) fn parse_manifest(manifest_path: &Path, base_dir: &Path, enabled: bool) -> Option<ModInfo> {
+pub(crate) fn parse_manifest(
+    manifest_path: &Path,
+    base_dir: &Path,
+    enabled: bool,
+) -> Option<ModInfo> {
     let content = match fs::read_to_string(manifest_path) {
         Ok(s) => s,
         Err(e) => {
@@ -630,8 +634,7 @@ fn try_load_mod_from(
                     found_names.insert(normalize_name(folder));
                 }
                 for f in &info.files {
-                    if let Some(stem) = Path::new(f).file_stem().and_then(|s| s.to_str())
-                    {
+                    if let Some(stem) = Path::new(f).file_stem().and_then(|s| s.to_str()) {
                         found_names.insert(normalize_name(stem));
                     }
                 }
@@ -883,9 +886,7 @@ pub(super) fn scan_mods_inner(dir: &Path, enabled: bool) -> Vec<ModInfo> {
                                     .flatten()
                                     .find(|e| {
                                         e.path().is_file()
-                                            && e.path()
-                                                .extension()
-                                                .and_then(|x| x.to_str())
+                                            && e.path().extension().and_then(|x| x.to_str())
                                                 == Some("json")
                                     })
                                     .and_then(|json_e| parse_manifest(&json_e.path(), dir, enabled))
@@ -1307,7 +1308,10 @@ mod pck_only_scan_tests {
             1,
             "JSON + PCK pair must produce exactly one entry"
         );
-        assert_eq!(results[0].version, "1.0.0", "JSON manifest version must win");
+        assert_eq!(
+            results[0].version, "1.0.0",
+            "JSON manifest version must win"
+        );
     }
 
     /// A multi-mod container folder (e.g. AliceDefectVisualPack) that wraps
@@ -1446,11 +1450,15 @@ mod pck_only_scan_tests {
 
         // ModA and ModB must NOT be separate entries.
         assert!(
-            scanned.iter().all(|m| m.folder_name.as_deref() != Some("ModA")),
+            scanned
+                .iter()
+                .all(|m| m.folder_name.as_deref() != Some("ModA")),
             "ModA must not appear as a separate entry"
         );
         assert!(
-            scanned.iter().all(|m| m.folder_name.as_deref() != Some("ModB")),
+            scanned
+                .iter()
+                .all(|m| m.folder_name.as_deref() != Some("ModB")),
             "ModB must not appear as a separate entry"
         );
     }

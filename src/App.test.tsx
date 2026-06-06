@@ -1470,6 +1470,54 @@ describe('<App>', () => {
     debugSpy.mockRestore();
   });
 
+  it('deep-link: cancelled URL can be retried after the dedupe window expires', async () => {
+    let now = 1_000;
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    let fetches = 0;
+    try {
+      registerInvokeHandler('get_subscriptions', () => []);
+      registerInvokeHandler('consume_pending_deep_link', () => null);
+      registerInvokeHandler('fetch_shared_profile_cmd', () => {
+        fetches += 1;
+        return {
+          name: 'RetryPack', mods: [{ name: 'M1' }], created_at: '2026-01-01',
+        };
+      });
+      const user = userEvent.setup();
+      render(<App />);
+      await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+
+      await fireTauriEvent('sts2mm-open-url', 'sts2mm://import/alice/AA5A-315D-61AE');
+      await screen.findByText(/Install this modpack/i);
+      expect(fetches).toBe(1);
+
+      const modalFoot = document.querySelector('.gf-modal-foot') as HTMLElement | null;
+      expect(modalFoot).toBeTruthy();
+      const cancelBtn = Array.from(modalFoot!.querySelectorAll('button')).find(
+        (b) => /^Cancel$/i.test(b.textContent?.trim() ?? ''),
+      ) as HTMLButtonElement | undefined;
+      expect(cancelBtn).toBeDefined();
+      await user.click(cancelBtn!);
+      await waitFor(() => {
+        expect(screen.queryByText(/Install this modpack/i)).toBeNull();
+      });
+
+      await fireTauriEvent('sts2mm-open-url', 'sts2mm://import/alice/AA5A-315D-61AE');
+      await waitFor(() => {
+        expect(fetches).toBe(1);
+      });
+
+      now += 2_001;
+      await fireTauriEvent('sts2mm-open-url', 'sts2mm://import/alice/AA5A-315D-61AE');
+      await waitFor(() => {
+        expect(fetches).toBe(2);
+      });
+      expect(await screen.findByText(/Install this modpack/i)).toBeInTheDocument();
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
   it('deep-link: cold-start drains pending URL via consume_pending_deep_link', async () => {
     registerInvokeHandler('get_subscriptions', () => []);
     registerInvokeHandler('consume_pending_deep_link', () => 'sts2mm://import/alice/AA5A-315D-61AE');

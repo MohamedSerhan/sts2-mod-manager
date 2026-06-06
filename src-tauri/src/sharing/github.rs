@@ -156,11 +156,7 @@ pub(super) async fn get_github_username(token: &str) -> Result<String> {
 }
 
 /// Ensure the sts2mm-profiles repo exists. Creates it if not.
-pub(super) async fn ensure_profiles_repo(
-    token: &str,
-    username: &str,
-    repo: &str,
-) -> Result<()> {
+pub(super) async fn ensure_profiles_repo(token: &str, username: &str, repo: &str) -> Result<()> {
     let client = build_client(token);
 
     // Check if repo exists
@@ -822,7 +818,12 @@ fn url_host_is_loopback(raw: &str) -> bool {
         .unwrap_or(false)
 }
 
-pub async fn download_bundle(url: &str, mod_name: &str, mods_path: &std::path::Path, expected_sha256: Option<&str>) -> Result<()> {
+pub async fn download_bundle(
+    url: &str,
+    mod_name: &str,
+    mods_path: &std::path::Path,
+    expected_sha256: Option<&str>,
+) -> Result<()> {
     // SSRF guard: the bundle URL comes from an untrusted modpack manifest.
     // Refuse anything that isn't an https GitHub asset URL before any fetch so
     // a malicious manifest can't make us hit an internal/arbitrary address.
@@ -2101,7 +2102,10 @@ mod download_bundle_url_routing_tests {
             !bundle_url_is_allowed("file:///etc/passwd"),
             "file scheme must be rejected"
         );
-        assert!(!bundle_url_is_allowed("not a url"), "garbage must be rejected");
+        assert!(
+            !bundle_url_is_allowed("not a url"),
+            "garbage must be rejected"
+        );
     }
 
     #[tokio::test]
@@ -2331,7 +2335,8 @@ mod github_api_stress_tests {
         .await?;
 
         let verify_result: Result<()> = async {
-            let fetched = fetch_shared_profile(username, &result.file_path, Some(token), repo).await?;
+            let fetched =
+                fetch_shared_profile(username, &result.file_path, Some(token), repo).await?;
             if fetched.mods.len() != STRESS_SIZE_PLAN_MIB.len() {
                 return Err(AppError::Other(format!(
                     "Fetched profile had {} mods, expected {}",

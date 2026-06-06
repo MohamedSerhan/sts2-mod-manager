@@ -31,8 +31,8 @@ mod subscriptions;
 // integration tests in `src-tauri/tests/` exercise check_all_updates +
 // audit_mod_versions directly so the qa-cassette playback layer can be
 // verified without spinning up a Tauri window.
-pub mod updater;
 pub mod dev_builds;
+pub mod updater;
 
 use state::create_app_state;
 use state::AppState;

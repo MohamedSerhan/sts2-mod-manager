@@ -30,10 +30,10 @@ use crate::mods::{
 
 use super::apply::disk_mod_matches_pin;
 use super::crud::{
-    hide_app_created_by, list_profiles, load_profile, mod_key, profile_has_json,
-    profile_is_edit_locked, profile_is_owned, profile_mod_from_installed,
-    profile_mod_matches_installed, profile_mod_matches_target, installed_mod_matches_target,
-    save_profile, subscribed_profile_names,
+    hide_app_created_by, installed_mod_matches_target, list_profiles, load_profile, mod_key,
+    profile_has_json, profile_is_edit_locked, profile_is_owned, profile_mod_from_installed,
+    profile_mod_matches_installed, profile_mod_matches_target, save_profile,
+    subscribed_profile_names,
 };
 use super::{
     LoadOrderSettingsStatus, Profile, ProfileMembershipGrid, ProfileMembershipMod,
@@ -209,7 +209,10 @@ pub(crate) fn set_profile_mods_enabled_from_paths(
                 } else {
                     (disabled_path, mods_path)
                 };
-                let label = inst.display_name.clone().unwrap_or_else(|| inst.name.clone());
+                let label = inst
+                    .display_name
+                    .clone()
+                    .unwrap_or_else(|| inst.name.clone());
                 match move_mod_by_info(inst, src, dest) {
                     Ok(()) => toggled.push(label),
                     Err(e) => {
@@ -661,7 +664,11 @@ mod profile_membership_tests {
         save_profile(&pack, &profiles_path).unwrap();
 
         let result = set_profile_mods_enabled_from_paths(
-            "Pack", true, &mods_path, &disabled_path, &profiles_path,
+            "Pack",
+            true,
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
         )
         .unwrap();
 
@@ -687,12 +694,18 @@ mod profile_membership_tests {
         // "Here" is already active; "Ghost" isn't installed at all.
         write_mod(&mods_path, "Here", "Here", "1.0.0");
         let mut pack = empty_profile("Pack");
-        pack.mods.push(profile_mod_entry("Here", "Here", "1.0.0", true));
-        pack.mods.push(profile_mod_entry("Ghost", "Ghost", "1.0.0", true));
+        pack.mods
+            .push(profile_mod_entry("Here", "Here", "1.0.0", true));
+        pack.mods
+            .push(profile_mod_entry("Ghost", "Ghost", "1.0.0", true));
         save_profile(&pack, &profiles_path).unwrap();
 
         let result = set_profile_mods_enabled_from_paths(
-            "Pack", true, &mods_path, &disabled_path, &profiles_path,
+            "Pack",
+            true,
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
         )
         .unwrap();
 
@@ -1199,7 +1212,9 @@ mod profile_membership_tests {
         .unwrap();
 
         // The new contents landed...
-        assert!(fs::read_to_string(&settings_path).unwrap().contains("mods_enabled"));
+        assert!(fs::read_to_string(&settings_path)
+            .unwrap()
+            .contains("mods_enabled"));
         // ...and the temporary backup was deleted on the success path.
         assert!(
             !returned.exists(),
@@ -1252,7 +1267,10 @@ mod profile_membership_tests {
             "the suffix counter must pick a distinct backup path on a name clash"
         );
         // And the write itself still succeeded.
-        assert_eq!(fs::read_to_string(&settings_path).unwrap(), "{\"written\":true}");
+        assert_eq!(
+            fs::read_to_string(&settings_path).unwrap(),
+            "{\"written\":true}"
+        );
     }
 
     #[test]
@@ -1418,17 +1436,23 @@ mod profile_membership_tests {
 
         // ModA and ModB must NOT be separate rows.
         assert!(
-            grid.mods.iter().all(|m| m.folder_name.as_deref() != Some("ModA")),
+            grid.mods
+                .iter()
+                .all(|m| m.folder_name.as_deref() != Some("ModA")),
             "ModA must not appear as a separate grid row — it is a bundle member"
         );
         assert!(
-            grid.mods.iter().all(|m| m.folder_name.as_deref() != Some("ModB")),
+            grid.mods
+                .iter()
+                .all(|m| m.folder_name.as_deref() != Some("ModB")),
             "ModB must not appear as a separate grid row — it is a bundle member"
         );
 
         // Standalone mod must still appear as its own row.
         assert!(
-            grid.mods.iter().any(|m| m.folder_name.as_deref() == Some("StandAlone")),
+            grid.mods
+                .iter()
+                .any(|m| m.folder_name.as_deref() == Some("StandAlone")),
             "StandAlone must still appear as its own row"
         );
     }

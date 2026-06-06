@@ -120,7 +120,8 @@ mod tests {
 
     #[test]
     fn parse_upload_response_extracts_url() {
-        let url = parse_upload_response(r#"{"url":"https://reports.example.dev/r/abc123"}"#).unwrap();
+        let url =
+            parse_upload_response(r#"{"url":"https://reports.example.dev/r/abc123"}"#).unwrap();
         assert_eq!(url, "https://reports.example.dev/r/abc123");
     }
 

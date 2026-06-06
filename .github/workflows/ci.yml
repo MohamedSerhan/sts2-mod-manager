@@ -254,6 +254,7 @@ jobs:
           node --test scripts/dev-build-stamp.test.mjs
           node --test scripts/make-dev-icon.test.mjs
           node --test scripts/ci-changes.test.mjs
+          node --test scripts/qa-coverage-matrix.test.mjs
           node --test scripts/changelog-fragments.test.mjs
           node --test scripts/translate-changelog.test.mjs
 

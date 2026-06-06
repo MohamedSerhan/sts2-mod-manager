@@ -29,22 +29,22 @@ Cross-referenced against [walkthrough-findings.md](../walkthrough-findings.md):
 - Flow 10 (snapshot / create profile) — 010
 - Flow 11 (switch profiles) — 003
 
-Flows still uncovered (priority for next batch): 2 (share code import), 12 (share publish), 13 (repair), 14 (drag-drop), 15 (restore backup), 16 (launch), 17 (onboarding), 18 (deep link), 19 (subscription), 20 (bulk).
+Additional flow owners live in [../coverage-matrix.md](../coverage-matrix.md): share-code import, share publish, repair, restore backup, onboarding, subscription updates, and bulk operations now have automated owners. Drag-drop install, launch, and OS protocol registration stay in the short manual release checklist because they cross desktop/OS integration boundaries.
 
 ### Mod-author flows
-None yet covered. Priority next:
-- A1 (iterate on dev build with malformed manifest)
-- A8 (DLL-only mod surfaces correctly)
+Covered author-flow owners:
+- A1 (iterate on dev build with malformed manifest) — `src-tauri/src/mods/scan.rs` lenient/invalid manifest tests.
+- A8 (DLL-only mod surfaces correctly) — `src-tauri/tests/qa_scenarios.rs::author_a8_dll_only_mod_surfaces_correctly`.
 
 ### Historical bugs (Tier 1 — must be regression-tested before next minor)
 - #1 — 002 ✓
 - #2 — 001 + 005 ✓
-- #4 — TODO (RitsuLib mixed-layout zip)
-- #6 — TODO (manifest-rename source migration)
-- #11 — TODO (zip-slip refusal)
-- #20 — TODO (profile Repair deletes orphan disabled-folder files)
-- #21 — TODO (game-version-skipped mods in snapshot)
-- #22 — TODO (profile state sticky after toggle)
+- #4 — `src-tauri/tests/qa_scenarios.rs::historical_4_mixed_layout_zip_lands_under_one_folder` ✓
+- #6 — `src-tauri/tests/qa_scenarios.rs::historical_6_source_entry_migrates_on_manifest_rename` ✓
+- #11 — `src-tauri/tests/qa_scenarios.rs::historical_11_zip_slip_traversal_is_refused` ✓
+- #20 — `qa/runner/smoke.mjs::specDisabledLibraryExtrasArePreserved` ✓
+- #21 — `qa/runner/smoke.mjs::specSkippedModAbsentFromSnapshot` ✓
+- #22 — `qa/runner/smoke.mjs::specToggleStickyAcrossProfileSwitch` ✓
 - #32 — 004 ✓
 
-3 / 9 Tier-1 bugs scenario-locked. Target before v1.4.0: all 9.
+9 / 9 Tier-1 bugs have automated owners. See [../coverage-matrix.md](../coverage-matrix.md) for the full release-confidence map and remaining lower-tier gaps.

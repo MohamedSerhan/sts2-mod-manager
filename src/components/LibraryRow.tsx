@@ -140,6 +140,8 @@ export interface LibraryRowProps {
   packActive?: boolean;
   /** Drag highlight target. */
   isDragOver: boolean;
+  /** The row currently being dragged. */
+  isDragging?: boolean;
   /** True while a setProfileLoadOrder commit is in flight. Disables
    *  draggable + early-returns drag handlers. */
   loadOrderSaving: boolean;
@@ -218,6 +220,7 @@ export function LibraryRow({
   packScoped = false,
   packActive = false,
   isDragOver,
+  isDragging = false,
   loadOrderSaving,
   membershipSaving,
   storageSaving,
@@ -300,10 +303,16 @@ export function LibraryRow({
   const auditError = audit?.error ?? null;
   const minGameViolated =
     !!mod?.min_game_version && !gameVersionSatisfies(gameVersion, mod.min_game_version);
+  const manifestVersion = (row.version || '').replace(/^v/i, '');
+  const effectiveInstalledVersion = audit?.installed_version?.replace(/^v/i, '') ?? null;
+  const showEffectiveNexusVersion =
+    !!effectiveInstalledVersion
+    && effectiveInstalledVersion !== manifestVersion
+    && !!(audit?.nexus_version || mod?.nexus_url);
 
   return (
     <Card
-      className={`gf-profile-library-row${(!packScoped || packActive) && row.installed_enabled ? ' is-active' : ''}${isDragOver ? ' drag-over' : ''}${mod?.pinned ? ' gf-mod-pinned' : ''}${mod ? ' is-clickable' : ''}`}
+      className={`gf-profile-library-row${(!packScoped || packActive) && row.installed_enabled ? ' is-active' : ''}${isDragOver ? ' drag-over' : ''}${isDragging ? ' dragging' : ''}${mod?.pinned ? ' gf-mod-pinned' : ''}${mod ? ' is-clickable' : ''}`}
       draggable={reorderable && !loadOrderSaving}
       onDragStart={(event) => onDragStart(event, inPackIndex)}
       onDragOver={(event) => onDragOver(event, inPackIndex)}
@@ -356,7 +365,7 @@ export function LibraryRow({
         {/* Active/stored toggle — only where in-game state is meaningful:
             the All Mods view, or the ACTIVE pack's rows. A non-active pack's
             members aren't loaded, so showing a toggle there is misleading. */}
-        {mod && (!packScoped || packActive) && (
+        {(!packScoped || packActive) && (
           <div
             className="gf-row-status"
             role="presentation"
@@ -531,8 +540,21 @@ export function LibraryRow({
                 a folder glyph + tooltip, so version / folder / description
                 read as distinct things instead of three grey lookalikes. */}
             <span className="gf-meta-version" title={t('mods.versionLabel')}>
-              v{(row.version || '').replace(/^v/i, '')}
+              {showEffectiveNexusVersion
+                ? t('mods.manifestVersion', { version: manifestVersion })
+                : `v${manifestVersion}`}
             </span>
+            {showEffectiveNexusVersion && (
+              <span
+                className="gf-meta-version"
+                title={t('mods.nexusEffectiveVersionTitle', {
+                  nexus: effectiveInstalledVersion,
+                  manifest: manifestVersion,
+                })}
+              >
+                {t('mods.nexusEffectiveVersion', { version: effectiveInstalledVersion })}
+              </span>
+            )}
             {row.folder_name
               && (row.folder_name !== row.name || !!row.display_name?.trim())
               && (
@@ -634,7 +656,7 @@ export function LibraryRow({
               (membership remove; on the active pack it also unloads the mod).
               All Mods view → the disk-delete trash. Delete-from-disk for the
               modpack view lives in the kebab. */}
-          {mod && packScoped ? (
+          {packScoped ? (
             <button
               type="button"
               className="gf-row-remove"
@@ -786,9 +808,11 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
     else membershipChip = 'includedOff';
   }
 
+  const snoozeTargetVersion =
+    audit?.latest_release_with_assets_tag ?? audit?.nexus_version ?? null;
   const canSnooze =
     !!audit?.snoozed ||
-    (!!audit?.needs_update && !!audit.latest_release_with_assets_tag);
+    (!!audit?.needs_update && !!snoozeTargetVersion);
 
   // Rebuilt per render — cheap, and the menu only mounts/opens on demand. Don't memoize (it would force listing every closure capture as a dep).
   // One descriptor per customizable id: contextual availability + how to render.
@@ -847,7 +871,7 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
             icon={<Clock size={12} />}
             onClick={onSnooze}
             description={t('mods.snoozeDesc', {
-              version: audit?.latest_release_with_assets_tag?.replace(/^v/, '') ?? '?',
+              version: snoozeTargetVersion?.replace(/^v/, '') ?? '?',
             })}
           >
             {t('mods.snoozeUpdate')}

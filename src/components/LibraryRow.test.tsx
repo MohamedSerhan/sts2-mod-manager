@@ -257,6 +257,12 @@ describe('<LibraryRow>', () => {
     expect(card.className).toContain('drag-over');
   });
 
+  it('isDragging=true applies the dragging class', () => {
+    const { container } = renderRow({ isDragging: true });
+    const card = container.querySelector('.gf-profile-library-row') as HTMLElement;
+    expect(card.className).toContain('dragging');
+  });
+
   it('shows a saving spinner on the in-pack indicator while membership is mutating', () => {
     const { container } = renderRow({
       row: baseMod({ folder_name: 'BaseLib' }),
@@ -812,7 +818,8 @@ describe('<LibraryRow> modpackName=null mode', () => {
 // The verbose "Store / Activate" button and the buried kebab item were
 // both retired in favour of a single compact switch on the row. ON = the
 // mod is active in the game folder; OFF = it's stored on disk. The switch
-// only renders when a ModInfo (`mod`) is supplied.
+// renders from the membership row itself; extra row actions still require a
+// matching ModInfo (`mod`).
 
 describe('<LibraryRow> active/stored switch', () => {
   it('renders a switch reflecting installed_enabled and a flipping label', () => {
@@ -838,9 +845,12 @@ describe('<LibraryRow> active/stored switch', () => {
     expect(screen.getByText('Stored')).toBeInTheDocument();
   });
 
-  it('does not render the switch when no mod prop is supplied', () => {
+  it('renders the switch when no mod prop is supplied', () => {
     renderRow({ mod: undefined });
-    expect(screen.queryByRole('switch')).toBeNull();
+    expect(
+      screen.getByRole('switch', { name: /toggle whether BaseLib is active in game/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /mod actions/i })).toBeNull();
   });
 
   it('clicking the switch fires onToggleStorage with the row', async () => {
@@ -1038,6 +1048,75 @@ describe('<LibraryRow> Nexus-only update pill', () => {
       audit: baseAudit({ needs_update: true, nexus_update_available: true, nexus_version: '2.1.0', pinned: true }),
     });
     expect(screen.queryByRole('button', { name: /Update available/i })).toBeNull();
+  });
+
+  it('offers Skip this update for a Nexus-only update and fires onSnooze', async () => {
+    const onSnooze = vi.fn();
+    const user = userEvent.setup();
+    renderRow({
+      mod: baseModInfo({ github_url: null, nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/99' }),
+      audit: baseAudit({
+        github_repo: null,
+        latest_release_tag: null,
+        latest_release_with_assets_tag: null,
+        latest_compatible_tag: null,
+        needs_update: true,
+        nexus_update_available: true,
+        nexus_version: '2.1.0',
+        update_source: 'nexus',
+      }),
+      onSnooze,
+    });
+
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /Skip this update/i }));
+
+    expect(onSnooze).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows Latest when Nexus is current and GitHub has no installable release assets', () => {
+    renderRow({
+      mod: baseModInfo({
+        github_url: 'https://github.com/x/y',
+        nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/99',
+      }),
+      audit: baseAudit({
+        latest_release_tag: 'v2.0.0',
+        latest_release_with_assets_tag: null,
+        latest_compatible_tag: null,
+        latest_has_assets: false,
+        needs_update: false,
+        nexus_update_available: false,
+        nexus_version: '1.0.0',
+        update_source: null,
+      }),
+    });
+
+    expect(screen.getByText(/Latest/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Update available/i })).toBeNull();
+  });
+
+  it('distinguishes the audited Nexus version from the manifest version when they differ', () => {
+    renderRow({
+      row: baseMod({ version: '1.0.0' }),
+      mod: baseModInfo({
+        version: '1.0.0',
+        nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/99',
+      }),
+      audit: baseAudit({
+        installed_version: '2.0.0',
+        latest_release_tag: null,
+        latest_release_with_assets_tag: null,
+        latest_compatible_tag: null,
+        needs_update: false,
+        nexus_update_available: false,
+        nexus_version: '2.0.0',
+        update_source: null,
+      }),
+    });
+
+    expect(screen.getByText('Nexus v2.0.0')).toBeInTheDocument();
+    expect(screen.getByText('manifest v1.0.0')).toBeInTheDocument();
   });
 });
 

@@ -13,7 +13,9 @@ export function isUpToDate(entry: ModAuditEntry): boolean {
   if (hasRealError) return false;
   const goneNoAssets =
     Boolean(entry.latest_release_tag) && !entry.latest_release_with_assets_tag;
-  if (goneNoAssets) return false;
+  const nexusCheckedCurrent =
+    Boolean(entry.nexus_url || entry.nexus_version) && !entry.nexus_update_available;
+  if (goneNoAssets && !nexusCheckedCurrent) return false;
   if (entry.game_version_too_old) return false;
   if (entry.latest_release_blocked_by_game_version) return false;
   return true;

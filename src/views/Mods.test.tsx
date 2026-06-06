@@ -246,6 +246,23 @@ describe('<ModsView>', () => {
     expect(order[order.length - 1]).toBe('NoTag');
   });
 
+  it('Tag picker has a No tags option that shows only untagged mods', async () => {
+    seedMods([
+      baseMod({ name: 'BaseLib', folder_name: 'BaseLib', tags: ['utility'] }),
+      baseMod({ name: 'CardArtEditor', folder_name: 'CardArtEditor', tags: ['visual'] }),
+      baseMod({ name: 'NoTag', folder_name: 'NoTag', tags: [] }),
+    ]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await screen.findByText('BaseLib');
+
+    await user.selectOptions(screen.getByRole('combobox', { name: /Tag/i }), '__no_tags__');
+
+    expect(screen.getByText('NoTag')).toBeInTheDocument();
+    expect(screen.queryByText('BaseLib')).toBeNull();
+    expect(screen.queryByText('CardArtEditor')).toBeNull();
+  });
+
   it('sort dropdown supports common mod-library orders', async () => {
     // Post-1.7.0 T18 unification: the Library view uses LibraryTable's
     // own sort dropdown. Sort modes shifted from

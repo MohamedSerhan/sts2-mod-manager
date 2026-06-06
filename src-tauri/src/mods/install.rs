@@ -571,10 +571,16 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
     // so scanners and the UI can identify it as a bundle container.
     if is_bundle {
         let dir = mods_path.join(&container_name);
-        let _ = super::bundle::write_sidecar(&dir, &super::bundle::BundleSidecar {
-            display_name: container_name.clone(),
-            ..Default::default()
-        });
+        let installed_version = super::bundle::nexus_file_version(zip_path)
+            .or_else(|| super::bundle::display_name_version(&container_name));
+        let _ = super::bundle::write_sidecar(
+            &dir,
+            &super::bundle::BundleSidecar {
+                display_name: container_name.clone(),
+                installed_version,
+                ..Default::default()
+            },
+        );
     }
 
     let size_bytes = calculate_mod_size(mods_path, &extracted_files);
@@ -1161,7 +1167,9 @@ mod archive_dispatch_tests {
     fn multi_member_archive_becomes_one_bundle_container_with_sidecar() {
         use crate::mods::bundle::{is_bundle_container, read_sidecar};
         let tmp = tempfile::tempdir().unwrap();
-        let zip = tmp.path().join("Alice Defect Visual Pack-979-2-1.zip");
+        let zip = tmp
+            .path()
+            .join("AliceDefectSkin V2.0-979-2-1-1780132414.zip");
         write_zip_file(&zip, vec![
             ("AliceDefectSkin/AliceDefectSkin.json",
                 br#"{"id":"AliceDefectSkin","name":"Alice Defect Skin","version":"0.1.31"}"#.to_vec()),
@@ -1172,14 +1180,24 @@ mod archive_dispatch_tests {
         ]);
         let mods = tempfile::tempdir().unwrap();
         install_mod_from_archive(&zip, mods.path()).expect("multi-member installs");
-        let tops: Vec<_> = fs::read_dir(mods.path()).unwrap().flatten()
-            .filter(|e| e.path().is_dir()).map(|e| e.file_name().to_string_lossy().to_string()).collect();
+        let tops: Vec<_> = fs::read_dir(mods.path())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.path().is_dir())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
         assert_eq!(tops.len(), 1, "one container, got {tops:?}");
         let container = mods.path().join(&tops[0]);
         assert!(is_bundle_container(&container), "container has a sidecar");
         assert!(container.join("AliceDefectSkin").is_dir());
         assert!(container.join("AliceDefectVoiceBridge").is_dir());
-        let _ = read_sidecar(&container).expect("sidecar parses");
+        let sidecar = read_sidecar(&container).expect("sidecar parses");
+        assert_eq!(sidecar.display_name, "AliceDefectSkin V2.0");
+        assert_eq!(sidecar.installed_version.as_deref(), Some("2.1"));
+
+        let scanned = scan_mods(mods.path());
+        assert_eq!(scanned.len(), 1);
+        assert_eq!(scanned[0].version, "2.1");
     }
 
     #[test]

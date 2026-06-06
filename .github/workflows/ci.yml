@@ -208,6 +208,35 @@ jobs:
       - name: WebDriver smoke (deterministic cassette)
         run: npm run qa:smoke:cassette
 
+  # Linux WebDriver smoke: tauri-driver forwards to WebKitWebDriver under Xvfb.
+  # This exercises the WebKitGTK stack that Windows/WebView2 never touches.
+  smoke-linux:
+    needs: changes
+    if: ${{ needs.changes.outputs.app == 'true' || needs.changes.outputs.qa == 'true' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev webkit2gtk-driver xvfb dbus-x11
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: smoke-linux
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: Install tauri-driver
+        run: cargo install tauri-driver --version 2.0.6 --locked
+      - name: Build app (qa-cassette feature, --no-bundle => no signing needed)
+        run: npm run qa:smoke:build
+      - name: WebDriver smoke (Linux deterministic cassette)
+        run: xvfb-run -a npm run qa:smoke:cassette
+
   script-tests:
     needs: changes
     if: ${{ needs.changes.outputs.scripts == 'true' }}
@@ -312,7 +341,7 @@ jobs:
 
   ci-gate:
     name: CI Gate
-    needs: [changes, compile, test-frontend, test-rust, app-build, smoke, script-tests, workflow-lint, changelog]
+    needs: [changes, compile, test-frontend, test-rust, app-build, smoke, smoke-linux, script-tests, workflow-lint, changelog]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -326,6 +355,7 @@ jobs:
           check "test-rust"     "${{ needs.test-rust.result }}"
           check "app-build"     "${{ needs.app-build.result }}"
           check "smoke"         "${{ needs.smoke.result }}"
+          check "smoke-linux"   "${{ needs.smoke-linux.result }}"
           check "script-tests"  "${{ needs.script-tests.result }}"
           check "workflow-lint" "${{ needs.workflow-lint.result }}"
           check "changelog"     "${{ needs.changelog.result }}"

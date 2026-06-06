@@ -1952,6 +1952,33 @@ mod version_helper_tests {
         );
     }
 
+    /// Regression for #139: a tester had BaseLib displayed as
+    /// "[BASE] BaseLib" while the manually linked source was saved under
+    /// the stable install folder "BaseLib". Update/repair must resolve the
+    /// folder-keyed manual GitHub source instead of looking only at the
+    /// decorated display name and reporting "no GitHub source linked".
+    #[test]
+    fn resolve_github_repo_handles_decorated_baselib_display_name() {
+        let info = mod_info(|m| {
+            m.name = "[BASE] BaseLib".into();
+            m.folder_name = Some("BaseLib".into());
+            m.mod_id = Some("BaseLib".into());
+        });
+        let mut sources = std::collections::HashMap::new();
+        sources.insert(
+            "BaseLib".into(),
+            ModSourceEntry {
+                github_repo: Some("Alchyr/BaseLib-STS2".into()),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            resolve_github_repo(&info, &sources),
+            Some(("Alchyr".into(), "BaseLib-STS2".into())),
+        );
+    }
+
     /// Regression: pre-1.4.3 the "already on chosen" gate in `update_mod`
     /// formatted the chosen tag with `(v{})` while `chosen.tag` already
     /// started with a `v`, producing `(vv0.2.32)`. The fix strips the
@@ -3016,11 +3043,14 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
         latest_release_with_assets_tag.as_deref(),
         nexus_version.as_deref(),
     );
+    let installed_version = best_known_installed_version(m, &ctx.sources_db.mods)
+        .map(|version| version.to_string())
+        .unwrap_or_else(|| m.version.clone());
     ModAuditEntry {
         mod_name: m.name.clone(),
         folder_name: m.folder_name.clone(),
         github_repo: display_github,
-        installed_version: m.version.clone(),
+        installed_version,
         latest_release_tag,
         latest_release_with_assets_tag,
         latest_has_assets: latest_has_mod_assets,

@@ -113,6 +113,36 @@ pub fn nexus_file_version(archive_path: &Path) -> Option<String> {
     (!version.is_empty()).then_some(version)
 }
 
+/// Extract a trailing version token from a bundle display/container name.
+///
+/// This is a fallback for older bundle sidecars written before
+/// `installed_version` was persisted. For example, a container/display name of
+/// `AliceDefectSkin V2.0` should scan as version `2.0` instead of `unknown`.
+pub fn display_name_version(name: &str) -> Option<String> {
+    let token = name
+        .split_whitespace()
+        .last()?
+        .trim_matches(|c| matches!(c, '(' | ')' | '[' | ']'));
+    let without_v = token.trim_start_matches(|c| c == 'v' || c == 'V');
+    let had_v_prefix = without_v.len() != token.len();
+
+    if without_v.is_empty() || (!had_v_prefix && !without_v.contains('.')) {
+        return None;
+    }
+    if !without_v.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+        return None;
+    }
+
+    let version = without_v.replace(['_', '-'], ".");
+    if version.chars().all(|c| c.is_ascii_digit() || c == '.')
+        && version.chars().any(|c| c.is_ascii_digit())
+    {
+        Some(version.trim_matches('.').to_string()).filter(|v| !v.is_empty())
+    } else {
+        None
+    }
+}
+
 /// After a bundle auto-installs, copy the resolved upstream link + version into
 /// the container's sidecar. Returns `false` (no-op) when the archive didn't
 /// produce a bundle container. Only overwrites fields for which a value is
@@ -258,5 +288,19 @@ mod tests {
             nexus_file_version(std::path::Path::new("MyMod-1775500710.zip")),
             None
         );
+    }
+
+    #[test]
+    fn display_name_version_extracts_trailing_pack_version() {
+        assert_eq!(
+            display_name_version("AliceDefectSkin V2.0"),
+            Some("2.0".to_string())
+        );
+        assert_eq!(
+            display_name_version("AliceDefectSkin 2.0"),
+            Some("2.0".to_string())
+        );
+        assert_eq!(display_name_version("Pack 2"), None);
+        assert_eq!(display_name_version("Pack"), None);
     }
 }

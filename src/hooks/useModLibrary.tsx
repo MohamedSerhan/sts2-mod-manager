@@ -30,6 +30,7 @@ import { Card } from '../components/Card';
 import { SourceEditor } from '../components/SourceEditor';
 import { AutoDetectModal } from '../components/AutoDetectModal';
 import { nexusFilesUrl } from '../lib/nexusUrl';
+import { loadAutoAddInstallsToModpack } from '../lib/installPolicy';
 import type { ModAuditEntry, ModInfo } from '../types';
 import {
   deleteMod,
@@ -95,6 +96,8 @@ export interface UseModLibraryOptions {
   /** When set, installs (Quick add URL / Import) add the new mod to this
    *  pack's membership immediately. Unset = All Mods (install to disk only). */
   targetPack?: string | null;
+  /** Fired when a target-pack install changed that pack's local manifest. */
+  onTargetPackChanged?: () => void;
   /** When set, the Audit action checks ONLY these mods (the modpack view
    *  audits just its pack). Unset = audit everything (All Mods view).
    *  A function so callers can read the latest pack contents at click time. */
@@ -102,7 +105,7 @@ export interface UseModLibraryOptions {
 }
 
 export function useModLibrary(opts: UseModLibraryOptions = {}) {
-  const { targetPack, auditScope } = opts;
+  const { targetPack, onTargetPackChanged, auditScope } = opts;
   const { t } = useTranslation();
   const {
     mods,
@@ -188,6 +191,19 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
       mod.mod_id ?? null,
       true,
     );
+    onTargetPackChanged?.();
+  }
+
+  function showInstallToast(mod: ModInfo, addedToPack: boolean) {
+    if (targetPack && addedToPack) {
+      toast.success(t('mods.toast.installedAndAddedToPack', { name: mod.name, pack: targetPack }));
+      return;
+    }
+    if (targetPack) {
+      toast.success(t('mods.toast.installedLibraryOnly', { name: mod.name }));
+      return;
+    }
+    toast.success(t('mods.toast.installed', { name: mod.name }));
   }
 
   // A *followed* (subscribed but not owned) pack isn't ours to edit, so
@@ -339,7 +355,8 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
 
   async function handleImportFile() {
     try {
-      if (await targetPackIsFollowed()) {
+      const autoAddToTargetPack = !!targetPack && loadAutoAddInstallsToModpack();
+      if (autoAddToTargetPack && await targetPackIsFollowed()) {
         toast.info(t('mods.toast.followedPackNoAdd', { pack: targetPack }));
         return;
       }
@@ -351,9 +368,11 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
       // `open({ multiple: false })` resolves to a single path or null; the
       // guard above already ruled out null, so this is just the string.
       const mod = await installModFromFile(selected);
-      await addToTargetPack(mod);
+      if (autoAddToTargetPack) {
+        await addToTargetPack(mod);
+      }
       await refreshAll();
-      toast.success(t('mods.toast.installed', { name: mod.name }));
+      showInstallToast(mod, autoAddToTargetPack);
     } catch (e) {
       const impErrMsg = e instanceof Error ? e.message : String(e);
       toast.error(t('mods.toast.importFailed', { error: impErrMsg }));
@@ -362,7 +381,8 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
 
   async function handleQuickAdd() {
     if (!quickAddUrl.trim()) return;
-    if (await targetPackIsFollowed()) {
+    const autoAddToTargetPack = !!targetPack && loadAutoAddInstallsToModpack();
+    if (autoAddToTargetPack && await targetPackIsFollowed()) {
       toast.info(t('mods.toast.followedPackNoAdd', { pack: targetPack }));
       return;
     }
@@ -371,9 +391,11 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
       setQuickAdding(true);
       const result = await quickAddMod(input);
       if (result.type === 'github_installed') {
-        await addToTargetPack(result.mod_info);
+        if (autoAddToTargetPack) {
+          await addToTargetPack(result.mod_info);
+        }
         await refreshAll();
-        toast.success(t('mods.toast.installed', { name: result.mod_info.name }));
+        showInstallToast(result.mod_info, autoAddToTargetPack);
       } else {
         const filesUrl = nexusFilesUrl(input);
         if (filesUrl) {
@@ -638,7 +660,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     onUpdate: handleInlineUpdate,
     onTogglePin: handleTogglePin,
     onSnooze: (mod: ModInfo, audit: ModAuditEntry | undefined) =>
-      handleSnooze(mod, audit?.latest_release_with_assets_tag ?? null),
+      handleSnooze(mod, audit?.latest_release_with_assets_tag ?? audit?.nexus_version ?? null),
     onUnsnooze: handleUnsnooze,
     onRepair: handleRepair,
     onRollback: handleRollback,

@@ -58,10 +58,9 @@ const baseProfile = (overrides: Partial<Profile> = {}): Profile =>
     ...overrides,
   } as Profile);
 
-// Membership is now changed from the per-row kebab, which only renders
-// when the row has a matching ModInfo (passed via modInfoByKey). This
-// factory builds that ModInfo so the kebab + its "Add/Remove from pack"
-// item are present in membership tests.
+// Many row-menu actions only render when the row has a matching ModInfo
+// (passed via modInfoByKey). This factory builds that ModInfo for tests that
+// exercise the kebab/source/update surface.
 const mkModInfo = (overrides: Partial<ModInfo> = {}): ModInfo =>
   ({
     name: 'Mod',
@@ -375,6 +374,44 @@ describe('<LibraryTable>', () => {
     });
   });
 
+  it('pack-scoped active rows keep core controls even when ModInfo lookup is missing', async () => {
+    registerInvokeHandler('get_active_profile', () => 'Stable');
+    registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [
+        {
+          name: 'RandomVision',
+          display_name: '[Cheats] RandomVision',
+          version: '0.2.0',
+          folder_name: 'RandomVision',
+          mod_id: 'RandomVision',
+          installed_enabled: true,
+          profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+        },
+      ],
+    }));
+
+    render(
+      <Wrap
+        modpackName="Stable"
+        packScoped
+        coupleActiveStorage
+        modInfoByKey={new Map()}
+      />,
+    );
+
+    expect(await screen.findByRole('heading', { name: '[Cheats] RandomVision' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('switch', {
+        name: /toggle whether \[Cheats\] RandomVision is active in game/i,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /Remove \[Cheats\] RandomVision from this modpack/i }),
+    ).toBeInTheDocument();
+  });
+
   // ── Enabling a stored mod that isn't in the active pack ──────────────
   // Prompts the user: enable + add to the pack, enable only, or back out.
   function seedStoredNotInPack(included = false) {
@@ -408,6 +445,11 @@ describe('<LibraryTable>', () => {
     );
     expect(await screen.findByText(/Enable only keeps it active on disk, but it will not be saved in "Stable"/)).toBeInTheDocument();
     expect(screen.getByText(/Friends who install this shared modpack will not get enable-only mods/)).toBeInTheDocument();
+    const enableOnly = await screen.findByRole('button', { name: /^Enable only this time$/i });
+    const enableAndAdd = await screen.findByRole('button', { name: /Enable and add to "Stable"/i });
+    expect(enableOnly.classList.contains('gf-btn')).toBe(true);
+    expect(enableOnly.classList.contains('gf-btn-2')).toBe(false);
+    expect(enableAndAdd.classList.contains('gf-btn-2')).toBe(true);
     await user.click(await screen.findByRole('button', { name: /Enable and add to "Stable"/i }));
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'toggle_mod' && c.args?.enable === true)).toBe(true);
@@ -1219,6 +1261,21 @@ describe('<LibraryTable modpackName={null}>', () => {
       const titles = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent);
       const order = titles.filter((tt) => ['Apple', 'Zeta'].includes(tt ?? ''));
       expect(order).toEqual(['Apple', 'Zeta']);
+    });
+
+    it('filters to only untagged mods when the No-tags sentinel is selected', async () => {
+      gridFromInstalled(['Apple', 'Zeta', 'Plain']);
+      const modInfoByKey = new Map([
+        ['Apple', mkModInfo({ name: 'Apple', folder_name: 'Apple', tags: ['ui'] })],
+        ['Zeta', mkModInfo({ name: 'Zeta', folder_name: 'Zeta', tags: ['combat'] })],
+        ['Plain', mkModInfo({ name: 'Plain', folder_name: 'Plain', tags: [] })],
+      ]);
+      render(<Wrap modpackName={null} modInfoByKey={modInfoByKey} priorityTag="__no_tags__" />);
+      await screen.findByTestId('library-table');
+
+      expect(screen.getByText('Plain')).toBeInTheDocument();
+      expect(screen.queryByText('Apple')).toBeNull();
+      expect(screen.queryByText('Zeta')).toBeNull();
     });
 
     it('with no priorityTag, uses the normal sort (no tag reordering)', async () => {

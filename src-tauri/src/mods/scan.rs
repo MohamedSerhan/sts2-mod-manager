@@ -830,7 +830,12 @@ pub(super) fn scan_mods_inner(dir: &Path, enabled: bool) -> Vec<ModInfo> {
 
                     let version = sc
                         .as_ref()
-                        .and_then(|s| s.installed_version.clone())
+                        .and_then(|s| s.installed_version.as_deref())
+                        .map(str::trim)
+                        .filter(|v| !v.is_empty() && !v.eq_ignore_ascii_case("unknown"))
+                        .map(str::to_string)
+                        .or_else(|| crate::mods::bundle::display_name_version(&name))
+                        .or_else(|| crate::mods::bundle::display_name_version(&container_name))
                         .unwrap_or_else(|| "unknown".to_string());
 
                     let nexus_url = sc.as_ref().and_then(|s| s.nexus_url.clone());
@@ -1448,6 +1453,40 @@ mod pck_only_scan_tests {
             scanned.iter().all(|m| m.folder_name.as_deref() != Some("ModB")),
             "ModB must not appear as a separate entry"
         );
+    }
+
+    #[test]
+    fn sidecar_container_uses_display_name_version_when_sidecar_version_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mods = tmp.path();
+        write_bytes(
+            &mods
+                .join("AliceDefectSkin V2.0")
+                .join("AliceDefectSkin")
+                .join("AliceDefectSkin.dll"),
+            b"",
+        );
+        write_bytes(
+            &mods
+                .join("AliceDefectSkin V2.0")
+                .join("AliceDefectVoiceBridge")
+                .join("AliceDefectVoiceBridge.dll"),
+            b"",
+        );
+        crate::mods::bundle::write_sidecar(
+            &mods.join("AliceDefectSkin V2.0"),
+            &crate::mods::bundle::BundleSidecar {
+                display_name: "AliceDefectSkin V2.0".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let scanned = scan_mods_inner(mods, true);
+
+        assert_eq!(scanned.len(), 1);
+        assert_eq!(scanned[0].name, "AliceDefectSkin V2.0");
+        assert_eq!(scanned[0].version, "2.0");
     }
 
     /// A container WITHOUT a sidecar must still descend and surface each

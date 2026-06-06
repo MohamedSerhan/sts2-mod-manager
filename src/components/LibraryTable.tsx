@@ -58,6 +58,7 @@ import type {
 } from '../types';
 
 const DEFAULT_PAGE_SIZE = 100;
+export const NO_TAGS_FILTER_VALUE = '__no_tags__';
 
 export type LibrarySortMode =
   | 'nameAsc'
@@ -209,6 +210,15 @@ function rowHasTag(
 ): boolean {
   const info = modInfoByKey?.get(membershipRowKey(row)) ?? modInfoByKey?.get(row.name);
   return (info?.tags ?? []).some((tg) => tg.trim().toLocaleLowerCase() === lowerTag);
+}
+
+/** Whether a row has at least one manager tag after trimming whitespace. */
+function rowHasAnyTags(
+  row: ProfileMembershipMod,
+  modInfoByKey?: Map<string, ModInfo>,
+): boolean {
+  const info = modInfoByKey?.get(membershipRowKey(row)) ?? modInfoByKey?.get(row.name);
+  return (info?.tags ?? []).some((tg) => tg.trim().length > 0);
 }
 
 export function LibraryTable({
@@ -415,7 +425,10 @@ export function LibraryTable({
     // External pre-filter (e.g. Library view's tag filter) is applied
     // first so the table's own search runs against an already-narrowed
     // set.
-    const preFiltered = filterRow ? effectiveGrid.mods.filter(filterRow) : effectiveGrid.mods;
+    const externallyFiltered = filterRow ? effectiveGrid.mods.filter(filterRow) : effectiveGrid.mods;
+    const preFiltered = priorityTag === NO_TAGS_FILTER_VALUE
+      ? externallyFiltered.filter((row) => !rowHasAnyTags(row, modInfoByKey))
+      : externallyFiltered;
     const rows = query
       ? preFiltered.filter((row) => {
           const haystack = [
@@ -437,7 +450,7 @@ export function LibraryTable({
       // Tag-priority ordering (the page Tag picker) OVERRIDES the sort mode
       // while a tag is chosen: that tag's mods first, then the rest by first
       // tag A–Z (untagged last); ties by display name. Nothing is hidden.
-      if (priorityTag) {
+      if (priorityTag && priorityTag !== NO_TAGS_FILTER_VALUE) {
         const key = priorityTag.toLocaleLowerCase();
         const aHas = rowHasTag(a, key, modInfoByKey);
         const bHas = rowHasTag(b, key, modInfoByKey);
@@ -591,13 +604,13 @@ export function LibraryTable({
         width: 560,
         choices: [
           {
-            value: 'enableAndAdd',
-            label: t('profiles.library.enableNotInPack.enableAndAdd', { pack: modpackName }),
+            value: 'enableOnly',
+            label: t('profiles.library.enableNotInPack.enableOnly'),
             variant: 'primary',
           },
           {
-            value: 'enableOnly',
-            label: t('profiles.library.enableNotInPack.enableOnly'),
+            value: 'enableAndAdd',
+            label: t('profiles.library.enableNotInPack.enableAndAdd', { pack: modpackName }),
             variant: 'secondary',
           },
         ],
@@ -847,6 +860,7 @@ export function LibraryTable({
               packScoped={packScoped}
               packActive={modpackName != null && modpackName === activeProfile}
               isDragOver={dragOverIndex === inPackIndex && inPack}
+              isDragging={draggedIndex === inPackIndex && inPack}
               loadOrderSaving={loadOrderSaving}
               membershipSaving={membershipSaving}
               storageSaving={storageSaving}

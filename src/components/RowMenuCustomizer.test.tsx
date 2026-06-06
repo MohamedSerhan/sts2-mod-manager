@@ -36,29 +36,55 @@ describe('<RowMenuCustomizer>', () => {
     expect(loadRowMenuConfig().hidden).toEqual([]);
   });
 
-  it('drag-drop reorders and persists', () => {
+  it('pointer drag reorders and persists', () => {
     renderCustomizer();
+    const list = screen.getByTestId('row-menu-customizer-list');
     const rows = screen.getAllByTestId(/^row-menu-item-/);
     const firstId = rows[0].getAttribute('data-item-id')!;
     const thirdId = rows[2].getAttribute('data-item-id')!;
-    const dt = { setData: () => {}, getData: () => '', dropEffect: '', effectAllowed: '' };
-    // drag row 0 onto row 2
-    fireEvent.dragStart(rows[0], { dataTransfer: dt });
-    fireEvent.dragOver(rows[2], { dataTransfer: dt });
-    fireEvent.drop(rows[2], { dataTransfer: dt });
+    const handle = within(rows[0]).getByLabelText(/drag/i);
+    // jsdom rows have zero-height rects; a large clientY hit-tests as the
+    // last row, which is enough to prove the pointer reorder path works.
+    fireEvent.pointerDown(handle, { pointerId: 1, clientY: 0 });
+    fireEvent.pointerMove(list, { pointerId: 1, clientY: 9999 });
+    fireEvent.pointerUp(list, { pointerId: 1, clientY: 9999 });
     const order = loadRowMenuConfig().order;
     expect(order.indexOf(firstId as never)).toBeGreaterThan(order.indexOf(thirdId as never));
   });
 
-  it('dragEnd resets drag state so a stray later drop does not reorder', () => {
+  it('pointer cancel resets drag state so a stray later pointerup does not reorder', () => {
     renderCustomizer();
+    const list = screen.getByTestId('row-menu-customizer-list');
     const rows = screen.getAllByTestId(/^row-menu-item-/);
     const before = loadRowMenuConfig().order;
-    const dt = { setData: () => {}, getData: () => '', dropEffect: '', effectAllowed: '' };
-    fireEvent.dragStart(rows[0], { dataTransfer: dt });
-    fireEvent.dragEnd(rows[0], { dataTransfer: dt });      // resets dragIndex → null
-    fireEvent.drop(rows[2], { dataTransfer: dt });          // no active drag → no-op
+    const handle = within(rows[0]).getByLabelText(/drag/i);
+    fireEvent.pointerDown(handle, { pointerId: 1, clientY: 0 });
+    fireEvent.pointerCancel(list, { pointerId: 1 });
+    fireEvent.pointerUp(list, { pointerId: 1, clientY: 9999 });
     expect(loadRowMenuConfig().order).toEqual(before);
+  });
+
+  it('up and down buttons reorder items without dragging', async () => {
+    const user = userEvent.setup();
+    renderCustomizer();
+    const rows = screen.getAllByTestId(/^row-menu-item-/);
+    const firstId = rows[0].getAttribute('data-item-id')!;
+    const secondId = rows[1].getAttribute('data-item-id')!;
+
+    await user.click(within(rows[1]).getByRole('button', { name: /move .* up/i }));
+    expect(loadRowMenuConfig().order[0]).toBe(secondId);
+
+    const reorderedRows = screen.getAllByTestId(/^row-menu-item-/);
+    await user.click(within(reorderedRows[0]).getByRole('button', { name: /move .* down/i }));
+    const order = loadRowMenuConfig().order;
+    expect(order.indexOf(firstId as never)).toBeLessThan(order.indexOf(secondId as never));
+  });
+
+  it('disables arrow buttons that would move an item past the list edge', () => {
+    renderCustomizer();
+    const rows = screen.getAllByTestId(/^row-menu-item-/);
+    expect(within(rows[0]).getByRole('button', { name: /move .* up/i })).toBeDisabled();
+    expect(within(rows[rows.length - 1]).getByRole('button', { name: /move .* down/i })).toBeDisabled();
   });
 
   it('shows locked items as a disabled footer', () => {

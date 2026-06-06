@@ -90,6 +90,41 @@ test('run is non-blocking when OPENAI_API_KEY is absent (default translator)', a
   }
 });
 
+test('run requireComplete rejects when OPENAI_API_KEY is absent and translations are missing', async () => {
+  const dir = makeRepo();
+  const prev = process.env.OPENAI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  try {
+    await assert.rejects(
+      run({ rootDir: dir, requireComplete: true, log: silent }),
+      /OPENAI_API_KEY.*missing changelog translations.*1\.7\.1.*ru.*ar.*zh-Hans/,
+    );
+  } finally {
+    if (prev !== undefined) process.env.OPENAI_API_KEY = prev;
+  }
+});
+
+test('run requireComplete succeeds without OPENAI_API_KEY when every locale already has the version', async () => {
+  const dir = makeRepo();
+  for (const { key } of LOCALES) {
+    writeFileSync(
+      join(dir, 'src', 'i18n', 'changelog', `${key}.json`),
+      JSON.stringify({ '1.7.1': `[${key}] translated` }) + '\n',
+      'utf8',
+    );
+  }
+  const prev = process.env.OPENAI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  try {
+    const res = await run({ rootDir: dir, requireComplete: true, log: silent });
+    assert.equal(res.version, '1.7.1');
+    assert.deepEqual(res.written, []);
+    assert.deepEqual(res.skipped.sort(), ['ar', 'ru', 'zh-Hans']);
+  } finally {
+    if (prev !== undefined) process.env.OPENAI_API_KEY = prev;
+  }
+});
+
 test('run continues past a single locale failure', async () => {
   const dir = makeRepo();
   const translateFn = async (body, name) => {
@@ -101,4 +136,16 @@ test('run continues past a single locale failure', async () => {
   assert.equal(existsSync(join(dir, 'src/i18n/changelog/ar.json')), true);
   const ar = JSON.parse(readFileSync(join(dir, 'src/i18n/changelog/ar.json'), 'utf8'));
   assert.equal(ar['1.7.1'], undefined); // failed locale left without the new version
+});
+
+test('run requireComplete rejects a failed locale instead of leaving English fallback', async () => {
+  const dir = makeRepo();
+  const translateFn = async (body, name) => {
+    if (name === 'Arabic') throw new Error('boom');
+    return `[${name}] ${body}`;
+  };
+  await assert.rejects(
+    run({ translateFn, rootDir: dir, requireComplete: true, log: silent }),
+    /ar failed \(boom\)/,
+  );
 });

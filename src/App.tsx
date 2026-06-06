@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, type MouseEvent } from 'react';
+import { useState, useEffect, useRef, useCallback, type CSSProperties, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
@@ -28,12 +28,15 @@ import { ConfirmProvider, useConfirm } from './components/ConfirmDialog';
 import { ThemeProvider } from './theme/ThemeContext';
 import { RowMenuProvider } from './contexts/RowMenuContext';
 import { ROW_MENU_OPEN_EVENT } from './lib/rowMenuConfig';
+import { UiScaleProvider } from './display/UiScaleContext';
 import { importShareCodeSmart } from './lib/shareImport';
 import { getSubscriptions } from './hooks/useTauri';
 import { OnboardingOverlay } from './components/OnboardingOverlay';
 import { LaunchSpinner } from './components/LaunchSpinner';
 import { ProfileSwitcher } from './components/ProfileSwitcher';
 import { HelpDrawer } from './components/HelpDrawer';
+import { SidebarResizeHandle } from './components/SidebarResizeHandle';
+import { useResizableSidebar } from './hooks/useResizableSidebar';
 import { HomeView } from './views/Home';
 import { ModsView } from './views/Mods';
 import { ProfilesView } from './views/Profiles';
@@ -81,13 +84,15 @@ export default function App() {
   return (
     <ThemeProvider>
       <RowMenuProvider>
-        <ToastProvider>
-          <ConfirmProvider>
-            <AppProvider>
-              <AppInner />
-            </AppProvider>
-          </ConfirmProvider>
-        </ToastProvider>
+        <UiScaleProvider>
+          <ToastProvider>
+            <ConfirmProvider>
+              <AppProvider>
+                <AppInner />
+              </AppProvider>
+            </ConfirmProvider>
+          </ToastProvider>
+        </UiScaleProvider>
       </RowMenuProvider>
     </ThemeProvider>
   );
@@ -96,6 +101,7 @@ export default function App() {
 
 function AppInner() {
   const { t } = useTranslation();
+  const sidebar = useResizableSidebar();
   const [activeView, setActiveView] = useState<View>('home');
   const { gameInfo, mods, refreshAll, activeProfile, gameRunning, subUpdates, refreshSubUpdates } = useApp();
   const toast = useToast();
@@ -713,7 +719,10 @@ function AppInner() {
             The brand mark + app name lives in the custom titlebar; the
             mod-count / game-detected state lives in the topbar profile
             chip + Settings → General. No need to repeat them here. */}
-        <nav className="gf-sidebar">
+        <nav
+          className="gf-sidebar"
+          style={{ '--gf-sidebar-width': `${sidebar.width}px` } as CSSProperties}
+        >
           {NAV.map(({ id, icon: Icon }) => {
             // Profiles gets a count badge when followed packs have
             // pending updates — same data the Home view's "update
@@ -766,6 +775,7 @@ function AppInner() {
               );
             })}
           </div>
+          <SidebarResizeHandle sidebar={sidebar} />
         </nav>
 
         {/* Main column: top bar + content */}

@@ -1335,4 +1335,12 @@ describe('<SettingsView>', () => {
     });
     expect(screen.getByTestId('row-menu-card')).toHaveClass('gf-row-menu-card-flash');
   });
+
+  it('shows the Display size slider on the General tab', async () => {
+    render(<Wrap />);
+    const slider = (await screen.findByLabelText('Interface scale')) as HTMLInputElement;
+    expect(slider.value).toBe('100');
+    expect(screen.getByText('Display size')).toBeInTheDocument();
+    expect(screen.getByText('Reset to 100%')).toBeInTheDocument();
+  });
 });

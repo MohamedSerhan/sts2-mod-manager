@@ -13,6 +13,7 @@ import {
   Download,
   Palette,
   SlidersHorizontal,
+  ALargeSmall,
 } from 'lucide-react';
 import { GITHUB_TOKEN_TEMPLATE_URL } from '../lib/githubLinks';
 import { open } from '@tauri-apps/plugin-dialog';
@@ -27,6 +28,7 @@ import { useConfirm } from '../components/ConfirmDialog';
 import { LogsViewer } from '../components/LogsViewer';
 import { LanguageSelect } from '../components/LanguageSelect';
 import { ThemeSelect } from '../components/ThemeSelect';
+import { UiScaleSlider } from '../components/UiScaleSlider';
 import { AboutCard } from '../components/AboutCard';
 import { RowMenuCustomizer } from '../components/RowMenuCustomizer';
 import { DevBuildsCard } from '../components/DevBuildsCard';
@@ -601,6 +603,17 @@ export function SettingsView({
               <ThemeSelect />
             </Card>
 
+            <Card className="space-y-4" style={{ marginTop: 8 }}>
+              <h3 className="text-base font-semibold text-text flex items-center gap-2">
+                <ALargeSmall size={16} />
+                {t('settings.display.label')}
+              </h3>
+              <div className="gf-set-desc" style={{ marginTop: -6 }}>
+                {t('settings.display.desc')}
+              </div>
+              <UiScaleSlider />
+            </Card>
+
             <div
               ref={rowMenuCardRef}
               data-testid="row-menu-card"
@@ -614,7 +627,6 @@ export function SettingsView({
                 <RowMenuCustomizer />
               </Card>
             </div>
-
             {/* 1.7.0 v7 — About card relocated from the Home page footer.
                 Home is now the single-block launcher; reference info +
                 support links live in Settings → General where they're

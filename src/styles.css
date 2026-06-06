@@ -277,6 +277,9 @@
 :root {
   color-scheme: var(--app-color-scheme, dark);
   accent-color: var(--gf, oklch(0.78 0.13 80));
+  /* Global UI scale (#119). The Display-size slider drives --ui-scale; the
+     whole page zooms uniformly, scaling the hardcoded-px type + layout. */
+  zoom: var(--ui-scale, 1);
 }
 
 body {
@@ -371,12 +374,30 @@ body {
 
 /* ── Sidebar ─────────────────────────────────────────────────────── */
 .gf-sidebar {
-  width: 230px;
+  width: var(--gf-sidebar-width, 248px);
   flex-shrink: 0;
+  position: relative;
   background: var(--indigo-side);
   border-inline-end: 1px solid var(--indigo-line);
   display: flex; flex-direction: column;
   padding: 14px 10px;
+}
+/* Drag handle on the sidebar's inner edge (#119). Sits below the Tauri
+   window-resize handles (z-index 80); inline-end so it mirrors in RTL. */
+.gf-sidebar-resize {
+  position: absolute;
+  inset-inline-end: 0;
+  top: 0; bottom: 0;
+  width: 6px;
+  z-index: 70;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.12s ease;
+}
+.gf-sidebar-resize:hover,
+.gf-sidebar-resize:focus-visible {
+  background: var(--gf-line);
+  outline: none;
 }
 .gf-nav {
   position: relative;
@@ -429,6 +450,29 @@ body {
   color: var(--gf-ink);
   line-height: 1;
 }
+.gf-nav .gf-nav-beta {
+  /* Inline next to the label — was absolutely positioned which broke
+     once labels wider than "Browse Modpacks" (e.g. Chinese) shifted
+     past the hardcoded offset. */
+  font-size: 9px;
+  line-height: 1.1;
+  letter-spacing: 0.06em;
+  padding: 1px 4px;
+  border-radius: 3px;
+  pointer-events: none;
+  flex: 0 0 auto;
+  gap: 0;
+}
+
+/* ── Display-size slider (Settings → General) ─────────────────────── */
+.gf-ui-scale { display: flex; flex-direction: column; gap: 8px; }
+.gf-ui-scale-row { display: flex; align-items: center; gap: 12px; }
+.gf-range { flex: 1; accent-color: var(--gf); cursor: pointer; }
+.gf-ui-scale-value {
+  font-size: 12px; color: var(--ink-mute);
+  min-width: 42px; text-align: end; font-variant-numeric: tabular-nums;
+}
+
 /* Activity feed on the Profiles view — followed packs with pending
    updates. Reads as a focused worklist: header pill, then one row per
    update with a quick "Apply" affordance. Yellow accent matches the

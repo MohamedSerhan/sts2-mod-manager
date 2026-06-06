@@ -713,6 +713,9 @@
     "skippedMod": "Skipped 1 mod: {{name}} needs game v{{version}} (you have v{{gameVersion}}).",
     "skippedMods": "Skipped {{n}} mods (need a newer game build than yours): {{names}}.",
     "vanillaInitials": "VA",
+    "sidebar": {
+      "resizeLabel": "Resize sidebar"
+    },
     "dragDrop": {
       "textActive": "Drop to install",
       "text": ".zip - we'll detect the source for you"
@@ -1240,6 +1243,12 @@
         "delete": "Delete from disk",
         "customize": "Customize menu"
       }
+    },
+    "display": {
+      "label": "Display size",
+      "desc": "Scale the entire interface. Affects both text and layout.",
+      "scaleLabel": "Interface scale",
+      "reset": "Reset to 100%"
     },
     "accounts": {
       "nexusKey": "Nexus Mods API Key",

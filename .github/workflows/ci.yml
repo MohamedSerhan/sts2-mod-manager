@@ -255,6 +255,7 @@ jobs:
           node --test scripts/make-dev-icon.test.mjs
           node --test scripts/ci-changes.test.mjs
           node --test scripts/changelog-fragments.test.mjs
+          node --test scripts/changelog-translations.test.mjs
           node --test scripts/translate-changelog.test.mjs
 
   workflow-lint:
@@ -338,6 +339,8 @@ jobs:
             echo "::error::App code changed but no new changelog entry was added. Add a changelog.d/<category>-<slug>.md fragment, or an [Unreleased] CHANGELOG bullet, in player-language — or label the PR 'no-changelog' for internal-only changes."
             exit 1
           fi
+      - name: Require localized changelog fragments
+        run: node scripts/changelog-translations.mjs check-fragments
 
   ci-gate:
     name: CI Gate

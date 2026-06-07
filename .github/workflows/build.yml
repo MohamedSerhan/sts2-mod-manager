@@ -139,13 +139,18 @@ jobs:
           args: ${{ matrix.args }}
 
       - name: Package portable zip (Windows only)
-        if: matrix.platform == 'windows-latest' && startsWith(github.ref, 'refs/tags/v')
+        if: matrix.platform == 'windows-latest' && (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: |
-          $version = $env:TAG.TrimStart('v')
+          $conf = Get-Content 'src-tauri/tauri.conf.json' -Raw | ConvertFrom-Json
+          $version = if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            $env:TAG.TrimStart('v')
+          } else {
+            $conf.version
+          }
 
           # Tauri's cargo binary is sts2-mod-manager.exe (from Cargo.toml).
           # Filter out NSIS *-setup.exe and any build-script intermediates.
@@ -169,7 +174,9 @@ jobs:
           $zip = "STS2.Mod.Manager_${version}_x64_portable.zip"
           Compress-Archive -Path "$staging/*" -DestinationPath $zip -Force
 
-          gh release upload "$env:TAG" $zip --clobber
+          if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            gh release upload "$env:TAG" $zip --clobber
+          }
 
       - name: Package portable zip (dev builds, Windows only)
         if: matrix.platform == 'windows-latest' && github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'dev-build')
@@ -230,10 +237,12 @@ jobs:
             src-tauri/target/release/bundle/**/*.rpm
             src-tauri/target/release/bundle/**/*.dmg
             src-tauri/target/release/bundle/**/*.app
+            src-tauri/target/release/bundle/**/*.tar.gz
             src-tauri/target/release/bundle/**/*.exe
             src-tauri/target/release/bundle/**/*.msi
             src-tauri/target/release/bundle/**/*.nsis
             src-tauri/target/universal-apple-darwin/release/bundle/**/*.dmg
+            src-tauri/target/universal-apple-darwin/release/bundle/**/*.tar.gz
             src-tauri/target/release/bundle/**/*.sig
             src-tauri/target/universal-apple-darwin/release/bundle/**/*.sig
             STS2.Mod.Manager_*_x64_portable.zip

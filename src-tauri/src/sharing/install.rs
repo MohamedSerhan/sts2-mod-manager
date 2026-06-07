@@ -17,7 +17,9 @@ use crate::profiles::Profile;
 use crate::state::AppState;
 
 use super::code::{code_to_filename, format_code, parse_share_code};
-use super::{download_bundle, fetch_shared_profile, SkippedMod};
+use super::{
+    download_bundle, fetch_shared_profile, recover_owned_share_info_sidecar_for_install, SkippedMod,
+};
 
 #[derive(Debug, Clone, Serialize)]
 struct ModpackSkippedEvent<'a> {
@@ -481,6 +483,34 @@ pub async fn install_shared_profile(
     let mut db = crate::subscriptions::load_subscriptions(&config_path);
     db.subscriptions.insert(share_key, sub);
     let _ = crate::subscriptions::save_subscriptions(&db, &config_path);
+
+    if let Some(token) = token.as_deref() {
+        match super::github::get_github_username(token).await {
+            Ok(username) if username.eq_ignore_ascii_case(&owner) => {
+                if let Err(e) = recover_owned_share_info_sidecar_for_install(
+                    &profile.name,
+                    &profiles_path,
+                    &owner,
+                    &profile_code,
+                    &profile,
+                ) {
+                    log::warn!(
+                        "install_shared_profile: failed to save ownership metadata for '{}': {}",
+                        profile.name,
+                        e
+                    );
+                }
+            }
+            Ok(_) => {}
+            Err(e) => {
+                log::debug!(
+                    "install_shared_profile: skipped own-share metadata check for '{}': {}",
+                    profile.name,
+                    e
+                );
+            }
+        }
+    }
 
     emit_modpack_install_progress(
         &app_handle,

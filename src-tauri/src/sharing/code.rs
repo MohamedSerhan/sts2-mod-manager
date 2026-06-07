@@ -66,6 +66,7 @@ pub(super) fn format_code(raw: &str) -> String {
     let upper: String = raw
         .chars()
         .filter(|c| c.is_ascii_alphanumeric())
+        .map(|c| c.to_ascii_uppercase())
         .take(12)
         .collect();
     if upper.len() >= 12 {

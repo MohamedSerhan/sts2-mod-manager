@@ -567,6 +567,59 @@ describe('<ProfilesView>', () => {
     });
   });
 
+  it('keeps a previously dismissed re-share nudge hidden after remount', async () => {
+    localStorage.setItem('sts2mm-reshare-nudge-dismissed:StoredDismissal', 'true');
+    seedProfiles([baseProfile({ name: 'StoredDismissal' })]);
+    registerInvokeHandler('get_share_info', () => ({
+      owner: 'alice',
+      code: 'AA5A-315D-61AE',
+      file_path: 'StoredDismissal.json',
+      url: 'https://github.com/alice/sts2mm-profiles',
+      repo_url: 'https://github.com/alice/sts2mm-profiles',
+      failed_uploads: [],
+      reshare_recommended: true,
+    }));
+
+    render(<Wrap />);
+
+    const card = await screen.findByRole('button', { name: /Open StoredDismissal modpack/i });
+    await waitFor(() => {
+      expect(within(card).getByText(/Shared/i)).toBeInTheDocument();
+    });
+    expect(
+      within(card).queryByRole('button', {
+        name: /Re-share modpack StoredDismissal to apply the latest improvements/i,
+      }),
+    ).toBeNull();
+  });
+
+  it('re-share nudge CTA opens the publish modal in update mode', async () => {
+    seedProfiles([baseProfile({ name: 'Stale' })]);
+    registerInvokeHandler('get_share_info', () => ({
+      owner: 'alice',
+      code: 'AA5A-315D-61AE',
+      file_path: 'Stale.json',
+      url: 'https://github.com/alice/sts2mm-profiles',
+      repo_url: 'https://github.com/alice/sts2mm-profiles',
+      failed_uploads: [],
+      reshare_recommended: true,
+    }));
+    registerInvokeHandler('get_api_key_status', () => ({
+      nexus_api_key_set: false,
+      github_token_set: true,
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+
+    const card = await screen.findByRole('button', { name: /Open Stale modpack/i });
+    await user.click(await within(card).findByRole('button', {
+      name: /Re-share modpack Stale to apply the latest improvements/i,
+    }));
+
+    expect(await screen.findByText('Re-share Stale?')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Push update$/i })).toBeInTheDocument();
+  });
+
   it('does not show the re-share nudge when the pack is already current', async () => {
     seedProfiles([baseProfile({ name: 'Current' })]);
     registerInvokeHandler('get_share_info', () => ({
@@ -753,6 +806,40 @@ describe('<ProfilesView>', () => {
     expect(screen.getByRole('button', { name: /Repair/i })).toBeInTheDocument();
   });
 
+  it('drift banner on an OWNED subscribed pack still offers Save changes', async () => {
+    // Regression for #160 / Solo's broken state: downloading your own share
+    // code auto-subscribes the pack, but local share ownership means it is
+    // still yours. The drift banner must keep the "save manifest" path visible
+    // so the curator can Save changes, then Re-share.
+    seedProfiles([baseProfile({ name: "Mod's Im playing with now" })]);
+    registerInvokeHandler('get_active_profile', () => "Mod's Im playing with now");
+    registerInvokeHandler('get_profile_drift', () => ({
+      added: ['NewLocalMod'],
+      removed: [],
+      toggled: [],
+      version_changed: [],
+      has_drift: true,
+    }));
+    registerInvokeHandler('get_share_info', () => ({
+      owner: 'Solomag',
+      code: '290A-56ED-B15D',
+      file_path: '290a56edb15d.json',
+      url: 'https://github.com/Solomag/sts2mm-profiles/blob/main/290a56edb15d.json',
+      repo_url: 'https://github.com/Solomag/sts2mm-profiles',
+      failed_uploads: [],
+      out_of_sync: false,
+    }));
+    registerInvokeHandler('get_subscriptions', () => [
+      { share_id: 'Solomag:290a56edb15d', profile_name: "Mod's Im playing with now" },
+    ]);
+
+    render(<Wrap />);
+
+    await waitFor(() => { expect(screen.getByText(/has drifted/)).toBeInTheDocument(); });
+    expect(screen.getByRole('button', { name: /Save changes/i })).toBeInTheDocument();
+    expect(screen.queryByText(/duplicate the pack to keep your edits/i)).toBeNull();
+  });
+
   it('drift banner Save changes reconciles the diff (save_profile_drift) without repairing disk', async () => {
     seedProfiles([baseProfile({ name: 'DriftedPack' })]);
     registerInvokeHandler('get_active_profile', () => 'DriftedPack');
@@ -813,6 +900,28 @@ describe('<ProfilesView>', () => {
       const text = document.body.textContent ?? '';
       expect(text).toContain('GoneA');
       expect(text).toContain('GoneB');
+    });
+  });
+
+  it('drift banner Save changes uses the base toast when no mods were added or removed', async () => {
+    seedProfiles([baseProfile({ name: 'ToggleOnlyPack' })]);
+    registerInvokeHandler('get_active_profile', () => 'ToggleOnlyPack');
+    registerInvokeHandler('get_profile_drift', () => ({
+      added: [],
+      removed: [],
+      toggled: ['StillHere'],
+      version_changed: [],
+      has_drift: true,
+    }));
+    registerInvokeHandler('save_profile_drift', (args) => baseProfile({ name: String(args?.name) }));
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('ToggleOnlyPack')).toBeInTheDocument(); });
+    await user.click(await screen.findByRole('button', { name: /Save changes/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Saved changes to "ToggleOnlyPack"')).toBeInTheDocument();
     });
   });
 

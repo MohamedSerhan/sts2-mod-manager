@@ -32,7 +32,7 @@ mod github;
 pub mod install;
 mod upload;
 
-use code::{code_to_filename, generate_code, parse_share_code};
+use code::{code_to_filename, format_code, generate_code, parse_share_code};
 // Low-level GitHub plumbing — the release-asset upload retry/recovery
 // layer and the orchestration helpers used by share/reshare/install.
 pub(crate) use github::build_client;
@@ -208,6 +208,136 @@ fn save_share_info(path: &Path, info: &ShareInfo) -> Result<()> {
     temp.as_file().sync_all()?;
     temp.persist(path).map_err(|e| e.error)?;
     Ok(())
+}
+
+fn recover_owned_share_info_sidecar(
+    profile_name: &str,
+    profiles_path: &Path,
+    owner: &str,
+    profile_code: &str,
+    published_profile: &Profile,
+) -> Result<ShareInfo> {
+    let info = ShareInfo {
+        code: format_code(profile_code),
+        owner: owner.to_string(),
+        file_sha: None,
+        share_format_version: SHARE_FORMAT_VERSION,
+        published_signature: Some(profile_publish_signature(published_profile)),
+    };
+    let share_info_path = profiles_path.join(format!("{}.share", profile_name));
+    save_share_info(&share_info_path, &info)?;
+    Ok(info)
+}
+
+pub(super) fn recover_owned_share_info_sidecar_for_install(
+    profile_name: &str,
+    profiles_path: &Path,
+    owner: &str,
+    profile_code: &str,
+    published_profile: &Profile,
+) -> Result<()> {
+    recover_owned_share_info_sidecar(
+        profile_name,
+        profiles_path,
+        owner,
+        profile_code,
+        published_profile,
+    )
+    .map(|_| ())
+}
+
+fn parse_subscription_owner_and_code(
+    sub: &crate::subscriptions::Subscription,
+) -> Option<(String, String)> {
+    if let Some((owner, code)) = sub.share_id.split_once(':') {
+        if let Ok((owner, code)) = parse_share_code(&format!("{}/{}", owner.trim(), code.trim())) {
+            return Some((owner, format_code(&code)));
+        }
+    }
+
+    parse_share_code(&sub.share_url)
+        .ok()
+        .map(|(owner, code)| (owner, format_code(&code)))
+}
+
+async fn recover_owned_share_info_from_subscription(
+    profile_name: &str,
+    profiles_path: &Path,
+    config_path: &Path,
+    token: Option<&str>,
+) -> Option<ShareInfo> {
+    let token = token?;
+    let db = crate::subscriptions::load_subscriptions(config_path);
+    let candidates: Vec<_> = db
+        .subscriptions
+        .values()
+        .filter(|sub| sub.profile_name.eq_ignore_ascii_case(profile_name))
+        .collect();
+    if candidates.is_empty() {
+        return None;
+    }
+
+    let username = match get_github_username(token).await {
+        Ok(username) => username,
+        Err(e) => {
+            log::warn!(
+                "get_share_info: cannot recover ownership metadata for '{}': {}",
+                profile_name,
+                e
+            );
+            return None;
+        }
+    };
+
+    for sub in candidates {
+        let Some((owner, profile_code)) = parse_subscription_owner_and_code(sub) else {
+            continue;
+        };
+        if !owner.eq_ignore_ascii_case(&username) {
+            continue;
+        }
+
+        let filename = code_to_filename(&profile_code);
+        let published_profile = match fetch_shared_profile(&owner, &filename, Some(token)).await {
+            Ok(profile) => profile,
+            Err(e) => {
+                log::warn!(
+                    "get_share_info: cannot fetch owned subscribed manifest '{}' for '{}': {}",
+                    filename,
+                    profile_name,
+                    e
+                );
+                continue;
+            }
+        };
+
+        match recover_owned_share_info_sidecar(
+            profile_name,
+            profiles_path,
+            &owner,
+            &profile_code,
+            &published_profile,
+        ) {
+            Ok(info) => {
+                log::info!(
+                    "get_share_info: recovered ownership metadata for '{}' from subscription '{}'",
+                    profile_name,
+                    sub.share_id
+                );
+                return Some(info);
+            }
+            Err(e) => {
+                log::warn!(
+                    "get_share_info: failed to save recovered ownership metadata for '{}': {}",
+                    profile_name,
+                    e
+                );
+                return None;
+            }
+        }
+    }
+
+    None
 }
 
 /// Per-step status emitted to the frontend while a share / re-share is
@@ -801,22 +931,52 @@ pub(super) async fn share_profile_impl(
 
 /// Get the share info (code + owner) for a profile, if it has been shared.
 #[tauri::command]
-pub fn get_share_info(
+pub async fn get_share_info(
     name: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Option<ShareResult>, String> {
-    let profiles_path = {
+    let (profiles_path, config_path, token) = {
         let s = state.lock().map_err(|e| e.to_string())?;
-        s.profiles_path.clone()
+        (
+            s.profiles_path.clone(),
+            s.config_path.clone(),
+            s.github_token.clone(),
+        )
     };
     let share_info_path = profiles_path.join(format!("{}.share", name));
-    let content = match std::fs::read_to_string(&share_info_path) {
-        Ok(c) => c,
-        Err(_) => return Ok(None),
-    };
-    let info: ShareInfo = match serde_json::from_str(&content) {
-        Ok(i) => i,
-        Err(_) => return Ok(None),
+    let info: ShareInfo = match std::fs::read_to_string(&share_info_path) {
+        Ok(content) => match serde_json::from_str(&content) {
+            Ok(info) => info,
+            Err(e) => {
+                log::warn!(
+                    "get_share_info: failed to read share metadata for '{}': {}",
+                    name,
+                    e
+                );
+                match recover_owned_share_info_from_subscription(
+                    &name,
+                    &profiles_path,
+                    &config_path,
+                    token.as_deref(),
+                )
+                .await
+                {
+                    Some(info) => info,
+                    None => return Ok(None),
+                }
+            }
+        },
+        Err(_) => match recover_owned_share_info_from_subscription(
+            &name,
+            &profiles_path,
+            &config_path,
+            token.as_deref(),
+        )
+        .await
+        {
+            Some(info) => info,
+            None => return Ok(None),
+        },
     };
     let filename = code_to_filename(&info.code);
     let url = format!(
@@ -1194,6 +1354,153 @@ mod listing_tests {
             leftovers.is_empty(),
             "atomic sidecar writes should not leave temp files behind"
         );
+    }
+
+    #[test]
+    fn recovered_owned_share_info_uses_remote_signature() {
+        let dir = tempfile::tempdir().unwrap();
+        let profiles_path = dir.path().join("profiles");
+        std::fs::create_dir_all(&profiles_path).unwrap();
+
+        let mut remote = make_profile("Solo Pack", Some(false));
+        remote.created_by = Some("Solomag".into());
+        crate::profiles::save_profile(&remote, &profiles_path).unwrap();
+
+        let mut local = remote.clone();
+        local.mods.push(crate::profiles::ProfileMod {
+            name: "Local Edit".into(),
+            version: "1.0.0".into(),
+            source: None,
+            hash: None,
+            files: vec![],
+            folder_name: Some("LocalEdit".into()),
+            mod_id: Some("LocalEdit".into()),
+            enabled: true,
+            bundle_url: None,
+            bundle_sha256: None,
+            bundle_members: vec![],
+        });
+        crate::profiles::save_profile(&local, &profiles_path).unwrap();
+
+        let saved = recover_owned_share_info_sidecar(
+            "Solo Pack",
+            &profiles_path,
+            "Solomag",
+            "290a56edb15d",
+            &remote,
+        )
+        .unwrap();
+
+        assert_eq!(saved.owner, "Solomag");
+        assert_eq!(saved.code, "290A-56ED-B15D");
+        assert_eq!(saved.share_format_version, SHARE_FORMAT_VERSION);
+        assert_eq!(
+            saved.published_signature.as_deref(),
+            Some(profile_publish_signature(&remote).as_str()),
+            "recovered sidecar must compare future local edits against the remote manifest, not the already-drifted local one"
+        );
+        assert!(
+            profiles_path.join("Solo Pack.share").exists(),
+            "the recovery path must leave get_share_info/profile_is_owned with a durable ownership marker"
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_owned_sidecar_recovers_from_subscription_and_token_owner() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let _env_guard = super::github::release_upload_tests::ENV_LOCK.lock().await;
+        let server = MockServer::start().await;
+        std::env::set_var("STS2_GITHUB_API_BASE", server.uri());
+
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path();
+        let profiles_path = config_path.join("profiles");
+        std::fs::create_dir_all(&profiles_path).unwrap();
+
+        let mut remote = make_profile("Solo Pack", Some(false));
+        remote.created_by = Some("Solomag".into());
+        crate::profiles::save_profile(&remote, &profiles_path).unwrap();
+
+        let mut local = remote.clone();
+        local.mods.push(crate::profiles::ProfileMod {
+            name: "Local Edit".into(),
+            version: "1.0.0".into(),
+            source: None,
+            hash: None,
+            files: vec![],
+            folder_name: Some("LocalEdit".into()),
+            mod_id: Some("LocalEdit".into()),
+            enabled: true,
+            bundle_url: None,
+            bundle_sha256: None,
+            bundle_members: vec![],
+        });
+        crate::profiles::save_profile(&local, &profiles_path).unwrap();
+
+        let mut db = crate::subscriptions::SubscriptionsDb::default();
+        db.subscriptions.insert(
+            "Solomag:290a56edb15d".into(),
+            crate::subscriptions::Subscription {
+                share_id: "Solomag:290a56edb15d".into(),
+                share_url: "Solomag/290A-56ED-B15D".into(),
+                profile_name: "Solo Pack".into(),
+                curator: Some("Solomag".into()),
+                last_synced_profile: remote.clone(),
+                last_checked: Utc::now(),
+                last_synced: Utc::now(),
+            },
+        );
+        crate::subscriptions::save_subscriptions(&db, config_path).unwrap();
+
+        assert!(
+            !profiles_path.join("Solo Pack.share").exists(),
+            "test setup should match the broken install state"
+        );
+
+        Mock::given(method("GET"))
+            .and(path("/user"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"login": "Solomag"})),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path(
+                "/repos/Solomag/sts2mm-profiles/contents/290a56edb15d.json",
+            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(serde_json::to_string_pretty(&remote).unwrap()),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let saved = recover_owned_share_info_from_subscription(
+            "Solo Pack",
+            &profiles_path,
+            config_path,
+            Some("test-token"),
+        )
+        .await
+        .expect("token owner should recover the missing share sidecar");
+
+        assert_eq!(saved.owner, "Solomag");
+        assert_eq!(saved.code, "290A-56ED-B15D");
+        assert_eq!(
+            saved.published_signature.as_deref(),
+            Some(profile_publish_signature(&remote).as_str())
+        );
+        assert_ne!(
+            profile_publish_signature(&local),
+            saved.published_signature.unwrap(),
+            "the recovered marker must keep the tester's local edits visible as drift"
+        );
+        assert!(profiles_path.join("Solo Pack.share").exists());
     }
 
     fn make_profile(name: &str, public: Option<bool>) -> Profile {

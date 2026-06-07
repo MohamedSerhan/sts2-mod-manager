@@ -363,12 +363,13 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     };
   }, [installedDriftSignature, activeProfile]);
 
-  // The active pack is a followed one when it shows up in our subscriptions.
-  // A followed manifest isn't ours to write, so the drift banner drops its
-  // "Save changes" button for it (the backend rejects the write either way).
-  const activeIsSubscribed =
+  // Subscriptions can point at our own packs when a curator installs their
+  // own share code again. Local share info proves ownership, so only followed
+  // packs from someone else should lose "Save changes".
+  const activeIsFollowed =
     !!activeProfile
-    && subscriptions.some((s) => s.profile_name.toLowerCase() === activeProfile.toLowerCase());
+    && subscriptions.some((s) => s.profile_name.toLowerCase() === activeProfile.toLowerCase())
+    && !shareInfoMap[activeProfile];
 
   // 1.7.0 T16 — open the active modpack's detail view when a sibling
   // surface pumps the signal (Mods view's "Manage active modpack →"
@@ -1276,11 +1277,11 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
                 driftMap[activeProfile].toggled.length && t('profiles.drift.toggledItems', { count: driftMap[activeProfile].toggled.length }),
                 (driftMap[activeProfile].version_changed?.length ?? 0) && t('profiles.drift.versionChanged', { count: driftMap[activeProfile].version_changed.length }),
               ].filter(Boolean).join(' · ') || t('profiles.drift.outOfSyncFallback')}
-              {' '}{t(activeIsSubscribed ? 'profiles.drift.followedHint' : 'profiles.drift.hint')}
+              {' '}{t(activeIsFollowed ? 'profiles.drift.followedHint' : 'profiles.drift.hint')}
             </div>
           </div>
           {/* Followed packs are read-only — no Save changes (only Repair). */}
-          {!activeIsSubscribed && (
+          {!activeIsFollowed && (
             <Button
               variant="secondary"
               size="sm"

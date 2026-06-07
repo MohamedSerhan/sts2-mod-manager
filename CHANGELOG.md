@@ -37,6 +37,15 @@ _Changes are tracked as fragments in [`changelog.d/`](changelog.d/) and assemble
 
 ---
 
+## [1.7.3] - 2026-06-07
+
+### Fixed
+
+- Modpacks created from your active mods no longer include mods that require a newer Slay the Spire 2 version.
+- Creating a modpack from active mods now waits for the mod list to load before choosing the starting selection.
+- Translated release notes now appear in Russian, Arabic, and Simplified Chinese instead of falling back to English.
+- Published modpacks you download again now stay editable when they drift, so you can save and share your changes normally.
+
 ## [1.7.2] - 2026-06-06
 
 ### Added

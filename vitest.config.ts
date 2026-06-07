@@ -35,12 +35,14 @@ export default defineConfig({
       // - main.tsx / Vite glue (no behavior to test)
       // - .test.ts(x) themselves
       // - the test setup file
+      // - type-only modules with no runtime behavior
       // - generated d.ts files
       include: ['src/**/*.{ts,tsx}'],
       exclude: [
         'src/**/*.test.{ts,tsx}',
         'src/__test__/**',
         'src/main.tsx',
+        'src/types.ts',
         'src/vite-env.d.ts',
         'src/**/*.d.ts',
       ],

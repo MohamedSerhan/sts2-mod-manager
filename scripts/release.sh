@@ -396,13 +396,14 @@ fs.writeFileSync(clPath, txt);
 
 # Delete consumed fragment files (staged by git rm — picked up by the commit
 # below). .gitkeep and README.md are intentionally excluded from these globs.
+node scripts/changelog-translations.mjs write-version --version "$NEW"
+
 FRAGS=$(find changelog.d -maxdepth 1 \( -name 'added-*.md' -o -name 'changed-*.md' -o -name 'fixed-*.md' -o -name 'security-*.md' \) 2>/dev/null | sort)
 if [ -n "$FRAGS" ]; then
   # shellcheck disable=SC2086
   git rm -q -- $FRAGS
 fi
 
-node scripts/changelog-translations.mjs write-version --version "$NEW"
 LOCALE_FRAGS=$(find changelog.i18n -mindepth 2 -maxdepth 2 \( -name 'added-*.md' -o -name 'changed-*.md' -o -name 'fixed-*.md' -o -name 'security-*.md' \) 2>/dev/null | sort)
 if [ -n "$LOCALE_FRAGS" ]; then
   # shellcheck disable=SC2086

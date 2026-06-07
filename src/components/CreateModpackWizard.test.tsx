@@ -22,7 +22,7 @@ import i18n from '../i18n';
 import { CreateModpackWizard } from './CreateModpackWizard';
 import { AllProviders } from '../__test__/providers';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
-import type { ModAuditEntry, ModInfo, Profile } from '../types';
+import type { GameInfo, ModAuditEntry, ModInfo, Profile } from '../types';
 
 const baseMod = (overrides: Partial<ModInfo> = {}): ModInfo => ({
   name: 'Mod A',
@@ -80,13 +80,26 @@ const baseAudit = (overrides: Partial<ModAuditEntry> = {}): ModAuditEntry => ({
   ...overrides,
 });
 
+const baseGameInfo = (overrides: Partial<GameInfo> = {}): GameInfo => ({
+  game_path: 'C:/Games/SlayTheSpire2',
+  mods_path: 'C:/Games/SlayTheSpire2/mods',
+  disabled_mods_path: 'C:/Games/SlayTheSpire2/mods_disabled',
+  mods_count: 0,
+  disabled_count: 0,
+  valid: true,
+  game_version: '0.105.0',
+  ...overrides,
+});
+
 function seed(opts: {
   mods?: ModInfo[];
   profiles?: Profile[];
   audit?: ModAuditEntry[];
+  gameInfo?: GameInfo;
   onCreate?: (name: string) => Profile;
 } = {}) {
   registerInvokeHandler('get_installed_mods', () => opts.mods ?? []);
+  registerInvokeHandler('get_game_info', () => opts.gameInfo ?? baseGameInfo());
   registerInvokeHandler('list_profiles_cmd', () => opts.profiles ?? []);
   registerInvokeHandler('audit_mod_versions', () => opts.audit ?? []);
   registerInvokeHandler('create_profile', (args) => {
@@ -721,6 +734,68 @@ describe('<CreateModpackWizard>', () => {
   // Regression: create_profile snapshots the whole install, so without an
   // explicit prune the new pack ended up with every installed mod.
   describe('exact membership', () => {
+    it('does not auto-select active mods that require a newer game version', async () => {
+      const compatible = baseMod({
+        name: 'Compatible',
+        enabled: true,
+        folder_name: 'compatible',
+        min_game_version: '0.100.0',
+      });
+      const skipped = baseMod({
+        name: 'SkippedMod',
+        enabled: true,
+        folder_name: 'SkippedMod',
+        min_game_version: '999.0.0',
+      });
+      seed({
+        gameInfo: baseGameInfo({ game_version: '0.105.0' }),
+        mods: [compatible, skipped],
+        onCreate: (n) => ({
+          ...baseProfile({ name: n }),
+          mods: [
+            {
+              name: 'Compatible',
+              version: compatible.version,
+              source: null,
+              hash: null,
+              files: [],
+              enabled: true,
+              bundle_url: null,
+              folder_name: compatible.folder_name,
+              mod_id: null,
+            },
+          ],
+        }),
+      });
+      render(<Wrap />);
+
+      await chooseFromActive();
+
+      await waitFor(() => { expect(screen.getByText(/1 selected/i)).toBeInTheDocument(); });
+      expect(screen.getByLabelText(/^Compatible$/)).toBeChecked();
+      expect(screen.getByLabelText(/^SkippedMod$/)).not.toBeChecked();
+
+      await clickNext();
+      await clickContinueAnyway();
+      fireEvent.change(await screen.findByLabelText(/modpack name/i), {
+        target: { value: 'Safe Pack' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /^create modpack$/i }));
+
+      await waitFor(() => {
+        expect(
+          getInvokeCalls().some(
+            (c) =>
+              c.cmd === 'set_profile_mod_membership' &&
+              c.args?.modName === 'Compatible' &&
+              c.args?.included === true,
+          ),
+        ).toBe(true);
+      });
+      const calls = getInvokeCalls().filter((c) => c.cmd === 'set_profile_mod_membership');
+      expect(calls.some((c) => c.args?.modName === 'SkippedMod' && c.args?.included === true)).toBe(false);
+    });
+
     it('prunes snapshot mods the user did not select', async () => {
       const installed = [
         baseMod({ name: 'Keep', enabled: true, folder_name: 'keep' }),

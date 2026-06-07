@@ -182,7 +182,10 @@ mod tests {
 
         let swap = swap_dirs_aside(&[&mods]).unwrap();
         assert!(mods.exists(), "dir is recreated empty for the rebuild");
-        assert!(!mods.join("old.txt").exists(), "original contents moved aside");
+        assert!(
+            !mods.join("old.txt").exists(),
+            "original contents moved aside"
+        );
 
         write(&mods.join("new.txt"), "new"); // simulate a successful rebuild
         swap.discard().unwrap();
@@ -205,8 +208,14 @@ mod tests {
         write(&mods.join("partial.txt"), "partial"); // simulate a partial/failed rebuild
         swap.restore().unwrap();
 
-        assert_eq!(std::fs::read_to_string(mods.join("old.txt")).unwrap(), "old");
-        assert!(!mods.join("partial.txt").exists(), "partial output discarded");
+        assert_eq!(
+            std::fs::read_to_string(mods.join("old.txt")).unwrap(),
+            "old"
+        );
+        assert!(
+            !mods.join("partial.txt").exists(),
+            "partial output discarded"
+        );
         assert!(
             leftover_swap_dirs(base.path()).is_empty(),
             "no swap temp should be left behind"
@@ -240,6 +249,9 @@ mod tests {
         write(&mods.join("new.txt"), "new");
         swap.restore().unwrap();
 
-        assert!(!mods.exists(), "a dir absent before should be absent after rollback");
+        assert!(
+            !mods.exists(),
+            "a dir absent before should be absent after rollback"
+        );
     }
 }

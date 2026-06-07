@@ -94,7 +94,12 @@ pub(super) fn compute_profile_drift(
         let key = mod_key(&pm.name, pm.folder_name.as_deref(), pm.mod_id.as_deref());
         profile_map.insert(
             key,
-            (pm.enabled, pm.version.clone(), pm.name.clone(), pm.hash.clone()),
+            (
+                pm.enabled,
+                pm.version.clone(),
+                pm.name.clone(),
+                pm.hash.clone(),
+            ),
         );
     }
 
@@ -102,15 +107,23 @@ pub(super) fn compute_profile_drift(
     let enabled_mods = crate::mods::scan_mods(mods_path);
     let disabled_mods = crate::mods::scan_disabled_mods(disabled_path);
 
-    let mut installed_map: std::collections::HashMap<String, (String, bool, String, Option<String>)> =
-        std::collections::HashMap::new();
+    let mut installed_map: std::collections::HashMap<
+        String,
+        (String, bool, String, Option<String>),
+    > = std::collections::HashMap::new();
     for m in &enabled_mods {
         let key = mod_key(&m.name, m.folder_name.as_deref(), m.mod_id.as_deref());
-        installed_map.insert(key, (m.name.clone(), true, m.version.clone(), m.hash.clone()));
+        installed_map.insert(
+            key,
+            (m.name.clone(), true, m.version.clone(), m.hash.clone()),
+        );
     }
     for m in &disabled_mods {
         let key = mod_key(&m.name, m.folder_name.as_deref(), m.mod_id.as_deref());
-        installed_map.insert(key, (m.name.clone(), false, m.version.clone(), m.hash.clone()));
+        installed_map.insert(
+            key,
+            (m.name.clone(), false, m.version.clone(), m.hash.clone()),
+        );
     }
 
     let mut added = Vec::new();
@@ -226,7 +239,9 @@ pub(super) fn reconcile_profile_with_disk(
         std::collections::HashMap::new();
     for m in &disabled_mods {
         let key = mod_key(&m.name, m.folder_name.as_deref(), m.mod_id.as_deref());
-        installed_by_key.entry(key).or_insert_with(|| (m.clone(), false));
+        installed_by_key
+            .entry(key)
+            .or_insert_with(|| (m.clone(), false));
     }
     for m in &enabled_mods {
         let key = mod_key(&m.name, m.folder_name.as_deref(), m.mod_id.as_deref());
@@ -370,7 +385,9 @@ mod reconcile_tests {
         fs::create_dir_all(&dir).unwrap();
         fs::write(
             dir.join(format!("{folder}.json")),
-            format!(r#"{{"id":"{folder}","name":"{display}","version":"{version}","author":"QA"}}"#),
+            format!(
+                r#"{{"id":"{folder}","name":"{display}","version":"{version}","author":"QA"}}"#
+            ),
         )
         .unwrap();
         fs::write(dir.join(format!("{folder}.dll")), b"dll").unwrap();
@@ -489,9 +506,14 @@ mod reconcile_tests {
         );
         save_profile(&profile, &profiles_path).unwrap();
 
-        let result =
-            reconcile_profile_with_disk("Stable", &mods_path, &disabled_path, &profiles_path, config_tmp.path())
-                .unwrap();
+        let result = reconcile_profile_with_disk(
+            "Stable",
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config_tmp.path(),
+        )
+        .unwrap();
 
         let folders: std::collections::HashSet<&str> = result
             .mods
@@ -535,15 +557,26 @@ mod reconcile_tests {
 
         // PackMod is in the pack as enabled, but on disk it's disabled.
         write_mod(&disabled_path, "PackMod", "Pack Mod", "1.0.0");
-        let profile = base_profile("Stable", vec![pack_mod("Pack Mod", "PackMod", "1.0.0", true)]);
+        let profile = base_profile(
+            "Stable",
+            vec![pack_mod("Pack Mod", "PackMod", "1.0.0", true)],
+        );
         save_profile(&profile, &profiles_path).unwrap();
 
-        let result =
-            reconcile_profile_with_disk("Stable", &mods_path, &disabled_path, &profiles_path, config_tmp.path())
-                .unwrap();
+        let result = reconcile_profile_with_disk(
+            "Stable",
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config_tmp.path(),
+        )
+        .unwrap();
 
         assert_eq!(result.mods.len(), 1, "mod stays in the pack");
-        assert!(!result.mods[0].enabled, "enabled state synced to disk (disabled)");
+        assert!(
+            !result.mods[0].enabled,
+            "enabled state synced to disk (disabled)"
+        );
 
         let drift = compute_profile_drift(&result, &mods_path, &disabled_path);
         assert!(!drift.has_drift, "no drift after syncing the toggle");
@@ -602,7 +635,10 @@ mod reconcile_tests {
 
         // The followed manifest was left untouched (Extra not written in).
         assert!(
-            load_profile("Henry Pack", &profiles_path).unwrap().mods.is_empty(),
+            load_profile("Henry Pack", &profiles_path)
+                .unwrap()
+                .mods
+                .is_empty(),
             "the followed manifest must not be mutated"
         );
     }

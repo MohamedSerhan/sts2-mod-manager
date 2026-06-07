@@ -66,9 +66,30 @@ interface HealthSummary {
   frozen: string[];
 }
 
+function gameVersionSatisfies(
+  current: string | null | undefined,
+  required: string | null | undefined,
+): boolean {
+  if (!current || !required) return true;
+  const parse = (v: string): [number, number, number] | null => {
+    const parts = v.trim().replace(/^v/i, '').split('.').slice(0, 3);
+    const numbers = parts.map((part) => Number.parseInt(part, 10));
+    if (numbers.length === 0 || numbers.some((n) => Number.isNaN(n))) return null;
+    return [numbers[0] ?? 0, numbers[1] ?? 0, numbers[2] ?? 0];
+  };
+  const currentParts = parse(current);
+  const requiredParts = parse(required);
+  if (!currentParts || !requiredParts) return true;
+  const [cMaj, cMin, cPatch] = currentParts;
+  const [rMaj, rMin, rPatch] = requiredParts;
+  if (cMaj !== rMaj) return cMaj > rMaj;
+  if (cMin !== rMin) return cMin > rMin;
+  return cPatch >= rPatch;
+}
+
 export function CreateModpackWizard({ onClose, onCreated }: Props) {
   const { t } = useTranslation();
-  const { mods } = useApp();
+  const { mods, gameInfo } = useApp();
   const [step, setStep] = useState<Step>(1);
   const [strategy, setStrategy] = useState<Strategy>('fromActive');
   const [cloneFrom, setCloneFrom] = useState<string | null>(null);
@@ -118,14 +139,21 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
   // `selectedMods`. The strategy is committed by clicking the strategy
   // tile (one-click navigation: choosing also advances), which avoids
   // a redundant "Next" on a step that's already a single-choice screen.
+  const gameVersion = gameInfo?.game_version ?? null;
+  const keyFor = (m: typeof mods[number]) => m.folder_name ?? m.name;
+  const compatibleKeys = (candidates: typeof mods) =>
+    candidates
+      .filter((m) => gameVersionSatisfies(gameVersion, m.min_game_version))
+      .map(keyFor);
+
   function applyStrategyAndAdvance(chosen: Strategy) {
     setStrategy(chosen);
     if (chosen === 'fromActive') {
-      setSelectedMods(new Set(mods.filter((m) => m.enabled).map((m) => m.folder_name ?? m.name)));
+      setSelectedMods(new Set(compatibleKeys(mods.filter((m) => m.enabled))));
       pendingInitialSelectionRef.current = mods.length === 0 ? 'fromActive' : null;
     } else if (chosen === 'allInstalled') {
       // Snapshot replacement: every installed mod, enabled OR disabled.
-      setSelectedMods(new Set(mods.map((m) => m.folder_name ?? m.name)));
+      setSelectedMods(new Set(compatibleKeys(mods)));
       pendingInitialSelectionRef.current = mods.length === 0 ? 'allInstalled' : null;
     } else if (chosen === 'empty') {
       setSelectedMods(new Set());
@@ -150,11 +178,11 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
     if (step !== 2 || !pending || mods.length === 0) return;
     pendingInitialSelectionRef.current = null;
     if (pending === 'fromActive') {
-      setSelectedMods(new Set(mods.filter((m) => m.enabled).map((m) => m.folder_name ?? m.name)));
+      setSelectedMods(new Set(compatibleKeys(mods.filter((m) => m.enabled))));
     } else {
-      setSelectedMods(new Set(mods.map((m) => m.folder_name ?? m.name)));
+      setSelectedMods(new Set(compatibleKeys(mods)));
     }
-  }, [mods, step]);
+  }, [mods, step, gameVersion]);
 
   // Trigger the audit when the user advances to step 3. One-shot per
   // wizard run — no caching, no debouncing; the audit can take a

@@ -242,10 +242,7 @@ pub fn find_game_in_libraries(libraries: &[PathBuf]) -> Option<PathBuf> {
             // A second check on name pattern keeps us fast on big libraries —
             // skip directories that obviously aren't STS2 before doing the
             // file-system probe in validate_game_path.
-            let name_lower = entry
-                .file_name()
-                .to_string_lossy()
-                .to_lowercase();
+            let name_lower = entry.file_name().to_string_lossy().to_lowercase();
             let looks_like_sts2 = name_lower.contains("slay")
                 || name_lower.contains("spire")
                 || name_lower.contains("sts2");
@@ -293,16 +290,16 @@ pub fn validate_game_path(path: &Path) -> bool {
 
     #[cfg(target_os = "windows")]
     {
-        let has_exe = path.join("SlayTheSpire2.exe").exists()
-            || path.join("Slay the Spire 2.exe").exists();
+        let has_exe =
+            path.join("SlayTheSpire2.exe").exists() || path.join("Slay the Spire 2.exe").exists();
         let has_dll = path.join("sts2.dll").exists();
         has_exe || has_dll || has_pck
     }
 
     #[cfg(target_os = "macos")]
     {
-        let has_app = path.join("SlayTheSpire2.app").is_dir()
-            || path.join("Slay the Spire 2.app").is_dir();
+        let has_app =
+            path.join("SlayTheSpire2.app").is_dir() || path.join("Slay the Spire 2.app").is_dir();
         has_app || has_pck
     }
 
@@ -339,10 +336,7 @@ fn normalize_game_path(path: PathBuf) -> PathBuf {
 
 /// Names the STS2 process can appear under across platforms.
 /// Matched case-insensitively, with platform-appropriate `.exe` stripping.
-const GAME_PROCESS_NAMES: &[&str] = &[
-    "SlayTheSpire2",
-    "Slay the Spire 2",
-];
+const GAME_PROCESS_NAMES: &[&str] = &["SlayTheSpire2", "Slay the Spire 2"];
 
 /// Check whether STS2 is currently running.
 /// File operations on the mods folder while the game is up can corrupt save state,
@@ -407,7 +401,10 @@ pub fn detect_game() -> Option<PathBuf> {
     log::info!(
         "Auto-detect: scanning {} Steam library/libraries: {:?}",
         libraries.len(),
-        libraries.iter().map(|p| p.display().to_string()).collect::<Vec<_>>()
+        libraries
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
     );
 
     let game_path = match find_game_in_libraries(&libraries) {
@@ -439,7 +436,9 @@ pub fn detect_game() -> Option<PathBuf> {
 
 /// Auto-detect the game path and store it in state. Returns GameInfo.
 #[tauri::command]
-pub fn detect_game_path(state: tauri::State<'_, AppState>) -> std::result::Result<GameInfo, String> {
+pub fn detect_game_path(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<GameInfo, String> {
     let path = detect_game();
     if let Some(ref p) = path {
         let mut s = state.lock().map_err(|e| e.to_string())?;
@@ -459,7 +458,10 @@ pub fn detect_game_path(state: tauri::State<'_, AppState>) -> std::result::Resul
 
 /// Manually set the game path after validation. Returns GameInfo.
 #[tauri::command]
-pub fn set_game_path(path: String, state: tauri::State<'_, AppState>) -> std::result::Result<GameInfo, String> {
+pub fn set_game_path(
+    path: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<GameInfo, String> {
     let game_path = normalize_game_path(PathBuf::from(&path));
     if !validate_game_path(&game_path) {
         return Err(AppError::GameNotFound(format!(
@@ -472,8 +474,13 @@ pub fn set_game_path(path: String, state: tauri::State<'_, AppState>) -> std::re
         let s = state.lock().map_err(|e| e.to_string())?;
         s.config_path.clone()
     };
-    crate::state::persist_game_path(&config_path, &game_path)
-        .map_err(|e| format!("Could not save game path to {}: {}", config_path.display(), e))?;
+    crate::state::persist_game_path(&config_path, &game_path).map_err(|e| {
+        format!(
+            "Could not save game path to {}: {}",
+            config_path.display(),
+            e
+        )
+    })?;
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.set_game_path(game_path);
     drop(s);
@@ -506,9 +513,18 @@ pub fn get_game_info(state: tauri::State<'_, AppState>) -> std::result::Result<G
         .unwrap_or(0);
 
     Ok(GameInfo {
-        game_path: s.game_path.as_ref().map(|p| p.to_string_lossy().to_string()),
-        mods_path: s.mods_path.as_ref().map(|p| p.to_string_lossy().to_string()),
-        disabled_mods_path: s.disabled_mods_path.as_ref().map(|p| p.to_string_lossy().to_string()),
+        game_path: s
+            .game_path
+            .as_ref()
+            .map(|p| p.to_string_lossy().to_string()),
+        mods_path: s
+            .mods_path
+            .as_ref()
+            .map(|p| p.to_string_lossy().to_string()),
+        disabled_mods_path: s
+            .disabled_mods_path
+            .as_ref()
+            .map(|p| p.to_string_lossy().to_string()),
         mods_count,
         disabled_count,
         valid,
@@ -735,7 +751,8 @@ fn launch_game_via_steam() -> std::result::Result<(), String> {
                 Ok(_) => return Ok(()),
                 Err(e) => log::warn!(
                     "macOS 'open -a Steam' failed: {}. Falling back to {}.",
-                    e, STEAM_URL
+                    e,
+                    STEAM_URL
                 ),
             }
         } else {
@@ -1043,14 +1060,14 @@ fn spawn_game_direct(game_path: Option<&Path>) -> std::result::Result<(), String
 /// Launch STS2 using the configured launch mode, with auto-backup.
 /// If vanilla_mode was active (from a previous Launch Vanilla), restore mods first.
 #[tauri::command]
-pub fn launch_game(
-    state: tauri::State<'_, AppState>,
-) -> std::result::Result<bool, String> {
+pub fn launch_game(state: tauri::State<'_, AppState>) -> std::result::Result<bool, String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
 
     // If we were in vanilla mode, restore all mods first
     if s.vanilla_mode {
-        if let (Some(ref mods_path), Some(ref disabled_path)) = (s.mods_path.clone(), s.disabled_mods_path.clone()) {
+        if let (Some(ref mods_path), Some(ref disabled_path)) =
+            (s.mods_path.clone(), s.disabled_mods_path.clone())
+        {
             log::info!("Restoring mods from vanilla mode before launch");
             restore_all_from_disabled(disabled_path, mods_path);
         }
@@ -1082,13 +1099,15 @@ pub fn launch_game(
 /// configured launch mode. Mods will be automatically restored on the
 /// next normal launch.
 #[tauri::command]
-pub fn launch_vanilla(
-    state: tauri::State<'_, AppState>,
-) -> std::result::Result<bool, String> {
+pub fn launch_vanilla(state: tauri::State<'_, AppState>) -> std::result::Result<bool, String> {
     ensure_game_not_running()?;
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?.clone();
-    let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?.clone();
+    let disabled_path = s
+        .disabled_mods_path
+        .as_ref()
+        .ok_or("Game path not set")?
+        .clone();
 
     // Auto-backup
     let backup_dir = s.config_path.join("backups");
@@ -1286,9 +1305,7 @@ pub struct ApiKeyStatus {
 
 /// Get the path to the log file.
 #[tauri::command]
-pub fn get_log_path(
-    state: tauri::State<'_, AppState>,
-) -> std::result::Result<String, String> {
+pub fn get_log_path(state: tauri::State<'_, AppState>) -> std::result::Result<String, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     let log_path = s.config_path.join("sts2mm.log");
     Ok(log_path.to_string_lossy().to_string())
@@ -1298,9 +1315,7 @@ pub fn get_log_path(
 /// Falls back to revealing the parent directory in the file explorer if the
 /// file cannot be opened directly (e.g. no handler registered for `.log`).
 #[tauri::command]
-pub fn open_log_file(
-    state: tauri::State<'_, AppState>,
-) -> std::result::Result<bool, String> {
+pub fn open_log_file(state: tauri::State<'_, AppState>) -> std::result::Result<bool, String> {
     let (log_path, parent) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let log_path = s.config_path.join("sts2mm.log");
@@ -1314,22 +1329,28 @@ pub fn open_log_file(
             Err(e) => {
                 log::warn!(
                     "system opener failed for log file {:?}: {}. Falling back to parent dir.",
-                    log_path, e
+                    log_path,
+                    e
                 );
             }
         }
     } else {
-        log::info!("Log file {:?} does not exist yet; opening config dir instead.", log_path);
+        log::info!(
+            "Log file {:?} does not exist yet; opening config dir instead.",
+            log_path
+        );
     }
 
     // Fall back to opening the parent (config) directory so the user can find the log.
     if parent.exists() {
-        crate::external_open::open_external_detached(&parent).map_err(|e| {
-            format!("Failed to open log directory {}: {}", parent.display(), e)
-        })?;
+        crate::external_open::open_external_detached(&parent)
+            .map_err(|e| format!("Failed to open log directory {}: {}", parent.display(), e))?;
         Ok(true)
     } else {
-        Err(format!("Log file and config directory not found at {}", parent.display()))
+        Err(format!(
+            "Log file and config directory not found at {}",
+            parent.display()
+        ))
     }
 }
 
@@ -1400,6 +1421,57 @@ mod nexus_download_dir_command_tests {
         assert!(
             result.unwrap_err().contains("is not a directory"),
             "expected 'is not a directory' in error message"
+        );
+    }
+}
+
+#[cfg(test)]
+mod steam_library_detection_tests {
+    use super::{find_game_in_libraries, parse_library_folders};
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn libraryfolders_vdf_unescapes_and_discovers_alt_library_game() {
+        let steam = tempdir().unwrap();
+        let alt_library = tempdir().unwrap();
+
+        fs::create_dir_all(steam.path().join("steamapps")).unwrap();
+        let alt_path = alt_library.path().to_string_lossy();
+        let vdf_path = alt_path.replace('\\', "\\\\").replace('"', "\\\"");
+        fs::write(
+            steam.path().join("steamapps").join("libraryfolders.vdf"),
+            format!(
+                r#""libraryfolders"
+{{
+    "0"
+    {{
+        "path" "{}"
+    }}
+}}"#,
+                vdf_path
+            ),
+        )
+        .unwrap();
+
+        let game_path = alt_library
+            .path()
+            .join("steamapps")
+            .join("common")
+            .join("Slay the Spire 2");
+        fs::create_dir_all(&game_path).unwrap();
+        fs::write(game_path.join("SlayTheSpire2.pck"), b"fake-game-pck").unwrap();
+
+        let libraries = parse_library_folders(steam.path());
+        assert!(
+            libraries.iter().any(|p| p == alt_library.path()),
+            "alternate Steam library from VDF should be scanned: {:?}",
+            libraries
+        );
+        assert_eq!(
+            find_game_in_libraries(&libraries).as_deref(),
+            Some(game_path.as_path()),
+            "auto-detect must find STS2 in the non-default Steam library"
         );
     }
 }

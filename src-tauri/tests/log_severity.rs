@@ -39,8 +39,8 @@ fn read_module_source(rel_path: &str) -> String {
         );
     }
     let mut combined = String::new();
-    for entry in std::fs::read_dir(&dir)
-        .unwrap_or_else(|e| panic!("read_dir {}: {}", dir.display(), e))
+    for entry in
+        std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("read_dir {}: {}", dir.display(), e))
     {
         let entry = entry.expect("dir entry");
         let path = entry.path();

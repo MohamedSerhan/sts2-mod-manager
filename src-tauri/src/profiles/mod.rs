@@ -345,7 +345,10 @@ pub fn delete_profile_cmd(
     drop(s);
 
     if was_active {
-        log::info!("Cleared active profile after deleting active pack '{}'", name);
+        log::info!(
+            "Cleared active profile after deleting active pack '{}'",
+            name
+        );
         // FB-B: clearing the pointer left the deleted pack's mods sitting in the
         // active folder, so a "modded" launch loaded them with errors. Empty the
         // active folder (move everything to disabled) so the post-delete state is
@@ -409,16 +412,15 @@ pub fn rename_profile(
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Profile, String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    let renamed = crud::rename_profile(&old_name, &new_name, &s.profiles_path)
-        .map_err(|e| e.to_string())?;
+    let renamed =
+        crud::rename_profile(&old_name, &new_name, &s.profiles_path).map_err(|e| e.to_string())?;
     let new = renamed.name.clone();
 
     // (c) If the renamed pack was active, follow it. Compare case-insensitively
     // so a casing difference between the stored active-profile pointer and the
     // requested old name doesn't strand active_profile.txt at the gone name
     // (mirrors the case-insensitive active-pointer handling on the delete path).
-    if s
-        .active_profile
+    if s.active_profile
         .as_deref()
         .is_some_and(|active| active.eq_ignore_ascii_case(&old_name))
     {
@@ -572,8 +574,14 @@ pub fn save_profile_drift(
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
     let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
-    drift::reconcile_profile_with_disk(&name, mods_path, disabled_path, &s.profiles_path, &s.config_path)
-        .map_err(|e| e.to_string())
+    drift::reconcile_profile_with_disk(
+        &name,
+        mods_path,
+        disabled_path,
+        &s.profiles_path,
+        &s.config_path,
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -636,7 +644,10 @@ mod active_profile_clear_tests {
 
         let was_active = clear_active_profile_if_deleted(&mut active, config, "MyPack");
 
-        assert!(was_active, "deleting the active pack must report it was active");
+        assert!(
+            was_active,
+            "deleting the active pack must report it was active"
+        );
         assert_eq!(active, None, "in-memory active pointer must be cleared");
         assert!(
             !config.join("active_profile.txt").exists(),
@@ -669,8 +680,15 @@ mod active_profile_clear_tests {
 
         let was_active = clear_active_profile_if_deleted(&mut active, config, "OtherPack");
 
-        assert!(!was_active, "deleting a non-active pack must not report a match");
-        assert_eq!(active, Some("MyPack".to_string()), "active pointer untouched");
+        assert!(
+            !was_active,
+            "deleting a non-active pack must not report a match"
+        );
+        assert_eq!(
+            active,
+            Some("MyPack".to_string()),
+            "active pointer untouched"
+        );
         assert!(config.join("active_profile.txt").exists());
         assert_eq!(
             std::fs::read_to_string(config.join("active_profile.txt")).unwrap(),

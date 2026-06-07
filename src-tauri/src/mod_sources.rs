@@ -1639,7 +1639,10 @@ struct Candidate {
 
 /// Retain only the mod identified by `only` (matched by folder_name first,
 /// then by name). `None` means no filter — all mods are returned unchanged.
-fn scope_installed(mut installed: Vec<crate::mods::ModInfo>, only: Option<&str>) -> Vec<crate::mods::ModInfo> {
+fn scope_installed(
+    mut installed: Vec<crate::mods::ModInfo>,
+    only: Option<&str>,
+) -> Vec<crate::mods::ModInfo> {
     if let Some(key) = only {
         installed.retain(|m| m.folder_name.as_deref() == Some(key) || m.name == key);
     }
@@ -1903,10 +1906,7 @@ pub async fn auto_detect_sources(
                             not_checked.push(m.name.clone());
                             break;
                         } else if wait > 0 {
-                            log::info!(
-                                "Auto-detect: quota low, waiting {}s for reset",
-                                wait
-                            );
+                            log::info!("Auto-detect: quota low, waiting {}s for reset", wait);
                             tokio::time::sleep(std::time::Duration::from_secs(wait as u64)).await;
                         }
                     }
@@ -1933,11 +1933,7 @@ pub async fn auto_detect_sources(
                         break; // stop issuing queries for this mod
                     }
                     SearchOutcome::Err(e) => {
-                        log::warn!(
-                            "Auto-detect search error for query '{}': {}",
-                            query,
-                            e
-                        );
+                        log::warn!("Auto-detect search error for query '{}': {}", query, e);
                         Vec::new()
                     }
                 }
@@ -3022,10 +3018,7 @@ mod shared_profile_source_tests {
 
     #[test]
     fn scope_installed_matches_by_mod_name_when_no_folder() {
-        let installed = vec![
-            make_mod("AlicePack", None),
-            make_mod("BobPack", None),
-        ];
+        let installed = vec![make_mod("AlicePack", None), make_mod("BobPack", None)];
         let result = scope_installed(installed, Some("AlicePack"));
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].name, "AlicePack");
@@ -3033,9 +3026,7 @@ mod shared_profile_source_tests {
 
     #[test]
     fn scope_installed_no_match_returns_empty() {
-        let installed = vec![
-            make_mod("Alpha", Some("alpha-folder")),
-        ];
+        let installed = vec![make_mod("Alpha", Some("alpha-folder"))];
         let result = scope_installed(installed, Some("nonexistent"));
         assert!(result.is_empty());
     }

@@ -448,11 +448,7 @@ pub(super) fn profile_is_owned(name: &str, profiles_path: &Path) -> bool {
 /// "subscribed AND not owned" keeps the intended protection — you can't
 /// clobber a pack you merely *follow*, since a sync would overwrite your
 /// edits — while letting you freely edit packs you published.
-pub(super) fn profile_is_edit_locked(
-    name: &str,
-    profiles_path: &Path,
-    config_path: &Path,
-) -> bool {
+pub(super) fn profile_is_edit_locked(name: &str, profiles_path: &Path, config_path: &Path) -> bool {
     subscribed_profile_names(config_path).contains(&name.to_lowercase())
         && !profile_is_owned(name, profiles_path)
 }
@@ -827,7 +823,8 @@ mod rename_tests {
         let dir = tmp.path();
         save_profile(&sample("Old Pack"), dir).unwrap();
         // .share is written under the RAW name by the share path.
-        let share_body = r#"{"code":"AA5A-315D-61AE","owner":"me","file_sha":"abc","share_format_version":3}"#;
+        let share_body =
+            r#"{"code":"AA5A-315D-61AE","owner":"me","file_sha":"abc","share_format_version":3}"#;
         std::fs::write(dir.join("Old Pack.share"), share_body).unwrap();
 
         rename_profile("Old Pack", "New Pack", dir).unwrap();
@@ -871,15 +868,22 @@ mod rename_tests {
         let tmp = tempdir().unwrap();
         let dir = tmp.path();
         save_profile(&sample("My Pack"), dir).unwrap();
-        let share_body = r#"{"code":"AA5A-315D-61AE","owner":"me","file_sha":"abc","share_format_version":3}"#;
+        let share_body =
+            r#"{"code":"AA5A-315D-61AE","owner":"me","file_sha":"abc","share_format_version":3}"#;
         std::fs::write(dir.join("My Pack.share"), share_body).unwrap();
 
         let renamed = rename_profile("My Pack", "my pack", dir).unwrap();
         assert_eq!(renamed.name, "my pack");
         // The renamed profile must still load under the new name (not deleted).
-        assert!(load_profile("my pack", dir).is_ok(), "profile must survive a case-only rename");
+        assert!(
+            load_profile("my pack", dir).is_ok(),
+            "profile must survive a case-only rename"
+        );
         // And its share code must be preserved under the new name (not deleted).
         let moved = std::fs::read_to_string(dir.join("my pack.share")).unwrap();
-        assert_eq!(moved, share_body, "share code must survive a case-only rename");
+        assert_eq!(
+            moved, share_body,
+            "share code must survive a case-only rename"
+        );
     }
 }

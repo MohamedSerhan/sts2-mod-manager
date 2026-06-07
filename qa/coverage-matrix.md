@@ -1,0 +1,98 @@
+# QA Coverage Matrix
+
+This matrix is the release-confidence map for issue #156. It records the current automated owner for each active scenario and historical user-reported bug, plus the gaps that still need a realistic owner.
+
+Status meanings:
+
+- `Automated`: covered by a command that runs under `npm run qa` or one of its release-gate children.
+- `Planned`: transition-only status for newly discovered gaps. Routine release-regression rows may not stay planned; `npm run qa:matrix` fails if one appears.
+- `Manual`: intentionally hard OS or UX boundary that belongs in the short release spot-check list for now.
+- `Out of scope`: not part of routine regression for the current release train.
+
+## Scenario Owners
+
+| Scenario | Flow | Tier | Scope | Automated owner | Release command | Status | Notes |
+|---|---|---:|---|---|---|---|---|
+| 001 | First-time scan | 1 | BaseLib BOM manifest surfaces the real version | `src-tauri/tests/qa_scenarios.rs::kitchen_sink_scan_handles_every_quirk_at_once` | `cargo test --manifest-path=src-tauri/Cargo.toml kitchen_sink_scan_handles_every_quirk_at_once` | Automated | Also guarded by BOM parse/install tests in `src-tauri/src/mods/mod.rs`. |
+| 002 | Scan, toggle, delete identity | 1 | Two same-named CardArtEditor folders stay distinct | `src-tauri/src/mods/mod.rs::scan_keeps_two_same_named_mods_in_different_folders` | `cargo test --manifest-path=src-tauri/Cargo.toml scan_keeps_two_same_named_mods_in_different_folders` | Automated | Companion toggle owner is `src-tauri/src/mods/mod.rs::disabling_one_same_named_mod_leaves_the_other_active`. |
+| 003 | Modpack apply | 1 | Pinned mod survives a modpack apply | `src-tauri/tests/qa_scenarios.rs::flow_11_apply_profile_pins_override_profile_state` | `cargo test --manifest-path=src-tauri/Cargo.toml flow_11_apply_profile_pins_override_profile_state` | Automated | WebDriver also covers modpack switch freeze persistence in `qa/runner/smoke.mjs::specModpackSwitchPreservesFreeze`. |
+| 004 | Downloads watcher | 1 | Folder-keyed pin lookup blocks pinned overwrite | `src-tauri/tests/qa_scenarios.rs::scenario_004_downloads_watcher_pin_lookup_finds_folder_keyed_pin` | `cargo test --manifest-path=src-tauri/Cargo.toml scenario_004_downloads_watcher_pin_lookup_finds_folder_keyed_pin` | Automated | Companion negative guard is `src-tauri/tests/qa_scenarios.rs::scenario_004b_name_only_lookup_misses_folder_keyed_pin_when_name_differs`. |
+| 005 | Install pipeline | 1 | BOM-manifest zip install returns a real version | `src-tauri/src/mods/mod.rs::install_mod_from_zip_handles_bom_manifest` | `cargo test --manifest-path=src-tauri/Cargo.toml install_mod_from_zip_handles_bom_manifest` | Automated | Cassette release-asset path is guarded by `src-tauri/tests/qa_scenarios.rs::scenario_005_install_from_release_url`. |
+| 006 | Toggle | 2 | Toggle off moves files to disabled storage | `qa/runner/smoke.mjs::specToggleMovesQaTestModToDisabled` | `npm run qa:smoke` | Automated | Runs against the isolated fixture game tree. |
+| 007 | Audit | 2 | Cassette audit reports exactly one pending update | `qa/runner/smoke.mjs::specAuditAgainstCassettesShowsOnePending` | `npm run qa:smoke:cassette` | Automated | Fixture GitHub cassettes must stay offline and deterministic. |
+| 008 | Pin plus audit | 2 | Pinned stale mod is suppressed from pending count | `qa/runner/smoke.mjs::specFreezeSuppressesPendingUpdate` | `npm run qa:smoke:cassette` | Automated | Uses the same cassette state as scenario 007. |
+| 009 | Delete | 2 | Removing a mod deletes the row and folder | `qa/runner/smoke.mjs::specDeleteUpToDateMod` | `npm run qa:smoke` | Automated | Confirms UI and disk state agree. |
+| 010 | Modpack create | 2 | New modpack appears in the list | `qa/runner/smoke.mjs::specCreateModpack` | `npm run qa:smoke` | Automated | Switch/apply semantics are owned by separate modpack specs. |
+
+## Major Flow Owners
+
+| Flow | User behavior | Primary owner | Status | Next gap |
+|---|---|---|---|---|
+| 1 | First-time setup and scan | `src-tauri/tests/qa_scenarios.rs::kitchen_sink_scan_handles_every_quirk_at_once` | Automated | Auto-detect platform paths still need more OS-specific coverage. |
+| 2 | Install from share code | `src/lib/shareImport.smart.test.tsx` plus `src-tauri/src/sharing/mod.rs::share_fetch_and_download_round_trips_through_github_api` | Automated | UI smart-routing, GitHub profile fetch, release bundle download, and install handoff all have automated owners. |
+| 3 | Quick Add GitHub | `src-tauri/src/mods/mod.rs::install_mod_from_zip_handles_bom_manifest` | Automated | Full Quick Add UI happy path is still smoke-level future work. |
+| 4 | Nexus download watcher | `src-tauri/tests/qa_scenarios.rs::scenario_004_downloads_watcher_pin_lookup_finds_folder_keyed_pin` | Automated | OS download-drop timing still belongs to a future harness tier. |
+| 5 | Toggle on/off | `qa/runner/smoke.mjs::specToggleMovesQaTestModToDisabled` | Automated | Interrupted active-plus-disabled cleanup remains a planned edge case. |
+| 6 | Delete | `qa/runner/smoke.mjs::specDeleteUpToDateMod` | Automated | Same-name delete-by-folder is covered in Rust, not WebDriver. |
+| 7 | Pin survives apply | `src-tauri/tests/qa_scenarios.rs::flow_11_apply_profile_pins_override_profile_state` | Automated | More modpack apply variants should reuse the same fixture pattern. |
+| 8 | Update one mod | `src/views/Mods.test.tsx::clicking the inline Update pill calls update_mod` plus `src-tauri/src/updater.rs::first_versioned_release_with_mod_assets_skips_empty_and_non_mod_releases` | Automated | UI update invocation and release-selection policy are covered; smoke owns compatible walk-back install. |
+| 9 | Audit/check for updates | `qa/runner/smoke.mjs::specAuditAgainstCassettesShowsOnePending` | Automated | More Nexus variant cases can stay in Rust cassette tests. |
+| 10 | Create modpack | `qa/runner/smoke.mjs::specCreateModpack` | Automated | Snapshot/update semantics are separate owners. |
+| 11 | Switch modpacks | `qa/runner/smoke.mjs::specModpackSwitchPreservesFreeze` | Automated | Large-modpack performance remains a frontend unit/perf follow-up. |
+| 12 | Share publish/curator path | `src-tauri/src/sharing/mod.rs::share_profile_routes_bundles_through_releases_and_persists_hash` | Automated | Stateful fake GitHub routes cover repo/release upload, bundle hashing, and profile persistence. |
+| 13 | Repair | `qa/runner/smoke.mjs::specRepairWalkback` | Automated | Folder-name collision repair should be added as Rust integration. |
+| 14 | Drag-drop install | None | Manual | Native OS drop interception needs a desktop-driver tier. |
+| 15 | Restore backup | `src-tauri/src/backup.rs::restore_backup_restores_config_files` plus `src/views/Settings.test.tsx::Restore backup confirms then invokes restore_backup_cmd` | Automated | Rust owns filesystem restore/rollback shape; Settings owns the user confirmation and command wiring. |
+| 16 | Launch game | `src-tauri/src/backup.rs` backup tests plus launch-mode UI tests | Manual | Steam protocol/direct binary launch needs OS spot-checking. |
+| 17 | Onboarding wizard | `qa/runner/smoke.mjs::dismissOnboardingIfPresent` and `src/components/OnboardingOverlay.test.tsx` | Automated | Retry/autodetect variants can stay in component tests. |
+| 18 | Deep link | Frontend share-code helpers and single-instance routing code | Manual | Cold-start/warm-start OS routing needs desktop-driver coverage. |
+| 19 | Subscription updates | `src/views/Home.test.tsx::active-update "Sync updates" fires apply_subscription_update and shows success toast` plus `src-tauri/tests/active_profile_after_apply.rs::apply_subscription_update_claims_active_profile_slot` | Automated | UI apply/update, active-profile claim, and incompatible-snapshot filtering are covered by release-gate tests. |
+| 20 | Bulk operations | `src/views/Mods.test.tsx::enable_all_mods failure surfaces a toast` plus `src-tauri/src/mods/mod.rs::delete_all_mods_does_not_rewrite_active_profile_manifest_to_empty` | Automated | Bulk enable/disable/delete command wiring, failure toasts, game-running locks, and backend delete safety are covered. |
+| A1 | Mod-author malformed manifests | `src-tauri/src/mods/scan.rs::pulls_version_when_strict_parse_would_fail` plus `src-tauri/src/mods/scan.rs::returns_none_on_invalid_json` | Automated | Strict schema drift, BOM tolerance, and invalid JSON fallback are covered at the manifest scanner boundary. |
+| A8 | DLL-only mod surfaces correctly | `src-tauri/tests/qa_scenarios.rs::author_a8_dll_only_mod_surfaces_correctly` | Automated | Keep as a Tier-1 author-flow owner. |
+
+## Historical Bug Owners
+
+| Bug | Area | Tier | Risk | Automated owner | Release command or next step | Status | Notes |
+|---|---|---:|---|---|---|---|---|
+| #1 | Same-name mod identity | 1 | Wrong mod toggled or hidden | `src-tauri/src/mods/mod.rs::scan_keeps_two_same_named_mods_in_different_folders` | `cargo test --manifest-path=src-tauri/Cargo.toml scan_keeps_two_same_named_mods_in_different_folders` | Automated | Scenario 002. |
+| #2 | BOM manifest parse/install | 1 | Version becomes unknown | `src-tauri/src/mods/mod.rs::install_mod_from_zip_handles_bom_manifest` | `cargo test --manifest-path=src-tauri/Cargo.toml install_mod_from_zip_handles_bom_manifest` | Automated | Scenarios 001 and 005. |
+| #3 | Disabled-storage copy clarity | 2 | User confusion | `qa/runner/smoke.mjs::specToggleMovesQaTestModToDisabled` | `npm run qa:smoke` | Automated | Disk behavior is owned; exact tutorial copy is not release-blocking. |
+| #4 | Mixed-layout zip wrapping | 1 | Half-old/half-new update | `src-tauri/tests/qa_scenarios.rs::historical_4_mixed_layout_zip_lands_under_one_folder` | `cargo test --manifest-path=src-tauri/Cargo.toml historical_4_mixed_layout_zip_lands_under_one_folder` | Automated | RitsuLib layout. |
+| #5 | Structured dependency parse | 2 | Mod shows unknown | `src-tauri/tests/qa_scenarios.rs::kitchen_sink_scan_handles_every_quirk_at_once` | `cargo test --manifest-path=src-tauri/Cargo.toml kitchen_sink_scan_handles_every_quirk_at_once` | Automated | Includes mixed string/object dependencies. |
+| #6 | Manifest rename source migration | 1 | Source link stranded | `src-tauri/tests/qa_scenarios.rs::historical_6_source_entry_migrates_on_manifest_rename` | `cargo test --manifest-path=src-tauri/Cargo.toml historical_6_source_entry_migrates_on_manifest_rename` | Automated | Also covers pin/Nexus/version carry. |
+| #7 | Stem-based toggle move | 2 | Wrong files moved | `src-tauri/src/mods/mod.rs::disabling_one_same_named_mod_leaves_the_other_active` | `cargo test --manifest-path=src-tauri/Cargo.toml disabling_one_same_named_mod_leaves_the_other_active` | Automated | Same fixture family as #1. |
+| #8 | DLL-only double count | 3 | Count mismatch | `src-tauri/tests/qa_scenarios.rs::author_a8_dll_only_mod_surfaces_correctly` | `cargo test --manifest-path=src-tauri/Cargo.toml author_a8_dll_only_mod_surfaces_correctly` | Automated | Author-flow owner. |
+| #9 | Doubly-nested zip invisible | 2 | Installed mod missing | `src-tauri/src/mods/scan.rs::non_sidecar_container_still_descends` | `cargo test --manifest-path=src-tauri/Cargo.toml non_sidecar_container_still_descends` | Automated | Scanner descends the recovered wrapper instead of leaving an invisible install. |
+| #10 | Dependency files filtered out | 3 | Mod fails at runtime | `src-tauri/tests/qa_scenarios.rs::historical_10_dependency_files_survive_zip_install` | `cargo test --manifest-path=src-tauri/Cargo.toml historical_10_dependency_files_survive_zip_install` | Automated | Realistic zip fixture includes non-DLL dependency files and tracks them for future cleanup/update. |
+| #11 | Zip-slip extraction | 1 | Security/data loss | `src-tauri/tests/qa_scenarios.rs::historical_11_zip_slip_traversal_is_refused` | `cargo test --manifest-path=src-tauri/Cargo.toml historical_11_zip_slip_traversal_is_refused` | Automated | Tier-1 locked. |
+| #12 | Incompatible latest update | 2 | Unloadable install | `qa/runner/smoke.mjs::specRepairWalkback` plus `src-tauri/src/updater.rs::already_on_chosen_message_returns_none_after_rollback_to_lower_version` | `npm run qa:smoke:cassette` and `cargo test --manifest-path=src-tauri/Cargo.toml already_on_chosen_message_returns_none_after_rollback_to_lower_version` | Automated | Smoke proves compatible walk-back install; Rust keeps update selection from sticking on the blocked latest. |
+| #13 | Release with no assets | 3 | False update | `src-tauri/src/updater.rs::first_versioned_release_with_mod_assets_returns_none_when_no_installable_assets_exist` | `cargo test --manifest-path=src-tauri/Cargo.toml first_versioned_release_with_mod_assets_returns_none_when_no_installable_assets_exist` | Automated | Empty/docs-only releases cannot become actionable update rows. |
+| #14 | Nexus-only unusable update | 3 | Bad update affordance | `src/lib/installPolicy.test.ts` and `src/views/Mods.test.tsx` | Keep frontend policy tests in `npm run qa:coverage` | Automated | UI decision logic owner. |
+| #15 | Nexus variant version mismatch | 3 | False mismatch warning | `src-tauri/tests/qa_cassette.rs::nexus_cassette_reports_expected_variant_version` | `cargo test --manifest-path=src-tauri/Cargo.toml --features qa-cassette nexus_cassette_reports_expected_variant_version` | Automated | Cassette-backed Nexus owner. |
+| #16 | Low-confidence auto-detect | 3 | Bad source link | `src-tauri/src/download.rs::repo_mentions_sts2_detects_supported_signals` | `cargo test --manifest-path=src-tauri/Cargo.toml repo_mentions_sts2_detects_supported_signals` | Automated | Relevance scoring still deserves broader cases. |
+| #17 | Auto-detect overwrites Nexus choice | 3 | User source choice lost | `src-tauri/src/mod_sources.rs` auto-detect skip tests | Keep Rust mod-source tests in `npm run qa:rust` | Automated | Folder/source policy owner. |
+| #18 | Fresh subscription update banner | 2 | Phantom update | `src/views/Home.test.tsx` subscription banner tests | Keep Home tests in `npm run qa:coverage` | Automated | End-to-end subscription server still planned. |
+| #19 | Out-of-sync stuck after re-share | 2 | False drift banner | `src-tauri/src/sharing/mod.rs::out_of_sync_detection_via_signature` | `cargo test --manifest-path=src-tauri/Cargo.toml out_of_sync_detection_via_signature` | Automated | Signature-level owner. |
+| #20 | Repair deletes orphan disabled files | 1 | Persistent drift | `qa/runner/smoke.mjs::specDisabledLibraryExtrasArePreserved` | `npm run qa:smoke` | Automated | Current behavior preserves disabled library extras and keeps them out of drift. |
+| #21 | Incompatible mods in created modpack | 1 | Phantom subscription entries | `qa/runner/smoke.mjs::specIncompatibleModAbsentFromCreatedModpack`; `src/components/CreateModpackWizard.test.tsx` | `npm run qa:smoke`; `npx vitest run src/components/CreateModpackWizard.test.tsx` | Automated | Create-from-active path is owned. |
+| #22 | Toggle state sticky after modpack switch | 1 | Repair undoes user choice | `qa/runner/smoke.mjs::specToggleStickyAcrossModpackSwitch` | `npm run qa:smoke` | Automated | Scenario-level owner. |
+| #23 | Deep link spawns new process | 3 | App focus/routing failure | Native single-instance routing | Add desktop-driver deep-link run | Manual | OS boundary. |
+| #24 | Duplicate cold-start/live URL dialogs | 2 | Duplicate confirm dialogs | `src/App.test.tsx::deep-link: dedupe window swallows repeat URL within 2s` | `npx vitest run src/App.test.tsx` | Automated | Non-OS route seam proves duplicate live/cold events do not double-open the confirm dialog. |
+| #25 | Cancel-then-retry no-ops | 2 | Retry silently ignored | `src/App.test.tsx::deep-link: cancelled URL can be retried after the dedupe window expires` | `npx vitest run src/App.test.tsx` | Automated | Same URL retries after the 2s dedupe window without waiting on desktop protocol registration. |
+| #26 | Discord paste share-code prefix | 3 | Import rejected | `src/lib/shareImport.test.ts` | Keep share import parser tests in `npm run qa:coverage` | Automated | Pure parsing owner. |
+| #27 | Steam non-default drive detection | 3 | Game not found | `src-tauri/src/game.rs::libraryfolders_vdf_unescapes_and_discovers_alt_library_game` | `cargo test --manifest-path=src-tauri/Cargo.toml libraryfolders_vdf_unescapes_and_discovers_alt_library_game` | Automated | Registry read remains OS-level, but alternate Steam library parsing and game discovery are deterministic. |
+| #28 | CachyOS graphical/deep-link issues | 3 | Linux platform quirks | Linux WebDriver smoke plus release spot-check | `npm run qa:smoke` on Linux CI | Manual | Platform behavior remains manual/exploratory. |
+| #29 | Nexus slow-download toast lingers | 2 | Stale toast | `src/contexts/AppContext.test.tsx::mod-auto-installed event dismisses the pending Nexus sticky toast` | `npx vitest run src/contexts/AppContext.test.tsx` | Automated | Sticky Nexus prompt dismisses on the watcher completion event instead of lingering. |
+| #30 | Nexus manager-download copy | 3 | User confusion | `src/components/QuickAddModal.test.tsx::Install of a Nexus URL opens the files tab + leaves a sticky toast` plus `src/views/Help.test.tsx` | `npx vitest run src/components/QuickAddModal.test.tsx src/views/Help.test.tsx` | Automated | Localized Quick Add and Help copy tell users to click Slow Download/Manual, not Mod Manager Download. |
+| #31 | Profile re-download misses folder-keyed source | 3 | Missing pack mod | `src-tauri/tests/qa_scenarios.rs::lookup_entry_precedence_is_folder_then_name_then_mod_id` | `cargo test --manifest-path=src-tauri/Cargo.toml lookup_entry_precedence_is_folder_then_name_then_mod_id` | Automated | Lookup contract owner. |
+| #32 | Downloads watcher overwrites pinned folder-keyed mod | 1 | Silent pinned overwrite | `src-tauri/tests/qa_scenarios.rs::scenario_004_downloads_watcher_pin_lookup_finds_folder_keyed_pin` | `cargo test --manifest-path=src-tauri/Cargo.toml scenario_004_downloads_watcher_pin_lookup_finds_folder_keyed_pin` | Automated | Scenario 004. |
+
+## Short Manual Release Checklist
+
+The intended end state is for this list to stay small. These checks are manual because they cross OS integration boundaries that the current Rust/Vitest/WebDriver layers do not own yet.
+
+- Drag a local mod archive onto a packaged app window and confirm the install starts.
+- Click a `sts2mm://` link from outside the app on Windows and Linux; confirm OS registration and warm-start focus.
+- Launch the game through the selected launch mode on the maintainer's release machine.
+- Do one exploratory pass over layout feel on Windows and Linux after the WebDriver smoke passes.

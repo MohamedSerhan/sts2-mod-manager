@@ -249,7 +249,7 @@ function seedWalkbackMod(dir) {
  * than the fixture game's `release_info.json` reports (0.105.0). The mod's
  * files live on disk so `scan_mods` picks them up, but the mod is incompatible
  * with the running game — `install_is_incompatible` returns true. Seeded inline
- * by specSkippedModAbsentFromSnapshot (NOT from seedFixtureGameTree) so other
+ * by specIncompatibleModAbsentFromCreatedModpack (NOT from seedFixtureGameTree) so other
  * specs' audit counts don't change.
  */
 function seedSkippedMod(dir) {
@@ -711,45 +711,45 @@ async function specDeleteUpToDateMod(driver) {
 }
 
 /**
- * Profile creation flow: click Profiles → New profile → type name →
- * Create. Verify the profile card appears in the list. Profiles are
- * one of the highest-risk surfaces (the apply / snapshot / switch
- * chain has multiple historical bugs), so we want at minimum a happy-
- * path spec proving the create handler doesn't blow up.
+ * Modpack creation flow: click Modpacks -> Create modpack, walk through the
+ * guided wizard, then verify the new modpack appears. Modpacks are one of
+ * the highest-risk surfaces (apply / snapshot / switch has multiple
+ * historical bugs), so the smoke keeps a happy-path owner for the current UI.
  */
-async function specCreateProfile(driver) {
-  // 1.7.0: creation is the guided Create-modpack wizard (Modpacks tab →
-  // Create modpack → Start empty → Next → Continue anyway → name → Create).
+async function specCreateModpack(driver) {
+  // 1.7.0: creation is the guided Create-modpack wizard (Modpacks tab ->
+  // Create modpack -> Start from active mods -> Next -> Continue anyway ->
+  // name -> Create).
   // A unique name keeps re-runs against a sticky STS2_CONFIG_DIR from
   // colliding.
-  const profileName = `QA Smoke ${Date.now().toString(36)}`;
-  await createProfileNamed(driver, profileName);
+  const modpackName = `QA Smoke ${Date.now().toString(36)}`;
+  await createModpackNamed(driver, modpackName);
 }
 
 /**
- * v1.3.1 contract: a mod frozen while one profile is active still
+ * v1.3.1 contract: a mod frozen while one modpack is active still
  * shows the "Frozen" pill after the user round-trips through another
- * profile and back. Freeze state lives in mod_sources.json (config dir),
- * not the profile manifest, so any future refactor that accidentally
- * folds freeze state into the per-profile snapshot — or has switch_profile
+ * modpack and back. Freeze state lives in mod_sources.json (config dir),
+ * not the modpack manifest, so any future refactor that accidentally
+ * folds freeze state into the per-modpack snapshot — or has switch_profile
  * stomp on mod_sources during apply — would break this assertion.
  *
  * Flow:
- *   1. Profiles → create + activate "Orig" profile (becomes active).
- *   2. Mods → freeze QaTestMod via kebab. Verify "Frozen" pill rendered.
- *   3. Profiles → create + activate "Other" profile.
- *   4. Profiles → switch back to "Orig".
- *   5. Mods → assert QaTestMod still shows the "Frozen" pill.
+ *   1. Modpacks -> create + activate "Orig" modpack.
+ *   2. Mod Library -> freeze QaTestMod via kebab. Verify "Frozen" pill rendered.
+ *   3. Modpacks -> create + activate "Other" modpack.
+ *   4. Modpacks -> switch back to "Orig".
+ *   5. Mod Library -> assert QaTestMod still shows the "Frozen" pill.
  */
-async function specProfileSwitchPreservesFreeze(driver) {
+async function specModpackSwitchPreservesFreeze(driver) {
   const suffix = Date.now().toString(36);
   const origName = `QA Orig ${suffix}`;
   const otherName = `QA Switch ${suffix}`;
 
-  await navToProfiles(driver);
-  await createProfileNamed(driver, origName);
+  await navToModpacks(driver);
+  await createModpackNamed(driver, origName);
   await waitForToastsToClear(driver);
-  await activateProfile(driver, origName);
+  await activateModpack(driver, origName);
   await waitForToastsToClear(driver);
 
   // Freeze QaTestMod from the Mods view.
@@ -795,12 +795,12 @@ async function specProfileSwitchPreservesFreeze(driver) {
 
   // Now round-trip through a second profile and back.
   await waitForToastsToClear(driver);
-  await navToProfiles(driver);
-  await createProfileNamed(driver, otherName);
+  await navToModpacks(driver);
+  await createModpackNamed(driver, otherName);
   await waitForToastsToClear(driver);
-  await activateProfile(driver, otherName);
+  await activateModpack(driver, otherName);
   await waitForToastsToClear(driver);
-  await activateProfile(driver, origName);
+  await activateModpack(driver, origName);
   await waitForToastsToClear(driver);
 
   // Verify the freeze survived the switch round trip.
@@ -824,13 +824,13 @@ async function specProfileSwitchPreservesFreeze(driver) {
  * Flow:
  *   1. Mods → toggle QaTestMod off; assert UI (aria-checked=false) and
  *      disk (folder moved to `mods_disabled/`).
- *   2. Profiles → create "Other", activate it, then switch back to the
- *      starting profile via the Default profile card.
- *   3. Mods → assert QaTestMod toggle still reads aria-checked=false
+ *   2. Modpacks -> create "Other", activate it, then switch back to the
+ *      starting modpack.
+ *   3. Mod Library -> assert QaTestMod toggle still reads aria-checked=false
  *      AND the folder is still in `mods_disabled/`, not resurrected
  *      into `mods/`.
  */
-async function specToggleStickyAcrossProfileSwitch(driver) {
+async function specToggleStickyAcrossModpackSwitch(driver) {
   // Step 1: toggle QaTestMod off from the Mods view.
   await navToMods(driver);
   const toggle = await waitForElement(
@@ -865,27 +865,27 @@ async function specToggleStickyAcrossProfileSwitch(driver) {
     throw new Error(`expected QaTestMod toggle aria-checked=false after click, got ${afterToggle}`);
   }
 
-  // Step 2: round-trip through a second profile. The fixture starts
-  // with a "Default" profile active (Profiles.tsx auto-creates one);
+  // Step 2: round-trip through a second modpack. The fixture starts
+  // with a "Default" modpack active (Profiles.tsx auto-creates one);
   // we create "Other", activate it, then activate "Default" again.
   const suffix = Date.now().toString(36);
   const otherName = `QA Other ${suffix}`;
   const origName = `QA Orig ${suffix}`;
 
   await waitForToastsToClear(driver);
-  await navToProfiles(driver);
-  // Create the starting profile we'll return to. We don't activate it
-  // first because whatever profile is currently active works as the
+  await navToModpacks(driver);
+  // Create the starting modpack we'll return to. We don't activate it
+  // first because whatever modpack is currently active works as the
   // "origin"; what matters is that we explicitly switch away and back.
-  await createProfileNamed(driver, origName);
+  await createModpackNamed(driver, origName);
   await waitForToastsToClear(driver);
-  await activateProfile(driver, origName);
+  await activateModpack(driver, origName);
   await waitForToastsToClear(driver);
-  await createProfileNamed(driver, otherName);
+  await createModpackNamed(driver, otherName);
   await waitForToastsToClear(driver);
-  await activateProfile(driver, otherName);
+  await activateModpack(driver, otherName);
   await waitForToastsToClear(driver);
-  await activateProfile(driver, origName);
+  await activateModpack(driver, origName);
   await waitForToastsToClear(driver);
 
   // Step 3: back on Mods, the toggle must still read off AND the
@@ -901,48 +901,48 @@ async function specToggleStickyAcrossProfileSwitch(driver) {
   const finalChecked = await toggleAfter.getAttribute('aria-checked');
   if (finalChecked !== 'false') {
     throw new Error(
-      `bug #22 regression: QaTestMod toggle resurrected to aria-checked=${finalChecked} after profile switch round trip (expected false)`,
+      `bug #22 regression: QaTestMod toggle resurrected to aria-checked=${finalChecked} after modpack switch round trip (expected false)`,
     );
   }
   if (!existsSync(disabledDir)) {
     throw new Error(
-      `bug #22 regression: mods_disabled/QaTestMod vanished after profile switch round trip`,
+      `bug #22 regression: mods_disabled/QaTestMod vanished after modpack switch round trip`,
     );
   }
   if (existsSync(enabledDir)) {
     throw new Error(
-      `bug #22 regression: mods/QaTestMod reappeared on disk after profile switch round trip`,
+      `bug #22 regression: mods/QaTestMod reappeared on disk after modpack switch round trip`,
     );
   }
 }
 
 /**
- * Regression spec for the safe profile repair/switch contract: disabled
- * library mods that are not part of the active profile must stay on disk and
- * must not surface as profile drift. Repair/switch makes active `mods/`
- * match the selected profile by disabling extras, not by deleting the
+ * Regression spec for the safe modpack repair/switch contract: disabled
+ * library mods that are not part of the active modpack must stay on disk and
+ * must not surface as modpack drift. Repair/switch makes active `mods/`
+ * match the selected modpack by disabling extras, not by deleting the
  * user's library from `mods_disabled/`.
  *
  * Flow:
- *   1. Profiles -> create + activate a fresh profile.
- *   2. Nav away from Profiles, then seed `mods_disabled/OrphanMod/` on disk
+ *   1. Modpacks -> create + activate a fresh modpack.
+ *   2. Nav away from Modpacks, then seed `mods_disabled/OrphanMod/` on disk
  *      post-snapshot so the manifest does not list it.
- *   3. Nav back to Profiles and wait for the drift effect to settle.
+ *   3. Nav back to Modpacks and wait for the drift effect to settle.
  *   4. Assert no Repair drift banner appears and the disabled orphan folder
  *      still exists.
  */
 async function specDisabledLibraryExtrasArePreserved(driver) {
   const suffix = Date.now().toString(36);
-  const profileName = `QA Repair ${suffix}`;
+  const modpackName = `QA Repair ${suffix}`;
 
-  // Step 1: create + activate a fresh profile.
-  await navToProfiles(driver);
-  await createProfileNamed(driver, profileName);
+  // Step 1: create + activate a fresh modpack.
+  await navToModpacks(driver);
+  await createModpackNamed(driver, modpackName);
   await waitForToastsToClear(driver);
-  await activateProfile(driver, profileName);
+  await activateModpack(driver, modpackName);
   await waitForToastsToClear(driver);
 
-  // Step 2: leave Profiles so the next visit remounts the view.
+  // Step 2: leave Modpacks so the next visit remounts the view.
   await navToMods(driver);
 
   // Step 3: seed an orphan folder under mods_disabled/. A proper-ish
@@ -972,9 +972,9 @@ async function specDisabledLibraryExtrasArePreserved(driver) {
     throw new Error(`orphan seed failed: ${orphanDir} does not exist after mkdir/writeFile`);
   }
 
-  // Step 4: nav back to Profiles. Disabled library extras should not
+  // Step 4: nav back to Modpacks. Disabled library extras should not
   // render a drift banner with a Repair action.
-  await navToProfiles(driver);
+  await navToModpacks(driver);
   const repairButtonLocator = By.xpath(
     "//*[contains(@class,'gf-banner') and contains(@class,'gf-banner-warn')]" +
       "//button[normalize-space(.)='Repair']",
@@ -1001,7 +1001,7 @@ async function specDisabledLibraryExtrasArePreserved(driver) {
 
 /* ── Helpers ────────────────────────────────────────────────────── */
 
-async function navToProfiles(driver) {
+async function navToModpacks(driver) {
   const nav = await waitForElement(
     driver,
     By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Modpacks']"),
@@ -1046,22 +1046,21 @@ async function waitForToastsToClear(driver) {
 }
 
 /**
- * Create a modpack through the 1.7.0 guided wizard: Modpacks tab →
- * "Create modpack" → "Start empty" (auto-advances) → Next → Continue
- * anyway → name → Create modpack. Waits for the new modpack to appear.
+ * Create a modpack through the 1.7.0 guided wizard: Modpacks tab ->
+ * "Create modpack" -> "Start from my active mods" (auto-advances) -> Next ->
+ * Continue anyway -> name -> Create modpack. Waits for the new modpack to appear.
  */
-async function createProfileNamed(driver, profileName) {
-  await navToProfiles(driver);
+async function createModpackNamed(driver, modpackName) {
+  await navToModpacks(driver);
   const entry = await waitForElement(
     driver,
     By.xpath("//button[contains(., 'Create modpack')]"),
     '"Create modpack" entry button',
   );
   await entry.click();
-  // Step 1 — snapshot the current active mods (clicking a tile advances).
+  // Step 1 - seed from current active mods (clicking a tile advances).
   // "From active" (vs "empty") keeps the new pack matching the on-disk
-  // enabled set, so it doesn't read as drift against the live install — the
-  // same contract the old inline "New profile" snapshot had.
+  // enabled set, so it does not read as drift against the live install.
   const strategy = await waitForElement(
     driver,
     By.xpath("//button[contains(@class,'gf-create-wizard-strategy-option')][contains(., 'Start from my active mods')]"),
@@ -1089,7 +1088,7 @@ async function createProfileNamed(driver, profileName) {
     By.css('#gf-create-wizard-name'),
     'wizard modpack-name input',
   );
-  await input.sendKeys(profileName);
+  await input.sendKeys(modpackName);
   const createBtn = await waitForElement(
     driver,
     By.xpath(
@@ -1101,8 +1100,8 @@ async function createProfileNamed(driver, profileName) {
   // The new modpack renders (as a card on the list, or the detail title).
   await waitForElement(
     driver,
-    By.xpath(`//*[normalize-space(text())='${profileName}']`),
-    `modpack "${profileName}" after create`,
+    By.xpath(`//*[normalize-space(text())='${modpackName}']`),
+    `modpack "${modpackName}" after create`,
     10_000,
   );
 }
@@ -1112,12 +1111,12 @@ async function createProfileNamed(driver, profileName) {
  * DETAIL view: open the card, click "Switch to", then wait for the ACTIVE
  * badge in the detail header (only the active modpack shows it).
  */
-async function activateProfile(driver, profileName) {
-  await navToProfiles(driver);
+async function activateModpack(driver, modpackName) {
+  await navToModpacks(driver);
   const card = await waitForElement(
     driver,
-    By.xpath(`//*[contains(@class,'gf-modpack-card-name') and normalize-space(.)='${profileName}']`),
-    `modpack card "${profileName}"`,
+    By.xpath(`//*[contains(@class,'gf-modpack-card-name') and normalize-space(.)='${modpackName}']`),
+    `modpack card "${modpackName}"`,
   );
   await card.click();
   const switchBtn = await waitForElement(
@@ -1125,7 +1124,7 @@ async function activateProfile(driver, profileName) {
     By.xpath(
       "//*[contains(@class,'gf-modpack-detail-head-actions')]//button[contains(., 'Switch to')]",
     ),
-    `"Switch to" button in detail for "${profileName}"`,
+    `"Switch to" button in detail for "${modpackName}"`,
   );
   await switchBtn.click();
   // Switching away from a modpack that has unsaved on-disk drift pops a
@@ -1146,7 +1145,7 @@ async function activateProfile(driver, profileName) {
     By.xpath(
       "//*[contains(@class,'gf-modpack-detail-title-row')]//*[normalize-space(.)='ACTIVE']",
     ),
-    `ACTIVE badge for "${profileName}"`,
+    `ACTIVE badge for "${modpackName}"`,
     30_000,
   );
 }
@@ -1320,7 +1319,7 @@ async function specAuditAgainstCassettesShowsOnePending(driver) {
   // `contains(text(),...)`: the pill button is `<Download/> {t(...)}`,
   // which React emits as two adjacent text nodes — XPath 1.0's
   // node-set-to-string conversion would only see the first (whitespace)
-  // text node. See specProfileSwitchPreservesFreeze for the longer note.
+  // text node. See specModpackSwitchPreservesFreeze for the longer note.
   await waitForElement(
     driver,
     By.xpath("//*[contains(text(),'QaTestMod')]/ancestor::*[contains(@class,'gf-mod-row') or contains(@class,'gf-card')][1]//*[contains(.,'Update available')]"),
@@ -1457,13 +1456,11 @@ async function specRepairWalkback(driver) {
 
 /**
  * Regression spec for issue #21: when a mod's `min_game_version` is above the
- * current game version, the user's manual Snapshot (kebab → "Snapshot from
- * current install") must NOT include it in the saved profile JSON. The bug:
- * `snapshot_current_with_sources` scans `mods/` + `mods_disabled/` indiscriminately,
- * so an on-disk incompatible mod ended up pinned into the manifest as
- * enabled=true. That's the same footgun commit 37df97f fixed for the
- * subscription path (`build_synced_profile_snapshot`) — this spec exercises
- * the manual-snapshot path which was missed.
+ * current game version, a modpack created from the active install must NOT
+ * include it in the saved profile JSON. The bug: automatic snapshot-style
+ * creation could treat an on-disk incompatible mod as selected and write it
+ * back into the manifest as enabled=true. That's the same footgun commit
+ * 37df97f fixed for the subscription path (`build_synced_profile_snapshot`).
  *
  * Flow:
  *   1. Seed SkippedMod on disk in mods/ (manifest declares min_game_version:
@@ -1479,11 +1476,11 @@ async function specRepairWalkback(driver) {
  *      enabled=false. enabled=false would still lie about disk state for
  *      a mod that's literally incompatible with the current game.
  */
-async function specSkippedModAbsentFromSnapshot(driver) {
+async function specIncompatibleModAbsentFromCreatedModpack(driver) {
   // Use a unique suffix so re-runs against the same config dir don't collide
-  // on the sanitized snapshot filename.
+  // on the sanitized modpack filename.
   const suffix = Date.now().toString(36);
-  const snapshotName = `QA Snap ${suffix}`;
+  const modpackName = `QA Compat ${suffix}`;
 
   await waitForToastsToClear(driver);
 
@@ -1537,13 +1534,13 @@ async function specSkippedModAbsentFromSnapshot(driver) {
   // The page-level Snapshot button this smoke originally clicked no longer
   // exists in the 1.7 UI; the Create Modpack wizard now uses this same command
   // before applying any optional membership edits.
-  await invokeTauri(driver, 'create_profile', { name: snapshotName });
+  await invokeTauri(driver, 'create_profile', { name: modpackName });
 
   // Step 4: read the saved profile JSON off disk. save_profile writes to
   // <profiles_path>/<sanitized_name>.json. sanitize_filename replaces
   // anything not alphanumeric/dash/underscore/dot with '_', so spaces
   // become underscores. profiles_path is <config>/profiles.
-  const sanitized = snapshotName.replace(/[^A-Za-z0-9._-]/g, '_');
+  const sanitized = modpackName.replace(/[^A-Za-z0-9._-]/g, '_');
   const profilePath = join(FIXTURE_DIRS.config, 'profiles', `${sanitized}.json`);
   let profile;
   try {
@@ -1551,7 +1548,7 @@ async function specSkippedModAbsentFromSnapshot(driver) {
     profile = JSON.parse(raw.replace(/^﻿/, ''));
   } catch (e) {
     throw new Error(
-      `Failed to read/parse snapshot profile at ${profilePath}: ${e instanceof Error ? e.message : String(e)}`,
+      `Failed to read/parse created modpack at ${profilePath}: ${e instanceof Error ? e.message : String(e)}`,
     );
   }
   if (!Array.isArray(profile.mods)) {
@@ -1560,21 +1557,21 @@ async function specSkippedModAbsentFromSnapshot(driver) {
     );
   }
 
-  // The load-bearing assertion: SkippedMod must NOT be in the snapshot at
+  // The load-bearing assertion: SkippedMod must NOT be in the modpack at
   // all (neither enabled nor disabled). The mod's min_game_version (999.0.0)
-  // is above the fixture game v0.105.0, so the filter in
-  // snapshot_current_inner must drop it entirely — matching
-  // build_synced_profile_snapshot's semantics on the subscription path.
+  // is above the fixture game v0.105.0, so the automatic create flow must
+  // leave it out entirely - matching build_synced_profile_snapshot's
+  // semantics on the subscription path.
   // Match on `name` OR `folder_name` since either could carry the label.
   const stillPresent = profile.mods.find(
     (m) => m.name === 'SkippedMod' || m.folder_name === 'SkippedMod',
   );
   if (stillPresent) {
     throw new Error(
-      `bug #21 regression: kebab→Snapshot profile at ${profilePath} contains SkippedMod ` +
+      `bug #21 regression: modpack created from active mods at ${profilePath} contains SkippedMod ` +
         `(min_game_version 999.0.0, fixture game v0.105.0). Entry: ` +
-        `${JSON.stringify(stillPresent)}. snapshot_current_with_sources must filter ` +
-        `mods whose min_game_version exceeds the current game version — see ` +
+        `${JSON.stringify(stillPresent)}. Create-from-active must not re-add ` +
+        `mods whose min_game_version exceeds the current game version - see ` +
         `build_synced_profile_snapshot in subscriptions.rs (commit 37df97f) for ` +
         `the matching fix on the subscription path.`,
     );
@@ -1624,11 +1621,11 @@ const CASSETTE_SPECS = [
 const STATE_SPECS = [
   ['toggle off moves QaTestMod to mods_disabled/', specToggleMovesQaTestModToDisabled],
   ['delete UpToDateMod via kebab → Remove mod…', specDeleteUpToDateMod],
-  ['create profile via Profiles → New profile', specCreateProfile],
-  ['profile switch preserves freeze state (v1.3.1 contract)', specProfileSwitchPreservesFreeze],
-  ['#22: toggle state sticky across profile switch', specToggleStickyAcrossProfileSwitch],
+  ['create modpack via Modpacks → Create modpack', specCreateModpack],
+  ['modpack switch preserves freeze state (v1.3.1 contract)', specModpackSwitchPreservesFreeze],
+  ['#22: toggle state sticky across modpack switch', specToggleStickyAcrossModpackSwitch],
   ['#20: disabled library extras are preserved', specDisabledLibraryExtrasArePreserved],
-  ['#21: skipped mods not in fresh snapshot', specSkippedModAbsentFromSnapshot],
+  ['#21: incompatible mods stay out of created modpack', specIncompatibleModAbsentFromCreatedModpack],
 ];
 
 const SPECS = CASSETTE_MODE

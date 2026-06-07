@@ -158,7 +158,10 @@ mod app_dir_name_tests {
 
     #[test]
     fn dev_version_uses_dev_dir() {
-        assert_eq!(dir_name_for("1.6.1-dev.pr42.ga1b2c3d"), "sts2-mod-manager-dev");
+        assert_eq!(
+            dir_name_for("1.6.1-dev.pr42.ga1b2c3d"),
+            "sts2-mod-manager-dev"
+        );
     }
 }
 
@@ -231,9 +234,7 @@ impl AppStateInner {
                 path.join("mods")
             }
         };
-        let disabled_mods_path = mods_path.parent()
-            .unwrap_or(&path)
-            .join("mods_disabled");
+        let disabled_mods_path = mods_path.parent().unwrap_or(&path).join("mods_disabled");
 
         // Ensure mod directories exist
         let _ = std::fs::create_dir_all(&mods_path);
@@ -269,10 +270,17 @@ fn read_release_info_version(game_path: &Path) -> Option<String> {
     let raw = value.get("version")?.as_str()?.trim().to_string();
     let stripped = raw.trim_start_matches('v').to_string();
     if stripped.is_empty() {
-        log::warn!("release_info.json had empty version string at {}", path.display());
+        log::warn!(
+            "release_info.json had empty version string at {}",
+            path.display()
+        );
         None
     } else {
-        log::info!("Detected game version v{} from {}", stripped, path.display());
+        log::info!(
+            "Detected game version v{} from {}",
+            stripped,
+            path.display()
+        );
         Some(stripped)
     }
 }
@@ -283,7 +291,10 @@ pub fn create_app_state() -> AppState {
 
 pub(crate) fn persist_game_path(config_path: &Path, game_path: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(config_path)?;
-    std::fs::write(config_path.join(GAME_PATH_FILE), game_path.to_string_lossy().as_ref())
+    std::fs::write(
+        config_path.join(GAME_PATH_FILE),
+        game_path.to_string_lossy().as_ref(),
+    )
 }
 
 pub(crate) fn load_persisted_game_path(config_path: &Path) -> Option<PathBuf> {

@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
 use crate::mod_sources::load_sources;
-use crate::mods::{install_mod_from_archive, scan_mods, scan_disabled_mods, ModInfo};
+use crate::mods::{install_mod_from_archive, scan_disabled_mods, scan_mods, ModInfo};
 use crate::state::AppState;
 
 /// Payload emitted to the frontend when a mod is auto-installed from Downloads.
@@ -36,10 +36,7 @@ pub struct ModAutoInstallFailed {
 /// Returns the user-configured `nexus_download_dir` from state when set;
 /// falls back to the OS default Downloads directory otherwise.
 pub(crate) fn resolve_watch_dir(state: &AppState) -> Option<PathBuf> {
-    let configured = state
-        .lock()
-        .ok()
-        .and_then(|s| s.nexus_download_dir.clone());
+    let configured = state.lock().ok().and_then(|s| s.nexus_download_dir.clone());
     if let Some(dir) = configured {
         return Some(dir);
     }
@@ -84,10 +81,7 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
         loop {
             match rx.recv() {
                 Ok(Ok(event)) => {
-                    if !matches!(
-                        event.kind,
-                        EventKind::Create(_) | EventKind::Modify(_)
-                    ) {
+                    if !matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_)) {
                         continue;
                     }
 
@@ -135,10 +129,7 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                         // file in Downloads and can re-trigger the watcher
                         // (e.g., by saving the file again) once the game exits.
                         if crate::game::is_game_running() {
-                            log::info!(
-                                "Downloads watcher: skipping {:?} — game is running",
-                                path
-                            );
+                            log::info!("Downloads watcher: skipping {:?} — game is running", path);
                             let _ = app.emit("mod-auto-install-failed", serde_json::json!({
                                 "file_name": path.file_name().unwrap_or_default().to_string_lossy().to_string(),
                                 "error": "Slay the Spire 2 is running. Close the game and re-save the file to install."
@@ -216,24 +207,29 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                         // the new folder. Fresh installs just snapshot the
                         // post-install state so the FIRST update preserves
                         // things.
-                        let replaced_identity = existing_mod.as_ref().map(|e| {
-                            (e.name.clone(), e.folder_name.clone())
-                        });
+                        let replaced_identity = existing_mod
+                            .as_ref()
+                            .map(|e| (e.name.clone(), e.folder_name.clone()));
 
                         // Step 1 (update only): read user-edited configs.
                         // Must happen BEFORE remove_existing_mod_files —
                         // that helper deletes the wrap folder, after which
                         // there's nothing left to preserve.
-                        let pre_update_preserved = existing_mod.as_ref().map(|existing| {
-                            let old_folder = existing.folder_name.clone()
-                                .unwrap_or_else(|| existing.name.clone());
-                            crate::mods::prepare_update_with_preserved_configs(
-                                &old_folder,
-                                &existing.name,
-                                &mods_path,
-                                &config_path,
-                            )
-                        }).unwrap_or_default();
+                        let pre_update_preserved = existing_mod
+                            .as_ref()
+                            .map(|existing| {
+                                let old_folder = existing
+                                    .folder_name
+                                    .clone()
+                                    .unwrap_or_else(|| existing.name.clone());
+                                crate::mods::prepare_update_with_preserved_configs(
+                                    &old_folder,
+                                    &existing.name,
+                                    &mods_path,
+                                    &config_path,
+                                )
+                            })
+                            .unwrap_or_default();
 
                         // For an update, move the old mod's files ASIDE rather
                         // than deleting them outright. If the install below
@@ -273,7 +269,9 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                     // preservation possible (nothing to
                                     // preserve from).
                                     crate::mods::snapshot_after_fresh_install(
-                                        &info, &mods_path, &config_path,
+                                        &info,
+                                        &mods_path,
+                                        &config_path,
                                     );
                                     Ok((info, Vec::new(), Vec::new()))
                                 }
@@ -342,14 +340,16 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                                 &state,
                                             )
                                         });
-                                    let version_to_store = nexus_ver
-                                        .unwrap_or_else(|| mod_info.version.clone());
+                                    let version_to_store =
+                                        nexus_ver.unwrap_or_else(|| mod_info.version.clone());
                                     version_to_store_for_bundle = version_to_store.clone();
-                                    if version_to_store != "unknown" && version_to_store != "0.0.0" {
+                                    if version_to_store != "unknown" && version_to_store != "0.0.0"
+                                    {
                                         // Folder-first key so installed_version is stored
                                         // under the same DB key the folder-first read
                                         // path (enrich/audit/pin) uses.
-                                        let install_key = mod_info.folder_name
+                                        let install_key = mod_info
+                                            .folder_name
                                             .as_deref()
                                             .unwrap_or(mod_info.name.as_str());
                                         crate::mod_sources::update_installed_version(
@@ -371,7 +371,8 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                 // is a no-op (enrich_bundle_sidecar returns false and
                                 // leaves no side-effects).
                                 {
-                                    let install_key = mod_info.folder_name
+                                    let install_key = mod_info
+                                        .folder_name
                                         .as_deref()
                                         .unwrap_or(mod_info.name.as_str());
                                     let sources_db = crate::mod_sources::load_sources(&config_path);
@@ -381,11 +382,14 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                         &mod_info.name,
                                         mod_info.mod_id.as_deref(),
                                     );
-                                    let (nexus_url, nexus_game_domain, nexus_mod_id) =
-                                        nexus_entry.map_or(
-                                            (None, None, None),
-                                            |e| (e.nexus_url.clone(), e.nexus_game_domain.clone(), e.nexus_mod_id),
-                                        );
+                                    let (nexus_url, nexus_game_domain, nexus_mod_id) = nexus_entry
+                                        .map_or((None, None, None), |e| {
+                                            (
+                                                e.nexus_url.clone(),
+                                                e.nexus_game_domain.clone(),
+                                                e.nexus_mod_id,
+                                            )
+                                        });
                                     let bundle_version = if version_to_store_for_bundle != "unknown"
                                         && version_to_store_for_bundle != "0.0.0"
                                     {
@@ -488,11 +492,25 @@ struct ZipIdentity {
 fn peek_zip_identity(zip_path: &Path) -> ZipIdentity {
     let file = match std::fs::File::open(zip_path) {
         Ok(f) => f,
-        Err(_) => return ZipIdentity { name: None, mod_id: None, folder_name: None, zip_stem_clean: None },
+        Err(_) => {
+            return ZipIdentity {
+                name: None,
+                mod_id: None,
+                folder_name: None,
+                zip_stem_clean: None,
+            }
+        }
     };
     let mut archive = match zip::ZipArchive::new(file) {
         Ok(a) => a,
-        Err(_) => return ZipIdentity { name: None, mod_id: None, folder_name: None, zip_stem_clean: None },
+        Err(_) => {
+            return ZipIdentity {
+                name: None,
+                mod_id: None,
+                folder_name: None,
+                zip_stem_clean: None,
+            }
+        }
     };
 
     // Also extract the folder name from the zip structure
@@ -528,12 +546,16 @@ fn peek_zip_identity(zip_path: &Path) -> ZipIdentity {
             // Try to read and parse
             let mut buf = String::new();
             if std::io::Read::read_to_string(&mut entry, &mut buf).is_ok() {
-                if let Ok(val) = serde_json::from_str::<serde_json::Value>(crate::mods::strip_utf8_bom(&buf)) {
-                    let mod_name = val.get("Name")
+                if let Ok(val) =
+                    serde_json::from_str::<serde_json::Value>(crate::mods::strip_utf8_bom(&buf))
+                {
+                    let mod_name = val
+                        .get("Name")
                         .or_else(|| val.get("name"))
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string());
-                    let mod_id = val.get("Id")
+                    let mod_id = val
+                        .get("Id")
                         .or_else(|| val.get("id"))
                         .or_else(|| val.get("ModId"))
                         .or_else(|| val.get("mod_id"))
@@ -809,7 +831,10 @@ fn stash_one(orig: PathBuf, moved: &mut Vec<(PathBuf, PathBuf)>) {
         return;
     }
     let Some(temp) = unique_stash_sibling(&orig) else {
-        log::error!("Could not allocate a stash path for {:?}; leaving in place", orig);
+        log::error!(
+            "Could not allocate a stash path for {:?}; leaving in place",
+            orig
+        );
         return;
     };
     match std::fs::rename(&orig, &temp) {
@@ -830,10 +855,7 @@ fn stash_existing_mod_files(
     disabled_path: Option<&Path>,
 ) -> StashedMod {
     // Determine the folder name to look for
-    let folder = existing
-        .folder_name
-        .as_deref()
-        .unwrap_or(&existing.name);
+    let folder = existing.folder_name.as_deref().unwrap_or(&existing.name);
 
     let mut moved: Vec<(PathBuf, PathBuf)> = Vec::new();
 
@@ -899,7 +921,10 @@ fn fetch_nexus_version_blocking(
             .get(url)
             .header("apikey", &api_key)
             .header("accept", "application/json")
-            .header("user-agent", concat!("sts2-mod-manager/", env!("CARGO_PKG_VERSION")))
+            .header(
+                "user-agent",
+                concat!("sts2-mod-manager/", env!("CARGO_PKG_VERSION")),
+            )
     };
 
     // 1. Page-level version as the fallback.
@@ -953,18 +978,13 @@ fn attach_pending_nexus_source(
             Err(_) => return,
         };
         // Drop entries older than 30 minutes before searching.
-        s.pending_nexus_installs.retain(|p| {
-            Instant::now().duration_since(p.queued_at) < Duration::from_secs(30 * 60)
-        });
+        s.pending_nexus_installs
+            .retain(|p| Instant::now().duration_since(p.queued_at) < Duration::from_secs(30 * 60));
 
         let stem_lower = file_name.to_lowercase();
         let installed_norm = normalize_mod_name(installed_name);
         let single_pending_filename_match = s.pending_nexus_installs.len() == 1
-            && download_filename_matches_installed_mod(
-                file_name,
-                installed_name,
-                installed_folder,
-            );
+            && download_filename_matches_installed_mod(file_name, installed_name, installed_folder);
 
         let idx = s.pending_nexus_installs.iter().position(|p| {
             // Nexus filenames look like "ModName-{mod_id}-{version}-...zip"

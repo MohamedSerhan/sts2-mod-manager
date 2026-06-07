@@ -257,7 +257,10 @@ fn install_mod_from_archive_unchecked(archive_path: &Path, mods_path: &Path) -> 
             extract_7z_to_dir(archive_path, staging.path())?;
             let repack_name = format!(
                 "{}.zip",
-                archive_path.file_stem().unwrap_or_default().to_string_lossy()
+                archive_path
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
             );
             let repack_zip = staging.path().join(repack_name);
             repack_dir_as_zip(staging.path(), &repack_zip)?;
@@ -273,7 +276,10 @@ fn install_mod_from_archive_unchecked(archive_path: &Path, mods_path: &Path) -> 
             extract_rar_to_dir(archive_path, staging.path())?;
             let repack_name = format!(
                 "{}.zip",
-                archive_path.file_stem().unwrap_or_default().to_string_lossy()
+                archive_path
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
             );
             let repack_zip = staging.path().join(repack_name);
             repack_dir_as_zip(staging.path(), &repack_zip)?;
@@ -745,7 +751,10 @@ pub fn read_user_edited_configs(
                 // gets the upstream's possibly-improved defaults.
             }
             _ => {
-                preserved.push(PreservedConfig { rel_path: rel, bytes });
+                preserved.push(PreservedConfig {
+                    rel_path: rel,
+                    bytes,
+                });
             }
         }
     }
@@ -853,7 +862,10 @@ pub fn finalize_update_with_preserved_configs(
                 names.join(", "),
             );
             // Leave the baseline as-is (no re-snapshot) and surface the loss.
-            return Ok(PreservedConfigOutcome { preserved: Vec::new(), lost: names });
+            return Ok(PreservedConfigOutcome {
+                preserved: Vec::new(),
+                lost: names,
+            });
         }
     }
 
@@ -865,7 +877,10 @@ pub fn finalize_update_with_preserved_configs(
         config_path,
     );
 
-    Ok(PreservedConfigOutcome { preserved: names, lost: Vec::new() })
+    Ok(PreservedConfigOutcome {
+        preserved: names,
+        lost: Vec::new(),
+    })
 }
 
 /// Snapshot the freshly-installed mod's config files so future updates
@@ -1205,10 +1220,16 @@ mod archive_dispatch_tests {
         use crate::mods::bundle::is_bundle_container;
         let tmp = tempfile::tempdir().unwrap();
         let zip = tmp.path().join("Solo.zip");
-        write_zip_file(&zip, vec![
-            ("Solo/Solo.json", br#"{"id":"Solo","name":"Solo","version":"1.0.0"}"#.to_vec()),
-            ("Solo/Solo.dll", b"dll".to_vec()),
-        ]);
+        write_zip_file(
+            &zip,
+            vec![
+                (
+                    "Solo/Solo.json",
+                    br#"{"id":"Solo","name":"Solo","version":"1.0.0"}"#.to_vec(),
+                ),
+                ("Solo/Solo.dll", b"dll".to_vec()),
+            ],
+        );
         let mods = tempfile::tempdir().unwrap();
         install_mod_from_archive(&zip, mods.path()).expect("single installs");
         assert!(!is_bundle_container(&mods.path().join("Solo")));
@@ -1654,7 +1675,8 @@ mod config_snapshot_tests {
             "nothing is reported as preserved on a failed restore"
         );
 
-        let baseline = crate::mod_sources::load_config_snapshot(Some("MyMod"), "MyMod", config_path);
+        let baseline =
+            crate::mod_sources::load_config_snapshot(Some("MyMod"), "MyMod", config_path);
         assert_eq!(
             baseline.get("settings.cfg").map(String::as_str),
             Some("old-baseline-hash"),

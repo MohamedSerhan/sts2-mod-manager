@@ -17,6 +17,7 @@ The harness exists to fix that. Scenarios use **real fixtures** — actual manif
 ```
 qa/
 ├── README.md                  ← you are here
+├── coverage-matrix.md         ← current automated owner for each scenario/bug
 ├── walkthrough-findings.md    ← coverage audit + historical-bug tracker
 ├── scenarios/                 ← one .md per user flow
 │   ├── _template.md           ← shape every scenario follows
@@ -50,6 +51,7 @@ Conceptually:
 |---|---|---|
 | Rust unit + integration | `npm run qa:rust` (or `cargo test --manifest-path=src-tauri/Cargo.toml`) | ~10s |
 | Rust cassette integration | `npm run qa:rust:cassette` | ~15s |
+| Coverage matrix guard | `npm run qa:matrix` | <1s |
 | Backend coverage report | `cargo llvm-cov --manifest-path src-tauri/Cargo.toml --summary-only` | ~30s |
 | Frontend unit tests | `npm run qa:unit` | ~5s |
 | Frontend coverage + gate | `npm run qa:coverage` (enforces vitest.config.ts thresholds) | ~10s |

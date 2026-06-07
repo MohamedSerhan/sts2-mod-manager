@@ -280,7 +280,7 @@ describe('<App>', () => {
     });
   });
 
-  it('clicking Profiles swaps to the Profiles view', async () => {
+  it('clicking Modpacks swaps to the Modpacks view', async () => {
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
@@ -819,7 +819,7 @@ describe('<App>', () => {
     expect(getInvokeCalls().some((c) => c.cmd === 'install_mod_from_file')).toBe(false);
   });
 
-  it('Profiles nav badge appears when there are pending pack updates', async () => {
+  it('Modpacks nav badge appears when there are pending pack updates', async () => {
     registerInvokeHandler('check_subscription_updates', () => [
       { share_id: 'alice/abcd', profile_name: 'AlicePack', has_update: true, added_mods: ['X'], updated_mods: [], removed_mods: [], remote_profile: null },
     ]);
@@ -1063,7 +1063,7 @@ describe('<App>', () => {
     });
   });
 
-  it('ProfileSwitcher "Manage all" routes to Profiles view', async () => {
+  it('ProfileSwitcher "Manage all" routes to the Modpacks view', async () => {
     registerInvokeHandler('get_active_profile', () => 'MyPack');
     registerInvokeHandler('list_profiles_cmd', () => [
       { name: 'MyPack', mods: [], created_at: '2026-01-01' },
@@ -1468,6 +1468,54 @@ describe('<App>', () => {
       );
     });
     debugSpy.mockRestore();
+  });
+
+  it('deep-link: cancelled URL can be retried after the dedupe window expires', async () => {
+    let now = 1_000;
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    let fetches = 0;
+    try {
+      registerInvokeHandler('get_subscriptions', () => []);
+      registerInvokeHandler('consume_pending_deep_link', () => null);
+      registerInvokeHandler('fetch_shared_profile_cmd', () => {
+        fetches += 1;
+        return {
+          name: 'RetryPack', mods: [{ name: 'M1' }], created_at: '2026-01-01',
+        };
+      });
+      const user = userEvent.setup();
+      render(<App />);
+      await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+
+      await fireTauriEvent('sts2mm-open-url', 'sts2mm://import/alice/AA5A-315D-61AE');
+      await screen.findByText(/Install this modpack/i);
+      expect(fetches).toBe(1);
+
+      const modalFoot = document.querySelector('.gf-modal-foot') as HTMLElement | null;
+      expect(modalFoot).toBeTruthy();
+      const cancelBtn = Array.from(modalFoot!.querySelectorAll('button')).find(
+        (b) => /^Cancel$/i.test(b.textContent?.trim() ?? ''),
+      ) as HTMLButtonElement | undefined;
+      expect(cancelBtn).toBeDefined();
+      await user.click(cancelBtn!);
+      await waitFor(() => {
+        expect(screen.queryByText(/Install this modpack/i)).toBeNull();
+      });
+
+      await fireTauriEvent('sts2mm-open-url', 'sts2mm://import/alice/AA5A-315D-61AE');
+      await waitFor(() => {
+        expect(fetches).toBe(1);
+      });
+
+      now += 2_001;
+      await fireTauriEvent('sts2mm-open-url', 'sts2mm://import/alice/AA5A-315D-61AE');
+      await waitFor(() => {
+        expect(fetches).toBe(2);
+      });
+      expect(await screen.findByText(/Install this modpack/i)).toBeInTheDocument();
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
   it('deep-link: cold-start drains pending URL via consume_pending_deep_link', async () => {
@@ -1949,10 +1997,10 @@ describe('<App>', () => {
     });
   });
 
-  it('ProfilesView PublishModal "Configure later in Settings" routes to Settings', async () => {
+  it('Modpacks PublishModal "Configure later in Settings" routes to Settings', async () => {
     // Trigger flow:
     //   1. Mount with a profile that's not yet shared and github_token_set = false.
-    //   2. Navigate to Profiles, click the Share button on the profile row.
+    //   2. Navigate to Modpacks, open the modpack detail, and click Share.
     //   3. PublishModal renders the inline ShareSetupPanel (replaces the
     //      old red "GitHub token required" block) with a
     //      "Configure later in Settings" escape-hatch button.
@@ -1994,7 +2042,7 @@ describe('<App>', () => {
     });
   });
 
-  it("Home's empty-state CTA routes to Profiles (1.7 v7 single-block launcher)", async () => {
+  it("Home's empty-state CTA routes to Modpacks (1.7 v7 single-block launcher)", async () => {
     // The 1.7 v7 Home is a single-block launcher. The "Your other packs"
     // inline section + "View all in Profiles" link were removed; their
     // replacement is the empty-state hero's "Open Modpacks" CTA which
@@ -2174,7 +2222,7 @@ describe('<App>', () => {
     });
   });
 
-  it('Profiles sidebar badge: with no pending updates the badge is hidden', async () => {
+  it('Modpacks sidebar badge: with no pending updates the badge is hidden', async () => {
     // App.tsx:511 — `id === 'profiles' && subUpdates.length > 0`. With
     // length=0 (default), the badge span is NOT rendered.
     render(<App />);

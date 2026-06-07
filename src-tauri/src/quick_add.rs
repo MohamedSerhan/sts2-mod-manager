@@ -48,10 +48,7 @@ pub fn resolve_github_url(url: &str) -> Result<(String, String)> {
 
     let host = parsed.host_str().unwrap_or("");
     if host != "github.com" && host != "www.github.com" {
-        return Err(AppError::Other(format!(
-            "Not a GitHub URL: {}",
-            url
-        )));
+        return Err(AppError::Other(format!("Not a GitHub URL: {}", url)));
     }
 
     let segments: Vec<&str> = parsed
@@ -92,10 +89,7 @@ pub fn resolve_nexus_url(url: &str) -> Result<(String, u64)> {
             })?;
             return Ok((game_domain, mod_id));
         }
-        return Err(AppError::Other(format!(
-            "Invalid Nexus shorthand: {}",
-            url
-        )));
+        return Err(AppError::Other(format!("Invalid Nexus shorthand: {}", url)));
     }
 
     // Full URL: https://www.nexusmods.com/game/mods/1234
@@ -103,10 +97,7 @@ pub fn resolve_nexus_url(url: &str) -> Result<(String, u64)> {
 
     let host = parsed.host_str().unwrap_or("");
     if host != "nexusmods.com" && host != "www.nexusmods.com" {
-        return Err(AppError::Other(format!(
-            "Not a Nexus Mods URL: {}",
-            url
-        )));
+        return Err(AppError::Other(format!("Not a Nexus Mods URL: {}", url)));
     }
 
     let segments: Vec<&str> = parsed
@@ -166,7 +157,8 @@ mod url_resolver_tests {
 
     #[test]
     fn resolve_nexus_url_handles_full_and_shorthand() {
-        let (g, id) = resolve_nexus_url("https://www.nexusmods.com/slaythespire2/mods/123").unwrap();
+        let (g, id) =
+            resolve_nexus_url("https://www.nexusmods.com/slaythespire2/mods/123").unwrap();
         assert_eq!(g.as_str(), "slaythespire2");
         assert_eq!(id, 123);
 
@@ -256,7 +248,11 @@ pub async fn quick_add_mod(
         entry.github_repo = Some(format!("{}/{}", owner, repo));
         entry.github_auto_detected = false;
         if let Err(e) = save_sources(&db, &config_path) {
-            log::error!("Quick add: failed to persist GitHub source for '{}': {}", mod_info.name, e);
+            log::error!(
+                "Quick add: failed to persist GitHub source for '{}': {}",
+                mod_info.name,
+                e
+            );
         }
 
         return Ok(QuickAddResult::GithubInstalled { mod_info });
@@ -264,7 +260,11 @@ pub async fn quick_add_mod(
 
     // Try Nexus
     if let Ok((game_domain, mod_id)) = resolve_nexus_url(&url) {
-        log::info!("Quick add resolved as Nexus: {}/mods/{}", game_domain, mod_id);
+        log::info!(
+            "Quick add resolved as Nexus: {}/mods/{}",
+            game_domain,
+            mod_id
+        );
         let api_key = {
             let s = state.lock().map_err(|e| e.to_string())?;
             s.nexus_api_key

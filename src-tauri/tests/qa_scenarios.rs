@@ -11,8 +11,10 @@
 use std::fs;
 use std::path::Path;
 
+use sts2_mod_manager_lib::mod_sources::{
+    load_sources, lookup_entry, save_sources, ModSourceEntry, ModSourcesDb,
+};
 use sts2_mod_manager_lib::mods::{install_mod_from_zip, scan_mods, ModInfo};
-use sts2_mod_manager_lib::mod_sources::{load_sources, lookup_entry, save_sources, ModSourceEntry, ModSourcesDb};
 
 /// Fixture: drop a BaseLib install into `mods/BaseLib/` with its BOM-
 /// prefixed manifest. Returns the tempdir so callers own its lifetime.
@@ -120,7 +122,10 @@ fn scenario_004b_name_only_lookup_misses_folder_keyed_pin_when_name_differs() {
     pin_mod_in_sources(config_tmp.path(), "card_art_editor_v2");
 
     let scanned = scan_mods(mods_tmp.path());
-    let cae = scanned.iter().find(|m| m.name == "Card Art Editor").unwrap();
+    let cae = scanned
+        .iter()
+        .find(|m| m.name == "Card Art Editor")
+        .unwrap();
 
     let db = load_sources(config_tmp.path());
 
@@ -184,7 +189,11 @@ fn scenario_003_pin_lookup_preserves_state_across_apply_decision() {
     // On-disk files are still where we put them — neither this test nor
     // any side effect of the lookup touched them.
     assert!(mods_tmp.path().join("BaseLib").join("BaseLib.dll").exists());
-    assert!(mods_tmp.path().join("BaseLib").join("BaseLib.json").exists());
+    assert!(mods_tmp
+        .path()
+        .join("BaseLib")
+        .join("BaseLib.json")
+        .exists());
 }
 
 /// Historical bug #11 — zip-slip refusal. A malicious zip with a
@@ -206,7 +215,8 @@ fn historical_11_zip_slip_traversal_is_refused() {
         let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
         // A safe entry — the install should produce SOMETHING valid.
         zw.start_file("SafeMod/manifest.json", opts).unwrap();
-        zw.write_all(br#"{"name":"SafeMod","version":"0.1.0"}"#).unwrap();
+        zw.write_all(br#"{"name":"SafeMod","version":"0.1.0"}"#)
+            .unwrap();
         zw.start_file("SafeMod/SafeMod.dll", opts).unwrap();
         zw.write_all(b"safe-bytes").unwrap();
         // The traversal entry — must be silently dropped, not extracted.
@@ -216,8 +226,8 @@ fn historical_11_zip_slip_traversal_is_refused() {
     }
 
     let mods_tmp = tempfile::tempdir().unwrap();
-    let info =
-        install_mod_from_zip(&zip_path, mods_tmp.path()).expect("install should succeed for the safe content");
+    let info = install_mod_from_zip(&zip_path, mods_tmp.path())
+        .expect("install should succeed for the safe content");
     assert_eq!(info.name, "SafeMod");
 
     // The escaped file must NOT exist anywhere outside mods_tmp.
@@ -228,9 +238,18 @@ fn historical_11_zip_slip_traversal_is_refused() {
         escaped_at_root.display()
     );
     // Sibling check too — different traversal depth.
-    let escaped_sibling = mods_tmp.path().parent().unwrap().parent().map(|p| p.join("escaped.txt"));
+    let escaped_sibling = mods_tmp
+        .path()
+        .parent()
+        .unwrap()
+        .parent()
+        .map(|p| p.join("escaped.txt"));
     if let Some(p) = escaped_sibling {
-        assert!(!p.exists(), "zip-slip succeeded (deeper escape): {}", p.display());
+        assert!(
+            !p.exists(),
+            "zip-slip succeeded (deeper escape): {}",
+            p.display()
+        );
     }
 }
 
@@ -253,7 +272,8 @@ fn historical_4_mixed_layout_zip_lands_under_one_folder() {
         zw.start_file("RitsuLib.dll", opts).unwrap();
         zw.write_all(b"dll-bytes").unwrap();
         zw.start_file("RitsuLib.json", opts).unwrap();
-        zw.write_all(br#"{"name":"RitsuLib","version":"0.2.29"}"#).unwrap();
+        zw.write_all(br#"{"name":"RitsuLib","version":"0.2.29"}"#)
+            .unwrap();
         // A side subdirectory in the same zip — exactly the RitsuLib case.
         zw.start_file("Translations/en.txt", opts).unwrap();
         zw.write_all(b"english strings").unwrap();
@@ -266,19 +286,30 @@ fn historical_4_mixed_layout_zip_lands_under_one_folder() {
     // The wrap folder name should be derived from the manifest's id /
     // dll stem (one of them is "RitsuLib"). Either way, NOTHING should
     // be at the mods root other than that wrap directory.
-    let root_entries: Vec<_> =
-        std::fs::read_dir(mods_tmp.path()).unwrap().filter_map(|e| e.ok()).collect();
+    let root_entries: Vec<_> = std::fs::read_dir(mods_tmp.path())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .collect();
     assert_eq!(
         root_entries.len(),
         1,
         "Mixed-layout zip must wrap into a single folder. Found {} entries at mods root: {:?}",
         root_entries.len(),
-        root_entries.iter().map(|e| e.file_name()).collect::<Vec<_>>()
+        root_entries
+            .iter()
+            .map(|e| e.file_name())
+            .collect::<Vec<_>>()
     );
     let wrap = &root_entries[0].path();
     assert!(wrap.is_dir(), "the single root entry must be a directory");
-    assert!(wrap.join("RitsuLib.dll").exists(), "DLL must be inside the wrap folder");
-    assert!(wrap.join("RitsuLib.json").exists(), "manifest must be inside the wrap folder");
+    assert!(
+        wrap.join("RitsuLib.dll").exists(),
+        "DLL must be inside the wrap folder"
+    );
+    assert!(
+        wrap.join("RitsuLib.json").exists(),
+        "manifest must be inside the wrap folder"
+    );
     assert!(
         wrap.join("Translations").join("en.txt").exists(),
         "Translations subdir must be preserved INSIDE the wrap folder. \
@@ -288,7 +319,73 @@ fn historical_4_mixed_layout_zip_lands_under_one_folder() {
     assert_eq!(info.name, "RitsuLib");
 }
 
-/// Historical bug #6 — manifest-name rename between versions stranded
+/// Historical bug #10 - dependency payloads must survive install.
+///
+/// Some .NET mods ship native libraries, data files, config sidecars, or
+/// resources next to the DLL. The old installer filtered archives down to
+/// .dll/.json/.pck and produced runtime ReflectionTypeLoadException failures.
+/// This fixture includes non-DLL dependency files and asserts the install
+/// extracts them exactly where the mod expects them.
+#[test]
+fn historical_10_dependency_files_survive_zip_install() {
+    use std::io::Write as _;
+    use zip::write::SimpleFileOptions;
+
+    let src_tmp = tempfile::tempdir().unwrap();
+    let zip_path = src_tmp.path().join("DependencyRich.zip");
+    {
+        let f = std::fs::File::create(&zip_path).unwrap();
+        let mut zw = zip::ZipWriter::new(f);
+        let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        zw.start_file("DependencyRich/DependencyRich.json", opts)
+            .unwrap();
+        zw.write_all(br#"{"id":"DependencyRich","name":"Dependency Rich","version":"1.2.3"}"#)
+            .unwrap();
+        zw.start_file("DependencyRich/DependencyRich.dll", opts)
+            .unwrap();
+        zw.write_all(b"dll-bytes").unwrap();
+        zw.start_file("DependencyRich/lib/helper.dat", opts)
+            .unwrap();
+        zw.write_all(b"runtime-data").unwrap();
+        zw.start_file(
+            "DependencyRich/runtimes/linux-x64/native/libhelper.so",
+            opts,
+        )
+        .unwrap();
+        zw.write_all(b"native-lib").unwrap();
+        zw.start_file("DependencyRich/Translations/en.txt", opts)
+            .unwrap();
+        zw.write_all(b"localized text").unwrap();
+        zw.finish().unwrap();
+    }
+
+    let mods_tmp = tempfile::tempdir().unwrap();
+    let info = install_mod_from_zip(&zip_path, mods_tmp.path()).expect("install should succeed");
+    assert_eq!(info.name, "Dependency Rich");
+    assert_eq!(info.version, "1.2.3");
+
+    let installed = mods_tmp.path().join("DependencyRich");
+    for rel in [
+        "lib/helper.dat",
+        "runtimes/linux-x64/native/libhelper.so",
+        "Translations/en.txt",
+    ] {
+        assert!(
+            installed.join(rel).exists(),
+            "installer must preserve non-manifest dependency file {}",
+            rel
+        );
+        assert!(
+            info.files
+                .iter()
+                .any(|f| f == &format!("DependencyRich/{}", rel)),
+            "ModInfo.files should track preserved dependency file {} for future cleanup/update",
+            rel
+        );
+    }
+}
+
+/// Historical bug #6 - manifest-name rename between versions stranded
 /// the source link.
 ///
 /// Real-world reproducer: BAKAOLC ships `STS2-ShowPlayerHandCards` for a
@@ -302,7 +399,9 @@ fn historical_4_mixed_layout_zip_lands_under_one_folder() {
 /// `nexus_url`, and `installed_version` from old key to new key.
 #[test]
 fn historical_6_source_entry_migrates_on_manifest_rename() {
-    use sts2_mod_manager_lib::mod_sources::{migrate_source_entry, save_sources, ModSourceEntry, ModSourcesDb};
+    use sts2_mod_manager_lib::mod_sources::{
+        migrate_source_entry, save_sources, ModSourceEntry, ModSourcesDb,
+    };
 
     let config_tmp = tempfile::tempdir().unwrap();
 
@@ -331,9 +430,15 @@ fn historical_6_source_entry_migrates_on_manifest_rename() {
          and the user's pin / GitHub link / version-stamp all stranded.",
     );
 
-    assert_eq!(new_entry.github_repo.as_deref(), Some("BAKAOLC/STS2-ShowPlayerHandCards"));
+    assert_eq!(
+        new_entry.github_repo.as_deref(),
+        Some("BAKAOLC/STS2-ShowPlayerHandCards")
+    );
     assert!(new_entry.pinned, "pinned state must survive the rename");
-    assert_eq!(new_entry.nexus_url.as_deref(), Some("https://www.nexusmods.com/slaythespire2/mods/42"));
+    assert_eq!(
+        new_entry.nexus_url.as_deref(),
+        Some("https://www.nexusmods.com/slaythespire2/mods/42")
+    );
     assert_eq!(new_entry.nexus_mod_id, Some(42));
     assert_eq!(new_entry.installed_version.as_deref(), Some("v0.4.0"));
 
@@ -445,14 +550,22 @@ fn kitchen_sink_scan_handles_every_quirk_at_once() {
         scanned.len()
     );
 
-    let baselib_e = scanned.iter().find(|m| m.folder_name.as_deref() == Some("BaseLib")).unwrap();
+    let baselib_e = scanned
+        .iter()
+        .find(|m| m.folder_name.as_deref() == Some("BaseLib"))
+        .unwrap();
     assert_eq!(baselib_e.version, "v3.1.2");
 
-    let cae_entries: Vec<&ModInfo> =
-        scanned.iter().filter(|m| m.name == "Card Art Editor").collect();
+    let cae_entries: Vec<&ModInfo> = scanned
+        .iter()
+        .filter(|m| m.name == "Card Art Editor")
+        .collect();
     assert_eq!(cae_entries.len(), 2);
 
-    let shc_e = scanned.iter().find(|m| m.name == "Show Player Hand Cards").unwrap();
+    let shc_e = scanned
+        .iter()
+        .find(|m| m.name == "Show Player Hand Cards")
+        .unwrap();
     assert_eq!(shc_e.version, "0.4.1");
     assert!(shc_e.dependencies.contains(&"RitsuLib".to_string()));
     assert!(shc_e.dependencies.contains(&"BaseLib".to_string()));
@@ -527,8 +640,8 @@ fn flow_11_apply_profile_pins_override_profile_state() {
 /// Order: folder_name → display name → mod_id.
 #[test]
 fn lookup_entry_precedence_is_folder_then_name_then_mod_id() {
-    use sts2_mod_manager_lib::mod_sources::{lookup_entry, ModSourceEntry};
     use std::collections::HashMap;
+    use sts2_mod_manager_lib::mod_sources::{lookup_entry, ModSourceEntry};
 
     // Same mod has THREE possible identifiers, each pointing at a
     // different entry so we can see which one wins.
@@ -559,9 +672,13 @@ fn lookup_entry_precedence_is_folder_then_name_then_mod_id() {
     assert_eq!(only_mod_id.github_repo.as_deref(), Some("mod-id/repo"));
 
     // Folder present but doesn't match any entry → name fallback.
-    let unknown_folder =
-        lookup_entry(&db, Some("unknown-folder"), "Display Name", Some("the.mod.id"))
-            .unwrap();
+    let unknown_folder = lookup_entry(
+        &db,
+        Some("unknown-folder"),
+        "Display Name",
+        Some("the.mod.id"),
+    )
+    .unwrap();
     assert_eq!(unknown_folder.github_repo.as_deref(), Some("name/repo"));
 
     // Nothing matches → None.
@@ -654,7 +771,10 @@ async fn scenario_005_install_from_release_url() {
     .expect("cassette-backed release download must succeed");
 
     assert!(
-        tmp.path().join("TheCursedMod").join("TheCursedMod.json").exists(),
+        tmp.path()
+            .join("TheCursedMod")
+            .join("TheCursedMod.json")
+            .exists(),
         "extract must produce TheCursedMod/TheCursedMod.json under the mods dir. \
          If this fails: either the cassette URL→path mapping is off (see \
          qa_cassette::url_to_path), the fixture zip is missing/empty, or the \

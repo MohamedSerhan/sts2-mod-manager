@@ -41,8 +41,8 @@ pub use install::{
     prepare_update_with_preserved_configs, read_user_edited_configs, restore_preserved_configs,
     snapshot_after_fresh_install, snapshot_mod_configs, PreservedConfig, PreservedConfigOutcome,
 };
-pub use scan::{scan_disabled_mods, scan_mods, strip_utf8_bom};
 pub(crate) use scan::{dedup_key, merge_active_disabled_mods};
+pub use scan::{scan_disabled_mods, scan_mods, strip_utf8_bom};
 pub use state::{
     delete_mod_files_by_info, disable_mod, enable_mod, move_directory, move_mod_by_info,
     path_is_inside, sanitize_path_segment,
@@ -271,9 +271,6 @@ pub fn restore_mod_from_cache(
     log::info!("Restored mod '{}' v{} from local cache", mod_name, version);
     Ok(())
 }
-
-
-
 
 // ── Tauri Commands ──────────────────────────────────────────────────────────
 
@@ -1271,14 +1268,19 @@ mod user_scenario_tests {
         // Nothing must remain under mods/Pack/
         let pack_src = mods_path.join("Pack");
         assert!(
-            !pack_src.exists() || fs::read_dir(&pack_src).map(|mut d| d.next().is_none()).unwrap_or(true),
+            !pack_src.exists()
+                || fs::read_dir(&pack_src)
+                    .map(|mut d| d.next().is_none())
+                    .unwrap_or(true),
             "mods/Pack/ must be empty or removed after move (no files left behind)"
         );
 
         // Every member file and the sidecar must now be at the destination.
         let dst_mod_a = disabled_path.join("Pack").join("ModA").join("ModA.dll");
         let dst_mod_b = disabled_path.join("Pack").join("ModB").join("ModB.dll");
-        let dst_sidecar = disabled_path.join("Pack").join(crate::mods::bundle::SIDECAR_FILENAME);
+        let dst_sidecar = disabled_path
+            .join("Pack")
+            .join(crate::mods::bundle::SIDECAR_FILENAME);
         assert!(
             dst_mod_a.exists(),
             "Pack/ModA/ModA.dll must be in mods_disabled after move"
@@ -1300,7 +1302,10 @@ mod user_scenario_tests {
             1,
             "disabled dir must contain exactly ONE bundle entry after move, got {}: {:?}",
             disabled_scan.len(),
-            disabled_scan.iter().map(|m| &m.folder_name).collect::<Vec<_>>()
+            disabled_scan
+                .iter()
+                .map(|m| &m.folder_name)
+                .collect::<Vec<_>>()
         );
         let moved = &disabled_scan[0];
         assert_eq!(
@@ -1317,7 +1322,10 @@ mod user_scenario_tests {
             "moved bundle must still list bundle_members"
         );
         assert!(
-            moved.files.iter().any(|f| f.ends_with(crate::mods::bundle::SIDECAR_FILENAME)),
+            moved
+                .files
+                .iter()
+                .any(|f| f.ends_with(crate::mods::bundle::SIDECAR_FILENAME)),
             "moved bundle's files must include the sidecar path"
         );
     }
@@ -1358,15 +1366,26 @@ mod user_scenario_tests {
 
         // Confirm specifically: sidecar, ModA, ModB
         assert!(
-            !mods_path.join("Pack").join(crate::mods::bundle::SIDECAR_FILENAME).exists(),
+            !mods_path
+                .join("Pack")
+                .join(crate::mods::bundle::SIDECAR_FILENAME)
+                .exists(),
             "sidecar must be deleted"
         );
         assert!(
-            !mods_path.join("Pack").join("ModA").join("ModA.dll").exists(),
+            !mods_path
+                .join("Pack")
+                .join("ModA")
+                .join("ModA.dll")
+                .exists(),
             "Pack/ModA/ModA.dll must be deleted"
         );
         assert!(
-            !mods_path.join("Pack").join("ModB").join("ModB.dll").exists(),
+            !mods_path
+                .join("Pack")
+                .join("ModB")
+                .join("ModB.dll")
+                .exists(),
             "Pack/ModB/ModB.dll must be deleted"
         );
     }
@@ -1439,7 +1458,10 @@ mod toggle_idempotency_tests {
         let in_src = mod_present_in(&disabled, Some("BaseLib"), "BaseLib", true);
         let in_dest = mod_present_in(&mods, Some("BaseLib"), "BaseLib", false);
         assert!(!in_src, "not in the enable-source (mods_disabled)");
-        assert!(in_dest, "already in the enable-dest (mods) → toggle is a no-op");
+        assert!(
+            in_dest,
+            "already in the enable-dest (mods) → toggle is a no-op"
+        );
     }
 }
 

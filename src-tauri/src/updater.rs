@@ -1702,11 +1702,7 @@ pub async fn update_all_mods(
                             &info.name,
                             &outcome.preserved,
                         );
-                        crate::mod_sources::emit_configs_lost(
-                            &app,
-                            &info.name,
-                            &outcome.lost,
-                        );
+                        crate::mod_sources::emit_configs_lost(&app, &info.name, &outcome.lost);
                     }
                     Err(e) => {
                         log::error!(
@@ -2218,6 +2214,64 @@ mod version_helper_tests {
         assert!(!is_mod_asset("source.tar.gz"));
     }
 
+    fn github_asset(name: &str) -> crate::download::GitHubAsset {
+        crate::download::GitHubAsset {
+            name: name.into(),
+            size: 123,
+            browser_download_url: format!("https://example.invalid/{name}"),
+            content_type: "application/octet-stream".into(),
+            download_count: 0,
+        }
+    }
+
+    fn github_release(tag: &str, assets: &[&str]) -> crate::download::GitHubRelease {
+        crate::download::GitHubRelease {
+            tag_name: tag.into(),
+            name: Some(tag.into()),
+            body: None,
+            prerelease: false,
+            published_at: None,
+            assets: assets.iter().map(|name| github_asset(name)).collect(),
+            html_url: format!("https://github.com/example/repo/releases/tag/{tag}"),
+        }
+    }
+
+    #[test]
+    fn first_versioned_release_with_mod_assets_skips_empty_and_non_mod_releases() {
+        let releases = vec![
+            github_release("v2.0.0", &[]),
+            github_release("dev-build", &["DevBuild.zip"]),
+            github_release("v1.9.0", &["README.md"]),
+            github_release("v1.8.0", &["DependencyRich.zip", "notes.txt"]),
+        ];
+
+        let (candidate, scanned) = first_versioned_release_with_mod_assets(&releases);
+        assert_eq!(scanned, 4);
+        assert_eq!(
+            candidate,
+            Some(InstallableReleaseCandidate {
+                tag_name: "v1.8.0".into(),
+                asset_names: vec!["DependencyRich.zip".into()],
+            }),
+            "audit must not flag a no-assets or docs-only release as the actionable update"
+        );
+    }
+
+    #[test]
+    fn first_versioned_release_with_mod_assets_returns_none_when_no_installable_assets_exist() {
+        let releases = vec![
+            github_release("v2.0.0", &[]),
+            github_release("v1.9.0", &["README.md", "source.tar.gz"]),
+        ];
+
+        let (candidate, scanned) = first_versioned_release_with_mod_assets(&releases);
+        assert_eq!(scanned, 2);
+        assert_eq!(
+            candidate, None,
+            "empty releases must not create a false update affordance"
+        );
+    }
+
     // ── Bundle / Nexus folder-first lookup tests ──────────────────────────
 
     /// A bundle's `ModInfo` has no display name, no mod_id, and a
@@ -2243,11 +2297,14 @@ mod version_helper_tests {
         // (the container has no manifest-level name for us to trust).
         let entry = crate::mod_sources::lookup_entry(
             &sources,
-            Some("FantasyPack"),  // folder_name — the container
-            "FantasyPack",        // name falls back to folder since bundle has no manifest name
+            Some("FantasyPack"), // folder_name — the container
+            "FantasyPack",       // name falls back to folder since bundle has no manifest name
             None,
         );
-        assert!(entry.is_some(), "bundle source should be found by container folder_name");
+        assert!(
+            entry.is_some(),
+            "bundle source should be found by container folder_name"
+        );
         let e = entry.unwrap();
         assert_eq!(e.nexus_mod_id, Some(99));
         assert_eq!(
@@ -2361,10 +2418,7 @@ mod version_helper_tests {
             found.is_some(),
             "folder-first lookup should find source entry keyed by 'Pack'"
         );
-        assert!(
-            found.unwrap().pinned,
-            "the found entry should be pinned"
-        );
+        assert!(found.unwrap().pinned, "the found entry should be pinned");
 
         // Name-only lookup (the OLD broken path) would miss the pin entirely.
         let old_path = sources.get(&bundle.name);
@@ -2524,6 +2578,41 @@ fn is_mod_asset(name: &str) -> bool {
         || lower.ends_with(".rar")
         || lower.ends_with(".dll")
         || lower.ends_with(".pck")
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct InstallableReleaseCandidate {
+    tag_name: String,
+    asset_names: Vec<String>,
+}
+
+fn first_versioned_release_with_mod_assets(
+    releases: &[crate::download::GitHubRelease],
+) -> (Option<InstallableReleaseCandidate>, u32) {
+    let mut scanned = 0;
+    for release in releases {
+        scanned += 1;
+        // Skip non-version tags (e.g. "dev-build", "nightly").
+        if !is_version_tag(&release.tag_name) {
+            continue;
+        }
+        let asset_names: Vec<String> = release
+            .assets
+            .iter()
+            .filter(|a| is_mod_asset(&a.name))
+            .map(|a| a.name.clone())
+            .collect();
+        if !asset_names.is_empty() {
+            return (
+                Some(InstallableReleaseCandidate {
+                    tag_name: release.tag_name.clone(),
+                    asset_names,
+                }),
+                scanned,
+            );
+        }
+    }
+    (None, scanned)
 }
 
 /// Audit installed mods against their latest GitHub releases.
@@ -2701,22 +2790,12 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                     break;
                 }
 
-                for release in &releases {
-                    total_scanned += 1;
-                    // Skip non-version tags (e.g. "dev-build", "nightly")
-                    if !is_version_tag(&release.tag_name) {
-                        continue;
-                    }
-                    if release.assets.iter().any(|a| is_mod_asset(&a.name)) {
-                        latest_release_with_assets_tag = Some(release.tag_name.clone());
-                        asset_names = release
-                            .assets
-                            .iter()
-                            .filter(|a| is_mod_asset(&a.name))
-                            .map(|a| a.name.clone())
-                            .collect();
-                        break 'outer;
-                    }
+                let (candidate, scanned) = first_versioned_release_with_mod_assets(&releases);
+                total_scanned += scanned;
+                if let Some(candidate) = candidate {
+                    latest_release_with_assets_tag = Some(candidate.tag_name);
+                    asset_names = candidate.asset_names;
+                    break 'outer;
                 }
             }
 

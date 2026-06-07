@@ -147,17 +147,15 @@ impl NexusClient {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             "apikey",
-            reqwest::header::HeaderValue::from_str(api_key).unwrap_or_else(|_| {
-                reqwest::header::HeaderValue::from_static("")
-            }),
+            reqwest::header::HeaderValue::from_str(api_key)
+                .unwrap_or_else(|_| reqwest::header::HeaderValue::from_static("")),
         );
-        headers.insert(
-            reqwest::header::ACCEPT,
-            "application/json".parse().unwrap(),
-        );
+        headers.insert(reqwest::header::ACCEPT, "application/json".parse().unwrap());
         headers.insert(
             reqwest::header::USER_AGENT,
-            concat!("sts2-mod-manager/", env!("CARGO_PKG_VERSION")).parse().unwrap(),
+            concat!("sts2-mod-manager/", env!("CARGO_PKG_VERSION"))
+                .parse()
+                .unwrap(),
         );
 
         let client = crate::http::https_client_builder()
@@ -182,11 +180,21 @@ impl NexusClient {
         }
         log::debug!("Nexus API: get_mod_info {}/{}", game, mod_id);
         let resp = self.client.get(&url).send().await.map_err(|e| {
-            log::warn!("Nexus get_mod_info request failed for {}/{}: {}", game, mod_id, e);
+            log::warn!(
+                "Nexus get_mod_info request failed for {}/{}: {}",
+                game,
+                mod_id,
+                e
+            );
             e
         })?;
         let resp = resp.error_for_status().map_err(|e| {
-            log::warn!("Nexus get_mod_info HTTP error for {}/{}: {}", game, mod_id, e);
+            log::warn!(
+                "Nexus get_mod_info HTTP error for {}/{}: {}",
+                game,
+                mod_id,
+                e
+            );
             e
         })?;
         let info: NexusModInfo = resp.json().await?;
@@ -327,7 +335,10 @@ pub async fn handle_nxm_link(
     })?;
     log::info!(
         "Parsed NXM link: game={} mod_id={} file_id={} (has_key={})",
-        link.game_domain, link.mod_id, link.file_id, link.key.is_some()
+        link.game_domain,
+        link.mod_id,
+        link.file_id,
+        link.key.is_some()
     );
     Ok(link)
 }
@@ -399,7 +410,8 @@ mod nexus_helper_tests {
 
     #[test]
     fn parse_nxm_url_extracts_all_components() {
-        let nxm = parse_nxm_url("nxm://slaythespire2/mods/103/files/456?key=abc&expires=42").unwrap();
+        let nxm =
+            parse_nxm_url("nxm://slaythespire2/mods/103/files/456?key=abc&expires=42").unwrap();
         assert_eq!(nxm.game_domain, "slaythespire2");
         assert_eq!(nxm.mod_id, 103);
         assert_eq!(nxm.file_id, 456);
@@ -447,7 +459,13 @@ mod nexus_helper_tests {
         assert!(parse_nxm_url("not-a-url").is_err());
     }
 
-    fn file(file_id: u64, name: &str, version: &str, category_id: Option<u64>, ts: i64) -> NexusFile {
+    fn file(
+        file_id: u64,
+        name: &str,
+        version: &str,
+        category_id: Option<u64>,
+        ts: i64,
+    ) -> NexusFile {
         NexusFile {
             file_id,
             name: Some(name.into()),

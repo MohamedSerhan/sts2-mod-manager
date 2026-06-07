@@ -59,7 +59,11 @@ pub fn filter_to_browser_cards(raw: Vec<RawManifest>) -> Vec<BrowserCard> {
 /// Turn "aa5a315d61ae.json" into "AA5A-315D-61AE".
 fn filename_to_code(filename: &str) -> String {
     let stem = filename.trim_end_matches(".json");
-    let upper: String = stem.chars().filter(|c| c.is_ascii_alphanumeric()).take(12).collect();
+    let upper: String = stem
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .take(12)
+        .collect();
     if upper.len() >= 12 {
         format!("{}-{}-{}", &upper[0..4], &upper[4..8], &upper[8..12]).to_uppercase()
     } else {
@@ -75,7 +79,7 @@ pub fn is_cache_fresh(fetched_at: i64, now_secs: i64, ttl_secs: i64) -> bool {
 /// One result row from GitHub's repository search.
 #[derive(Debug, Deserialize)]
 struct SearchRepoItem {
-    full_name: String,  // "owner/name"
+    full_name: String, // "owner/name"
     name: String,
 }
 
@@ -88,9 +92,9 @@ struct SearchResponse {
 /// One Contents API list entry.
 #[derive(Debug, Deserialize)]
 struct ContentsListEntry {
-    name: String,        // filename
+    name: String, // filename
     #[serde(rename = "type")]
-    kind: String,        // "file" | "dir"
+    kind: String, // "file" | "dir"
 }
 
 // GitHub search caps per_page at 100; use the max to minimise the number of
@@ -144,10 +148,7 @@ pub async fn list_manifest_filenames(
     owner: &str,
     repo: &str,
 ) -> Result<Vec<String>, String> {
-    let url = format!(
-        "https://api.github.com/repos/{}/{}/contents/",
-        owner, repo
-    );
+    let url = format!("https://api.github.com/repos/{}/{}/contents/", owner, repo);
     let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
     let status = resp.status();
     if !status.is_success() {
@@ -156,7 +157,9 @@ pub async fn list_manifest_filenames(
         // partial-failure cause is recoverable from logs.
         log::warn!(
             "modpack-browser: list_manifest_filenames {}/{} returned {}",
-            owner, repo, status,
+            owner,
+            repo,
+            status,
         );
         return Ok(vec![]);
     }
@@ -192,7 +195,11 @@ async fn fetch_one_manifest(
     let profile = crate::sharing::fetch_shared_profile(&owner, &filename, token.as_deref())
         .await
         .ok()?;
-    Some(RawManifest { owner, filename, profile })
+    Some(RawManifest {
+        owner,
+        filename,
+        profile,
+    })
 }
 
 #[tauri::command]
@@ -261,7 +268,9 @@ pub async fn fetch_modpack_browser_page(
         for (owner, repo) in owners {
             let client = client.clone();
             list_tasks.push(async move {
-                let files = list_manifest_filenames(&client, &owner, &repo).await.unwrap_or_default();
+                let files = list_manifest_filenames(&client, &owner, &repo)
+                    .await
+                    .unwrap_or_default();
                 (owner, files)
             });
         }
@@ -382,12 +391,21 @@ mod tests {
     #[test]
     fn filter_drops_unlisted_manifests() {
         let raw = vec![
-            RawManifest { owner: "alice".into(), filename: "aa5a315d61ae.json".into(),
-                profile: make_profile("listed", Some(true)) },
-            RawManifest { owner: "bob".into(), filename: "bb5a315d61ae.json".into(),
-                profile: make_profile("unlisted-none", None) },
-            RawManifest { owner: "carol".into(), filename: "cc5a315d61ae.json".into(),
-                profile: make_profile("unlisted-false", Some(false)) },
+            RawManifest {
+                owner: "alice".into(),
+                filename: "aa5a315d61ae.json".into(),
+                profile: make_profile("listed", Some(true)),
+            },
+            RawManifest {
+                owner: "bob".into(),
+                filename: "bb5a315d61ae.json".into(),
+                profile: make_profile("unlisted-none", None),
+            },
+            RawManifest {
+                owner: "carol".into(),
+                filename: "cc5a315d61ae.json".into(),
+                profile: make_profile("unlisted-false", Some(false)),
+            },
         ];
         let cards = filter_to_browser_cards(raw);
         assert_eq!(cards.len(), 1);
@@ -397,10 +415,16 @@ mod tests {
     #[test]
     fn filter_keeps_all_public_including_self() {
         let raw = vec![
-            RawManifest { owner: "alice".into(), filename: "aa5a315d61ae.json".into(),
-                profile: make_profile("a", Some(true)) },
-            RawManifest { owner: "bob".into(), filename: "bb5a315d61ae.json".into(),
-                profile: make_profile("b", Some(true)) },
+            RawManifest {
+                owner: "alice".into(),
+                filename: "aa5a315d61ae.json".into(),
+                profile: make_profile("a", Some(true)),
+            },
+            RawManifest {
+                owner: "bob".into(),
+                filename: "bb5a315d61ae.json".into(),
+                profile: make_profile("b", Some(true)),
+            },
         ];
         let cards = filter_to_browser_cards(raw);
         assert_eq!(cards.len(), 2);
@@ -444,18 +468,21 @@ mod tests {
         let now = chrono::Utc::now().timestamp();
         {
             let mut s = state.lock().unwrap();
-            s.modpack_browser_cache.insert(1, CachedBrowserPage {
-                fetched_at: now,
-                cards: vec![BrowserCard {
-                    owner: "alice".into(),
-                    code: "AA5A-315D-61AE".into(),
-                    name: "Demo".into(),
-                    mod_count: 3,
-                    created_at: "2026-01-01T00:00:00Z".into(),
-                    updated_at: "2026-01-01T00:00:00Z".into(),
-                }],
-                has_next_page: false,
-            });
+            s.modpack_browser_cache.insert(
+                1,
+                CachedBrowserPage {
+                    fetched_at: now,
+                    cards: vec![BrowserCard {
+                        owner: "alice".into(),
+                        code: "AA5A-315D-61AE".into(),
+                        name: "Demo".into(),
+                        mod_count: 3,
+                        created_at: "2026-01-01T00:00:00Z".into(),
+                        updated_at: "2026-01-01T00:00:00Z".into(),
+                    }],
+                    has_next_page: false,
+                },
+            );
         }
         let cached = state.lock().unwrap().modpack_browser_cache.get(&1).cloned();
         assert!(cached.is_some());

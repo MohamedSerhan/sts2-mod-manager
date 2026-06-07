@@ -26,7 +26,9 @@ use serde::{Deserialize, Serialize};
 use crate::error::Result;
 use crate::mods::{merge_active_disabled_mods, scan_disabled_mods, scan_mods};
 
-use super::crud::{load_profile, mod_identity_keys, sanitize_filename, save_profile, version_is_wildcard};
+use super::crud::{
+    load_profile, mod_identity_keys, sanitize_filename, save_profile, version_is_wildcard,
+};
 use super::membership::sync_profile_load_order_to_settings;
 use super::{Profile, ProfileMod, APP_CREATED_BY};
 
@@ -624,7 +626,11 @@ pub(crate) async fn switch_profile_from_paths(
     let _ = std::fs::create_dir_all(&backup_dir);
     match crate::backup::create_backup(mods_path, &backup_dir) {
         Ok(backup_name) => {
-            log::info!("Pre-switch backup created for profile '{}': {}", name, backup_name)
+            log::info!(
+                "Pre-switch backup created for profile '{}': {}",
+                name,
+                backup_name
+            )
         }
         Err(e) => log::warn!(
             "Failed to create pre-switch backup before applying profile '{}': {}",
@@ -760,7 +766,8 @@ pub(crate) async fn switch_profile_from_paths(
                             if let Err(re) = swap.restore() {
                                 log::error!(
                                     "Rollback after cache-restore failure for '{}' failed: {}",
-                                    pm.name, re
+                                    pm.name,
+                                    re
                                 );
                             }
                             log::warn!(
@@ -773,7 +780,8 @@ pub(crate) async fn switch_profile_from_paths(
                     Err(e) => {
                         log::warn!(
                             "Could not stash '{}' aside for cache restore: {} -- trying bundle",
-                            pm.name, e
+                            pm.name,
+                            e
                         );
                     }
                 }
@@ -794,7 +802,8 @@ pub(crate) async fn switch_profile_from_paths(
                     Err(e) => {
                         log::warn!(
                             "Could not stash '{}' aside before replace ({}); deleting in place",
-                            pm.name, e
+                            pm.name,
+                            e
                         );
                         crate::mods::delete_mod_files_by_info(disk_mod, base);
                     }
@@ -820,7 +829,14 @@ pub(crate) async fn switch_profile_from_paths(
         // source may be wrong/unreliable (e.g., wrong game's repo)
         if let Some(ref bundle_url) = pm.bundle_url {
             log::info!("Downloading bundled mod '{}' from profiles repo", pm.name);
-            match crate::sharing::download_bundle(bundle_url, &pm.name, mods_path, pm.bundle_sha256.as_deref()).await {
+            match crate::sharing::download_bundle(
+                bundle_url,
+                &pm.name,
+                mods_path,
+                pm.bundle_sha256.as_deref(),
+            )
+            .await
+            {
                 Ok(_) => {
                     log::info!("Installed bundled mod '{}'", pm.name);
                     downloaded_count += 1;
@@ -828,11 +844,14 @@ pub(crate) async fn switch_profile_from_paths(
                     // Fix M-13: snapshot config files after fresh bundle install.
                     // download_bundle returns () so we re-scan to get a ModInfo.
                     let after_scan = scan_mods(mods_path);
-                    if let Some(installed) = after_scan
-                        .iter()
-                        .find(|m| m.name == pm.name || pm.folder_name.as_deref() == Some(m.name.as_str()))
-                    {
-                        crate::mods::snapshot_after_fresh_install(installed, mods_path, config_path);
+                    if let Some(installed) = after_scan.iter().find(|m| {
+                        m.name == pm.name || pm.folder_name.as_deref() == Some(m.name.as_str())
+                    }) {
+                        crate::mods::snapshot_after_fresh_install(
+                            installed,
+                            mods_path,
+                            config_path,
+                        );
                     }
                 }
                 Err(e) => {
@@ -889,7 +908,11 @@ pub(crate) async fn switch_profile_from_paths(
                             downloaded_count += 1;
                             downloaded = true;
                             // Fix M-13: snapshot config files after fresh install.
-                            crate::mods::snapshot_after_fresh_install(&info, mods_path, config_path);
+                            crate::mods::snapshot_after_fresh_install(
+                                &info,
+                                mods_path,
+                                config_path,
+                            );
                         }
                         Err(e) => {
                             log::error!("GitHub download also failed for '{}': {}", pm.name, e);
@@ -910,7 +933,8 @@ pub(crate) async fn switch_profile_from_paths(
                 if let Err(e) = swap.restore() {
                     log::error!(
                         "Failed to roll back '{}' after a failed update: {}",
-                        pm.name, e
+                        pm.name,
+                        e
                     );
                 } else {
                     log::warn!(
@@ -1217,8 +1241,8 @@ mod pinned_download_tests {
 
 #[cfg(test)]
 mod modpack_flow_tests {
-    use super::*;
     use super::super::drift::{compute_profile_drift, repair_profile_from_paths};
+    use super::*;
     use sha2::{Digest, Sha256};
     use std::collections::HashSet;
     use std::fs;
@@ -1897,7 +1921,11 @@ mod modpack_flow_tests {
             bundle_sha256: Some("00".repeat(32)),
             bundle_members: vec![],
         };
-        save_pack("Keeper Pack", &paths.profiles, vec![PublishedMod { profile_mod: pm }]);
+        save_pack(
+            "Keeper Pack",
+            &paths.profiles,
+            vec![PublishedMod { profile_mod: pm }],
+        );
 
         // On disk: the OLD v1.0.0 with a distinctive marker.
         install_loose_mod(&paths.mods, "Keeper", "old-keeper-v1");
@@ -1917,7 +1945,10 @@ mod modpack_flow_tests {
         assert!(result.applied);
         // The crux: the old version is STILL on disk (rolled back), not lost.
         let dll = paths.mods.join("Keeper").join("Keeper.dll");
-        assert!(dll.exists(), "the existing mod must survive a failed update");
+        assert!(
+            dll.exists(),
+            "the existing mod must survive a failed update"
+        );
         assert_eq!(
             fs::read_to_string(&dll).unwrap(),
             "old-keeper-v1",

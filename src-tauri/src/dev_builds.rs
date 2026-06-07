@@ -156,8 +156,7 @@ const ALLOWED_MANIFEST_HOSTS: &[&str] = &["github.com", "objects.githubuserconte
 /// in the first place.) Returns the parsed URL on success so the caller does
 /// not parse twice.
 fn validate_manifest_url(manifest_url: &str) -> Result<url::Url, String> {
-    let parsed =
-        url::Url::parse(manifest_url).map_err(|e| format!("Bad manifest URL: {e}"))?;
+    let parsed = url::Url::parse(manifest_url).map_err(|e| format!("Bad manifest URL: {e}"))?;
     if parsed.scheme() != "https" {
         return Err(format!(
             "Refusing manifest URL with non-https scheme: {}",
@@ -182,10 +181,7 @@ fn validate_manifest_url(manifest_url: &str) -> Result<url::Url, String> {
 /// Unguarded by platform: on non-Windows the updater simply fails at
 /// download_and_install (propagated as an Err), so there's no silent misbehavior.
 #[tauri::command]
-pub async fn switch_dev_build(
-    app: tauri::AppHandle,
-    manifest_url: String,
-) -> Result<(), String> {
+pub async fn switch_dev_build(app: tauri::AppHandle, manifest_url: String) -> Result<(), String> {
     use tauri_plugin_updater::UpdaterExt;
     let url = validate_manifest_url(&manifest_url)?;
     let updater = app
@@ -195,16 +191,12 @@ pub async fn switch_dev_build(
         .version_comparator(|_current, _update| true)
         .build()
         .map_err(|e| format!("Updater build error: {e}"))?;
-    let maybe_update = updater
-        .check()
-        .await
-        .map_err(|e| {
-            log::warn!("switch_dev_build: update check failed: {e}");
-            format!("Switch check failed: {e}")
-        })?;
-    let update = maybe_update.ok_or_else(|| {
-        "No installable build found in the dev manifest.".to_string()
+    let maybe_update = updater.check().await.map_err(|e| {
+        log::warn!("switch_dev_build: update check failed: {e}");
+        format!("Switch check failed: {e}")
     })?;
+    let update = maybe_update
+        .ok_or_else(|| "No installable build found in the dev manifest.".to_string())?;
     update
         .download_and_install(|_, _| {}, || {})
         .await
@@ -263,7 +255,12 @@ mod tests {
     #[test]
     fn filters_sorts_and_shapes() {
         let releases = vec![
-            release("v1.6.1", "1.6.1", false, vec![asset("STS2_1.6.1_x64-setup.exe")]),
+            release(
+                "v1.6.1",
+                "1.6.1",
+                false,
+                vec![asset("STS2_1.6.1_x64-setup.exe")],
+            ),
             // dev-pr tag but NOT a prerelease — must be excluded by the prerelease filter.
             release("dev-pr42", "dev-pr42", false, vec![]),
             release(
@@ -280,16 +277,25 @@ mod tests {
                 "dev-pr60",
                 "Dev build — PR #60 (gabc1234)",
                 true,
-                vec![asset("STS2 Mod Manager (Dev)_1.6.1-dev.pr60.gabc1234_universal.dmg")],
+                vec![asset(
+                    "STS2 Mod Manager (Dev)_1.6.1-dev.pr60.gabc1234_universal.dmg",
+                )],
             ),
         ];
         let builds = parse_dev_builds(releases);
-        assert_eq!(builds.len(), 2, "stable release + non-prerelease dev-pr tag both excluded");
+        assert_eq!(
+            builds.len(),
+            2,
+            "stable release + non-prerelease dev-pr tag both excluded"
+        );
         assert_eq!(builds[0].pr, 60, "newest PR first");
         assert_eq!(builds[1].pr, 59);
         assert_eq!(builds[1].sha, "837f5ba");
         assert!(builds[1].windows_installer_url.is_some());
-        assert!(builds[0].windows_installer_url.is_none(), "PR60 has no win setup");
+        assert!(
+            builds[0].windows_installer_url.is_none(),
+            "PR60 has no win setup"
+        );
         assert_eq!(
             builds[1].manifest_url.as_deref(),
             Some("https://example/latest.json"),
@@ -297,10 +303,17 @@ mod tests {
         );
         assert!(builds[0].manifest_url.is_none(), "PR60 has no manifest");
         assert!(
-            !builds[1].assets.iter().any(|a| a.name.eq_ignore_ascii_case("latest.json")),
+            !builds[1]
+                .assets
+                .iter()
+                .any(|a| a.name.eq_ignore_ascii_case("latest.json")),
             "latest.json manifest must not appear as a downloadable asset"
         );
-        let dmg = builds[1].assets.iter().find(|a| a.name.ends_with(".dmg")).unwrap();
+        let dmg = builds[1]
+            .assets
+            .iter()
+            .find(|a| a.name.ends_with(".dmg"))
+            .unwrap();
         assert_eq!(dmg.platform, "macOS");
     }
 }

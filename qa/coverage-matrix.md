@@ -1,6 +1,6 @@
 # QA Coverage Matrix
 
-This matrix is the release-confidence map for issue #156. It records the current automated owner for each active scenario and historical user-reported bug, plus the gaps that still need a realistic owner.
+This matrix is the release-confidence map for issue #157. It records the current automated owner for each active scenario, major flow, and historical user-reported bug. The detailed user-interaction inventory lives in [interaction-inventory.md](interaction-inventory.md), and `npm run qa:matrix` validates both files before CI or release can trust the suite.
 
 Status meanings:
 
@@ -8,6 +8,12 @@ Status meanings:
 - `Planned`: transition-only status for newly discovered gaps. Routine release-regression rows may not stay planned; `npm run qa:matrix` fails if one appears.
 - `Manual`: intentionally hard OS or UX boundary that belongs in the short release spot-check list for now.
 - `Out of scope`: not part of routine regression for the current release train.
+
+## Release Trust Contract
+
+When `npm run qa:matrix`, `npm run qa:coverage`, `npm run qa:rust`, `npm run qa:rust:cassette`, and the WebDriver smoke gates pass, release managers should not do routine manual regression for rows marked `Automated` here or in [interaction-inventory.md](interaction-inventory.md). Manual regression is reserved for rows marked `Manual`, each with a reason and review date in the interaction inventory.
+
+New user-facing app behavior must add or update an interaction inventory row in the same PR as the feature. If the row is `Automated`, it needs a concrete smoke, Vitest, Rust, or script owner plus a release command. If the row is `Manual`, it needs a manual-only reason and a date for the next coverage review.
 
 ## Scenario Owners
 
@@ -92,7 +98,10 @@ Status meanings:
 
 The intended end state is for this list to stay small. These checks are manual because they cross OS integration boundaries that the current Rust/Vitest/WebDriver layers do not own yet.
 
-- Drag a local mod archive onto a packaged app window and confirm the install starts.
-- Click a `sts2mm://` link from outside the app on Windows and Linux; confirm OS registration and warm-start focus.
-- Launch the game through the selected launch mode on the maintainer's release machine.
-- Do one exploratory pass over layout feel on Windows and Linux after the WebDriver smoke passes.
+- M001: Drag a local mod archive onto a packaged app window and confirm the install starts.
+- M002: Click a `sts2mm://` link from outside the app on Windows and Linux; confirm OS registration and warm-start focus.
+- M003: Launch the game through the selected launch mode on the maintainer's release machine.
+- M004: Smoke a packaged macOS build after OS-divergent changes.
+- M005: Do one exploratory pass over layout feel on Windows and Linux after the WebDriver smoke passes.
+
+The source of truth for reasons and review dates is [interaction-inventory.md](interaction-inventory.md).

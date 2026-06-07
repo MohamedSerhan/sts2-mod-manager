@@ -567,6 +567,34 @@ describe('<ProfilesView>', () => {
     });
   });
 
+  it('re-share nudge CTA opens the publish modal without opening the card', async () => {
+    seedProfiles([baseProfile({ name: 'Stale' })]);
+    registerInvokeHandler('get_share_info', () => ({
+      owner: 'alice',
+      code: 'AA5A-315D-61AE',
+      file_path: 'Stale.json',
+      url: 'https://github.com/alice/sts2mm-profiles',
+      repo_url: 'https://github.com/alice/sts2mm-profiles',
+      failed_uploads: [],
+      reshare_recommended: true,
+    }));
+    registerInvokeHandler('get_api_key_status', () => ({
+      nexus_api_key_set: false,
+      github_token_set: true,
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+
+    const card = await screen.findByRole('button', { name: /Open Stale modpack/i });
+    const cta = await within(card).findByRole('button', {
+      name: /Re-share modpack Stale to apply the latest improvements/i,
+    });
+    await user.click(cta);
+
+    expect(await screen.findByText(/Re-share Stale\?/i)).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { level: 2, name: 'Stale' })).toBeNull();
+  });
+
   it('does not show the re-share nudge when the pack is already current', async () => {
     seedProfiles([baseProfile({ name: 'Current' })]);
     registerInvokeHandler('get_share_info', () => ({

@@ -458,6 +458,54 @@ describe('<CreateModpackWizard>', () => {
   });
 
   describe('mod selection persists across navigation', () => {
+    it('seeds active mods when the mod list finishes loading after the first click', async () => {
+      const installed = [
+        baseMod({ name: 'Loaded Active', enabled: true, folder_name: 'loaded-active' }),
+        baseMod({ name: 'Loaded Disabled', enabled: false, folder_name: 'loaded-disabled' }),
+      ];
+      let resolveMods!: (mods: ModInfo[]) => void;
+      registerInvokeHandler(
+        'get_installed_mods',
+        () => new Promise<ModInfo[]>((resolve) => { resolveMods = resolve; }),
+      );
+      render(<Wrap />);
+
+      await chooseFromActive();
+      expect(await screen.findByText(/0 selected/i)).toBeInTheDocument();
+
+      await act(async () => { resolveMods(installed); });
+
+      await waitFor(() => {
+        expect(screen.getByText(/1 selected/i)).toBeInTheDocument();
+      });
+      expect(screen.getByLabelText(/^Loaded Active$/i)).toBeChecked();
+      expect(screen.getByLabelText(/^Loaded Disabled$/i)).not.toBeChecked();
+    });
+
+    it('seeds all installed mods when that strategy is picked before mods finish loading', async () => {
+      const installed = [
+        baseMod({ name: 'Loaded Active', enabled: true, folder_name: 'loaded-active' }),
+        baseMod({ name: 'Loaded Disabled', enabled: false, folder_name: 'loaded-disabled' }),
+      ];
+      let resolveMods!: (mods: ModInfo[]) => void;
+      registerInvokeHandler(
+        'get_installed_mods',
+        () => new Promise<ModInfo[]>((resolve) => { resolveMods = resolve; }),
+      );
+      render(<Wrap />);
+
+      fireEvent.click(await screen.findByRole('button', { name: /start with all installed mods/i }));
+      expect(await screen.findByText(/0 selected/i)).toBeInTheDocument();
+
+      await act(async () => { resolveMods(installed); });
+
+      await waitFor(() => {
+        expect(screen.getByText(/2 selected/i)).toBeInTheDocument();
+      });
+      expect(screen.getByLabelText(/^Loaded Active$/i)).toBeChecked();
+      expect(screen.getByLabelText(/^Loaded Disabled$/i)).toBeChecked();
+    });
+
     it('preserves user selections when navigating back and forward', async () => {
       seed({
         mods: [

@@ -102,6 +102,7 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const modalRef = useRef<HTMLDivElement>(null);
+  const pendingInitialSelectionRef = useRef<'fromActive' | 'allInstalled' | null>(null);
   // Escape / focus-trap / initial focus. Gated while creating so a stray
   // Escape can't abort an in-flight write.
   useModalA11y(modalRef, onClose, !creating);
@@ -138,33 +139,50 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
   // `selectedMods`. The strategy is committed by clicking the strategy
   // tile (one-click navigation: choosing also advances), which avoids
   // a redundant "Next" on a step that's already a single-choice screen.
+  const gameVersion = gameInfo?.game_version ?? null;
+  const keyFor = (m: typeof mods[number]) => m.folder_name ?? m.name;
+  const compatibleKeys = (candidates: typeof mods) =>
+    candidates
+      .filter((m) => gameVersionSatisfies(gameVersion, m.min_game_version))
+      .map(keyFor);
+
   function applyStrategyAndAdvance(chosen: Strategy) {
     setStrategy(chosen);
-    const gameVersion = gameInfo?.game_version ?? null;
-    const keyFor = (m: typeof mods[number]) => m.folder_name ?? m.name;
-    const compatibleKeys = (candidates: typeof mods) =>
-      candidates
-        .filter((m) => gameVersionSatisfies(gameVersion, m.min_game_version))
-        .map(keyFor);
     if (chosen === 'fromActive') {
       setSelectedMods(new Set(compatibleKeys(mods.filter((m) => m.enabled))));
+      pendingInitialSelectionRef.current = mods.length === 0 ? 'fromActive' : null;
     } else if (chosen === 'allInstalled') {
       // Snapshot replacement: every installed mod, enabled OR disabled.
       setSelectedMods(new Set(compatibleKeys(mods)));
+      pendingInitialSelectionRef.current = mods.length === 0 ? 'allInstalled' : null;
     } else if (chosen === 'empty') {
       setSelectedMods(new Set());
+      pendingInitialSelectionRef.current = null;
     } else if (chosen === 'clone' && cloneFrom) {
       const target = existingProfiles.find((p) => p.name === cloneFrom);
       setSelectedMods(new Set(target ? target.mods.map((m) => m.folder_name ?? m.name) : []));
+      pendingInitialSelectionRef.current = null;
     } else {
       // clone strategy without a chosen profile — keep empty; the
       // step 1 Clone tile is disabled until cloneFrom is set so the
       // user shouldn't normally land here.
       setSelectedMods(new Set());
+      pendingInitialSelectionRef.current = null;
     }
     setTouchedSelection(true);
     setStep(2);
   }
+
+  useEffect(() => {
+    const pending = pendingInitialSelectionRef.current;
+    if (step !== 2 || !pending || mods.length === 0) return;
+    pendingInitialSelectionRef.current = null;
+    if (pending === 'fromActive') {
+      setSelectedMods(new Set(compatibleKeys(mods.filter((m) => m.enabled))));
+    } else {
+      setSelectedMods(new Set(compatibleKeys(mods)));
+    }
+  }, [mods, step, gameVersion]);
 
   // Trigger the audit when the user advances to step 3. One-shot per
   // wizard run — no caching, no debouncing; the audit can take a

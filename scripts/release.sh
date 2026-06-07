@@ -126,6 +126,9 @@ if [[ -n "$devspeak_hits" ]]; then
   exit 1
 fi
 
+echo "Checking localized changelog fragments..."
+node scripts/changelog-translations.mjs check-fragments
+
 # --- Translation gate ---
 #
 # This is intentionally outside SKIP_QA. A release may skip the heavier
@@ -397,6 +400,13 @@ FRAGS=$(find changelog.d -maxdepth 1 \( -name 'added-*.md' -o -name 'changed-*.m
 if [ -n "$FRAGS" ]; then
   # shellcheck disable=SC2086
   git rm -q -- $FRAGS
+fi
+
+node scripts/changelog-translations.mjs write-version --version "$NEW"
+LOCALE_FRAGS=$(find changelog.i18n -mindepth 2 -maxdepth 2 \( -name 'added-*.md' -o -name 'changed-*.md' -o -name 'fixed-*.md' -o -name 'security-*.md' \) 2>/dev/null | sort)
+if [ -n "$LOCALE_FRAGS" ]; then
+  # shellcheck disable=SC2086
+  git rm -q -- $LOCALE_FRAGS
 fi
 
 # --- Translate the new changelog entry for non-English locales ---

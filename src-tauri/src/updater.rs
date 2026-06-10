@@ -52,16 +52,37 @@ fn is_newer_version(current: &str, latest: &str) -> bool {
     }
 }
 
+/// Lenient version parse for GAME build strings. Steam beta branches
+/// suffix the build number ("0.106.1b", "0.106.1-beta.4257"), which the
+/// strict semver parse rejects — and a None game version silently
+/// disables every compatibility check downstream (the audit fails open,
+/// and asset selection skips the Compat-variant branch entirely, which
+/// is how a beta-branch user ended up with RitsuLib's latest-game main
+/// file instead of the matching Compat build). Takes the leading digits
+/// of each of the first three dot components; requires a numeric major.
+pub(crate) fn parse_loose_version(v: &str) -> Option<semver::Version> {
+    let stripped = v.trim().trim_start_matches(['v', 'V']);
+    let mut nums = stripped.split('.').map(|part| {
+        let digits: String = part.chars().take_while(|c| c.is_ascii_digit()).collect();
+        digits.parse::<u64>().ok()
+    });
+    let major = nums.next().flatten()?;
+    let minor = nums.next().flatten().unwrap_or(0);
+    let patch = nums.next().flatten().unwrap_or(0);
+    Some(semver::Version::new(major, minor, patch))
+}
+
 /// Returns true iff a mod declaring `min_game_version = required` can run
 /// on a player whose game version is `current`. Both arguments are
-/// semver-ish strings ("0.103.2", "v0.105.0") — we strip the leading "v"
-/// and compare numerically.
+/// semver-ish strings ("0.103.2", "v0.105.0", beta-suffixed "0.106.1b") —
+/// we strip the leading "v", tolerate non-numeric suffixes, and compare
+/// numerically.
 ///
 /// Fails OPEN on parse errors: if either version doesn't parse, we assume
 /// compatible. The audit/Repair codepath would rather show a row than
 /// hide a real one because of a quirky version string.
 pub fn game_version_satisfies(current: &str, required: &str) -> bool {
-    match (parse_version(current), parse_version(required)) {
+    match (parse_loose_version(current), parse_loose_version(required)) {
         (Some(cur), Some(req)) => cur >= req,
         _ => true,
     }
@@ -1776,6 +1797,38 @@ mod version_helper_tests {
         assert!(parse_version("nightly").is_none());
         assert!(parse_version("").is_none());
         assert!(parse_version("x.y.z").is_none());
+    }
+
+    #[test]
+    fn parse_loose_version_tolerates_steam_beta_suffixes() {
+        assert_eq!(
+            parse_loose_version("0.106.1b").unwrap(),
+            semver::Version::new(0, 106, 1)
+        );
+        assert_eq!(
+            parse_loose_version("0.106.1-beta.4257").unwrap(),
+            semver::Version::new(0, 106, 1)
+        );
+        assert_eq!(
+            parse_loose_version("v0.103.2").unwrap(),
+            semver::Version::new(0, 103, 2)
+        );
+        assert_eq!(
+            parse_loose_version("1.2").unwrap(),
+            semver::Version::new(1, 2, 0)
+        );
+        // Still refuses strings with no numeric major.
+        assert!(parse_loose_version("dev-build").is_none());
+        assert!(parse_loose_version("").is_none());
+    }
+
+    #[test]
+    fn game_version_satisfies_handles_beta_suffixed_current() {
+        // The exact shape of Solo's RitsuLib report: a beta-branch game
+        // version must compare numerically, not fail open.
+        assert!(game_version_satisfies("0.106.1b", "0.106.1"));
+        assert!(game_version_satisfies("0.106.1-beta.4257", "0.103.2"));
+        assert!(!game_version_satisfies("0.103.2b", "0.106.1"));
     }
 
     #[test]

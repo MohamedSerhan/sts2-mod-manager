@@ -1022,6 +1022,28 @@ describe('<HomeView> Recent modpacks strip', () => {
     });
   });
 
+  it('quick-switch with NO active pack skips the drift probe entirely', async () => {
+    // Vanilla state (no active modpack) + launch history → the strip still
+    // offers recents, and switching must not call get_profile_drift (there
+    // is nothing to lose).
+    registerInvokeHandler('get_active_profile', () => null);
+    registerInvokeHandler('list_profiles_cmd', () => [
+      { name: 'WeekendPack', mods: [], created_at: '2026-01-01' },
+    ]);
+    registerInvokeHandler('get_subscriptions', () => []);
+    localStorage.setItem(USAGE_KEY, JSON.stringify({ WeekendPack: 2000 }));
+    registerInvokeHandler('switch_profile', () => ({
+      applied: true, downloaded: 0, missing_mods: [], failed_downloads: [],
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.click(await screen.findByRole('button', { name: /Switch to WeekendPack/i }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'switch_profile')).toBe(true);
+    });
+    expect(getInvokeCalls().some((c) => c.cmd === 'get_profile_drift')).toBe(false);
+  });
+
   it('warns about unsaved drift on the current pack before switching away', async () => {
     seedRecentWorld();
     localStorage.setItem(USAGE_KEY, JSON.stringify({ WeekendPack: 2000 }));

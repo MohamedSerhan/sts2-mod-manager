@@ -136,6 +136,37 @@ async function expandLibrary(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('<ModpackDetail>', () => {
+  // ── Unified search (Solo FR, 2026-06-10) ──────────────────────────
+  it('typing in the in-pack search auto-opens and filters Add-from-Library, matching tags', async () => {
+    const profile = setupPack({
+      inPack: [modInfo({ name: 'PackMod', folder_name: 'PackMod', enabled: true })],
+      available: [
+        modInfo({ name: 'WaifuOverhaul', folder_name: 'WaifuOverhaul', tags: ['anime'] }),
+        modInfo({ name: 'PlainUtility', folder_name: 'PlainUtility' }),
+      ],
+    });
+    const user = userEvent.setup();
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+    // One query, both sections: type a TAG into the in-pack table's search.
+    const search = await screen.findByLabelText('Search mod library');
+    await user.type(search, 'anime');
+    // The Add-from-Library section pops open by itself and is filtered to
+    // the tag match — no second search box, no manual expanding.
+    const available = await screen.findByTestId('modpack-detail-available');
+    await waitFor(() => {
+      expect(within(available).getByText('WaifuOverhaul')).toBeInTheDocument();
+    });
+    expect(within(available).queryByText('PlainUtility')).toBeNull();
+    // And the in-pack rows are filtered by the same query (PackMod has no
+    // matching tag, so the table reports no matches rather than ignoring it).
+    expect(screen.getByText(/No matching mods/i)).toBeInTheDocument();
+    // Clearing the search restores the unfiltered available list.
+    await user.clear(search);
+    await waitFor(() => {
+      expect(within(available).getByText('PlainUtility')).toBeInTheDocument();
+    });
+  });
+
   // ── Header ────────────────────────────────────────────────────────
   it('renders the header row with name, Back button, and Switch button for inactive profile', async () => {
     const onBack = vi.fn();

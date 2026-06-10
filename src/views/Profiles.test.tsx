@@ -1666,6 +1666,21 @@ describe('<ProfilesView>', () => {
     await waitFor(() => { expect(cardNames()).toEqual(['Newest', 'Oldest']); });
   });
 
+  it('FR4: a garbled manifest timestamp sorts as oldest instead of breaking the order', async () => {
+    // ts() NaN-guard: a profile with an unparseable updated_at must sink to
+    // the bottom (treated as 0), not poison the comparator.
+    seedProfiles([
+      baseProfile({ name: 'Broken', updated_at: 'not-a-date' } as Partial<Profile>),
+      baseProfile({ name: 'Valid', updated_at: '2026-03-01T00:00:00Z' } as Partial<Profile>),
+    ]);
+    // Persisted sort choice is honored on mount (init-from-storage branch).
+    localStorage.setItem('sts2mm-modpack-sort', 'edited');
+    render(<Wrap />);
+    const cardNames = () =>
+      [...document.querySelectorAll('.gf-modpack-card-name')].map((el) => el.textContent);
+    await waitFor(() => { expect(cardNames()).toEqual(['Valid', 'Broken']); });
+  });
+
   it('Share button opens the publish modal when profile is unpublished', async () => {
     seedProfiles([baseProfile({ name: 'Unpublished' })]);
     registerInvokeHandler('get_share_info', () => null);

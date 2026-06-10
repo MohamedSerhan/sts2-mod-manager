@@ -94,6 +94,42 @@ pub fn build_synced_profile_snapshot(
     snapshot
 }
 
+/// After a successful share/re-share, the curator's local profile IS the
+/// just-published manifest. If this machine also subscribes to the pack
+/// (installing your own share code auto-subscribes), refresh the stored
+/// snapshot so the update poll doesn't flag the curator's own publish as
+/// a pending update on their own pack (Solo, 2026-06-10). Matching is by
+/// profile name, case-insensitive — the share_id encodes owner:code, but
+/// the profile name is the field both records share. A different machine
+/// subscribed to the same pack keeps its stale snapshot and correctly
+/// sees the update. Returns true when a subscription was refreshed.
+pub fn sync_own_subscription_after_publish(config_path: &Path, profile: &Profile) -> bool {
+    let mut db = load_subscriptions(config_path);
+    let mut changed = false;
+    for sub in db.subscriptions.values_mut() {
+        if sub.profile_name.to_lowercase() == profile.name.to_lowercase() {
+            sub.last_synced_profile = profile.clone();
+            sub.last_synced = Utc::now();
+            changed = true;
+        }
+    }
+    if changed {
+        if let Err(e) = save_subscriptions(&db, config_path) {
+            log::warn!(
+                "Failed to refresh own subscription for '{}' after publish: {}",
+                profile.name,
+                e
+            );
+            return false;
+        }
+        log::info!(
+            "Refreshed own subscription snapshot for '{}' after publish",
+            profile.name
+        );
+    }
+    changed
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModVersionChange {
     pub name: String,
@@ -716,6 +752,9 @@ async fn apply_subscription_update_inner(
     // Mods view shows GitHub/Nexus chips instead of "Unlinked" — including
     // for mods already on disk at the right version, which the loop skips.
     crate::profiles::persist_profile_mod_sources(&remote.mods, &config_path);
+    // Curator notes/links/tags ride in the manifest (Solo FR) — merge
+    // them fill-only so the receiver's own annotations always win.
+    crate::mod_sources::merge_shared_extras(&remote.mod_extras, &config_path);
 
     if !skipped_incompatible.is_empty() {
         log::info!(
@@ -809,6 +848,7 @@ mod rename_helper_tests {
                     created_at: now,
                     updated_at: now,
                     public: None,
+                    mod_extras: Default::default(),
                 },
                 last_checked: now,
                 last_synced: now,
@@ -817,5 +857,105 @@ mod rename_helper_tests {
         assert!(rename_profile_name(&mut db, "Old", "New"));
         assert_eq!(db.subscriptions["id1"].profile_name, "New");
         assert!(!rename_profile_name(&mut db, "Nope", "X"));
+    }
+}
+
+#[cfg(test)]
+mod own_subscription_sync_tests {
+    use super::*;
+
+    fn profile(name: &str, mod_names: &[(&str, &str)]) -> Profile {
+        let now = chrono::Utc::now();
+        Profile {
+            name: name.into(),
+            game_version: None,
+            created_by: None,
+            mods: mod_names
+                .iter()
+                .map(|(n, v)| crate::profiles::ProfileMod {
+                    name: (*n).into(),
+                    version: (*v).into(),
+                    source: None,
+                    hash: None,
+                    files: vec![format!("{n}/{n}.dll")],
+                    folder_name: Some((*n).into()),
+                    mod_id: Some((*n).into()),
+                    enabled: true,
+                    bundle_url: None,
+                    bundle_sha256: None,
+                    bundle_members: vec![],
+                })
+                .collect(),
+            created_at: now,
+            updated_at: now,
+            public: None,
+            mod_extras: Default::default(),
+        }
+    }
+
+    fn subscription(profile_name: &str, snapshot: Profile) -> Subscription {
+        let now = chrono::Utc::now();
+        Subscription {
+            share_id: format!("solomag:{}", profile_name.to_lowercase()),
+            share_url: "solomag/CODE".into(),
+            profile_name: profile_name.into(),
+            curator: Some("solomag".into()),
+            last_synced_profile: snapshot,
+            last_checked: now,
+            last_synced: now,
+        }
+    }
+
+    #[test]
+    fn publish_refreshes_matching_self_subscription_snapshot() {
+        // Solo's 2026-06-10 report: re-uploading her own pack made the
+        // updater flag her own pack as having updates — the subscription
+        // snapshot was stale relative to what she just published.
+        let tmp = tempfile::tempdir().unwrap();
+        let old_snapshot = profile("My Pack", &[("ModA", "1.0.0")]);
+        let mut db = SubscriptionsDb::default();
+        let sub = subscription("My Pack", old_snapshot);
+        db.subscriptions.insert(sub.share_id.clone(), sub);
+        save_subscriptions(&db, tmp.path()).unwrap();
+
+        // Curator re-shares with a changed mod set.
+        let published = profile("My Pack", &[("ModA", "1.1.0"), ("ModB", "0.3.0")]);
+        assert!(sync_own_subscription_after_publish(tmp.path(), &published));
+
+        let reloaded = load_subscriptions(tmp.path());
+        let sub = reloaded.subscriptions.values().next().unwrap();
+        // Snapshot now equals the published manifest → the next update
+        // poll diffs equal-vs-equal and reports no pending update.
+        let (added, removed, updated) = diff_profiles(&sub.last_synced_profile, &published);
+        assert!(added.is_empty() && removed.is_empty() && updated.is_empty());
+    }
+
+    #[test]
+    fn publish_with_no_matching_subscription_is_a_noop() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut db = SubscriptionsDb::default();
+        let sub = subscription("Someone Elses Pack", profile("Someone Elses Pack", &[]));
+        db.subscriptions.insert(sub.share_id.clone(), sub);
+        save_subscriptions(&db, tmp.path()).unwrap();
+
+        let published = profile("My Pack", &[("ModA", "1.0.0")]);
+        assert!(!sync_own_subscription_after_publish(tmp.path(), &published));
+
+        // The unrelated subscription's snapshot is untouched.
+        let reloaded = load_subscriptions(tmp.path());
+        let sub = reloaded.subscriptions.values().next().unwrap();
+        assert!(sub.last_synced_profile.mods.is_empty());
+    }
+
+    #[test]
+    fn name_match_is_case_insensitive() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut db = SubscriptionsDb::default();
+        let sub = subscription("my pack", profile("my pack", &[]));
+        db.subscriptions.insert(sub.share_id.clone(), sub);
+        save_subscriptions(&db, tmp.path()).unwrap();
+
+        let published = profile("My Pack", &[("ModA", "1.0.0")]);
+        assert!(sync_own_subscription_after_publish(tmp.path(), &published));
     }
 }

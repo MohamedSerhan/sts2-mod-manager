@@ -85,6 +85,10 @@ export interface LibraryTableProps {
   onLoadOrderChanged?: () => void;
   /** Initial value of the search filter. Useful for tests + deep-links. */
   initialSearch?: string;
+  /** Fired whenever the table's search query changes. The modpack detail
+   *  view uses it to drive its "Add from Mod Library" filter from the
+   *  same box, so one search covers both sections (Solo, 2026-06-10). */
+  onSearchChange?: (query: string) => void;
   /** Initial sort mode. Defaults to 'inPackFirst' when modpackName is
    *  set; 'nameAsc' when modpackName is null. */
   initialSort?: LibrarySortMode;
@@ -226,6 +230,7 @@ export function LibraryTable({
   onMembershipChanged,
   onLoadOrderChanged,
   initialSearch = '',
+  onSearchChange,
   initialSort,
   pageSize = DEFAULT_PAGE_SIZE,
   enableReorder = false,
@@ -431,12 +436,17 @@ export function LibraryTable({
       : externallyFiltered;
     const rows = query
       ? preFiltered.filter((row) => {
+          // Tags are part of the haystack so "anime" finds every mod the
+          // user tagged that way, not just name matches (Solo, 2026-06-10).
+          const info =
+            modInfoByKey?.get(membershipRowKey(row)) ?? modInfoByKey?.get(row.name);
           const haystack = [
             row.name,
             row.display_name ?? '',
             row.folder_name ?? '',
             row.mod_id ?? '',
             row.version,
+            ...(info?.tags ?? []),
           ]
             .join(' ')
             .toLowerCase();
@@ -747,7 +757,10 @@ export function LibraryTable({
           <Search size={13} />
           <input
             value={filter}
-            onChange={(event) => setFilter(event.target.value)}
+            onChange={(event) => {
+              setFilter(event.target.value);
+              onSearchChange?.(event.target.value);
+            }}
             placeholder={
               packScoped
                 ? t('profiles.library.searchPackPlaceholder')

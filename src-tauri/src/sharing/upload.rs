@@ -38,8 +38,14 @@ pub(crate) fn zip_mod_files(
     let mut zip_writer = zip::ZipWriter::new(buf);
     let mut written_files = 0usize;
 
+    // Deterministic output: pin every entry's mtime to the DOS epoch
+    // (1980-01-01). With the zip crate's `time` feature on, the default is
+    // the CURRENT time, which changes the archive bytes on every share —
+    // so the sha256 in upload_mod_bundle_via_release never matched the
+    // prior hash and re-shares re-uploaded every bundle, changed or not.
     let options = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
+        .compression_method(zip::CompressionMethod::Deflated)
+        .last_modified_time(zip::DateTime::default());
 
     for file_rel in files {
         let normalized = file_rel.replace('\\', "/");
@@ -71,7 +77,14 @@ pub(crate) fn zip_mod_files(
                 .map_err(|e| AppError::Other(format!("Zip write error: {}", e)))?;
             written_files += 1;
         } else if file_path.is_dir() {
-            for entry in WalkDir::new(&file_path).into_iter().flatten() {
+            // sort_by_file_name: walk order must not depend on filesystem
+            // enumeration quirks, or identical content could still zip to
+            // different bytes and defeat the unchanged-bundle skip.
+            for entry in WalkDir::new(&file_path)
+                .sort_by_file_name()
+                .into_iter()
+                .flatten()
+            {
                 if !entry.file_type().is_file() {
                     continue;
                 }
@@ -307,6 +320,43 @@ mod publish_bundle_contract_tests {
         assert!(
             archive.by_name("ContractMod/ContractMod.json").is_ok(),
             "disabled profile mods must be bundled from mods_disabled"
+        );
+    }
+
+    #[test]
+    fn zip_mod_files_is_deterministic_for_unchanged_content() {
+        // The re-share diff-upload depends on this: identical mod content
+        // must zip to identical bytes (same sha256), or every re-share
+        // re-uploads every bundle. Two things can break it — wall-clock
+        // entry mtimes (the zip crate's default with the `time` feature)
+        // and filesystem-dependent walk order.
+        let tmp = tempfile::tempdir().unwrap();
+        let mod_dir = tmp.path().join("ContractMod");
+        std::fs::create_dir_all(mod_dir.join("sub")).unwrap();
+        std::fs::write(mod_dir.join("ContractMod.json"), b"{}").unwrap();
+        std::fs::write(mod_dir.join("a.txt"), b"alpha").unwrap();
+        std::fs::write(mod_dir.join("sub/b.txt"), b"beta").unwrap();
+
+        let files: Vec<String> = vec!["ContractMod".into()];
+        let first = zip_mod_files("ContractMod", &files, tmp.path()).unwrap();
+        // Sleep past the 2-second DOS-time resolution so a regression to
+        // wall-clock mtimes can't accidentally pass within the same tick.
+        std::thread::sleep(std::time::Duration::from_millis(2100));
+        let second = zip_mod_files("ContractMod", &files, tmp.path()).unwrap();
+
+        assert_eq!(
+            first, second,
+            "unchanged content must produce byte-identical bundles"
+        );
+
+        // And the entries carry the fixed DOS epoch, not the build time.
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(first)).unwrap();
+        let entry = archive.by_name("ContractMod/a.txt").unwrap();
+        let mtime = entry.last_modified().expect("zip entry has an mtime");
+        assert_eq!(
+            (mtime.year(), mtime.month(), mtime.day()),
+            (1980, 1, 1),
+            "entry mtimes must be pinned to the DOS epoch for determinism"
         );
     }
 

@@ -330,6 +330,14 @@
       "following": "所有模组包",
       "publishedByYou": "你发布的"
     },
+    "sort": {
+      "label": "排序",
+      "recent": "最近启动",
+      "edited": "最近编辑",
+      "created": "最近创建",
+      "name": "名称 A–Z",
+      "mods": "模组最多"
+    },
     "activity": {
       "hasUpdates": "{{count}} 个模组包有更新",
       "haveUpdates": "{{count}} 个模组包有更新",
@@ -610,7 +618,7 @@
   "modpacks": {
     "tabs": {
       "yours": "已安装",
-      "browse": "浏览"
+      "browse": "浏览社区整合包"
     },
     "quickAdd": {
       "label": "通过分享码添加整合包",
@@ -621,7 +629,7 @@
   "library": {
     "tabs": {
       "installed": "已安装",
-      "browse": "浏览"
+      "browse": "浏览模组"
     }
   },
   "nav": {
@@ -1092,6 +1100,10 @@
     "secondary": {
       "create": "创建模组包",
       "reviewUpdates": "查看更新（{{count}}）"
+    },
+    "recent": {
+      "title": "最近的模组包",
+      "switchTitle": "切换到 {{name}}"
     },
     "syncPillReady": "可同步",
     "sharePillReady": "尚未分享",

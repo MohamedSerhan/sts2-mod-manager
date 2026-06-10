@@ -45,6 +45,12 @@ import {
   getSubscriptions,
 } from '../hooks/useTauri';
 import { importShareCodeSmart, buildShareLink, buildShareMessage } from '../lib/shareImport';
+import {
+  getModpackUsage,
+  recordModpackLaunch,
+  renameModpackUsage,
+  forgetModpackUsage,
+} from '../lib/modpackUsage';
 import type { ProfileDrift } from '../hooks/useTauri';
 import type { LoadOrderSettingsStatus, Profile, ShareResult, Subscription } from '../types';
 
@@ -201,6 +207,24 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
   const [selectedModpack, setSelectedModpack] = useState<string | null>(null);
   // v5 batch 3 - profile list filters.
   const [tab, setTab] = useState<'following' | 'published'>('following');
+  // FR4 — list sort. Persisted so the user's preference survives reloads.
+  // 'recent' (last launched) is the default; packs never launched on this
+  // machine fall back to name order at the bottom.
+  const MODPACK_SORT_KEY = 'sts2mm-modpack-sort';
+  type ModpackSort = 'recent' | 'edited' | 'created' | 'name' | 'mods';
+  const [modpackSort, setModpackSort] = useState<ModpackSort>(() => {
+    try {
+      const stored = localStorage.getItem(MODPACK_SORT_KEY);
+      if (stored === 'recent' || stored === 'edited' || stored === 'created' || stored === 'name' || stored === 'mods') {
+        return stored;
+      }
+    } catch { /* storage unavailable */ }
+    return 'recent';
+  });
+  const changeModpackSort = useCallback((next: ModpackSort) => {
+    setModpackSort(next);
+    try { localStorage.setItem(MODPACK_SORT_KEY, next); } catch { /* best-effort */ }
+  }, []);
   const [loadOrderProfile, setLoadOrderProfile] = useState<Profile | null>(null);
   const [loadOrderDraft, setLoadOrderDraft] = useState<Profile['mods']>([]);
   const [loadOrderSaving, setLoadOrderSaving] = useState(false);
@@ -588,6 +612,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       setSwitchingProfile(name);
       const result = await switchProfile(name);
       setActiveProfile(name);
+      recordModpackLaunch(name);
       await refreshAll();
       await loadProfiles();
       bumpRevision();
@@ -661,6 +686,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       }
       const result = await repairProfile(name);
       setActiveProfile(name);
+      recordModpackLaunch(name);
       await refreshAll();
       await loadProfiles();
       bumpRevision();
@@ -777,6 +803,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       await deleteProfile(name);
       setProfiles((prev) => prev.filter((p) => p.name !== name));
       clearLocalOutOfSync(name);
+      forgetModpackUsage(name);
       // Bug 3: if we just deleted the active pack, clear the AppContext
       // active pointer too (the backend clears active_profile.txt) so nothing
       // keeps flagging the now-gone pack as active until an app restart.
@@ -857,6 +884,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
           t('profiles.toast.importedModpack', { name: outcome.profile.name, count: outcome.profile.mods.length }),
         );
       } else if (outcome.kind === 'activated') {
+        recordModpackLaunch(outcome.profileName);
         toastCtx.success(t('profiles.toast.activated', { name: outcome.profileName }));
       } else if (outcome.kind === 'reapplied') {
         const parts: string[] = [];
@@ -1177,6 +1205,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
             renameExistingNames={profiles.map((p) => p.name)}
             onRenamed={async (oldName, newName) => {
               if (activeProfile === oldName) setActiveProfile(newName);
+              renameModpackUsage(oldName, newName);
               setLocalOutOfSyncMap((prev) => {
                 if (!prev[oldName]) return prev;
                 const next = { ...prev };
@@ -1210,6 +1239,23 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
           {t('profiles.tabs.publishedByYou')}
           <span className="gf-tab-count">{Object.keys(shareInfoMap).length}</span>
         </button>
+        {/* FR4 — list sort, right-aligned on the filter row. */}
+        {profiles.length > 1 && (
+          <label className="gf-sort-control" style={{ marginLeft: 'auto' }}>
+            <span>{t('profiles.sort.label')}</span>
+            <select
+              aria-label={t('profiles.sort.label')}
+              value={modpackSort}
+              onChange={(e) => changeModpackSort(e.target.value as ModpackSort)}
+            >
+              <option value="recent">{t('profiles.sort.recent')}</option>
+              <option value="edited">{t('profiles.sort.edited')}</option>
+              <option value="created">{t('profiles.sort.created')}</option>
+              <option value="name">{t('profiles.sort.name')}</option>
+              <option value="mods">{t('profiles.sort.mods')}</option>
+            </select>
+          </label>
+        )}
       </div>
 
       {/* Activity — pending updates from followed packs. One row per
@@ -1331,9 +1377,39 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
           </div>
         </div>
       ) : (() => {
-        const visible = tab === 'published'
+        const filtered = tab === 'published'
           ? profiles.filter((p) => shareInfoMap[p.name])
           : profiles;
+        // FR4 — sort a copy; `profiles` keeps backend order for everything
+        // else (drift maps, detail lookups are name-keyed and unaffected).
+        const byName = (a: Profile, b: Profile) =>
+          a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true });
+        // NaN-safe: a missing/garbled timestamp sorts as 0 (oldest) instead
+        // of poisoning the comparator with NaN (inconsistent sort order).
+        const ts = (iso: string | undefined) => {
+          const n = Date.parse(iso ?? '');
+          return Number.isFinite(n) ? n : 0;
+        };
+        const usage = getModpackUsage();
+        const visible = [...filtered].sort((a, b) => {
+          switch (modpackSort) {
+            case 'recent': {
+              // Launched packs first (newest launch on top); the rest A–Z.
+              const ua = usage[a.name] ?? 0;
+              const ub = usage[b.name] ?? 0;
+              return ub - ua || byName(a, b);
+            }
+            case 'edited':
+              return ts(b.updated_at) - ts(a.updated_at) || byName(a, b);
+            case 'created':
+              return ts(b.created_at) - ts(a.created_at) || byName(a, b);
+            case 'mods':
+              return b.mods.length - a.mods.length || byName(a, b);
+            case 'name':
+            default:
+              return byName(a, b);
+          }
+        });
         if (visible.length === 0) {
           return (
             <div className="gf-empty">

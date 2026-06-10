@@ -329,6 +329,14 @@
       "following": "All modpacks",
       "publishedByYou": "Published by you"
     },
+    "sort": {
+      "label": "Sort",
+      "recent": "Recently launched",
+      "edited": "Recently edited",
+      "created": "Recently created",
+      "name": "Name A–Z",
+      "mods": "Most mods"
+    },
     "activity": {
       "hasUpdates": "{{count}} modpack has updates",
       "haveUpdates": "{{count}} modpacks have updates",
@@ -609,7 +617,7 @@
   "modpacks": {
     "tabs": {
       "yours": "Installed",
-      "browse": "Browse"
+      "browse": "Browse community packs"
     },
     "quickAdd": {
       "label": "Add a modpack by code",
@@ -620,7 +628,7 @@
   "library": {
     "tabs": {
       "installed": "Installed",
-      "browse": "Browse"
+      "browse": "Browse mods"
     }
   },
   "nav": {
@@ -1091,6 +1099,10 @@
     "secondary": {
       "create": "Create modpack",
       "reviewUpdates": "Review updates ({{count}})"
+    },
+    "recent": {
+      "title": "Recent modpacks",
+      "switchTitle": "Switch to {{name}}"
     },
     "syncPillReady": "Sync available",
     "sharePillReady": "Not yet shared",

@@ -1757,6 +1757,16 @@ body {
   flex-wrap: wrap;
   gap: 8px;
 }
+/* FR5 — leading label on the Recent-modpacks strip; aligns with the
+   gf-btn-3 chips it sits next to without reading as a button itself. */
+.gf-home-recent-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  opacity: 0.75;
+  align-self: center;
+}
 .gf-home-footer {
   margin-top: auto;
   padding-top: 32px;

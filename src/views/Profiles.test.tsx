@@ -180,7 +180,7 @@ describe('<ProfilesView>', () => {
     expect(screen.getByRole('button', { name: /^Installed$/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Yours$/i })).toBeNull();
     // Click Browse — outer tab
-    await user.click(screen.getByRole('button', { name: /^Browse$/i }));
+    await user.click(screen.getByRole('button', { name: /^Browse /i }));
     // The public modpack browser heading appears
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Browse Modpacks' })).toBeInTheDocument();
@@ -1599,6 +1599,73 @@ describe('<ProfilesView>', () => {
     expect(screen.getByRole('status', { name: /out of sync/i })).toBeInTheDocument();
   });
 
+  it('FR4: sort select reorders the modpack cards (name / most mods / recently launched)', async () => {
+    seedProfiles([
+      baseProfile({ name: 'Zebra', mods: [profileMod()] }),
+      baseProfile({ name: 'Alpha', mods: [] }),
+      baseProfile({
+        name: 'Mega',
+        mods: [profileMod(), profileMod({ name: 'Second', folder_name: 'Second' })],
+      }),
+    ]);
+    // Launch history: Zebra most recent, Alpha older, Mega never.
+    localStorage.setItem(
+      'sts2mm-modpack-launches',
+      JSON.stringify({ Zebra: 2000, Alpha: 1000 }),
+    );
+    const user = userEvent.setup();
+    render(<Wrap />);
+    const cardNames = () =>
+      [...document.querySelectorAll('.gf-modpack-card-name')].map((el) => el.textContent);
+
+    // Default sort = recently launched: Zebra, Alpha, then unlaunched Mega.
+    await waitFor(() => {
+      expect(cardNames()).toEqual(['Zebra', 'Alpha', 'Mega']);
+    });
+
+    const select = screen.getByRole('combobox', { name: /Sort/i });
+    await user.selectOptions(select, 'name');
+    await waitFor(() => {
+      expect(cardNames()).toEqual(['Alpha', 'Mega', 'Zebra']);
+    });
+
+    await user.selectOptions(select, 'mods');
+    await waitFor(() => {
+      expect(cardNames()).toEqual(['Mega', 'Zebra', 'Alpha']);
+    });
+
+    // Choice persists for the next mount.
+    expect(localStorage.getItem('sts2mm-modpack-sort')).toBe('mods');
+  });
+
+  it('FR4: sort by recently edited / recently created uses the manifest timestamps', async () => {
+    seedProfiles([
+      baseProfile({
+        name: 'Oldest',
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-03-01T00:00:00Z',
+      } as Partial<Profile>),
+      baseProfile({
+        name: 'Newest',
+        created_at: '2026-02-01T00:00:00Z',
+        updated_at: '2026-01-15T00:00:00Z',
+      } as Partial<Profile>),
+    ]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    const cardNames = () =>
+      [...document.querySelectorAll('.gf-modpack-card-name')].map((el) => el.textContent);
+    await waitFor(() => { expect(cardNames().length).toBe(2); });
+
+    const select = screen.getByRole('combobox', { name: /Sort/i });
+    // Recently edited: Oldest has the newer updated_at.
+    await user.selectOptions(select, 'edited');
+    await waitFor(() => { expect(cardNames()).toEqual(['Oldest', 'Newest']); });
+    // Recently created: Newest has the newer created_at.
+    await user.selectOptions(select, 'created');
+    await waitFor(() => { expect(cardNames()).toEqual(['Newest', 'Oldest']); });
+  });
+
   it('Share button opens the publish modal when profile is unpublished', async () => {
     seedProfiles([baseProfile({ name: 'Unpublished' })]);
     registerInvokeHandler('get_share_info', () => null);
@@ -2475,7 +2542,7 @@ describe('<ProfilesView> toolbar Quick-Add (relocated from Home v7)', () => {
     expect(screen.getByLabelText(/Add a modpack by code/i)).toBeInTheDocument();
     // Switch to Browse — the toolbar Quick-Add row hides because
     // it's part of the Yours surface.
-    await user.click(screen.getByRole('button', { name: /^Browse$/i }));
+    await user.click(screen.getByRole('button', { name: /^Browse /i }));
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Browse Modpacks' })).toBeInTheDocument();
     });

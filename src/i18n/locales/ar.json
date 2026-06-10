@@ -330,6 +330,14 @@
       "following": "جميع الحزم",
       "publishedByYou": "المنشورة بواسطتك"
     },
+    "sort": {
+      "label": "ترتيب",
+      "recent": "الأحدث تشغيلًا",
+      "edited": "الأحدث تعديلًا",
+      "created": "الأحدث إنشاءً",
+      "name": "الاسم أ–ي",
+      "mods": "الأكثر تعديلات"
+    },
     "activity": {
       "hasUpdates": "{{count}} حزمة لها تحديثات",
       "haveUpdates": "{{count}} حزم لها تحديثات",
@@ -610,7 +618,7 @@
   "modpacks": {
     "tabs": {
       "yours": "المثبّتة",
-      "browse": "تصفّح"
+      "browse": "تصفّح حزم المجتمع"
     },
     "quickAdd": {
       "label": "إضافة حزمة عبر رمز",
@@ -621,7 +629,7 @@
   "library": {
     "tabs": {
       "installed": "المثبّتة",
-      "browse": "تصفّح"
+      "browse": "تصفّح التعديلات"
     }
   },
   "nav": {
@@ -1092,6 +1100,10 @@
     "secondary": {
       "create": "إنشاء حزمة",
       "reviewUpdates": "مراجعة التحديثات ({{count}})"
+    },
+    "recent": {
+      "title": "الحزم الأخيرة",
+      "switchTitle": "التبديل إلى {{name}}"
     },
     "syncPillReady": "المزامنة متاحة",
     "sharePillReady": "لم تُشارَك بعد",

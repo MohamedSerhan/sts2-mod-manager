@@ -893,3 +893,159 @@ describe('<HomeView> active modpack with imported sub renders the share chip', (
     });
   });
 });
+
+// ── FR5 — Recent modpacks quick-switch strip ─────────────────────────
+describe('<HomeView> Recent modpacks strip', () => {
+  const USAGE_KEY = 'sts2mm-modpack-launches';
+
+  function seedRecentWorld() {
+    registerInvokeHandler('get_active_profile', () => 'ActivePack');
+    registerInvokeHandler('list_profiles_cmd', () => [
+      { name: 'ActivePack', mods: [], created_at: '2026-01-01' },
+      { name: 'OldFavorite', mods: [], created_at: '2026-01-01' },
+      { name: 'WeekendPack', mods: [], created_at: '2026-01-01' },
+    ]);
+    registerInvokeHandler('get_subscriptions', () => []);
+  }
+
+  it('shows recently launched packs (newest first), excluding the active one', async () => {
+    seedRecentWorld();
+    localStorage.setItem(USAGE_KEY, JSON.stringify({
+      ActivePack: 3000, // active — must NOT appear in the strip
+      OldFavorite: 1000,
+      WeekendPack: 2000,
+    }));
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText(/Recent modpacks/)).toBeInTheDocument(); });
+    const weekend = screen.getByRole('button', { name: /Switch to WeekendPack/i });
+    const old = screen.getByRole('button', { name: /Switch to OldFavorite/i });
+    // Newest launch renders before the older one.
+    expect(weekend.compareDocumentPosition(old) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The active pack never offers "switch to itself".
+    expect(screen.queryByRole('button', { name: /Switch to ActivePack/i })).toBeNull();
+  });
+
+  it('hides the strip entirely when there is no launch history', async () => {
+    seedRecentWorld();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('ActivePack')).toBeInTheDocument(); });
+    expect(screen.queryByText(/Recent modpacks/)).toBeNull();
+  });
+
+  it('skips stale history entries for packs no longer on disk', async () => {
+    seedRecentWorld();
+    localStorage.setItem(USAGE_KEY, JSON.stringify({
+      DeletedPack: 9000, // not in list_profiles_cmd — must not render
+      WeekendPack: 2000,
+    }));
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText(/Recent modpacks/)).toBeInTheDocument(); });
+    expect(screen.getByRole('button', { name: /Switch to WeekendPack/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Switch to DeletedPack/i })).toBeNull();
+  });
+
+  it('clicking a recent pack switches to it and records the launch', async () => {
+    seedRecentWorld();
+    localStorage.setItem(USAGE_KEY, JSON.stringify({ WeekendPack: 2000 }));
+    registerInvokeHandler('get_profile_drift', () => ({
+      added: [], removed: [], toggled: [], version_changed: [], has_drift: false,
+    }));
+    registerInvokeHandler('switch_profile', () => ({
+      applied: true, downloaded: 0, missing_mods: [], failed_downloads: [],
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    const btn = await screen.findByRole('button', { name: /Switch to WeekendPack/i });
+    await user.click(btn);
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'switch_profile')).toBe(true);
+    });
+    // Launch recorded — WeekendPack's timestamp moved to "now".
+    const map = JSON.parse(localStorage.getItem(USAGE_KEY) ?? '{}');
+    expect(map.WeekendPack).toBeGreaterThan(2000);
+    // Success toast fires.
+    await waitFor(() => {
+      expect(screen.getByText(/Switched to modpack "WeekendPack"/i)).toBeInTheDocument();
+    });
+  });
+
+  it('confirming the drift warning ("Switch anyway") proceeds with the switch', async () => {
+    seedRecentWorld();
+    localStorage.setItem(USAGE_KEY, JSON.stringify({ WeekendPack: 2000 }));
+    registerInvokeHandler('get_profile_drift', () => ({
+      added: ['LooseMod'], removed: [], toggled: [], version_changed: [], has_drift: true,
+    }));
+    registerInvokeHandler('switch_profile', () => ({
+      applied: true, downloaded: 0, missing_mods: [], failed_downloads: [],
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.click(await screen.findByRole('button', { name: /Switch to WeekendPack/i }));
+    const foot = await waitFor(() => {
+      const f = document.querySelector('.gf-modal-back .gf-modal .gf-modal-foot');
+      if (!f) throw new Error('confirm modal foot not mounted');
+      return f as HTMLElement;
+    });
+    await user.click(within(foot).getByRole('button', { name: /Switch anyway/i }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'switch_profile')).toBe(true);
+    });
+  });
+
+  it('a failed drift lookup does not block the quick-switch', async () => {
+    seedRecentWorld();
+    localStorage.setItem(USAGE_KEY, JSON.stringify({ WeekendPack: 2000 }));
+    registerInvokeHandler('get_profile_drift', () => { throw new Error('drift probe down'); });
+    registerInvokeHandler('switch_profile', () => ({
+      applied: true, downloaded: 0, missing_mods: [], failed_downloads: [],
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.click(await screen.findByRole('button', { name: /Switch to WeekendPack/i }));
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'switch_profile')).toBe(true);
+    });
+  });
+
+  it('switch failure surfaces the error toast', async () => {
+    seedRecentWorld();
+    localStorage.setItem(USAGE_KEY, JSON.stringify({ WeekendPack: 2000 }));
+    registerInvokeHandler('get_profile_drift', () => ({
+      added: [], removed: [], toggled: [], version_changed: [], has_drift: false,
+    }));
+    registerInvokeHandler('switch_profile', () => { throw new Error('disk on fire'); });
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.click(await screen.findByRole('button', { name: /Switch to WeekendPack/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/disk on fire/)).toBeInTheDocument();
+    });
+  });
+
+  it('warns about unsaved drift on the current pack before switching away', async () => {
+    seedRecentWorld();
+    localStorage.setItem(USAGE_KEY, JSON.stringify({ WeekendPack: 2000 }));
+    registerInvokeHandler('get_profile_drift', () => ({
+      added: ['LooseMod'], removed: [], toggled: [], version_changed: [], has_drift: true,
+    }));
+    registerInvokeHandler('switch_profile', () => ({
+      applied: true, downloaded: 0, missing_mods: [], failed_downloads: [],
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    const btn = await screen.findByRole('button', { name: /Switch to WeekendPack/i });
+    await user.click(btn);
+    // Drift confirm appears (same ConfirmDialog shell Profiles uses);
+    // "Stay here" must NOT switch.
+    const foot = await waitFor(() => {
+      const f = document.querySelector('.gf-modal-back .gf-modal .gf-modal-foot');
+      if (!f) throw new Error('confirm modal foot not mounted');
+      return f as HTMLElement;
+    });
+    await user.click(within(foot).getByRole('button', { name: /Stay here/i }));
+    await waitFor(() => {
+      expect(document.querySelector('.gf-modal-back')).toBeNull();
+    });
+    expect(getInvokeCalls().some((c) => c.cmd === 'switch_profile')).toBe(false);
+  });
+});

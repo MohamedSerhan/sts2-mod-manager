@@ -41,6 +41,15 @@ export interface ModInfo {
   display_description?: string | null;
 }
 
+/** Curator-authored per-mod metadata carried inside a shared manifest
+ *  (notes / custom link / tags). Merged fill-only into the receiver's
+ *  mod_sources on install — their own annotations always win. */
+export interface SharedModExtras {
+  note?: string | null;
+  custom_url?: string | null;
+  tags?: string[];
+}
+
 export interface Profile {
   name: string;
   game_version: string | null;
@@ -51,6 +60,9 @@ export interface Profile {
   /** Opt-in flag for the in-app Browse Modpacks tab.
    *  true = listed; null / false = unlisted. */
   public?: boolean | null;
+  /** Curator notes/links/tags per mod, keyed `folder_name ?? name`.
+   *  Present only on manifests published with "Include notes" on. */
+  mod_extras?: Record<string, SharedModExtras>;
 }
 
 export interface ProfileMod {

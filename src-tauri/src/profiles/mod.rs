@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::state::AppState;
 
@@ -94,6 +95,26 @@ fn default_enabled() -> bool {
     true
 }
 
+/// Curator-authored metadata for one mod, carried inside a shared
+/// manifest so friends inherit the curator's notes/links/tags
+/// (Solo FR, 2026-06-10). Purely informational — never used for mod
+/// identity, drift, updates, or the publish signature.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct SharedModExtras {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+}
+
+impl SharedModExtras {
+    pub fn is_empty(&self) -> bool {
+        self.note.is_none() && self.custom_url.is_none() && self.tags.is_empty()
+    }
+}
+
 /// A saved profile capturing a snapshot of installed/enabled mods.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Profile {
@@ -109,6 +130,14 @@ pub struct Profile {
     /// `sts2mm-profiles` repo (no field present) is treated as opted out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub public: Option<bool>,
+    /// Curator notes/links/tags per mod, keyed folder-first
+    /// (`folder_name ?? name`) to match the sources-DB convention.
+    /// Populated at publish time from the curator's mod_sources.json
+    /// (unless they opt out); merged fill-only into the receiver's
+    /// sources DB on install. Older manifests deserialize as empty;
+    /// older app versions ignore the unknown field.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub mod_extras: HashMap<String, SharedModExtras>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

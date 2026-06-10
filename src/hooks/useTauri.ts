@@ -438,15 +438,17 @@ export async function findGithubFromNexus(
 export async function shareProfile(
   name: string,
   listPublic: boolean | null,
+  includeNotes: boolean | null = null,
 ): Promise<ShareResult> {
-  return invoke('share_profile', { name, listPublic });
+  return invoke('share_profile', { name, listPublic, includeNotes });
 }
 
 export async function reshareProfile(
   name: string,
   listPublic: boolean | null,
+  includeNotes: boolean | null = null,
 ): Promise<ShareResult> {
-  return invoke('reshare_profile', { name, listPublic });
+  return invoke('reshare_profile', { name, listPublic, includeNotes });
 }
 
 export async function fetchSharedProfile(code: string): Promise<Profile> {

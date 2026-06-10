@@ -278,6 +278,7 @@ fn snapshot_current_inner(
             .unwrap_or(now),
         updated_at: now,
         public: existing_profile.as_ref().and_then(|p| p.public),
+        mod_extras: Default::default(),
     };
 
     save_profile(&profile, profiles_path)?;
@@ -955,6 +956,9 @@ pub(crate) async fn switch_profile_from_paths(
     // shared profile links its mods' GitHub/Nexus chips, same as a fresh
     // install or subscription update. Covers mods already on disk too.
     crate::profiles::persist_profile_mod_sources(&profile.mods, config_path);
+    // Curator notes/links/tags ride in the manifest (Solo FR) — merge
+    // them fill-only so the receiver's own annotations always win.
+    crate::mod_sources::merge_shared_extras(&profile.mod_extras, config_path);
 
     // ── STEP 2: Apply profile AFTER downloads ──
     apply_profile_with_pins(&profile, mods_path, disabled_path, &pinned_set)
@@ -1050,6 +1054,7 @@ mod snapshot_metadata_tests {
                 created_at: now,
                 updated_at: now,
                 public: Some(true),
+                mod_extras: Default::default(),
             },
             &profiles_path,
         )
@@ -1383,6 +1388,7 @@ mod modpack_flow_tests {
             created_at: now,
             updated_at: now,
             public: Some(false),
+            mod_extras: Default::default(),
         };
         save_profile(&profile, profiles).unwrap();
         profile

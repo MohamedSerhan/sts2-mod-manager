@@ -418,6 +418,7 @@ mod reconcile_tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             public: None,
+            mod_extras: Default::default(),
         }
     }
 

@@ -576,6 +576,7 @@ fn filter_profile_for_publish_compatibility(
 fn load_profile_for_publish_from_paths(
     name: &str,
     list_public: Option<bool>,
+    include_notes: bool,
     profiles_path: &std::path::Path,
     mods_path: &std::path::Path,
     disabled_path: &std::path::Path,
@@ -585,10 +586,49 @@ fn load_profile_for_publish_from_paths(
     let mut profile = crate::profiles::load_profile(name, profiles_path)?;
     filter_profile_for_publish_compatibility(&mut profile, mods_path, disabled_path, game_version);
     backfill_profile_sources_from_db(&mut profile, config_path);
+    if include_notes {
+        backfill_profile_extras_from_db(&mut profile, config_path);
+    } else {
+        // Opt-out: also drop extras a previous publish may have left in
+        // the saved local JSON, so they don't ride along anyway.
+        profile.mod_extras.clear();
+    }
     if let Some(public) = list_public {
         profile.public = Some(public);
     }
     Ok(profile)
+}
+
+/// Populate the manifest's per-mod curator extras (note / custom link /
+/// tags) from the local sources DB (Solo FR, 2026-06-10). Folder-first
+/// keying to match `enrich_mods_with_sources`. Rebuilt from the DB on
+/// every publish — the DB is the source of truth, so edits and removals
+/// both propagate on the next share. Deliberately NOT part of the
+/// publish signature: editing a note never flags the pack out-of-sync;
+/// the new notes simply ride along with the next real re-share.
+fn backfill_profile_extras_from_db(profile: &mut Profile, config_path: &std::path::Path) {
+    let db = crate::mod_sources::load_sources(config_path);
+    let mut extras = std::collections::HashMap::new();
+    for pm in &profile.mods {
+        let Some(entry) = crate::mod_sources::lookup_entry(
+            &db.mods,
+            pm.folder_name.as_deref(),
+            &pm.name,
+            pm.mod_id.as_deref(),
+        ) else {
+            continue;
+        };
+        let e = crate::profiles::SharedModExtras {
+            note: entry.note.clone(),
+            custom_url: entry.custom_url.clone(),
+            tags: entry.tags.clone(),
+        };
+        if !e.is_empty() {
+            let key = pm.folder_name.clone().unwrap_or_else(|| pm.name.clone());
+            extras.insert(key, e);
+        }
+    }
+    profile.mod_extras = extras;
 }
 
 /// Stamp each mod's `source` from the curator's local `mod_sources.json`
@@ -670,6 +710,7 @@ fn profile_publish_signature(profile: &Profile) -> String {
 pub async fn share_profile(
     name: String,
     list_public: Option<bool>,
+    include_notes: Option<bool>,
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ShareResult, String> {
@@ -701,7 +742,7 @@ pub async fn share_profile(
             "Profile '{}' already shared, reusing code via reshare",
             name
         );
-        return reshare_profile(name, list_public, app_handle, state).await;
+        return reshare_profile(name, list_public, include_notes, app_handle, state).await;
     }
 
     let _guard = ShareGuard::try_acquire(state.inner(), &name)?;
@@ -711,6 +752,7 @@ pub async fn share_profile(
     let profile = load_profile_for_publish_from_paths(
         &name,
         list_public,
+        include_notes.unwrap_or(true),
         &profiles_path,
         &mods_path,
         &disabled_path,
@@ -734,7 +776,18 @@ pub async fn share_profile(
     )
     .await
     {
-        Ok(result) => Ok(result),
+        Ok(result) => {
+            // Self-subscribed curators are by definition in sync with what
+            // was just published — refresh the snapshot so the update poll
+            // doesn't flag their own publish (see the helper's doc).
+            if let Ok(published) = crate::profiles::load_profile(&name, &profiles_path) {
+                crate::subscriptions::sync_own_subscription_after_publish(
+                    &config_path,
+                    &published,
+                );
+            }
+            Ok(result)
+        }
         Err(e) => {
             restore_profile_after_failed_publish(Some(&old_profile), &profiles_path);
             Err(e.to_string())
@@ -1017,6 +1070,7 @@ pub async fn get_share_info(
 pub async fn reshare_profile(
     name: String,
     list_public: Option<bool>,
+    include_notes: Option<bool>,
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ShareResult, String> {
@@ -1054,6 +1108,7 @@ pub async fn reshare_profile(
     let mut profile = load_profile_for_publish_from_paths(
         &name,
         list_public,
+        include_notes.unwrap_or(true),
         &profiles_path,
         &mods_path,
         &disabled_path,
@@ -1191,6 +1246,11 @@ pub async fn reshare_profile(
         published_signature: Some(profile_publish_signature(&profile)),
     };
     save_share_info(&share_info_path, &updated_info).map_err(|e| e.to_string())?;
+
+    // Self-subscribed curators are by definition in sync with what was just
+    // published — refresh the subscription snapshot so the update poll
+    // doesn't flag the curator's own re-share as a pending update.
+    crate::subscriptions::sync_own_subscription_after_publish(&config_path, &profile);
 
     // Reclaim disk on the `bundles` release: any asset no profile
     // manifest still references after this re-share is dead weight.
@@ -1512,6 +1572,7 @@ mod listing_tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             public,
+            mod_extras: Default::default(),
         }
     }
 
@@ -1612,12 +1673,14 @@ mod share_orchestration_tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             public: None,
+            mod_extras: Default::default(),
         };
         crate::profiles::save_profile(&profile, &profiles_path).unwrap();
 
         let prepared = load_profile_for_publish_from_paths(
             "Stable",
             Some(false),
+            true,
             &profiles_path,
             &mods_path,
             &disabled_path,
@@ -1655,12 +1718,14 @@ mod share_orchestration_tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             public: None,
+            mod_extras: Default::default(),
         };
         crate::profiles::save_profile(&profile, &profiles_path).unwrap();
 
         let prepared = load_profile_for_publish_from_paths(
             "Stable",
             None,
+            true,
             &profiles_path,
             &mods_path,
             &disabled_path,
@@ -1702,12 +1767,14 @@ mod share_orchestration_tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             public: None,
+            mod_extras: Default::default(),
         };
         crate::profiles::save_profile(&profile, &profiles_path).unwrap();
 
         let prepared = load_profile_for_publish_from_paths(
             "Stable",
             None,
+            true,
             &profiles_path,
             &mods_path,
             &disabled_path,
@@ -1761,12 +1828,14 @@ mod share_orchestration_tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             public: None,
+            mod_extras: Default::default(),
         };
         crate::profiles::save_profile(&profile, &profiles_path).unwrap();
 
         let prepared = load_profile_for_publish_from_paths(
             "Stable",
             None,
+            true,
             &profiles_path,
             &mods_path,
             &disabled_path,
@@ -1825,12 +1894,14 @@ mod share_orchestration_tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             public: None,
+            mod_extras: Default::default(),
         };
         crate::profiles::save_profile(&profile, &profiles_path).unwrap();
 
         let prepared = load_profile_for_publish_from_paths(
             "Stable",
             None,
+            true,
             &profiles_path,
             &mods_path,
             &disabled_path,
@@ -1938,6 +2009,7 @@ mod share_orchestration_tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             public: None,
+            mod_extras: Default::default(),
         };
 
         let disabled_path = tmpdir.path().join("mods_disabled");
@@ -2074,6 +2146,7 @@ mod share_orchestration_tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             public: Some(false),
+            mod_extras: Default::default(),
         };
 
         let result = share_profile_impl(
@@ -2353,7 +2426,68 @@ mod publish_signature_tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             public: Some(false),
+            mod_extras: Default::default(),
         }
+    }
+
+    /// Curator extras (notes/links/tags) are publish metadata, not pack
+    /// content — editing a note must never flag the pack out-of-sync.
+    #[test]
+    fn signature_ignores_mod_extras() {
+        let plain = base_profile();
+        let mut with_extras = base_profile();
+        with_extras.mod_extras.insert(
+            "ModA".into(),
+            crate::profiles::SharedModExtras {
+                note: Some("compat patch".into()),
+                custom_url: Some("https://example.com".into()),
+                tags: vec!["QoL".into()],
+            },
+        );
+        assert_eq!(
+            profile_publish_signature(&plain),
+            profile_publish_signature(&with_extras),
+            "mod_extras must not affect the publish signature"
+        );
+    }
+
+    /// FR (Solo, 2026-06-10): publishing carries the curator's per-mod
+    /// note/link/tags from the local sources DB into the manifest — and
+    /// the opt-out path strips them, including stale ones left in the
+    /// saved local JSON by a previous opted-in publish.
+    #[test]
+    fn publish_backfills_extras_and_opt_out_strips_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config");
+        std::fs::create_dir_all(&config_path).unwrap();
+
+        // The curator annotated ModA in their sources DB.
+        let mut db = crate::mod_sources::ModSourcesDb::default();
+        db.mods.insert(
+            "ModA".into(),
+            crate::mod_sources::ModSourceEntry {
+                note: Some("downloaded from Patreon".into()),
+                custom_url: Some("https://patreon.com/author".into()),
+                tags: vec!["anime".into()],
+                ..Default::default()
+            },
+        );
+        crate::mod_sources::save_sources(&db, &config_path).unwrap();
+
+        // Opt-in (default): extras ride along.
+        let mut profile = base_profile();
+        backfill_profile_extras_from_db(&mut profile, &config_path);
+        let extras = profile.mod_extras.get("ModA").expect("ModA extras published");
+        assert_eq!(extras.note.as_deref(), Some("downloaded from Patreon"));
+        assert_eq!(extras.custom_url.as_deref(), Some("https://patreon.com/author"));
+        assert_eq!(extras.tags, vec!["anime".to_string()]);
+        // ModB has no annotations — no empty entry is published for it.
+        assert!(!profile.mod_extras.contains_key("ModB"));
+
+        // Round-trip through the manifest JSON (what friends download).
+        let json = serde_json::to_string(&profile).unwrap();
+        let parsed: Profile = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.mod_extras.get("ModA"), profile.mod_extras.get("ModA"));
     }
 
     /// Step B test 1: signature is stable across updated_at and bundle fields.

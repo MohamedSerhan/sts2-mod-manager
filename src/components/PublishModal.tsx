@@ -59,6 +59,10 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onLi
   const [tokenSet, setTokenSet] = useState<boolean | null>(null);
   const [progress, setProgress] = useState<ShareProgress | null>(null);
   const [visibility, setVisibility] = useState<'private' | 'public'>('private');
+  // FR (Solo, 2026-06-10): carry the curator's per-mod notes/links/tags
+  // in the share. On by default; the checkbox lets curators keep
+  // personal annotations private. Per-publish, not persisted.
+  const [includeNotes, setIncludeNotes] = useState(true);
   /**
    * Inline-repair state. Populated when the Rust publish command rejects
    * with the "missing bundles for N mod(s): …" pattern (see Solo's bug
@@ -135,8 +139,8 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onLi
     });
     try {
       const result = await (isReshare
-        ? reshareProfile(profile.name, listPublic)
-        : shareProfile(profile.name, listPublic));
+        ? reshareProfile(profile.name, listPublic, includeNotes)
+        : shareProfile(profile.name, listPublic, includeNotes));
       setShared(result);
       onShared?.(result);
 
@@ -387,6 +391,33 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onLi
                   </label>
                 </div>
               </div>
+
+              {/* FR (Solo) — include the curator's per-mod notes, custom
+                  links, and tags in the share. Unchecked = personal
+                  annotations stay on this machine. */}
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 9,
+                  fontSize: 12,
+                  color: 'var(--ink-mute)',
+                  cursor: 'pointer',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={includeNotes}
+                  onChange={(e) => setIncludeNotes(e.target.checked)}
+                  style={{ marginTop: 2 }}
+                />
+                <span>
+                  <span style={{ fontWeight: 600, color: 'var(--ink)', display: 'block' }}>
+                    {t('publish.includeNotes')}
+                  </span>
+                  {t('publish.includeNotesDesc')}
+                </span>
+              </label>
 
               {/* Consent — first-time curators get a public repo on
                   their GitHub profile without ever being told. Tell

@@ -2445,6 +2445,7 @@ mod github_api_stress_tests {
             created_at: now,
             updated_at: now,
             public: Some(false),
+            mod_extras: Default::default(),
         })
     }
 

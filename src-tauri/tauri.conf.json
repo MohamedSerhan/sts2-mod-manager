@@ -29,6 +29,9 @@
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,
+    "publisher": "Magical Crocs",
+    "copyright": "Copyright (c) 2026 MohamedSerhan (Magical Crocs)",
+    "homepage": "https://github.com/MohamedSerhan/sts2-mod-manager",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

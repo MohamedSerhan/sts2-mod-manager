@@ -282,7 +282,10 @@ export function ModpackDetail({
     [profile.mods],
   );
 
-  // Available section filter (its own search box).
+  // Available section filter. Driven by its own search box AND by the
+  // in-pack table's search (via onSearchChange) so one query covers both
+  // sections — searching narrows the pack list and the Add-from-Library
+  // list together (Solo, 2026-06-10). Tags match too.
   const filteredAvailable = useMemo(() => {
     const q = availableQuery.trim().toLowerCase();
     if (!q) return availableMods;
@@ -292,6 +295,7 @@ export function ModpackDetail({
         name.includes(q)
         || (m.folder_name?.toLowerCase().includes(q) ?? false)
         || m.version.toLowerCase().includes(q)
+        || (m.tags ?? []).some((tag) => tag.toLowerCase().includes(q))
       );
     });
   }, [availableMods, availableQuery]);
@@ -850,6 +854,13 @@ export function ModpackDetail({
           }}
           onMembershipChanged={refreshAfterMutation}
           onLoadOrderChanged={refreshAfterMutation}
+          onSearchChange={(q) => {
+            // One search, both sections: mirror the query into the
+            // Add-from-Library filter, and pop the section open so the
+            // matches are actually visible while typing.
+            setAvailableQuery(q);
+            if (q.trim()) setLibraryOpen(true);
+          }}
           {...lib.tableActionProps}
         />
       </section>

@@ -839,12 +839,11 @@ fn is_single_file_mod_asset(name: &str) -> bool {
 }
 
 fn parse_asset_version(version: &str) -> Option<semver::Version> {
-    let trimmed = version.trim().trim_start_matches('v');
-    let mut parts = trimmed.split('.');
-    let major = parts.next()?.parse::<u64>().ok()?;
-    let minor = parts.next().unwrap_or("0").parse::<u64>().ok()?;
-    let patch = parts.next().unwrap_or("0").parse::<u64>().ok()?;
-    Some(semver::Version::new(major, minor, patch))
+    // Lenient on purpose: the game-version side can carry a Steam beta
+    // suffix ("0.106.1b"). The old digit-only parse returned None for
+    // those, which skipped the whole Compat-asset branch and downloaded
+    // the latest-game main file on beta builds (the RitsuLib bug).
+    crate::updater::parse_loose_version(version)
 }
 
 fn compat_version_from_asset_name(name: &str) -> Option<String> {
@@ -1210,6 +1209,56 @@ mod asset_selection_tests {
             owner: make_owner(),
             topics: topics.iter().map(|s| s.to_string()).collect(),
         }
+    }
+
+    /// RitsuLib v0.4.17's real asset list (2026-06-10) — the multi-variant
+    /// release shape that motivated find_best_asset_for_game_version.
+    fn ritsulib_release() -> GitHubRelease {
+        release(&[
+            "STS2-RitsuLib.0.4.17.variant-pack.zip",
+            "STS2.RitsuLib.0.4.17.github.zip",
+            "STS2.RitsuLib.0.4.17.nupkg",
+            "STS2.RitsuLib.Compat.0.103.2.0.4.17.github.zip",
+            "STS2.RitsuLib.Compat.0.103.2.0.4.17.nupkg",
+            "STS2.RitsuLib.Compat.0.106.1.0.4.17.github.zip",
+            "STS2.RitsuLib.Compat.0.106.1.0.4.17.nupkg",
+        ])
+    }
+
+    #[test]
+    fn ritsulib_known_game_version_picks_matching_compat_asset() {
+        let rel = ritsulib_release();
+        let asset = find_best_asset_for_game_version(&rel, Some("0.106.1")).unwrap();
+        assert_eq!(asset.name, "STS2.RitsuLib.Compat.0.106.1.0.4.17.github.zip");
+        let asset = find_best_asset_for_game_version(&rel, Some("0.103.2")).unwrap();
+        assert_eq!(asset.name, "STS2.RitsuLib.Compat.0.103.2.0.4.17.github.zip");
+        // Between the two compat lines → newest satisfied line wins.
+        let asset = find_best_asset_for_game_version(&rel, Some("0.105.0")).unwrap();
+        assert_eq!(asset.name, "STS2.RitsuLib.Compat.0.103.2.0.4.17.github.zip");
+    }
+
+    #[test]
+    fn ritsulib_beta_suffixed_game_version_still_picks_compat_asset() {
+        // Solo's bug (2026-06-10): Steam beta builds report suffixed
+        // versions. The old strict parse returned None for them, the
+        // Compat branch was skipped, and the latest-game main file got
+        // installed on a beta build → RitsuLib patch failures at boot.
+        let rel = ritsulib_release();
+        for beta in ["0.106.1b", "0.106.1-beta.4257", "v0.106.1 beta"] {
+            let asset = find_best_asset_for_game_version(&rel, Some(beta)).unwrap();
+            assert_eq!(
+                asset.name, "STS2.RitsuLib.Compat.0.106.1.0.4.17.github.zip",
+                "beta version string {:?} must still select the Compat asset",
+                beta
+            );
+        }
+    }
+
+    #[test]
+    fn ritsulib_unknown_game_version_prefers_main_github_zip_over_variant_pack() {
+        let rel = ritsulib_release();
+        let asset = find_best_asset_for_game_version(&rel, None).unwrap();
+        assert_eq!(asset.name, "STS2.RitsuLib.0.4.17.github.zip");
     }
 
     #[test]

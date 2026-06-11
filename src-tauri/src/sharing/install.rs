@@ -392,6 +392,9 @@ pub async fn install_shared_profile(
     // the loop skipped via `continue` — which is the case the previous,
     // download-arm-nested write missed.
     crate::profiles::persist_profile_mod_sources(&profile.mods, &config_path);
+    // Curator notes/links/tags ride in the manifest (Solo FR) — merge
+    // them fill-only so the receiver's own annotations always win.
+    crate::mod_sources::merge_shared_extras(&profile.mod_extras, &config_path);
 
     if !download_failures.is_empty() {
         log::error!(

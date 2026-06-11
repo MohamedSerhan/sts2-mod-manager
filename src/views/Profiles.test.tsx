@@ -180,7 +180,7 @@ describe('<ProfilesView>', () => {
     expect(screen.getByRole('button', { name: /^Installed$/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Yours$/i })).toBeNull();
     // Click Browse — outer tab
-    await user.click(screen.getByRole('button', { name: /^Browse$/i }));
+    await user.click(screen.getByRole('button', { name: /^Browse /i }));
     // The public modpack browser heading appears
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Browse Modpacks' })).toBeInTheDocument();
@@ -1472,6 +1472,215 @@ describe('<ProfilesView>', () => {
     expect(await screen.findByRole('status', { name: /out of sync/i })).toBeInTheDocument();
   });
 
+  it('membership edit on a shared pack keeps the out-of-sync banner even with NO drift (Solo regression)', async () => {
+    // Solo's 2026-06-08 report: Remove from a shared active pack disables the
+    // mod on disk AND drops it from the manifest, so there is no manifest-vs-
+    // disk drift — but the published share no longer matches local, so the
+    // out-of-sync banner must appear and SURVIVE the revision-driven refetch
+    // (the old refreshShareAndDrift race used to wipe the optimistic flag).
+    seedProfiles([baseProfile({ name: 'SoloPack', mods: [] })]);
+    registerInvokeHandler('get_share_info', () => ({
+      owner: 'Solomag',
+      code: '290A-56ED-B15D',
+      file_path: 'SoloPack.json',
+      url: 'https://github.com/Solomag/sts2mm-profiles/blob/main/SoloPack.json',
+      repo_url: 'https://github.com/Solomag/sts2mm-profiles',
+      failed_uploads: [],
+      // Worst case for the race: the backend flag is still false (stale
+      // signature) — the local optimistic flag alone must keep the banner up.
+      out_of_sync: false,
+    }));
+    registerInvokeHandler('get_active_profile', () => 'SoloPack');
+    // No drift at any point — mirrors the Remove case where manifest and
+    // disk agree after the mutation.
+    registerInvokeHandler('get_profile_drift', () => ({
+      added: [], removed: [], toggled: [], version_changed: [], has_drift: false,
+    }));
+    registerInvokeHandler('get_installed_mods', () => [{
+      name: 'SomeMod',
+      version: '1.0.0',
+      description: '',
+      enabled: true,
+      files: [],
+      source: null,
+      hash: null,
+      dependencies: [],
+      size_bytes: 0,
+      github_url: null,
+      nexus_url: null,
+      folder_name: 'SomeMod',
+      mod_id: 'SomeMod',
+      pinned: false,
+    }]);
+    registerInvokeHandler('set_profile_mod_membership', () => baseProfile({ name: 'SoloPack' }));
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await openDetailFor(user, 'SoloPack');
+    const available = await screen.findByTestId('modpack-detail-available');
+    await user.click(within(available).getByRole('button', { name: /Add from Mod Library/i }));
+    await user.click(within(available).getByRole('button', { name: /^Add$/i }));
+
+    // The banner appears via the optimistic local flag…
+    expect(await screen.findByRole('status', { name: /out of sync/i })).toBeInTheDocument();
+    // …and is still up after the membership mutation's revision bump has
+    // re-fetched share info (≥2 get_share_info calls: mount + post-mutation).
+    await waitFor(() => {
+      expect(getInvokeCalls().filter((c) => c.cmd === 'get_share_info').length).toBeGreaterThanOrEqual(2);
+    });
+    expect(screen.getByRole('status', { name: /out of sync/i })).toBeInTheDocument();
+    // And no drift banner — manifest and disk agree (Remove ≠ drift).
+    expect(screen.queryByText(/has drifted/)).toBeNull();
+  });
+
+  it('a stale in-flight share/drift refetch cannot clobber a newer result (revision guard)', async () => {
+    // Race regression: refetch #1 (mount) hangs; a mutation bumps the
+    // revision and refetch #2 lands with out_of_sync: true. When #1 finally
+    // resolves with the STALE out_of_sync: false payload, the revision guard
+    // must discard it — the banner stays.
+    seedProfiles([baseProfile({ name: 'RacePack', mods: [] })]);
+    const shareInfo = (outOfSync: boolean) => ({
+      owner: 'alice',
+      code: 'AA5A-315D-61AE',
+      file_path: 'RacePack.json',
+      url: 'https://github.com/alice/sts2mm-profiles/blob/main/RacePack.json',
+      repo_url: 'https://github.com/alice/sts2mm-profiles',
+      failed_uploads: [],
+      out_of_sync: outOfSync,
+    });
+    let resolveFirst: ((v: unknown) => void) | null = null;
+    let shareCalls = 0;
+    registerInvokeHandler('get_share_info', () => {
+      shareCalls++;
+      if (shareCalls === 1) {
+        // Hang the mount-time fetch until we release it below.
+        return new Promise((res) => { resolveFirst = res; });
+      }
+      return shareInfo(true);
+    });
+    registerInvokeHandler('get_active_profile', () => 'RacePack');
+    registerInvokeHandler('get_profile_drift', () => ({
+      added: [], removed: [], toggled: [], version_changed: [], has_drift: false,
+    }));
+    registerInvokeHandler('get_installed_mods', () => [{
+      name: 'SomeMod',
+      version: '1.0.0',
+      description: '',
+      enabled: true,
+      files: [],
+      source: null,
+      hash: null,
+      dependencies: [],
+      size_bytes: 0,
+      github_url: null,
+      nexus_url: null,
+      folder_name: 'SomeMod',
+      mod_id: 'SomeMod',
+      pinned: false,
+    }]);
+    registerInvokeHandler('set_profile_mod_membership', () => baseProfile({ name: 'RacePack' }));
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await openDetailFor(user, 'RacePack');
+    // Mutate while fetch #1 is still hanging → revision bump → fetch #2.
+    const available = await screen.findByTestId('modpack-detail-available');
+    await user.click(within(available).getByRole('button', { name: /Add from Mod Library/i }));
+    await user.click(within(available).getByRole('button', { name: /^Add$/i }));
+    // Fetch #2's authoritative out_of_sync: true lands → banner up.
+    expect(await screen.findByRole('status', { name: /out of sync/i })).toBeInTheDocument();
+
+    // Now release the STALE fetch #1 (out_of_sync: false). The guard must
+    // discard it: the banner stays and the share badge state doesn't revert.
+    expect(resolveFirst).not.toBeNull();
+    resolveFirst!(shareInfo(false));
+    // Give the discarded promise chain a tick to (not) apply.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByRole('status', { name: /out of sync/i })).toBeInTheDocument();
+  });
+
+  it('FR4: sort select reorders the modpack cards (name / most mods / recently launched)', async () => {
+    seedProfiles([
+      baseProfile({ name: 'Zebra', mods: [profileMod()] }),
+      baseProfile({ name: 'Alpha', mods: [] }),
+      baseProfile({
+        name: 'Mega',
+        mods: [profileMod(), profileMod({ name: 'Second', folder_name: 'Second' })],
+      }),
+    ]);
+    // Launch history: Zebra most recent, Alpha older, Mega never.
+    localStorage.setItem(
+      'sts2mm-modpack-launches',
+      JSON.stringify({ Zebra: 2000, Alpha: 1000 }),
+    );
+    const user = userEvent.setup();
+    render(<Wrap />);
+    const cardNames = () =>
+      [...document.querySelectorAll('.gf-modpack-card-name')].map((el) => el.textContent);
+
+    // Default sort = recently launched: Zebra, Alpha, then unlaunched Mega.
+    await waitFor(() => {
+      expect(cardNames()).toEqual(['Zebra', 'Alpha', 'Mega']);
+    });
+
+    const select = screen.getByRole('combobox', { name: /Sort/i });
+    await user.selectOptions(select, 'name');
+    await waitFor(() => {
+      expect(cardNames()).toEqual(['Alpha', 'Mega', 'Zebra']);
+    });
+
+    await user.selectOptions(select, 'mods');
+    await waitFor(() => {
+      expect(cardNames()).toEqual(['Mega', 'Zebra', 'Alpha']);
+    });
+
+    // Choice persists for the next mount.
+    expect(localStorage.getItem('sts2mm-modpack-sort')).toBe('mods');
+  });
+
+  it('FR4: sort by recently edited / recently created uses the manifest timestamps', async () => {
+    seedProfiles([
+      baseProfile({
+        name: 'Oldest',
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-03-01T00:00:00Z',
+      } as Partial<Profile>),
+      baseProfile({
+        name: 'Newest',
+        created_at: '2026-02-01T00:00:00Z',
+        updated_at: '2026-01-15T00:00:00Z',
+      } as Partial<Profile>),
+    ]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    const cardNames = () =>
+      [...document.querySelectorAll('.gf-modpack-card-name')].map((el) => el.textContent);
+    await waitFor(() => { expect(cardNames().length).toBe(2); });
+
+    const select = screen.getByRole('combobox', { name: /Sort/i });
+    // Recently edited: Oldest has the newer updated_at.
+    await user.selectOptions(select, 'edited');
+    await waitFor(() => { expect(cardNames()).toEqual(['Oldest', 'Newest']); });
+    // Recently created: Newest has the newer created_at.
+    await user.selectOptions(select, 'created');
+    await waitFor(() => { expect(cardNames()).toEqual(['Newest', 'Oldest']); });
+  });
+
+  it('FR4: a garbled manifest timestamp sorts as oldest instead of breaking the order', async () => {
+    // ts() NaN-guard: a profile with an unparseable updated_at must sink to
+    // the bottom (treated as 0), not poison the comparator.
+    seedProfiles([
+      baseProfile({ name: 'Broken', updated_at: 'not-a-date' } as Partial<Profile>),
+      baseProfile({ name: 'Valid', updated_at: '2026-03-01T00:00:00Z' } as Partial<Profile>),
+    ]);
+    // Persisted sort choice is honored on mount (init-from-storage branch).
+    localStorage.setItem('sts2mm-modpack-sort', 'edited');
+    render(<Wrap />);
+    const cardNames = () =>
+      [...document.querySelectorAll('.gf-modpack-card-name')].map((el) => el.textContent);
+    await waitFor(() => { expect(cardNames()).toEqual(['Valid', 'Broken']); });
+  });
+
   it('Share button opens the publish modal when profile is unpublished', async () => {
     seedProfiles([baseProfile({ name: 'Unpublished' })]);
     registerInvokeHandler('get_share_info', () => null);
@@ -2165,14 +2374,22 @@ describe('<ProfilesView>', () => {
   });
 
   it('PublishModal onShared callback patches shareInfoMap (Share label flips to Re-share)', async () => {
-    // Start unpublished.
+    // Start unpublished. After share_profile succeeds the backend has the
+    // .share sidecar, so get_share_info flips from null to the share info —
+    // the consolidated revision refetch must then CONFIRM the optimistic
+    // patch, not wipe it (backend is authoritative).
     seedProfiles([baseProfile({ name: 'Fresh' })]);
-    registerInvokeHandler('get_share_info', () => null);
-    // share_profile invoke succeeds; PublishModal will call onShared with the result.
-    registerInvokeHandler('share_profile', () => ({
+    const sharedResult = {
       owner: 'me', code: 'NEWC-ODE0-0000', url: '', remote_path: 'Fresh.json',
       failed_uploads: [],
-    }));
+    };
+    let shared = false;
+    registerInvokeHandler('get_share_info', () => (shared ? sharedResult : null));
+    // share_profile invoke succeeds; PublishModal will call onShared with the result.
+    registerInvokeHandler('share_profile', () => {
+      shared = true;
+      return sharedResult;
+    });
     registerInvokeHandler('get_api_key_status', () => ({
       nexus_api_key_set: false, github_token_set: true,
     }));
@@ -2340,7 +2557,7 @@ describe('<ProfilesView> toolbar Quick-Add (relocated from Home v7)', () => {
     expect(screen.getByLabelText(/Add a modpack by code/i)).toBeInTheDocument();
     // Switch to Browse — the toolbar Quick-Add row hides because
     // it's part of the Yours surface.
-    await user.click(screen.getByRole('button', { name: /^Browse$/i }));
+    await user.click(screen.getByRole('button', { name: /^Browse /i }));
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Browse Modpacks' })).toBeInTheDocument();
     });

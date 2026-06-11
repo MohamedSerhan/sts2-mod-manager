@@ -1515,6 +1515,7 @@ mod profile_manifest_refresh_tests {
             created_at: now,
             updated_at: now,
             public: None,
+            mod_extras: Default::default(),
         }
     }
 

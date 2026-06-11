@@ -251,6 +251,40 @@ it still won't open, strip the quarantine flag manually:
 xattr -dr com.apple.quarantine "/Applications/STS2 Mod Manager.app"
 ```
 
+## Windows: Antivirus False Positives
+
+Some antivirus engines (Kaspersky in particular) occasionally flag the
+Windows installer as a trojan. **These are false positives.** The installer
+is built in public by GitHub Actions from this repository's source — every
+release links the exact commit it was built from, and you can compare any
+release on [VirusTotal](https://www.virustotal.com) (typically 0–2 generic
+ML detections out of ~70 engines, no named malware family).
+
+Why it happens: the app is not Authenticode-signed (certificates cost money
+this free project doesn't have), and it legitimately does things heuristic
+scanners score as suspicious in *unsigned* binaries — it downloads and
+extracts mod archives, self-updates, registers the `sts2mm://` link handler,
+and checks whether the game process is running. Signed software does all of
+the same things silently.
+
+What you can do:
+
+1. **Verify instead of trust**: upload the installer you downloaded to
+   [VirusTotal](https://www.virustotal.com) and check that the few engines
+   flagging it report only generic heuristics ("ML", "Gen", "Heur"), not a
+   named family.
+2. **Report the false positive** — this actually helps every other user:
+   Kaspersky accepts samples at
+   [opentip.kaspersky.com](https://opentip.kaspersky.com); most other
+   vendors have similar portals.
+3. **Allow-list the install folder** (`%LOCALAPPDATA%\STS2 Mod Manager`)
+   if your AV keeps quarantining updates.
+
+If a release is *widely* flagged with a named detection (not 1–2 generic
+hits), do not install it — report it on the
+[issue tracker](https://github.com/MohamedSerhan/sts2-mod-manager/issues)
+immediately.
+
 ## Linux Notes
 
 Some Arch-based distros (e.g. CachyOS) have a known FUSE issue with AppImages

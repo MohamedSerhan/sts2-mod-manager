@@ -227,7 +227,31 @@ describe('<PublishModal>', () => {
       expect(call).toBeDefined();
       // Default visibility is "Friends only" → listPublic is explicitly
       // false (not null / undefined) so the backend never has to guess.
-      expect(call!.args).toEqual({ name: 'My Pack', listPublic: false });
+      // Notes/links sharing defaults ON (Solo FR, 2026-06-10).
+      expect(call!.args).toEqual({ name: 'My Pack', listPublic: false, includeNotes: true });
+    });
+  });
+
+  it('unchecking "Include your mod notes" publishes with includeNotes=false', async () => {
+    registerInvokeHandler('get_api_key_status', () => ({
+      nexus_api_key_set: false,
+      github_token_set: true,
+    }));
+    registerInvokeHandler('share_profile', () => ({
+      owner: 'alice',
+      code: 'AA5A-315D-61AE',
+      url: 'https://github.com/alice/sts2mm-profiles',
+      remote_path: 'My_Pack.json',
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText(/My Pack/)).toBeInTheDocument(); });
+    await user.click(screen.getByRole('checkbox', { name: /Include your mod notes/i }));
+    await user.click(getPublishButton());
+    await waitFor(() => {
+      const call = getInvokeCalls().find((c) => c.cmd === 'share_profile');
+      expect(call).toBeDefined();
+      expect(call!.args).toEqual({ name: 'My Pack', listPublic: false, includeNotes: false });
     });
   });
 
@@ -1062,7 +1086,7 @@ describe('<PublishModal>', () => {
     await waitFor(() => {
       const call = getInvokeCalls().find((c) => c.cmd === 'share_profile');
       expect(call).toBeDefined();
-      expect(call!.args).toEqual({ name: 'My Pack', listPublic: true });
+      expect(call!.args).toEqual({ name: 'My Pack', listPublic: true, includeNotes: true });
     });
   });
 
@@ -1102,7 +1126,7 @@ describe('<PublishModal>', () => {
     await waitFor(() => {
       const call = getInvokeCalls().find((c) => c.cmd === 'share_profile');
       expect(call).toBeDefined();
-      expect(call!.args).toEqual({ name: 'My Pack', listPublic: true });
+      expect(call!.args).toEqual({ name: 'My Pack', listPublic: true, includeNotes: true });
     });
   });
 

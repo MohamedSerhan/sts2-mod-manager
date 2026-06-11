@@ -45,6 +45,12 @@ import {
   getSubscriptions,
 } from '../hooks/useTauri';
 import { importShareCodeSmart, buildShareLink, buildShareMessage } from '../lib/shareImport';
+import {
+  getModpackUsage,
+  recordModpackLaunch,
+  renameModpackUsage,
+  forgetModpackUsage,
+} from '../lib/modpackUsage';
 import type { ProfileDrift } from '../hooks/useTauri';
 import type { LoadOrderSettingsStatus, Profile, ShareResult, Subscription } from '../types';
 
@@ -201,6 +207,24 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
   const [selectedModpack, setSelectedModpack] = useState<string | null>(null);
   // v5 batch 3 - profile list filters.
   const [tab, setTab] = useState<'following' | 'published'>('following');
+  // FR4 — list sort. Persisted so the user's preference survives reloads.
+  // 'recent' (last launched) is the default; packs never launched on this
+  // machine fall back to name order at the bottom.
+  const MODPACK_SORT_KEY = 'sts2mm-modpack-sort';
+  type ModpackSort = 'recent' | 'edited' | 'created' | 'name' | 'mods';
+  const [modpackSort, setModpackSort] = useState<ModpackSort>(() => {
+    try {
+      const stored = localStorage.getItem(MODPACK_SORT_KEY);
+      if (stored === 'recent' || stored === 'edited' || stored === 'created' || stored === 'name' || stored === 'mods') {
+        return stored;
+      }
+    } catch { /* storage unavailable */ }
+    return 'recent';
+  });
+  const changeModpackSort = useCallback((next: ModpackSort) => {
+    setModpackSort(next);
+    try { localStorage.setItem(MODPACK_SORT_KEY, next); } catch { /* best-effort */ }
+  }, []);
   const [loadOrderProfile, setLoadOrderProfile] = useState<Profile | null>(null);
   const [loadOrderDraft, setLoadOrderDraft] = useState<Profile['mods']>([]);
   const [loadOrderSaving, setLoadOrderSaving] = useState(false);
@@ -232,6 +256,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       const profile = await applySubscriptionUpdate(shareId);
       await refreshAll();
       refreshSubUpdates();
+      bumpRevision();
       toastCtx.success(t('profiles.toast.synced', { name: profile.name }));
     } catch (e) {
       toastCtx.error(t('profiles.toast.syncFailed', { error: e instanceof Error ? e.message : String(e) }));
@@ -276,92 +301,78 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     loadProfiles();
   }, []);
 
-  /**
-   * Re-pull share info + drift state for currently-loaded profiles.
-   *
-   * Drift only matters for the active profile — every other profile is
-   * just a saved snapshot, so "differs from disk" there is the expected
-   * state, not a problem.
-   *
-   * Exposed (vs being inline in the useEffect) so that mutating actions —
-   * Share, Re-share, Update from drift — can fire it after they finish
-   * and the UI updates immediately instead of leaving the user staring at
-   * a stale "out of sync" banner until they navigate away and back.
-   */
-  // Bumped on each refresh so a slower in-flight call can detect it was
-  // superseded and skip applying its (now stale) results.
-  const refreshGenRef = useRef(0);
-  const refreshShareAndDrift = useCallback(async () => {
-    const gen = ++refreshGenRef.current;
+  // ── Single revision counter ──────────────────────────────────────────
+  // Replaces three competing refresh paths (installedDriftSignature,
+  // refreshShareAndDrift, handleLibraryChanged manual calls) with one
+  // monotonic counter. Any mutation that changes profile state or on-disk
+  // mods bumps this; the consolidated effect below re-fetches everything.
+  const [profileRevision, setProfileRevision] = useState(0);
+  const bumpRevision = useCallback(() => setProfileRevision((r) => r + 1), []);
 
-    const shareMap: Record<string, ShareResult> = {};
-    for (const p of profiles) {
-      try {
-        const info = await getShareInfo(p.name);
-        if (info) shareMap[p.name] = info;
-      } catch { /* no share info */ }
-    }
-    // Track followed packs so the drift banner offers Repair (restore the
-    // author's manifest) but never Save changes for them.
-    const subs = await getSubscriptions().catch(() => []);
-    const driftEntries: Record<string, ProfileDrift> = {};
-    if (activeProfile) {
-      try {
-        const drift = await getProfileDrift(activeProfile);
-        if (drift.has_drift) driftEntries[activeProfile] = drift;
-      } catch { /* ignore */ }
-    }
+  const activeProfileRef = useRef(activeProfile);
+  useEffect(() => { activeProfileRef.current = activeProfile; }, [activeProfile]);
 
-    // A newer call started while we were awaiting — let it own the state so a
-    // stale result can't clobber a fresher one (concurrent triggers: the mount
-    // effect + Share / Re-share / Update-from-drift actions all fire this).
-    if (gen !== refreshGenRef.current) return;
-    setShareInfoMap(shareMap);
-    setSubscriptions(subs);
-    setDriftMap(driftEntries);
-  }, [profiles, activeProfile]);
+  // FB2-C bridge: when the installed mods set changes (toggle, delete,
+  // install from a sibling surface), bump the revision so drift is
+  // recomputed. Replaces the old installedDriftSignature effect.
+  const modsSignature = useMemo(
+    () =>
+      mods
+        .map((m) => `${m.folder_name ?? m.name}|${m.version}|${m.enabled ? 1 : 0}`)
+        .sort()
+        .join('\n'),
+    [mods],
+  );
+  const prevModsSigRef = useRef(modsSignature);
+  useEffect(() => {
+    if (prevModsSigRef.current !== modsSignature) {
+      prevModsSigRef.current = modsSignature;
+      bumpRevision();
+    }
+  }, [modsSignature, bumpRevision]);
+
+  // ── Consolidated recompute effect ──────────────────────────────────
+  // Single effect that re-fetches share info, subscriptions, and drift
+  // whenever the revision counter, the profile list, or the active
+  // profile changes. `profiles` must stay in the deps: the initial
+  // loadProfiles() populates the list without bumping the revision, and
+  // share info can only be fetched once the names are known.
+  const profileRevisionRef = useRef(profileRevision);
+  profileRevisionRef.current = profileRevision;
 
   useEffect(() => {
     if (profiles.length === 0) return;
-    refreshShareAndDrift();
-  }, [profiles, activeProfile, refreshShareAndDrift]);
-
-  // FB2-C: drift (the banner + the modpack's "(N missing)" indicator) is a
-  // function of the INSTALLED mods, but the effect above only re-runs when the
-  // profile list or active pack changes. A per-row toggle/delete refreshes the
-  // mods array (not the profiles), so drift stayed stale until you navigated
-  // away and back. Recompute drift for the active pack whenever the installed
-  // set / versions / enabled-state change — drift-only, so it doesn't re-fetch
-  // share info on every toggle.
-  const installedDriftSignature = useMemo(
-    () =>
-      mods
-        .map((m) => `${m.folder_name ?? m.name} ${m.version} ${m.enabled ? 1 : 0}`)
-        .sort()
-        .join('|'),
-    [mods],
-  );
-  useEffect(() => {
-    if (!activeProfile) {
-      setDriftMap((prev) => (Object.keys(prev).length > 0 ? {} : prev));
-      return;
-    }
+    const rev = profileRevision;
     let cancelled = false;
-    getProfileDrift(activeProfile)
-      .then((drift) => {
-        if (cancelled || !drift) return;
-        setDriftMap((prev) => {
-          const next = { ...prev };
-          if (drift.has_drift) next[activeProfile] = drift;
-          else delete next[activeProfile];
-          return next;
-        });
-      })
-      .catch(() => { /* ignore */ });
-    return () => {
-      cancelled = true;
-    };
-  }, [installedDriftSignature, activeProfile]);
+
+    (async () => {
+      const shareMap: Record<string, ShareResult> = {};
+      for (const p of profiles) {
+        try {
+          const info = await getShareInfo(p.name);
+          if (info) shareMap[p.name] = info;
+        } catch { /* no share info */ }
+      }
+
+      const subs = await getSubscriptions().catch(() => []);
+
+      const driftEntries: Record<string, ProfileDrift> = {};
+      const ap = activeProfileRef.current;
+      if (ap) {
+        try {
+          const drift = await getProfileDrift(ap);
+          if (drift?.has_drift) driftEntries[ap] = drift;
+        } catch { /* ignore */ }
+      }
+
+      if (cancelled || profileRevisionRef.current !== rev) return;
+      setShareInfoMap(shareMap);
+      setSubscriptions(subs);
+      setDriftMap(driftEntries);
+    })();
+
+    return () => { cancelled = true; };
+  }, [profileRevision, profiles, activeProfile]);
 
   // Subscriptions can point at our own packs when a curator installs their
   // own share code again. Local share info proves ownership, so only followed
@@ -582,7 +593,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     // Silent so the open ModpackDetail keeps its scroll position while
     // the manifest re-pulls after an add/remove.
     await loadProfiles({ silent: true });
-    refreshShareAndDrift();
+    bumpRevision();
   }
 
   async function handleSwitch(name: string) {
@@ -601,8 +612,10 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       setSwitchingProfile(name);
       const result = await switchProfile(name);
       setActiveProfile(name);
+      recordModpackLaunch(name);
       await refreshAll();
       await loadProfiles();
+      bumpRevision();
 
       const parts: string[] = [];
       if (result.downloaded > 0) parts.push(t('common.parts.modsDownloaded', { count: result.downloaded }));
@@ -673,8 +686,10 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       }
       const result = await repairProfile(name);
       setActiveProfile(name);
+      recordModpackLaunch(name);
       await refreshAll();
       await loadProfiles();
+      bumpRevision();
 
       // Bug 4: report mods by NAME (not just counts) — which orphans were
       // disabled, which mods were updated, and which kept their old version
@@ -740,6 +755,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       });
       await refreshAll();
       await loadProfiles();
+      bumpRevision();
       const base = shareInfoMap[name]
         ? t('profiles.toast.savedChangesWithReShare', { name })
         : t('profiles.toast.savedChanges', { name });
@@ -787,6 +803,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       await deleteProfile(name);
       setProfiles((prev) => prev.filter((p) => p.name !== name));
       clearLocalOutOfSync(name);
+      forgetModpackUsage(name);
       // Bug 3: if we just deleted the active pack, clear the AppContext
       // active pointer too (the backend clears active_profile.txt) so nothing
       // keeps flagging the now-gone pack as active until an app restart.
@@ -826,6 +843,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       const profile = await importSts2pack(path);
       setProfiles((prev) => [...prev, profile]);
       await refreshAll();
+      bumpRevision();
       toastCtx.success(t('profiles.toast.imported', { name: profile.name }));
     } catch (e) {
       toastCtx.error(t('profiles.toast.importFailed', { error: e instanceof Error ? e.message : String(e) }));
@@ -858,6 +876,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       setImportCode('');
       await refreshAll();
       refreshSubUpdates();
+      bumpRevision();
 
       if (outcome.kind === 'installed') {
         setProfiles((prev) => [...prev, outcome.profile]);
@@ -865,6 +884,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
           t('profiles.toast.importedModpack', { name: outcome.profile.name, count: outcome.profile.mods.length }),
         );
       } else if (outcome.kind === 'activated') {
+        recordModpackLaunch(outcome.profileName);
         toastCtx.success(t('profiles.toast.activated', { name: outcome.profileName }));
       } else if (outcome.kind === 'reapplied') {
         const parts: string[] = [];
@@ -1185,6 +1205,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
             renameExistingNames={profiles.map((p) => p.name)}
             onRenamed={async (oldName, newName) => {
               if (activeProfile === oldName) setActiveProfile(newName);
+              renameModpackUsage(oldName, newName);
               setLocalOutOfSyncMap((prev) => {
                 if (!prev[oldName]) return prev;
                 const next = { ...prev };
@@ -1193,6 +1214,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
                 return next;
               });
               await loadProfiles();
+              bumpRevision();
               setSelectedModpack(newName);
             }}
           />
@@ -1217,6 +1239,23 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
           {t('profiles.tabs.publishedByYou')}
           <span className="gf-tab-count">{Object.keys(shareInfoMap).length}</span>
         </button>
+        {/* FR4 — list sort, right-aligned on the filter row. */}
+        {profiles.length > 1 && (
+          <label className="gf-sort-control" style={{ marginLeft: 'auto' }}>
+            <span>{t('profiles.sort.label')}</span>
+            <select
+              aria-label={t('profiles.sort.label')}
+              value={modpackSort}
+              onChange={(e) => changeModpackSort(e.target.value as ModpackSort)}
+            >
+              <option value="recent">{t('profiles.sort.recent')}</option>
+              <option value="edited">{t('profiles.sort.edited')}</option>
+              <option value="created">{t('profiles.sort.created')}</option>
+              <option value="name">{t('profiles.sort.name')}</option>
+              <option value="mods">{t('profiles.sort.mods')}</option>
+            </select>
+          </label>
+        )}
       </div>
 
       {/* Activity — pending updates from followed packs. One row per
@@ -1338,9 +1377,39 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
           </div>
         </div>
       ) : (() => {
-        const visible = tab === 'published'
+        const filtered = tab === 'published'
           ? profiles.filter((p) => shareInfoMap[p.name])
           : profiles;
+        // FR4 — sort a copy; `profiles` keeps backend order for everything
+        // else (drift maps, detail lookups are name-keyed and unaffected).
+        const byName = (a: Profile, b: Profile) =>
+          a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true });
+        // NaN-safe: a missing/garbled timestamp sorts as 0 (oldest) instead
+        // of poisoning the comparator with NaN (inconsistent sort order).
+        const ts = (iso: string | undefined) => {
+          const n = Date.parse(iso ?? '');
+          return Number.isFinite(n) ? n : 0;
+        };
+        const usage = getModpackUsage();
+        const visible = [...filtered].sort((a, b) => {
+          switch (modpackSort) {
+            case 'recent': {
+              // Launched packs first (newest launch on top); the rest A–Z.
+              const ua = usage[a.name] ?? 0;
+              const ub = usage[b.name] ?? 0;
+              return ub - ua || byName(a, b);
+            }
+            case 'edited':
+              return ts(b.updated_at) - ts(a.updated_at) || byName(a, b);
+            case 'created':
+              return ts(b.created_at) - ts(a.created_at) || byName(a, b);
+            case 'mods':
+              return b.mods.length - a.mods.length || byName(a, b);
+            case 'name':
+            default:
+              return byName(a, b);
+          }
+        });
         if (visible.length === 0) {
           return (
             <div className="gf-empty">
@@ -1556,22 +1625,14 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
         isReshare={publishTarget?.isReshare ?? false}
         onGoToSettings={onGoToSettings}
         onClose={() => setPublishTarget(null)}
-        onListingChanged={() => { void loadProfiles(); }}
+        onListingChanged={() => { void loadProfiles().then(bumpRevision); }}
         onShared={(result) => {
-          // Optimistically patch share info so the row flips Share→Re-share
-          // immediately even before the reload below settles. Capture the name
-          // defensively: if publishTarget was cleared (modal closed) before the
-          // share resolved, skip the patch rather than deref null.
           const sharedName = publishTarget?.profile.name;
           if (sharedName) {
             setShareInfoMap((prev) => ({ ...prev, [sharedName]: result }));
             clearLocalOutOfSync(sharedName);
           }
-          // Share/Re-share enriches the saved profile manifest with bundle
-          // URLs and listing state. Reload the profile list so the row shows
-          // the persisted manifest immediately instead of waiting for a
-          // navigation round-trip.
-          loadProfiles();
+          loadProfiles().then(bumpRevision);
         }}
       />
     </div>

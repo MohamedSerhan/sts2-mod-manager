@@ -236,7 +236,7 @@ describe('<App>', () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     await user.click(getNavButton('Mod Library'));
-    await user.click(screen.getByRole('button', { name: /^Browse$/i }));
+    await user.click(screen.getByRole('button', { name: /^Browse /i }));
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /GitHub/i })).toBeInTheDocument();
     });
@@ -249,7 +249,7 @@ describe('<App>', () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     await user.click(getNavButton('Modpacks'));
-    await user.click(screen.getByRole('button', { name: /^Browse$/i }));
+    await user.click(screen.getByRole('button', { name: /^Browse /i }));
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Browse Modpacks' })).toBeInTheDocument();
     });
@@ -271,7 +271,7 @@ describe('<App>', () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     await user.click(getNavButton('Modpacks'));
-    await user.click(screen.getByRole('button', { name: /^Browse$/i }));
+    await user.click(screen.getByRole('button', { name: /^Browse /i }));
 
     await user.click(await screen.findByRole('button', { name: /Go to Modpacks/i }));
 
@@ -1716,7 +1716,7 @@ describe('<App>', () => {
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     // 1.7.0: Browse Mods is a tab inside Library, not its own sidebar entry.
     await user.click(getNavButton('Mod Library'));
-    await user.click(screen.getByRole('button', { name: /^Browse$/i }));
+    await user.click(screen.getByRole('button', { name: /^Browse /i }));
     // Default Browse tab is github; switch to Nexus Trending so the
     // effect fires and surfaces the key-missing banner.
     const trendingTab = await screen.findByRole('button', { name: /Nexus Trending/i });

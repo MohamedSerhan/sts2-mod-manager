@@ -122,6 +122,11 @@ pub struct AppStateInner {
     /// the watcher falls back to the OS default Downloads folder. Persisted
     /// in `<config>/nexus_download_dir.txt`.
     pub nexus_download_dir: Option<PathBuf>,
+    /// How many automatic backups the manager keeps. Newest `N` are retained
+    /// after each successful backup; `0` disables automatic backups entirely
+    /// (existing backups are left untouched). Clamped to `0..=5`. Persisted in
+    /// `<config>/backup_retention.txt`. Defaults to 5 (historical behavior).
+    pub backup_retention: u8,
     /// In-memory cache for `fetch_modpack_browser_page`. Keyed by page
     /// number. TTL is enforced in the command, not here.
     pub modpack_browser_cache: std::collections::HashMap<u32, CachedBrowserPage>,
@@ -218,6 +223,7 @@ impl AppStateInner {
             pending_deep_link: None,
             launch_mode: LaunchMode::default(),
             nexus_download_dir: None,
+            backup_retention: crate::backup::DEFAULT_BACKUP_RETENTION,
             modpack_browser_cache: std::collections::HashMap::new(),
         }
     }
@@ -391,6 +397,7 @@ mod game_path_persistence_tests {
             pending_deep_link: None,
             launch_mode: LaunchMode::default(),
             nexus_download_dir: None,
+            backup_retention: crate::backup::DEFAULT_BACKUP_RETENTION,
             modpack_browser_cache: std::collections::HashMap::new(),
         };
 

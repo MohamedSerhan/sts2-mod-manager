@@ -84,7 +84,7 @@ futures = "0.3"
 regex = "1"
 semver = "1"
 base64 = "0.22"
-sysinfo = { version = "0.32", default-features = false, features = ["system"] }
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 # Used by sharing.rs::upload_release_asset to safely encode asset
 # filenames into the `?name=<...>` query param of GitHub's release-asset
 # upload endpoint. Pure-Rust, no transitive bloat — smaller than pulling

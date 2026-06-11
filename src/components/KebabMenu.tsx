@@ -64,7 +64,17 @@ export function KebabMenu({
   const buttonClass = buttonClassName ?? (size === 'sm' ? 'gf-btn-3 gf-btn-icon gf-btn-2-sm' : 'gf-btn-3 gf-btn-icon');
 
   return (
-    <div ref={wrapRef} style={{ position: 'relative', display: 'inline-block' }}>
+    // `gf-kebab-open` raises this wrapper's z-index while the menu is open.
+    // The wrapper is `position: relative`, but a row's `.gf-card` only sets a
+    // `transition` (not a `transform`/`will-change`), so it does NOT establish
+    // a stacking context — meaning sibling rows later in DOM order would paint
+    // OVER this absolutely-positioned popover (issue #162). Lifting the open
+    // wrapper's z-index makes it (and its popover) win against following rows.
+    <div
+      ref={wrapRef}
+      className={open ? 'gf-kebab-wrap gf-kebab-open' : 'gf-kebab-wrap'}
+      style={{ position: 'relative', display: 'inline-block' }}
+    >
       <button
         className={buttonClass}
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}

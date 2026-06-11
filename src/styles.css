@@ -2418,6 +2418,11 @@ body {
   border-top: 1px solid var(--indigo-line);
 }
 
+/* While the menu is open, lift the whole wrapper above following rows.
+   `.gf-card` rows don't establish a stacking context (transition only), so a
+   later sibling row would otherwise paint over this popover — issue #162. */
+.gf-kebab-open { z-index: 60; }
+
 .gf-kebab {
   position: absolute; top: 100%; inset-inline-end: 0; margin-top: 4px;
   min-width: 240px; z-index: 10;

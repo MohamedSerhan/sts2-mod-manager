@@ -368,6 +368,67 @@ pub(super) async fn ensure_bundles_release(
     Ok(release)
 }
 
+/// How many total attempts the bundle-upload retry loop makes before
+/// giving up on a transient failure (timeouts, connection drops, 5xx,
+/// 403/429 rate-limit/abuse). `1` initial try + `RETRY_MAX_ATTEMPTS - 1`
+/// retries. Only transient classes retry — permanent 4xx (401/404/422/…)
+/// fail on the first attempt, see `RetryClass`.
+const RETRY_MAX_ATTEMPTS: u32 = 3;
+
+/// Base delay for the exponential backoff between upload retries
+/// (attempt 1 → BASE, attempt 2 → BASE*2, …). Kept tiny under
+/// `cfg(test)` so the retry tests don't add real wall-clock time;
+/// production waits seconds so a momentary GitHub blip clears.
+#[cfg(not(test))]
+const RETRY_BASE_DELAY: Duration = Duration::from_secs(2);
+#[cfg(test)]
+const RETRY_BASE_DELAY: Duration = Duration::from_millis(1);
+
+/// Upper bound on how long we'll honor a server-sent `Retry-After` before
+/// the next upload attempt. GitHub secondary-rate-limit responses can ask
+/// for long waits; we cap so a pathological value can't pin the share
+/// worker for minutes.
+const RETRY_AFTER_CAP: Duration = Duration::from_secs(30);
+
+/// Classification of a failed upload attempt for the retry loop. (Success
+/// is represented as `Ok(asset)` by the caller, not a variant here.)
+enum RetryClass {
+    /// A transient failure worth retrying after a backoff. The optional
+    /// `Duration` is a server-requested `Retry-After` (already parsed +
+    /// capped); when present the loop waits at least that long.
+    Transient(Option<Duration>),
+    /// A permanent failure (auth/validation/not-found). Do NOT retry —
+    /// the carried message bubbles straight up to the caller. This also
+    /// carries the 422 `already_exists` text so the recovering wrapper
+    /// can still detect and repair name conflicts.
+    Permanent(String),
+}
+
+/// Parse a `Retry-After` header value (delay-seconds form only — GitHub's
+/// rate-limit responses use integer seconds) into a capped `Duration`.
+/// Returns `None` for missing/garbage values so the caller falls back to
+/// plain exponential backoff.
+fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
+    let secs: u64 = headers
+        .get(reqwest::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse()
+        .ok()?;
+    Some(Duration::from_secs(secs).min(RETRY_AFTER_CAP))
+}
+
+/// Whether a non-success HTTP status is a transient class we retry.
+/// 5xx are server-side blips; 403/429 are GitHub's secondary-rate-limit /
+/// abuse signals (403 with a `Retry-After` or abuse body, 429 always).
+/// Every other 4xx (401 auth, 404 missing, 422 validation) is permanent.
+fn status_is_transient(status: reqwest::StatusCode) -> bool {
+    status.is_server_error()
+        || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+        || status == reqwest::StatusCode::FORBIDDEN
+}
+
 /// Upload a single binary asset to a release. `upload_url_template` is
 /// the `upload_url` field returned by the GitHub release endpoint —
 /// a URI Template like `https://uploads.github.com/.../assets{?name,label}`.
@@ -380,6 +441,14 @@ pub(super) async fn ensure_bundles_release(
 /// Unlike the Contents API, this endpoint takes raw bytes (no base64).
 /// That's what removes the ~50 MiB Contents-API ceiling: the asset
 /// endpoint accepts up to 2 GB per file.
+///
+/// Transient failures (request timeout / connection drop, HTTP 5xx, and
+/// GitHub's 403/429 secondary-rate-limit/abuse responses) are retried up
+/// to `RETRY_MAX_ATTEMPTS` times with exponential backoff, honoring a
+/// `Retry-After` header when present. This is the primary fix for issue
+/// #164: previously any one of those hiccups dropped a random mod into
+/// `failed_uploads` and blocked the whole publish. Permanent failures
+/// (401/404/422/…) are NOT retried — they fail on the first attempt.
 pub(super) async fn upload_release_asset(
     client: &reqwest::Client,
     upload_url_template: &str,
@@ -408,22 +477,91 @@ pub(super) async fn upload_release_asset(
         None => format!("{}?name={}", base, encoded_name),
     };
 
-    let resp = client
-        .post(&url)
-        .header(reqwest::header::CONTENT_TYPE, "application/zip")
-        .body(data.to_vec())
-        .send()
-        .await?;
+    let mut attempt: u32 = 0;
+    loop {
+        attempt += 1;
 
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-        return Err(AppError::Other(format!(
-            "Failed to upload release asset '{}' ({}): {}",
-            filename, status, text
-        )));
+        // Classify this attempt without holding the response borrow across
+        // the backoff sleep: resolve to `Ok(asset)`, retry, or a permanent
+        // error before we decide whether to loop.
+        let outcome: std::result::Result<ReleaseAsset, RetryClass> = match client
+            .post(&url)
+            .header(reqwest::header::CONTENT_TYPE, "application/zip")
+            .body(data.to_vec())
+            .send()
+            .await
+        {
+            Ok(resp) => {
+                let status = resp.status();
+                if status.is_success() {
+                    match resp.json::<ReleaseAsset>().await {
+                        Ok(asset) => Ok(asset),
+                        // A malformed success body isn't something a retry
+                        // fixes — surface it.
+                        Err(e) => Err(RetryClass::Permanent(format!(
+                            "Failed to parse uploaded asset '{}': {}",
+                            filename, e
+                        ))),
+                    }
+                } else {
+                    let retry_after = parse_retry_after(resp.headers());
+                    let text = resp.text().await.unwrap_or_default();
+                    let msg = format!(
+                        "Failed to upload release asset '{}' ({}): {}",
+                        filename, status, text
+                    );
+                    if status_is_transient(status) {
+                        log::warn!(
+                            "Transient upload failure for '{}' (attempt {}/{}): {} {}",
+                            filename,
+                            attempt,
+                            RETRY_MAX_ATTEMPTS,
+                            status,
+                            text
+                        );
+                        Err(RetryClass::Transient(retry_after))
+                    } else {
+                        // Permanent — but 422 already_exists must reach the
+                        // recovering wrapper, so we carry the message intact.
+                        Err(RetryClass::Permanent(msg))
+                    }
+                }
+            }
+            Err(e) if e.is_timeout() || e.is_connect() || e.is_request() => {
+                log::warn!(
+                    "Transient upload error for '{}' (attempt {}/{}): {}",
+                    filename,
+                    attempt,
+                    RETRY_MAX_ATTEMPTS,
+                    e
+                );
+                Err(RetryClass::Transient(None))
+            }
+            Err(e) => Err(RetryClass::Permanent(format!(
+                "Failed to upload release asset '{}': {}",
+                filename, e
+            ))),
+        };
+
+        match outcome {
+            Ok(asset) => return Ok(asset),
+            Err(RetryClass::Permanent(msg)) => return Err(AppError::Other(msg)),
+            Err(RetryClass::Transient(retry_after)) => {
+                if attempt >= RETRY_MAX_ATTEMPTS {
+                    return Err(AppError::Other(format!(
+                        "Failed to upload release asset '{}' after {} attempts (last failure was transient — network or GitHub rate-limit). Try sharing again.",
+                        filename, RETRY_MAX_ATTEMPTS
+                    )));
+                }
+                // Exponential backoff: BASE * 2^(attempt-1), or the
+                // server-requested Retry-After if it's longer.
+                let backoff = RETRY_BASE_DELAY
+                    .saturating_mul(1u32 << (attempt - 1))
+                    .max(retry_after.unwrap_or(Duration::ZERO));
+                tokio::time::sleep(backoff).await;
+            }
+        }
     }
-    Ok(resp.json::<ReleaseAsset>().await?)
 }
 
 /// Upload helper that recovers from GitHub's `422 already_exists`. The
@@ -2041,6 +2179,257 @@ pub(super) mod release_upload_tests {
             first_name, second_name,
             "different bytes must produce different content-addressed names"
         );
+    }
+
+    // ── Retry-on-transient-failure tests (issue #164) ───────────────────────
+    //
+    // Pre-fix, a single timeout / 5xx / 403-rate-limit during the bundle
+    // upload dropped that mod into `failed_uploads` and blocked the whole
+    // publish — and *which* mod hit the blip varied per run, exactly the
+    // "different mod fails every time" symptom in #164. `upload_release_asset`
+    // now retries transient classes with exponential backoff (tiny under
+    // cfg(test)) and only fails permanent 4xx without retrying.
+
+    #[tokio::test]
+    async fn upload_release_asset_retries_on_500_then_succeeds() {
+        let (server, _env_guard) = mock_github().await;
+        let upload_url_template = format!(
+            "{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}",
+            server.uri()
+        );
+
+        // First attempt → 500 (transient). wiremock serves mocks in
+        // registration order and `up_to_n_times(1)` retires this one after a
+        // single match, so attempt 2 falls through to the 201 mock below.
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("name", "Flaky_v1.0.0.zip"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("upstream boom"))
+            .up_to_n_times(1)
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("name", "Flaky_v1.0.0.zip"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": 7,
+                "name": "Flaky_v1.0.0.zip",
+                "browser_download_url": "https://github.com/octo/sts2mm-profiles/releases/download/bundles/Flaky_v1.0.0.zip"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = build_client("test-token");
+        let asset = upload_release_asset(
+            &client,
+            &upload_url_template,
+            "Flaky_v1.0.0.zip",
+            None,
+            b"bytes",
+        )
+        .await
+        .expect("a 500 then 201 must succeed after one retry");
+        assert_eq!(asset.id, 7);
+    }
+
+    #[tokio::test]
+    async fn upload_release_asset_retries_on_403_rate_limit_honoring_retry_after() {
+        let (server, _env_guard) = mock_github().await;
+        let upload_url_template = format!(
+            "{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}",
+            server.uri()
+        );
+
+        // First attempt → 403 with a Retry-After. Under cfg(test) the base
+        // backoff is 1ms and Retry-After is capped at RETRY_AFTER_CAP, so
+        // even a "1" here keeps the test fast while exercising the
+        // honor-Retry-After branch (the .max() picks the larger of the two).
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .respond_with(
+                ResponseTemplate::new(403)
+                    .insert_header("Retry-After", "0")
+                    .set_body_string("You have exceeded a secondary rate limit"),
+            )
+            .up_to_n_times(1)
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": 9,
+                "name": "Limited_v1.0.0.zip",
+                "browser_download_url": "https://github.com/octo/sts2mm-profiles/releases/download/bundles/Limited_v1.0.0.zip"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = build_client("test-token");
+        let asset = upload_release_asset(
+            &client,
+            &upload_url_template,
+            "Limited_v1.0.0.zip",
+            None,
+            b"bytes",
+        )
+        .await
+        .expect("a 403 rate-limit then 201 must succeed after one retry");
+        assert_eq!(asset.id, 9);
+    }
+
+    #[tokio::test]
+    async fn upload_release_asset_does_not_retry_on_401() {
+        let (server, _env_guard) = mock_github().await;
+        let upload_url_template = format!(
+            "{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}",
+            server.uri()
+        );
+
+        // A 401 is a permanent auth failure — it must fail on the FIRST
+        // attempt with no retry. expect(1) proves exactly one POST went out.
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .respond_with(ResponseTemplate::new(401).set_body_string("Bad credentials"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = build_client("test-token");
+        let err = upload_release_asset(
+            &client,
+            &upload_url_template,
+            "Unauthed_v1.0.0.zip",
+            None,
+            b"bytes",
+        )
+        .await
+        .expect_err("a 401 must not be retried");
+        assert!(
+            err.to_string().contains("401"),
+            "error should surface the 401 status, got: {}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn upload_release_asset_gives_up_after_max_attempts_on_persistent_500() {
+        let (server, _env_guard) = mock_github().await;
+        let upload_url_template = format!(
+            "{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}",
+            server.uri()
+        );
+
+        // Every attempt 500s. The loop makes exactly RETRY_MAX_ATTEMPTS (3)
+        // POSTs and then surfaces a transient-exhausted error.
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .respond_with(ResponseTemplate::new(503).set_body_string("still down"))
+            .expect(3)
+            .mount(&server)
+            .await;
+
+        let client = build_client("test-token");
+        let err = upload_release_asset(
+            &client,
+            &upload_url_template,
+            "Doomed_v1.0.0.zip",
+            None,
+            b"bytes",
+        )
+        .await
+        .expect_err("a persistent 5xx must eventually fail");
+        assert!(
+            err.to_string().contains("after 3 attempts"),
+            "error should mention attempt exhaustion, got: {}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn upload_release_asset_recovering_still_recovers_422_already_exists() {
+        // The 422 already_exists recovery path must keep working unchanged:
+        // a 422 is permanent (no retry), the recovering wrapper refetches the
+        // listing, DELETEs the conflicting asset, and re-POSTs.
+        let (server, _env_guard) = mock_github().await;
+        let upload_url_template = format!(
+            "{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}",
+            server.uri()
+        );
+
+        // First POST → 422 already_exists (permanent; recovering wrapper
+        // takes over). expect(1) proves the 422 itself was NOT retried.
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("name", "Dup_v1.0.0.zip"))
+            .respond_with(ResponseTemplate::new(422).set_body_json(serde_json::json!({
+                "message": "Validation Failed",
+                "errors": [{"code": "already_exists"}]
+            })))
+            .up_to_n_times(1)
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        // Recovery refetches the release listing to find the conflicting asset.
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 42,
+                "upload_url": format!("{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}", server.uri()),
+                "assets": []
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("page", "1"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                    "id": 555,
+                    "name": "Dup_v1.0.0.zip",
+                    "browser_download_url": "https://example/dup"
+                }])),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("DELETE"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/assets/555"))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        // Re-POST after the DELETE → 201.
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("name", "Dup_v1.0.0.zip"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": 777,
+                "name": "Dup_v1.0.0.zip",
+                "browser_download_url": "https://github.com/octo/sts2mm-profiles/releases/download/bundles/Dup_v1.0.0.zip"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = build_client("test-token");
+        let asset = upload_release_asset_recovering(
+            &client,
+            "octo",
+            "sts2mm-profiles",
+            &upload_url_template,
+            "Dup_v1.0.0.zip",
+            None,
+            b"bytes",
+        )
+        .await
+        .expect("422 already_exists recovery must still succeed");
+        assert_eq!(asset.id, 777);
     }
 }
 

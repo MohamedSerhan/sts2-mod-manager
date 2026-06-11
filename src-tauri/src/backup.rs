@@ -833,6 +833,18 @@ mod backup_pure_tests {
     }
 
     #[test]
+    fn manual_backup_keep_never_prunes_to_one_when_backups_are_off() {
+        // Retention 0 = automatic backups off. A manual "Create backup" click
+        // must fall back to the historical cap, not keep=1 (which would wipe
+        // every other hand-made backup).
+        assert_eq!(super::manual_backup_keep(0), MAX_BACKUPS);
+        assert_eq!(super::manual_backup_keep(2), 2);
+        assert_eq!(super::manual_backup_keep(5), 5);
+        // Out-of-range values clamp to the cap.
+        assert_eq!(super::manual_backup_keep(99), MAX_BACKUPS);
+    }
+
+    #[test]
     fn default_backup_retention_is_five() {
         assert_eq!(DEFAULT_BACKUP_RETENTION, 5);
         assert_eq!(MAX_BACKUPS, 5);
@@ -1084,10 +1096,20 @@ pub fn create_backup_cmd(state: tauri::State<'_, AppState>) -> std::result::Resu
     let backup_dir = s.config_path.join("backups");
     let _ = fs::create_dir_all(&backup_dir);
     // An explicit "Create backup" click always honors the user's intent even
-    // when automatic retention is set to 0 (off); we still prune to at most
-    // MAX_BACKUPS so a manual backup never grows the set unbounded.
-    let keep = clamp_retention(s.backup_retention).max(1) as usize;
+    // when automatic retention is set to 0 (off).
+    let keep = manual_backup_keep(s.backup_retention);
     create_backup_preserving_keep(mods_path, &backup_dir, None, keep).map_err(|e| e.to_string())
+}
+
+/// Retention used by the explicit "Create backup" command. With automatic
+/// backups off (retention 0) we prune to the historical MAX_BACKUPS cap —
+/// never to 1, which would silently delete every other backup a backups-off
+/// user deliberately created by hand.
+fn manual_backup_keep(retention: u8) -> usize {
+    match clamp_retention(retention) {
+        0 => MAX_BACKUPS,
+        n => n as usize,
+    }
 }
 
 /// Return the user-configured backup-retention count (`0..=5`).

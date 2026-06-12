@@ -563,7 +563,7 @@ describe('<PublishModal>', () => {
     await user.click(publishBtn);
     // Inline panel renders with the parsed mod list.
     await screen.findByRole('heading', {
-      name: /Some mods need repair before sharing/i,
+      name: /Some mod uploads didn.t finish/i,
     });
     expect(screen.getByText('ModA')).toBeInTheDocument();
     expect(screen.getByText('ModB')).toBeInTheDocument();
@@ -600,7 +600,7 @@ describe('<PublishModal>', () => {
     await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
     await user.click(publishBtn);
     await screen.findByRole('heading', {
-      name: /Some mods need repair before sharing/i,
+      name: /Some mod uploads didn.t finish/i,
     });
     await user.click(screen.getByRole('button', { name: /Repair these mods/i }));
     // Auto-retry kicks in once both repairs succeed → publish lands the
@@ -624,7 +624,7 @@ describe('<PublishModal>', () => {
     await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
     await user.click(publishBtn);
     await screen.findByRole('heading', {
-      name: /Some mods need repair before sharing/i,
+      name: /Some mod uploads didn.t finish/i,
     });
     // Use the panel's Cancel button — the modal footer is hidden while
     // the panel owns the action surface, so there's only one Cancel.
@@ -658,7 +658,7 @@ describe('<PublishModal>', () => {
     await waitFor(() => { expect(pushBtn).not.toBeDisabled(); });
     await user.click(pushBtn);
     await screen.findByRole('heading', {
-      name: /Some mods need repair before sharing/i,
+      name: /Some mod uploads didn.t finish/i,
     });
     // Chinese mod name from Solo's actual bug report renders unmangled.
     expect(screen.getByText('Solo尖塔铭者卡图强化')).toBeInTheDocument();
@@ -700,7 +700,7 @@ describe('<PublishModal>', () => {
     await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
     await user.click(publishBtn);
     await screen.findByRole('heading', {
-      name: /Some mods need repair before sharing/i,
+      name: /Some mod uploads didn.t finish/i,
     });
     await user.click(screen.getByRole('button', { name: /Repair these mods/i }));
     // Wait for the failure marker to appear.
@@ -740,7 +740,7 @@ describe('<PublishModal>', () => {
     // The inline panel must NOT appear — this isn't a missing-bundles error.
     expect(
       screen.queryByRole('heading', {
-        name: /Some mods need repair before sharing/i,
+        name: /Some mod uploads didn.t finish/i,
       }),
     ).toBeNull();
   });

@@ -39,6 +39,32 @@ describe('<KebabMenu>', () => {
     expect(screen.getByRole('button', { name: 'More actions' })).toHaveAttribute('aria-expanded', 'true');
   });
 
+  it('elevates the wrapper (gf-kebab-open) only while the menu is open', async () => {
+    // Guards issue #162: a row's `.gf-card` does not establish a stacking
+    // context, so without lifting the open wrapper's z-index the popover paints
+    // behind the next row and its items become unclickable. jsdom can't assert
+    // real paint order, so we assert the structural class contract that drives
+    // the `.gf-kebab-open { z-index }` CSS rule instead.
+    const user = userEvent.setup();
+    render(
+      <KebabMenu>
+        <KebabItem onClick={() => {}}>Pin</KebabItem>
+      </KebabMenu>,
+    );
+    const trigger = screen.getByRole('button', { name: 'More actions' });
+    const wrapper = trigger.parentElement as HTMLElement;
+    expect(wrapper).toHaveClass('gf-kebab-wrap');
+    expect(wrapper).not.toHaveClass('gf-kebab-open');
+
+    await user.click(trigger);
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+    expect(wrapper).toHaveClass('gf-kebab-open');
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(wrapper).not.toHaveClass('gf-kebab-open');
+  });
+
   it('closes on Escape', async () => {
     const user = userEvent.setup();
     render(

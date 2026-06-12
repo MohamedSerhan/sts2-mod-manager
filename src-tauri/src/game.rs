@@ -1081,8 +1081,10 @@ pub fn launch_game(state: tauri::State<'_, AppState>) -> std::result::Result<boo
     if let Some(ref mods_path) = s.mods_path {
         let backup_dir = s.config_path.join("backups");
         let _ = std::fs::create_dir_all(&backup_dir);
-        match crate::backup::create_backup(mods_path, &backup_dir) {
-            Ok(name) => log::info!("Pre-launch backup created: {}", name),
+        match crate::backup::create_backup_with_retention(mods_path, &backup_dir, s.backup_retention)
+        {
+            Ok(Some(name)) => log::info!("Pre-launch backup created: {}", name),
+            Ok(None) => log::info!("Backups disabled (retention 0); skipping pre-launch backup"),
             Err(e) => log::warn!("Failed to create pre-launch backup: {}", e),
         }
     }
@@ -1109,10 +1111,10 @@ pub fn launch_vanilla(state: tauri::State<'_, AppState>) -> std::result::Result<
         .ok_or("Game path not set")?
         .clone();
 
-    // Auto-backup
+    // Auto-backup (honors the user's retention setting; 0 = skip).
     let backup_dir = s.config_path.join("backups");
     let _ = std::fs::create_dir_all(&backup_dir);
-    let _ = crate::backup::create_backup(&mods_path, &backup_dir);
+    let _ = crate::backup::create_backup_with_retention(&mods_path, &backup_dir, s.backup_retention);
 
     // Move all mods to disabled
     crate::backup::reset_to_vanilla(&mods_path, &disabled_path).map_err(|e| e.to_string())?;

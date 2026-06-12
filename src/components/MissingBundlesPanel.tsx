@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, Check, FolderOpen, RotateCw, X } from 'lucide-react';
+import { AlertTriangle, Check, FolderOpen, RotateCw, Upload, X } from 'lucide-react';
 import { openModsFolder, repairMod } from '../hooks/useTauri';
 
 /**
@@ -8,16 +8,20 @@ import { openModsFolder, repairMod } from '../hooks/useTauri';
  * `share_profile` / `reshare_profile` command rejects with the "missing
  * bundles for N mod(s): …" pattern.
  *
- * The original UX was a raw toast that left curators with no clue what
- * "Restore or reinstall these mods" actually meant — they had to find
- * each mod, repair it manually, then retry the publish. This panel
- * does that for them: list the affected mods, repair them sequentially
- * with per-mod status, then auto-retry the publish on full success.
+ * Issue #164: the overwhelmingly common cause of this error is a TRANSIENT
+ * upload failure — a network blip or a GitHub rate-limit while uploading
+ * one mod's bundle — which is why "a different mod fails every time". The
+ * right remedy for that is simply to share again: the share flow skips
+ * bundles that already uploaded and only re-attempts the ones that failed.
+ * So the PRIMARY action here is "Try sharing again" (`onRetryPublish`).
  *
- * On partial failure, each failed row gets an "Open mod folder" link
- * so the curator can fix the underlying problem (corrupt download,
- * locked DLL, etc.) and click "Repair these mods" again — already-
- * succeeded rows are skipped on the retry pass.
+ * "Repair these mods" remains as a SECONDARY remedy for the genuinely-
+ * broken case (corrupt/missing local files), where repairing reinstalls
+ * each mod from its linked GitHub source. That needs a linked source and
+ * does nothing for a pure upload failure, so it's deliberately demoted.
+ * On partial failure, each failed row gets an "Open mod folder" link so
+ * the curator can fix the underlying problem manually; already-succeeded
+ * rows are skipped on the retry pass.
  */
 
 export type ModRepairStatus = 'pending' | 'repairing' | 'success' | 'failed';
@@ -69,6 +73,24 @@ export function MissingBundlesPanel({ modNames, onRetryPublish, onCancel }: Prop
     Object.fromEntries(modNames.map((n) => [n, 'pending' as ModRepairStatus])),
   );
   const [repairing, setRepairing] = useState(false);
+  const [sharing, setSharing] = useState(false);
+
+  const busy = repairing || sharing;
+
+  // Primary remedy for the transient-upload case (issue #164): just run
+  // the share again. The Rust share flow re-attempts only the bundles
+  // that didn't already upload, so this is cheap and usually fixes it.
+  async function handleShareAgain() {
+    setSharing(true);
+    try {
+      await onRetryPublish();
+    } catch {
+      // The parent's catch in handlePublish() already surfaces a toast
+      // (and may re-render this very panel if it failed again).
+    } finally {
+      setSharing(false);
+    }
+  }
 
   async function handleRepair() {
     setRepairing(true);
@@ -119,6 +141,9 @@ export function MissingBundlesPanel({ modNames, onRetryPublish, onCancel }: Prop
           <p className="gf-missing-bundles-body">
             {t('publish.missingBundles.body')}
           </p>
+          <p className="gf-missing-bundles-subbody">
+            {t('publish.missingBundles.repairHint')}
+          </p>
         </div>
       </div>
       <ul className="gf-missing-bundles-list">
@@ -161,21 +186,37 @@ export function MissingBundlesPanel({ modNames, onRetryPublish, onCancel }: Prop
           type="button"
           className="gf-btn-3"
           onClick={onCancel}
-          disabled={repairing}
+          disabled={busy}
         >
           {t('common.cancel')}
         </button>
         <div style={{ flex: 1 }} />
+        {/* Secondary remedy: repair genuinely-broken local files. Needs a
+            linked GitHub source; does nothing for a pure upload failure. */}
         <button
           type="button"
-          className="gf-btn"
-          disabled={repairing}
+          className="gf-btn-2"
+          disabled={busy}
           onClick={handleRepair}
+          title={t('publish.missingBundles.repairBtnTitle')}
         >
           <RotateCw size={12} />
           {repairing
             ? t('publish.missingBundles.repairing')
             : t('publish.missingBundles.repairBtn')}
+        </button>
+        {/* Primary remedy: re-run the share. Re-uploads only the bundles
+            that failed; the common transient-failure fix for issue #164. */}
+        <button
+          type="button"
+          className="gf-btn"
+          disabled={busy}
+          onClick={handleShareAgain}
+        >
+          <Upload size={12} />
+          {sharing
+            ? t('publish.missingBundles.sharingAgain')
+            : t('publish.missingBundles.shareAgainBtn')}
         </button>
       </div>
     </section>

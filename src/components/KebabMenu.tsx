@@ -64,7 +64,19 @@ export function KebabMenu({
   const buttonClass = buttonClassName ?? (size === 'sm' ? 'gf-btn-3 gf-btn-icon gf-btn-2-sm' : 'gf-btn-3 gf-btn-icon');
 
   return (
-    <div ref={wrapRef} style={{ position: 'relative', display: 'inline-block' }}>
+    // `gf-kebab-open` raises this wrapper's z-index while the menu is open so
+    // it (and its absolutely-positioned popover) wins against later sibling
+    // rows. That alone suffices for containers that don't create a stacking
+    // context (e.g. `.gf-card`). But the Mod Library rows
+    // (`.gf-profile-library-row`) and load-order rows set
+    // `will-change: transform`, which DOES establish a stacking context and
+    // traps this wrapper's z-index inside the row — so styles.css also lifts
+    // the owning row via `:has(.gf-kebab-open)`. (issue #162)
+    <div
+      ref={wrapRef}
+      className={open ? 'gf-kebab-wrap gf-kebab-open' : 'gf-kebab-wrap'}
+      style={{ position: 'relative', display: 'inline-block' }}
+    >
       <button
         className={buttonClass}
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}

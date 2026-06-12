@@ -767,7 +767,10 @@ fn strip_nexus_suffix(stem: &str) -> String {
 /// On install success call [`StashedMod::discard`]; on failure call
 /// [`StashedMod::restore`] to put the originals back (sweeping away any partial
 /// output the failed install left at the original locations).
-struct StashedMod {
+///
+/// Shared with `updater::repair_mod` / `updater::update_mod`, which have the
+/// same delete-then-fallible-extract shape (#174).
+pub(crate) struct StashedMod {
     /// (original path, temp path it was moved to). Only items that actually
     /// existed are recorded.
     moved: Vec<(PathBuf, PathBuf)>,
@@ -775,7 +778,7 @@ struct StashedMod {
 
 impl StashedMod {
     /// Success path: the new install is in place, so delete the saved originals.
-    fn discard(self) {
+    pub(crate) fn discard(self) {
         for (_orig, temp) in &self.moved {
             if temp.is_dir() {
                 let _ = std::fs::remove_dir_all(temp);
@@ -788,7 +791,7 @@ impl StashedMod {
     /// Failure path: delete whatever now sits at each original location (partial
     /// install output) and move the saved originals back. Done in reverse order
     /// for symmetry with the stash order.
-    fn restore(self) {
+    pub(crate) fn restore(self) {
         for (orig, temp) in self.moved.iter().rev() {
             // Remove any partial install output occupying the original path.
             if orig.is_dir() {
@@ -846,10 +849,56 @@ fn stash_one(orig: PathBuf, moved: &mut Vec<(PathBuf, PathBuf)>) {
     }
 }
 
+/// Best-effort cleanup of leftover `.<name>.sts2mm-update-stash-*` siblings
+/// for `existing`'s folder and top-level files that a crashed earlier
+/// update/repair never cleaned up (#174). `unique_stash_sibling` always finds
+/// a fresh numbered name, so stale stashes never block a new stash — but
+/// without this they'd accumulate forever. Called before stashing the current
+/// install so a crash-then-retry doesn't pile up `-0`, `-1`, `-2`, ... dirs.
+pub(crate) fn sweep_stale_update_stashes(existing: &ModInfo, mods_path: &Path) {
+    let folder = existing.folder_name.as_deref().unwrap_or(&existing.name);
+    let mut candidates: Vec<PathBuf> = vec![mods_path.join(folder)];
+    candidates.extend(existing.files.iter().map(|f| mods_path.join(f)));
+
+    for orig in &candidates {
+        let Some(parent) = orig.parent().filter(|p| !p.as_os_str().is_empty()) else {
+            continue;
+        };
+        let base = match orig.file_name().and_then(|n| n.to_str()) {
+            Some(b) => b,
+            None => continue,
+        };
+        let Ok(entries) = std::fs::read_dir(parent) else {
+            continue;
+        };
+        let prefix = format!(".{base}.sts2mm-update-stash-");
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else { continue };
+            if !name.starts_with(&prefix) {
+                continue;
+            }
+            let path = entry.path();
+            log::warn!(
+                "Removing stale update/repair stash left over from a previous run: {:?}",
+                path
+            );
+            let result = if path.is_dir() {
+                std::fs::remove_dir_all(&path)
+            } else {
+                std::fs::remove_file(&path)
+            };
+            if let Err(e) = result {
+                log::error!("Failed to remove stale stash {:?}: {}", path, e);
+            }
+        }
+    }
+}
+
 /// Move an existing mod's files ASIDE (both enabled and disabled paths) so a
 /// failed update can restore them. Replaces the old delete-then-install order
 /// that left a failed update with the mod gone and no recovery (audit L-10).
-fn stash_existing_mod_files(
+pub(crate) fn stash_existing_mod_files(
     existing: &ModInfo,
     mods_path: &Path,
     disabled_path: Option<&Path>,
@@ -1098,6 +1147,199 @@ mod watcher_dir_tests {
         // nexus_download_dir is None by default in a fresh AppStateInner
         let result = resolve_watch_dir(&state);
         assert_eq!(result, dirs::download_dir());
+    }
+}
+
+#[cfg(test)]
+mod stash_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    /// Minimal ModInfo fixture for a mod with a folder plus a loose
+    /// top-level manifest/config file.
+    fn fixture_mod_info(folder: &str, extra_files: &[&str]) -> ModInfo {
+        ModInfo {
+            name: folder.to_string(),
+            version: "1.0.0".into(),
+            description: String::new(),
+            enabled: true,
+            files: extra_files.iter().map(|f| f.to_string()).collect(),
+            source: None,
+            hash: None,
+            dependencies: vec![],
+            size_bytes: 0,
+            folder_name: Some(folder.to_string()),
+            mod_id: None,
+            github_url: None,
+            nexus_url: None,
+            pinned: false,
+            min_game_version: None,
+            author: None,
+            note: None,
+            custom_url: None,
+            tags: vec![],
+            display_name: None,
+            display_description: None,
+            bundle_members: vec![],
+        }
+    }
+
+    fn write(path: &Path, contents: &str) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, contents).unwrap();
+    }
+
+    fn list_dir_names(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .map(|rd| {
+                rd.flatten()
+                    .map(|e| e.file_name().to_string_lossy().to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn stash_moves_mod_folder_and_top_level_files_out_of_mods_dir() {
+        let base = tempdir().unwrap();
+        let mods = base.path().join("mods");
+        write(&mods.join("MyMod").join("manifest.json"), "{}");
+        write(&mods.join("MyMod").join("plugin.dll"), "dll-bytes");
+        write(&mods.join("MyMod-extra.json"), "{}");
+
+        let info = fixture_mod_info("MyMod", &["MyMod-extra.json"]);
+        let stashed = stash_existing_mod_files(&info, &mods, None);
+
+        // Original locations are gone.
+        assert!(!mods.join("MyMod").exists(), "mod folder should be moved aside");
+        assert!(
+            !mods.join("MyMod-extra.json").exists(),
+            "top-level file should be moved aside"
+        );
+
+        // Two entries recorded (folder + loose file), both pointing at
+        // existing temp siblings inside `mods`.
+        assert_eq!(stashed.moved.len(), 2);
+        for (orig, temp) in &stashed.moved {
+            assert!(temp.exists(), "stash target {:?} should exist", temp);
+            assert_eq!(
+                temp.parent(),
+                orig.parent(),
+                "stash sibling must be on the same filesystem as the original"
+            );
+        }
+
+        // Clean up to avoid leaking a leftover stash dir from this test.
+        stashed.discard();
+    }
+
+    #[test]
+    fn restore_puts_stashed_files_back_exactly_and_discards_partial_output() {
+        let base = tempdir().unwrap();
+        let mods = base.path().join("mods");
+        write(&mods.join("MyMod").join("manifest.json"), "original-manifest");
+        write(&mods.join("MyMod").join("plugin.dll"), "original-dll");
+        write(&mods.join("MyMod-extra.json"), "original-extra");
+
+        let info = fixture_mod_info("MyMod", &["MyMod-extra.json"]);
+        let stashed = stash_existing_mod_files(&info, &mods, None);
+
+        // Simulate a failed extract that left partial output behind.
+        write(&mods.join("MyMod").join("manifest.json"), "partial-manifest");
+
+        stashed.restore();
+
+        assert_eq!(
+            std::fs::read_to_string(mods.join("MyMod").join("manifest.json")).unwrap(),
+            "original-manifest",
+            "restore should bring back the original file contents, discarding partial output"
+        );
+        assert_eq!(
+            std::fs::read_to_string(mods.join("MyMod").join("plugin.dll")).unwrap(),
+            "original-dll"
+        );
+        assert_eq!(
+            std::fs::read_to_string(mods.join("MyMod-extra.json")).unwrap(),
+            "original-extra"
+        );
+
+        // No stash siblings left behind in `mods`.
+        let leftovers: Vec<String> = list_dir_names(&mods)
+            .into_iter()
+            .filter(|n| n.contains("sts2mm-update-stash"))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "no stash temp dirs should remain after restore, got {:?}",
+            leftovers
+        );
+    }
+
+    #[test]
+    fn discard_removes_stash_after_successful_install() {
+        let base = tempdir().unwrap();
+        let mods = base.path().join("mods");
+        write(&mods.join("MyMod").join("manifest.json"), "original-manifest");
+
+        let info = fixture_mod_info("MyMod", &[]);
+        let stashed = stash_existing_mod_files(&info, &mods, None);
+
+        // Simulate a successful install writing the new mod in place.
+        write(&mods.join("MyMod").join("manifest.json"), "new-manifest");
+
+        stashed.discard();
+
+        assert_eq!(
+            std::fs::read_to_string(mods.join("MyMod").join("manifest.json")).unwrap(),
+            "new-manifest",
+            "discard must not touch the freshly-installed files"
+        );
+        let leftovers: Vec<String> = list_dir_names(&mods)
+            .into_iter()
+            .filter(|n| n.contains("sts2mm-update-stash"))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "no stash temp dirs should remain after discard, got {:?}",
+            leftovers
+        );
+    }
+
+    #[test]
+    fn sweep_stale_update_stashes_removes_leftovers_from_a_crashed_run() {
+        let base = tempdir().unwrap();
+        let mods = base.path().join("mods");
+        write(&mods.join("MyMod").join("manifest.json"), "current");
+
+        // Simulate leftovers from a crashed earlier run: stale stash dirs
+        // for both the mod folder and a loose top-level file.
+        write(
+            &mods
+                .join(".MyMod.sts2mm-update-stash-0")
+                .join("manifest.json"),
+            "stale-folder-stash",
+        );
+        write(
+            &mods.join(".MyMod-extra.json.sts2mm-update-stash-0"),
+            "stale-file-stash",
+        );
+
+        let info = fixture_mod_info("MyMod", &["MyMod-extra.json"]);
+        sweep_stale_update_stashes(&info, &mods);
+
+        let names = list_dir_names(&mods);
+        assert!(
+            !names.iter().any(|n| n.contains("sts2mm-update-stash")),
+            "stale stashes should be swept, got {:?}",
+            names
+        );
+        // Current install is untouched.
+        assert_eq!(
+            std::fs::read_to_string(mods.join("MyMod").join("manifest.json")).unwrap(),
+            "current"
+        );
     }
 }
 

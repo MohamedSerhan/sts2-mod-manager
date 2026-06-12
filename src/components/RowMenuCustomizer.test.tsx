@@ -3,7 +3,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { RowMenuCustomizer } from './RowMenuCustomizer';
 import { AllProviders } from '../__test__/providers';
-import { ROW_MENU_STORAGE_KEY, loadRowMenuConfig } from '../lib/rowMenuConfig';
+import { DEFAULT_ROW_MENU_ORDER, ROW_MENU_STORAGE_KEY, loadRowMenuConfig } from '../lib/rowMenuConfig';
 
 beforeEach(() => {
   try { localStorage.clear(); } catch { /* jsdom quirk */ }
@@ -92,5 +92,39 @@ describe('<RowMenuCustomizer>', () => {
     const locked = screen.getByTestId('row-menu-locked');
     expect(within(locked).getByText(/delete from disk/i)).toBeInTheDocument();
     expect(within(locked).getByText(/customize menu/i)).toBeInTheDocument();
+  });
+
+  it('the locked Customize row has a toggle, and Delete does not', () => {
+    renderCustomizer();
+    const locked = screen.getByTestId('row-menu-locked');
+    const deleteRow = within(locked).getByText(/delete from disk/i).closest('.gf-row-menu-item') as HTMLElement;
+    const customizeRow = within(locked).getByText(/customize menu/i).closest('.gf-row-menu-item') as HTMLElement;
+    expect(within(deleteRow).queryByRole('switch')).toBeNull();
+    expect(within(customizeRow).getByRole('switch', { name: /show customize menu/i })).toBeInTheDocument();
+  });
+
+  it('switching off the Customize toggle persists showCustomizeEntry: false', async () => {
+    const user = userEvent.setup();
+    renderCustomizer();
+    const toggle = screen.getByRole('switch', { name: /show customize menu/i });
+    expect(toggle).toBeChecked();
+    await user.click(toggle);
+    expect(toggle).not.toBeChecked();
+    expect(loadRowMenuConfig().showCustomizeEntry).toBe(false);
+    const stored = JSON.parse(localStorage.getItem(ROW_MENU_STORAGE_KEY)!);
+    expect(stored.showCustomizeEntry).toBe(false);
+  });
+
+  it('reset restores showCustomizeEntry to true', async () => {
+    localStorage.setItem(
+      ROW_MENU_STORAGE_KEY,
+      JSON.stringify({ order: [...DEFAULT_ROW_MENU_ORDER], hidden: [], showCustomizeEntry: false }),
+    );
+    const user = userEvent.setup();
+    renderCustomizer();
+    expect(screen.getByRole('switch', { name: /show customize menu/i })).not.toBeChecked();
+    await user.click(screen.getByRole('button', { name: /reset to default/i }));
+    expect(screen.getByRole('switch', { name: /show customize menu/i })).toBeChecked();
+    expect(loadRowMenuConfig().showCustomizeEntry).toBe(true);
   });
 });

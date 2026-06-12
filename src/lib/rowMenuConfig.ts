@@ -48,11 +48,14 @@ function isKnownId(value: unknown): value is RowMenuItemId {
 export interface RowMenuConfig {
   order: RowMenuItemId[];
   hidden: RowMenuItemId[];
+  /** Whether the locked "Customize menu…" footer item is shown. Default true. */
+  showCustomizeEntry: boolean;
 }
 
 export const DEFAULT_ROW_MENU_CONFIG: RowMenuConfig = {
   order: [...DEFAULT_ROW_MENU_ORDER],
   hidden: [],
+  showCustomizeEntry: true,
 };
 
 /**
@@ -88,7 +91,11 @@ export function normalizeConfig(raw: unknown): RowMenuConfig {
     }
   }
 
-  return { order, hidden };
+  // Only a literal `false` disables the footer entry; anything else (missing,
+  // legacy configs, malformed values) preserves the always-shown default.
+  const showCustomizeEntry = (raw as { showCustomizeEntry?: unknown })?.showCustomizeEntry !== false;
+
+  return { order, hidden, showCustomizeEntry };
 }
 
 /** Immutable array move. Returns the input unchanged on out-of-range indices. */
@@ -119,6 +126,11 @@ export function toggleHidden(config: RowMenuConfig, id: RowMenuItemId): RowMenuC
     ? config.hidden.filter((h) => h !== id)
     : [...config.hidden, id];
   return { ...config, hidden };
+}
+
+/** Set whether the locked "Customize menu…" footer item is shown. */
+export function setShowCustomizeEntry(config: RowMenuConfig, show: boolean): RowMenuConfig {
+  return { ...config, showCustomizeEntry: show };
 }
 
 /**

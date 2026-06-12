@@ -988,16 +988,20 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
           </>
         )}
         {/* Locked footer — always last; opens the Settings customizer. */}
-        <KebabDivider />
-        <KebabSection>
-          <KebabItem
-            icon={<SlidersHorizontal size={12} />}
-            onClick={() => window.dispatchEvent(new CustomEvent(ROW_MENU_OPEN_EVENT))}
-            description={t('mods.customizeMenuDesc')}
-          >
-            {t('mods.customizeMenu')}
-          </KebabItem>
-        </KebabSection>
+        {config.showCustomizeEntry && (
+          <>
+            <KebabDivider />
+            <KebabSection>
+              <KebabItem
+                icon={<SlidersHorizontal size={12} />}
+                onClick={() => window.dispatchEvent(new CustomEvent(ROW_MENU_OPEN_EVENT))}
+                description={t('mods.customizeMenuDesc')}
+              >
+                {t('mods.customizeMenu')}
+              </KebabItem>
+            </KebabSection>
+          </>
+        )}
       </KebabMenu>
     </div>
   );

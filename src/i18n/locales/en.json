@@ -1247,7 +1247,7 @@
       "title": "Mod menu",
       "desc": "Choose which actions appear in each mod's ⋯ menu, and drag to reorder them.",
       "reset": "Reset to default",
-      "lockedCaption": "Delete and Customize are always pinned to the bottom.",
+      "lockedCaption": "Delete is always pinned to the bottom. Customize can be hidden — you can always reopen this panel from Settings.",
       "visibleAria": "Show {{item}} in the menu",
       "dragAria": "Drag to reorder {{item}}",
       "items": {

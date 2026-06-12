@@ -33,7 +33,7 @@ const LOCKED_IDS: readonly LockedRowMenuItemId[] = ['delete', 'customize'];
 
 export function RowMenuCustomizer() {
   const { t } = useTranslation();
-  const { config, setOrder, toggleHidden, reset } = useRowMenu();
+  const { config, setOrder, toggleHidden, setShowCustomizeEntry, reset } = useRowMenu();
   const listRef = useRef<HTMLUListElement | null>(null);
   const dragStateRef = useRef<{ from: number; over: number } | null>(null);
   const [dragState, setDragState] = useState<{ from: number; over: number } | null>(null);
@@ -148,13 +148,23 @@ export function RowMenuCustomizer() {
       </ul>
 
       <div className="gf-row-menu-locked" data-testid="row-menu-locked">
-        {LOCKED_IDS.map((id) => (
-          <div key={id} className="gf-row-menu-item is-locked">
-            <span className="gf-row-menu-grip" aria-hidden><GripVertical size={14} /></span>
-            <span className="gf-row-menu-ico">{ITEM_ICONS[id]}</span>
-            <span className="gf-row-menu-label">{label(id)}</span>
-          </div>
-        ))}
+        {LOCKED_IDS.map((id) => {
+          const itemLabel = label(id);
+          return (
+            <div key={id} className="gf-row-menu-item is-locked">
+              <span className="gf-row-menu-grip" aria-hidden><GripVertical size={14} /></span>
+              <span className="gf-row-menu-ico">{ITEM_ICONS[id]}</span>
+              <span className="gf-row-menu-label">{itemLabel}</span>
+              {id === 'customize' && (
+                <Toggle
+                  checked={config.showCustomizeEntry}
+                  onChange={() => setShowCustomizeEntry(!config.showCustomizeEntry)}
+                  ariaLabel={t('settings.rowMenu.visibleAria', { item: itemLabel })}
+                />
+              )}
+            </div>
+          );
+        })}
         <div className="gf-help muted"><span>{t('settings.rowMenu.lockedCaption')}</span></div>
       </div>
 

@@ -2720,6 +2720,7 @@ mod github_api_stress_tests {
             profiles_path,
             token,
             None,
+            Vec::new(),
         )
         .await?;
 

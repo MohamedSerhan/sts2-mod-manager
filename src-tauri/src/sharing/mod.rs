@@ -504,12 +504,44 @@ fn publish_profile_mod_matches_installed(pm: &ProfileMod, installed: &ModInfo) -
     publish_keys_intersect(&profile_keys, &installed_keys)
 }
 
+/// Refresh a saved pack entry's on-disk-derived fields (`files`,
+/// `folder_name`, `version`) from the currently-installed mod it resolves
+/// to (issue #174). The saved manifest can go stale when the curator
+/// deletes and reinstalls a mod: Nexus archives often unpack into a
+/// version-suffixed folder, so `pm.files` ends up pointing at paths that
+/// no longer exist and bundling fails with a confusing "missing declared
+/// file" error on every subsequent share attempt.
+///
+/// Curator-authored fields (`source`, `hash`, `mod_id`, `enabled`,
+/// `bundle_url`, `bundle_sha256`, `bundle_members`, and the pack-level
+/// `mod_extras`/notes/links/tags) are deliberately left untouched here —
+/// only the fields that describe "what's actually on disk right now" are
+/// refreshed. For an unchanged mod this is a no-op (the installed scan
+/// reports the same `files`/`folder_name`/`version` already in `pm`), so
+/// re-share's content-addressed bundle hashing is unaffected.
+///
+/// Returns `true` if `files` actually changed, so the caller can log the
+/// drift-repair as a diagnostic trail.
+fn refresh_profile_mod_from_installed(pm: &mut ProfileMod, installed: &ModInfo) -> bool {
+    let files_changed = pm.files != installed.files;
+    if files_changed {
+        pm.files = installed.files.clone();
+    }
+    if installed.folder_name.is_some() && pm.folder_name != installed.folder_name {
+        pm.folder_name = installed.folder_name.clone();
+    }
+    if pm.version != installed.version {
+        pm.version = installed.version.clone();
+    }
+    files_changed
+}
+
 fn filter_profile_for_publish_compatibility(
     profile: &mut Profile,
     mods_path: &std::path::Path,
     disabled_path: &std::path::Path,
     game_version: Option<&str>,
-) {
+) -> Vec<String> {
     // We always need the installed scan so we can drop stored (disabled)
     // members — that exclusion does not depend on the game version.
     let installed_mods =
@@ -517,8 +549,15 @@ fn filter_profile_for_publish_compatibility(
     let profile_name = profile.name.clone();
     let mut filtered_incompatible = 0;
     let mut filtered_stored = 0;
+    let mut refreshed_files = 0;
+    // Pack entries that resolve to no installed mod at all (issue #174):
+    // bundling them would fail with a confusing "missing declared file"
+    // zip error. We surface these to the caller so they can be reported
+    // through the existing failed/missing-bundles mechanism with a clear
+    // "not installed" message instead.
+    let mut not_installed: Vec<String> = Vec::new();
 
-    profile.mods.retain(|pm| {
+    profile.mods.retain_mut(|pm| {
         let installed = installed_mods
             .iter()
             .find(|installed| publish_profile_mod_matches_installed(pm, installed));
@@ -553,7 +592,35 @@ fn filter_profile_for_publish_compatibility(
                 filtered_incompatible += 1;
                 false
             }
-            _ => true,
+            // Resolved to a live install: refresh the stale manifest paths
+            // (and folder_name/version if they drifted) so bundling reads
+            // from where the mod actually lives now, not where it lived
+            // when the pack entry was first saved.
+            Some(m) => {
+                if refresh_profile_mod_from_installed(pm, m) {
+                    refreshed_files += 1;
+                    log::info!(
+                        "Publish '{}': refreshed stale file list for '{}' from current install ({} file(s))",
+                        profile_name,
+                        pm.name,
+                        pm.files.len(),
+                    );
+                }
+                true
+            }
+            // No installed mod matches this pack entry at all -- the
+            // curator likely deleted it without removing it from the pack.
+            // Keep it in the profile (so it's still visible/removable) but
+            // clear its stale `files` so the bundling loop's `!files.is_empty()`
+            // filter skips it instead of attempting a zip that's guaranteed
+            // to fail with a confusing "missing declared file" error. The
+            // caller reports it through the failed/missing-bundles
+            // mechanism with the clearer "not installed" message instead.
+            None => {
+                pm.files.clear();
+                not_installed.push(pm.name.clone());
+                true
+            }
         }
     });
 
@@ -571,8 +638,31 @@ fn filter_profile_for_publish_compatibility(
             filtered_incompatible,
         );
     }
+    if refreshed_files > 0 {
+        log::info!(
+            "Publish '{}': refreshed file lists for {} reinstalled mod(s)",
+            profile_name,
+            refreshed_files,
+        );
+    }
+    for name in &not_installed {
+        log::warn!(
+            "Publish '{}': '{}' is in this modpack but not installed -- remove it from the pack or reinstall it",
+            profile_name,
+            name,
+        );
+    }
+
+    not_installed
 }
 
+/// Returns the prepared profile plus the names of any pack entries that
+/// resolved to no installed mod at all (issue #174) -- these have already
+/// had their stale `files` cleared by `filter_profile_for_publish_compatibility`
+/// so bundling skips them; callers should seed `failed_uploads` with this
+/// list so `ensure_profile_publish_complete` reports them with a clear
+/// "not installed" message instead of letting bundling fail with a raw
+/// zip error.
 fn load_profile_for_publish_from_paths(
     name: &str,
     list_public: Option<bool>,
@@ -582,9 +672,10 @@ fn load_profile_for_publish_from_paths(
     disabled_path: &std::path::Path,
     config_path: &std::path::Path,
     game_version: Option<&str>,
-) -> Result<Profile> {
+) -> Result<(Profile, Vec<String>)> {
     let mut profile = crate::profiles::load_profile(name, profiles_path)?;
-    filter_profile_for_publish_compatibility(&mut profile, mods_path, disabled_path, game_version);
+    let not_installed =
+        filter_profile_for_publish_compatibility(&mut profile, mods_path, disabled_path, game_version);
     backfill_profile_sources_from_db(&mut profile, config_path);
     if include_notes {
         backfill_profile_extras_from_db(&mut profile, config_path);
@@ -596,7 +687,7 @@ fn load_profile_for_publish_from_paths(
     if let Some(public) = list_public {
         profile.public = Some(public);
     }
-    Ok(profile)
+    Ok((profile, not_installed))
 }
 
 /// Populate the manifest's per-mod curator extras (note / custom link /
@@ -749,7 +840,7 @@ pub async fn share_profile(
 
     let old_profile =
         crate::profiles::load_profile(&name, &profiles_path).map_err(|e| e.to_string())?;
-    let profile = load_profile_for_publish_from_paths(
+    let (profile, not_installed) = load_profile_for_publish_from_paths(
         &name,
         list_public,
         include_notes.unwrap_or(true),
@@ -773,6 +864,7 @@ pub async fn share_profile(
         &profiles_path,
         &token,
         Some(&emit_fn),
+        not_installed,
     )
     .await
     {
@@ -808,6 +900,7 @@ pub(super) async fn share_profile_impl(
     profiles_path: &std::path::Path,
     token: &str,
     emit: Option<&(dyn Fn(&str, ShareProgress) + Send + Sync)>,
+    failed_uploads_seed: Vec<String>,
 ) -> Result<ShareResult> {
     // Get username
     let username = get_github_username(token).await?;
@@ -816,7 +909,12 @@ pub(super) async fn share_profile_impl(
     // Ensure repo exists
     ensure_profiles_repo(token, &username).await?;
 
-    let mut failed_uploads: Vec<String> = Vec::new();
+    // Seeded with pack entries that resolved to no installed mod at all
+    // (issue #174) -- `filter_profile_for_publish_compatibility` already
+    // cleared their `files` so the bundling loop below skips them, but
+    // they still need to surface in `ensure_profile_publish_complete`'s
+    // missing-bundles report with a clear "not installed" message.
+    let mut failed_uploads: Vec<String> = failed_uploads_seed;
     let bundlable: Vec<usize> = profile
         .mods
         .iter()
@@ -1105,7 +1203,7 @@ pub async fn reshare_profile(
 
     let old_profile = crate::profiles::load_profile(&name, &profiles_path).ok();
 
-    let mut profile = load_profile_for_publish_from_paths(
+    let (mut profile, not_installed) = load_profile_for_publish_from_paths(
         &name,
         list_public,
         include_notes.unwrap_or(true),
@@ -1124,7 +1222,12 @@ pub async fn reshare_profile(
         profile.mods.len()
     );
 
-    let mut failed_uploads: Vec<String> = Vec::new();
+    // Seeded with pack entries that resolved to no installed mod at all
+    // (issue #174) -- `filter_profile_for_publish_compatibility` already
+    // cleared their `files` so the bundling loop below skips them, but
+    // they still need to surface in `ensure_profile_publish_complete`'s
+    // missing-bundles report with a clear "not installed" message.
+    let mut failed_uploads: Vec<String> = not_installed;
     let bundlable: Vec<usize> = profile
         .mods
         .iter()
@@ -1677,7 +1780,7 @@ mod share_orchestration_tests {
         };
         crate::profiles::save_profile(&profile, &profiles_path).unwrap();
 
-        let prepared = load_profile_for_publish_from_paths(
+        let (prepared, _not_installed) = load_profile_for_publish_from_paths(
             "Stable",
             Some(false),
             true,
@@ -1722,7 +1825,7 @@ mod share_orchestration_tests {
         };
         crate::profiles::save_profile(&profile, &profiles_path).unwrap();
 
-        let prepared = load_profile_for_publish_from_paths(
+        let (prepared, _not_installed) = load_profile_for_publish_from_paths(
             "Stable",
             None,
             true,
@@ -1736,6 +1839,159 @@ mod share_orchestration_tests {
 
         assert_eq!(prepared.mods.len(), 1);
         assert_eq!(prepared.mods[0].name, "Stable Only");
+    }
+
+    #[test]
+    fn publish_preparation_refreshes_stale_files_for_reinstalled_mod() {
+        // Issue #174: the curator deleted "End Run Graph" and reinstalled
+        // it -- the new Nexus archive unpacked into a version-suffixed
+        // folder ("EndRunGraph-v2"), so the saved pack entry's `files`
+        // (pointing at the old "EndRunGraph" folder) no longer exist on
+        // disk. Preparation must resolve the entry to the new install
+        // (same identity keys: mod_id/folder_name match the *new*
+        // folder... but here we match via `name` since folder_name
+        // differs) and refresh `files`/`folder_name`/`version` so
+        // bundling reads from the new location.
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mods_path = tmpdir.path().join("mods");
+        let disabled_path = tmpdir.path().join("mods_disabled");
+        let profiles_path = tmpdir.path().join("profiles");
+        std::fs::create_dir_all(&mods_path).unwrap();
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        std::fs::create_dir_all(&profiles_path).unwrap();
+
+        // Only the NEW folder exists on disk -- the old one was deleted.
+        write_mod(&mods_path, "EndRunGraphV2", "End Run Graph");
+
+        // The saved pack entry still references the OLD folder/files and
+        // an older version string. Both `mod_id` and `folder_name` are
+        // cleared so identity falls back to matching on `name` -- exactly
+        // what happens when a reinstall lands under a fresh
+        // version-suffixed folder with a different manifest `id`.
+        let mut stale_pm = profile_mod("End Run Graph", "EndRunGraph");
+        stale_pm.mod_id = None;
+        stale_pm.folder_name = None;
+        stale_pm.files = vec!["EndRunGraph/EndRunGraph.json".into(), "EndRunGraph/EndRunGraph.dll".into()];
+        stale_pm.version = "0.9.0".into();
+
+        let profile = Profile {
+            name: "Stable".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![stale_pm],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+            mod_extras: Default::default(),
+        };
+        crate::profiles::save_profile(&profile, &profiles_path).unwrap();
+
+        let (prepared, not_installed) = load_profile_for_publish_from_paths(
+            "Stable",
+            None,
+            true,
+            &profiles_path,
+            &mods_path,
+            &disabled_path,
+            tmpdir.path(),
+            None,
+        )
+        .unwrap();
+
+        assert!(
+            not_installed.is_empty(),
+            "the reinstalled mod should resolve to the new install: {not_installed:?}"
+        );
+        assert_eq!(prepared.mods.len(), 1);
+        let pm = &prepared.mods[0];
+        assert_eq!(pm.name, "End Run Graph");
+        // `files` now point at the NEW folder, matching what's on disk --
+        // this is what makes `zip_profile_mod_files` succeed instead of
+        // erroring with "missing declared file". (Sorted order: .dll
+        // before .json; normalize separators for cross-platform CI.)
+        let normalized_files: Vec<String> =
+            pm.files.iter().map(|f| f.replace('\\', "/")).collect();
+        assert_eq!(
+            normalized_files,
+            vec![
+                "EndRunGraphV2/EndRunGraphV2.dll".to_string(),
+                "EndRunGraphV2/EndRunGraphV2.json".to_string(),
+            ]
+        );
+        assert_eq!(pm.folder_name, Some("EndRunGraphV2".into()));
+        assert_eq!(pm.version, "1.0.0");
+
+        // Bundling must now succeed against the refreshed files.
+        super::upload::zip_profile_mod_files(pm, &mods_path, &disabled_path)
+            .expect("refreshed files must zip successfully from the new install location");
+    }
+
+    #[test]
+    fn publish_preparation_reports_pack_entry_with_no_installed_match() {
+        // Issue #174: if the curator removed a mod entirely (not just
+        // reinstalled it under a new folder), the pack entry resolves to
+        // NO installed mod. Preparation must not let bundling attempt
+        // this (it would fail with a confusing "missing declared file"
+        // zip error); instead it reports the mod name via `not_installed`
+        // and clears `files` so the bundling loop skips it.
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mods_path = tmpdir.path().join("mods");
+        let disabled_path = tmpdir.path().join("mods_disabled");
+        let profiles_path = tmpdir.path().join("profiles");
+        std::fs::create_dir_all(&mods_path).unwrap();
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        std::fs::create_dir_all(&profiles_path).unwrap();
+
+        write_mod(&mods_path, "StillHere", "Still Here");
+
+        let profile = Profile {
+            name: "Stable".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![
+                profile_mod("Still Here", "StillHere"),
+                profile_mod("Long Gone", "LongGone"),
+            ],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+            mod_extras: Default::default(),
+        };
+        crate::profiles::save_profile(&profile, &profiles_path).unwrap();
+
+        let (prepared, not_installed) = load_profile_for_publish_from_paths(
+            "Stable",
+            None,
+            true,
+            &profiles_path,
+            &mods_path,
+            &disabled_path,
+            tmpdir.path(),
+            None,
+        )
+        .unwrap();
+
+        // The entry is retained (so the curator can still see/remove it
+        // from the pack) but flagged as not installed.
+        assert_eq!(prepared.mods.len(), 2);
+        assert_eq!(not_installed, vec!["Long Gone".to_string()]);
+        let missing_pm = prepared
+            .mods
+            .iter()
+            .find(|m| m.name == "Long Gone")
+            .unwrap();
+        assert!(
+            missing_pm.files.is_empty(),
+            "files must be cleared so the bundling loop skips this entry"
+        );
+
+        // The other entry resolves normally and keeps its files.
+        let ok_pm = prepared
+            .mods
+            .iter()
+            .find(|m| m.name == "Still Here")
+            .unwrap();
+        assert!(!ok_pm.files.is_empty());
     }
 
     #[test]
@@ -1771,7 +2027,7 @@ mod share_orchestration_tests {
         };
         crate::profiles::save_profile(&profile, &profiles_path).unwrap();
 
-        let prepared = load_profile_for_publish_from_paths(
+        let (prepared, _not_installed) = load_profile_for_publish_from_paths(
             "Stable",
             None,
             true,
@@ -1832,7 +2088,7 @@ mod share_orchestration_tests {
         };
         crate::profiles::save_profile(&profile, &profiles_path).unwrap();
 
-        let prepared = load_profile_for_publish_from_paths(
+        let (prepared, _not_installed) = load_profile_for_publish_from_paths(
             "Stable",
             None,
             true,
@@ -1898,7 +2154,7 @@ mod share_orchestration_tests {
         };
         crate::profiles::save_profile(&profile, &profiles_path).unwrap();
 
-        let prepared = load_profile_for_publish_from_paths(
+        let (prepared, _not_installed) = load_profile_for_publish_from_paths(
             "Stable",
             None,
             true,
@@ -2022,6 +2278,7 @@ mod share_orchestration_tests {
             &profiles_path,
             "test-token",
             None,
+        Vec::new(),
         )
         .await
         .expect("share should succeed");
@@ -2156,6 +2413,7 @@ mod share_orchestration_tests {
             &profiles_path,
             "test-token",
             None,
+        Vec::new(),
         )
         .await
         .expect("share should upload bundle and manifest through the GitHub API");

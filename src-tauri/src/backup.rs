@@ -22,9 +22,14 @@ pub struct BackupInfo {
     pub size_bytes: u64,
 }
 
-/// Maximum number of backups to retain. Older backups are pruned after each
-/// successful create.
-const MAX_BACKUPS: usize = 5;
+/// Default and maximum number of backups to retain. Older backups are pruned
+/// after each successful create. The user-configurable retention setting is
+/// clamped to `0..=MAX_BACKUPS`; `0` disables automatic backups entirely.
+pub const MAX_BACKUPS: usize = 5;
+
+/// Default retention used when the persisted setting is absent. Matches the
+/// historical hardcoded behavior so existing users are unaffected.
+pub const DEFAULT_BACKUP_RETENTION: u8 = MAX_BACKUPS as u8;
 
 /// Config items stored in the app data directory that are included in every
 /// backup and restored alongside mods.
@@ -41,8 +46,32 @@ const CONFIG_ITEMS: &[&str] = &[
 /// Copies all files from `mods_path` into a new subdirectory under
 /// `backup_dir` named `backup_YYYY-MM-DD_HH-MM-SS`.
 /// Returns the backup directory name.
+// Retained as a stable test/helper entry point that always uses the default
+// retention. Production paths use `create_backup_with_retention` so the user's
+// setting is honored, leaving this unused outside tests.
+#[allow(dead_code)]
 pub fn create_backup(mods_path: &Path, backup_dir: &Path) -> Result<String> {
     create_backup_preserving(mods_path, backup_dir, None)
+}
+
+/// Create a backup honoring a user-configured retention count.
+///
+/// `keep` is the number of newest backups to retain after pruning. When
+/// `keep == 0` automatic backups are disabled: no new backup is created and
+/// existing backups are left untouched (the user can clean them manually).
+/// `keep` is clamped to at most [`MAX_BACKUPS`]. Returns `Ok(None)` when
+/// backups are disabled.
+pub fn create_backup_with_retention(
+    mods_path: &Path,
+    backup_dir: &Path,
+    keep: u8,
+) -> Result<Option<String>> {
+    if keep == 0 {
+        log::info!("Backup retention is 0 (off); skipping automatic backup creation");
+        return Ok(None);
+    }
+    create_backup_preserving_keep(mods_path, backup_dir, None, (keep as usize).min(MAX_BACKUPS))
+        .map(Some)
 }
 
 /// Create a backup while keeping a named restore target safe from retention
@@ -64,6 +93,17 @@ pub fn create_backup_preserving(
     mods_path: &Path,
     backup_dir: &Path,
     preserve_name: Option<&str>,
+) -> Result<String> {
+    create_backup_preserving_keep(mods_path, backup_dir, preserve_name, MAX_BACKUPS)
+}
+
+/// Like [`create_backup_preserving`] but prunes to a caller-supplied retention
+/// count instead of the default [`MAX_BACKUPS`].
+pub fn create_backup_preserving_keep(
+    mods_path: &Path,
+    backup_dir: &Path,
+    preserve_name: Option<&str>,
+    keep: usize,
 ) -> Result<String> {
     let timestamp = Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
     let backup_name = format!("backup_{}", timestamp);
@@ -112,7 +152,7 @@ pub fn create_backup_preserving(
 
     log::info!("Backup created: {}", dest.display());
 
-    if let Err(e) = prune_old_backups_preserving(backup_dir, MAX_BACKUPS, preserve_name) {
+    if let Err(e) = prune_old_backups_preserving(backup_dir, keep, preserve_name) {
         log::warn!("Retention pruning failed: {}", e);
     }
 
@@ -736,6 +776,108 @@ mod backup_pure_tests {
     }
 
     #[test]
+    fn create_backup_with_retention_keeps_newest_n() {
+        // A custom retention of 2 must keep only the newest 2 backups after a
+        // successful create (the new one + 1 prior).
+        let root = tempfile::tempdir().unwrap();
+        let mods = root.path().join("mods");
+        let backups = root.path().join("backups");
+        fs::create_dir_all(mods.join("CurrentMod")).unwrap();
+        fs::write(mods.join("CurrentMod/CurrentMod.json"), b"{}").unwrap();
+
+        // Seed 4 pre-existing backups.
+        for ts in [
+            "2026-01-01_10-00-00",
+            "2026-02-01_10-00-00",
+            "2026-03-01_10-00-00",
+            "2026-04-01_10-00-00",
+        ] {
+            fs::create_dir_all(backups.join(format!("backup_{}", ts))).unwrap();
+        }
+
+        let created = create_backup_with_retention(&mods, &backups, 2).unwrap();
+        let created = created.expect("retention 2 must create a backup");
+
+        let remaining = list_backups(&backups);
+        assert_eq!(
+            remaining.len(),
+            2,
+            "retention 2 must keep exactly the newest 2 backups"
+        );
+        // The just-created backup is newest, so it must be present.
+        assert!(remaining.iter().any(|b| b.name == created));
+    }
+
+    #[test]
+    fn create_backup_with_retention_zero_skips_creation_and_keeps_existing() {
+        let root = tempfile::tempdir().unwrap();
+        let mods = root.path().join("mods");
+        let backups = root.path().join("backups");
+        fs::create_dir_all(mods.join("CurrentMod")).unwrap();
+        fs::write(mods.join("CurrentMod/CurrentMod.json"), b"{}").unwrap();
+
+        // Two pre-existing backups the user should keep.
+        fs::create_dir_all(backups.join("backup_2026-01-01_10-00-00")).unwrap();
+        fs::create_dir_all(backups.join("backup_2026-02-01_10-00-00")).unwrap();
+
+        let created = create_backup_with_retention(&mods, &backups, 0).unwrap();
+        assert!(
+            created.is_none(),
+            "retention 0 must skip creating a new backup"
+        );
+        assert_eq!(
+            list_backups(&backups).len(),
+            2,
+            "retention 0 must not delete existing backups"
+        );
+    }
+
+    #[test]
+    fn manual_backup_keep_never_prunes_to_one_when_backups_are_off() {
+        // Retention 0 = automatic backups off. A manual "Create backup" click
+        // must fall back to the historical cap, not keep=1 (which would wipe
+        // every other hand-made backup).
+        assert_eq!(super::manual_backup_keep(0), MAX_BACKUPS);
+        assert_eq!(super::manual_backup_keep(2), 2);
+        assert_eq!(super::manual_backup_keep(5), 5);
+        // Out-of-range values clamp to the cap.
+        assert_eq!(super::manual_backup_keep(99), MAX_BACKUPS);
+    }
+
+    #[test]
+    fn default_backup_retention_is_five() {
+        assert_eq!(DEFAULT_BACKUP_RETENTION, 5);
+        assert_eq!(MAX_BACKUPS, 5);
+    }
+
+    #[test]
+    fn clamp_retention_bounds_to_max() {
+        assert_eq!(clamp_retention(0), 0);
+        assert_eq!(clamp_retention(3), 3);
+        assert_eq!(clamp_retention(5), 5);
+        assert_eq!(clamp_retention(99), 5);
+    }
+
+    #[test]
+    fn load_persisted_backup_retention_defaults_and_clamps() {
+        let dir = tempfile::tempdir().unwrap();
+        // Absent file ⇒ default 5.
+        assert_eq!(load_persisted_backup_retention(dir.path()), 5);
+        // Valid value round-trips.
+        fs::write(dir.path().join("backup_retention.txt"), b"2").unwrap();
+        assert_eq!(load_persisted_backup_retention(dir.path()), 2);
+        // 0 (off) round-trips.
+        fs::write(dir.path().join("backup_retention.txt"), b"0").unwrap();
+        assert_eq!(load_persisted_backup_retention(dir.path()), 0);
+        // Out-of-range is clamped.
+        fs::write(dir.path().join("backup_retention.txt"), b"42").unwrap();
+        assert_eq!(load_persisted_backup_retention(dir.path()), 5);
+        // Garbage falls back to default.
+        fs::write(dir.path().join("backup_retention.txt"), b"nope").unwrap();
+        assert_eq!(load_persisted_backup_retention(dir.path()), 5);
+    }
+
+    #[test]
     fn pre_restore_backup_pruning_preserves_restore_target() {
         let root = tempfile::tempdir().unwrap();
         let mods = root.path().join("mods");
@@ -913,6 +1055,37 @@ mod backup_pure_tests {
     }
 }
 
+/// Clamp an arbitrary retention value to the valid `0..=MAX_BACKUPS` range.
+pub fn clamp_retention(value: u8) -> u8 {
+    value.min(MAX_BACKUPS as u8)
+}
+
+/// Read the persisted backup-retention setting from `<config>/backup_retention.txt`.
+/// Returns [`DEFAULT_BACKUP_RETENTION`] when the file is absent or unparseable,
+/// preserving the historical behavior for existing users. The value is clamped
+/// to `0..=MAX_BACKUPS` to defend against a hand-edited config.
+pub fn load_persisted_backup_retention(config_path: &Path) -> u8 {
+    let file = config_path.join("backup_retention.txt");
+    match fs::read_to_string(&file) {
+        Ok(raw) => match raw.trim().parse::<u8>() {
+            Ok(n) => clamp_retention(n),
+            Err(_) => {
+                log::warn!(
+                    "Ignoring unrecognized backup_retention.txt content: {:?}",
+                    raw.trim()
+                );
+                DEFAULT_BACKUP_RETENTION
+            }
+        },
+        Err(_) => DEFAULT_BACKUP_RETENTION,
+    }
+}
+
+/// Persist the backup-retention setting to `<config>/backup_retention.txt`.
+fn persist_backup_retention(config_path: &Path, value: u8) -> io::Result<()> {
+    fs::write(config_path.join("backup_retention.txt"), value.to_string())
+}
+
 // ── Tauri Commands ──────────────────────────────────────────────────────────
 
 /// Create a backup of the current mods directory.
@@ -922,7 +1095,47 @@ pub fn create_backup_cmd(state: tauri::State<'_, AppState>) -> std::result::Resu
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
     let backup_dir = s.config_path.join("backups");
     let _ = fs::create_dir_all(&backup_dir);
-    create_backup(mods_path, &backup_dir).map_err(|e| e.to_string())
+    // An explicit "Create backup" click always honors the user's intent even
+    // when automatic retention is set to 0 (off).
+    let keep = manual_backup_keep(s.backup_retention);
+    create_backup_preserving_keep(mods_path, &backup_dir, None, keep).map_err(|e| e.to_string())
+}
+
+/// Retention used by the explicit "Create backup" command. With automatic
+/// backups off (retention 0) we prune to the historical MAX_BACKUPS cap —
+/// never to 1, which would silently delete every other backup a backups-off
+/// user deliberately created by hand.
+fn manual_backup_keep(retention: u8) -> usize {
+    match clamp_retention(retention) {
+        0 => MAX_BACKUPS,
+        n => n as usize,
+    }
+}
+
+/// Return the user-configured backup-retention count (`0..=5`).
+#[tauri::command]
+pub fn get_backup_retention(state: tauri::State<'_, AppState>) -> std::result::Result<u8, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    Ok(clamp_retention(s.backup_retention))
+}
+
+/// Persist a new backup-retention count. Validated/clamped to `0..=5`
+/// server-side. `0` disables automatic backups (existing backups are kept).
+#[tauri::command]
+pub fn set_backup_retention(
+    count: u8,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<u8, String> {
+    let clamped = clamp_retention(count);
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let config_path = s.config_path.clone();
+    if let Err(e) = persist_backup_retention(&config_path, clamped) {
+        log::error!("Couldn't persist backup_retention: {}", e);
+        return Err(format!("Could not save backup retention: {}", e));
+    }
+    s.backup_retention = clamped;
+    log::info!("Backup retention set to {}", clamped);
+    Ok(clamped)
 }
 
 /// Create a backup while preserving another named backup from retention.

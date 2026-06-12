@@ -625,14 +625,19 @@ pub(crate) async fn switch_profile_from_paths(
     // switch.
     let backup_dir = config_path.join("backups");
     let _ = std::fs::create_dir_all(&backup_dir);
-    match crate::backup::create_backup(mods_path, &backup_dir) {
-        Ok(backup_name) => {
+    let retention = crate::backup::load_persisted_backup_retention(config_path);
+    match crate::backup::create_backup_with_retention(mods_path, &backup_dir, retention) {
+        Ok(Some(backup_name)) => {
             log::info!(
                 "Pre-switch backup created for profile '{}': {}",
                 name,
                 backup_name
             )
         }
+        Ok(None) => log::info!(
+            "Backups disabled (retention 0); skipping pre-switch backup for profile '{}'",
+            name
+        ),
         Err(e) => log::warn!(
             "Failed to create pre-switch backup before applying profile '{}': {}",
             name,

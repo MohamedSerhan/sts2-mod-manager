@@ -454,6 +454,39 @@ pub(crate) fn parse_manifest(
     })
 }
 
+/// For a manifest-fallback mod whose primary artifact (`artifact_path`) lives in
+/// a subdirectory of `base_dir`, return every file under that subdirectory
+/// (relative to `base_dir`, forward slashes). For a flat-layout artifact sitting
+/// directly in `base_dir`, return `flat_fallback` unchanged.
+///
+/// Without this, a folder-layout mod that fell back from a malformed manifest
+/// would record only its .dll/.pck and shares would upload an incomplete bundle
+/// missing the .json and assets (issue #165).
+fn subdir_files_or(artifact_path: &Path, base_dir: &Path, flat_fallback: Vec<String>) -> Vec<String> {
+    let parent = match artifact_path.parent() {
+        Some(p) if p != base_dir => p,
+        _ => return flat_fallback,
+    };
+
+    let mut files: Vec<String> = WalkDir::new(parent)
+        .into_iter()
+        .flatten()
+        .filter(|e| e.file_type().is_file())
+        .filter_map(|e| {
+            e.path()
+                .strip_prefix(base_dir)
+                .ok()
+                .map(|rel| rel.to_string_lossy().replace('\\', "/"))
+        })
+        .collect();
+
+    if files.is_empty() {
+        return flat_fallback;
+    }
+    files.sort();
+    files
+}
+
 /// Create a ModInfo for a PCK-only mod (no JSON manifest, no DLL).
 ///
 /// Skin/asset/voice mods in STS2 are often pure Godot resource packs (.pck)
@@ -485,14 +518,18 @@ pub(super) fn pck_only_mod(pck_path: &Path, base_dir: &Path, enabled: bool) -> M
             .to_string()
     };
 
-    let size_bytes = pck_path.metadata().map(|m| m.len()).unwrap_or(0);
+    // For a subdirectory-layout mod, the whole folder is the mod: include every
+    // file under it so shares upload the complete bundle (see issue #165).
+    // Flat-layout (.pck directly in the mods dir) keeps just the single file.
+    let files = subdir_files_or(pck_path, base_dir, vec![file_name]);
+    let size_bytes = calculate_mod_size(base_dir, &files);
 
     ModInfo {
         name,
         version: "unknown".to_string(),
         description: String::new(),
         enabled,
-        files: vec![file_name],
+        files,
         source: None,
         hash: hash_file(pck_path),
         dependencies: Vec::new(),
@@ -540,16 +577,19 @@ pub(super) fn dll_only_mod(dll_path: &Path, base_dir: &Path, enabled: bool) -> M
             .to_string()
     };
 
-    let size_bytes = dll_path.metadata().map(|m| m.len()).unwrap_or(0);
-
-    // Also check for a co-located .pck file
+    // Flat-layout fallback file set: the .dll plus a co-located same-stem .pck.
+    let mut flat_files = vec![file_name];
     let pck_path = dll_path.with_extension("pck");
-    let mut files = vec![file_name];
     if pck_path.exists() {
         if let Ok(rel) = pck_path.strip_prefix(base_dir) {
-            files.push(rel.to_string_lossy().to_string());
+            flat_files.push(rel.to_string_lossy().to_string());
         }
     }
+
+    // For a subdirectory-layout mod, the whole folder is the mod: include every
+    // file under it so shares upload the complete bundle (see issue #165).
+    let files = subdir_files_or(dll_path, base_dir, flat_files);
+    let size_bytes = calculate_mod_size(base_dir, &files);
 
     ModInfo {
         name,
@@ -1250,7 +1290,7 @@ mod dedup_identity_tests {
 
 #[cfg(test)]
 mod pck_only_scan_tests {
-    use super::{pck_only_mod, scan_mods_inner};
+    use super::{dll_only_mod, pck_only_mod, scan_mods_inner};
     use std::fs;
     use tempfile::TempDir;
 
@@ -1522,5 +1562,90 @@ mod pck_only_scan_tests {
             .collect();
         assert!(names.contains("ModA"), "ModA must be a separate entry");
         assert!(names.contains("ModB"), "ModB must be a separate entry");
+    }
+
+    /// Issue #165: a folder-layout mod whose manifest is malformed (so it falls
+    /// back to dll_only_mod) must record EVERY file in its folder — the .dll, the
+    /// (unparsable) .json, and any assets — so a share uploads a complete bundle.
+    #[test]
+    fn manifest_fallback_subdir_mod_includes_all_folder_files() {
+        let tmp = TempDir::new().unwrap();
+        let mods_dir = tmp.path();
+
+        // Malformed JSON → parse_manifest fails → dll_only_mod fallback.
+        write_bytes(&mods_dir.join("Flagellant").join("Mod.dll"), b"MZ");
+        write_bytes(
+            &mods_dir.join("Flagellant").join("Mod.json"),
+            b"{ this is not valid json",
+        );
+        write_bytes(
+            &mods_dir.join("Flagellant").join("assets").join("art.png"),
+            b"PNG",
+        );
+
+        let results = scan_mods_inner(mods_dir, true);
+        assert_eq!(results.len(), 1, "exactly one mod expected");
+        let info = &results[0];
+        assert_eq!(info.version, "unknown", "fallback mods report unknown");
+
+        let mut files = info.files.clone();
+        files.sort();
+        assert_eq!(
+            files,
+            vec![
+                "Flagellant/Mod.dll".to_string(),
+                "Flagellant/Mod.json".to_string(),
+                "Flagellant/assets/art.png".to_string(),
+            ],
+            "all folder files must be recorded with forward slashes; got {:?}",
+            info.files
+        );
+    }
+
+    /// A flat-layout DLL sitting directly in the mods dir must keep the original
+    /// behaviour: just the .dll plus a co-located same-stem .pck.
+    #[test]
+    fn flat_layout_dll_only_mod_keeps_minimal_files() {
+        let tmp = TempDir::new().unwrap();
+        let mods_dir = tmp.path();
+
+        write_bytes(&mods_dir.join("Flat.dll"), b"MZ");
+        write_bytes(&mods_dir.join("Flat.pck"), b"GDPC");
+        // An unrelated sibling file that must NOT be swept in.
+        write_bytes(&mods_dir.join("Other.txt"), b"x");
+
+        let info = dll_only_mod(&mods_dir.join("Flat.dll"), mods_dir, true);
+        let mut files = info.files.clone();
+        files.sort();
+        assert_eq!(
+            files,
+            vec!["Flat.dll".to_string(), "Flat.pck".to_string()],
+            "flat-layout mod must keep only the dll + same-stem pck; got {:?}",
+            info.files
+        );
+    }
+
+    /// A PCK-only mod in a subdirectory with an extra asset file must record
+    /// every file in the folder (issue #165 applies to pck_only_mod too).
+    #[test]
+    fn pck_only_subdir_mod_includes_all_folder_files() {
+        let tmp = TempDir::new().unwrap();
+        let mods_dir = tmp.path();
+
+        write_bytes(&mods_dir.join("ZSproject").join("ZSproject.pck"), b"GDPC");
+        write_bytes(&mods_dir.join("ZSproject").join("readme.txt"), b"hi");
+
+        let info = pck_only_mod(&mods_dir.join("ZSproject").join("ZSproject.pck"), mods_dir, true);
+        let mut files = info.files.clone();
+        files.sort();
+        assert_eq!(
+            files,
+            vec![
+                "ZSproject/ZSproject.pck".to_string(),
+                "ZSproject/readme.txt".to_string(),
+            ],
+            "pck-only subdir mod must record all folder files; got {:?}",
+            info.files
+        );
     }
 }

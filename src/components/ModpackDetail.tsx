@@ -66,6 +66,7 @@ import { useConfirm } from './ConfirmDialog';
 import { useModLibrary } from '../hooks/useModLibrary';
 import { usePinScroll } from '../hooks/usePinScroll';
 import { deleteMod, setProfileModMembership, setProfileModsEnabled, toggleMod } from '../hooks/useTauri';
+import { identitiesMatch } from '../lib/modIdentity';
 import type { ModInfo, Profile, ShareResult } from '../types';
 import type { ProfileDrift } from '../hooks/useTauri';
 
@@ -238,10 +239,14 @@ export function ModpackDetail({
   // library. Matched against the live on-disk state so it agrees with the
   // active/stored toggles shown in the row list.
   const activeInPack = useMemo(() => {
-    const key = (m: { folder_name?: string | null; mod_id?: string | null; name: string }) =>
-      m.folder_name ?? m.mod_id ?? m.name;
-    const enabled = new Set(mods.filter((m) => m.enabled).map(key));
-    return profile.mods.filter((pm) => enabled.has(key(pm))).length;
+    // Drift-tolerant: a pack entry whose saved folder_name/mod_id has gone
+    // stale (curator deleted + reinstalled the mod under a new folder)
+    // still counts as active if it matches an enabled installed mod by
+    // ANY identity key — mirroring the backend's publish matcher so the
+    // header agrees with the row list, which resolves membership the same
+    // way (issue #174).
+    const enabledMods = mods.filter((m) => m.enabled);
+    return profile.mods.filter((pm) => enabledMods.some((m) => identitiesMatch(pm, m))).length;
   }, [mods, profile.mods]);
   // GitHub-updatable mods in THIS pack (drives the "N updates available"
   // pill + the update-all action).
@@ -261,16 +266,14 @@ export function ModpackDetail({
   );
   const updatesCount = packUpdateNames.length;
 
-  // The pack's mods, in load order. (profile.mods is the manifest order.)
-  const inPackKeys = useMemo(
-    () => new Set(profile.mods.map((m) => modKey(m))),
-    [profile.mods],
-  );
-
-  // Available = installed mods NOT already in the pack.
+  // Available = installed mods NOT already in the pack. Drift-tolerant
+  // (issue #174): a reinstalled mod whose folder_name changed but whose
+  // mod_id/name still matches a pack entry must NOT show up here as
+  // "available to add" — it's already in the pack, just under a new
+  // folder. Mirrors activeInPack's matching so the two sections agree.
   const availableMods = useMemo(
-    () => mods.filter((m) => !inPackKeys.has(modKey(m))),
-    [mods, inPackKeys],
+    () => mods.filter((m) => !profile.mods.some((pm) => identitiesMatch(pm, m))),
+    [mods, profile.mods],
   );
 
   // Order-sensitive membership signature. Feeds LibraryTable's reloadToken

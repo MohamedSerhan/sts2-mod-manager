@@ -1092,7 +1092,7 @@ describe('<HomeView> Recent modpacks strip', () => {
     await waitFor(() => {
       const call = getInvokeCalls().find((c) => c.cmd === 'switch_profile');
       expect(call).toBeDefined();
-      expect(call!.args).toEqual({ name: 'profile-other' });
+      expect(call!.args).toEqual({ profileId: 'profile-other' });
     });
     const map = JSON.parse(localStorage.getItem(USAGE_KEY) ?? '{}');
     expect(map['profile-other']).toBeGreaterThan(2000);

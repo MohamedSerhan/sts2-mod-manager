@@ -507,7 +507,7 @@ describe('<App>', () => {
       const call = getInvokeCalls().find(
         (c) => c.cmd === 'set_profile_mod_membership' && c.args?.modName === 'Dropped',
       );
-      expect(call?.args).toMatchObject({ profileName: 'Stable', included: true });
+      expect(call?.args).toMatchObject({ profileId: 'Stable', included: true });
     });
   }, 10000);
 

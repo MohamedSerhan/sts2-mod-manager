@@ -79,6 +79,7 @@ export interface LibraryTableProps {
    *  component as ModpackDetail without anchoring it to a specific
    *  modpack. */
   modpackName: string | null;
+  modpackLabel?: string | null;
   /** Fired after a membership / storage / load-order mutation so the
    *  parent (ProfilesView) can re-pull share-info, drift, profile list. */
   onMembershipChanged?: () => void;
@@ -235,6 +236,7 @@ function sourceHintForRow(
 
 export function LibraryTable({
   modpackName,
+  modpackLabel,
   onMembershipChanged,
   onLoadOrderChanged,
   initialSearch = '',
@@ -276,7 +278,8 @@ export function LibraryTable({
   const { t } = useTranslation();
   const toastCtx = useToast();
   const confirm = useConfirm();
-  const { mods: appMods, refreshAll, activeProfile } = useApp();
+  const { mods: appMods, refreshAll, activeProfile, activeProfileId } = useApp();
+  const focusedProfileLabel = modpackLabel ?? modpackName;
 
   const [grid, setGrid] = useState<ProfileMembershipGrid | null>(null);
   const [loading, setLoading] = useState(modpackName != null);
@@ -384,7 +387,9 @@ export function LibraryTable({
    *  Returns undefined when modpackName is null (no-focus mode). */
   function focusedState(row: ProfileMembershipMod) {
     if (modpackName == null) return undefined;
-    return row.profiles.find((p) => p.profile_name === modpackName);
+    return row.profiles.find((p) =>
+      p.profile_id === modpackName || p.profile_name === modpackName
+    );
   }
 
   /** Rows that have this modpack in their `profiles` array (so the
@@ -394,7 +399,9 @@ export function LibraryTable({
     if (!effectiveGrid || modpackName == null) return new Set<string>();
     const set = new Set<string>();
     for (const row of effectiveGrid.mods) {
-      const state = row.profiles.find((p) => p.profile_name === modpackName);
+      const state = row.profiles.find((p) =>
+        p.profile_id === modpackName || p.profile_name === modpackName
+      );
       if (state?.included) set.add(membershipRowKey(row));
     }
     return set;
@@ -414,7 +421,9 @@ export function LibraryTable({
     // order if for some reason we can't find the profile in the user
     // grid.
     const inPack = effectiveGrid.mods.filter((row) =>
-      row.profiles.find((p) => p.profile_name === modpackName)?.included,
+      row.profiles.find((p) =>
+        p.profile_id === modpackName || p.profile_name === modpackName
+      )?.included,
     );
     setLoadOrderDraft(
       inPack.map((row) => ({
@@ -520,7 +529,7 @@ export function LibraryTable({
           return {
             ...mod,
             profiles: mod.profiles.map((p) =>
-              p.profile_name === modpackName
+              p.profile_id === modpackName || p.profile_name === modpackName
                 ? {
                     ...p,
                     included: nextIncluded,
@@ -565,7 +574,7 @@ export function LibraryTable({
       // for the *active* pack and only when disk state needs to change.
       const mirrorsToDisk =
         coupleActiveStorage
-        && modpackName === activeProfile
+        && (modpackName === activeProfileId || (!activeProfileId && modpackName === activeProfile))
         && row.installed_enabled !== nextIncluded;
       if (mirrorsToDisk) {
         await toggleMod(row.name, row.folder_name, nextIncluded);
@@ -585,11 +594,11 @@ export function LibraryTable({
         nextIncluded
           ? t('profiles.library.toastAdded', {
               mod: membershipDisplayName(row),
-              profile: modpackName,
+              profile: focusedProfileLabel,
             })
           : t('profiles.library.toastRemoved', {
               mod: membershipDisplayName(row),
-              profile: modpackName,
+              profile: focusedProfileLabel,
             }),
       );
       onMembershipChanged?.();
@@ -618,7 +627,7 @@ export function LibraryTable({
     if (nextEnabled && modpackName != null && state && !state.included && state.editable) {
       const result = await confirm({
         title: t('profiles.library.enableNotInPack.title', { mod: displayName }),
-        body: t('profiles.library.enableNotInPack.body', { pack: modpackName }),
+        body: t('profiles.library.enableNotInPack.body', { pack: focusedProfileLabel }),
         cancelLabel: t('profiles.library.enableNotInPack.keepStored'),
         width: 560,
         choices: [
@@ -629,7 +638,7 @@ export function LibraryTable({
           },
           {
             value: 'enableAndAdd',
-            label: t('profiles.library.enableNotInPack.enableAndAdd', { pack: modpackName }),
+            label: t('profiles.library.enableNotInPack.enableAndAdd', { pack: focusedProfileLabel }),
             variant: 'secondary',
           },
         ],
@@ -666,11 +675,11 @@ export function LibraryTable({
         toastCtx.success(t('profiles.library.toastStored', { mod: displayName }));
       } else if (alsoAddToPack) {
         toastCtx.success(
-          t('profiles.library.toastActivatedAndAdded', { mod: displayName, pack: modpackName }),
+          t('profiles.library.toastActivatedAndAdded', { mod: displayName, pack: focusedProfileLabel }),
         );
       } else if (enabledOutsideFollowedPack) {
         toastCtx.info(
-          t('profiles.library.toastActivatedFollowed', { mod: displayName, pack: modpackName }),
+          t('profiles.library.toastActivatedFollowed', { mod: displayName, pack: focusedProfileLabel }),
         );
       } else {
         toastCtx.success(t('profiles.library.toastActivated', { mod: displayName }));
@@ -881,7 +890,7 @@ export function LibraryTable({
               inPackIndex={inPackIndex}
               enableReorder={enableReorder}
               packScoped={packScoped}
-              packActive={modpackName != null && modpackName === activeProfile}
+              packActive={modpackName != null && (modpackName === activeProfileId || (!activeProfileId && modpackName === activeProfile))}
               isDragOver={dragOverIndex === inPackIndex && inPack}
               isDragging={draggedIndex === inPackIndex && inPack}
               loadOrderSaving={loadOrderSaving}

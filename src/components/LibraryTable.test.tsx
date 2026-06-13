@@ -204,7 +204,7 @@ describe('<LibraryTable>', () => {
       expect(getInvokeCalls()).toContainEqual({
         cmd: 'set_profile_mod_membership',
         args: {
-          profileName: 'Stable',
+          profileId: 'Stable',
           modName: 'NewMod',
           folderName: 'NewMod',
           modId: 'NewMod',

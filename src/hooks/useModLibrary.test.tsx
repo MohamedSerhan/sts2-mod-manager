@@ -104,7 +104,7 @@ describe('useModLibrary', () => {
 
     await waitFor(() => expect(membershipCalls()).toHaveLength(1));
     expect(membershipCalls()[0].args).toMatchObject({
-      profileName: 'MyPack',
+      profileId: 'MyPack',
       modName: 'Cool',
       folderName: 'Cool',
       included: true,
@@ -233,7 +233,7 @@ describe('useModLibrary', () => {
 
     await waitFor(() => expect(membershipCalls()).toHaveLength(1));
     expect(membershipCalls()[0].args).toMatchObject({
-      profileName: 'MyPack',
+      profileId: 'MyPack',
       modName: 'Cool',
       folderName: 'Cool',
       included: true,

@@ -154,7 +154,7 @@ describe('<ProfileSwitcher>', () => {
     });
     const switched = getInvokeCalls().filter((c) => c.cmd === 'switch_profile');
     expect(switched.length).toBe(1);
-    expect(switched[0].args).toEqual({ name: 'Other' });
+    expect(switched[0].args).toEqual({ profileId: 'Other' });
   });
 
   it('switching to a different profile records the launch for Home "Recent modpacks"', async () => {

@@ -224,6 +224,7 @@ interface SmartImportOpts {
   confirm: ConfirmFn;
   subscriptions: Subscription[];
   activeProfile: string | null;
+  activeProfileId?: string | null;
   subUpdates: SubscriptionUpdate[];
   t: TFunction;
   onBusyChange?: (busy: boolean) => void;
@@ -290,7 +291,9 @@ export async function importShareCodeSmart(
   const pending = opts.subUpdates.find(
     (u) => canonicalShareCode(u.share_id) === canonical,
   );
-  const isActive = opts.activeProfile === match.profile_name;
+  const profileId = match.profile_id || match.profile_name;
+  const isActive = opts.activeProfileId === profileId
+    || (!opts.activeProfileId && opts.activeProfile === match.profile_name);
   // `pretty` was already declared above for the new-pack install path;
   // the rest of the function reuses it via the outer-scope binding.
 
@@ -371,7 +374,7 @@ export async function importShareCodeSmart(
   if (isActive) {
     opts.onBusyChange?.(true);
     try {
-      const result = await switchProfile(match.profile_name);
+      const result = await switchProfile(profileId);
       return { kind: 'reapplied', profileName: match.profile_name, result };
     } finally {
       opts.onBusyChange?.(false);
@@ -404,7 +407,7 @@ export async function importShareCodeSmart(
   if (!ok) return { kind: 'cancelled' };
   opts.onBusyChange?.(true);
   try {
-    const result = await switchProfile(match.profile_name);
+    const result = await switchProfile(profileId);
     return { kind: 'activated', profileName: match.profile_name, result };
   } finally {
     opts.onBusyChange?.(false);

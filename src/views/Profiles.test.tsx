@@ -1249,7 +1249,7 @@ describe('<ProfilesView>', () => {
       }),
     ]);
     registerInvokeHandler('set_profile_load_order', (args) => {
-      expect(args?.profileName).toBe('Stable');
+      expect(args?.profileId).toBe('Stable');
       expect(args?.orderedMods).toEqual([
         { name: 'Card Art Editor', folderName: 'CardArtEditor', modId: 'CardArtEditor' },
         { name: 'BaseLib', folderName: 'BaseLib', modId: 'BaseLib' },
@@ -2017,7 +2017,7 @@ describe('<ProfilesView>', () => {
     await user.click(modal.getByRole('button', { name: /Delete modpack/i }));
     await waitFor(() => {
       expect(getInvokeCalls().some(
-        (c) => c.cmd === 'delete_profile_cmd' && c.args?.name === 'Doomed',
+        (c) => c.cmd === 'delete_profile_cmd' && c.args?.profileId === 'Doomed',
       )).toBe(true);
     });
     await waitFor(() => {
@@ -2049,7 +2049,7 @@ describe('<ProfilesView>', () => {
     await user.click(modal.getByRole('button', { name: /Delete modpack/i }));
     await waitFor(() => {
       expect(getInvokeCalls().some(
-        (c) => c.cmd === 'delete_profile_cmd' && c.args?.name === 'A',
+        (c) => c.cmd === 'delete_profile_cmd' && c.args?.profileId === 'A',
       )).toBe(true);
     });
 
@@ -2084,7 +2084,7 @@ describe('<ProfilesView>', () => {
     await user.click(modal.getByRole('button', { name: /Delete modpack/i }));
     await waitFor(() => {
       expect(getInvokeCalls().some(
-        (c) => c.cmd === 'delete_profile_cmd' && c.args?.name === 'mypack',
+        (c) => c.cmd === 'delete_profile_cmd' && c.args?.profileId === 'mypack',
       )).toBe(true);
     });
     await waitFor(() => {
@@ -2115,7 +2115,7 @@ describe('<ProfilesView>', () => {
     await user.click(modal.getByRole('button', { name: /Delete modpack/i }));
     await waitFor(() => {
       expect(getInvokeCalls().some(
-        (c) => c.cmd === 'delete_profile_cmd' && c.args?.name === 'B',
+        (c) => c.cmd === 'delete_profile_cmd' && c.args?.profileId === 'B',
       )).toBe(true);
     });
 
@@ -2305,7 +2305,7 @@ describe('<ProfilesView>', () => {
     // hit. The row's Switch-to button on OtherInstalled is gated by the
     // disabled flag while switching, but we still want to disambiguate.
     expect(getInvokeCalls().some(
-      (c) => c.cmd === 'switch_profile' && c.args?.name === 'OtherInstalled',
+      (c) => c.cmd === 'switch_profile' && c.args?.profileId === 'OtherInstalled',
     )).toBe(true);
   });
 

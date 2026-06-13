@@ -169,7 +169,8 @@ export function ModpackDetail({
   // mod installed from here auto-joins THIS pack, and the Audit action
   // checks only this pack's mods. The same hook powers the All Mods view.
   const lib = useModLibrary({
-    targetPack: profile.name,
+    targetPack: profileKey,
+    targetPackLabel: profile.name,
     onTargetPackChanged: markSharedLocalEdit,
     auditScope: () => profile.mods.map((m) => m.name),
   });
@@ -337,7 +338,7 @@ export function ModpackDetail({
         await toggleMod(mod.name, mod.folder_name ?? null, true);
       }
       await setProfileModMembership(
-        profile.name,
+        profileKey,
         mod.name,
         mod.folder_name ?? null,
         mod.mod_id ?? null,
@@ -439,7 +440,7 @@ export function ModpackDetail({
         }));
       }
       if (issues.length > 0) {
-        toast.info(`${base} ${issues.join(' ')}`);
+        toast.error(`${base} ${issues.join(' ')}`);
       } else {
         toast.success(base);
       }
@@ -838,7 +839,8 @@ export function ModpackDetail({
             each row's visible action into "Remove from pack". reloadToken
             re-syncs when membership changes from outside the table. */}
         <LibraryTable
-          modpackName={profile.name}
+          modpackName={profileKey}
+          modpackLabel={profile.name}
           packScoped
           coupleActiveStorage
           reloadToken={`${membershipSignature}|active:${activeProfile ?? ''}|bulk:${bulkReloadNonce}`}
@@ -846,7 +848,7 @@ export function ModpackDetail({
           bulkActionsBar={packBulkBar}
           filterRow={(row) => {
             const included = !!row.profiles.find(
-              (p) => p.profile_name === profile.name,
+              (p) => p.profile_id === profileKey || p.profile_name === profile.name,
             )?.included;
             if (!included) return false;
             if (!tagFilter) return true;

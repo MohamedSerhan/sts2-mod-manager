@@ -29,9 +29,10 @@ interface Props {
 
 export function EditModpackModal({ profile, onClose, onSaved }: Props) {
   const { t } = useTranslation();
-  const { mods, activeProfile } = useApp();
+  const { mods, activeProfile, activeProfileId } = useApp();
   const toast = useToast();
-  const isActive = activeProfile === profile.name;
+  const profileKey = profile.id || profile.name;
+  const isActive = activeProfileId === profileKey || (!activeProfileId && activeProfile === profile.name);
 
   // Selection starts as the pack's current members, keyed by folder so two
   // mods that share a manifest name are tracked (and diffed) independently.
@@ -83,7 +84,7 @@ export function EditModpackModal({ profile, onClose, onSaved }: Props) {
       for (const m of toAdd) {
         if (isActive) await toggleMod(m.name, m.folder_name ?? null, true);
         await setProfileModMembership(
-          profile.name,
+          profileKey,
           m.name,
           m.folder_name ?? null,
           m.mod_id ?? null,
@@ -93,7 +94,7 @@ export function EditModpackModal({ profile, onClose, onSaved }: Props) {
       }
       for (const m of toRemove) {
         if (isActive) await toggleMod(m.name, m.folder_name ?? null, false);
-        await setProfileModMembership(profile.name, m.name, m.folder_name ?? null, m.mod_id ?? null, false);
+        await setProfileModMembership(profileKey, m.name, m.folder_name ?? null, m.mod_id ?? null, false);
       }
       toast.success(
         t('modpack.edit.saved', { added: toAdd.length, removed: toRemove.length, name: profile.name }),

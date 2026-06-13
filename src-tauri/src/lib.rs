@@ -214,7 +214,9 @@ pub fn run() {
             if !identifier.is_empty() {
                 let resolved = crate::profiles::list_profiles(&s.profiles_path)
                     .into_iter()
-                    .find(|profile| crate::profiles::profile_identifier_matches(profile, &identifier));
+                    .find(|profile| {
+                        crate::profiles::profile_identifier_matches(profile, &identifier)
+                    });
                 if let Some(profile) = resolved {
                     log::info!(
                         "Restored active profile from previous session: {} ({})",

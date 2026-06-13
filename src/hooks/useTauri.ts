@@ -168,8 +168,8 @@ export async function createProfile(name: string): Promise<Profile> {
   return invoke('create_profile', { name });
 }
 
-export async function switchProfile(name: string): Promise<SwitchProfileResult> {
-  return invoke('switch_profile', { name });
+export async function switchProfile(profileId: string): Promise<SwitchProfileResult> {
+  return invoke('switch_profile', { profileId });
 }
 
 /** Repair a profile: re-apply the manifest, restore missing/profile-drifted
@@ -179,16 +179,16 @@ export async function repairProfile(name: string): Promise<RepairProfileResult> 
   return invoke('repair_profile', { name });
 }
 
-export async function deleteProfile(name: string): Promise<void> {
-  return invoke('delete_profile_cmd', { name });
+export async function deleteProfile(profileId: string): Promise<void> {
+  return invoke('delete_profile_cmd', { profileId });
 }
 
-export async function duplicateProfile(name: string, newName: string): Promise<Profile> {
-  return invoke('duplicate_profile', { name, newName });
+export async function duplicateProfile(profileId: string, newName: string): Promise<Profile> {
+  return invoke('duplicate_profile', { profileId, newName });
 }
 
-export async function renameProfile(oldName: string, newName: string): Promise<Profile> {
-  return invoke('rename_profile', { oldName, newName });
+export async function renameProfile(profileId: string, newName: string): Promise<Profile> {
+  return invoke('rename_profile', { profileId, newName });
 }
 
 export async function exportProfileToFile(name: string, path: string): Promise<void> {
@@ -204,7 +204,7 @@ export async function getProfileMemberships(): Promise<ProfileMembershipGrid> {
 }
 
 export async function setProfileModMembership(
-  profileName: string,
+  profileId: string,
   modName: string,
   folderName: string | null,
   modId: string | null,
@@ -212,7 +212,7 @@ export async function setProfileModMembership(
   sourceHint?: string | null,
 ): Promise<Profile> {
   return invoke('set_profile_mod_membership', {
-    profileName,
+    profileId,
     modName,
     folderName,
     modId,
@@ -222,11 +222,11 @@ export async function setProfileModMembership(
 }
 
 export async function setProfileLoadOrder(
-  profileName: string,
+  profileId: string,
   orderedMods: ProfileModOrderKey[],
 ): Promise<ProfileLoadOrderUpdate> {
   return invoke('set_profile_load_order', {
-    profileName,
+    profileId,
     orderedMods: orderedMods.map((mod) => ({
       name: mod.name,
       folderName: mod.folder_name,
@@ -442,23 +442,23 @@ export async function findGithubFromNexus(
 // ── Sharing ────────────────────────────────────────────────────────────────
 
 export async function shareProfile(
-  name: string,
+  profileId: string,
   listPublic: boolean | null,
   includeNotes: boolean | null = null,
 ): Promise<ShareResult> {
-  return invoke('share_profile', { name, listPublic, includeNotes });
+  return invoke('share_profile', { name: profileId, listPublic, includeNotes });
 }
 
-export async function cancelProfileShare(name: string): Promise<boolean> {
-  return invoke('cancel_profile_share', { name });
+export async function cancelProfileShare(profileId: string): Promise<boolean> {
+  return invoke('cancel_profile_share', { name: profileId });
 }
 
 export async function reshareProfile(
-  name: string,
+  profileId: string,
   listPublic: boolean | null,
   includeNotes: boolean | null = null,
 ): Promise<ShareResult> {
-  return invoke('reshare_profile', { name, listPublic, includeNotes });
+  return invoke('reshare_profile', { name: profileId, listPublic, includeNotes });
 }
 
 export async function fetchSharedProfile(code: string): Promise<Profile> {
@@ -469,8 +469,8 @@ export async function installSharedProfile(code: string): Promise<Profile> {
   return invoke('install_shared_profile', { code });
 }
 
-export async function getShareInfo(name: string): Promise<ShareResult | null> {
-  return invoke('get_share_info', { name });
+export async function getShareInfo(profileId: string): Promise<ShareResult | null> {
+  return invoke('get_share_info', { name: profileId });
 }
 
 export async function fetchModpackBrowserPage(
@@ -484,17 +484,17 @@ export async function fetchModpackBrowserPage(
  *  entry to its real on-disk mod backend-side, so it works even when the
  *  manifest folder name has drifted. */
 export async function setProfileModsEnabled(
-  name: string,
+  profileId: string,
   enabled: boolean,
 ): Promise<SetProfileModsEnabledResult> {
-  return invoke('set_profile_mods_enabled', { name, enabled });
+  return invoke('set_profile_mods_enabled', { profileId, enabled });
 }
 
 export async function setModpackListing(
-  name: string,
+  profileId: string,
   public_: boolean,
 ): Promise<void> {
-  return invoke('set_modpack_listing', { name, public: public_ });
+  return invoke('set_modpack_listing', { name: profileId, public: public_ });
 }
 
 export async function launchVanilla(): Promise<boolean> {

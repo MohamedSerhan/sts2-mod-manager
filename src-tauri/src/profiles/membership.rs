@@ -31,9 +31,8 @@ use crate::mods::{
 use super::apply::disk_mod_matches_pin;
 use super::crud::{
     hide_app_created_by, installed_mod_matches_target, list_profiles, load_profile, mod_key,
-    profile_has_json, profile_is_edit_locked, profile_is_owned, profile_mod_from_installed,
+    profile_has_json, profile_is_edit_locked, profile_mod_from_installed,
     profile_mod_matches_installed, profile_mod_matches_target, save_profile,
-    subscribed_profile_names,
 };
 use super::{
     LoadOrderSettingsStatus, Profile, ProfileMembershipGrid, ProfileMembershipMod,
@@ -47,7 +46,6 @@ pub(crate) fn profile_membership_matrix(
     config_path: &Path,
 ) -> Result<ProfileMembershipGrid> {
     let profiles = list_profiles(profiles_path);
-    let subscribed_names = subscribed_profile_names(config_path);
 
     let profile_rows: Vec<ProfileMembershipProfile> = profiles
         .iter()
@@ -55,11 +53,11 @@ pub(crate) fn profile_membership_matrix(
             // Editable when it has a local manifest and isn't a *followed*
             // (subscribed-but-not-owned) pack. A pack you published is owned —
             // editable even though installing your own code auto-subscribed you.
-            let locked = subscribed_names.contains(&profile.name.to_lowercase())
-                && !profile_is_owned(&profile.name, profiles_path);
+            let locked = profile_is_edit_locked(&profile.id, profiles_path, config_path);
             ProfileMembershipProfile {
+                id: profile.id.clone(),
                 name: profile.name.clone(),
-                editable: !locked && profile_has_json(&profile.name, profiles_path),
+                editable: !locked && profile_has_json(&profile.id, profiles_path),
             }
         })
         .collect();
@@ -79,6 +77,7 @@ pub(crate) fn profile_membership_matrix(
                         .iter()
                         .find(|pm| profile_mod_matches_installed(pm, &installed));
                     ProfileMembershipState {
+                        profile_id: profile.id.clone(),
                         profile_name: profile.name.clone(),
                         included: matched.is_some(),
                         enabled: matched.is_some(),
@@ -1074,7 +1073,9 @@ mod profile_membership_tests {
         fs::create_dir_all(&disabled_path).unwrap();
         fs::create_dir_all(&profiles_path).unwrap();
         write_mod(&mods_path, "BaseLib", "BaseLib", "1.0.0");
-        save_profile(&empty_profile("Friend Pack"), &profiles_path).unwrap();
+        let profile = empty_profile("Friend Pack");
+        let profile_id = profile.id.clone();
+        save_profile(&profile, &profiles_path).unwrap();
         crate::subscriptions::save_subscriptions(
             &crate::subscriptions::SubscriptionsDb {
                 subscriptions: std::collections::HashMap::from([(
@@ -1083,6 +1084,7 @@ mod profile_membership_tests {
                         share_id: "alice/AAAA-BBBB-CCCC".into(),
                         share_url: "https://example.test".into(),
                         profile_name: "Friend Pack".into(),
+                        profile_id,
                         curator: Some("alice".into()),
                         last_synced_profile: empty_profile("Friend Pack"),
                         last_checked: "2026-05-19T00:00:00Z".parse().unwrap(),

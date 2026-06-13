@@ -612,7 +612,7 @@ describe('<ModpackDetail>', () => {
     });
     const call = getInvokeCalls().find((c) => c.cmd === 'set_profile_mod_membership');
     expect(call?.args).toMatchObject({
-      profileName: 'Sample',
+      profileId: 'Sample',
       modName: 'LibMod',
       folderName: 'LibMod',
       modId: 'LibMod',
@@ -764,7 +764,7 @@ describe('<ModpackDetail>', () => {
     await user.click(await screen.findByRole('button', { name: /^Enable all$/i }));
     await waitFor(() => {
       const call = getInvokeCalls().find((c) => c.cmd === 'set_profile_mods_enabled');
-      expect(call?.args).toMatchObject({ name: 'Sample', enabled: true });
+      expect(call?.args).toMatchObject({ profileId: 'Sample', enabled: true });
     });
   });
 
@@ -781,7 +781,7 @@ describe('<ModpackDetail>', () => {
     await user.click(await screen.findByRole('button', { name: /^Disable all$/i }));
     await waitFor(() => {
       const call = getInvokeCalls().find((c) => c.cmd === 'set_profile_mods_enabled');
-      expect(call?.args).toMatchObject({ name: 'Sample', enabled: false });
+      expect(call?.args).toMatchObject({ profileId: 'Sample', enabled: false });
     });
   });
 
@@ -904,7 +904,7 @@ describe('<ModpackDetail>', () => {
         (c) => c.cmd === 'set_profile_mod_membership' && c.args?.modName === 'NewMod',
       );
       expect(call?.args).toMatchObject({
-        profileName: 'Sample',
+        profileId: 'Sample',
         modName: 'NewMod',
         included: true,
       });

@@ -209,6 +209,11 @@ impl AppStateInner {
         let _ = std::fs::create_dir_all(&config_path);
         let _ = std::fs::create_dir_all(&cache_path);
         let _ = std::fs::create_dir_all(&profiles_path);
+        if let Err(e) =
+            crate::profiles::migrate_profile_identity_storage(&profiles_path, &config_path)
+        {
+            log::warn!("Profile identity migration did not complete: {}", e);
+        }
 
         Self {
             game_path: None,

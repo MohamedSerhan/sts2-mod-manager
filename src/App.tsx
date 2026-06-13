@@ -32,7 +32,7 @@ import { ROW_MENU_OPEN_EVENT } from './lib/rowMenuConfig';
 import { loadAutoAddInstallsToModpack } from './lib/installPolicy';
 import { UiScaleProvider } from './display/UiScaleContext';
 import { importShareCodeSmart } from './lib/shareImport';
-import { switchResultDetails } from './lib/switchResultSummary';
+import { switchResultDetails, switchResultHasProblems } from './lib/switchResultSummary';
 import { getSubscriptions } from './hooks/useTauri';
 import { OnboardingOverlay } from './components/OnboardingOverlay';
 import { LaunchSpinner } from './components/LaunchSpinner';
@@ -106,7 +106,7 @@ function AppInner() {
   const { t } = useTranslation();
   const sidebar = useResizableSidebar();
   const [activeView, setActiveView] = useState<View>('home');
-  const { gameInfo, mods, refreshAll, activeProfile, gameRunning, subUpdates, refreshSubUpdates } = useApp();
+  const { gameInfo, mods, refreshAll, activeProfile, activeProfileId, gameRunning, subUpdates, refreshSubUpdates } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
   const [dragOver, setDragOver] = useState(false);
@@ -288,8 +288,10 @@ function AppInner() {
   // profile is whatever it was at app startup" and incorrect
   // `already-active` toasts would slip through.
   const activeProfileRef = useRef(activeProfile);
+  const activeProfileIdRef = useRef(activeProfileId);
   const subUpdatesRef = useRef(subUpdates);
   useEffect(() => { activeProfileRef.current = activeProfile; }, [activeProfile]);
+  useEffect(() => { activeProfileIdRef.current = activeProfileId; }, [activeProfileId]);
   useEffect(() => { subUpdatesRef.current = subUpdates; }, [subUpdates]);
 
   // The modpack the user is currently viewing in ProfilesView (null when
@@ -297,9 +299,9 @@ function AppInner() {
   // auto-joins it — same "added through the modpack view → in the pack"
   // behavior as Quick add / Import. A ref so the global drop handler reads
   // the latest without re-binding its listeners.
-  const viewedPackRef = useRef<string | null>(null);
-  const handleViewedModpackChange = useCallback((name: string | null) => {
-    viewedPackRef.current = name;
+  const viewedPackRef = useRef<{ id: string; name: string } | null>(null);
+  const handleViewedModpackChange = useCallback((profile: { id: string; name: string } | null) => {
+    viewedPackRef.current = profile;
   }, []);
 
   // De-dupe ref: a URL can arrive via two paths (cold-start buffer
@@ -352,6 +354,7 @@ function AppInner() {
           confirm,
           subscriptions: subs,
           activeProfile: activeProfileRef.current,
+          activeProfileId: activeProfileIdRef.current,
           subUpdates: subUpdatesRef.current,
           t,
           onBusyChange: setBlockingModpackOperation,
@@ -367,12 +370,12 @@ function AppInner() {
         );
         } else if (outcome.kind === 'activated') {
           const parts = switchResultDetails(outcome.result, t, { includeLists: false });
-          toast.info(parts.length > 0
+          (switchResultHasProblems(outcome.result) ? toast.error : toast.info)(parts.length > 0
             ? parts.join(', ')
             : t('profiles.toast.activated', { name: outcome.profileName }));
         } else if (outcome.kind === 'reapplied') {
           const parts = switchResultDetails(outcome.result, t, { includeLists: false });
-          toast.info(parts.length > 0
+          (switchResultHasProblems(outcome.result) ? toast.error : toast.info)(parts.length > 0
             ? parts.join(', ')
             : t('profiles.toast.reapplied', { name: outcome.profileName }));
         } else if (outcome.kind === 'synced') {
@@ -564,8 +567,8 @@ function AppInner() {
       if (pack && autoAddToViewedPack) {
         try {
           const subs = await getSubscriptions();
-          if (subs.some((s) => s.profile_name.toLowerCase() === pack.toLowerCase())) {
-            toast.info(t('mods.toast.followedPackNoAdd', { pack }));
+          if (subs.some((s) => s.profile_id === pack.id || s.profile_name.toLowerCase() === pack.name.toLowerCase())) {
+            toast.info(t('mods.toast.followedPackNoAdd', { pack: pack.name }));
             return;
           }
         } catch {
@@ -590,18 +593,18 @@ function AppInner() {
               // fail the move) while the membership write doesn't — toggling
               // first keeps disk + manifest in sync. (Only when it isn't
               // already active; toggle_mod errors on an already-active mod.)
-              if (pack === activeProfileRef.current && !mod.enabled) {
+              if ((pack.id === activeProfileIdRef.current || (!activeProfileIdRef.current && pack.name === activeProfileRef.current)) && !mod.enabled) {
                 await toggleMod(mod.name, mod.folder_name ?? null, true);
               }
               await setProfileModMembership(
-                pack,
+                pack.id,
                 mod.name,
                 mod.folder_name ?? null,
                 mod.mod_id ?? null,
                 true,
                 mod.source ?? mod.github_url ?? mod.nexus_url ?? null,
               );
-              toast.success(t('app.toast.installedModToPack', { name: mod.name, pack }));
+              toast.success(t('app.toast.installedModToPack', { name: mod.name, pack: pack.name }));
             } catch {
               // Membership failed — the mod is still installed on disk.
               toast.success(t('app.toast.installedMod', { name: mod.name }));

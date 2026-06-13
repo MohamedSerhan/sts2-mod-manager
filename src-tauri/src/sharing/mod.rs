@@ -2397,6 +2397,7 @@ mod listing_tests {
                 share_id: "Solomag:290a56edb15d".into(),
                 share_url: "Solomag/290A-56ED-B15D".into(),
                 profile_name: "Solo Pack".into(),
+                profile_id: local.id.clone(),
                 curator: Some("Solomag".into()),
                 last_synced_profile: remote.clone(),
                 last_checked: Utc::now(),

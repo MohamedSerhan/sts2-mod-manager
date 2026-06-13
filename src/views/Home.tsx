@@ -31,7 +31,7 @@ import {
   getProfileDrift,
 } from '../hooks/useTauri';
 import { buildShareMessage, buildShareLink, importShareCodeSmart } from '../lib/shareImport';
-import { switchResultDetails } from '../lib/switchResultSummary';
+import { switchResultDetails, switchResultHasProblems } from '../lib/switchResultSummary';
 import { getModpackUsage, recordModpackLaunch } from '../lib/modpackUsage';
 import type { ShareResult, Profile } from '../types';
 import { PublishModal } from '../components/PublishModal';
@@ -280,12 +280,12 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
     try {
       setRecentSwitching(key);
       const result = await switchProfile(key);
-      setActiveProfile(targetName);
+      setActiveProfile(key, targetName);
       recordModpackLaunch(key);
       await refreshAll();
       const parts = switchResultDetails(result, t);
       if (parts.length > 0) {
-        toast.info(parts.join('. '));
+        (switchResultHasProblems(result) ? toast.error : toast.info)(parts.join('. '));
       } else {
         toast.success(t('profiles.toast.switched', { name: targetName }));
       }
@@ -365,6 +365,7 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
         confirm,
         subscriptions: subs,
         activeProfile,
+        activeProfileId,
         subUpdates,
         t,
         onBusyChange: onBlockingOperationChange,
@@ -379,10 +380,14 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
         );
       } else if (outcome.kind === 'activated') {
         const parts = switchResultDetails(outcome.result, t, { includeLists: false });
-        toast.info(parts.length ? parts.join(', ') : t('profiles.toast.activated', { name: outcome.profileName }));
+        (switchResultHasProblems(outcome.result) ? toast.error : toast.info)(
+          parts.length ? parts.join(', ') : t('profiles.toast.activated', { name: outcome.profileName }),
+        );
       } else if (outcome.kind === 'reapplied') {
         const parts = switchResultDetails(outcome.result, t, { includeLists: false });
-        toast.info(parts.length ? parts.join(', ') : t('profiles.toast.reapplied', { name: outcome.profileName }));
+        (switchResultHasProblems(outcome.result) ? toast.error : toast.info)(
+          parts.length ? parts.join(', ') : t('profiles.toast.reapplied', { name: outcome.profileName }),
+        );
       } else if (outcome.kind === 'synced') {
         toast.success(t('profiles.toast.syncedUpToDate', { name: outcome.profileName }));
       } else if (outcome.kind === 'already-active') {
@@ -396,8 +401,12 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
   }
 
   const enabledMods = mods.filter((m) => m.enabled);
-  const activeSub = subscriptions.find((s) => s.profile_name === activeProfile);
-  const activeUpdate = subUpdates.find((s) => s.profile_name === activeProfile);
+  const activeSub = subscriptions.find((s) =>
+    s.profile_id === activeProfileKey || s.profile_name === activeProfile
+  );
+  const activeUpdate = subUpdates.find((s) =>
+    s.profile_id === activeProfileKey || s.profile_name === activeProfile
+  );
 
   const heroName = activeProfile || t('home.heroNameVanilla');
   // Share code source: prefer activeSub (a pack imported FROM someone),

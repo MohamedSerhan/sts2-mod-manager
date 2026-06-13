@@ -601,7 +601,9 @@ mod reconcile_tests {
         // An enabled mod on disk that isn't in the followed pack → there IS
         // drift, but saving it must still be refused.
         write_mod(&mods_path, "Extra", "Extra", "1.0.0");
-        save_profile(&base_profile("Henry Pack", vec![]), &profiles_path).unwrap();
+        let profile = base_profile("Henry Pack", vec![]);
+        let profile_id = profile.id.clone();
+        save_profile(&profile, &profiles_path).unwrap();
         crate::subscriptions::save_subscriptions(
             &crate::subscriptions::SubscriptionsDb {
                 subscriptions: std::collections::HashMap::from([(
@@ -610,6 +612,7 @@ mod reconcile_tests {
                         share_id: "henry/AAAA-BBBB-CCCC".into(),
                         share_url: "https://example.test".into(),
                         profile_name: "Henry Pack".into(),
+                        profile_id,
                         curator: Some("henry".into()),
                         last_synced_profile: base_profile("Henry Pack", vec![]),
                         last_checked: "2026-05-19T00:00:00Z".parse().unwrap(),

@@ -6,7 +6,7 @@ import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from './ConfirmDialog';
 import { recordModpackLaunch } from '../lib/modpackUsage';
-import { switchResultDetails } from '../lib/switchResultSummary';
+import { switchResultDetails, switchResultHasProblems } from '../lib/switchResultSummary';
 import type { Profile, SubscriptionUpdate } from '../types';
 
 // v5 — Profile switcher popover. Opens from the top-bar profile chip.
@@ -119,12 +119,12 @@ export function ProfileSwitcher({ onClose, onAddPack, onManageAll }: Props) {
     setSwitching(name);
     try {
       const result = await switchProfile(key);
-      setActiveProfile(name);
+      setActiveProfile(key, name);
       recordModpackLaunch(key);
       await refreshAll();
       const parts = switchResultDetails(result, t);
       if (parts.length > 0) {
-        toast.info(parts.join('. '));
+        (switchResultHasProblems(result) ? toast.error : toast.info)(parts.join('. '));
       } else {
         toast.success(t('profiles.toast.switched', { name }));
       }
@@ -136,8 +136,9 @@ export function ProfileSwitcher({ onClose, onAddPack, onManageAll }: Props) {
     }
   }
 
-  function updateCountFor(profileName: string): number {
-    const u = updates.find((x) => x.profile_name === profileName);
+  function updateCountFor(profile: Profile): number {
+    const key = profileKey(profile);
+    const u = updates.find((x) => x.profile_id === key || x.profile_name === profile.name);
     if (!u) return 0;
     return (u.added_mods?.length || 0) + (u.updated_mods?.length || 0) + (u.removed_mods?.length || 0);
   }
@@ -168,7 +169,7 @@ export function ProfileSwitcher({ onClose, onAddPack, onManageAll }: Props) {
           const key = profileKey(p);
           const isActive = activeProfileId === key || activeProfile === p.name;
           const count = modCount(p);
-          const updateCount = updateCountFor(p.name);
+          const updateCount = updateCountFor(p);
           const initials = packInitials(p.name) || 'P';
           return (
             <button

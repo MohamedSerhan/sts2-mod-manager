@@ -203,11 +203,11 @@ describe('<AppProvider>', () => {
     );
     await waitFor(() => { expect(captured?.loading).toBe(false); });
     act(() => {
-      captured!.setActiveProfile('New Pack');
+      captured!.setActiveProfile('profile-new-pack', 'New Pack');
     });
     expect(captured?.activeProfile).toBe('New Pack');
     await waitFor(() => {
-      expect(getInvokeCalls().some((c) => c.cmd === 'set_active_profile' && c.args?.name === 'New Pack')).toBe(true);
+      expect(getInvokeCalls().some((c) => c.cmd === 'set_active_profile' && c.args?.name === 'profile-new-pack')).toBe(true);
     });
   });
 
@@ -220,7 +220,7 @@ describe('<AppProvider>', () => {
       </Wrap>,
     );
     await waitFor(() => { expect(captured?.loading).toBe(false); });
-    act(() => { captured!.setActiveProfile('Doomed Pack'); });
+    act(() => { captured!.setActiveProfile('profile-doomed-pack', 'Doomed Pack'); });
     // The optimistic state update happens regardless; the rejection is
     // swallowed by the inline .catch(() => {}) so React doesn't see an
     // unhandled rejection.

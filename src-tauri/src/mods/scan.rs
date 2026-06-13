@@ -462,7 +462,11 @@ pub(crate) fn parse_manifest(
 /// Without this, a folder-layout mod that fell back from a malformed manifest
 /// would record only its .dll/.pck and shares would upload an incomplete bundle
 /// missing the .json and assets (issue #165).
-fn subdir_files_or(artifact_path: &Path, base_dir: &Path, flat_fallback: Vec<String>) -> Vec<String> {
+fn subdir_files_or(
+    artifact_path: &Path,
+    base_dir: &Path,
+    flat_fallback: Vec<String>,
+) -> Vec<String> {
     let parent = match artifact_path.parent() {
         Some(p) if p != base_dir => p,
         _ => return flat_fallback,
@@ -1635,7 +1639,11 @@ mod pck_only_scan_tests {
         write_bytes(&mods_dir.join("ZSproject").join("ZSproject.pck"), b"GDPC");
         write_bytes(&mods_dir.join("ZSproject").join("readme.txt"), b"hi");
 
-        let info = pck_only_mod(&mods_dir.join("ZSproject").join("ZSproject.pck"), mods_dir, true);
+        let info = pck_only_mod(
+            &mods_dir.join("ZSproject").join("ZSproject.pck"),
+            mods_dir,
+            true,
+        );
         let mut files = info.files.clone();
         files.sort();
         assert_eq!(

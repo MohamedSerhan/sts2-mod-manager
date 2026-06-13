@@ -96,6 +96,7 @@ export interface UseModLibraryOptions {
   /** When set, installs (Quick add URL / Import) add the new mod to this
    *  pack's membership immediately. Unset = All Mods (install to disk only). */
   targetPack?: string | null;
+  targetPackLabel?: string | null;
   /** Fired when a target-pack install changed that pack's local manifest. */
   onTargetPackChanged?: () => void;
   /** When set, the Audit action checks ONLY these mods (the modpack view
@@ -105,7 +106,8 @@ export interface UseModLibraryOptions {
 }
 
 export function useModLibrary(opts: UseModLibraryOptions = {}) {
-  const { targetPack, onTargetPackChanged, auditScope } = opts;
+  const { targetPack, targetPackLabel, onTargetPackChanged, auditScope } = opts;
+  const targetPackDisplay = targetPackLabel ?? targetPack;
   const { t } = useTranslation();
   const {
     mods,
@@ -120,6 +122,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     updatingAll,
     updateAllGithub,
     activeProfile,
+    activeProfileId,
     refreshAuditEntries,
   } = useApp();
   const toast = useToast();
@@ -181,7 +184,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     // pack: toggle_mod guards on the game running (and can fail the move) while
     // the membership write doesn't — toggling first keeps disk + manifest in
     // sync instead of recording a membership the live folder never received.
-    if (activeProfile === targetPack && !mod.enabled) {
+    if ((activeProfileId === targetPack || (!activeProfileId && activeProfile === targetPack)) && !mod.enabled) {
       await toggleMod(mod.name, mod.folder_name ?? null, true);
     }
     await setProfileModMembership(
@@ -197,7 +200,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
 
   function showInstallToast(mod: ModInfo, addedToPack: boolean) {
     if (targetPack && addedToPack) {
-      toast.success(t('mods.toast.installedAndAddedToPack', { name: mod.name, pack: targetPack }));
+      toast.success(t('mods.toast.installedAndAddedToPack', { name: mod.name, pack: targetPackDisplay }));
       return;
     }
     if (targetPack) {
@@ -224,7 +227,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     try {
       const subs = await getSubscriptions();
       const subscribed = subs.some(
-        (s) => s.profile_name.toLowerCase() === targetPack.toLowerCase(),
+        (s) => s.profile_id === targetPack || s.profile_name.toLowerCase() === targetPack.toLowerCase(),
       );
       if (!subscribed) return false;
       // Subscribed — but if we own it (have a local .share), it's still ours.
@@ -358,7 +361,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     try {
       const autoAddToTargetPack = !!targetPack && loadAutoAddInstallsToModpack();
       if (autoAddToTargetPack && await targetPackIsFollowed()) {
-        toast.info(t('mods.toast.followedPackNoAdd', { pack: targetPack }));
+        toast.info(t('mods.toast.followedPackNoAdd', { pack: targetPackDisplay }));
         return;
       }
       const selected = await open({
@@ -384,7 +387,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     if (!quickAddUrl.trim()) return;
     const autoAddToTargetPack = !!targetPack && loadAutoAddInstallsToModpack();
     if (autoAddToTargetPack && await targetPackIsFollowed()) {
-      toast.info(t('mods.toast.followedPackNoAdd', { pack: targetPack }));
+      toast.info(t('mods.toast.followedPackNoAdd', { pack: targetPackDisplay }));
       return;
     }
     const input = quickAddUrl.trim();

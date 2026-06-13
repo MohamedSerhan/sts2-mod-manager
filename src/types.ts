@@ -108,6 +108,7 @@ export interface ProfileMembershipGrid {
 }
 
 export interface ProfileMembershipProfile {
+  id?: string;
   name: string;
   editable: boolean;
 }
@@ -123,6 +124,7 @@ export interface ProfileMembershipMod {
 }
 
 export interface ProfileMembershipState {
+  profile_id?: string;
   profile_name: string;
   included: boolean;
   enabled: boolean;
@@ -295,6 +297,7 @@ export interface AutoDetectMatch {
 export interface Subscription {
   share_id: string;
   share_url: string;
+  profile_id?: string;
   profile_name: string;
   curator: string | null;
   last_checked: string;
@@ -303,6 +306,7 @@ export interface Subscription {
 
 export interface SubscriptionUpdate {
   share_id: string;
+  profile_id?: string;
   profile_name: string;
   has_update: boolean;
   added_mods: string[];

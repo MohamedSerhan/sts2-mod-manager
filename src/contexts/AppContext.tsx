@@ -29,7 +29,7 @@ interface AppContextType {
   refreshAll: () => Promise<void>;
   refreshGameRunning: () => Promise<void>;
   refreshSubUpdates: () => Promise<void>;
-  setActiveProfile: (name: string | null) => void;
+  setActiveProfile: (profileId: string | null, displayName?: string | null) => void;
   /** Show a sticky toast telling the user "click Slow Download / Manual on
    *  Nexus" and keep it visible until the downloads-folder watcher reports
    *  the install (or a fail-safe timeout fires). The Nexus install path
@@ -192,10 +192,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setLoading(false);
   }, [refreshGameInfo, refreshMods]);
 
-  const setActiveProfile = useCallback((name: string | null) => {
-    setActiveProfileState(name);
-    setActiveProfileIdState(name);
-    invoke('set_active_profile', { name }).catch(() => {});
+  const setActiveProfile = useCallback((profileId: string | null, displayName?: string | null) => {
+    setActiveProfileState(displayName ?? null);
+    setActiveProfileIdState(profileId);
+    invoke('set_active_profile', { name: profileId }).catch(() => {});
   }, []);
 
   /** Run a full mod audit (GitHub + Nexus version checks for every linked

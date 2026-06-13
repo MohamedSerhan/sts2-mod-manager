@@ -133,6 +133,107 @@ pub fn lookup_entry<'a>(
         .or_else(|| mod_id.and_then(|i| db.get(i)))
 }
 
+fn compact_source_identity(name: &str) -> String {
+    name.chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .map(|c| c.to_ascii_lowercase())
+        .collect()
+}
+
+fn trim_windows_copy_suffix(stem: &str) -> &str {
+    let trimmed = stem.trim();
+    let Some(prefix) = trimmed.strip_suffix(')') else {
+        return trimmed;
+    };
+    let Some(open_idx) = prefix.rfind(" (") else {
+        return trimmed;
+    };
+    if prefix[open_idx + 2..].chars().all(|c| c.is_ascii_digit()) {
+        prefix[..open_idx].trim_end()
+    } else {
+        trimmed
+    }
+}
+
+fn strip_nexus_download_suffix(stem: &str) -> String {
+    let stem = trim_windows_copy_suffix(stem);
+    let bytes = stem.as_bytes();
+    let mut cut_pos = stem.len();
+    let mut pos = stem.len();
+    loop {
+        let digit_end = pos;
+        while pos > 0 && bytes[pos - 1].is_ascii_digit() {
+            pos -= 1;
+        }
+        if pos == digit_end {
+            break;
+        }
+        if pos > 0 && bytes[pos - 1] == b'-' {
+            cut_pos = pos - 1;
+            pos -= 1;
+        } else {
+            break;
+        }
+    }
+
+    if cut_pos > 0 && cut_pos < stem.len() {
+        stem[..cut_pos].trim_end().to_string()
+    } else {
+        stem.to_string()
+    }
+}
+
+fn nexus_download_stem_matches_mod(
+    stem: &str,
+    folder_name: Option<&str>,
+    display_name: &str,
+) -> bool {
+    let cleaned = compact_source_identity(&strip_nexus_download_suffix(stem));
+    if cleaned.len() < 4 {
+        return false;
+    }
+
+    [folder_name, Some(display_name)]
+        .into_iter()
+        .flatten()
+        .any(|candidate| {
+            let candidate = compact_source_identity(candidate);
+            if candidate.len() < 4 {
+                return false;
+            }
+            if cleaned == candidate {
+                return true;
+            }
+            cleaned
+                .strip_prefix(&candidate)
+                .map(|suffix| !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()))
+                .unwrap_or(false)
+        })
+}
+
+fn find_nexus_download_stem_entry<'a>(
+    db: &'a HashMap<String, ModSourceEntry>,
+    folder_name: Option<&str>,
+    display_name: &str,
+) -> Option<(&'a str, &'a ModSourceEntry)> {
+    db.iter().find_map(|(key, entry)| {
+        let has_nexus_source = entry.nexus_url.is_some() || entry.nexus_mod_id.is_some();
+        if has_nexus_source && nexus_download_stem_matches_mod(key, folder_name, display_name) {
+            Some((key.as_str(), entry))
+        } else {
+            None
+        }
+    })
+}
+
+fn usable_installed_version(version: &str) -> Option<String> {
+    let trimmed = version.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("unknown") || trimmed == "0.0.0" {
+        return None;
+    }
+    Some(trimmed.trim_start_matches(['v', 'V']).to_string())
+}
+
 /// Result of auto-detecting sources for mods.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AutoDetectResult {
@@ -565,13 +666,25 @@ pub fn enrich_mods_with_sources(mods: &mut [ModInfo], config_path: &Path) {
         // instead of leaking across both rows. Display-name lookup is kept
         // as a fallback for legacy entries created before pin_mod started
         // saving by folder.
-        let entry = m
-            .folder_name
-            .as_ref()
-            .and_then(|f| db.mods.get(f))
-            .or_else(|| db.mods.get(&m.name))
-            .or_else(|| m.mod_id.as_ref().and_then(|i| db.mods.get(i)));
-        if let Some(entry) = entry {
+        let folder_name = m.folder_name.as_deref();
+        let entry = lookup_entry(&db.mods, folder_name, &m.name, m.mod_id.as_deref())
+            .cloned()
+            .or_else(|| {
+                let (stranded_key, stranded_entry) =
+                    find_nexus_download_stem_entry(&db.mods, folder_name, &m.name)?;
+                let target_key = folder_name.unwrap_or(m.name.as_str());
+                if stranded_key != target_key {
+                    migrate_source_entry(stranded_key, target_key, config_path);
+                    log::info!(
+                        "Recovered Nexus source for '{}' from archive-stem key '{}' into '{}'",
+                        m.name,
+                        stranded_key,
+                        target_key
+                    );
+                }
+                Some(stranded_entry.clone())
+            });
+        if let Some(entry) = entry.as_ref() {
             // GitHub override precedence:
             //   * Manual entry (user typed into SourceEditor) WINS over the
             //     manifest URL — the user edited sources precisely because
@@ -597,6 +710,15 @@ pub fn enrich_mods_with_sources(mods: &mut [ModInfo], config_path: &Path) {
             }
             if m.nexus_url.is_none() {
                 m.nexus_url = entry.nexus_url.clone();
+            }
+            if let Some(version) = entry
+                .installed_version
+                .as_deref()
+                .and_then(usable_installed_version)
+            {
+                if usable_installed_version(&m.version).is_none() {
+                    m.version = version;
+                }
             }
             m.pinned = entry.pinned;
             // User-saved extras: surface on the row so they show up next
@@ -2351,6 +2473,45 @@ mod enrich_priority_tests {
             mods[0].tags,
             vec!["utility".to_string(), "beta".to_string()]
         );
+    }
+
+    #[test]
+    fn enrich_recovers_nexus_source_stranded_under_download_stem_key() {
+        let tmp = tempdir().unwrap();
+        let config = tmp.path();
+        write_entry(
+            config,
+            "Flagellant 0.1.7-1073-0-1-7-1781082503 (1)",
+            ModSourceEntry {
+                nexus_url: Some("https://www.nexusmods.com/slaythespire2/mods/1073".into()),
+                nexus_game_domain: Some("slaythespire2".into()),
+                nexus_mod_id: Some(1073),
+                installed_version: Some("0.1.7".into()),
+                ..Default::default()
+            },
+        );
+        let mut mod_info = mod_with("Flagellant", Some("Flagellant"), None);
+        mod_info.version = "unknown".into();
+        let mut mods = vec![mod_info];
+
+        enrich_mods_with_sources(&mut mods, config);
+
+        assert_eq!(
+            mods[0].nexus_url.as_deref(),
+            Some("https://www.nexusmods.com/slaythespire2/mods/1073"),
+            "the scanned Flagellant row should show Nexus instead of Unlinked"
+        );
+        assert_eq!(
+            mods[0].version, "0.1.7",
+            "known Nexus file version should replace the broken-manifest unknown version"
+        );
+        let db = load_sources(config);
+        let recovered = db
+            .mods
+            .get("Flagellant")
+            .expect("source metadata should be migrated to the real folder key");
+        assert_eq!(recovered.nexus_mod_id, Some(1073));
+        assert_eq!(recovered.installed_version.as_deref(), Some("0.1.7"));
     }
 
     #[test]

@@ -3,12 +3,21 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import {
+  INTERACTION_INVENTORY_PATH,
+  formatGateReport,
+  readGateInputs,
+  validateGate,
+} from './qa-coverage-matrix.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..');
 const MATRIX_PATH = join(REPO_ROOT, 'qa', 'coverage-matrix.md');
 const SCENARIO_INDEX_PATH = join(REPO_ROOT, 'qa', 'scenarios', 'INDEX.md');
 const WALKTHROUGH_PATH = join(REPO_ROOT, 'qa', 'walkthrough-findings.md');
+const PACKAGE_PATH = join(REPO_ROOT, 'package.json');
+const CI_PATH = join(REPO_ROOT, '.github', 'workflows', 'ci.yml');
+const RELEASE_PATH = join(REPO_ROOT, 'scripts', 'release.sh');
 
 function read(path) {
   return readFileSync(path, 'utf8');
@@ -93,6 +102,10 @@ test('coverage matrix exists', () => {
   assert.equal(existsSync(MATRIX_PATH), true, 'qa/coverage-matrix.md must exist');
 });
 
+test('interaction inventory exists for issue #157 coverage ownership', () => {
+  assert.equal(existsSync(INTERACTION_INVENTORY_PATH), true, 'qa/interaction-inventory.md must exist');
+});
+
 test('coverage matrix tracks every active scenario from qa/scenarios/INDEX.md', () => {
   const documented = new Set(matrixScenarioRows().map((row) => row.id));
   const missing = activeScenarioIds().filter((id) => !documented.has(id));
@@ -134,4 +147,41 @@ test('routine release-regression rows do not leave planned gaps', () => {
     .filter((row) => row.status === 'Planned')
     .map((row) => row.id);
   assert.deepEqual(planned, []);
+});
+
+test('interaction inventory covers the required issue #157 surface classes', () => {
+  const inputs = readGateInputs(REPO_ROOT);
+  const result = validateGate(inputs);
+  assert.deepEqual(result.missingRequiredTags, []);
+});
+
+test('interaction inventory rows have final owner status and actionable evidence', () => {
+  const inputs = readGateInputs(REPO_ROOT);
+  const result = validateGate(inputs);
+  assert.deepEqual(result.unownedInteractions, []);
+  assert.deepEqual(result.automatedInteractionsWithoutExistingOwner, []);
+  assert.deepEqual(result.manualInteractionsWithoutReason, []);
+  assert.deepEqual(result.manualInteractionsWithoutReviewDate, []);
+});
+
+test('matrix report prints inventory completeness counts for CI logs', () => {
+  const inputs = readGateInputs(REPO_ROOT);
+  const result = validateGate(inputs);
+  const report = formatGateReport(result);
+  assert.match(report, /QA coverage matrix:/);
+  assert.match(report, /Interaction inventory:/);
+  assert.match(report, /unowned=0/);
+});
+
+test('package, CI, and release gates run qa:matrix before merge or release', () => {
+  const pkg = JSON.parse(read(PACKAGE_PATH));
+  assert.match(pkg.scripts['qa:matrix'], /qa-coverage-matrix\.mjs/);
+
+  const ci = read(CI_PATH);
+  assert.match(ci, /qa-matrix:/, 'CI needs a dedicated qa-matrix job');
+  assert.match(ci, /npm run qa:matrix/, 'CI qa-matrix job must print the inventory report');
+  assert.match(ci, /needs: \[changes, qa-matrix, compile/, 'CI Gate must depend on qa-matrix');
+
+  const release = read(RELEASE_PATH);
+  assert.match(release, /npm run --silent qa:matrix/, 'release preflight must run qa:matrix');
 });

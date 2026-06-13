@@ -51,7 +51,7 @@ Conceptually:
 |---|---|---|
 | Rust unit + integration | `npm run qa:rust` (or `cargo test --manifest-path=src-tauri/Cargo.toml`) | ~10s |
 | Rust cassette integration | `npm run qa:rust:cassette` | ~15s |
-| Coverage matrix guard | `npm run qa:matrix` | <1s |
+| Coverage matrix + interaction inventory guard | `npm run qa:matrix` | <1s |
 | Backend coverage report | `cargo llvm-cov --manifest-path src-tauri/Cargo.toml --summary-only` | ~30s |
 | Frontend unit tests | `npm run qa:unit` | ~5s |
 | Frontend coverage + gate | `npm run qa:coverage` (enforces vitest.config.ts thresholds) | ~10s |
@@ -62,6 +62,27 @@ Conceptually:
 
 `scripts/release.sh` runs all five before any version bump. Set
 `SKIP_QA=1` to bypass for emergency hotfixes (and accept the risk).
+
+## Trusting automated QA
+
+`qa/coverage-matrix.md` and `qa/interaction-inventory.md` are the release
+confidence contract. A row marked `Automated` should not receive routine manual
+regression once these gates pass:
+
+- `npm run qa:matrix`
+- `npm run qa:rust`
+- `npm run qa:rust:cassette`
+- `npm run qa:coverage`
+- `npm run qa:smoke` / `npm run qa:smoke:cassette` where the platform supports it
+
+Manual checks are limited to rows marked `Manual` in
+`qa/interaction-inventory.md`. Those rows must keep a reason and review date so
+they are reviewed as harness candidates instead of becoming permanent folklore.
+
+When a PR adds or changes user-facing behavior, update the inventory in the same
+PR. Use `Automated` for a real smoke, Rust, Vitest, or script owner with a
+release command. Use `Manual` only for OS or desktop boundaries the current
+harness cannot drive.
 
 ## Harness env vars
 

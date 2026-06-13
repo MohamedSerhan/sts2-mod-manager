@@ -76,6 +76,20 @@ jobs:
         working-directory: src-tauri
         run: cargo check
 
+  qa-matrix:
+    needs: changes
+    if: ${{ needs.changes.outputs.app == 'true' || needs.changes.outputs.qa == 'true' || needs.changes.outputs.scripts == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: QA interaction inventory report
+        run: npm run qa:matrix
+
   test-frontend:
     needs: changes
     if: ${{ needs.changes.outputs.app == 'true' }}
@@ -345,7 +359,7 @@ jobs:
 
   ci-gate:
     name: CI Gate
-    needs: [changes, compile, test-frontend, test-rust, app-build, smoke, smoke-linux, script-tests, workflow-lint, changelog]
+    needs: [changes, qa-matrix, compile, test-frontend, test-rust, app-build, smoke, smoke-linux, script-tests, workflow-lint, changelog]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -354,6 +368,7 @@ jobs:
           fail=0
           check() { echo "$1: $2"; if [ "$2" = "failure" ] || [ "$2" = "cancelled" ]; then fail=1; fi; }
           check "changes"       "${{ needs.changes.result }}"
+          check "qa-matrix"     "${{ needs.qa-matrix.result }}"
           check "compile"       "${{ needs.compile.result }}"
           check "test-frontend" "${{ needs.test-frontend.result }}"
           check "test-rust"     "${{ needs.test-rust.result }}"

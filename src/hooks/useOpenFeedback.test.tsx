@@ -43,4 +43,18 @@ describe('useOpenFeedback', () => {
       ).toBeInTheDocument();
     });
   });
+
+  it('stringifies non-Error failures from the opener', async () => {
+    registerInvokeHandler('open_external_url', () => {
+      throw 'offline';
+    });
+    const user = userEvent.setup();
+    renderHarness();
+    await user.click(screen.getByRole('button', { name: 'open' }));
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Couldn't open the Nexus page: offline/),
+      ).toBeInTheDocument();
+    });
+  });
 });

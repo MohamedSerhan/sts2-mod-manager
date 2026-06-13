@@ -618,6 +618,7 @@ describe('<ProfilesView>', () => {
 
     expect(await screen.findByText('Re-share Stale?')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^Push update$/i })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { level: 2, name: 'Stale' })).toBeNull();
   });
 
   it('does not show the re-share nudge when the pack is already current', async () => {

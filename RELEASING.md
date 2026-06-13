@@ -35,9 +35,18 @@ The portable zip ships to Nexus specifically because the NSIS self-extracting in
 
 ## Hard gates
 
+- `npm run qa:matrix` must pass before release. It reports the coverage matrix
+  and interaction inventory completeness, and it fails if a user-facing
+  interaction has no automated owner or an intentional manual-only reason.
 - `npm run qa:i18n` must pass before release. Supported locales cannot ship
   missing keys or copied-English fallback prose. This gate runs even when
   `SKIP_QA=1` is used for an emergency hotfix.
+
+Rows marked `Automated` in `qa/coverage-matrix.md` and
+`qa/interaction-inventory.md` do not need routine manual regression once the
+matrix, Rust, frontend coverage, and supported WebDriver smoke gates are green.
+Manual regression is reserved for rows marked `Manual` in
+`qa/interaction-inventory.md`.
 
 ## Required GitHub Actions secrets
 
@@ -100,6 +109,9 @@ msedgedriver; Linux uses WebKitGTK + WebKitWebDriver). Run this manual pass on a
 Mac when a release changes OS-divergent surface — file moves, archive
 extraction, path handling, the downloads watcher. Requires a Mac (Intel or
 Apple Silicon; the build is a universal binary).
+
+This is the M004 manual row in `qa/interaction-inventory.md`; keep its review
+date current when the harness boundary changes.
 
 1. Download `STS2.Mod.Manager_<version>_universal.dmg` from the GitHub Release.
 2. Open the `.dmg`, drag the app to Applications. First launch: right-click →
@@ -199,6 +211,7 @@ checks it runs depend on what files a PR touches.
 - **App PRs** (changes under `src/`, `src-tauri/`, `public/`, `index.html`, the
   build/test config — `vite.config.ts`, `vitest.config.ts`, `tsconfig*.json` — or
   the manifests `package.json` / `src-tauri/Cargo.toml`) run the full suite:
+  - QA matrix + interaction inventory report — `npm run qa:matrix`
   - Frontend unit tests — `npm run qa:unit` (vitest)
   - Rust unit + integration tests — `cargo test` (`qa:rust`)
   - A 3-platform build (Windows / macOS / Linux) — confirms it bundles everywhere

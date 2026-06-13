@@ -17,6 +17,7 @@ import {
   Minus,
   Square,
   X,
+  Loader2,
 } from 'lucide-react';
 import { check, type Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
@@ -138,6 +139,7 @@ function AppInner() {
   // SettingsView observes the bump and scrolls/highlights the customizer card.
   const [openRowMenuSettingsSignal, setOpenRowMenuSettingsSignal] = useState(0);
   const [launching, setLaunching] = useState<null | 'modded' | 'vanilla'>(null);
+  const [blockingModpackOperation, setBlockingModpackOperation] = useState(false);
   const [isDev, setIsDev] = useState(false);
   useEffect(() => {
     isDevBuild().then(setIsDev).catch(() => {});
@@ -351,6 +353,7 @@ function AppInner() {
           activeProfile: activeProfileRef.current,
           subUpdates: subUpdatesRef.current,
           t,
+          onBusyChange: setBlockingModpackOperation,
         });
         if (outcome.kind === 'cancelled') return;
 
@@ -589,7 +592,14 @@ function AppInner() {
               if (pack === activeProfileRef.current && !mod.enabled) {
                 await toggleMod(mod.name, mod.folder_name ?? null, true);
               }
-              await setProfileModMembership(pack, mod.name, mod.folder_name ?? null, mod.mod_id ?? null, true);
+              await setProfileModMembership(
+                pack,
+                mod.name,
+                mod.folder_name ?? null,
+                mod.mod_id ?? null,
+                true,
+                mod.source ?? mod.github_url ?? mod.nexus_url ?? null,
+              );
               toast.success(t('app.toast.installedModToPack', { name: mod.name, pack }));
             } catch {
               // Membership failed — the mod is still installed on disk.
@@ -969,6 +979,7 @@ function AppInner() {
                   setOpenCreateWizardSignal((n) => n + 1);
                 }}
                 onLaunch={handleLaunchGame}
+                onBlockingOperationChange={setBlockingModpackOperation}
               />
             )}
             {/* Modpacks view. The legacy 'browse-modpacks' view-id
@@ -983,6 +994,7 @@ function AppInner() {
                 openCreateWizardSignal={openCreateWizardSignal}
                 onCreateWizardConsumed={() => setOpenCreateWizardSignal(0)}
                 onViewedModpackChange={handleViewedModpackChange}
+                onBlockingOperationChange={setBlockingModpackOperation}
               />
             )}
             {/* Library view. The legacy 'browse-mods' view-id
@@ -1048,6 +1060,14 @@ function AppInner() {
 
             {/* Slide-out Help drawer, opened from the topbar `?`. */}
             <HelpDrawer open={showHelpDrawer} onClose={() => setShowHelpDrawer(false)} />
+            {blockingModpackOperation && (
+              <div className="gf-app-blocker" role="status" aria-live="polite" aria-busy="true">
+                <div className="gf-app-blocker-panel">
+                  <Loader2 size={20} className="gf-spin" aria-hidden />
+                  <div className="gf-app-blocker-title">{t('browseModpacks.installingModpack')}</div>
+                </div>
+              </div>
+            )}
           </main>
         </div>
       </div>

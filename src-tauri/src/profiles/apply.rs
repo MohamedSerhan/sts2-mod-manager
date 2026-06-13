@@ -9,8 +9,8 @@
 //!     capture the current disk state (enabled + disabled) into a saved
 //!     profile, with optional bug-#21 compatibility filtering and
 //!     source-link enrichment.
-//!   - `apply_profile_with_pins` restores the exact enabled/disabled
-//!     state from a profile manifest, honouring user-pinned mods.
+//!   - `apply_profile_with_pins` activates every non-frozen mod listed in a
+//!     profile manifest and disables mods outside it.
 //!   - `switch_profile_from_paths` downloads missing/mismatched mods,
 //!     then applies the manifest. Used by both `switch_profile` and
 //!     `repair_profile` (the latter via `drift::repair_profile_from_paths`).
@@ -27,7 +27,8 @@ use crate::error::Result;
 use crate::mods::{merge_active_disabled_mods, scan_disabled_mods, scan_mods};
 
 use super::crud::{
-    load_profile, mod_identity_keys, sanitize_filename, save_profile, version_is_wildcard,
+    load_profile, mod_identity_keys, profile_mod_matches_installed, sanitize_filename,
+    save_profile, version_is_wildcard,
 };
 use super::membership::sync_profile_load_order_to_settings;
 use super::{Profile, ProfileMod, APP_CREATED_BY};
@@ -285,8 +286,8 @@ fn snapshot_current_inner(
     Ok(profile)
 }
 
-/// Apply a profile: restore exact enabled/disabled state for all listed mods.
-/// Mods not in the profile are disabled. Uses move_mod_by_info with fallback.
+/// Apply a profile: enable every listed mod unless it is frozen. Mods not in
+/// the profile are disabled. Uses move_mod_by_info with fallback.
 ///
 /// Matches on-disk mods against the profile by **name OR folder_name OR mod_id**
 /// (same multi-key lookup used by `switch_profile` / `apply_subscription_update`).
@@ -326,7 +327,8 @@ pub fn apply_profile_with_pins(
     };
 
     // Build a map from any identifier (name / folder_name / mod_id) to the
-    // desired enabled state. Last write wins, but the same ProfileMod owns all
+    // desired enabled state. Pack membership now means "enabled on switch";
+    // frozen mods still keep their current disk state. Last write wins, but the same ProfileMod owns all
     // its identifiers so collisions only happen if two profile entries share an
     // identifier — in which case the profile itself is malformed.
     //
@@ -337,12 +339,12 @@ pub fn apply_profile_with_pins(
     // disable a mod that drift considers present.
     let mut profile_state: HashMap<String, bool> = HashMap::new();
     for pm in &profile.mods {
-        profile_state.insert(pm.name.to_lowercase(), pm.enabled);
+        profile_state.insert(pm.name.to_lowercase(), true);
         if let Some(ref folder) = pm.folder_name {
-            profile_state.insert(folder.to_lowercase(), pm.enabled);
+            profile_state.insert(folder.to_lowercase(), true);
         }
         if let Some(ref id) = pm.mod_id {
-            profile_state.insert(id.to_lowercase(), pm.enabled);
+            profile_state.insert(id.to_lowercase(), true);
         }
     }
 
@@ -367,7 +369,7 @@ pub fn apply_profile_with_pins(
         None
     };
 
-    // Step 1: Move mods that should be DISABLED from enabled to disabled
+    // Step 1: Move mods outside the profile from enabled to disabled.
     let current_enabled = scan_mods(mods_path);
     for m in &current_enabled {
         if is_pinned(m) {
@@ -398,7 +400,7 @@ pub fn apply_profile_with_pins(
         }
     }
 
-    // Step 2: Move mods that should be ENABLED from disabled to enabled
+    // Step 2: Move included profile mods from disabled to enabled.
     let current_disabled = scan_disabled_mods(disabled_path);
     for m in &current_disabled {
         if is_pinned(m) {
@@ -447,22 +449,20 @@ pub fn apply_profile_with_pins(
         })
         .collect();
     for pm in &profile.mods {
-        if pm.enabled {
-            let found = on_disk_ids.contains(&pm.name)
-                || pm
-                    .folder_name
-                    .as_ref()
-                    .map_or(false, |f| on_disk_ids.contains(f))
-                || pm
-                    .mod_id
-                    .as_ref()
-                    .map_or(false, |i| on_disk_ids.contains(i));
-            if !found {
-                log::error!(
-                    "Profile apply: profile expects '{}' enabled but no matching mod found on disk (folder={:?}, mod_id={:?})",
-                    pm.name, pm.folder_name, pm.mod_id
-                );
-            }
+        let found = on_disk_ids.contains(&pm.name)
+            || pm
+                .folder_name
+                .as_ref()
+                .map_or(false, |f| on_disk_ids.contains(f))
+            || pm
+                .mod_id
+                .as_ref()
+                .map_or(false, |i| on_disk_ids.contains(i));
+        if !found {
+            log::error!(
+                "Profile apply: profile expects '{}' enabled but no matching mod found on disk (folder={:?}, mod_id={:?})",
+                pm.name, pm.folder_name, pm.mod_id
+            );
         }
     }
 
@@ -557,8 +557,8 @@ fn stash_mod_for_replace(
     }
 }
 
-/// Switch to a profile: downloads missing mods, then applies the target
-/// profile's exact enabled/disabled state.
+/// Switch to a profile: downloads missing mods, then enables the target
+/// profile's included mods.
 pub(crate) async fn switch_profile_from_paths(
     name: &str,
     mods_path: &Path,
@@ -646,10 +646,11 @@ pub(crate) async fn switch_profile_from_paths(
     }
 
     // ── STEP 1: Download missing mods AND restore version-mismatched mods ──
-    let all_on_disk: Vec<crate::mods::ModInfo> = scan_mods(mods_path)
+    let mut all_on_disk: Vec<crate::mods::ModInfo> = scan_mods(mods_path)
         .into_iter()
         .chain(scan_disabled_mods(disabled_path).into_iter())
         .collect();
+    crate::mod_sources::enrich_mods_with_sources(&mut all_on_disk, config_path);
 
     // Build a map from identifiers to on-disk mod info (for version comparison)
     let mut on_disk_by_id: std::collections::HashMap<String, &crate::mods::ModInfo> =
@@ -684,7 +685,12 @@ pub(crate) async fn switch_profile_from_paths(
             .get(&pm.name)
             .or_else(|| pm.folder_name.as_ref().and_then(|f| on_disk_by_id.get(f)))
             .or_else(|| pm.mod_id.as_ref().and_then(|id| on_disk_by_id.get(id)))
-            .copied();
+            .copied()
+            .or_else(|| {
+                all_on_disk
+                    .iter()
+                    .find(|disk_mod| profile_mod_matches_installed(pm, disk_mod))
+            });
 
         if on_disk_mod.is_none() && profile_mod_matches_pin(pm, &pinned_set) {
             log::info!(
@@ -849,10 +855,12 @@ pub(crate) async fn switch_profile_from_paths(
                     downloaded = true;
                     // Fix M-13: snapshot config files after fresh bundle install.
                     // download_bundle returns () so we re-scan to get a ModInfo.
-                    let after_scan = scan_mods(mods_path);
-                    if let Some(installed) = after_scan.iter().find(|m| {
-                        m.name == pm.name || pm.folder_name.as_deref() == Some(m.name.as_str())
-                    }) {
+                    let mut after_scan = scan_mods(mods_path);
+                    crate::mod_sources::enrich_mods_with_sources(&mut after_scan, config_path);
+                    if let Some(installed) = after_scan
+                        .iter()
+                        .find(|m| profile_mod_matches_installed(pm, m))
+                    {
                         crate::mods::snapshot_after_fresh_install(
                             installed,
                             mods_path,
@@ -979,10 +987,11 @@ pub(crate) async fn switch_profile_from_paths(
     );
 
     // ── STEP 3: Check what's still missing ──
-    let final_on_disk: Vec<crate::mods::ModInfo> = scan_mods(mods_path)
+    let mut final_on_disk: Vec<crate::mods::ModInfo> = scan_mods(mods_path)
         .into_iter()
         .chain(scan_disabled_mods(disabled_path).into_iter())
         .collect();
+    crate::mod_sources::enrich_mods_with_sources(&mut final_on_disk, config_path);
     // Build comprehensive identifier set (name, folder_name, mod_id)
     let mut final_identifiers: std::collections::HashSet<String> = std::collections::HashSet::new();
     for m in &final_on_disk {
@@ -1007,6 +1016,9 @@ pub(crate) async fn switch_profile_from_paths(
                     .mod_id
                     .as_ref()
                     .map_or(false, |id| final_identifiers.contains(id))
+                && !final_on_disk
+                    .iter()
+                    .any(|disk_mod| profile_mod_matches_installed(pm, disk_mod))
         })
         .map(|pm| pm.name.clone())
         .collect();
@@ -1629,8 +1641,11 @@ mod modpack_flow_tests {
             "repair A failed downloads: {:?}",
             repair_a.failed_downloads
         );
-        assert_enabled(&paths, &["SharedCore", "AlphaOnly", "SameInBoth"]);
-        assert_disabled_contains(&paths, &["AlphaDisabled"]);
+        assert_enabled(
+            &paths,
+            &["SharedCore", "AlphaOnly", "AlphaDisabled", "SameInBoth"],
+        );
+        assert_eq!(folder_names(&paths.disabled), HashSet::new());
         assert_marker(&paths.mods, "SharedCore", "shared-from-a");
         assert_no_root_artifacts(&paths);
 
@@ -1655,8 +1670,11 @@ mod modpack_flow_tests {
             "switch B failed downloads: {:?}",
             switch_b.failed_downloads
         );
-        assert_enabled(&paths, &["SharedCore", "BetaOnly", "SameInBoth"]);
-        assert_disabled_contains(&paths, &["AlphaOnly", "AlphaDisabled", "BetaDisabled"]);
+        assert_enabled(
+            &paths,
+            &["SharedCore", "BetaOnly", "BetaDisabled", "SameInBoth"],
+        );
+        assert_disabled_contains(&paths, &["AlphaOnly", "AlphaDisabled"]);
         assert_marker(&paths.mods, "SharedCore", "shared-from-b");
         assert_no_root_artifacts(&paths);
 
@@ -1681,8 +1699,11 @@ mod modpack_flow_tests {
             "switch A failed downloads: {:?}",
             switch_a.failed_downloads
         );
-        assert_enabled(&paths, &["SharedCore", "AlphaOnly", "SameInBoth"]);
-        assert_disabled_contains(&paths, &["BetaOnly", "BetaDisabled", "AlphaDisabled"]);
+        assert_enabled(
+            &paths,
+            &["SharedCore", "AlphaOnly", "AlphaDisabled", "SameInBoth"],
+        );
+        assert_disabled_contains(&paths, &["BetaOnly", "BetaDisabled"]);
         assert_marker(&paths.mods, "SharedCore", "shared-from-a");
         assert_no_root_artifacts(&paths);
 
@@ -1708,11 +1729,11 @@ mod modpack_flow_tests {
             "repair B failed downloads: {:?}",
             repair_b.failed_downloads
         );
-        assert_enabled(&paths, &["SharedCore", "BetaOnly", "SameInBoth"]);
-        assert_eq!(
-            folder_names(&paths.disabled),
-            HashSet::from(["BetaDisabled".to_string()])
+        assert_enabled(
+            &paths,
+            &["SharedCore", "BetaOnly", "BetaDisabled", "SameInBoth"],
         );
+        assert_eq!(folder_names(&paths.disabled), HashSet::new());
         assert_marker(&paths.mods, "SharedCore", "shared-from-b");
         assert_no_root_artifacts(&paths);
     }
@@ -2025,12 +2046,12 @@ mod modpack_flow_tests {
     }
 
     #[tokio::test]
-    async fn disabled_mod_version_mismatch_replaces_in_place_without_loss() {
+    async fn stored_mod_version_mismatch_replaces_and_enables_without_loss() {
         // Review nit: the happy-path replace test only covered the ENABLED
         // path. A pack mod that's DISABLED on disk and version-mismatched must
-        // also be replaced safely — the new content lands in mods_disabled
-        // (the profile keeps it disabled), nothing is stranded in the active
-        // folder, and no empty swap dirs are left behind.
+        // also be replaced safely. Pack switching now enables included mods,
+        // so the new content lands in mods/, the old disabled copy is not
+        // stranded, and no empty swap dirs are left behind.
         let paths = flow_paths();
         let server = MockServer::start().await;
         save_pack(
@@ -2045,7 +2066,7 @@ mod modpack_flow_tests {
                     "DisMod",
                     "2.0.0",
                     "new-v2",
-                    false, // disabled in the manifest
+                    false, // legacy disabled manifest state is ignored on switch
                     None,
                 )
                 .await,
@@ -2072,10 +2093,11 @@ mod modpack_flow_tests {
             result.replaced_mods
         );
         assert!(result.replace_failures.is_empty());
-        // New content landed in mods_disabled, nothing stranded in active, and
-        // no stray empty folders.
-        assert_marker(&paths.disabled, "DisMod", "new-v2");
-        assert!(!paths.mods.join("DisMod").exists());
+        // New content landed active and no old mod files are stranded in
+        // storage. The rollback guard may leave an empty source directory
+        // behind after a successful active replacement, which is harmless.
+        assert_marker(&paths.mods, "DisMod", "new-v2");
+        assert!(!paths.disabled.join("DisMod").join("DisMod.dll").exists());
         assert_no_root_artifacts(&paths);
     }
 

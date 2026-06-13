@@ -124,8 +124,8 @@ pub struct AppStateInner {
     pub nexus_download_dir: Option<PathBuf>,
     /// How many automatic backups the manager keeps. Newest `N` are retained
     /// after each successful backup; `0` disables automatic backups entirely
-    /// (existing backups are left untouched). Clamped to `0..=5`. Persisted in
-    /// `<config>/backup_retention.txt`. Defaults to 5 (historical behavior).
+    /// (existing backups are left untouched). Clamped to `0..=MAX_BACKUPS`.
+    /// Persisted in `<config>/backup_retention.txt`.
     pub backup_retention: u8,
     /// In-memory cache for `fetch_modpack_browser_page`. Keyed by page
     /// number. TTL is enforced in the command, not here.

@@ -231,6 +231,7 @@ pub fn set_profile_mod_membership(
     folder_name: Option<String>,
     mod_id: Option<String>,
     included: bool,
+    source_hint: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Profile, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
@@ -242,6 +243,7 @@ pub fn set_profile_mod_membership(
         folder_name.as_deref(),
         mod_id.as_deref(),
         included,
+        source_hint.as_deref(),
         mods_path,
         disabled_path,
         &s.profiles_path,

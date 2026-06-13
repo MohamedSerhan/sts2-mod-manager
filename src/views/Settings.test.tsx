@@ -106,13 +106,14 @@ describe('<SettingsView>', () => {
 
   it('changing the retention select invokes set_backup_retention with the new count', async () => {
     registerInvokeHandler('list_backups_cmd', () => []);
-    registerInvokeHandler('get_backup_retention', () => 5);
+    registerInvokeHandler('get_backup_retention', () => 10);
     registerInvokeHandler('set_backup_retention', (args) => Number(args?.count));
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
     await user.click(screen.getByRole('button', { name: /Backups/ }));
     const select = await screen.findByLabelText(/Backups to keep/i);
+    expect(within(select as HTMLSelectElement).getByRole('option', { name: '10' })).toBeInTheDocument();
     await user.selectOptions(select, '0');
     await waitFor(() => {
       expect(getInvokeCalls().some(

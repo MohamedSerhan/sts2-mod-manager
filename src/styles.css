@@ -2591,6 +2591,32 @@ body {
   padding: 12px 18px; border-top: 1px solid var(--indigo-line);
   display: flex; align-items: center; gap: 6px;
 }
+.gf-app-blocker {
+  position: fixed;
+  inset: 0;
+  z-index: 260;
+  display: grid;
+  place-items: center;
+  background: color-mix(in oklch, var(--well-base) 72%, transparent);
+  backdrop-filter: blur(4px);
+  cursor: wait;
+}
+.gf-app-blocker-panel {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 220px;
+  padding: 14px 16px;
+  border: 1px solid var(--indigo-line);
+  border-radius: 8px;
+  background: var(--indigo-panel);
+  box-shadow: 0 18px 44px rgba(0,0,0,0.42);
+}
+.gf-app-blocker-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+}
 
 /* Mod list rendered inside BrowseModpackDetail — one row per mod with
  * version aligned to the right. Kept lightweight to match the

@@ -205,6 +205,7 @@ export async function setProfileModMembership(
   folderName: string | null,
   modId: string | null,
   included: boolean,
+  sourceHint?: string | null,
 ): Promise<Profile> {
   return invoke('set_profile_mod_membership', {
     profileName,
@@ -212,6 +213,7 @@ export async function setProfileModMembership(
     folderName,
     modId,
     included,
+    sourceHint,
   });
 }
 
@@ -531,13 +533,13 @@ export async function resetToVanilla(): Promise<void> {
   return invoke('reset_to_vanilla_cmd');
 }
 
-/** How many automatic backups the manager keeps (0..=5; 0 = backups off). */
+/** How many automatic backups the manager keeps (0..=10; 0 = backups off). */
 export async function getBackupRetention(): Promise<number> {
   return invoke('get_backup_retention');
 }
 
 /**
- * Set how many automatic backups to keep. Validated/clamped to 0..=5
+ * Set how many automatic backups to keep. Validated/clamped to 0..=10
  * server-side; 0 disables automatic backups (existing backups are kept).
  * Returns the value the backend stored.
  */

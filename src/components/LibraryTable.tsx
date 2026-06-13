@@ -225,6 +225,14 @@ function rowHasAnyTags(
   return (info?.tags ?? []).some((tg) => tg.trim().length > 0);
 }
 
+function sourceHintForRow(
+  row: ProfileMembershipMod,
+  modInfoByKey?: Map<string, ModInfo>,
+): string | null {
+  const info = modInfoByKey?.get(membershipRowKey(row)) ?? modInfoByKey?.get(row.name);
+  return info?.source ?? info?.github_url ?? info?.nexus_url ?? null;
+}
+
 export function LibraryTable({
   modpackName,
   onMembershipChanged,
@@ -569,6 +577,7 @@ export function LibraryTable({
         row.folder_name,
         row.mod_id,
         nextIncluded,
+        sourceHintForRow(row, modInfoByKey),
       );
       patchRowMembership(membershipRowKey(row), nextIncluded);
       if (mirrorsToDisk) await refreshAll();
@@ -648,6 +657,7 @@ export function LibraryTable({
           row.folder_name,
           row.mod_id,
           true,
+          sourceHintForRow(row, modInfoByKey),
         );
         patchRowMembership(membershipRowKey(row), true);
       }

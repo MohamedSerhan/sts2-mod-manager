@@ -578,8 +578,8 @@ fn kitchen_sink_scan_handles_every_quirk_at_once() {
 }
 
 /// Flow 11 + scenario 003 (full integration) — apply_profile_with_pins
-/// preserves a pinned mod's enabled state even when the profile lists
-/// it as disabled. THE player promise.
+/// preserves a pinned mod's enabled state even while modpack switching
+/// activates included, unfrozen mods.
 #[test]
 fn flow_11_apply_profile_pins_override_profile_state() {
     use sts2_mod_manager_lib::profiles::{apply_profile_with_pins, Profile, ProfileMod};
@@ -784,7 +784,7 @@ async fn scenario_005_install_from_release_url() {
 }
 
 #[test]
-fn flow_11_apply_profile_without_pin_moves_mod_as_directed() {
+fn flow_11_apply_profile_without_pin_enables_included_mod() {
     use sts2_mod_manager_lib::profiles::{apply_profile_with_pins, Profile, ProfileMod};
 
     let mods_tmp = tempfile::tempdir().unwrap();
@@ -822,11 +822,11 @@ fn flow_11_apply_profile_without_pin_moves_mod_as_directed() {
     let active_baselib = mods_tmp.path().join("BaseLib").join("BaseLib.dll");
     let disabled_baselib = disabled_tmp.path().join("BaseLib").join("BaseLib.dll");
     assert!(
-        !active_baselib.exists(),
-        "Without pin, BaseLib should have moved out of mods/."
+        active_baselib.exists(),
+        "Without pin, an included BaseLib should stay active in mods/."
     );
     assert!(
-        disabled_baselib.exists(),
-        "Without pin, BaseLib should be in mods_disabled/."
+        !disabled_baselib.exists(),
+        "Without pin, an included BaseLib should not be stored in mods_disabled/."
     );
 }

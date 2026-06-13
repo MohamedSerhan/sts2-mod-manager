@@ -737,6 +737,55 @@ pub fn parse_source_url(url: &str) -> Option<ModSourceEntry> {
     None
 }
 
+pub fn source_entries_match(a: &ModSourceEntry, b: &ModSourceEntry) -> bool {
+    let github_match = match (a.github_repo.as_deref(), b.github_repo.as_deref()) {
+        (Some(left), Some(right)) => {
+            normalize_github_repo_input(left).as_deref()
+                == normalize_github_repo_input(right).as_deref()
+        }
+        _ => false,
+    };
+    if github_match {
+        return true;
+    }
+
+    match (
+        a.nexus_game_domain.as_deref(),
+        a.nexus_mod_id,
+        b.nexus_game_domain.as_deref(),
+        b.nexus_mod_id,
+    ) {
+        (Some(left_domain), Some(left_id), Some(right_domain), Some(right_id)) => {
+            left_id == right_id && left_domain.eq_ignore_ascii_case(right_domain)
+        }
+        _ => false,
+    }
+}
+
+pub fn profile_source_matches_entry(source: Option<&str>, entry: &ModSourceEntry) -> bool {
+    source
+        .and_then(parse_source_url)
+        .is_some_and(|parsed| source_entries_match(&parsed, entry))
+}
+
+pub fn mod_info_source_matches_entry(info: &ModInfo, entry: &ModSourceEntry) -> bool {
+    if profile_source_matches_entry(info.source.as_deref(), entry) {
+        return true;
+    }
+    if info
+        .github_url
+        .as_deref()
+        .and_then(parse_source_url)
+        .is_some_and(|parsed| source_entries_match(&parsed, entry))
+    {
+        return true;
+    }
+    info.nexus_url
+        .as_deref()
+        .and_then(parse_source_url)
+        .is_some_and(|parsed| source_entries_match(&parsed, entry))
+}
+
 /// Normalize a user-provided GitHub repo input ("owner/repo", a full
 /// GitHub URL, or the `github:owner/repo` shorthand) into the canonical
 /// `owner/repo` form that everything else in the codebase expects.
@@ -2877,7 +2926,11 @@ mod shared_profile_source_tests {
         let mut shared = HashMap::new();
         shared.insert(
             "AutoPath".to_string(),
-            extras(Some("compat patch for beta"), Some("https://patreon.com/x"), &["QoL"]),
+            extras(
+                Some("compat patch for beta"),
+                Some("https://patreon.com/x"),
+                &["QoL"],
+            ),
         );
         merge_shared_extras(&shared, tmp.path());
 
@@ -2908,7 +2961,11 @@ mod shared_profile_source_tests {
         let mut shared = HashMap::new();
         shared.insert(
             "AutoPath".to_string(),
-            extras(Some("curator note"), Some("https://example.com"), &["curator-tag"]),
+            extras(
+                Some("curator note"),
+                Some("https://example.com"),
+                &["curator-tag"],
+            ),
         );
         merge_shared_extras(&shared, tmp.path());
 

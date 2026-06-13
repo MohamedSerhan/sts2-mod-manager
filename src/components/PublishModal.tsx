@@ -37,7 +37,7 @@ interface Props {
 
 interface ShareProgress {
   profile_name: string;
-  stage: 'bundling' | 'uploading-manifest' | 'done';
+  stage: 'checking-bundle' | 'bundling' | 'uploading-manifest' | 'done';
   current: number;
   total: number;
   mod_name: string | null;
@@ -458,12 +458,18 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onLi
               <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--ink)' }}>
                 {progress?.stage === 'uploading-manifest'
                   ? t('publish.uploadingManifest')
+                  : progress?.stage === 'checking-bundle' && progress?.mod_name
+                  ? t('publish.checkingBundle', { current: progress.current, total: progress.total, name: progress.mod_name })
                   : progress?.mod_name
                   ? t('publish.bundlingMod', { current: progress.current, total: progress.total, name: progress.mod_name })
                   : t('publish.preparing')}
               </div>
-              {progress?.total && progress.total > 0 && progress.stage === 'bundling' && (
+              {progress?.total && progress.total > 0 && (progress.stage === 'checking-bundle' || progress.stage === 'bundling') && (
                 <div
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.min(100, Math.round((progress.current / progress.total) * 100))}
                   style={{
                     width: '100%',
                     height: 8,

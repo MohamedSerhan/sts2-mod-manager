@@ -811,6 +811,39 @@ describe('<PublishModal>', () => {
     await waitForModalTitle('Modpack published');
   });
 
+  it('share-progress listener: checking-bundle event renders mod counter + progress bar', async () => {
+    tokenIsSet(true);
+    let resolveShare!: (v: typeof shareOk) => void;
+    registerInvokeHandler(
+      'share_profile',
+      () => new Promise<typeof shareOk>((res) => { resolveShare = res; }),
+    );
+    const user = userEvent.setup();
+    render(<Wrap />);
+    const publishBtn = await screen.findByRole('button', { name: /Publish/ });
+    await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
+    await user.click(publishBtn);
+    await screen.findByText('Preparing…');
+    const listenSpy = vi.mocked(listenMock);
+    const reg = [...listenSpy.mock.calls].reverse().find((c) => c[0] === 'share-progress');
+    expect(reg).toBeDefined();
+    const handler = reg![1] as (e: { payload: unknown }) => void;
+    handler({
+      payload: {
+        profile_name: 'My Pack',
+        stage: 'checking-bundle',
+        current: 2,
+        total: 5,
+        mod_name: 'BaseLib',
+      },
+    });
+
+    await screen.findByText(/Checking mod 2 of 5: BaseLib/);
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '40');
+    resolveShare(shareOk);
+    await waitForModalTitle('Modpack published');
+  });
+
   it('share-progress listener: uploading-manifest stage shows manifest copy', async () => {
     tokenIsSet(true);
     let resolveShare!: (v: typeof shareOk) => void;

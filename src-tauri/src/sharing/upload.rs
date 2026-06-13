@@ -15,11 +15,30 @@
 //! alongside the HTTP plumbing it composes.
 
 use std::io::Write;
-use std::path::Component;
+use std::path::{Component, Path, PathBuf};
 use walkdir::WalkDir;
 
 use crate::error::{AppError, Result};
 use crate::profiles::Profile;
+
+fn validate_bundle_relpath(mod_name: &str, file_rel: &str) -> Result<String> {
+    let normalized = file_rel.replace('\\', "/");
+    if std::path::Path::new(&normalized)
+        .components()
+        .any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::Prefix(_) | Component::RootDir
+            )
+        })
+    {
+        return Err(AppError::Other(format!(
+            "Mod '{}' has unsafe declared file '{}'",
+            mod_name, normalized
+        )));
+    }
+    Ok(normalized)
+}
 
 /// Zip a mod's files into an in-memory buffer.
 ///
@@ -48,21 +67,7 @@ pub(crate) fn zip_mod_files(
         .last_modified_time(zip::DateTime::default());
 
     for file_rel in files {
-        let normalized = file_rel.replace('\\', "/");
-        if std::path::Path::new(&normalized)
-            .components()
-            .any(|component| {
-                matches!(
-                    component,
-                    Component::ParentDir | Component::Prefix(_) | Component::RootDir
-                )
-            })
-        {
-            return Err(AppError::Other(format!(
-                "Mod '{}' has unsafe declared file '{}'",
-                mod_name, normalized
-            )));
-        }
+        let normalized = validate_bundle_relpath(mod_name, file_rel)?;
         let file_path = mods_path.join(&normalized);
 
         if file_path.is_file() {
@@ -128,6 +133,76 @@ pub(crate) fn zip_mod_files(
     Ok(cursor.into_inner())
 }
 
+/// Hash the exact source files that would be bundled, without building
+/// the zip. This lets re-share skip both compression and upload when the
+/// profile already has a bundle URL/hash and the on-disk inputs are
+/// byte-for-byte unchanged since the last successful publish.
+pub(crate) fn fingerprint_mod_files(
+    mod_name: &str,
+    files: &[String],
+    mods_path: &Path,
+) -> Result<String> {
+    use sha2::{Digest, Sha256};
+
+    let mut entries: Vec<(String, PathBuf)> = Vec::new();
+    for file_rel in files {
+        let normalized = validate_bundle_relpath(mod_name, file_rel)?;
+        let file_path = mods_path.join(&normalized);
+        if file_path.is_file() {
+            entries.push((normalized, file_path));
+        } else if file_path.is_dir() {
+            for entry in WalkDir::new(&file_path)
+                .sort_by_file_name()
+                .into_iter()
+                .flatten()
+            {
+                if !entry.file_type().is_file() {
+                    continue;
+                }
+                let rel = entry.path().strip_prefix(mods_path).map_err(|e| {
+                    AppError::Other(format!(
+                        "Could not make '{}' relative to '{}': {}",
+                        entry.path().display(),
+                        mods_path.display(),
+                        e
+                    ))
+                })?;
+                entries.push((
+                    rel.to_string_lossy().replace('\\', "/"),
+                    entry.path().to_path_buf(),
+                ));
+            }
+        } else {
+            return Err(AppError::Other(format!(
+                "Mod '{}' is missing declared file '{}'",
+                mod_name, normalized
+            )));
+        }
+    }
+
+    if entries.is_empty() {
+        return Err(AppError::Other(format!(
+            "Mod '{}' produced an empty bundle fingerprint; no declared files were readable",
+            mod_name
+        )));
+    }
+
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut hasher = Sha256::new();
+    for (rel, path) in entries {
+        let data = std::fs::read(&path)
+            .map_err(|e| AppError::Other(format!("Read error for '{}': {}", path.display(), e)))?;
+        hasher.update(rel.as_bytes());
+        hasher.update([0x1f]);
+        hasher.update((data.len() as u64).to_le_bytes());
+        hasher.update([0x1f]);
+        hasher.update(&data);
+        hasher.update([0x1e]);
+    }
+
+    Ok(hex::encode(hasher.finalize()))
+}
+
 /// Resolve a relative zip-entry name into an absolute path under
 /// `mods_path`, refusing anything that escapes via `..`, an absolute
 /// path, or a Windows drive prefix. Returns `None` when the entry is
@@ -169,6 +244,21 @@ pub(crate) fn zip_profile_mod_files(
         Err(first_err) => {
             let fallback = if pm.enabled { disabled_path } else { mods_path };
             zip_mod_files(&pm.name, &pm.files, fallback).map_err(|_| first_err)
+        }
+    }
+}
+
+pub(crate) fn fingerprint_profile_mod_files(
+    pm: &crate::profiles::ProfileMod,
+    mods_path: &Path,
+    disabled_path: &Path,
+) -> Result<String> {
+    let base = if pm.enabled { mods_path } else { disabled_path };
+    match fingerprint_mod_files(&pm.name, &pm.files, base) {
+        Ok(fingerprint) => Ok(fingerprint),
+        Err(first_err) => {
+            let fallback = if pm.enabled { disabled_path } else { mods_path };
+            fingerprint_mod_files(&pm.name, &pm.files, fallback).map_err(|_| first_err)
         }
     }
 }
@@ -349,6 +439,64 @@ mod publish_bundle_contract_tests {
         assert!(
             archive.by_name("ContractMod/ContractMod.json").is_ok(),
             "disabled profile mods must be bundled from mods_disabled"
+        );
+    }
+
+    #[test]
+    fn fingerprint_mod_files_is_stable_for_unchanged_content() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mod_dir = tmp.path().join("ContractMod");
+        std::fs::create_dir_all(mod_dir.join("sub")).unwrap();
+        std::fs::write(mod_dir.join("ContractMod.json"), b"{}").unwrap();
+        std::fs::write(mod_dir.join("a.txt"), b"alpha").unwrap();
+        std::fs::write(mod_dir.join("sub/b.txt"), b"beta").unwrap();
+
+        let files: Vec<String> = vec!["ContractMod".into()];
+        let first = fingerprint_mod_files("ContractMod", &files, tmp.path()).unwrap();
+        let second = fingerprint_mod_files("ContractMod", &files, tmp.path()).unwrap();
+
+        assert_eq!(
+            first, second,
+            "unchanged source files must keep the same fingerprint so re-share can skip bundling"
+        );
+    }
+
+    #[test]
+    fn fingerprint_mod_files_changes_when_file_content_changes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mod_dir = tmp.path().join("ContractMod");
+        std::fs::create_dir_all(&mod_dir).unwrap();
+        let dll_path = mod_dir.join("ContractMod.dll");
+        std::fs::write(mod_dir.join("ContractMod.json"), b"{}").unwrap();
+        std::fs::write(&dll_path, b"alpha").unwrap();
+
+        let files: Vec<String> = vec!["ContractMod".into()];
+        let first = fingerprint_mod_files("ContractMod", &files, tmp.path()).unwrap();
+        std::fs::write(&dll_path, b"beta").unwrap();
+        let second = fingerprint_mod_files("ContractMod", &files, tmp.path()).unwrap();
+
+        assert_ne!(
+            first, second,
+            "changed source bytes must force a fresh bundle on the next share"
+        );
+    }
+
+    #[test]
+    fn fingerprint_profile_mod_files_reads_disabled_mods_from_disabled_base() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mods_path = tmp.path().join("mods");
+        let disabled_path = tmp.path().join("mods_disabled");
+        let disabled_mod = disabled_path.join("ContractMod");
+        std::fs::create_dir_all(&disabled_mod).unwrap();
+        std::fs::write(disabled_mod.join("ContractMod.json"), b"{}").unwrap();
+
+        let fingerprint =
+            fingerprint_profile_mod_files(&profile_mod(false), &mods_path, &disabled_path)
+                .expect("disabled profile mods must fingerprint from mods_disabled");
+
+        assert!(
+            !fingerprint.is_empty(),
+            "fingerprint helper must support the same enabled/disabled fallback as bundling"
         );
     }
 

@@ -2653,7 +2653,7 @@ body {
 
 /* ── Batch 3: modals / banners / patterns ─────────────────────────────── */
 .gf-modal-back {
-  position: absolute; inset: 0; z-index: 50;
+  position: fixed; inset: 0; z-index: 50;
   background: color-mix(in oklch, var(--well-base) 60%, transparent);
   backdrop-filter: blur(4px);
   display: grid; place-items: center;

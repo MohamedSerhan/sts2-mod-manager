@@ -368,14 +368,14 @@ pub(super) async fn ensure_bundles_release(
     Ok(release)
 }
 
-/// How many total attempts the bundle-upload retry loop makes before
+/// How many total attempts the bundle transfer retry loops make before
 /// giving up on a transient failure (timeouts, connection drops, 5xx,
 /// 403/429 rate-limit/abuse). `1` initial try + `RETRY_MAX_ATTEMPTS - 1`
 /// retries. Only transient classes retry — permanent 4xx (401/404/422/…)
 /// fail on the first attempt, see `RetryClass`.
 const RETRY_MAX_ATTEMPTS: u32 = 3;
 
-/// Base delay for the exponential backoff between upload retries
+/// Base delay for the exponential backoff between transfer retries
 /// (attempt 1 → BASE, attempt 2 → BASE*2, …). Kept tiny under
 /// `cfg(test)` so the retry tests don't add real wall-clock time;
 /// production waits seconds so a momentary GitHub blip clears.
@@ -385,13 +385,13 @@ const RETRY_BASE_DELAY: Duration = Duration::from_secs(2);
 const RETRY_BASE_DELAY: Duration = Duration::from_millis(1);
 
 /// Upper bound on how long we'll honor a server-sent `Retry-After` before
-/// the next upload attempt. GitHub secondary-rate-limit responses can ask
+/// the next transfer attempt. GitHub secondary-rate-limit responses can ask
 /// for long waits; we cap so a pathological value can't pin the share
 /// worker for minutes.
 const RETRY_AFTER_CAP: Duration = Duration::from_secs(30);
 
-/// Classification of a failed upload attempt for the retry loop. (Success
-/// is represented as `Ok(asset)` by the caller, not a variant here.)
+/// Classification of a failed transfer attempt for the retry loop. (Success
+/// is represented as `Ok(...)` by the caller, not a variant here.)
 enum RetryClass {
     /// A transient failure worth retrying after a backoff. The optional
     /// `Duration` is a server-requested `Retry-After` (already parsed +
@@ -945,6 +945,106 @@ fn sha256_hex_bytes(bytes: &[u8]) -> String {
     hex::encode(h.finalize())
 }
 
+async fn download_bundle_bytes_with_retry(
+    client: &reqwest::Client,
+    url: &str,
+    mod_name: &str,
+    source_label: &str,
+    accept: Option<&str>,
+) -> Result<Vec<u8>> {
+    let mut attempt: u32 = 0;
+    loop {
+        attempt += 1;
+        let outcome: std::result::Result<Vec<u8>, RetryClass> = match {
+            let mut req = client.get(url);
+            if let Some(value) = accept {
+                req = req.header("Accept", value);
+            }
+            req.send().await
+        } {
+            Ok(resp) => {
+                let status = resp.status();
+                if status.is_success() {
+                    match resp.bytes().await {
+                        Ok(bytes) => Ok(bytes.to_vec()),
+                        Err(e)
+                            if e.is_timeout()
+                                || e.is_connect()
+                                || e.is_request()
+                                || e.is_body() =>
+                        {
+                            log::warn!(
+                                "Transient bundle body error for '{}' from {} (attempt {}/{}): {}",
+                                mod_name,
+                                source_label,
+                                attempt,
+                                RETRY_MAX_ATTEMPTS,
+                                e
+                            );
+                            Err(RetryClass::Transient(None))
+                        }
+                        Err(e) => Err(RetryClass::Permanent(format!(
+                            "Failed to read bundle for '{}' from {}: {}",
+                            mod_name, source_label, e
+                        ))),
+                    }
+                } else {
+                    let retry_after = parse_retry_after(resp.headers());
+                    let msg = format!(
+                        "Failed to download bundle for '{}' from {}: {}",
+                        mod_name, source_label, status
+                    );
+                    if status_is_transient(status) {
+                        log::warn!(
+                            "Transient bundle download failure for '{}' from {} (attempt {}/{}): {}",
+                            mod_name,
+                            source_label,
+                            attempt,
+                            RETRY_MAX_ATTEMPTS,
+                            status
+                        );
+                        Err(RetryClass::Transient(retry_after))
+                    } else {
+                        Err(RetryClass::Permanent(msg))
+                    }
+                }
+            }
+            Err(e) if e.is_timeout() || e.is_connect() || e.is_request() || e.is_body() => {
+                log::warn!(
+                    "Transient bundle download error for '{}' from {} (attempt {}/{}): {}",
+                    mod_name,
+                    source_label,
+                    attempt,
+                    RETRY_MAX_ATTEMPTS,
+                    e
+                );
+                Err(RetryClass::Transient(None))
+            }
+            Err(e) => Err(RetryClass::Permanent(format!(
+                "Failed to download bundle for '{}' from {}: {}",
+                mod_name, source_label, e
+            ))),
+        };
+
+        match outcome {
+            Ok(bytes) => return Ok(bytes),
+            Err(RetryClass::Permanent(msg)) => return Err(AppError::Other(msg)),
+            Err(RetryClass::Transient(retry_after)) => {
+                if attempt >= RETRY_MAX_ATTEMPTS {
+                    return Err(AppError::Other(format!(
+                        "Failed to download bundle for '{}' from {} after {} attempts (last failure was transient).",
+                        mod_name, source_label, RETRY_MAX_ATTEMPTS
+                    )));
+                }
+                let backoff = RETRY_BASE_DELAY
+                    .saturating_mul(1u32 << (attempt - 1))
+                    .max(retry_after.unwrap_or(Duration::ZERO));
+                tokio::time::sleep(backoff).await;
+            }
+        }
+    }
+}
+
 /// Whether `raw` points at a loopback host. Used only to widen the bundle
 /// download guard under `cfg!(test)` so the modpack flow tests can fetch from a
 /// local mock server; never relied on in shipped builds.
@@ -1064,15 +1164,8 @@ pub async fn download_bundle(
             mod_name,
             effective
         );
-        let resp = client.get(&effective).send().await?;
-        if !resp.status().is_success() {
-            return Err(AppError::Other(format!(
-                "Failed to download release bundle for '{}': {}",
-                mod_name,
-                resp.status()
-            )));
-        }
-        resp.bytes().await?
+        download_bundle_bytes_with_retry(&client, &effective, mod_name, "release asset", None)
+            .await?
     } else if url.starts_with("https://raw.githubusercontent.com/") {
         // Use GitHub API to avoid CDN caching issues
         let parts: Vec<&str> = url
@@ -1094,54 +1187,36 @@ pub async fn download_bundle(
                 api_url
             );
 
-            let resp = client
-                .get(&api_url)
-                .header("Accept", "application/vnd.github.raw+json")
-                .send()
-                .await?;
-
-            if !resp.status().is_success() {
-                // Fallback to direct URL if API fails
-                log::warn!(
-                    "GitHub API download failed for '{}' ({}), falling back to direct URL",
-                    mod_name,
-                    resp.status()
-                );
-                let resp2 = client.get(url).send().await?;
-                if !resp2.status().is_success() {
-                    return Err(AppError::Other(format!(
-                        "Failed to download bundle for '{}': {}",
+            // Fallback to direct URL if the API route fails after its own
+            // retries. Permanent API failures can still be recovered by the
+            // raw URL, which is how the legacy path behaved.
+            match download_bundle_bytes_with_retry(
+                &client,
+                &api_url,
+                mod_name,
+                "GitHub API",
+                Some("application/vnd.github.raw+json"),
+            )
+            .await
+            {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    log::warn!(
+                        "GitHub API download failed for '{}' after retries ({}), falling back to direct URL",
                         mod_name,
-                        resp2.status()
-                    )));
+                        e
+                    );
+                    download_bundle_bytes_with_retry(&client, url, mod_name, "raw URL", None)
+                        .await?
                 }
-                resp2.bytes().await?
-            } else {
-                resp.bytes().await?
             }
         } else {
             // Can't parse URL, use direct download
-            let resp = client.get(url).send().await?;
-            if !resp.status().is_success() {
-                return Err(AppError::Other(format!(
-                    "Failed to download bundle for '{}': {}",
-                    mod_name,
-                    resp.status()
-                )));
-            }
-            resp.bytes().await?
+            download_bundle_bytes_with_retry(&client, url, mod_name, "direct URL", None).await?
         }
     } else {
         // Non-GitHub URL, use direct download
-        let resp = client.get(url).send().await?;
-        if !resp.status().is_success() {
-            return Err(AppError::Other(format!(
-                "Failed to download bundle for '{}': {}",
-                mod_name,
-                resp.status()
-            )));
-        }
-        resp.bytes().await?
+        download_bundle_bytes_with_retry(&client, url, mod_name, "direct URL", None).await?
     };
 
     log::info!(
@@ -2553,6 +2628,44 @@ mod download_bundle_url_routing_tests {
         .expect("release URL must work");
 
         assert!(tmp.path().join("NewMod.json").exists());
+    }
+
+    #[tokio::test]
+    async fn download_bundle_retries_release_asset_500_then_succeeds() {
+        // Sets STS2_GITHUB_RELEASES_BASE — process-global env var, same lock.
+        let _env_guard = super::release_upload_tests::ENV_LOCK.lock().await;
+        let server = MockServer::start().await;
+        std::env::set_var("STS2_GITHUB_RELEASES_BASE", server.uri());
+
+        Mock::given(method("GET"))
+            .and(path(
+                "/owner/sts2mm-profiles/releases/download/bundles/RetryMod_v1.zip",
+            ))
+            .respond_with(ResponseTemplate::new(503).set_body_string("try again"))
+            .up_to_n_times(1)
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(
+                "/owner/sts2mm-profiles/releases/download/bundles/RetryMod_v1.zip",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(make_tiny_zip("RetryMod.json")))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        download_bundle(
+            "https://github.com/owner/sts2mm-profiles/releases/download/bundles/RetryMod_v1.zip",
+            "RetryMod",
+            tmp.path(),
+            None,
+        )
+        .await
+        .expect("transient release-asset failure should be retried");
+
+        assert!(tmp.path().join("RetryMod.json").exists());
     }
 
     #[tokio::test]

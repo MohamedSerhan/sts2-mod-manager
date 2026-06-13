@@ -7,6 +7,7 @@ import {
   checkForUpdates,
   checkModDependencies,
   checkSubscriptionUpdates,
+  cancelProfileShare,
   createBackup,
   createBackupPreserving,
   createProfile,
@@ -352,6 +353,11 @@ describe('useTauri wrappers — command names + arg shapes', () => {
     });
     await reshareProfile('My Pack', null);
     expect(lastCall().cmd).toBe('reshare_profile');
+    await cancelProfileShare('My Pack');
+    expect(lastCall()).toEqual({
+      cmd: 'cancel_profile_share',
+      args: { name: 'My Pack' },
+    });
     await fetchSharedProfile('alice/abcd1234');
     expect(lastCall()).toEqual({
       cmd: 'fetch_shared_profile_cmd',

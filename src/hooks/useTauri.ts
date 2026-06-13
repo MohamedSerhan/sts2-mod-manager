@@ -445,6 +445,10 @@ export async function shareProfile(
   return invoke('share_profile', { name, listPublic, includeNotes });
 }
 
+export async function cancelProfileShare(name: string): Promise<boolean> {
+  return invoke('cancel_profile_share', { name });
+}
+
 export async function reshareProfile(
   name: string,
   listPublic: boolean | null,

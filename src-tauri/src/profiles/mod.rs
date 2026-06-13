@@ -436,26 +436,52 @@ pub fn delete_profile_cmd(
 
 /// Duplicate an existing profile with a new name.
 #[tauri::command]
-pub fn duplicate_profile(
+pub async fn duplicate_profile(
     name: String,
     new_name: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Profile, String> {
-    let s = state.lock().map_err(|e| e.to_string())?;
-    let mut profile = load_profile(&name, &s.profiles_path).map_err(|e| e.to_string())?;
+    let (profiles_path, token) = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        (s.profiles_path.clone(), s.github_token.clone())
+    };
+    let mut profile = load_profile(&name, &profiles_path).map_err(|e| e.to_string())?;
     let new_name = new_name.trim();
     if new_name.is_empty() {
         return Err("Name can't be empty".to_string());
     }
-    if profile_name_exists(new_name, &s.profiles_path, None) {
+    if profile_name_exists(new_name, &profiles_path, None) {
         return Err(format!("A modpack named '{}' already exists", new_name));
     }
+    let duplicate_owner = match token.as_deref() {
+        Some(token) => match crate::sharing::authenticated_github_username(token).await {
+            Ok(username) => Some(username),
+            Err(e) => {
+                log::warn!(
+                    "Could not resolve GitHub username while duplicating '{}': {}",
+                    name,
+                    e
+                );
+                None
+            }
+        },
+        None => None,
+    };
     profile.id = new_profile_id();
     profile.name = new_name.to_string();
     profile.updated_at = chrono::Utc::now();
-    save_profile(&profile, &s.profiles_path).map_err(|e| e.to_string())?;
+    stamp_duplicate_profile_metadata(&mut profile, duplicate_owner.as_deref());
+    save_profile(&profile, &profiles_path).map_err(|e| e.to_string())?;
     log::info!("Duplicated profile '{}' as '{}'", name, profile.name);
     Ok(profile)
+}
+
+fn stamp_duplicate_profile_metadata(profile: &mut Profile, owner: Option<&str>) {
+    profile.created_by = owner
+        .map(str::trim)
+        .filter(|owner| !owner.is_empty())
+        .map(ToString::to_string);
+    profile.public = None;
 }
 
 /// Rename a profile, preserving its `.share` code, active state, and any
@@ -676,6 +702,50 @@ pub async fn repair_profile(
     persist_active_profile(&s.config_path, &name);
 
     Ok(result)
+}
+
+#[cfg(test)]
+mod duplicate_profile_tests {
+    use super::*;
+
+    fn sample_profile() -> Profile {
+        Profile {
+            id: crate::profiles::new_profile_id(),
+            name: "Friend Pack".into(),
+            game_version: None,
+            created_by: Some("friend".into()),
+            mods: vec![],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: Some(true),
+            mod_extras: Default::default(),
+        }
+    }
+
+    #[test]
+    fn duplicate_metadata_uses_current_owner_and_clears_listing_state() {
+        let mut profile = sample_profile();
+
+        stamp_duplicate_profile_metadata(&mut profile, Some("octo"));
+
+        assert_eq!(profile.created_by.as_deref(), Some("octo"));
+        assert_eq!(
+            profile.public, None,
+            "a local duplicate is not published or listed yet"
+        );
+    }
+
+    #[test]
+    fn duplicate_metadata_clears_original_owner_when_current_owner_unknown() {
+        let mut profile = sample_profile();
+
+        stamp_duplicate_profile_metadata(&mut profile, None);
+
+        assert_eq!(
+            profile.created_by, None,
+            "duplicates must not keep showing the original curator as the author"
+        );
+    }
 }
 
 #[cfg(test)]

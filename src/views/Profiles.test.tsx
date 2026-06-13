@@ -659,9 +659,9 @@ describe('<ProfilesView>', () => {
     }));
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('DriftedPack')).toBeInTheDocument(); });
-    // The banner copy contains "has drifted" — unique to the active-profile banner.
+    // The banner copy contains "has unsaved mod changes" — unique to the active-profile banner.
     await waitFor(() => {
-      expect(screen.getByText(/has drifted/)).toBeInTheDocument();
+      expect(screen.getByText(/has unsaved mod changes/)).toBeInTheDocument();
     });
   });
 
@@ -689,7 +689,7 @@ describe('<ProfilesView>', () => {
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('DriftedPack')).toBeInTheDocument(); });
     // The banner's Repair button has a unique title.
-    const repairBanner = await screen.findByTitle('Re-apply manifest and store extra active mods');
+    const repairBanner = await screen.findByTitle('Restore saved modpack and move extra active mods to storage');
     await user.click(repairBanner);
     // Confirm modal opens; click the Repair button in its foot.
     const modal = await confirmModal();
@@ -725,7 +725,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('DriftedPack')).toBeInTheDocument(); });
-    const repairBanner = await screen.findByTitle('Re-apply manifest and store extra active mods');
+    const repairBanner = await screen.findByTitle('Restore saved modpack and move extra active mods to storage');
     await user.click(repairBanner);
     const modal = await confirmModal();
     await user.click(modal.getByRole('button', { name: 'Repair' }));
@@ -799,7 +799,7 @@ describe('<ProfilesView>', () => {
       { share_id: 'henry/AAAA-BBBB', profile_name: 'Henry Pack' },
     ]);
     render(<Wrap />);
-    await waitFor(() => { expect(screen.getByText(/has drifted/)).toBeInTheDocument(); });
+    await waitFor(() => { expect(screen.getByText(/has unsaved mod changes/)).toBeInTheDocument(); });
     // No "Save changes" for a followed pack, and the followed-pack hint shows.
     expect(screen.queryByRole('button', { name: /Save changes/i })).toBeNull();
     expect(screen.getByText(/duplicate the pack to keep your edits/i)).toBeInTheDocument();
@@ -836,7 +836,7 @@ describe('<ProfilesView>', () => {
 
     render(<Wrap />);
 
-    await waitFor(() => { expect(screen.getByText(/has drifted/)).toBeInTheDocument(); });
+    await waitFor(() => { expect(screen.getByText(/has unsaved mod changes/)).toBeInTheDocument(); });
     expect(screen.getByRole('button', { name: /Save changes/i })).toBeInTheDocument();
     expect(screen.queryByText(/duplicate the pack to keep your edits/i)).toBeNull();
   });
@@ -985,10 +985,10 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('DriftedPack')).toBeInTheDocument(); });
-    const repairBanner = await screen.findByTitle('Re-apply manifest and store extra active mods');
+    const repairBanner = await screen.findByTitle('Restore saved modpack and move extra active mods to storage');
     await user.click(repairBanner);
     await waitFor(() => {
-      expect(screen.getByText(/No active extra mods to disable/)).toBeInTheDocument();
+      expect(screen.getByText(/No extra active mods need to be disabled/)).toBeInTheDocument();
     });
     const modal = await confirmModal();
     await user.click(modal.getByRole('button', { name: 'Repair' }));
@@ -1016,7 +1016,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('DriftedPack')).toBeInTheDocument(); });
-    const repairBanner = await screen.findByTitle('Re-apply manifest and store extra active mods');
+    const repairBanner = await screen.findByTitle('Restore saved modpack and move extra active mods to storage');
     await user.click(repairBanner);
     const modal = await confirmModal();
     await user.click(modal.getByRole('button', { name: 'Cancel' }));
@@ -1044,7 +1044,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('DriftedPack')).toBeInTheDocument(); });
-    const repairBanner = await screen.findByTitle('Re-apply manifest and store extra active mods');
+    const repairBanner = await screen.findByTitle('Restore saved modpack and move extra active mods to storage');
     await user.click(repairBanner);
     const checkbox = await screen.findByRole('checkbox');
     expect(checkbox).not.toBeChecked();
@@ -1078,7 +1078,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('DriftedPack')).toBeInTheDocument(); });
-    const repairBanner = await screen.findByTitle('Re-apply manifest and store extra active mods');
+    const repairBanner = await screen.findByTitle('Restore saved modpack and move extra active mods to storage');
     await user.click(repairBanner);
     await user.click(await screen.findByRole('checkbox'));
     const modal = await confirmModal();
@@ -1103,7 +1103,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('DriftedPack')).toBeInTheDocument(); });
-    const repairBanner = await screen.findByTitle('Re-apply manifest and store extra active mods');
+    const repairBanner = await screen.findByTitle('Restore saved modpack and move extra active mods to storage');
     await user.click(repairBanner);
     const modal = await confirmModal();
     await user.click(modal.getByRole('button', { name: 'Repair' }));
@@ -1126,7 +1126,7 @@ describe('<ProfilesView>', () => {
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('BigDrift')).toBeInTheDocument(); });
-    const repairBanner = await screen.findByTitle('Re-apply manifest and store extra active mods');
+    const repairBanner = await screen.findByTitle('Restore saved modpack and move extra active mods to storage');
     await user.click(repairBanner);
     await waitFor(() => {
       // "Orph1, Orph2, ... Orph8, …4 more"
@@ -1530,8 +1530,8 @@ describe('<ProfilesView>', () => {
       expect(getInvokeCalls().filter((c) => c.cmd === 'get_share_info').length).toBeGreaterThanOrEqual(2);
     });
     expect(screen.getByRole('status', { name: /out of sync/i })).toBeInTheDocument();
-    // And no drift banner — manifest and disk agree (Remove ≠ drift).
-    expect(screen.queryByText(/has drifted/)).toBeNull();
+    // And no drift banner — the saved setup and active mods agree (Remove ≠ drift).
+    expect(screen.queryByText(/has unsaved mod changes/)).toBeNull();
   });
 
   it('a stale in-flight share/drift refetch cannot clobber a newer result (revision guard)', async () => {

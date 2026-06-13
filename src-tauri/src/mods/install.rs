@@ -591,6 +591,24 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
 
     let size_bytes = calculate_mod_size(mods_path, &extracted_files);
 
+    let fallback_mod_name = if is_bundle {
+        container_name.clone()
+    } else if has_clean_single_top_dir && all_top_dirs.len() == 1 {
+        all_top_dirs
+            .iter()
+            .next()
+            .cloned()
+            .unwrap_or_else(|| container_name.clone())
+    } else if all_entries.len() == 1 {
+        Path::new(all_entries.first().map(String::as_str).unwrap_or(""))
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().to_string())
+            .filter(|stem| !stem.is_empty())
+            .unwrap_or_else(|| container_name.clone())
+    } else {
+        container_name.clone()
+    };
+
     match manifest {
         Some(mut m) => {
             m.files = extracted_files;
@@ -598,7 +616,7 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
             Ok(m)
         }
         None => {
-            let mod_name = zip_stem;
+            let mod_name = fallback_mod_name;
             Ok(ModInfo {
                 name: mod_name.clone(),
                 version: "unknown".to_string(),
@@ -1005,6 +1023,42 @@ mod archive_dispatch_tests {
             info.files.iter().any(|f| f.ends_with(".dll")),
             "the .dll from the .7z must end up on the file list, got files: {:?}",
             info.files,
+        );
+    }
+
+    #[test]
+    fn broken_manifest_clean_folder_zip_reports_installed_folder_not_nexus_stem() {
+        let tmp = tempfile::tempdir().unwrap();
+        let zip_path = tmp
+            .path()
+            .join("Flagellant 0.1.7-1073-0-1-7-1781082503 (1).zip");
+        write_zip_file(
+            &zip_path,
+            vec![
+                ("Flagellant/Flagellant.dll", b"fake-dll".to_vec()),
+                (
+                    "Flagellant/Flagellant.json",
+                    br#"{
+  Name: "Flagellant"
+}"#
+                    .to_vec(),
+                ),
+            ],
+        );
+
+        let mods_tmp = tempfile::tempdir().unwrap();
+        let info = install_mod_from_zip(&zip_path, mods_tmp.path())
+            .expect("broken manifest should still install through dll fallback");
+
+        assert_eq!(info.name, "Flagellant");
+        assert_eq!(info.folder_name.as_deref(), Some("Flagellant"));
+        assert_eq!(info.version, "unknown");
+        assert!(
+            info.files
+                .iter()
+                .any(|file| file == "Flagellant/Flagellant.dll"),
+            "the fallback ModInfo must still track files from the real installed folder: {:?}",
+            info.files
         );
     }
 

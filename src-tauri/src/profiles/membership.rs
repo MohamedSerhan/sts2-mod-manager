@@ -127,31 +127,33 @@ pub(crate) fn set_profile_mod_membership_from_paths(
 
     if included {
         let source_hint = source_hint.and_then(crate::mod_sources::parse_source_url);
-        let already_in_profile = profile.mods.iter().any(|pm| {
+        let mut installed_mods =
+            merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
+        crate::mod_sources::enrich_mods_with_sources(&mut installed_mods, config_path);
+        let installed = installed_mods
+            .into_iter()
+            .find(|m| {
+                installed_mod_matches_target(m, mod_name, folder_name, mod_id)
+                    || source_hint.as_ref().is_some_and(|hint| {
+                        crate::mod_sources::mod_info_source_matches_entry(m, hint)
+                    })
+            })
+            .ok_or_else(|| {
+                AppError::ModNotFound(format!(
+                    "Installed mod '{}' was not found; refresh the mod list and try again.",
+                    mod_name
+                ))
+            })?;
+        let next_entry = profile_mod_from_installed(&installed);
+        if let Some(existing) = profile.mods.iter_mut().find(|pm| {
             profile_mod_matches_target(pm, mod_name, folder_name, mod_id)
                 || source_hint.as_ref().is_some_and(|hint| {
                     crate::mod_sources::profile_source_matches_entry(pm.source.as_deref(), hint)
                 })
-        });
-        if !already_in_profile {
-            let mut installed_mods =
-                merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
-            crate::mod_sources::enrich_mods_with_sources(&mut installed_mods, config_path);
-            let installed = installed_mods
-                .into_iter()
-                .find(|m| {
-                    installed_mod_matches_target(m, mod_name, folder_name, mod_id)
-                        || source_hint.as_ref().is_some_and(|hint| {
-                            crate::mod_sources::mod_info_source_matches_entry(m, hint)
-                        })
-                })
-                .ok_or_else(|| {
-                    AppError::ModNotFound(format!(
-                        "Installed mod '{}' was not found; refresh the mod list and try again.",
-                        mod_name
-                    ))
-                })?;
-            profile.mods.push(profile_mod_from_installed(&installed));
+        }) {
+            *existing = next_entry;
+        } else {
+            profile.mods.push(next_entry);
         }
     } else {
         profile
@@ -193,7 +195,7 @@ pub(crate) fn set_profile_mods_enabled_from_paths(
     disabled_path: &Path,
     profiles_path: &Path,
 ) -> Result<SetProfileModsEnabledResult> {
-    let profile = load_profile(profile_name, profiles_path)?;
+    let mut profile = load_profile(profile_name, profiles_path)?;
     let installed =
         merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
 
@@ -201,10 +203,11 @@ pub(crate) fn set_profile_mods_enabled_from_paths(
     let mut missing = Vec::new();
     let mut failed = Vec::new();
 
-    for pm in &profile.mods {
+    for index in 0..profile.mods.len() {
+        let pm = profile.mods[index].clone();
         match installed
             .iter()
-            .find(|m| profile_mod_matches_installed(pm, m))
+            .find(|m| profile_mod_matches_installed(&pm, m))
         {
             None => missing.push(pm.name.clone()),
             Some(inst) => {
@@ -224,7 +227,10 @@ pub(crate) fn set_profile_mods_enabled_from_paths(
                     .clone()
                     .unwrap_or_else(|| inst.name.clone());
                 match move_mod_by_info(inst, src, dest) {
-                    Ok(()) => toggled.push(label),
+                    Ok(()) => {
+                        profile.mods[index].enabled = enabled;
+                        toggled.push(label);
+                    }
                     Err(e) => {
                         log::error!(
                             "set_profile_mods_enabled: failed to move '{}': {}",
@@ -236,6 +242,11 @@ pub(crate) fn set_profile_mods_enabled_from_paths(
                 }
             }
         }
+    }
+
+    if !toggled.is_empty() {
+        profile.updated_at = chrono::Utc::now();
+        save_profile(&profile, profiles_path)?;
     }
 
     Ok(SetProfileModsEnabledResult {
@@ -727,6 +738,38 @@ mod profile_membership_tests {
     }
 
     #[test]
+    fn set_profile_mods_enabled_persists_saved_enabled_state() {
+        let game_tmp = tempfile::tempdir().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let mods_path = game_tmp.path().join("mods");
+        let disabled_path = game_tmp.path().join("mods_disabled");
+        let profiles_path = config_tmp.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        write_mod(&mods_path, "Here", "Here", "1.0.0");
+        let mut pack = empty_profile("Pack");
+        pack.mods
+            .push(profile_mod_entry("Here", "Here", "1.0.0", true));
+        save_profile(&pack, &profiles_path).unwrap();
+
+        let result = set_profile_mods_enabled_from_paths(
+            "Pack",
+            false,
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+        )
+        .unwrap();
+
+        assert_eq!(result.toggled, vec!["Here".to_string()]);
+        assert!(disabled_path.join("Here").join("Here.dll").exists());
+        let saved = load_profile("Pack", &profiles_path).unwrap();
+        assert!(!saved.mods[0].enabled);
+    }
+
+    #[test]
     fn membership_matrix_lists_installed_mods_against_profiles_by_folder() {
         let game_tmp = tempfile::tempdir().unwrap();
         let config_tmp = tempfile::tempdir().unwrap();
@@ -888,6 +931,54 @@ mod profile_membership_tests {
 
         assert_eq!(updated.mods.len(), 1);
         assert_eq!(updated.mods[0].folder_name.as_deref(), Some("LibraryOnly"));
+    }
+
+    #[test]
+    fn set_profile_mod_membership_refreshes_existing_entry_from_disk() {
+        let game_tmp = tempfile::tempdir().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let mods_path = game_tmp.path().join("mods");
+        let disabled_path = game_tmp.path().join("mods_disabled");
+        let profiles_path = config_tmp.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        write_mod(&mods_path, "LibraryOnly", "Library Only", "2.0.0");
+        let mut profile = empty_profile("Stable");
+        profile.mods.push(ProfileMod {
+            name: "Library Only".into(),
+            version: "1.2.3".into(),
+            source: None,
+            hash: None,
+            files: vec!["LibraryOnly/LibraryOnly.dll".into()],
+            folder_name: Some("LibraryOnly".into()),
+            mod_id: Some("LibraryOnly".into()),
+            enabled: true,
+            bundle_url: None,
+            bundle_sha256: None,
+            bundle_members: vec![],
+        });
+        save_profile(&profile, &profiles_path).unwrap();
+
+        let updated = set_profile_mod_membership_from_paths(
+            "Stable",
+            "Library Only",
+            Some("LibraryOnly"),
+            Some("LibraryOnly"),
+            true,
+            None,
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config_tmp.path(),
+        )
+        .unwrap();
+
+        assert_eq!(updated.mods.len(), 1);
+        assert_eq!(updated.mods[0].version, "2.0.0");
+        let saved = load_profile("Stable", &profiles_path).unwrap();
+        assert_eq!(saved.mods[0].version, "2.0.0");
     }
 
     #[test]

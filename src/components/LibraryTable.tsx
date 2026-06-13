@@ -659,7 +659,7 @@ export function LibraryTable({
       setStorageSaving(key);
       await toggleMod(row.name, row.folder_name, nextEnabled);
       patchRowStorage(membershipRowKey(row), nextEnabled);
-      if (alsoAddToPack && modpackName != null) {
+      if ((alsoAddToPack || (state?.included && state.editable)) && modpackName != null) {
         await setProfileModMembership(
           modpackName,
           row.name,
@@ -668,7 +668,7 @@ export function LibraryTable({
           true,
           sourceHintForRow(row, modInfoByKey),
         );
-        patchRowMembership(membershipRowKey(row), true);
+        if (alsoAddToPack) patchRowMembership(membershipRowKey(row), true);
       }
       await refreshAll();
       if (!nextEnabled) {

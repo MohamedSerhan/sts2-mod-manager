@@ -385,6 +385,7 @@ export function ModpackDetail({
       const targets = profile.mods.map((m) => ({ name: m.name, folder_name: m.folder_name ?? null }));
       for (const m of targets) {
         await deleteMod(m.name, m.folder_name);
+        await setProfileModMembership(profileKey, m.name, m.folder_name, null, false);
       }
       await refreshAfterMutation();
       toast.success(

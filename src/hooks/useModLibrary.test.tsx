@@ -106,6 +106,39 @@ describe('useModLibrary', () => {
     });
   });
 
+  it('handleImportFile enables a disabled mod before adding it to the active target pack', async () => {
+    localStorage.setItem(AUTO_ADD_INSTALLS_TO_MODPACK_KEY, 'true');
+    vi.mocked(open).mockResolvedValueOnce('C:\\downloads\\Cool.zip');
+    registerInvokeHandler('get_active_profile_id', () => 'MyPack');
+    registerInvokeHandler('get_active_profile', () => 'MyPack');
+    registerInvokeHandler('install_mod_from_file', () => makeMod({
+      name: 'Cool',
+      folder_name: 'Cool',
+      enabled: false,
+    }));
+    registerInvokeHandler('toggle_mod', () => ({}));
+    registerInvokeHandler('set_profile_mod_membership', () => ({}));
+    const { result } = renderHook(() => useModLibrary({ targetPack: 'MyPack' }), {
+      wrapper: AllProviders,
+    });
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'get_active_profile')).toBe(true);
+    });
+
+    await act(async () => { await result.current.handleImportFile(); });
+
+    const calls = getInvokeCalls();
+    const toggleIndex = calls.findIndex((c) => c.cmd === 'toggle_mod');
+    const membershipIndex = calls.findIndex((c) => c.cmd === 'set_profile_mod_membership');
+    expect(toggleIndex).toBeGreaterThanOrEqual(0);
+    expect(membershipIndex).toBeGreaterThan(toggleIndex);
+    expect(calls[toggleIndex].args).toMatchObject({
+      name: 'Cool',
+      folderName: 'Cool',
+      enable: true,
+    });
+  });
+
   it('handleImportFile installs to the Library only when target-pack auto-add is disabled', async () => {
     localStorage.setItem(AUTO_ADD_INSTALLS_TO_MODPACK_KEY, 'false');
     followPack('MyPack');
@@ -448,6 +481,78 @@ describe('useModLibrary', () => {
     });
 
     expect(membershipCalls()).toHaveLength(1);
+    expect(onTargetPackChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('repair syncs the refreshed mod into a targeted modpack manifest', async () => {
+    const githubMod = makeMod({
+      name: 'PackMod',
+      folder_name: 'PackMod',
+      github_url: 'https://github.com/some/pack-mod',
+      nexus_url: null,
+    });
+    registerInvokeHandler('repair_mod', () => makeMod({
+      name: 'PackMod',
+      version: '2.0.0',
+      folder_name: 'PackMod',
+      mod_id: 'pack-mod',
+      github_url: 'https://github.com/some/pack-mod',
+    }));
+    registerInvokeHandler('set_profile_mod_membership', () => ({}));
+    const onTargetPackChanged = vi.fn();
+    const { result } = renderHook(() => useModLibrary({
+      targetPack: 'profile-123',
+      onTargetPackChanged,
+    }), { wrapper: AllProviders });
+    const user = userEvent.setup();
+
+    let repairPromise: Promise<void> | null = null;
+    act(() => {
+      repairPromise = result.current.tableActionProps.onRepair(githubMod);
+    });
+    await user.click(await screen.findByRole('button', { name: /^Repair now$/i }));
+    await repairPromise;
+
+    expect(membershipCalls()).toHaveLength(1);
+    expect(membershipCalls()[0].args).toMatchObject({
+      profileId: 'profile-123',
+      modName: 'PackMod',
+      modId: 'pack-mod',
+      included: true,
+    });
+    expect(onTargetPackChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('delete removes the mod from a targeted modpack manifest after deleting from disk', async () => {
+    const githubMod = makeMod({
+      name: 'PackMod',
+      folder_name: 'PackMod',
+      github_url: 'https://github.com/some/pack-mod',
+    });
+    registerInvokeHandler('delete_mod_cmd', () => ({}));
+    registerInvokeHandler('set_profile_mod_membership', () => ({}));
+    const onTargetPackChanged = vi.fn();
+    const { result } = renderHook(() => useModLibrary({
+      targetPack: 'profile-123',
+      onTargetPackChanged,
+    }), { wrapper: AllProviders });
+    const user = userEvent.setup();
+
+    let deletePromise: Promise<void> | null = null;
+    act(() => {
+      deletePromise = result.current.tableActionProps.onDelete(githubMod);
+    });
+    await user.click(await screen.findByRole('button', { name: /^Delete$/i }));
+    await deletePromise;
+
+    expect(getInvokeCalls().some((c) => c.cmd === 'delete_mod_cmd')).toBe(true);
+    expect(membershipCalls()).toHaveLength(1);
+    expect(membershipCalls()[0].args).toMatchObject({
+      profileId: 'profile-123',
+      modName: 'PackMod',
+      folderName: 'PackMod',
+      included: false,
+    });
     expect(onTargetPackChanged).toHaveBeenCalledTimes(1);
   });
 });

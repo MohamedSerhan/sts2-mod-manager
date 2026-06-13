@@ -1028,6 +1028,7 @@ describe('<ModpackDetail>', () => {
       available: [modInfo({ name: 'OutsiderMod', folder_name: 'OutsiderMod' })],
     });
     registerInvokeHandler('delete_mod_cmd', () => true);
+    registerInvokeHandler('set_profile_mod_membership', () => baseProfile());
     const user = userEvent.setup();
     render(<Wrap profile={profile} onBack={vi.fn()} />);
     await screen.findByRole('heading', { level: 2, name: 'Sample' });
@@ -1048,6 +1049,9 @@ describe('<ModpackDetail>', () => {
       const deletes = getInvokeCalls().filter((c) => c.cmd === 'delete_mod_cmd');
       expect(deletes.map((c) => c.args?.name).sort()).toEqual(['PackOne', 'PackTwo']);
     });
+    const removals = getInvokeCalls().filter((c) => c.cmd === 'set_profile_mod_membership');
+    expect(removals.map((c) => c.args?.modName).sort()).toEqual(['PackOne', 'PackTwo']);
+    expect(removals.every((c) => c.args?.profileId === 'Sample' && c.args?.included === false)).toBe(true);
     // The non-pack mod is never touched.
     expect(
       getInvokeCalls().some((c) => c.cmd === 'delete_mod_cmd' && c.args?.name === 'OutsiderMod'),

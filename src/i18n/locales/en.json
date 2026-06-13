@@ -355,9 +355,9 @@
       "eta": "This may take a minute depending on the number of mods."
     },
     "drift": {
-      "title": "{{name}} has drifted",
-      "hint": "since the manifest. Save changes to update the modpack, or Repair to restore it.",
-      "followedHint": "since the manifest. This pack is followed, so you can't save changes to it — Repair to restore the original, or duplicate the pack to keep your edits.",
+      "title": "{{name}} has unsaved mod changes",
+      "hint": "Your current enabled mods no longer match this saved modpack. Save changes to update the modpack, or Repair to go back to the saved setup.",
+      "followedHint": "Your current enabled mods no longer match this followed modpack. You can't save changes to a followed pack — Repair to go back to the saved setup, or duplicate the pack to keep your edits.",
       "newItems": "{{count}} new",
       "removedItems": "{{count}} removed",
       "toggledItems": "{{count}} toggled",
@@ -365,7 +365,7 @@
       "outOfSyncFallback": "modpack and disk are out of sync",
       "saveChanges": "Save changes",
       "repair": "Repair",
-      "repairTitle": "Re-apply manifest and store extra active mods"
+      "repairTitle": "Restore saved modpack and move extra active mods to storage"
     },
     "form": {
       "jsonLabel": "Paste modpack JSON",
@@ -485,20 +485,20 @@
     "confirm": {
       "switch": {
         "title": "Switch away from \"{{name}}\"?",
-        "body": "This modpack has unsaved changes on disk. Switching applies another manifest and those working changes will not be saved to the current modpack.",
-        "warning": "Use Save changes first if you want the current install to become the modpack manifest.",
+        "body": "This modpack has unsaved changes in your current enabled mods. Switching loads another saved modpack setup, and those changes will not be saved to the current modpack.",
+        "warning": "Use Save changes first if you want the current enabled mods to become this modpack's saved setup.",
         "confirmLabel": "Switch anyway",
         "cancelLabel": "Stay here"
       },
       "delete": {
         "title": "Delete modpack \"{{name}}\"?",
-        "body": "The modpack manifest will be removed. Mod files on disk stay where they are.",
+        "body": "The saved modpack setup will be removed. Mod files on disk stay where they are.",
         "confirmLabel": "Delete modpack"
       },
       "repair": {
         "title": "Repair \"{{name}}\"?",
-        "bodyWithOrphans": "Re-applies the manifest and moves {{count}} active mod(s) that aren't in the modpack to mods_disabled: {{list}}.",
-        "bodyNoOrphans": "Re-applies the manifest. No active extra mods to disable — drift will be fixed by toggling state.",
+        "bodyWithOrphans": "Restores the saved modpack setup and moves {{count}} active mod(s) that aren't in the modpack to mods_disabled: {{list}}.",
+        "bodyNoOrphans": "Restores the saved modpack setup. No extra active mods need to be disabled.",
         "confirmLabel": "Repair",
         "backupCheckbox": "Make a backup before repairing"
       }

@@ -1008,6 +1008,15 @@ pub(super) async fn share_profile_impl(
     // they still need to surface in `ensure_profile_publish_complete`'s
     // missing-bundles report with a clear "not installed" message.
     let mut failed_uploads: Vec<String> = failed_uploads_seed;
+    let mut failed_upload_reasons: Vec<(String, String)> = failed_uploads
+        .iter()
+        .map(|name| {
+            (
+                name.clone(),
+                "This mod is in the modpack but is not installed locally.".to_string(),
+            )
+        })
+        .collect();
     let bundlable: Vec<usize> = profile
         .mods
         .iter()
@@ -1067,6 +1076,7 @@ pub(super) async fn share_profile_impl(
                     }
                     Err(e) => {
                         log::error!("Failed to upload bundle for '{}': {}", pm.name, e);
+                        failed_upload_reasons.push((pm.name.clone(), e.to_string()));
                         // If bundling fails AND there's no GitHub source either, the
                         // mod isn't recoverable for friends. Track either way so the
                         // curator sees a clear "X of N failed" toast — they can
@@ -1080,6 +1090,7 @@ pub(super) async fn share_profile_impl(
             }
             Err(e) => {
                 log::error!("Failed to zip mod '{}': {}", pm.name, e);
+                failed_upload_reasons.push((pm.name.clone(), e.to_string()));
                 failed_uploads.push(pm.name.clone());
             }
         }
@@ -1091,7 +1102,7 @@ pub(super) async fn share_profile_impl(
         bundles_uploaded
     );
 
-    ensure_profile_publish_complete(&profile, &failed_uploads)?;
+    ensure_profile_publish_complete(&profile, &failed_uploads, &failed_upload_reasons)?;
 
     // Generate code and filename
     let code = generate_code(&profile);
@@ -1359,6 +1370,15 @@ pub async fn reshare_profile(
     // they still need to surface in `ensure_profile_publish_complete`'s
     // missing-bundles report with a clear "not installed" message.
     let mut failed_uploads: Vec<String> = not_installed;
+    let mut failed_upload_reasons: Vec<(String, String)> = failed_uploads
+        .iter()
+        .map(|name| {
+            (
+                name.clone(),
+                "This mod is in the modpack but is not installed locally.".to_string(),
+            )
+        })
+        .collect();
     let bundlable: Vec<usize> = profile
         .mods
         .iter()
@@ -1414,12 +1434,14 @@ pub async fn reshare_profile(
                     }
                     Err(e) => {
                         log::error!("Failed to upload bundle for '{}': {}", pm.name, e);
+                        failed_upload_reasons.push((pm.name.clone(), e.to_string()));
                         failed_uploads.push(pm.name.clone());
                     }
                 }
             }
             Err(e) => {
                 log::error!("Failed to zip mod '{}': {}", pm.name, e);
+                failed_upload_reasons.push((pm.name.clone(), e.to_string()));
                 failed_uploads.push(pm.name.clone());
             }
         }
@@ -1431,7 +1453,9 @@ pub async fn reshare_profile(
         bundles_uploaded
     );
 
-    if let Err(e) = ensure_profile_publish_complete(&profile, &failed_uploads) {
+    if let Err(e) =
+        ensure_profile_publish_complete(&profile, &failed_uploads, &failed_upload_reasons)
+    {
         restore_profile_after_failed_publish(old_profile.as_ref(), &profiles_path);
         return Err(e.to_string());
     }

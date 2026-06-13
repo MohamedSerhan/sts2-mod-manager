@@ -20,6 +20,19 @@ describe('parseMissingBundlesError', () => {
     });
   });
 
+  it('parses backend details when a publish failure includes the last upload error', () => {
+    const msg =
+      "Could not publish profile 'Solo Pack': missing bundles for 1 mod(s): Ascender's Sandbox. " +
+      "Details: Ascender's Sandbox: Upload of 'Ascender_s_Sandbox_v1.1.1_7995e258.zip' failed with 422 already_exists. " +
+      'Restore or reinstall these mods, then share again so the manifest can repair them later.';
+    expect(parseMissingBundlesError(msg)).toEqual({
+      count: 1,
+      mods: ["Ascender's Sandbox"],
+      details:
+        "Ascender's Sandbox: Upload of 'Ascender_s_Sandbox_v1.1.1_7995e258.zip' failed with 422 already_exists",
+    });
+  });
+
   it('parses a single-mod error (mod(s) covers both singular and plural)', () => {
     const msg =
       "Could not publish profile 'X': missing bundles for 1 mod(s): SoloMod. Restore or reinstall these mods, then share again so the manifest can repair them later.";
@@ -72,6 +85,7 @@ describe('<MissingBundlesPanel>', () => {
       <AllProviders>
         <MissingBundlesPanel
           modNames={props.modNames ?? ['ModA', 'ModB']}
+          errorDetails={props.errorDetails}
           onRetryPublish={props.onRetryPublish ?? (async () => {})}
           onCancel={props.onCancel ?? (() => {})}
         />
@@ -87,7 +101,7 @@ describe('<MissingBundlesPanel>', () => {
       }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/The upload to GitHub didn't complete/i),
+      screen.getByText(/couldn't finish uploading bundles/i),
     ).toBeInTheDocument();
     for (const name of ['Alpha', 'Beta', 'Gamma']) {
       expect(screen.getByText(name)).toBeInTheDocument();
@@ -129,11 +143,24 @@ describe('<MissingBundlesPanel>', () => {
     expect(repairBtn).toHaveClass('gf-btn-2');
   });
 
-  it('surfaces the secondary repair guidance about linked GitHub sources', () => {
+  it('surfaces the repair guidance that repair is only for local files', () => {
     render(<Wrap modNames={['A']} />);
     expect(
-      screen.getByText(/reinstalls each mod from its linked GitHub source/i),
+      screen.getByText(/Repair only helps when local files are missing or broken/i),
     ).toBeInTheDocument();
+  });
+
+  it('shows the last backend error and disables repair for GitHub upload failures', () => {
+    render(
+      <Wrap
+        modNames={["Ascender's Sandbox"]}
+        errorDetails="Ascender's Sandbox: Upload failed with 422 already_exists"
+      />,
+    );
+    expect(screen.getByText(/Last error:/i)).toHaveTextContent('already_exists');
+    expect(
+      screen.getByRole('button', { name: /Repair these mods/i }),
+    ).toBeDisabled();
   });
 
   it('"Repair these mods" calls repair_mod sequentially for every mod', async () => {

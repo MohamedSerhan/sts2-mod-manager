@@ -167,6 +167,10 @@ pub(super) fn release_asset_name(mod_name: &str, version: &str, sha256_hex: &str
 /// separator becomes `_`. Unicode letters pass through unchanged
 /// (issue #44 — Chinese ideographs used to collapse to `___`).
 ///
+/// Apostrophes are also replaced because GitHub normalizes them in
+/// release asset names but does not report the normalized name in 422
+/// `already_exists` errors, which can otherwise strand uploads.
+///
 /// `allow_dot=true` is used for version strings (`v1.2.3`) where the
 /// dots are meaningful; for mod names we replace them too so the
 /// filename has at most one dot (the `.zip`).
@@ -181,7 +185,20 @@ pub(super) fn sanitize_asset_component(input: &str, allow_dot: bool) -> String {
                 || c.is_whitespace()
                 || matches!(
                     c,
-                    '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '#' | '%' | '&' | '+'
+                    '/' | '\\'
+                        | ':'
+                        | '*'
+                        | '?'
+                        | '"'
+                        | '<'
+                        | '>'
+                        | '|'
+                        | '#'
+                        | '%'
+                        | '&'
+                        | '+'
+                        | '\''
+                        | '\u{2019}'
                 );
             if unsafe_char {
                 '_'
@@ -270,6 +287,18 @@ mod release_asset_name_tests {
         assert_eq!(
             release_asset_name("My-Mod_42", "v2.3.4", SHA_EMPTY),
             "My-Mod_42_v2.3.4_e3b0c442.zip",
+        );
+    }
+
+    #[test]
+    fn replaces_apostrophes_before_github_normalizes_them() {
+        assert_eq!(
+            release_asset_name("Ascender's Sandbox", "1.1.1", SHA_EMPTY),
+            "Ascender_s_Sandbox_v1.1.1_e3b0c442.zip",
+        );
+        assert_eq!(
+            release_asset_name("Curator\u{2019}s Pick", "1.0.0", SHA_EMPTY),
+            "Curator_s_Pick_v1.0.0_e3b0c442.zip",
         );
     }
 

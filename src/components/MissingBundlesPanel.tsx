@@ -29,6 +29,8 @@ export type ModRepairStatus = 'pending' | 'repairing' | 'success' | 'failed';
 interface Props {
   /** Mod names parsed out of the Rust error message. */
   modNames: string[];
+  /** Last backend error for the failed uploads, when Rust could identify it. */
+  errorDetails?: string | null;
   /**
    * Called once after every mod's repair succeeded. The parent re-runs
    * the original `share_profile` / `reshare_profile` call so the publish
@@ -53,10 +55,10 @@ interface Props {
  */
 export function parseMissingBundlesError(
   errorMsg: string,
-): { count: number; mods: string[] } | null {
+): { count: number; mods: string[]; details?: string } | null {
   if (!errorMsg) return null;
   const match = errorMsg.match(
-    /missing bundles for (\d+) mod\(s?\):\s*(.+?)\.\s*Restore or reinstall/i,
+    /missing bundles for (\d+) mod\(s?\):\s*(.+?)\.\s*(?:Details:\s*(.+?)\.\s*)?Restore or reinstall/is,
   );
   if (!match) return null;
   const count = parseInt(match[1] ?? '0', 10);
@@ -64,10 +66,21 @@ export function parseMissingBundlesError(
     .split(',')
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
-  return { count, mods };
+  const details = (match[3] ?? '').trim();
+  return details ? { count, mods, details } : { count, mods };
 }
 
-export function MissingBundlesPanel({ modNames, onRetryPublish, onCancel }: Props) {
+function isUploadFailureDetail(details: string | null | undefined): boolean {
+  if (!details) return false;
+  return /already_exists|release asset|failed to upload|upload of|github|rate-limit|network/i.test(details);
+}
+
+export function MissingBundlesPanel({
+  modNames,
+  errorDetails,
+  onRetryPublish,
+  onCancel,
+}: Props) {
   const { t } = useTranslation();
   const [statuses, setStatuses] = useState<Record<string, ModRepairStatus>>(() =>
     Object.fromEntries(modNames.map((n) => [n, 'pending' as ModRepairStatus])),
@@ -76,6 +89,7 @@ export function MissingBundlesPanel({ modNames, onRetryPublish, onCancel }: Prop
   const [sharing, setSharing] = useState(false);
 
   const busy = repairing || sharing;
+  const repairBlockedByUploadError = isUploadFailureDetail(errorDetails);
 
   // Primary remedy for the transient-upload case (issue #164): just run
   // the share again. The Rust share flow re-attempts only the bundles
@@ -144,6 +158,11 @@ export function MissingBundlesPanel({ modNames, onRetryPublish, onCancel }: Prop
           <p className="gf-missing-bundles-subbody">
             {t('publish.missingBundles.repairHint')}
           </p>
+          {errorDetails && (
+            <p className="gf-missing-bundles-detail">
+              {t('publish.missingBundles.lastError', { error: errorDetails })}
+            </p>
+          )}
         </div>
       </div>
       <ul className="gf-missing-bundles-list">
@@ -196,9 +215,13 @@ export function MissingBundlesPanel({ modNames, onRetryPublish, onCancel }: Prop
         <button
           type="button"
           className="gf-btn-2"
-          disabled={busy}
+          disabled={busy || repairBlockedByUploadError}
           onClick={handleRepair}
-          title={t('publish.missingBundles.repairBtnTitle')}
+          title={
+            repairBlockedByUploadError
+              ? t('publish.missingBundles.repairUploadDisabledTitle')
+              : t('publish.missingBundles.repairBtnTitle')
+          }
         >
           <RotateCw size={12} />
           {repairing

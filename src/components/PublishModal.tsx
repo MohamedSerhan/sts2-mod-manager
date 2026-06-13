@@ -70,7 +70,10 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onLi
    * error string — the curator can repair the bad bundles in-modal and
    * the publish auto-retries.
    */
-  const [missingBundles, setMissingBundles] = useState<string[] | null>(null);
+  const [missingBundles, setMissingBundles] = useState<{
+    mods: string[];
+    details?: string;
+  } | null>(null);
 
   // Refresh token status whenever the modal opens so we don't show stale
   // "token missing" state if the curator just set it in Settings.
@@ -165,7 +168,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onLi
       // fall through to the normal toast.
       const parsed = parseMissingBundlesError(msg);
       if (parsed && parsed.mods.length > 0) {
-        setMissingBundles(parsed.mods);
+        setMissingBundles({ mods: parsed.mods, details: parsed.details });
       } else {
         toast.error(t('publish.publishFailed', { error: msg }));
       }
@@ -249,9 +252,10 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onLi
               the affected mods with per-mod status, repairs them
               sequentially via `repair_mod`, and auto-retries the publish
               on full success. */}
-          {missingBundles && missingBundles.length > 0 && (
+          {missingBundles && missingBundles.mods.length > 0 && (
             <MissingBundlesPanel
-              modNames={missingBundles}
+              modNames={missingBundles.mods}
+              errorDetails={missingBundles.details}
               onRetryPublish={async () => {
                 setMissingBundles(null);
                 await handlePublish();

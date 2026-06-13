@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { getGameInfo, getInstalledMods, isGameRunning, checkSubscriptionUpdates, auditModVersions, updateAllMods } from '../hooks/useTauri';
+import { getActiveProfileId, getGameInfo, getInstalledMods, isGameRunning, checkSubscriptionUpdates, auditModVersions, updateAllMods } from '../hooks/useTauri';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { GameInfo, ModInfo, ModAuditEntry, SubscriptionUpdate } from '../types';
@@ -12,6 +12,7 @@ interface AppContextType {
   mods: ModInfo[];
   loading: boolean;
   activeProfile: string | null;
+  activeProfileId: string | null;
   gameRunning: boolean;
   /** Per-pack updates available from upstream. Drives the badge on the
    *  Profiles sidebar item and the Home view's "update available" cards. */
@@ -59,6 +60,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [mods, setMods] = useState<ModInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeProfile, setActiveProfileState] = useState<string | null>(null);
+  const [activeProfileId, setActiveProfileIdState] = useState<string | null>(null);
   const [gameRunning, setGameRunning] = useState<boolean>(false);
   const [subUpdates, setSubUpdates] = useState<SubscriptionUpdate[]>([]);
   const [auditResults, setAuditResults] = useState<ModAuditEntry[] | null>(null);
@@ -180,14 +182,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await Promise.all([refreshGameInfo(), refreshMods()]);
     // Load active profile and vanilla mode state from backend
     try {
-      const profile = await invoke<string | null>('get_active_profile');
+      const [profile, profileId] = await Promise.all([
+        invoke<string | null>('get_active_profile'),
+        getActiveProfileId().catch(() => null),
+      ]);
       setActiveProfileState(profile);
+      setActiveProfileIdState(profileId);
     } catch { /* ignore */ }
     setLoading(false);
   }, [refreshGameInfo, refreshMods]);
 
   const setActiveProfile = useCallback((name: string | null) => {
     setActiveProfileState(name);
+    setActiveProfileIdState(name);
     invoke('set_active_profile', { name }).catch(() => {});
   }, []);
 
@@ -340,7 +347,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [refreshGameRunning, refreshMods]);
 
   return (
-    <AppContext.Provider value={{ gameInfo, mods, loading, activeProfile, gameRunning, subUpdates, auditResults, auditing, runAudit, refreshAuditEntries, updatingAll, updateAllGithub, refreshGameInfo, refreshMods, refreshAll, refreshGameRunning, refreshSubUpdates, setActiveProfile, notifyNexusOpen }}>
+    <AppContext.Provider value={{ gameInfo, mods, loading, activeProfile, activeProfileId, gameRunning, subUpdates, auditResults, auditing, runAudit, refreshAuditEntries, updatingAll, updateAllGithub, refreshGameInfo, refreshMods, refreshAll, refreshGameRunning, refreshSubUpdates, setActiveProfile, notifyNexusOpen }}>
       {children}
     </AppContext.Provider>
   );

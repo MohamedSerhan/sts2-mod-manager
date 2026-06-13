@@ -8,7 +8,15 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+  readFileSync,
+} from 'node:fs';
 import { createConnection } from 'node:net';
 import { tmpdir } from 'node:os';
 import { basename, dirname, resolve, join } from 'node:path';
@@ -860,7 +868,14 @@ async function specToggleStickyAcrossModpackSwitch(driver) {
   if (existsSync(enabledDir)) {
     throw new Error(`mods/QaTestMod still exists after toggle-off — move was a copy?`);
   }
-  const afterToggle = await toggle.getAttribute('aria-checked');
+  const toggleAfterClick = await waitForElement(
+    driver,
+    By.xpath(
+      "//*[normalize-space(text())='QaTestMod']/ancestor::*[.//button[@role='switch']][1]//button[@role='switch']",
+    ),
+    'QaTestMod toggle switch after click',
+  );
+  const afterToggle = await toggleAfterClick.getAttribute('aria-checked');
   if (afterToggle !== 'false') {
     throw new Error(`expected QaTestMod toggle aria-checked=false after click, got ${afterToggle}`);
   }
@@ -1536,12 +1551,30 @@ async function specIncompatibleModAbsentFromCreatedModpack(driver) {
   // before applying any optional membership edits.
   await invokeTauri(driver, 'create_profile', { name: modpackName });
 
-  // Step 4: read the saved profile JSON off disk. save_profile writes to
-  // <profiles_path>/<sanitized_name>.json. sanitize_filename replaces
-  // anything not alphanumeric/dash/underscore/dot with '_', so spaces
-  // become underscores. profiles_path is <config>/profiles.
+  // Step 4: read the saved profile JSON off disk. New profiles are saved under
+  // stable IDs, while old app versions saved them under sanitized display names.
+  // Support both layouts so this smoke keeps verifying behavior instead of a
+  // filename implementation detail.
   const sanitized = modpackName.replace(/[^A-Za-z0-9._-]/g, '_');
-  const profilePath = join(FIXTURE_DIRS.config, 'profiles', `${sanitized}.json`);
+  const profilesDir = join(FIXTURE_DIRS.config, 'profiles');
+  const legacyProfilePath = join(profilesDir, `${sanitized}.json`);
+  const profilePath = existsSync(legacyProfilePath)
+    ? legacyProfilePath
+    : readdirSync(profilesDir)
+        .filter((name) => name.endsWith('.json'))
+        .map((name) => join(profilesDir, name))
+        .find((candidatePath) => {
+          try {
+            const raw = readFileSync(candidatePath, 'utf8');
+            const candidateProfile = JSON.parse(raw.replace(/^\uFEFF/, ''));
+            return candidateProfile.name === modpackName;
+          } catch {
+            return false;
+          }
+        });
+  if (!profilePath) {
+    throw new Error(`Failed to find created modpack named "${modpackName}" under ${profilesDir}`);
+  }
   let profile;
   try {
     const raw = readFileSync(profilePath, 'utf8');

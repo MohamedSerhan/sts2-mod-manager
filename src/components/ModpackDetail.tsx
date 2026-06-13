@@ -155,14 +155,15 @@ export function ModpackDetail({
   renameExistingNames,
 }: ModpackDetailProps) {
   const { t } = useTranslation();
-  const { activeProfile, auditResults, mods, refreshAll, gameRunning } = useApp();
+  const { activeProfile, activeProfileId, auditResults, mods, refreshAll, gameRunning } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
-  const isActive = activeProfile === profile.name;
+  const profileKey = profile.id || profile.name;
+  const isActive = activeProfileId === profileKey || activeProfile === profile.name;
   const isShared = !!shareInfo;
   const isOutOfSync = !!shareInfo?.out_of_sync || localOutOfSync;
   const markSharedLocalEdit = () => {
-    if (isShared) onLocalOutOfSync?.(profile.name);
+    if (isShared) onLocalOutOfSync?.(profileKey);
   };
   // Shared mod-library surface (toolbar + install actions), scoped so a
   // mod installed from here auto-joins THIS pack, and the Audit action
@@ -193,8 +194,8 @@ export function ModpackDetail({
   // never go the other way.)
   const missingMods = drift?.removed ?? [];
   const missingCount = missingMods.length;
-  const switchingThis = switchingProfile === profile.name;
-  const switchingOther = !!switchingProfile && switchingProfile !== profile.name;
+  const switchingThis = switchingProfile === profileKey || switchingProfile === profile.name;
+  const switchingOther = !!switchingProfile && !switchingThis;
 
   // Per-row in-flight keys so a double-click can't double-fire the
   // membership add. Keyed by modKey().
@@ -418,7 +419,7 @@ export function ModpackDetail({
       // (the manifest folder_name can drift), best-effort, and report which
       // couldn't be toggled — instead of looping toggleMod by manifest folder,
       // which hard-errored on the first drifted entry.
-      const result = await setProfileModsEnabled(profile.name, enabled);
+      const result = await setProfileModsEnabled(profileKey, enabled);
       await refreshAfterMutation();
       setBulkReloadNonce((n) => n + 1);
       const base = enabled

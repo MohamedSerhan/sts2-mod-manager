@@ -173,6 +173,15 @@ describe('<HomeView> single-block launcher shape (v7)', () => {
     await waitFor(() => expect(input.value).toBe(''));
   });
 
+  it('empty-state Quick-Add ignores blank share codes', async () => {
+    registerInvokeHandler('get_active_profile', () => null);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await screen.findByPlaceholderText(/username\/AA5A-315D-61AE/i);
+    await user.click(screen.getByRole('button', { name: /^Add$/i }));
+    expect(importShareCodeSmart).not.toHaveBeenCalled();
+  });
+
   it('empty-state Quick-Add keeps the typed code when the import is cancelled', async () => {
     vi.mocked(importShareCodeSmart).mockResolvedValue({ kind: 'cancelled' } as never);
     const { input } = await typeCodeAndAdd();
@@ -184,6 +193,27 @@ describe('<HomeView> single-block launcher shape (v7)', () => {
     vi.mocked(importShareCodeSmart).mockRejectedValue(new Error('bad code'));
     await typeCodeAndAdd();
     expect(await screen.findByText(/bad code/i)).toBeInTheDocument();
+  });
+
+  it('empty-state Quick-Add stringifies non-Error import failures', async () => {
+    vi.mocked(importShareCodeSmart).mockRejectedValue('string failure');
+    await typeCodeAndAdd();
+    expect(await screen.findByText(/string failure/i)).toBeInTheDocument();
+  });
+
+  it('empty-state Quick-Add submits with Enter', async () => {
+    vi.mocked(importShareCodeSmart).mockResolvedValue({ kind: 'installed', profile: { name: 'EnterPack', mods: [] } } as never);
+    registerInvokeHandler('get_active_profile', () => null);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    const input = (await screen.findByPlaceholderText(/username\/AA5A-315D-61AE/i)) as HTMLInputElement;
+    await user.type(input, `${ADDED_CODE}{Enter}`);
+    await waitFor(() => {
+      expect(importShareCodeSmart).toHaveBeenCalledWith(
+        ADDED_CODE,
+        expect.objectContaining({ confirm: expect.anything(), t: expect.anything() }),
+      );
+    });
   });
 
   it('does NOT render an "Other Packs" / "Your other packs" section on Home', async () => {
@@ -296,6 +326,26 @@ describe('<HomeView> active hero', () => {
     expect(launchBtn).not.toBeNull();
     await user.click(launchBtn!);
     expect(onLaunch).toHaveBeenCalled();
+  });
+
+  it('disables the hero Play button when no launch handler is available', async () => {
+    withActive('MyPack');
+    render(
+      <AllProviders>
+        <HomeView
+          onGoToSettings={() => {}}
+          onGoToMods={() => {}}
+          onGoToProfiles={() => {}}
+          onGoToBrowseModpacks={() => {}}
+          onCreateModpack={() => {}}
+        />
+      </AllProviders>,
+    );
+    await waitFor(() => { expect(screen.getByText('MyPack')).toBeInTheDocument(); });
+    const launchBtn = document.querySelector('.gf-hero-play') as HTMLButtonElement | null;
+    expect(launchBtn).not.toBeNull();
+    expect(launchBtn).toBeDisabled();
+    expect(launchBtn).toHaveAttribute('title', 'Use the Launch button in the top bar');
   });
 
   it('Ctrl+L shortcut tip is rendered when active profile exists', async () => {
@@ -984,6 +1034,86 @@ describe('<HomeView> Recent modpacks strip', () => {
     await waitFor(() => {
       expect(screen.getByText(/Switched to modpack "WeekendPack"/i)).toBeInTheDocument();
     });
+  });
+
+  it('quick-switch reports restore details when switching had work to do', async () => {
+    seedRecentWorld();
+    localStorage.setItem(USAGE_KEY, JSON.stringify({ WeekendPack: 2000 }));
+    registerInvokeHandler('get_profile_drift', () => ({
+      added: [], removed: [], toggled: [], version_changed: [], has_drift: false,
+    }));
+    registerInvokeHandler('switch_profile', () => ({
+      applied: true,
+      downloaded: 1,
+      missing_mods: [],
+      failed_downloads: [],
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+
+    await user.click(await screen.findByRole('button', { name: /Switch to WeekendPack/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/1 mod\(s\) downloaded/)).toBeInTheDocument();
+    });
+  });
+
+  it('uses stable profile ids for recent packs while still reading old name history', async () => {
+    registerInvokeHandler('get_active_profile', () => 'SharedTester');
+    registerInvokeHandler('get_active_profile_id', () => 'profile-active');
+    registerInvokeHandler('list_profiles_cmd', () => [
+      { id: 'profile-active', name: 'SharedTester', mods: [], created_at: '2026-01-01' },
+      { id: 'profile-other', name: 'SharedTester', mods: [{ name: 'A', enabled: true }], created_at: '2026-01-01' },
+      { id: 'profile-legacy', name: 'LegacyName', mods: [], created_at: '2026-01-01' },
+    ]);
+    registerInvokeHandler('get_subscriptions', () => []);
+    localStorage.setItem(USAGE_KEY, JSON.stringify({
+      'profile-active': 3000,
+      'profile-other': 2000,
+      LegacyName: 1000,
+    }));
+    registerInvokeHandler('get_profile_drift', () => ({
+      added: [], removed: [], toggled: [], version_changed: [], has_drift: false,
+    }));
+    registerInvokeHandler('switch_profile', () => ({
+      applied: true, downloaded: 0, missing_mods: [], failed_downloads: [],
+    }));
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+
+    const sharedCards = await screen.findAllByRole('button', { name: /Switch to SharedTester/i });
+    expect(sharedCards).toHaveLength(1);
+    expect(screen.getByRole('button', { name: /Switch to LegacyName/i })).toBeInTheDocument();
+
+    await user.click(sharedCards[0]);
+
+    await waitFor(() => {
+      const call = getInvokeCalls().find((c) => c.cmd === 'switch_profile');
+      expect(call).toBeDefined();
+      expect(call!.args).toEqual({ name: 'profile-other' });
+    });
+    const map = JSON.parse(localStorage.getItem(USAGE_KEY) ?? '{}');
+    expect(map['profile-other']).toBeGreaterThan(2000);
+  });
+
+  it('falls back to display name when active profile id is not available yet', async () => {
+    registerInvokeHandler('get_active_profile', () => 'SharedTester');
+    registerInvokeHandler('get_active_profile_id', () => null);
+    registerInvokeHandler('list_profiles_cmd', () => [
+      { id: 'profile-active', name: 'SharedTester', mods: [], created_at: '2026-01-01' },
+      { id: 'profile-other', name: 'SharedTester', mods: [], created_at: '2026-01-01' },
+    ]);
+    registerInvokeHandler('get_subscriptions', () => []);
+    localStorage.setItem(USAGE_KEY, JSON.stringify({ 'profile-other': 2000 }));
+
+    render(<Wrap />);
+
+    await waitFor(() => {
+      expect(screen.getByText('SharedTester')).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Recent modpacks/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /Switch to SharedTester/i })).toBeNull();
   });
 
   it('confirming the drift warning ("Switch anyway") proceeds with the switch', async () => {

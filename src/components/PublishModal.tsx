@@ -133,6 +133,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onLi
     // uncovered: dead at runtime — line 77 already short-circuits the render
     // when !profile, so the Publish button only exists when profile is truthy.
     if (!profile) return;
+    const key = profile.id || profile.name;
     const listPublic = visibility === 'public';
     setBusy(true);
     setCanceling(false);
@@ -145,8 +146,8 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onLi
     });
     try {
       const result = await (isReshare
-        ? reshareProfile(profile.name, listPublic, includeNotes)
-        : shareProfile(profile.name, listPublic, includeNotes));
+        ? reshareProfile(key, listPublic, includeNotes)
+        : shareProfile(key, listPublic, includeNotes));
       setShared(result);
       onShared?.(result);
 
@@ -188,9 +189,10 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onLi
 
   async function handleCancelPublish() {
     if (!profile || canceling) return;
+    const key = profile.id || profile.name;
     setCanceling(true);
     try {
-      await cancelProfileShare(profile.name);
+      await cancelProfileShare(key);
     } catch (e) {
       setCanceling(false);
       toast.error(t('publish.cancelFailed', { error: e instanceof Error ? e.message : String(e) }));
@@ -619,7 +621,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onLi
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, fontSize: 12 }}>
                 <span style={{ color: 'var(--ink-mute)' }}>{t('publish.listedPublicly')}</span>
-                <ListingToggle profileName={profile.name} initial={visibility === 'public'} onChanged={onListingChanged} />
+                <ListingToggle profileName={profile.id || profile.name} initial={visibility === 'public'} onChanged={onListingChanged} />
               </div>
             </>
           )}

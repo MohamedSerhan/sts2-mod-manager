@@ -55,7 +55,7 @@ export function RenameModpackModal({ profile, existingNames, onClose, onRenamed 
     setSaving(true);
     setError(null);
     try {
-      await renameProfile(profile.name, trimmed);
+      await renameProfile(profile.id || profile.name, trimmed);
       toast.success(t('modpack.rename.success', { old: profile.name, new: trimmed }));
       onRenamed(profile.name, trimmed);
       onClose();

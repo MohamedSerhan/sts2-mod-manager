@@ -793,16 +793,12 @@ async fn apply_subscription_update_inner(
     // active and a later "Activate" of it (or app reload) would undo the sync.
     {
         let mut s = state.lock().map_err(|e| e.to_string())?;
-        s.active_profile = Some(remote.name.clone());
-        if let Err(e) = std::fs::write(s.config_path.join("active_profile.txt"), &remote.name) {
-            log::error!(
-                "Failed to persist active_profile.txt after subscription update: {}",
-                e
-            );
-        }
+        s.active_profile = Some(remote.id.clone());
+        crate::profiles::persist_active_profile(&s.config_path, &remote.id);
         log::info!(
-            "Subscription update: active profile set to '{}'",
-            remote.name
+            "Subscription update: active profile set to '{}' ({})",
+            remote.name,
+            remote.id
         );
     }
 

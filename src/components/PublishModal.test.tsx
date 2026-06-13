@@ -18,6 +18,11 @@ const profile = {
   ],
 } as any;
 
+const profileWithId = {
+  ...profile,
+  id: 'profile-my-pack',
+} as any;
+
 function Wrap(props: Partial<React.ComponentProps<typeof PublishModal>> = {}) {
   // Use 'profile' in props explicitly to allow null override.
   const resolvedProfile = 'profile' in props ? props.profile : profile;
@@ -246,6 +251,22 @@ describe('<PublishModal>', () => {
     });
   });
 
+  it('Publish click uses the stable profile id when one exists', async () => {
+    tokenIsSet(true);
+    registerInvokeHandler('share_profile', () => shareOk);
+    const user = userEvent.setup();
+    render(<Wrap profile={profileWithId} />);
+
+    await waitFor(() => { expect(screen.getByText(/My Pack/)).toBeInTheDocument(); });
+    await user.click(getPublishButton());
+
+    await waitFor(() => {
+      const call = getInvokeCalls().find((c) => c.cmd === 'share_profile');
+      expect(call).toBeDefined();
+      expect(call!.args).toEqual({ name: 'profile-my-pack', listPublic: false, includeNotes: true });
+    });
+  });
+
   it('unchecking "Include your mod notes" publishes with includeNotes=false', async () => {
     registerInvokeHandler('get_api_key_status', () => ({
       nexus_api_key_set: false,
@@ -287,6 +308,22 @@ describe('<PublishModal>', () => {
     await user.click(publishBtn);
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'reshare_profile')).toBe(true);
+    });
+  });
+
+  it('Re-share uses the stable profile id when one exists', async () => {
+    tokenIsSet(true);
+    registerInvokeHandler('reshare_profile', () => shareOk);
+    const user = userEvent.setup();
+    render(<Wrap profile={profileWithId} isReshare />);
+
+    await screen.findByText(/Re-share My Pack\?/);
+    await user.click(screen.getByRole('button', { name: /Push update/ }));
+
+    await waitFor(() => {
+      const call = getInvokeCalls().find((c) => c.cmd === 'reshare_profile');
+      expect(call).toBeDefined();
+      expect(call!.args).toEqual({ name: 'profile-my-pack', listPublic: false, includeNotes: true });
     });
   });
 
@@ -1286,6 +1323,26 @@ describe('<PublishModal>', () => {
     expect(call!.args).toEqual({ name: 'My Pack', public: true });
     // Success toast surfaces.
     expect(screen.getByText('Listed on Browse Modpacks')).toBeInTheDocument();
+  });
+
+  it('ListingToggle uses the stable profile id when one exists', async () => {
+    tokenIsSet(true);
+    registerInvokeHandler('share_profile', () => shareOk);
+    registerInvokeHandler('set_modpack_listing', () => null);
+    const user = userEvent.setup();
+    render(<Wrap profile={profileWithId} />);
+    const publishBtn = await screen.findByRole('button', { name: /Publish/ });
+    await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
+    await user.click(publishBtn);
+    await waitForModalTitle('Modpack published');
+
+    await user.click(screen.getByRole('button', { name: 'No' }));
+
+    await waitFor(() => {
+      const call = getInvokeCalls().find((c) => c.cmd === 'set_modpack_listing');
+      expect(call).toBeDefined();
+      expect(call!.args).toEqual({ name: 'profile-my-pack', public: true });
+    });
   });
 
   it('ListingToggle: clicking "Yes" toggles to "No" and toasts "Hidden from Browse Modpacks"', async () => {

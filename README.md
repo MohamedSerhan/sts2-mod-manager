@@ -253,12 +253,15 @@ xattr -dr com.apple.quarantine "/Applications/STS2 Mod Manager.app"
 
 ## Windows: Antivirus False Positives
 
-Some antivirus engines (Kaspersky in particular) occasionally flag the
-Windows installer as a trojan. **These are false positives.** The installer
-is built in public by GitHub Actions from this repository's source — every
-release links the exact commit it was built from, and you can compare any
-release on [VirusTotal](https://www.virustotal.com) (typically 0–2 generic
-ML detections out of ~70 engines, no named malware family).
+Some antivirus engines, including Microsoft Defender, occasionally flag the
+Windows installer as a trojan or suspicious download. This can happen whether
+you download from GitHub/Nexus or install through the in-app updater, because
+both paths fetch the same release asset. **These are false positives when the
+detections are generic heuristics.** The installer is built in public by
+GitHub Actions from this repository's source — every release links the exact
+commit it was built from, and you can compare any release on
+[VirusTotal](https://www.virustotal.com) (typically 0–2 generic ML detections
+out of ~70 engines, no named malware family).
 
 Why it happens: the app is not Authenticode-signed (certificates cost money
 this free project doesn't have), and it legitimately does things heuristic
@@ -274,9 +277,11 @@ What you can do:
    flagging it report only generic heuristics ("ML", "Gen", "Heur"), not a
    named family.
 2. **Report the false positive** — this actually helps every other user:
-   Kaspersky accepts samples at
-   [opentip.kaspersky.com](https://opentip.kaspersky.com); most other
-   vendors have similar portals.
+   for Microsoft Defender, open **Windows Security → Protection history**,
+   select the STS2 Mod Manager detection, and use Microsoft's false-positive
+   submission flow. Kaspersky accepts samples at
+   [opentip.kaspersky.com](https://opentip.kaspersky.com); most other vendors
+   have similar portals.
 3. **Allow-list the install folder** (`%LOCALAPPDATA%\STS2 Mod Manager`)
    if your AV keeps quarantining updates.
 

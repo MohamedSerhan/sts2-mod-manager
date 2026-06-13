@@ -654,6 +654,7 @@
     "updateAvailableBanner": "يتوفّر مدير المودات v{{version}}",
     "willRestart": "سيُعاد تشغيل التطبيق عند انتهاء هذا.",
     "currentVersion": "أنت على v{{version}}.",
+    "windowsSecurityNote": "قد يحذّر Windows Defender من هذا المثبّت غير الموقّع. تحقّق منه على VirusTotal، ثم اسمح بالتحديث إذا كانت الاكتشافات عامة فقط.",
     "downloadManual": "فتح صفحة إصدارات GitHub للتنزيل يدويًا",
     "download": "تنزيل",
     "installingLabel": "جارٍ التثبيت…",
@@ -1112,7 +1113,17 @@
     },
     "recent": {
       "title": "الحزم الأخيرة",
-      "switchTitle": "التبديل إلى {{name}}"
+      "hint": "ارجع بسرعة إلى الحزم التي لعبت بها فعلًا.",
+      "switchTitle": "التبديل إلى {{name}}",
+      "lastPlayed": "آخر تشغيل {{date}}",
+      "modCount_one": "مود واحد",
+      "modCount_few": "{{count}} مودات",
+      "modCount_many": "{{count}} مودًا",
+      "modCount_other": "{{count}} مود",
+      "enabledCount_one": "مود واحد نشط",
+      "enabledCount_few": "{{count}} مودات نشطة",
+      "enabledCount_many": "{{count}} مودًا نشطًا",
+      "enabledCount_other": "{{count}} مود نشط"
     },
     "syncPillReady": "المزامنة متاحة",
     "sharePillReady": "لم تُشارَك بعد",

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Download,
@@ -31,7 +31,7 @@ import {
   getProfileDrift,
 } from '../hooks/useTauri';
 import { buildShareMessage, buildShareLink, importShareCodeSmart } from '../lib/shareImport';
-import { recordModpackLaunch, recentModpacks } from '../lib/modpackUsage';
+import { getModpackUsage, recordModpackLaunch } from '../lib/modpackUsage';
 import type { ShareResult, Profile } from '../types';
 import { PublishModal } from '../components/PublishModal';
 import type { SubscriptionUpdate, Subscription } from '../types';
@@ -179,9 +179,9 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
   // the hero gets a "Share this pack" button that opens the modal
   // directly on Home (no detour through Profiles).
   const [publishTarget, setPublishTarget] = useState<{ profile: Profile; isReshare: boolean } | null>(null);
-  // FR5 — "Recent modpacks" quick-switch strip. Names of every pack on
-  // disk (to filter stale launch-history entries) + in-flight guard.
-  const [profileNames, setProfileNames] = useState<string[]>([]);
+  // FR5 — "Recent modpacks" quick-switch strip. Profiles on disk are used
+  // to filter stale launch-history entries and enrich the shelf with counts.
+  const [profiles, setProfiles] = useState<Profile[]>([]);
   const [recentSwitching, setRecentSwitching] = useState<string | null>(null);
 
   useEffect(() => {
@@ -221,15 +221,31 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
   useEffect(() => {
     let cancelled = false;
     listProfiles()
-      .then((list) => { if (!cancelled) setProfileNames(list.map((p) => p.name)); })
+      .then((list) => { if (!cancelled) setProfiles(list); })
       .catch(() => { /* keep last known names */ });
     return () => { cancelled = true; };
   }, [activeProfile]);
 
   // Up to 3 recently launched packs, excluding the one already active.
-  const recent = recentModpacks(profileNames, 4)
-    .filter((name) => name !== activeProfile)
-    .slice(0, 3);
+  const recent = useMemo(() => {
+    const byName = new Map(profiles.map((profile) => [profile.name, profile]));
+    return Object.entries(getModpackUsage())
+      .filter(([name]) => byName.has(name) && name !== activeProfile)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([name, lastPlayed]) => {
+        const profile = byName.get(name)!;
+        return {
+          name,
+          lastPlayed,
+          modCount: profile.mods.length,
+          enabledCount: profile.mods.filter((mod) => mod.enabled).length,
+        };
+      });
+  }, [activeProfile, profiles]);
+
+  const formatRecentDate = (ts: number) =>
+    new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(ts));
 
   /** FR5 — one-click switch from the Recent strip. Mirrors Profiles'
    *  handleSwitch semantics: warn when the current active pack has
@@ -582,31 +598,47 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
           and never shows the already-active pack. Hidden entirely until
           there is history — first-run Home stays uncluttered. */}
       {recent.length > 0 && (
-        <div className="gf-home-secondary">
-          <div className="gf-home-secondary-actions">
-            <span className="gf-home-recent-label">
-              <History size={13} /> {t('home.recent.title')}
-            </span>
-            {recent.map((name) => (
+        <section className="gf-home-recent" aria-labelledby="gf-home-recent-title">
+          <div className="gf-home-recent-head">
+            <div>
+              <h2 id="gf-home-recent-title" className="gf-home-recent-title">
+                <History size={14} /> {t('home.recent.title')}
+              </h2>
+              <p className="gf-home-recent-hint">{t('home.recent.hint')}</p>
+            </div>
+          </div>
+          <div className="gf-home-recent-list">
+            {recent.map((item) => (
               <button
-                key={name}
+                key={item.name}
                 type="button"
-                className="gf-btn-3"
+                className="gf-home-recent-item"
                 disabled={recentSwitching !== null}
-                onClick={() => handleQuickSwitch(name)}
-                title={t('home.recent.switchTitle', { name })}
-                aria-label={t('home.recent.switchTitle', { name })}
+                onClick={() => handleQuickSwitch(item.name)}
+                title={t('home.recent.switchTitle', { name: item.name })}
+                aria-label={t('home.recent.switchTitle', { name: item.name })}
               >
-                {recentSwitching === name ? (
-                  <RefreshCw size={13} className="animate-spin" />
-                ) : (
-                  <Play size={13} />
-                )}{' '}
-                {name}
+                <span className="gf-home-recent-main">
+                  <span className="gf-home-recent-name">{item.name}</span>
+                  <span className="gf-home-recent-meta">
+                    {t('home.recent.lastPlayed', { date: formatRecentDate(item.lastPlayed) })}
+                  </span>
+                </span>
+                <span className="gf-home-recent-stats">
+                  <span>{t('home.recent.modCount', { count: item.modCount })}</span>
+                  <span>{t('home.recent.enabledCount', { count: item.enabledCount })}</span>
+                </span>
+                <span className="gf-home-recent-action" aria-hidden>
+                  {recentSwitching === item.name ? (
+                    <RefreshCw size={13} className="animate-spin" />
+                  ) : (
+                    <Play size={13} />
+                  )}
+                </span>
               </button>
             ))}
           </div>
-        </div>
+        </section>
       )}
 
       {/* Pending updates for non-active modpacks are surfaced in the

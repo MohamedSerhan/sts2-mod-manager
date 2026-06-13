@@ -902,8 +902,21 @@ describe('<HomeView> Recent modpacks strip', () => {
     registerInvokeHandler('get_active_profile', () => 'ActivePack');
     registerInvokeHandler('list_profiles_cmd', () => [
       { name: 'ActivePack', mods: [], created_at: '2026-01-01' },
-      { name: 'OldFavorite', mods: [], created_at: '2026-01-01' },
-      { name: 'WeekendPack', mods: [], created_at: '2026-01-01' },
+      {
+        name: 'OldFavorite',
+        mods: [
+          { name: 'Old A', enabled: true },
+        ],
+        created_at: '2026-01-01',
+      },
+      {
+        name: 'WeekendPack',
+        mods: [
+          { name: 'Weekend A', enabled: true },
+          { name: 'Weekend B', enabled: false },
+        ],
+        created_at: '2026-01-01',
+      },
     ]);
     registerInvokeHandler('get_subscriptions', () => []);
   }
@@ -921,6 +934,10 @@ describe('<HomeView> Recent modpacks strip', () => {
     const old = screen.getByRole('button', { name: /Switch to OldFavorite/i });
     // Newest launch renders before the older one.
     expect(weekend.compareDocumentPosition(old) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText(/Jump back into the packs you actually played/i)).toBeInTheDocument();
+    expect(within(weekend).getByText('2 mods')).toBeInTheDocument();
+    expect(within(weekend).getByText('1 active')).toBeInTheDocument();
+    expect(within(weekend).getByText(/Last played/)).toBeInTheDocument();
     // The active pack never offers "switch to itself".
     expect(screen.queryByRole('button', { name: /Switch to ActivePack/i })).toBeNull();
   });

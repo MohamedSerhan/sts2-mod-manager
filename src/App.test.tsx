@@ -1097,6 +1097,7 @@ describe('<App>', () => {
       expect(screen.getByText(/Mod Manager v9\.9\.9 is available/)).toBeInTheDocument();
     });
     expect(screen.getByText(/You're on v1\.3\.4/)).toBeInTheDocument();
+    expect(screen.getByText(/Windows Defender may warn on this unsigned installer/)).toBeInTheDocument();
   });
 
   it('app-update banner Dismiss button hides the banner', async () => {

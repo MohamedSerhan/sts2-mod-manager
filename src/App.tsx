@@ -936,6 +936,9 @@ function AppInner() {
                       ? t('app.willRestart')
                       : t('app.currentVersion', { version: appUpdate.currentVersion })}
                   </div>
+                  <div className="gf-banner-security-note">
+                    {t('app.windowsSecurityNote')}
+                  </div>
                 </div>
                 <button
                   onClick={() => setUpdateDismissed(true)}

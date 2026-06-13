@@ -619,18 +619,12 @@ fn find_existing_mod(
         }
     }
 
-    // Try matching by name (case-insensitive, ignoring common suffixes like "Lite")
+    // Try matching by exact name. Do not collapse variant suffixes such as
+    // "Lite": BetterSpire2 and BetterSpire2 Lite are separate mods.
     if let Some(ref incoming_name) = identity.name {
-        let normalized = normalize_mod_name(incoming_name);
+        let normalized = compact_mod_identity(incoming_name);
         for m in &all_mods {
-            if normalize_mod_name(&m.name) == normalized {
-                return Some(m.clone());
-            }
-        }
-        // Also try substring match (e.g., "BetterSpire2" matches "BetterSpire2 Lite")
-        for m in &all_mods {
-            let existing_norm = normalize_mod_name(&m.name);
-            if existing_norm.contains(&normalized) || normalized.contains(&existing_norm) {
+            if compact_mod_identity(&m.name) == normalized {
                 return Some(m.clone());
             }
         }
@@ -651,23 +645,15 @@ fn find_existing_mod(
     // Try matching by cleaned zip filename (strips Nexus suffixes like -284-1-1-0-1775500710)
     if let Some(ref clean_stem) = identity.zip_stem_clean {
         let lower_stem = clean_stem.to_lowercase();
-        // Exact match against folder name or mod name (without spaces)
+        // Exact compact match against folder name or mod name. Substring
+        // matching is intentionally avoided so variants do not replace each
+        // other, e.g. BetterSpire2 vs BetterSpire2 Lite.
         for m in &all_mods {
-            let name_nospace = m.name.to_lowercase().replace(' ', "");
-            if name_nospace == lower_stem {
+            if compact_mod_identity(&m.name) == compact_mod_identity(&lower_stem) {
                 return Some(m.clone());
             }
             if let Some(ref folder) = m.folder_name {
-                if folder.to_lowercase().replace(' ', "") == lower_stem {
-                    return Some(m.clone());
-                }
-            }
-        }
-        // Substring/contains match
-        for m in &all_mods {
-            let name_nospace = m.name.to_lowercase().replace(' ', "");
-            if name_nospace.contains(&lower_stem) || lower_stem.contains(&name_nospace) {
-                if !lower_stem.is_empty() && lower_stem.len() >= 4 {
+                if compact_mod_identity(folder) == compact_mod_identity(&lower_stem) {
                     return Some(m.clone());
                 }
             }
@@ -677,31 +663,45 @@ fn find_existing_mod(
     None
 }
 
-/// Normalize a mod name for fuzzy matching: lowercase, strip common suffixes/prefixes.
+/// Normalize a mod name for exact compact matching.
 fn normalize_mod_name(name: &str) -> String {
-    name.to_lowercase()
-        .replace(" lite", "")
-        .replace(" full", "")
-        .replace(" plus", "")
-        .replace(" pro", "")
-        .trim()
-        .to_string()
+    name.to_lowercase().trim().to_string()
 }
 
 /// Compact a mod/file label for loose identity comparisons.
 /// Removes punctuation, spaces, and version separators so
 /// "STS2BaseCamp V0.4.0" can still match an installed "Base Camp".
 fn compact_mod_identity(name: &str) -> String {
-    name.chars()
+    let without_version = strip_display_version_suffix(name);
+    let compact: String = without_version
+        .chars()
         .filter(|c| c.is_ascii_alphanumeric())
         .map(|c| c.to_ascii_lowercase())
-        .collect()
+        .collect();
+    compact
+        .strip_prefix("sts2")
+        .unwrap_or(compact.as_str())
+        .to_string()
+}
+
+fn strip_display_version_suffix(name: &str) -> &str {
+    for (idx, ch) in name.char_indices().rev() {
+        if (ch == 'v' || ch == 'V')
+            && name[idx + ch.len_utf8()..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_digit())
+        {
+            return name[..idx].trim();
+        }
+    }
+    name
 }
 
 fn identities_overlap(a: &str, b: &str) -> bool {
     let a = compact_mod_identity(&normalize_mod_name(a));
     let b = compact_mod_identity(&normalize_mod_name(b));
-    a.len() >= 4 && b.len() >= 4 && (a.contains(&b) || b.contains(&a))
+    !a.is_empty() && a == b
 }
 
 fn download_filename_matches_installed_mod(
@@ -1043,9 +1043,7 @@ fn attach_pending_nexus_source(
             }
             let p_norm = normalize_mod_name(&p.mod_name);
             if !p_norm.is_empty()
-                && (installed_norm.contains(&p_norm)
-                    || p_norm.contains(&installed_norm)
-                    || identities_overlap(installed_name, &p.mod_name))
+                && (installed_norm == p_norm || identities_overlap(installed_name, &p.mod_name))
             {
                 return true;
             }
@@ -1213,7 +1211,10 @@ mod stash_tests {
         let stashed = stash_existing_mod_files(&info, &mods, None);
 
         // Original locations are gone.
-        assert!(!mods.join("MyMod").exists(), "mod folder should be moved aside");
+        assert!(
+            !mods.join("MyMod").exists(),
+            "mod folder should be moved aside"
+        );
         assert!(
             !mods.join("MyMod-extra.json").exists(),
             "top-level file should be moved aside"
@@ -1239,7 +1240,10 @@ mod stash_tests {
     fn restore_puts_stashed_files_back_exactly_and_discards_partial_output() {
         let base = tempdir().unwrap();
         let mods = base.path().join("mods");
-        write(&mods.join("MyMod").join("manifest.json"), "original-manifest");
+        write(
+            &mods.join("MyMod").join("manifest.json"),
+            "original-manifest",
+        );
         write(&mods.join("MyMod").join("plugin.dll"), "original-dll");
         write(&mods.join("MyMod-extra.json"), "original-extra");
 
@@ -1247,7 +1251,10 @@ mod stash_tests {
         let stashed = stash_existing_mod_files(&info, &mods, None);
 
         // Simulate a failed extract that left partial output behind.
-        write(&mods.join("MyMod").join("manifest.json"), "partial-manifest");
+        write(
+            &mods.join("MyMod").join("manifest.json"),
+            "partial-manifest",
+        );
 
         stashed.restore();
 
@@ -1281,7 +1288,10 @@ mod stash_tests {
     fn discard_removes_stash_after_successful_install() {
         let base = tempdir().unwrap();
         let mods = base.path().join("mods");
-        write(&mods.join("MyMod").join("manifest.json"), "original-manifest");
+        write(
+            &mods.join("MyMod").join("manifest.json"),
+            "original-manifest",
+        );
 
         let info = fixture_mod_info("MyMod", &[]);
         let stashed = stash_existing_mod_files(&info, &mods, None);
@@ -1387,6 +1397,51 @@ mod pending_nexus_source_tests {
         assert!(
             state.lock().unwrap().pending_nexus_installs.is_empty(),
             "matching pending Nexus install should be consumed"
+        );
+    }
+
+    #[test]
+    fn identity_helpers_do_not_merge_lite_variants() {
+        assert!(
+            !identities_overlap("BetterSpire2", "BetterSpire2 Lite"),
+            "variant suffixes must not collapse separate mods"
+        );
+        assert!(
+            !download_filename_matches_installed_mod(
+                "BetterSpire2-123-1-0-0-1780000000.zip",
+                "BetterSpire2 Lite",
+                Some("BetterSpire2Lite"),
+            ),
+            "Nexus filename matching must not treat BetterSpire2 as BetterSpire2 Lite"
+        );
+    }
+
+    #[test]
+    fn find_existing_mod_does_not_replace_lite_variant_by_name() {
+        let tmp = tempdir().unwrap();
+        let mods_path = tmp.path().join("mods");
+        let disabled_path = tmp.path().join("mods_disabled");
+        let lite_dir = disabled_path.join("BetterSpire2Lite");
+        std::fs::create_dir_all(&lite_dir).unwrap();
+        std::fs::write(
+            lite_dir.join("BetterSpire2Lite.json"),
+            r#"{"id":"BetterSpire2Lite","name":"BetterSpire2 Lite","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        std::fs::write(lite_dir.join("BetterSpire2Lite.dll"), b"dll").unwrap();
+
+        let identity = ZipIdentity {
+            name: Some("BetterSpire2".into()),
+            mod_id: None,
+            folder_name: Some("BetterSpire2".into()),
+            zip_stem_clean: Some("BetterSpire2".into()),
+        };
+
+        let matched = find_existing_mod(&identity, &mods_path, Some(&disabled_path));
+
+        assert!(
+            matched.is_none(),
+            "BetterSpire2 must not match an installed BetterSpire2 Lite variant"
         );
     }
 }

@@ -41,6 +41,7 @@ use github::{
     cleanup_orphan_bundle_assets as github_cleanup_orphan_bundle_assets,
     download_bundle as github_download_bundle, ensure_profiles_repo as github_ensure_profiles_repo,
     fetch_shared_profile as github_fetch_shared_profile, get_github_username,
+    upload_mod_bundle_file_via_release as github_upload_mod_bundle_file_via_release,
     upload_mod_bundle_via_release as github_upload_mod_bundle_via_release,
     upsert_file as github_upsert_file,
 };
@@ -50,7 +51,9 @@ use github::{
 // (which has the enabled-vs-disabled-path fallback baked in), so the
 // raw `zip_mod_files` lives in `upload.rs` as an implementation detail.
 use upload::{ensure_profile_publish_complete, restore_profile_after_failed_publish};
-pub(crate) use upload::{fingerprint_profile_mod_files, zip_profile_mod_files};
+pub(crate) use upload::{
+    fingerprint_profile_mod_files, zip_profile_mod_files, zip_profile_mod_files_to_tempfile,
+};
 
 /// One mod skipped during a modpack install because it declared a
 /// `min_game_version` higher than the user's STS2 build. Surfaced in
@@ -405,6 +408,7 @@ async fn upsert_file(
     .await
 }
 
+#[allow(dead_code)]
 pub(crate) async fn upload_mod_bundle_via_release(
     token: &str,
     username: &str,
@@ -419,6 +423,26 @@ pub(crate) async fn upload_mod_bundle_via_release(
         mod_name,
         version,
         zip_data,
+        prior_sha256,
+        &profiles_repo(),
+    )
+    .await
+}
+
+pub(crate) async fn upload_mod_bundle_file_via_release(
+    token: &str,
+    username: &str,
+    mod_name: &str,
+    version: &str,
+    zip_path: &Path,
+    prior_sha256: Option<&str>,
+) -> Result<(String, String)> {
+    github_upload_mod_bundle_file_via_release(
+        token,
+        username,
+        mod_name,
+        version,
+        zip_path,
         prior_sha256,
         &profiles_repo(),
     )
@@ -1107,15 +1131,16 @@ pub(super) async fn share_profile_impl(
             );
         }
         log::info!("Bundling mod '{}' ({} files)", pm.name, pm.files.len());
-        match zip_profile_mod_files(pm, mods_path, disabled_path) {
-            Ok(zip_data) => {
+        match zip_profile_mod_files_to_tempfile(pm, mods_path, disabled_path) {
+            Ok(zip_file) => {
+                let zip_len = zip_file.as_file().metadata().map(|m| m.len()).unwrap_or(0);
                 let prior_sha256 = pm.bundle_sha256.clone();
-                match upload_mod_bundle_via_release(
+                match upload_mod_bundle_file_via_release(
                     token,
                     &username,
                     &pm.name,
                     &pm.version,
-                    &zip_data,
+                    zip_file.path(),
                     prior_sha256.as_deref(),
                 )
                 .await
@@ -1130,11 +1155,7 @@ pub(super) async fn share_profile_impl(
                         pm.bundle_sha256 = Some(hash);
                         bundle_source_fingerprints
                             .insert(fingerprint_key.clone(), source_fingerprint.clone());
-                        log::info!(
-                            "Bundled mod '{}' successfully ({} bytes)",
-                            pm.name,
-                            zip_data.len()
-                        );
+                        log::info!("Bundled mod '{}' successfully ({} bytes)", pm.name, zip_len);
                     }
                     Err(e) => {
                         log::error!("Failed to upload bundle for '{}': {}", pm.name, e);
@@ -1512,15 +1533,16 @@ pub async fn reshare_profile(
             },
         );
         log::info!("Re-bundling mod '{}' ({} files)", pm.name, pm.files.len());
-        match zip_profile_mod_files(pm, &mods_path, &disabled_path) {
-            Ok(zip_data) => {
+        match zip_profile_mod_files_to_tempfile(pm, &mods_path, &disabled_path) {
+            Ok(zip_file) => {
+                let zip_len = zip_file.as_file().metadata().map(|m| m.len()).unwrap_or(0);
                 let prior_sha256 = pm.bundle_sha256.clone();
-                match upload_mod_bundle_via_release(
+                match upload_mod_bundle_file_via_release(
                     &token,
                     &share_info.owner,
                     &pm.name,
                     &pm.version,
-                    &zip_data,
+                    zip_file.path(),
                     prior_sha256.as_deref(),
                 )
                 .await
@@ -1538,7 +1560,7 @@ pub async fn reshare_profile(
                         log::info!(
                             "Re-bundled mod '{}' successfully ({} bytes)",
                             pm.name,
-                            zip_data.len()
+                            zip_len
                         );
                     }
                     Err(e) => {
@@ -2684,7 +2706,9 @@ mod share_orchestration_tests {
         let fingerprint = share_info
             .bundle_source_fingerprints
             .get("folder:testmod")
-            .expect("successful share should persist the source fingerprint for future re-share skips");
+            .expect(
+                "successful share should persist the source fingerprint for future re-share skips",
+            );
         assert!(
             fingerprint.starts_with("v1:1.0.0:"),
             "source fingerprint must include the profile mod version: {fingerprint}"

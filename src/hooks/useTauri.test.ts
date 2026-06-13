@@ -348,7 +348,7 @@ describe('useTauri wrappers — command names + arg shapes', () => {
     await shareProfile('My Pack', null);
     expect(lastCall()).toEqual({
       cmd: 'share_profile',
-      args: { name: 'My Pack', listPublic: null },
+      args: { name: 'My Pack', listPublic: null, includeNotes: null },
     });
     await reshareProfile('My Pack', null);
     expect(lastCall().cmd).toBe('reshare_profile');

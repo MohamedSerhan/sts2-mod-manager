@@ -91,6 +91,36 @@ describe('<SettingsView>', () => {
     });
   });
 
+  it('Backups tab shows the retention control reflecting the stored value', async () => {
+    registerInvokeHandler('list_backups_cmd', () => []);
+    registerInvokeHandler('get_backup_retention', () => 3);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: /Backups/ }));
+    const select = await screen.findByLabelText(/Backups to keep/i);
+    expect(select).toHaveValue('3');
+    // The "Off" option (value 0) is offered.
+    expect(within(select as HTMLSelectElement).getByRole('option', { name: /Off/i })).toBeInTheDocument();
+  });
+
+  it('changing the retention select invokes set_backup_retention with the new count', async () => {
+    registerInvokeHandler('list_backups_cmd', () => []);
+    registerInvokeHandler('get_backup_retention', () => 5);
+    registerInvokeHandler('set_backup_retention', (args) => Number(args?.count));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: /Backups/ }));
+    const select = await screen.findByLabelText(/Backups to keep/i);
+    await user.selectOptions(select, '0');
+    await waitFor(() => {
+      expect(getInvokeCalls().some(
+        (c) => c.cmd === 'set_backup_retention' && c.args?.count === 0,
+      )).toBe(true);
+    });
+  });
+
   it('Advanced tab shows a Check-for-updates button', async () => {
     const user = userEvent.setup();
     render(<Wrap />);

@@ -32,7 +32,7 @@ mod github;
 pub mod install;
 mod upload;
 
-use code::{code_to_filename, generate_code, parse_share_code};
+use code::{code_to_filename, format_code, generate_code, parse_share_code};
 // Low-level GitHub plumbing — the release-asset upload retry/recovery
 // layer and the orchestration helpers used by share/reshare/install.
 pub(crate) use github::build_client;
@@ -210,6 +210,136 @@ fn save_share_info(path: &Path, info: &ShareInfo) -> Result<()> {
     Ok(())
 }
 
+fn recover_owned_share_info_sidecar(
+    profile_name: &str,
+    profiles_path: &Path,
+    owner: &str,
+    profile_code: &str,
+    published_profile: &Profile,
+) -> Result<ShareInfo> {
+    let info = ShareInfo {
+        code: format_code(profile_code),
+        owner: owner.to_string(),
+        file_sha: None,
+        share_format_version: SHARE_FORMAT_VERSION,
+        published_signature: Some(profile_publish_signature(published_profile)),
+    };
+    let share_info_path = profiles_path.join(format!("{}.share", profile_name));
+    save_share_info(&share_info_path, &info)?;
+    Ok(info)
+}
+
+pub(super) fn recover_owned_share_info_sidecar_for_install(
+    profile_name: &str,
+    profiles_path: &Path,
+    owner: &str,
+    profile_code: &str,
+    published_profile: &Profile,
+) -> Result<()> {
+    recover_owned_share_info_sidecar(
+        profile_name,
+        profiles_path,
+        owner,
+        profile_code,
+        published_profile,
+    )
+    .map(|_| ())
+}
+
+fn parse_subscription_owner_and_code(
+    sub: &crate::subscriptions::Subscription,
+) -> Option<(String, String)> {
+    if let Some((owner, code)) = sub.share_id.split_once(':') {
+        if let Ok((owner, code)) = parse_share_code(&format!("{}/{}", owner.trim(), code.trim())) {
+            return Some((owner, format_code(&code)));
+        }
+    }
+
+    parse_share_code(&sub.share_url)
+        .ok()
+        .map(|(owner, code)| (owner, format_code(&code)))
+}
+
+async fn recover_owned_share_info_from_subscription(
+    profile_name: &str,
+    profiles_path: &Path,
+    config_path: &Path,
+    token: Option<&str>,
+) -> Option<ShareInfo> {
+    let token = token?;
+    let db = crate::subscriptions::load_subscriptions(config_path);
+    let candidates: Vec<_> = db
+        .subscriptions
+        .values()
+        .filter(|sub| sub.profile_name.eq_ignore_ascii_case(profile_name))
+        .collect();
+    if candidates.is_empty() {
+        return None;
+    }
+
+    let username = match get_github_username(token).await {
+        Ok(username) => username,
+        Err(e) => {
+            log::warn!(
+                "get_share_info: cannot recover ownership metadata for '{}': {}",
+                profile_name,
+                e
+            );
+            return None;
+        }
+    };
+
+    for sub in candidates {
+        let Some((owner, profile_code)) = parse_subscription_owner_and_code(sub) else {
+            continue;
+        };
+        if !owner.eq_ignore_ascii_case(&username) {
+            continue;
+        }
+
+        let filename = code_to_filename(&profile_code);
+        let published_profile = match fetch_shared_profile(&owner, &filename, Some(token)).await {
+            Ok(profile) => profile,
+            Err(e) => {
+                log::warn!(
+                    "get_share_info: cannot fetch owned subscribed manifest '{}' for '{}': {}",
+                    filename,
+                    profile_name,
+                    e
+                );
+                continue;
+            }
+        };
+
+        match recover_owned_share_info_sidecar(
+            profile_name,
+            profiles_path,
+            &owner,
+            &profile_code,
+            &published_profile,
+        ) {
+            Ok(info) => {
+                log::info!(
+                    "get_share_info: recovered ownership metadata for '{}' from subscription '{}'",
+                    profile_name,
+                    sub.share_id
+                );
+                return Some(info);
+            }
+            Err(e) => {
+                log::warn!(
+                    "get_share_info: failed to save recovered ownership metadata for '{}': {}",
+                    profile_name,
+                    e
+                );
+                return None;
+            }
+        }
+    }
+
+    None
+}
+
 /// Per-step status emitted to the frontend while a share / re-share is
 /// running. Lets the PublishModal show "Bundling mod 5 of 20…" instead
 /// of an opaque "Publishing…" spinner — bundling 20 mods of any real
@@ -374,12 +504,44 @@ fn publish_profile_mod_matches_installed(pm: &ProfileMod, installed: &ModInfo) -
     publish_keys_intersect(&profile_keys, &installed_keys)
 }
 
+/// Refresh a saved pack entry's on-disk-derived fields (`files`,
+/// `folder_name`, `version`) from the currently-installed mod it resolves
+/// to (issue #174). The saved manifest can go stale when the curator
+/// deletes and reinstalls a mod: Nexus archives often unpack into a
+/// version-suffixed folder, so `pm.files` ends up pointing at paths that
+/// no longer exist and bundling fails with a confusing "missing declared
+/// file" error on every subsequent share attempt.
+///
+/// Curator-authored fields (`source`, `hash`, `mod_id`, `enabled`,
+/// `bundle_url`, `bundle_sha256`, `bundle_members`, and the pack-level
+/// `mod_extras`/notes/links/tags) are deliberately left untouched here —
+/// only the fields that describe "what's actually on disk right now" are
+/// refreshed. For an unchanged mod this is a no-op (the installed scan
+/// reports the same `files`/`folder_name`/`version` already in `pm`), so
+/// re-share's content-addressed bundle hashing is unaffected.
+///
+/// Returns `true` if `files` actually changed, so the caller can log the
+/// drift-repair as a diagnostic trail.
+fn refresh_profile_mod_from_installed(pm: &mut ProfileMod, installed: &ModInfo) -> bool {
+    let files_changed = pm.files != installed.files;
+    if files_changed {
+        pm.files = installed.files.clone();
+    }
+    if installed.folder_name.is_some() && pm.folder_name != installed.folder_name {
+        pm.folder_name = installed.folder_name.clone();
+    }
+    if pm.version != installed.version {
+        pm.version = installed.version.clone();
+    }
+    files_changed
+}
+
 fn filter_profile_for_publish_compatibility(
     profile: &mut Profile,
     mods_path: &std::path::Path,
     disabled_path: &std::path::Path,
     game_version: Option<&str>,
-) {
+) -> Vec<String> {
     // We always need the installed scan so we can drop stored (disabled)
     // members — that exclusion does not depend on the game version.
     let installed_mods =
@@ -387,8 +549,15 @@ fn filter_profile_for_publish_compatibility(
     let profile_name = profile.name.clone();
     let mut filtered_incompatible = 0;
     let mut filtered_stored = 0;
+    let mut refreshed_files = 0;
+    // Pack entries that resolve to no installed mod at all (issue #174):
+    // bundling them would fail with a confusing "missing declared file"
+    // zip error. We surface these to the caller so they can be reported
+    // through the existing failed/missing-bundles mechanism with a clear
+    // "not installed" message instead.
+    let mut not_installed: Vec<String> = Vec::new();
 
-    profile.mods.retain(|pm| {
+    profile.mods.retain_mut(|pm| {
         let installed = installed_mods
             .iter()
             .find(|installed| publish_profile_mod_matches_installed(pm, installed));
@@ -423,7 +592,35 @@ fn filter_profile_for_publish_compatibility(
                 filtered_incompatible += 1;
                 false
             }
-            _ => true,
+            // Resolved to a live install: refresh the stale manifest paths
+            // (and folder_name/version if they drifted) so bundling reads
+            // from where the mod actually lives now, not where it lived
+            // when the pack entry was first saved.
+            Some(m) => {
+                if refresh_profile_mod_from_installed(pm, m) {
+                    refreshed_files += 1;
+                    log::info!(
+                        "Publish '{}': refreshed stale file list for '{}' from current install ({} file(s))",
+                        profile_name,
+                        pm.name,
+                        pm.files.len(),
+                    );
+                }
+                true
+            }
+            // No installed mod matches this pack entry at all -- the
+            // curator likely deleted it without removing it from the pack.
+            // Keep it in the profile (so it's still visible/removable) but
+            // clear its stale `files` so the bundling loop's `!files.is_empty()`
+            // filter skips it instead of attempting a zip that's guaranteed
+            // to fail with a confusing "missing declared file" error. The
+            // caller reports it through the failed/missing-bundles
+            // mechanism with the clearer "not installed" message instead.
+            None => {
+                pm.files.clear();
+                not_installed.push(pm.name.clone());
+                true
+            }
         }
     });
 
@@ -441,24 +638,88 @@ fn filter_profile_for_publish_compatibility(
             filtered_incompatible,
         );
     }
+    if refreshed_files > 0 {
+        log::info!(
+            "Publish '{}': refreshed file lists for {} reinstalled mod(s)",
+            profile_name,
+            refreshed_files,
+        );
+    }
+    for name in &not_installed {
+        log::warn!(
+            "Publish '{}': '{}' is in this modpack but not installed -- remove it from the pack or reinstall it",
+            profile_name,
+            name,
+        );
+    }
+
+    not_installed
 }
 
+/// Returns the prepared profile plus the names of any pack entries that
+/// resolved to no installed mod at all (issue #174) -- these have already
+/// had their stale `files` cleared by `filter_profile_for_publish_compatibility`
+/// so bundling skips them; callers should seed `failed_uploads` with this
+/// list so `ensure_profile_publish_complete` reports them with a clear
+/// "not installed" message instead of letting bundling fail with a raw
+/// zip error.
 fn load_profile_for_publish_from_paths(
     name: &str,
     list_public: Option<bool>,
+    include_notes: bool,
     profiles_path: &std::path::Path,
     mods_path: &std::path::Path,
     disabled_path: &std::path::Path,
     config_path: &std::path::Path,
     game_version: Option<&str>,
-) -> Result<Profile> {
+) -> Result<(Profile, Vec<String>)> {
     let mut profile = crate::profiles::load_profile(name, profiles_path)?;
-    filter_profile_for_publish_compatibility(&mut profile, mods_path, disabled_path, game_version);
+    let not_installed =
+        filter_profile_for_publish_compatibility(&mut profile, mods_path, disabled_path, game_version);
     backfill_profile_sources_from_db(&mut profile, config_path);
+    if include_notes {
+        backfill_profile_extras_from_db(&mut profile, config_path);
+    } else {
+        // Opt-out: also drop extras a previous publish may have left in
+        // the saved local JSON, so they don't ride along anyway.
+        profile.mod_extras.clear();
+    }
     if let Some(public) = list_public {
         profile.public = Some(public);
     }
-    Ok(profile)
+    Ok((profile, not_installed))
+}
+
+/// Populate the manifest's per-mod curator extras (note / custom link /
+/// tags) from the local sources DB (Solo FR, 2026-06-10). Folder-first
+/// keying to match `enrich_mods_with_sources`. Rebuilt from the DB on
+/// every publish — the DB is the source of truth, so edits and removals
+/// both propagate on the next share. Deliberately NOT part of the
+/// publish signature: editing a note never flags the pack out-of-sync;
+/// the new notes simply ride along with the next real re-share.
+fn backfill_profile_extras_from_db(profile: &mut Profile, config_path: &std::path::Path) {
+    let db = crate::mod_sources::load_sources(config_path);
+    let mut extras = std::collections::HashMap::new();
+    for pm in &profile.mods {
+        let Some(entry) = crate::mod_sources::lookup_entry(
+            &db.mods,
+            pm.folder_name.as_deref(),
+            &pm.name,
+            pm.mod_id.as_deref(),
+        ) else {
+            continue;
+        };
+        let e = crate::profiles::SharedModExtras {
+            note: entry.note.clone(),
+            custom_url: entry.custom_url.clone(),
+            tags: entry.tags.clone(),
+        };
+        if !e.is_empty() {
+            let key = pm.folder_name.clone().unwrap_or_else(|| pm.name.clone());
+            extras.insert(key, e);
+        }
+    }
+    profile.mod_extras = extras;
 }
 
 /// Stamp each mod's `source` from the curator's local `mod_sources.json`
@@ -540,6 +801,7 @@ fn profile_publish_signature(profile: &Profile) -> String {
 pub async fn share_profile(
     name: String,
     list_public: Option<bool>,
+    include_notes: Option<bool>,
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ShareResult, String> {
@@ -571,16 +833,17 @@ pub async fn share_profile(
             "Profile '{}' already shared, reusing code via reshare",
             name
         );
-        return reshare_profile(name, list_public, app_handle, state).await;
+        return reshare_profile(name, list_public, include_notes, app_handle, state).await;
     }
 
     let _guard = ShareGuard::try_acquire(state.inner(), &name)?;
 
     let old_profile =
         crate::profiles::load_profile(&name, &profiles_path).map_err(|e| e.to_string())?;
-    let profile = load_profile_for_publish_from_paths(
+    let (profile, not_installed) = load_profile_for_publish_from_paths(
         &name,
         list_public,
+        include_notes.unwrap_or(true),
         &profiles_path,
         &mods_path,
         &disabled_path,
@@ -601,10 +864,22 @@ pub async fn share_profile(
         &profiles_path,
         &token,
         Some(&emit_fn),
+        not_installed,
     )
     .await
     {
-        Ok(result) => Ok(result),
+        Ok(result) => {
+            // Self-subscribed curators are by definition in sync with what
+            // was just published — refresh the snapshot so the update poll
+            // doesn't flag their own publish (see the helper's doc).
+            if let Ok(published) = crate::profiles::load_profile(&name, &profiles_path) {
+                crate::subscriptions::sync_own_subscription_after_publish(
+                    &config_path,
+                    &published,
+                );
+            }
+            Ok(result)
+        }
         Err(e) => {
             restore_profile_after_failed_publish(Some(&old_profile), &profiles_path);
             Err(e.to_string())
@@ -625,6 +900,7 @@ pub(super) async fn share_profile_impl(
     profiles_path: &std::path::Path,
     token: &str,
     emit: Option<&(dyn Fn(&str, ShareProgress) + Send + Sync)>,
+    failed_uploads_seed: Vec<String>,
 ) -> Result<ShareResult> {
     // Get username
     let username = get_github_username(token).await?;
@@ -633,7 +909,12 @@ pub(super) async fn share_profile_impl(
     // Ensure repo exists
     ensure_profiles_repo(token, &username).await?;
 
-    let mut failed_uploads: Vec<String> = Vec::new();
+    // Seeded with pack entries that resolved to no installed mod at all
+    // (issue #174) -- `filter_profile_for_publish_compatibility` already
+    // cleared their `files` so the bundling loop below skips them, but
+    // they still need to surface in `ensure_profile_publish_complete`'s
+    // missing-bundles report with a clear "not installed" message.
+    let mut failed_uploads: Vec<String> = failed_uploads_seed;
     let bundlable: Vec<usize> = profile
         .mods
         .iter()
@@ -801,22 +1082,52 @@ pub(super) async fn share_profile_impl(
 
 /// Get the share info (code + owner) for a profile, if it has been shared.
 #[tauri::command]
-pub fn get_share_info(
+pub async fn get_share_info(
     name: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Option<ShareResult>, String> {
-    let profiles_path = {
+    let (profiles_path, config_path, token) = {
         let s = state.lock().map_err(|e| e.to_string())?;
-        s.profiles_path.clone()
+        (
+            s.profiles_path.clone(),
+            s.config_path.clone(),
+            s.github_token.clone(),
+        )
     };
     let share_info_path = profiles_path.join(format!("{}.share", name));
-    let content = match std::fs::read_to_string(&share_info_path) {
-        Ok(c) => c,
-        Err(_) => return Ok(None),
-    };
-    let info: ShareInfo = match serde_json::from_str(&content) {
-        Ok(i) => i,
-        Err(_) => return Ok(None),
+    let info: ShareInfo = match std::fs::read_to_string(&share_info_path) {
+        Ok(content) => match serde_json::from_str(&content) {
+            Ok(info) => info,
+            Err(e) => {
+                log::warn!(
+                    "get_share_info: failed to read share metadata for '{}': {}",
+                    name,
+                    e
+                );
+                match recover_owned_share_info_from_subscription(
+                    &name,
+                    &profiles_path,
+                    &config_path,
+                    token.as_deref(),
+                )
+                .await
+                {
+                    Some(info) => info,
+                    None => return Ok(None),
+                }
+            }
+        },
+        Err(_) => match recover_owned_share_info_from_subscription(
+            &name,
+            &profiles_path,
+            &config_path,
+            token.as_deref(),
+        )
+        .await
+        {
+            Some(info) => info,
+            None => return Ok(None),
+        },
     };
     let filename = code_to_filename(&info.code);
     let url = format!(
@@ -857,6 +1168,7 @@ pub fn get_share_info(
 pub async fn reshare_profile(
     name: String,
     list_public: Option<bool>,
+    include_notes: Option<bool>,
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ShareResult, String> {
@@ -891,9 +1203,10 @@ pub async fn reshare_profile(
 
     let old_profile = crate::profiles::load_profile(&name, &profiles_path).ok();
 
-    let mut profile = load_profile_for_publish_from_paths(
+    let (mut profile, not_installed) = load_profile_for_publish_from_paths(
         &name,
         list_public,
+        include_notes.unwrap_or(true),
         &profiles_path,
         &mods_path,
         &disabled_path,
@@ -909,7 +1222,12 @@ pub async fn reshare_profile(
         profile.mods.len()
     );
 
-    let mut failed_uploads: Vec<String> = Vec::new();
+    // Seeded with pack entries that resolved to no installed mod at all
+    // (issue #174) -- `filter_profile_for_publish_compatibility` already
+    // cleared their `files` so the bundling loop below skips them, but
+    // they still need to surface in `ensure_profile_publish_complete`'s
+    // missing-bundles report with a clear "not installed" message.
+    let mut failed_uploads: Vec<String> = not_installed;
     let bundlable: Vec<usize> = profile
         .mods
         .iter()
@@ -1031,6 +1349,11 @@ pub async fn reshare_profile(
         published_signature: Some(profile_publish_signature(&profile)),
     };
     save_share_info(&share_info_path, &updated_info).map_err(|e| e.to_string())?;
+
+    // Self-subscribed curators are by definition in sync with what was just
+    // published — refresh the subscription snapshot so the update poll
+    // doesn't flag the curator's own re-share as a pending update.
+    crate::subscriptions::sync_own_subscription_after_publish(&config_path, &profile);
 
     // Reclaim disk on the `bundles` release: any asset no profile
     // manifest still references after this re-share is dead weight.
@@ -1196,6 +1519,153 @@ mod listing_tests {
         );
     }
 
+    #[test]
+    fn recovered_owned_share_info_uses_remote_signature() {
+        let dir = tempfile::tempdir().unwrap();
+        let profiles_path = dir.path().join("profiles");
+        std::fs::create_dir_all(&profiles_path).unwrap();
+
+        let mut remote = make_profile("Solo Pack", Some(false));
+        remote.created_by = Some("Solomag".into());
+        crate::profiles::save_profile(&remote, &profiles_path).unwrap();
+
+        let mut local = remote.clone();
+        local.mods.push(crate::profiles::ProfileMod {
+            name: "Local Edit".into(),
+            version: "1.0.0".into(),
+            source: None,
+            hash: None,
+            files: vec![],
+            folder_name: Some("LocalEdit".into()),
+            mod_id: Some("LocalEdit".into()),
+            enabled: true,
+            bundle_url: None,
+            bundle_sha256: None,
+            bundle_members: vec![],
+        });
+        crate::profiles::save_profile(&local, &profiles_path).unwrap();
+
+        let saved = recover_owned_share_info_sidecar(
+            "Solo Pack",
+            &profiles_path,
+            "Solomag",
+            "290a56edb15d",
+            &remote,
+        )
+        .unwrap();
+
+        assert_eq!(saved.owner, "Solomag");
+        assert_eq!(saved.code, "290A-56ED-B15D");
+        assert_eq!(saved.share_format_version, SHARE_FORMAT_VERSION);
+        assert_eq!(
+            saved.published_signature.as_deref(),
+            Some(profile_publish_signature(&remote).as_str()),
+            "recovered sidecar must compare future local edits against the remote manifest, not the already-drifted local one"
+        );
+        assert!(
+            profiles_path.join("Solo Pack.share").exists(),
+            "the recovery path must leave get_share_info/profile_is_owned with a durable ownership marker"
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_owned_sidecar_recovers_from_subscription_and_token_owner() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let _env_guard = super::github::release_upload_tests::ENV_LOCK.lock().await;
+        let server = MockServer::start().await;
+        std::env::set_var("STS2_GITHUB_API_BASE", server.uri());
+
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path();
+        let profiles_path = config_path.join("profiles");
+        std::fs::create_dir_all(&profiles_path).unwrap();
+
+        let mut remote = make_profile("Solo Pack", Some(false));
+        remote.created_by = Some("Solomag".into());
+        crate::profiles::save_profile(&remote, &profiles_path).unwrap();
+
+        let mut local = remote.clone();
+        local.mods.push(crate::profiles::ProfileMod {
+            name: "Local Edit".into(),
+            version: "1.0.0".into(),
+            source: None,
+            hash: None,
+            files: vec![],
+            folder_name: Some("LocalEdit".into()),
+            mod_id: Some("LocalEdit".into()),
+            enabled: true,
+            bundle_url: None,
+            bundle_sha256: None,
+            bundle_members: vec![],
+        });
+        crate::profiles::save_profile(&local, &profiles_path).unwrap();
+
+        let mut db = crate::subscriptions::SubscriptionsDb::default();
+        db.subscriptions.insert(
+            "Solomag:290a56edb15d".into(),
+            crate::subscriptions::Subscription {
+                share_id: "Solomag:290a56edb15d".into(),
+                share_url: "Solomag/290A-56ED-B15D".into(),
+                profile_name: "Solo Pack".into(),
+                curator: Some("Solomag".into()),
+                last_synced_profile: remote.clone(),
+                last_checked: Utc::now(),
+                last_synced: Utc::now(),
+            },
+        );
+        crate::subscriptions::save_subscriptions(&db, config_path).unwrap();
+
+        assert!(
+            !profiles_path.join("Solo Pack.share").exists(),
+            "test setup should match the broken install state"
+        );
+
+        Mock::given(method("GET"))
+            .and(path("/user"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"login": "Solomag"})),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path(
+                "/repos/Solomag/sts2mm-profiles/contents/290a56edb15d.json",
+            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(serde_json::to_string_pretty(&remote).unwrap()),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let saved = recover_owned_share_info_from_subscription(
+            "Solo Pack",
+            &profiles_path,
+            config_path,
+            Some("test-token"),
+        )
+        .await
+        .expect("token owner should recover the missing share sidecar");
+
+        assert_eq!(saved.owner, "Solomag");
+        assert_eq!(saved.code, "290A-56ED-B15D");
+        assert_eq!(
+            saved.published_signature.as_deref(),
+            Some(profile_publish_signature(&remote).as_str())
+        );
+        assert_ne!(
+            profile_publish_signature(&local),
+            saved.published_signature.unwrap(),
+            "the recovered marker must keep the tester's local edits visible as drift"
+        );
+        assert!(profiles_path.join("Solo Pack.share").exists());
+    }
+
     fn make_profile(name: &str, public: Option<bool>) -> Profile {
         Profile {
             name: name.into(),
@@ -1205,6 +1675,7 @@ mod listing_tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             public,
+            mod_extras: Default::default(),
         }
     }
 
@@ -1305,12 +1776,14 @@ mod share_orchestration_tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             public: None,
+            mod_extras: Default::default(),
         };
         crate::profiles::save_profile(&profile, &profiles_path).unwrap();
 
-        let prepared = load_profile_for_publish_from_paths(
+        let (prepared, _not_installed) = load_profile_for_publish_from_paths(
             "Stable",
             Some(false),
+            true,
             &profiles_path,
             &mods_path,
             &disabled_path,
@@ -1348,12 +1821,14 @@ mod share_orchestration_tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             public: None,
+            mod_extras: Default::default(),
         };
         crate::profiles::save_profile(&profile, &profiles_path).unwrap();
 
-        let prepared = load_profile_for_publish_from_paths(
+        let (prepared, _not_installed) = load_profile_for_publish_from_paths(
             "Stable",
             None,
+            true,
             &profiles_path,
             &mods_path,
             &disabled_path,
@@ -1364,6 +1839,159 @@ mod share_orchestration_tests {
 
         assert_eq!(prepared.mods.len(), 1);
         assert_eq!(prepared.mods[0].name, "Stable Only");
+    }
+
+    #[test]
+    fn publish_preparation_refreshes_stale_files_for_reinstalled_mod() {
+        // Issue #174: the curator deleted "End Run Graph" and reinstalled
+        // it -- the new Nexus archive unpacked into a version-suffixed
+        // folder ("EndRunGraph-v2"), so the saved pack entry's `files`
+        // (pointing at the old "EndRunGraph" folder) no longer exist on
+        // disk. Preparation must resolve the entry to the new install
+        // (same identity keys: mod_id/folder_name match the *new*
+        // folder... but here we match via `name` since folder_name
+        // differs) and refresh `files`/`folder_name`/`version` so
+        // bundling reads from the new location.
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mods_path = tmpdir.path().join("mods");
+        let disabled_path = tmpdir.path().join("mods_disabled");
+        let profiles_path = tmpdir.path().join("profiles");
+        std::fs::create_dir_all(&mods_path).unwrap();
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        std::fs::create_dir_all(&profiles_path).unwrap();
+
+        // Only the NEW folder exists on disk -- the old one was deleted.
+        write_mod(&mods_path, "EndRunGraphV2", "End Run Graph");
+
+        // The saved pack entry still references the OLD folder/files and
+        // an older version string. Both `mod_id` and `folder_name` are
+        // cleared so identity falls back to matching on `name` -- exactly
+        // what happens when a reinstall lands under a fresh
+        // version-suffixed folder with a different manifest `id`.
+        let mut stale_pm = profile_mod("End Run Graph", "EndRunGraph");
+        stale_pm.mod_id = None;
+        stale_pm.folder_name = None;
+        stale_pm.files = vec!["EndRunGraph/EndRunGraph.json".into(), "EndRunGraph/EndRunGraph.dll".into()];
+        stale_pm.version = "0.9.0".into();
+
+        let profile = Profile {
+            name: "Stable".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![stale_pm],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+            mod_extras: Default::default(),
+        };
+        crate::profiles::save_profile(&profile, &profiles_path).unwrap();
+
+        let (prepared, not_installed) = load_profile_for_publish_from_paths(
+            "Stable",
+            None,
+            true,
+            &profiles_path,
+            &mods_path,
+            &disabled_path,
+            tmpdir.path(),
+            None,
+        )
+        .unwrap();
+
+        assert!(
+            not_installed.is_empty(),
+            "the reinstalled mod should resolve to the new install: {not_installed:?}"
+        );
+        assert_eq!(prepared.mods.len(), 1);
+        let pm = &prepared.mods[0];
+        assert_eq!(pm.name, "End Run Graph");
+        // `files` now point at the NEW folder, matching what's on disk --
+        // this is what makes `zip_profile_mod_files` succeed instead of
+        // erroring with "missing declared file". (Sorted order: .dll
+        // before .json; normalize separators for cross-platform CI.)
+        let normalized_files: Vec<String> =
+            pm.files.iter().map(|f| f.replace('\\', "/")).collect();
+        assert_eq!(
+            normalized_files,
+            vec![
+                "EndRunGraphV2/EndRunGraphV2.dll".to_string(),
+                "EndRunGraphV2/EndRunGraphV2.json".to_string(),
+            ]
+        );
+        assert_eq!(pm.folder_name, Some("EndRunGraphV2".into()));
+        assert_eq!(pm.version, "1.0.0");
+
+        // Bundling must now succeed against the refreshed files.
+        super::upload::zip_profile_mod_files(pm, &mods_path, &disabled_path)
+            .expect("refreshed files must zip successfully from the new install location");
+    }
+
+    #[test]
+    fn publish_preparation_reports_pack_entry_with_no_installed_match() {
+        // Issue #174: if the curator removed a mod entirely (not just
+        // reinstalled it under a new folder), the pack entry resolves to
+        // NO installed mod. Preparation must not let bundling attempt
+        // this (it would fail with a confusing "missing declared file"
+        // zip error); instead it reports the mod name via `not_installed`
+        // and clears `files` so the bundling loop skips it.
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mods_path = tmpdir.path().join("mods");
+        let disabled_path = tmpdir.path().join("mods_disabled");
+        let profiles_path = tmpdir.path().join("profiles");
+        std::fs::create_dir_all(&mods_path).unwrap();
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        std::fs::create_dir_all(&profiles_path).unwrap();
+
+        write_mod(&mods_path, "StillHere", "Still Here");
+
+        let profile = Profile {
+            name: "Stable".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![
+                profile_mod("Still Here", "StillHere"),
+                profile_mod("Long Gone", "LongGone"),
+            ],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+            mod_extras: Default::default(),
+        };
+        crate::profiles::save_profile(&profile, &profiles_path).unwrap();
+
+        let (prepared, not_installed) = load_profile_for_publish_from_paths(
+            "Stable",
+            None,
+            true,
+            &profiles_path,
+            &mods_path,
+            &disabled_path,
+            tmpdir.path(),
+            None,
+        )
+        .unwrap();
+
+        // The entry is retained (so the curator can still see/remove it
+        // from the pack) but flagged as not installed.
+        assert_eq!(prepared.mods.len(), 2);
+        assert_eq!(not_installed, vec!["Long Gone".to_string()]);
+        let missing_pm = prepared
+            .mods
+            .iter()
+            .find(|m| m.name == "Long Gone")
+            .unwrap();
+        assert!(
+            missing_pm.files.is_empty(),
+            "files must be cleared so the bundling loop skips this entry"
+        );
+
+        // The other entry resolves normally and keeps its files.
+        let ok_pm = prepared
+            .mods
+            .iter()
+            .find(|m| m.name == "Still Here")
+            .unwrap();
+        assert!(!ok_pm.files.is_empty());
     }
 
     #[test]
@@ -1395,12 +2023,14 @@ mod share_orchestration_tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             public: None,
+            mod_extras: Default::default(),
         };
         crate::profiles::save_profile(&profile, &profiles_path).unwrap();
 
-        let prepared = load_profile_for_publish_from_paths(
+        let (prepared, _not_installed) = load_profile_for_publish_from_paths(
             "Stable",
             None,
+            true,
             &profiles_path,
             &mods_path,
             &disabled_path,
@@ -1454,12 +2084,14 @@ mod share_orchestration_tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             public: None,
+            mod_extras: Default::default(),
         };
         crate::profiles::save_profile(&profile, &profiles_path).unwrap();
 
-        let prepared = load_profile_for_publish_from_paths(
+        let (prepared, _not_installed) = load_profile_for_publish_from_paths(
             "Stable",
             None,
+            true,
             &profiles_path,
             &mods_path,
             &disabled_path,
@@ -1518,12 +2150,14 @@ mod share_orchestration_tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             public: None,
+            mod_extras: Default::default(),
         };
         crate::profiles::save_profile(&profile, &profiles_path).unwrap();
 
-        let prepared = load_profile_for_publish_from_paths(
+        let (prepared, _not_installed) = load_profile_for_publish_from_paths(
             "Stable",
             None,
+            true,
             &profiles_path,
             &mods_path,
             &disabled_path,
@@ -1631,6 +2265,7 @@ mod share_orchestration_tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             public: None,
+            mod_extras: Default::default(),
         };
 
         let disabled_path = tmpdir.path().join("mods_disabled");
@@ -1643,6 +2278,7 @@ mod share_orchestration_tests {
             &profiles_path,
             "test-token",
             None,
+        Vec::new(),
         )
         .await
         .expect("share should succeed");
@@ -1767,6 +2403,7 @@ mod share_orchestration_tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             public: Some(false),
+            mod_extras: Default::default(),
         };
 
         let result = share_profile_impl(
@@ -1776,6 +2413,7 @@ mod share_orchestration_tests {
             &profiles_path,
             "test-token",
             None,
+        Vec::new(),
         )
         .await
         .expect("share should upload bundle and manifest through the GitHub API");
@@ -2046,7 +2684,68 @@ mod publish_signature_tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             public: Some(false),
+            mod_extras: Default::default(),
         }
+    }
+
+    /// Curator extras (notes/links/tags) are publish metadata, not pack
+    /// content — editing a note must never flag the pack out-of-sync.
+    #[test]
+    fn signature_ignores_mod_extras() {
+        let plain = base_profile();
+        let mut with_extras = base_profile();
+        with_extras.mod_extras.insert(
+            "ModA".into(),
+            crate::profiles::SharedModExtras {
+                note: Some("compat patch".into()),
+                custom_url: Some("https://example.com".into()),
+                tags: vec!["QoL".into()],
+            },
+        );
+        assert_eq!(
+            profile_publish_signature(&plain),
+            profile_publish_signature(&with_extras),
+            "mod_extras must not affect the publish signature"
+        );
+    }
+
+    /// FR (Solo, 2026-06-10): publishing carries the curator's per-mod
+    /// note/link/tags from the local sources DB into the manifest — and
+    /// the opt-out path strips them, including stale ones left in the
+    /// saved local JSON by a previous opted-in publish.
+    #[test]
+    fn publish_backfills_extras_and_opt_out_strips_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config");
+        std::fs::create_dir_all(&config_path).unwrap();
+
+        // The curator annotated ModA in their sources DB.
+        let mut db = crate::mod_sources::ModSourcesDb::default();
+        db.mods.insert(
+            "ModA".into(),
+            crate::mod_sources::ModSourceEntry {
+                note: Some("downloaded from Patreon".into()),
+                custom_url: Some("https://patreon.com/author".into()),
+                tags: vec!["anime".into()],
+                ..Default::default()
+            },
+        );
+        crate::mod_sources::save_sources(&db, &config_path).unwrap();
+
+        // Opt-in (default): extras ride along.
+        let mut profile = base_profile();
+        backfill_profile_extras_from_db(&mut profile, &config_path);
+        let extras = profile.mod_extras.get("ModA").expect("ModA extras published");
+        assert_eq!(extras.note.as_deref(), Some("downloaded from Patreon"));
+        assert_eq!(extras.custom_url.as_deref(), Some("https://patreon.com/author"));
+        assert_eq!(extras.tags, vec!["anime".to_string()]);
+        // ModB has no annotations — no empty entry is published for it.
+        assert!(!profile.mod_extras.contains_key("ModB"));
+
+        // Round-trip through the manifest JSON (what friends download).
+        let json = serde_json::to_string(&profile).unwrap();
+        let parsed: Profile = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.mod_extras.get("ModA"), profile.mod_extras.get("ModA"));
     }
 
     /// Step B test 1: signature is stable across updated_at and bundle fields.

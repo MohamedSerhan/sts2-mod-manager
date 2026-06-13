@@ -438,15 +438,17 @@ export async function findGithubFromNexus(
 export async function shareProfile(
   name: string,
   listPublic: boolean | null,
+  includeNotes: boolean | null = null,
 ): Promise<ShareResult> {
-  return invoke('share_profile', { name, listPublic });
+  return invoke('share_profile', { name, listPublic, includeNotes });
 }
 
 export async function reshareProfile(
   name: string,
   listPublic: boolean | null,
+  includeNotes: boolean | null = null,
 ): Promise<ShareResult> {
-  return invoke('reshare_profile', { name, listPublic });
+  return invoke('reshare_profile', { name, listPublic, includeNotes });
 }
 
 export async function fetchSharedProfile(code: string): Promise<Profile> {
@@ -527,6 +529,20 @@ export async function deleteBackup(name: string): Promise<void> {
 
 export async function resetToVanilla(): Promise<void> {
   return invoke('reset_to_vanilla_cmd');
+}
+
+/** How many automatic backups the manager keeps (0..=5; 0 = backups off). */
+export async function getBackupRetention(): Promise<number> {
+  return invoke('get_backup_retention');
+}
+
+/**
+ * Set how many automatic backups to keep. Validated/clamped to 0..=5
+ * server-side; 0 disables automatic backups (existing backups are kept).
+ * Returns the value the backend stored.
+ */
+export async function setBackupRetention(count: number): Promise<number> {
+  return invoke('set_backup_retention', { count });
 }
 
 // ── Subscriptions (Friend Sync) ────────────────────────────────────────────

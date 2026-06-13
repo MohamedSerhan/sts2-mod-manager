@@ -198,6 +198,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             public: None,
+            mod_extras: Default::default(),
         }
     }
 

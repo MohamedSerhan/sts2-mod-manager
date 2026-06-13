@@ -72,6 +72,7 @@ pub fn list_profiles(profiles_path: &Path) -> Vec<Profile> {
                         created_at: chrono::Utc::now(),
                         updated_at: chrono::Utc::now(),
                         public: None,
+                        mod_extras: Default::default(),
                     });
                     seen_names.insert(stem);
                 }
@@ -495,6 +496,7 @@ mod public_field_tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             public: None,
+            mod_extras: Default::default(),
         };
         let json = serde_json::to_string(&profile).unwrap();
         assert!(!json.contains("\"public\""), "got: {}", json);
@@ -510,6 +512,7 @@ mod public_field_tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             public: Some(true),
+            mod_extras: Default::default(),
         };
         let json = serde_json::to_string(&profile).unwrap();
         assert!(json.contains("\"public\":true"));
@@ -715,6 +718,7 @@ mod edit_lock_tests {
                     created_at: now,
                     updated_at: now,
                     public: None,
+                    mod_extras: Default::default(),
                 },
                 last_checked: now,
                 last_synced: now,
@@ -802,6 +806,7 @@ mod rename_tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             public: None,
+            mod_extras: Default::default(),
         }
     }
 

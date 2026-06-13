@@ -41,7 +41,11 @@ const profileMod = (overrides: Partial<ProfileMod> = {}): ProfileMod =>
     enabled: true,
     bundle_url: null,
     folder_name: 'PackMod',
-    mod_id: 'PackMod',
+    // Defaults to the (possibly overridden) name so two fixtures with
+    // different names don't accidentally collide on a literal shared
+    // mod_id default — that would make drift-tolerant identity matching
+    // (issue #174) see them as the same mod.
+    mod_id: overrides.name ?? 'PackMod',
     ...overrides,
   });
 
@@ -59,7 +63,9 @@ const modInfo = (overrides: Partial<ModInfo> = {}): ModInfo =>
     github_url: null,
     nexus_url: null,
     folder_name: 'LibMod',
-    mod_id: 'LibMod',
+    // See profileMod() above — derive from name to avoid cross-fixture
+    // mod_id collisions under drift-tolerant identity matching.
+    mod_id: overrides.name ?? 'LibMod',
     pinned: false,
     ...overrides,
   });
@@ -136,6 +142,37 @@ async function expandLibrary(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('<ModpackDetail>', () => {
+  // ── Unified search (Solo FR, 2026-06-10) ──────────────────────────
+  it('typing in the in-pack search auto-opens and filters Add-from-Library, matching tags', async () => {
+    const profile = setupPack({
+      inPack: [modInfo({ name: 'PackMod', folder_name: 'PackMod', enabled: true })],
+      available: [
+        modInfo({ name: 'WaifuOverhaul', folder_name: 'WaifuOverhaul', tags: ['anime'] }),
+        modInfo({ name: 'PlainUtility', folder_name: 'PlainUtility' }),
+      ],
+    });
+    const user = userEvent.setup();
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+    // One query, both sections: type a TAG into the in-pack table's search.
+    const search = await screen.findByLabelText('Search mod library');
+    await user.type(search, 'anime');
+    // The Add-from-Library section pops open by itself and is filtered to
+    // the tag match — no second search box, no manual expanding.
+    const available = await screen.findByTestId('modpack-detail-available');
+    await waitFor(() => {
+      expect(within(available).getByText('WaifuOverhaul')).toBeInTheDocument();
+    });
+    expect(within(available).queryByText('PlainUtility')).toBeNull();
+    // And the in-pack rows are filtered by the same query (PackMod has no
+    // matching tag, so the table reports no matches rather than ignoring it).
+    expect(screen.getByText(/No matching mods/i)).toBeInTheDocument();
+    // Clearing the search restores the unfiltered available list.
+    await user.clear(search);
+    await waitFor(() => {
+      expect(within(available).getByText('PlainUtility')).toBeInTheDocument();
+    });
+  });
+
   // ── Header ────────────────────────────────────────────────────────
   it('renders the header row with name, Back button, and Switch button for inactive profile', async () => {
     const onBack = vi.fn();
@@ -273,6 +310,125 @@ describe('<ModpackDetail>', () => {
     // A, C, D are enabled AND in the pack → 3 active of 4; library size (5) ignored.
     expect(screen.getByText(/3 active \/ 4 mods in this modpack/i)).toBeInTheDocument();
     expect(screen.queryByText(/in library/i)).toBeNull();
+  });
+
+  it('counts a reinstalled mod with a stale folder_name as active when its mod_id matches an enabled install (#174)', async () => {
+    // The pack entry was saved with folder_name "OldFolder" (from the
+    // original install). The curator deleted + reinstalled the mod and it
+    // now lives on disk as "NewFolder-v2" — a different folder_name, but the
+    // SAME mod_id (from the mod's manifest) and the same display name. The
+    // old folder-precedence key (folder_name ?? mod_id ?? name) would have
+    // compared "OldFolder" against "NewFolder-v2" and missed this entirely;
+    // the new matcher resolves it via the shared mod_id, and the header
+    // counter must agree.
+    registerInvokeHandler('get_installed_mods', () => [
+      modInfo({
+        name: 'Reinstalled Mod',
+        folder_name: 'NewFolder-v2',
+        mod_id: 'stable-mod-id',
+        enabled: true,
+      }),
+      modInfo({ name: 'Stable Mod', folder_name: 'StableMod', mod_id: 'StableMod', enabled: true }),
+    ]);
+    const profile = baseProfile({
+      name: 'DriftPack',
+      mods: [
+        // Stale: saved folder_name no longer exists on disk, but the
+        // mod_id still matches "Reinstalled Mod" above.
+        profileMod({ name: 'Reinstalled Mod', folder_name: 'OldFolder', mod_id: 'stable-mod-id' }),
+        profileMod({ name: 'Stable Mod', folder_name: 'StableMod', mod_id: 'StableMod' }),
+      ],
+    });
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+    await screen.findByRole('heading', { level: 2, name: 'DriftPack' });
+    // Both entries resolve to an enabled installed mod → 2 active / 2.
+    expect(screen.getByText(/2 active \/ 2 mods in this modpack/i)).toBeInTheDocument();
+  });
+
+  it('does not count a reinstalled mod as active when neither folder_name nor mod_id intersect, even with the same name (#174)', async () => {
+    // Both sides have strong keys (folder_name + mod_id), but none of them
+    // intersect — only the display name matches. Per the backend matcher,
+    // a strong-key set on both sides takes precedence over the name, so
+    // this must NOT be treated as the same mod (two different mods can
+    // share a display name). This guards against "fixing" the matcher to
+    // let the name always win.
+    registerInvokeHandler('get_installed_mods', () => [
+      modInfo({
+        name: 'Reinstalled Mod',
+        folder_name: 'NewFolder-v2',
+        mod_id: 'new-mod-id',
+        enabled: true,
+      }),
+      modInfo({ name: 'Stable Mod', folder_name: 'StableMod', mod_id: 'StableMod', enabled: true }),
+    ]);
+    const profile = baseProfile({
+      name: 'NoMatchPack',
+      mods: [
+        // Different folder_name AND different mod_id from the installed
+        // "Reinstalled Mod" above — only the name coincides.
+        profileMod({ name: 'Reinstalled Mod', folder_name: 'OldFolder', mod_id: 'old-mod-id' }),
+        profileMod({ name: 'Stable Mod', folder_name: 'StableMod', mod_id: 'StableMod' }),
+      ],
+    });
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+    await screen.findByRole('heading', { level: 2, name: 'NoMatchPack' });
+    // Only "Stable Mod" resolves to an enabled install → 1 active / 2.
+    expect(screen.getByText(/1 active \/ 2 mods in this modpack/i)).toBeInTheDocument();
+  });
+
+  it('does not count a genuinely missing or disabled pack entry as active', async () => {
+    registerInvokeHandler('get_installed_mods', () => [
+      modInfo({ name: 'Stable Mod', folder_name: 'StableMod', mod_id: 'StableMod', enabled: true }),
+      // Installed but disabled — must not count toward "active".
+      modInfo({ name: 'Disabled Mod', folder_name: 'DisabledMod', mod_id: 'DisabledMod', enabled: false }),
+    ]);
+    const profile = baseProfile({
+      name: 'PartialPack',
+      mods: [
+        profileMod({ name: 'Stable Mod', folder_name: 'StableMod', mod_id: 'StableMod' }),
+        profileMod({ name: 'Disabled Mod', folder_name: 'DisabledMod', mod_id: 'DisabledMod' }),
+        // Not installed at all anymore (no matching identity in the library).
+        profileMod({ name: 'Gone Mod', folder_name: 'GoneFolder', mod_id: 'gone-mod-id' }),
+      ],
+    });
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+    await screen.findByRole('heading', { level: 2, name: 'PartialPack' });
+    // Only "Stable Mod" is both present and enabled → 1 active / 3.
+    expect(screen.getByText(/1 active \/ 3 mods in this modpack/i)).toBeInTheDocument();
+  });
+
+  it('does not show a reinstalled (drifted) mod in Add-from-library — it is already in the pack (#174)', async () => {
+    registerInvokeHandler('get_installed_mods', () => [
+      // Same mod as the pack entry below, but reinstalled under a new
+      // folder_name. The mod_id (from the manifest) and the display name
+      // are unchanged, so the matcher recognizes it via the shared mod_id.
+      modInfo({
+        name: 'Reinstalled Mod',
+        folder_name: 'NewFolder-v2',
+        mod_id: 'stable-mod-id',
+        enabled: true,
+      }),
+      // A genuinely-available library mod, unrelated to the pack.
+      modInfo({ name: 'Extra Mod', folder_name: 'ExtraMod', mod_id: 'ExtraMod', enabled: true }),
+    ]);
+    const profile = baseProfile({
+      name: 'DriftAddPack',
+      mods: [
+        // Stale: saved folder_name no longer exists on disk, but the
+        // mod_id still matches the install above.
+        profileMod({ name: 'Reinstalled Mod', folder_name: 'OldFolder', mod_id: 'stable-mod-id' }),
+      ],
+    });
+    const user = userEvent.setup();
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+    await screen.findByRole('heading', { level: 2, name: 'DriftAddPack' });
+
+    const available = await expandLibrary(user);
+    // "Extra Mod" is genuinely available.
+    expect(within(available).getByText('Extra Mod')).toBeInTheDocument();
+    // "Reinstalled Mod" must NOT appear as available — it's already in the
+    // pack under its new folder_name (matched via the shared mod_id).
+    expect(within(available).queryByText('Reinstalled Mod')).toBeNull();
   });
 
   it('the Audit action checks ONLY this pack\'s mods (scoped audit)', async () => {

@@ -245,6 +245,14 @@ pub fn run() {
         }
     }
 
+    // Restore the user-configured backup retention count. Absent file ⇒ default
+    // (5), so existing users keep the historical behavior unchanged.
+    if let Ok(mut s) = app_state.lock() {
+        let retention = backup::load_persisted_backup_retention(&s.config_path.clone());
+        log::info!("Backup retention: keeping newest {} backup(s)", retention);
+        s.backup_retention = retention;
+    }
+
     let mut builder = tauri::Builder::default();
 
     // Single-instance has to be the FIRST plugin so its launch-args
@@ -375,6 +383,8 @@ pub fn run() {
             backup::restore_backup_cmd,
             backup::delete_backup_cmd,
             backup::reset_to_vanilla_cmd,
+            backup::get_backup_retention,
+            backup::set_backup_retention,
             // Sharing
             sharing::share_profile,
             sharing::reshare_profile,

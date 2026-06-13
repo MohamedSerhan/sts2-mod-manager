@@ -83,11 +83,11 @@ describe('<MissingBundlesPanel>', () => {
     render(<Wrap modNames={['Alpha', 'Beta', 'Gamma']} />);
     expect(
       screen.getByRole('heading', {
-        name: /Some mods need repair before sharing/i,
+        name: /Some mod uploads didn't finish/i,
       }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/These mods don't have working bundles/i),
+      screen.getByText(/The upload to GitHub didn't complete/i),
     ).toBeInTheDocument();
     for (const name of ['Alpha', 'Beta', 'Gamma']) {
       expect(screen.getByText(name)).toBeInTheDocument();
@@ -95,6 +95,45 @@ describe('<MissingBundlesPanel>', () => {
     // Every row starts with "Pending" status.
     const pending = screen.getAllByText(/Pending/i);
     expect(pending.length).toBe(3);
+  });
+
+  it('primary "Try sharing again" button re-runs the share (issue #164)', async () => {
+    // The common cause is a transient upload failure, so the panel leads
+    // with re-sharing rather than repairing. Clicking it must call
+    // onRetryPublish directly — without invoking repair_mod at all.
+    const onRetryPublish = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    render(<Wrap modNames={['A', 'B']} onRetryPublish={onRetryPublish} />);
+    await user.click(
+      screen.getByRole('button', { name: /Try sharing again/i }),
+    );
+    await waitFor(() => {
+      expect(onRetryPublish).toHaveBeenCalledTimes(1);
+    });
+    // No repair was attempted — re-sharing is the upload-failure remedy.
+    expect(
+      getInvokeCalls().filter((c) => c.cmd === 'repair_mod').length,
+    ).toBe(0);
+  });
+
+  it('"Try sharing again" is the primary action and "Repair these mods" the secondary', () => {
+    render(<Wrap modNames={['A']} />);
+    const shareBtn = screen.getByRole('button', {
+      name: /Try sharing again/i,
+    });
+    const repairBtn = screen.getByRole('button', {
+      name: /Repair these mods/i,
+    });
+    // Primary carries the prominent button class; secondary the muted one.
+    expect(shareBtn).toHaveClass('gf-btn');
+    expect(repairBtn).toHaveClass('gf-btn-2');
+  });
+
+  it('surfaces the secondary repair guidance about linked GitHub sources', () => {
+    render(<Wrap modNames={['A']} />);
+    expect(
+      screen.getByText(/reinstalls each mod from its linked GitHub source/i),
+    ).toBeInTheDocument();
   });
 
   it('"Repair these mods" calls repair_mod sequentially for every mod', async () => {

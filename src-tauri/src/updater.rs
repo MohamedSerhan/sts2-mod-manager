@@ -52,16 +52,37 @@ fn is_newer_version(current: &str, latest: &str) -> bool {
     }
 }
 
+/// Lenient version parse for GAME build strings. Steam beta branches
+/// suffix the build number ("0.106.1b", "0.106.1-beta.4257"), which the
+/// strict semver parse rejects — and a None game version silently
+/// disables every compatibility check downstream (the audit fails open,
+/// and asset selection skips the Compat-variant branch entirely, which
+/// is how a beta-branch user ended up with RitsuLib's latest-game main
+/// file instead of the matching Compat build). Takes the leading digits
+/// of each of the first three dot components; requires a numeric major.
+pub(crate) fn parse_loose_version(v: &str) -> Option<semver::Version> {
+    let stripped = v.trim().trim_start_matches(['v', 'V']);
+    let mut nums = stripped.split('.').map(|part| {
+        let digits: String = part.chars().take_while(|c| c.is_ascii_digit()).collect();
+        digits.parse::<u64>().ok()
+    });
+    let major = nums.next().flatten()?;
+    let minor = nums.next().flatten().unwrap_or(0);
+    let patch = nums.next().flatten().unwrap_or(0);
+    Some(semver::Version::new(major, minor, patch))
+}
+
 /// Returns true iff a mod declaring `min_game_version = required` can run
 /// on a player whose game version is `current`. Both arguments are
-/// semver-ish strings ("0.103.2", "v0.105.0") — we strip the leading "v"
-/// and compare numerically.
+/// semver-ish strings ("0.103.2", "v0.105.0", beta-suffixed "0.106.1b") —
+/// we strip the leading "v", tolerate non-numeric suffixes, and compare
+/// numerically.
 ///
 /// Fails OPEN on parse errors: if either version doesn't parse, we assume
 /// compatible. The audit/Repair codepath would rather show a row than
 /// hide a real one because of a quirky version string.
 pub fn game_version_satisfies(current: &str, required: &str) -> bool {
-    match (parse_version(current), parse_version(required)) {
+    match (parse_loose_version(current), parse_loose_version(required)) {
         (Some(cur), Some(req)) => cur >= req,
         _ => true,
     }
@@ -804,11 +825,13 @@ pub async fn update_mod(
             .unwrap_or_default()
     };
 
-    // Delete the old mod files before installing the update to prevent duplicates
-    // (e.g., old mod in "ModConfig-v0.2.1/" and new one in "ModConfig-v0.2.2/").
+    // Move the old mod files ASIDE (instead of deleting them) before
+    // installing the update, to prevent duplicates (e.g., old mod in
+    // "ModConfig-v0.2.1/" and new one in "ModConfig-v0.2.2/") while still
+    // letting us restore the original if the extract below fails (#174).
     // Reuse the same folder-first resolution so two same-named mods don't
     // step on each other.
-    {
+    let stashed_existing = {
         let old_info = if let Some(ref folder) = folder_name {
             installed
                 .iter()
@@ -816,40 +839,12 @@ pub async fn update_mod(
         } else {
             installed.iter().find(|m| m.name == name)
         };
-        if let Some(old_info) = old_info {
-            let mut parent_dirs = std::collections::HashSet::new();
-            for file_rel in &old_info.files {
-                let normalized = file_rel.replace('\\', "/");
-                let file_path = mods_path.join(&normalized);
-                if file_path.is_dir() {
-                    let _ = std::fs::remove_dir_all(&file_path);
-                } else if file_path.exists() {
-                    let _ = std::fs::remove_file(&file_path);
-                }
-                if let Some(parent_rel) = std::path::Path::new(&normalized).parent() {
-                    if !parent_rel.as_os_str().is_empty() {
-                        parent_dirs.insert(mods_path.join(parent_rel));
-                    }
-                }
-            }
-            for dir in &parent_dirs {
-                if dir.is_dir()
-                    && std::fs::read_dir(dir)
-                        .map(|mut d| d.next().is_none())
-                        .unwrap_or(false)
-                {
-                    let _ = std::fs::remove_dir(dir);
-                }
-            }
-            if let Some(folder) = old_info.folder_name.as_deref() {
-                let folder_path = mods_path.join(folder);
-                if folder_path.is_dir() {
-                    let _ = std::fs::remove_dir_all(&folder_path);
-                }
-            }
-            log::info!("Deleted old files for '{}' before updating", name);
-        }
-    }
+        old_info.map(|old_info| {
+            crate::downloads_watcher::sweep_stale_update_stashes(old_info, &mods_path);
+            log::info!("Stashing old files for '{}' aside before updating", name);
+            crate::downloads_watcher::stash_existing_mod_files(old_info, &mods_path, None)
+        })
+    };
 
     log::info!(
         "update_mod: installing {}/{}@{} for {} (game v{}, min_game_version={}, preserving {} configs)",
@@ -858,8 +853,29 @@ pub async fn update_mod(
         chosen_mgv.as_deref().unwrap_or("none"),
         pre_update_preserved.len(),
     );
-    let info =
-        crate::mods::install_mod_from_zip(&chosen_zip, &mods_path).map_err(|e| e.to_string())?;
+    // On failure, restore the stashed original so the user keeps their
+    // existing install instead of ending up with nothing (#174).
+    let info = match crate::mods::install_mod_from_zip(&chosen_zip, &mods_path) {
+        Ok(info) => info,
+        Err(e) => {
+            if let Some(stash) = stashed_existing {
+                log::error!(
+                    "update_mod: extract of '{}' from {}/{}@{} failed ({}); restoring previous install",
+                    name, owner, repo, chosen_tag, e,
+                );
+                stash.restore();
+            }
+            return Err(e.to_string());
+        }
+    };
+
+    // Extraction succeeded — see repair_mod's matching comment for why the
+    // unhealthy-ModInfo branch below does not roll back: it's a pre-existing
+    // degraded-install condition distinct from the #174 extract-failure
+    // hazard this stash protects against.
+    if let Some(stash) = stashed_existing {
+        stash.discard();
+    }
 
     // Only record the new installed_version if the install RESULT looks
     // healthy. install_mod_from_zip falls through to a stub with
@@ -1011,9 +1027,12 @@ pub async fn repair_mod(
         })
         .unwrap_or_default();
 
-    // Now safe to delete the broken install. Reuse the same folder-first
-    // lookup we did above so we delete the exact mod we resolved earlier.
-    {
+    // Move the broken install ASIDE instead of deleting it outright. Reuse
+    // the same folder-first lookup we did above so we stash the exact mod we
+    // resolved earlier. If the extract below fails, `stashed_existing` lets
+    // us put these files back so a failed Repair can never leave the user
+    // with nothing on disk (#174).
+    let stashed_existing = {
         let old_info = if let Some(ref folder) = folder_name {
             installed
                 .iter()
@@ -1021,48 +1040,47 @@ pub async fn repair_mod(
         } else {
             installed.iter().find(|m| m.name == name)
         };
-        if let Some(old_info) = old_info {
-            let mut parent_dirs = std::collections::HashSet::new();
-            for file_rel in &old_info.files {
-                let normalized = file_rel.replace('\\', "/");
-                let file_path = mods_path.join(&normalized);
-                if file_path.is_dir() {
-                    let _ = std::fs::remove_dir_all(&file_path);
-                } else if file_path.exists() {
-                    let _ = std::fs::remove_file(&file_path);
-                }
-                if let Some(parent_rel) = std::path::Path::new(&normalized).parent() {
-                    if !parent_rel.as_os_str().is_empty() {
-                        parent_dirs.insert(mods_path.join(parent_rel));
-                    }
-                }
-            }
-            for dir in &parent_dirs {
-                if dir.is_dir()
-                    && std::fs::read_dir(dir)
-                        .map(|mut d| d.next().is_none())
-                        .unwrap_or(false)
-                {
-                    let _ = std::fs::remove_dir(dir);
-                }
-            }
-            if let Some(folder) = old_info.folder_name.as_deref() {
-                let folder_path = mods_path.join(folder);
-                if folder_path.is_dir() {
-                    let _ = std::fs::remove_dir_all(&folder_path);
-                }
-            }
+        old_info.map(|old_info| {
+            crate::downloads_watcher::sweep_stale_update_stashes(old_info, &mods_path);
             log::info!(
-                "repair_mod: deleted old files for '{}' (preserving {} configs)",
+                "repair_mod: stashing old files for '{}' aside (preserving {} configs)",
                 name,
                 pre_update_preserved.len(),
             );
-        }
-    }
+            crate::downloads_watcher::stash_existing_mod_files(old_info, &mods_path, None)
+        })
+    };
 
-    // Extract the cached candidate into the live mods folder.
-    let info = crate::mods::install_mod_from_zip(&chosen.zip_path, &mods_path)
-        .map_err(|e| e.to_string())?;
+    // Extract the cached candidate into the live mods folder. On failure,
+    // restore the stashed original so the user keeps their existing install
+    // instead of ending up with nothing (#174).
+    let info = match crate::mods::install_mod_from_zip(&chosen.zip_path, &mods_path) {
+        Ok(info) => info,
+        Err(e) => {
+            if let Some(stash) = stashed_existing {
+                log::error!(
+                    "repair_mod: extract of '{}' from {}/{}@{} failed ({}); restoring previous install",
+                    name, owner, repo, chosen.tag, e,
+                );
+                stash.restore();
+            }
+            return Err(e.to_string());
+        }
+    };
+
+    // Extraction itself succeeded (files are on disk), so the stashed
+    // original is no longer needed regardless of whether the resulting
+    // ModInfo is "healthy". We deliberately do NOT roll back on the
+    // unhealthy branch below: that branch means install_mod_from_zip wrote
+    // files but couldn't parse a clean manifest version, which is a
+    // pre-existing degraded-install condition distinct from the #174
+    // extract-failure hazard this stash protects against. Restoring the old
+    // (also broken, since the user clicked Repair) install in that case
+    // would discard files that may still be usable in-game, trading one
+    // degraded state for another without clear benefit.
+    if let Some(stash) = stashed_existing {
+        stash.discard();
+    }
 
     // Same healthy-install gate as update_mod — only persist installed_version
     // when the manifest parsed cleanly.
@@ -1776,6 +1794,38 @@ mod version_helper_tests {
         assert!(parse_version("nightly").is_none());
         assert!(parse_version("").is_none());
         assert!(parse_version("x.y.z").is_none());
+    }
+
+    #[test]
+    fn parse_loose_version_tolerates_steam_beta_suffixes() {
+        assert_eq!(
+            parse_loose_version("0.106.1b").unwrap(),
+            semver::Version::new(0, 106, 1)
+        );
+        assert_eq!(
+            parse_loose_version("0.106.1-beta.4257").unwrap(),
+            semver::Version::new(0, 106, 1)
+        );
+        assert_eq!(
+            parse_loose_version("v0.103.2").unwrap(),
+            semver::Version::new(0, 103, 2)
+        );
+        assert_eq!(
+            parse_loose_version("1.2").unwrap(),
+            semver::Version::new(1, 2, 0)
+        );
+        // Still refuses strings with no numeric major.
+        assert!(parse_loose_version("dev-build").is_none());
+        assert!(parse_loose_version("").is_none());
+    }
+
+    #[test]
+    fn game_version_satisfies_handles_beta_suffixed_current() {
+        // The exact shape of Solo's RitsuLib report: a beta-branch game
+        // version must compare numerically, not fail open.
+        assert!(game_version_satisfies("0.106.1b", "0.106.1"));
+        assert!(game_version_satisfies("0.106.1-beta.4257", "0.103.2"));
+        assert!(!game_version_satisfies("0.103.2b", "0.106.1"));
     }
 
     #[test]
@@ -3163,5 +3213,109 @@ fn audit_snooze_matches(
     ) {
         (Some(snooze), Some(latest)) => snooze == latest,
         _ => false,
+    }
+}
+
+// ── Repair/update stash-on-failure (#174) ──────────────────────────────────
+//
+// `repair_mod` and `update_mod` both follow the same shape: stash the old
+// install aside via `downloads_watcher::stash_existing_mod_files`, then try
+// `mods::install_mod_from_zip`. On `Err` the stash is restored so the user
+// keeps their existing install; on `Ok` the stash is discarded. The
+// tauri::command wrappers themselves need a live AppState/network to drive,
+// so this test exercises that exact sequence directly against the real
+// helpers with a corrupt "zip" to force `install_mod_from_zip` to fail.
+#[cfg(test)]
+mod repair_stash_on_failed_extract_tests {
+    use crate::downloads_watcher::stash_existing_mod_files;
+    use crate::mods::ModInfo;
+    use tempfile::tempdir;
+
+    fn fixture_mod_info(folder: &str) -> ModInfo {
+        ModInfo {
+            name: folder.to_string(),
+            version: "1.0.0".into(),
+            description: String::new(),
+            enabled: true,
+            files: vec![],
+            source: None,
+            hash: None,
+            dependencies: vec![],
+            size_bytes: 0,
+            folder_name: Some(folder.to_string()),
+            mod_id: None,
+            github_url: None,
+            nexus_url: None,
+            pinned: false,
+            min_game_version: None,
+            author: None,
+            note: None,
+            custom_url: None,
+            tags: vec![],
+            display_name: None,
+            display_description: None,
+            bundle_members: vec![],
+        }
+    }
+
+    fn write(path: &std::path::Path, contents: &str) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, contents).unwrap();
+    }
+
+    /// Mirrors the repair_mod/update_mod sequence: stash the old install,
+    /// attempt the extract, and on `Err` restore the stash. A corrupt zip
+    /// makes `install_mod_from_zip` fail at `ZipArchive::new`, so this
+    /// proves the old install survives a failed extract (#174's core hazard).
+    #[test]
+    fn failed_extract_restores_the_existing_install() {
+        let base = tempdir().unwrap();
+        let mods = base.path().join("mods");
+        write(
+            &mods.join("MyMod").join("manifest.json"),
+            r#"{"name":"MyMod","version":"1.0.0"}"#,
+        );
+        write(&mods.join("MyMod").join("plugin.dll"), "original-dll-bytes");
+
+        // A corrupt "zip" — just plain text. ZipArchive::new will fail.
+        let bad_zip = base.path().join("corrupt.zip");
+        write(&bad_zip, "not a real zip file");
+
+        let info = fixture_mod_info("MyMod");
+        let stashed = stash_existing_mod_files(&info, &mods, None);
+        assert!(
+            !mods.join("MyMod").exists(),
+            "old install should be stashed aside before the extract attempt"
+        );
+
+        let result = crate::mods::install_mod_from_zip(&bad_zip, &mods);
+        assert!(result.is_err(), "corrupt zip must fail to extract");
+
+        // repair_mod/update_mod's failure branch: restore the stash.
+        stashed.restore();
+
+        assert_eq!(
+            std::fs::read_to_string(mods.join("MyMod").join("manifest.json")).unwrap(),
+            r#"{"name":"MyMod","version":"1.0.0"}"#,
+            "manifest should be restored after a failed extract"
+        );
+        assert_eq!(
+            std::fs::read_to_string(mods.join("MyMod").join("plugin.dll")).unwrap(),
+            "original-dll-bytes",
+            "plugin dll should be restored after a failed extract"
+        );
+
+        // No leftover stash dirs.
+        let leftovers: Vec<String> = std::fs::read_dir(&mods)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| n.contains("sts2mm-update-stash"))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "no stash temp dirs should remain after restore, got {:?}",
+            leftovers
+        );
     }
 }

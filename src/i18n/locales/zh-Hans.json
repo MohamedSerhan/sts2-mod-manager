@@ -330,6 +330,14 @@
       "following": "所有模组包",
       "publishedByYou": "你发布的"
     },
+    "sort": {
+      "label": "排序",
+      "recent": "最近启动",
+      "edited": "最近编辑",
+      "created": "最近创建",
+      "name": "名称 A–Z",
+      "mods": "模组最多"
+    },
     "activity": {
       "hasUpdates": "{{count}} 个模组包有更新",
       "haveUpdates": "{{count}} 个模组包有更新",
@@ -484,7 +492,7 @@
       },
       "noMatches": {
         "title": "没有匹配的模组",
-        "hint": "请尝试其他名称、文件夹、ID 或版本。"
+        "hint": "请尝试其他名称、文件夹、ID、版本或标签。"
       },
       "packEmpty": {
         "title": "此整合包中还没有模组",
@@ -610,7 +618,7 @@
   "modpacks": {
     "tabs": {
       "yours": "已安装",
-      "browse": "浏览"
+      "browse": "浏览社区整合包"
     },
     "quickAdd": {
       "label": "通过分享码添加整合包",
@@ -621,7 +629,7 @@
   "library": {
     "tabs": {
       "installed": "已安装",
-      "browse": "浏览"
+      "browse": "浏览模组"
     }
   },
   "nav": {
@@ -967,6 +975,8 @@
     "friendsOnlyDesc": "任何知道代码或链接的人都可以安装。不会在浏览模组包中列出。",
     "public": "公开",
     "publicDesc": "在浏览模组包中列出。使用该应用的任何人都可以找到并安装。",
+    "includeNotes": "包含你的模组备注、链接和标签",
+    "includeNotesDesc": "安装此包的朋友将继承你为每个模组写的备注、自定义链接和标签（他们自己的标注永远不会被覆盖）。取消勾选可保持私密。",
     "publicRepoNote": "管理器将在你的 GitHub 账户上创建一个名为 <1>sts2mm-profiles</1> 的<0>公开</0>仓库（如果你还没有的话），用于存放你发布的包和模组捆绑包。稍后你可以重新发布更新到同一代码；你也可以随时在 GitHub 上删除或将其设为私有。",
     "uploadingManifest": "正在上传整合包清单…",
     "bundlingMod": "正在打包模组 {{current}}/{{total}}：{{name}}",
@@ -1008,9 +1018,13 @@
     "failedUploadsMore_other": "，另有 {{count}} 个",
     "failedUploadsHelp": "朋友安装此代码时会看到这些模组缺失；请重新发布以重试。",
     "missingBundles": {
-      "title": "部分模组在分享前需要修复",
-      "body": "这些模组没有可用的安装包。修复一次后，你的模组包就能成功分享。",
+      "title": "部分模组未能完成上传",
+      "body": "这些模组上传到 GitHub 时未能完成——通常只是网络或 GitHub 的短暂故障。再分享一次即可：只会重新上传未成功的模组。",
+      "repairHint": "试了几次仍然失败？请使用“修复这些模组”——它会从各模组关联的 GitHub 源重新安装，适用于文件确实缺失或损坏的情况。",
+      "shareAgainBtn": "重新分享",
+      "sharingAgain": "分享中…",
       "repairBtn": "修复这些模组",
+      "repairBtnTitle": "从关联的 GitHub 源重新安装这些模组。仅在文件确实缺失或损坏时有用，且需要已关联的源。",
       "repairing": "修复中…",
       "openFolder": "打开模组文件夹",
       "openFolderTitle": "打开 Mods 文件夹，以便手动替换损坏的文件",
@@ -1092,6 +1106,10 @@
     "secondary": {
       "create": "创建模组包",
       "reviewUpdates": "查看更新（{{count}}）"
+    },
+    "recent": {
+      "title": "最近的模组包",
+      "switchTitle": "切换到 {{name}}"
     },
     "syncPillReady": "可同步",
     "sharePillReady": "尚未分享",
@@ -1234,7 +1252,7 @@
       "title": "模组菜单",
       "desc": "选择每个模组的 ⋯ 菜单中显示哪些操作，并拖动以重新排序。",
       "reset": "恢复默认",
-      "lockedCaption": "「删除」和「自定义」始终固定在底部。",
+      "lockedCaption": "「删除」始终固定在底部。「自定义」可以隐藏——您始终可以从设置中重新打开此面板。",
       "visibleAria": "在菜单中显示{{item}}",
       "dragAria": "拖动以重新排序{{item}}",
       "items": {
@@ -1285,6 +1303,14 @@
     "backups": {
       "title": "备份",
       "desc": "每次启动前自动保存，包括原版模式 - 保留最近 5 份",
+      "retentionTitle": "自动备份",
+      "retentionDesc": "选择要保留多少份自动备份，或将其关闭。达到上限后会删除最旧的备份。",
+      "retentionLabel": "保留备份数",
+      "retentionOff": "关闭",
+      "retentionOffHint": "自动备份已关闭。现有备份会一直保留，直到你手动删除。",
+      "retentionSaved": "将保留最近 {{count}} 份备份。",
+      "retentionSavedOff": "已关闭自动备份。",
+      "retentionFailed": "更新备份保留设置失败：{{error}}",
       "openFolder": "打开文件夹",
       "create": "创建备份",
       "creating": "创建中…",

@@ -57,6 +57,8 @@ import {
   setLaunchMode,
   getNexusDownloadDir,
   setNexusDownloadDir,
+  getBackupRetention,
+  setBackupRetention,
 } from '../hooks/useTauri';
 import type { LaunchMode } from '../hooks/useTauri';
 import type { BackupInfo } from '../types';
@@ -110,6 +112,8 @@ export function SettingsView({
   // ── Backups ─────────────────────────────────────────
   const [backups, setBackups] = useState<BackupInfo[]>([]);
   const [backupBusy, setBackupBusy] = useState<string | null>(null);
+  const [backupRetention, setBackupRetentionValue] = useState<number>(5);
+  const [savingRetention, setSavingRetention] = useState(false);
 
   // ── Updates (Advanced) ──────────────────────────────
   const [checkingUpdate, setCheckingUpdate] = useState(false);
@@ -161,6 +165,9 @@ export function SettingsView({
     getNexusDownloadDir().then(setNexusDownloadDirValue).catch(() => {});
   }, []);
   useEffect(() => {
+    getBackupRetention().then(setBackupRetentionValue).catch(() => {});
+  }, []);
+  useEffect(() => {
     downloadDir().then(setDefaultDownloadDir).catch(() => {});
   }, []);
 
@@ -178,6 +185,27 @@ export function SettingsView({
       toast.error(t('settings.backups.createFailed', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setBackupBusy(null);
+    }
+  }
+
+  async function handleChangeBackupRetention(count: number) {
+    if (count === backupRetention || savingRetention) return;
+    const previous = backupRetention;
+    setSavingRetention(true);
+    setBackupRetentionValue(count);
+    try {
+      const saved = await setBackupRetention(count);
+      setBackupRetentionValue(saved);
+      toast.success(
+        saved === 0
+          ? t('settings.backups.retentionSavedOff')
+          : t('settings.backups.retentionSaved', { count: saved }),
+      );
+    } catch (e) {
+      setBackupRetentionValue(previous);
+      toast.error(t('settings.backups.retentionFailed', { error: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setSavingRetention(false);
     }
   }
 
@@ -810,6 +838,36 @@ export function SettingsView({
                 </Button>
               </div>
             </div>
+            <Card className="space-y-3" data-testid="backup-retention-card" style={{ marginBottom: 10 }}>
+              <div className="gf-set-label">{t('settings.backups.retentionTitle')}</div>
+              <div className="gf-set-desc" style={{ marginTop: -4 }}>
+                {t('settings.backups.retentionDesc')}
+              </div>
+              <div className="gf-input-row" style={{ alignItems: 'center', gap: 10 }}>
+                <label htmlFor="backup-retention-select" className="gf-set-label" style={{ fontSize: 13 }}>
+                  {t('settings.backups.retentionLabel')}
+                </label>
+                <select
+                  id="backup-retention-select"
+                  className="gf-set-input"
+                  value={backupRetention}
+                  disabled={savingRetention}
+                  onChange={(e) => handleChangeBackupRetention(Number(e.target.value))}
+                  style={{ width: 'auto', minWidth: 140 }}
+                >
+                  {[0, 1, 2, 3, 4, 5].map((n) => (
+                    <option key={n} value={n}>
+                      {n === 0 ? t('settings.backups.retentionOff') : String(n)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {backupRetention === 0 && (
+                <div className="gf-help muted">
+                  <span>{t('settings.backups.retentionOffHint')}</span>
+                </div>
+              )}
+            </Card>
             {backups.length === 0 ? (
               <div className="gf-empty">
                 <div className="gf-empty-art"><Archive size={28} /></div>

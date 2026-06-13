@@ -15,7 +15,7 @@ import userEvent from '@testing-library/user-event';
 
 import { LibraryRow, type LibraryRowProps } from './LibraryRow';
 import { AllProviders } from '../__test__/providers';
-import { ROW_MENU_STORAGE_KEY, ROW_MENU_OPEN_EVENT } from '../lib/rowMenuConfig';
+import { DEFAULT_ROW_MENU_ORDER, ROW_MENU_STORAGE_KEY, ROW_MENU_OPEN_EVENT } from '../lib/rowMenuConfig';
 import type {
   ModAuditEntry,
   ModInfo,
@@ -520,6 +520,24 @@ describe('<LibraryRow> kebab + audit pills', () => {
       expect.objectContaining({ type: ROW_MENU_OPEN_EVENT }),
     );
     dispatch.mockRestore();
+  });
+
+  it('Customize menu… is present by default', async () => {
+    const user = userEvent.setup();
+    renderRow({ mod: baseModInfo() });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    expect(screen.getByRole('menuitem', { name: /customize menu/i })).toBeInTheDocument();
+  });
+
+  it('Customize menu… is absent when showCustomizeEntry is false', async () => {
+    localStorage.setItem(
+      ROW_MENU_STORAGE_KEY,
+      JSON.stringify({ order: [...DEFAULT_ROW_MENU_ORDER], hidden: [], showCustomizeEntry: false }),
+    );
+    const user = userEvent.setup();
+    renderRow({ mod: baseModInfo() });
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    expect(screen.queryByRole('menuitem', { name: /customize menu/i })).toBeNull();
   });
 
   it('packScoped pins Delete from disk just above Customize menu…', async () => {

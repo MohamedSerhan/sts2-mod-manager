@@ -1757,6 +1757,16 @@ body {
   flex-wrap: wrap;
   gap: 8px;
 }
+/* FR5 — leading label on the Recent-modpacks strip; aligns with the
+   gf-btn-3 chips it sits next to without reading as a button itself. */
+.gf-home-recent-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  opacity: 0.75;
+  align-self: center;
+}
 .gf-home-footer {
   margin-top: auto;
   padding-top: 32px;
@@ -2406,6 +2416,25 @@ body {
   margin-top: 4px;
   padding-top: 6px;
   border-top: 1px solid var(--indigo-line);
+}
+
+/* While the menu is open, lift the wrapper above following rows. This is
+   enough on its own for containers that DON'T create a stacking context
+   (e.g. `.gf-card`, whose `transition` alone doesn't establish one) — issue
+   #162. */
+.gf-kebab-open { z-index: 60; }
+
+/* …but `.gf-profile-library-row` / `.gf-load-order-row` DO create a stacking
+   context via `will-change: transform`, which traps the wrapper's z-index
+   inside the row. Lifting the wrapper alone can't escape that, so the next
+   sibling row still paints over the open menu. Lift the owning row too. The
+   `.gf-card` selector is harmless (no stacking context) but keeps the hook
+   uniform should a card gain a transform later. (#162) */
+.gf-profile-library-row:has(.gf-kebab-open),
+.gf-load-order-row:has(.gf-kebab-open),
+.gf-card:has(.gf-kebab-open) {
+  position: relative;
+  z-index: 60;
 }
 
 .gf-kebab {

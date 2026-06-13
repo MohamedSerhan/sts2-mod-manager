@@ -835,6 +835,45 @@ pub fn shareable_source_for(
     None
 }
 
+/// Fill-only merge of a shared pack's curator extras (note / custom link
+/// / tags) into the local sources DB after install/sync (Solo FR,
+/// 2026-06-10). The receiver's OWN notes/links/tags always win — a
+/// curator's note never clobbers something the user wrote themselves.
+/// Tags merge only when the local entry has none, so a user's curated
+/// tag taxonomy isn't polluted by every pack they follow.
+pub fn merge_shared_extras(
+    extras: &HashMap<String, crate::profiles::SharedModExtras>,
+    config_path: &Path,
+) {
+    if extras.is_empty() {
+        return;
+    }
+    let mut db = load_sources(config_path);
+    let mut changed = false;
+    for (key, ex) in extras {
+        let entry = db.mods.entry(key.clone()).or_default();
+        if entry.note.is_none() && ex.note.is_some() {
+            entry.note = ex.note.clone();
+            changed = true;
+        }
+        if entry.custom_url.is_none() && ex.custom_url.is_some() {
+            entry.custom_url = ex.custom_url.clone();
+            changed = true;
+        }
+        if entry.tags.is_empty() && !ex.tags.is_empty() {
+            entry.tags = ex.tags.clone();
+            changed = true;
+        }
+    }
+    if changed {
+        if let Err(e) = save_sources(&db, config_path) {
+            log::warn!("Failed to persist shared pack extras: {}", e);
+        } else {
+            log::info!("Merged curator notes/links for {} mod(s)", extras.len());
+        }
+    }
+}
+
 // ── Tauri Commands ──────────────────────────────────────────────────────────
 
 /// Get all mod source links.
@@ -2817,6 +2856,70 @@ mod shared_profile_source_tests {
         assert!(
             entry.github_auto_detected,
             "a curator-supplied link is auto-detected, not user-authored"
+        );
+    }
+
+    fn extras(
+        note: Option<&str>,
+        url: Option<&str>,
+        tags: &[&str],
+    ) -> crate::profiles::SharedModExtras {
+        crate::profiles::SharedModExtras {
+            note: note.map(String::from),
+            custom_url: url.map(String::from),
+            tags: tags.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn merge_shared_extras_fills_empty_fields_and_persists() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut shared = HashMap::new();
+        shared.insert(
+            "AutoPath".to_string(),
+            extras(Some("compat patch for beta"), Some("https://patreon.com/x"), &["QoL"]),
+        );
+        merge_shared_extras(&shared, tmp.path());
+
+        let db = load_sources(tmp.path());
+        let entry = db.mods.get("AutoPath").expect("entry created");
+        assert_eq!(entry.note.as_deref(), Some("compat patch for beta"));
+        assert_eq!(entry.custom_url.as_deref(), Some("https://patreon.com/x"));
+        assert_eq!(entry.tags, vec!["QoL".to_string()]);
+    }
+
+    #[test]
+    fn merge_shared_extras_never_clobbers_user_annotations() {
+        // The receiver wrote their own note + tags; the curator's version
+        // of those fields must lose. The curator's custom_url fills the
+        // one field the user left empty.
+        let tmp = tempfile::tempdir().unwrap();
+        let mut db = ModSourcesDb::default();
+        db.mods.insert(
+            "AutoPath".into(),
+            ModSourceEntry {
+                note: Some("MY note".into()),
+                tags: vec!["my-tag".into()],
+                ..Default::default()
+            },
+        );
+        save_sources(&db, tmp.path()).unwrap();
+
+        let mut shared = HashMap::new();
+        shared.insert(
+            "AutoPath".to_string(),
+            extras(Some("curator note"), Some("https://example.com"), &["curator-tag"]),
+        );
+        merge_shared_extras(&shared, tmp.path());
+
+        let db = load_sources(tmp.path());
+        let entry = db.mods.get("AutoPath").unwrap();
+        assert_eq!(entry.note.as_deref(), Some("MY note"), "user's note wins");
+        assert_eq!(entry.tags, vec!["my-tag".to_string()], "user's tags win");
+        assert_eq!(
+            entry.custom_url.as_deref(),
+            Some("https://example.com"),
+            "the field the user left empty is filled"
         );
     }
 

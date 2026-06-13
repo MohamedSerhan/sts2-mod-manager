@@ -6,6 +6,7 @@ import {
   loadRowMenuConfig,
   normalizeConfig,
   saveRowMenuConfig,
+  setShowCustomizeEntry as setShowCustomizeEntryPure,
   toggleHidden as toggleHiddenPure,
   type RowMenuConfig,
   type RowMenuItemId,
@@ -15,6 +16,7 @@ interface RowMenuContextValue {
   config: RowMenuConfig;
   setOrder: (order: RowMenuItemId[]) => void;
   toggleHidden: (id: RowMenuItemId) => void;
+  setShowCustomizeEntry: (show: boolean) => void;
   reset: () => void;
 }
 
@@ -24,6 +26,7 @@ const RowMenuContext = createContext<RowMenuContextValue>({
   config: DEFAULT_ROW_MENU_CONFIG,
   setOrder: () => {},
   toggleHidden: () => {},
+  setShowCustomizeEntry: () => {},
   reset: () => {},
 });
 
@@ -42,13 +45,17 @@ export function RowMenuProvider({ children }: { children: ReactNode }) {
     (id: RowMenuItemId) => setConfig((c) => toggleHiddenPure(c, id)),
     [],
   );
+  const setShowCustomizeEntry = useCallback(
+    (show: boolean) => setConfig((c) => setShowCustomizeEntryPure(c, show)),
+    [],
+  );
   const reset = useCallback(
     () => setConfig({ ...DEFAULT_ROW_MENU_CONFIG, order: [...DEFAULT_ROW_MENU_ORDER] }),
     [],
   );
   const value = useMemo(
-    () => ({ config, setOrder, toggleHidden, reset }),
-    [config, setOrder, toggleHidden, reset],
+    () => ({ config, setOrder, toggleHidden, setShowCustomizeEntry, reset }),
+    [config, setOrder, toggleHidden, setShowCustomizeEntry, reset],
   );
 
   return <RowMenuContext.Provider value={value}>{children}</RowMenuContext.Provider>;

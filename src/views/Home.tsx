@@ -12,6 +12,7 @@ import {
   MessageSquare,
   Link as LinkIcon,
   Plus,
+  History,
 } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
@@ -26,8 +27,11 @@ import {
   getSubscriptions,
   getShareInfo,
   listProfiles,
+  switchProfile,
+  getProfileDrift,
 } from '../hooks/useTauri';
 import { buildShareMessage, buildShareLink, importShareCodeSmart } from '../lib/shareImport';
+import { recordModpackLaunch, recentModpacks } from '../lib/modpackUsage';
 import type { ShareResult, Profile } from '../types';
 import { PublishModal } from '../components/PublishModal';
 import type { SubscriptionUpdate, Subscription } from '../types';
@@ -155,7 +159,7 @@ interface HomeProps {
 }
 export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfiles, onGoToBrowseModpacks, onCreateModpack, onLaunch }: HomeProps) {
   const { t } = useTranslation();
-  const { gameInfo, mods, refreshAll, activeProfile, refreshSubUpdates } = useApp();
+  const { gameInfo, mods, refreshAll, activeProfile, setActiveProfile, refreshSubUpdates } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
   const [subUpdates, setSubUpdates] = useState<SubscriptionUpdate[]>([]);
@@ -174,6 +178,10 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
   // the hero gets a "Share this pack" button that opens the modal
   // directly on Home (no detour through Profiles).
   const [publishTarget, setPublishTarget] = useState<{ profile: Profile; isReshare: boolean } | null>(null);
+  // FR5 — "Recent modpacks" quick-switch strip. Names of every pack on
+  // disk (to filter stale launch-history entries) + in-flight guard.
+  const [profileNames, setProfileNames] = useState<string[]>([]);
+  const [recentSwitching, setRecentSwitching] = useState<string | null>(null);
 
   useEffect(() => {
     loadSubscriptions();
@@ -204,6 +212,56 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
       const subs = await getSubscriptions();
       setSubscriptions(subs);
     } catch { /* ignore */ }
+  }
+
+  // FR5 — pull the on-disk pack names so launch history can be filtered
+  // to packs that still exist. Re-pull on active-profile change (covers
+  // switch, install, delete-active) — cheap directory listing.
+  useEffect(() => {
+    let cancelled = false;
+    listProfiles()
+      .then((list) => { if (!cancelled) setProfileNames(list.map((p) => p.name)); })
+      .catch(() => { /* keep last known names */ });
+    return () => { cancelled = true; };
+  }, [activeProfile]);
+
+  // Up to 3 recently launched packs, excluding the one already active.
+  const recent = recentModpacks(profileNames, 4)
+    .filter((name) => name !== activeProfile)
+    .slice(0, 3);
+
+  /** FR5 — one-click switch from the Recent strip. Mirrors Profiles'
+   *  handleSwitch semantics: warn when the current active pack has
+   *  unsaved drift, record the launch, refresh app state. */
+  async function handleQuickSwitch(name: string) {
+    if (recentSwitching) return;
+    if (activeProfile) {
+      try {
+        const drift = await getProfileDrift(activeProfile);
+        if (drift?.has_drift) {
+          const ok = await confirm({
+            title: t('profiles.confirm.switch.title', { name: activeProfile }),
+            body: t('profiles.confirm.switch.body'),
+            warning: t('profiles.confirm.switch.warning'),
+            confirmLabel: t('profiles.confirm.switch.confirmLabel'),
+            cancelLabel: t('profiles.confirm.switch.cancelLabel'),
+          });
+          if (!ok) return;
+        }
+      } catch { /* drift lookup failed — proceed with the switch */ }
+    }
+    try {
+      setRecentSwitching(name);
+      await switchProfile(name);
+      setActiveProfile(name);
+      recordModpackLaunch(name);
+      await refreshAll();
+      toast.success(t('profiles.toast.switched', { name }));
+    } catch (e) {
+      toast.error(t('profiles.toast.switchFailed', { error: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setRecentSwitching(null);
+    }
   }
 
   async function checkSubs(showToast = false) {
@@ -512,6 +570,39 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
                 {t('home.secondary.reviewUpdates', { count: subUpdates.length })}
               </button>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* FR5 — Recent modpacks. One-click jump back to the packs the
+          user actually plays. Sourced from the local launch history
+          (localStorage), filtered to packs still on disk, capped at 3,
+          and never shows the already-active pack. Hidden entirely until
+          there is history — first-run Home stays uncluttered. */}
+      {recent.length > 0 && (
+        <div className="gf-home-secondary">
+          <div className="gf-home-secondary-actions">
+            <span className="gf-home-recent-label">
+              <History size={13} /> {t('home.recent.title')}
+            </span>
+            {recent.map((name) => (
+              <button
+                key={name}
+                type="button"
+                className="gf-btn-3"
+                disabled={recentSwitching !== null}
+                onClick={() => handleQuickSwitch(name)}
+                title={t('home.recent.switchTitle', { name })}
+                aria-label={t('home.recent.switchTitle', { name })}
+              >
+                {recentSwitching === name ? (
+                  <RefreshCw size={13} className="animate-spin" />
+                ) : (
+                  <Play size={13} />
+                )}{' '}
+                {name}
+              </button>
+            ))}
           </div>
         </div>
       )}

@@ -10,6 +10,7 @@ import {
   normalizeConfig,
   resolveRowMenuOrder,
   saveRowMenuConfig,
+  setShowCustomizeEntry,
   toggleHidden,
   type RowMenuItemId,
 } from './rowMenuConfig';
@@ -43,6 +44,22 @@ describe('normalizeConfig', () => {
   it('clamps hidden to known customizable ids', () => {
     const out = normalizeConfig({ order: [...DEFAULT_ROW_MENU_ORDER], hidden: ['freeze', 'delete', 'bogus'] });
     expect(out.hidden).toEqual(['freeze']); // 'delete' is locked, 'bogus' unknown
+  });
+
+  it('defaults showCustomizeEntry to true for legacy stored configs (order/hidden only)', () => {
+    const out = normalizeConfig({ order: [...DEFAULT_ROW_MENU_ORDER], hidden: [] });
+    expect(out.showCustomizeEntry).toBe(true);
+  });
+
+  it('preserves an explicit showCustomizeEntry: false', () => {
+    const out = normalizeConfig({ order: [...DEFAULT_ROW_MENU_ORDER], hidden: [], showCustomizeEntry: false });
+    expect(out.showCustomizeEntry).toBe(false);
+  });
+
+  it('treats any non-false showCustomizeEntry value as true', () => {
+    expect(normalizeConfig({ showCustomizeEntry: 'nope' }).showCustomizeEntry).toBe(true);
+    expect(normalizeConfig({ showCustomizeEntry: true }).showCustomizeEntry).toBe(true);
+    expect(normalizeConfig({ showCustomizeEntry: null }).showCustomizeEntry).toBe(true);
   });
 });
 
@@ -82,15 +99,26 @@ describe('toggleHidden', () => {
 
 describe('resolveRowMenuOrder', () => {
   it('returns ordered ids minus hidden, minus unavailable', () => {
-    const cfg = { order: ['copyVersion', 'freeze', 'openFolder'] as RowMenuItemId[], hidden: ['freeze'] as RowMenuItemId[] };
+    const cfg = { order: ['copyVersion', 'freeze', 'openFolder'] as RowMenuItemId[], hidden: ['freeze'] as RowMenuItemId[], showCustomizeEntry: true };
     const available = new Set<RowMenuItemId>(['copyVersion', 'openFolder']); // freeze unavailable AND hidden
     expect(resolveRowMenuOrder(cfg, available)).toEqual(['copyVersion', 'openFolder']);
   });
 
   it('preserves the user order for available, visible ids', () => {
-    const cfg = { order: ['openFolder', 'copyVersion'] as RowMenuItemId[], hidden: [] as RowMenuItemId[] };
+    const cfg = { order: ['openFolder', 'copyVersion'] as RowMenuItemId[], hidden: [] as RowMenuItemId[], showCustomizeEntry: true };
     const available = new Set<RowMenuItemId>(['copyVersion', 'openFolder']);
     expect(resolveRowMenuOrder(cfg, available)).toEqual(['openFolder', 'copyVersion']);
+  });
+});
+
+describe('setShowCustomizeEntry', () => {
+  it('pure-updates showCustomizeEntry without mutating the input', () => {
+    const off = setShowCustomizeEntry(DEFAULT_ROW_MENU_CONFIG, false);
+    expect(off.showCustomizeEntry).toBe(false);
+    expect(DEFAULT_ROW_MENU_CONFIG.showCustomizeEntry).toBe(true);
+
+    const on = setShowCustomizeEntry(off, true);
+    expect(on.showCustomizeEntry).toBe(true);
   });
 });
 
@@ -99,6 +127,12 @@ describe('load/save', () => {
     const cfg = toggleHidden(DEFAULT_ROW_MENU_CONFIG, 'autoDetect');
     saveRowMenuConfig(cfg);
     expect(loadRowMenuConfig()).toEqual(cfg);
+  });
+
+  it('round-trips showCustomizeEntry through save/load', () => {
+    const cfg = setShowCustomizeEntry(DEFAULT_ROW_MENU_CONFIG, false);
+    saveRowMenuConfig(cfg);
+    expect(loadRowMenuConfig().showCustomizeEntry).toBe(false);
   });
 
   it('returns default when storage is empty or malformed', () => {

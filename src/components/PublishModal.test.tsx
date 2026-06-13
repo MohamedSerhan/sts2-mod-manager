@@ -227,7 +227,31 @@ describe('<PublishModal>', () => {
       expect(call).toBeDefined();
       // Default visibility is "Friends only" → listPublic is explicitly
       // false (not null / undefined) so the backend never has to guess.
-      expect(call!.args).toEqual({ name: 'My Pack', listPublic: false });
+      // Notes/links sharing defaults ON (Solo FR, 2026-06-10).
+      expect(call!.args).toEqual({ name: 'My Pack', listPublic: false, includeNotes: true });
+    });
+  });
+
+  it('unchecking "Include your mod notes" publishes with includeNotes=false', async () => {
+    registerInvokeHandler('get_api_key_status', () => ({
+      nexus_api_key_set: false,
+      github_token_set: true,
+    }));
+    registerInvokeHandler('share_profile', () => ({
+      owner: 'alice',
+      code: 'AA5A-315D-61AE',
+      url: 'https://github.com/alice/sts2mm-profiles',
+      remote_path: 'My_Pack.json',
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText(/My Pack/)).toBeInTheDocument(); });
+    await user.click(screen.getByRole('checkbox', { name: /Include your mod notes/i }));
+    await user.click(getPublishButton());
+    await waitFor(() => {
+      const call = getInvokeCalls().find((c) => c.cmd === 'share_profile');
+      expect(call).toBeDefined();
+      expect(call!.args).toEqual({ name: 'My Pack', listPublic: false, includeNotes: false });
     });
   });
 
@@ -539,7 +563,7 @@ describe('<PublishModal>', () => {
     await user.click(publishBtn);
     // Inline panel renders with the parsed mod list.
     await screen.findByRole('heading', {
-      name: /Some mods need repair before sharing/i,
+      name: /Some mod uploads didn.t finish/i,
     });
     expect(screen.getByText('ModA')).toBeInTheDocument();
     expect(screen.getByText('ModB')).toBeInTheDocument();
@@ -576,7 +600,7 @@ describe('<PublishModal>', () => {
     await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
     await user.click(publishBtn);
     await screen.findByRole('heading', {
-      name: /Some mods need repair before sharing/i,
+      name: /Some mod uploads didn.t finish/i,
     });
     await user.click(screen.getByRole('button', { name: /Repair these mods/i }));
     // Auto-retry kicks in once both repairs succeed → publish lands the
@@ -600,7 +624,7 @@ describe('<PublishModal>', () => {
     await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
     await user.click(publishBtn);
     await screen.findByRole('heading', {
-      name: /Some mods need repair before sharing/i,
+      name: /Some mod uploads didn.t finish/i,
     });
     // Use the panel's Cancel button — the modal footer is hidden while
     // the panel owns the action surface, so there's only one Cancel.
@@ -634,7 +658,7 @@ describe('<PublishModal>', () => {
     await waitFor(() => { expect(pushBtn).not.toBeDisabled(); });
     await user.click(pushBtn);
     await screen.findByRole('heading', {
-      name: /Some mods need repair before sharing/i,
+      name: /Some mod uploads didn.t finish/i,
     });
     // Chinese mod name from Solo's actual bug report renders unmangled.
     expect(screen.getByText('Solo尖塔铭者卡图强化')).toBeInTheDocument();
@@ -676,7 +700,7 @@ describe('<PublishModal>', () => {
     await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
     await user.click(publishBtn);
     await screen.findByRole('heading', {
-      name: /Some mods need repair before sharing/i,
+      name: /Some mod uploads didn.t finish/i,
     });
     await user.click(screen.getByRole('button', { name: /Repair these mods/i }));
     // Wait for the failure marker to appear.
@@ -716,7 +740,7 @@ describe('<PublishModal>', () => {
     // The inline panel must NOT appear — this isn't a missing-bundles error.
     expect(
       screen.queryByRole('heading', {
-        name: /Some mods need repair before sharing/i,
+        name: /Some mod uploads didn.t finish/i,
       }),
     ).toBeNull();
   });
@@ -1062,7 +1086,7 @@ describe('<PublishModal>', () => {
     await waitFor(() => {
       const call = getInvokeCalls().find((c) => c.cmd === 'share_profile');
       expect(call).toBeDefined();
-      expect(call!.args).toEqual({ name: 'My Pack', listPublic: true });
+      expect(call!.args).toEqual({ name: 'My Pack', listPublic: true, includeNotes: true });
     });
   });
 
@@ -1102,7 +1126,7 @@ describe('<PublishModal>', () => {
     await waitFor(() => {
       const call = getInvokeCalls().find((c) => c.cmd === 'share_profile');
       expect(call).toBeDefined();
-      expect(call!.args).toEqual({ name: 'My Pack', listPublic: true });
+      expect(call!.args).toEqual({ name: 'My Pack', listPublic: true, includeNotes: true });
     });
   });
 

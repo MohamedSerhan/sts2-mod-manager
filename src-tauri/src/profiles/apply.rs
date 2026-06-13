@@ -278,6 +278,7 @@ fn snapshot_current_inner(
             .unwrap_or(now),
         updated_at: now,
         public: existing_profile.as_ref().and_then(|p| p.public),
+        mod_extras: Default::default(),
     };
 
     save_profile(&profile, profiles_path)?;
@@ -624,14 +625,19 @@ pub(crate) async fn switch_profile_from_paths(
     // switch.
     let backup_dir = config_path.join("backups");
     let _ = std::fs::create_dir_all(&backup_dir);
-    match crate::backup::create_backup(mods_path, &backup_dir) {
-        Ok(backup_name) => {
+    let retention = crate::backup::load_persisted_backup_retention(config_path);
+    match crate::backup::create_backup_with_retention(mods_path, &backup_dir, retention) {
+        Ok(Some(backup_name)) => {
             log::info!(
                 "Pre-switch backup created for profile '{}': {}",
                 name,
                 backup_name
             )
         }
+        Ok(None) => log::info!(
+            "Backups disabled (retention 0); skipping pre-switch backup for profile '{}'",
+            name
+        ),
         Err(e) => log::warn!(
             "Failed to create pre-switch backup before applying profile '{}': {}",
             name,
@@ -955,6 +961,9 @@ pub(crate) async fn switch_profile_from_paths(
     // shared profile links its mods' GitHub/Nexus chips, same as a fresh
     // install or subscription update. Covers mods already on disk too.
     crate::profiles::persist_profile_mod_sources(&profile.mods, config_path);
+    // Curator notes/links/tags ride in the manifest (Solo FR) — merge
+    // them fill-only so the receiver's own annotations always win.
+    crate::mod_sources::merge_shared_extras(&profile.mod_extras, config_path);
 
     // ── STEP 2: Apply profile AFTER downloads ──
     apply_profile_with_pins(&profile, mods_path, disabled_path, &pinned_set)
@@ -1050,6 +1059,7 @@ mod snapshot_metadata_tests {
                 created_at: now,
                 updated_at: now,
                 public: Some(true),
+                mod_extras: Default::default(),
             },
             &profiles_path,
         )
@@ -1383,6 +1393,7 @@ mod modpack_flow_tests {
             created_at: now,
             updated_at: now,
             public: Some(false),
+            mod_extras: Default::default(),
         };
         save_profile(&profile, profiles).unwrap();
         profile

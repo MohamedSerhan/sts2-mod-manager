@@ -1,0 +1,1 @@
+When a share can't finish, the recovery panel now leads with "Try sharing again" for the common upload-hiccup case, keeping "Repair these mods" as a clearly-labeled fallback for genuinely broken files.

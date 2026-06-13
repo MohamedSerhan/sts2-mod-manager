@@ -329,6 +329,14 @@
       "following": "All modpacks",
       "publishedByYou": "Published by you"
     },
+    "sort": {
+      "label": "Sort",
+      "recent": "Recently launched",
+      "edited": "Recently edited",
+      "created": "Recently created",
+      "name": "Name A–Z",
+      "mods": "Most mods"
+    },
     "activity": {
       "hasUpdates": "{{count}} modpack has updates",
       "haveUpdates": "{{count}} modpacks have updates",
@@ -400,7 +408,7 @@
       },
       "noMatches": {
         "title": "No matching mods",
-        "hint": "Try a different name, folder, ID, or version."
+        "hint": "Try a different name, folder, ID, version, or tag."
       },
       "packEmpty": {
         "title": "No mods in this modpack yet",
@@ -609,7 +617,7 @@
   "modpacks": {
     "tabs": {
       "yours": "Installed",
-      "browse": "Browse"
+      "browse": "Browse community packs"
     },
     "quickAdd": {
       "label": "Add a modpack by code",
@@ -620,7 +628,7 @@
   "library": {
     "tabs": {
       "installed": "Installed",
-      "browse": "Browse"
+      "browse": "Browse mods"
     }
   },
   "nav": {
@@ -966,6 +974,8 @@
     "friendsOnlyDesc": "Anyone with the code or link can install it. Not listed on Browse Modpacks.",
     "public": "Public",
     "publicDesc": "Listed on Browse Modpacks. Anyone using the app can find and install it.",
+    "includeNotes": "Include your mod notes, links & tags",
+    "includeNotesDesc": "Friends who install this pack inherit your per-mod notes, custom links, and tags (their own annotations are never overwritten). Uncheck to keep them private.",
     "publicRepoNote": "The manager will create a <0>public</0> repo called <1>sts2mm-profiles</1> on your GitHub account (if you don't already have one) to hold your published packs + mod bundles. You can re-publish updates later to the same code; you can also delete or make it private on GitHub at any time.",
     "uploadingManifest": "Uploading modpack manifest…",
     "bundlingMod": "Bundling mod {{current}} of {{total}}: {{name}}",
@@ -1007,9 +1017,13 @@
     "failedUploadsMore_other": ", +{{count}} more",
     "failedUploadsHelp": "Friends installing this code will see \"missing mod\" for these - re-publish to retry.",
     "missingBundles": {
-      "title": "Some mods need repair before sharing",
-      "body": "These mods don't have working bundles. Repair them once and your modpack will share successfully.",
+      "title": "Some mod uploads didn't finish",
+      "body": "The upload to GitHub didn't complete for these mods — usually a brief network or GitHub hiccup. Just share again: only the mods that didn't upload are retried.",
+      "repairHint": "Still failing after a few tries? Use \"Repair these mods\" — it reinstalls each mod from its linked GitHub source, for files that are genuinely missing or broken.",
+      "shareAgainBtn": "Try sharing again",
+      "sharingAgain": "Sharing…",
       "repairBtn": "Repair these mods",
+      "repairBtnTitle": "Reinstall these mods from their linked GitHub source. Only helps when the files are actually missing or corrupt, and needs a linked source.",
       "repairing": "Repairing…",
       "openFolder": "Open mod folder",
       "openFolderTitle": "Open the Mods folder so you can replace the broken files manually",
@@ -1091,6 +1105,10 @@
     "secondary": {
       "create": "Create modpack",
       "reviewUpdates": "Review updates ({{count}})"
+    },
+    "recent": {
+      "title": "Recent modpacks",
+      "switchTitle": "Switch to {{name}}"
     },
     "syncPillReady": "Sync available",
     "sharePillReady": "Not yet shared",
@@ -1233,7 +1251,7 @@
       "title": "Mod menu",
       "desc": "Choose which actions appear in each mod's ⋯ menu, and drag to reorder them.",
       "reset": "Reset to default",
-      "lockedCaption": "Delete and Customize are always pinned to the bottom.",
+      "lockedCaption": "Delete is always pinned to the bottom. Customize can be hidden — you can always reopen this panel from Settings.",
       "visibleAria": "Show {{item}} in the menu",
       "dragAria": "Drag to reorder {{item}}",
       "items": {
@@ -1284,6 +1302,14 @@
     "backups": {
       "title": "Backups",
       "desc": "Auto-saved before every launch and Vanilla Mode - keeps the last 5",
+      "retentionTitle": "Automatic backups",
+      "retentionDesc": "Choose how many automatic backups to keep, or turn them off. The oldest are removed once the limit is reached.",
+      "retentionLabel": "Backups to keep",
+      "retentionOff": "Off",
+      "retentionOffHint": "Automatic backups are off. Existing backups are kept until you delete them.",
+      "retentionSaved": "Keeping the {{count}} newest backups.",
+      "retentionSavedOff": "Automatic backups turned off.",
+      "retentionFailed": "Failed to update backup retention: {{error}}",
       "openFolder": "Open Folder",
       "create": "Create backup",
       "creating": "Creating…",

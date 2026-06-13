@@ -137,7 +137,7 @@ describe('<ModsView>', () => {
     await waitFor(() => {
       expect(screen.getByText(/All installed mods/i)).toBeInTheDocument();
     });
-    await user.click(screen.getByRole('button', { name: /^Browse$/i }));
+    await user.click(screen.getByRole('button', { name: /^Browse /i }));
     // BrowseView's GitHub source sub-tab proves we switched.
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /GitHub/i })).toBeInTheDocument();

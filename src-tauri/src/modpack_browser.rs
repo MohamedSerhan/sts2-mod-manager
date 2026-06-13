@@ -380,6 +380,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             public,
+            mod_extras: Default::default(),
         }
     }
 

@@ -30,7 +30,7 @@ use super::{new_profile_id, Profile, ProfileMod, APP_CREATED_BY};
 /// Includes profiles that only have a .share file (remote profiles not yet fetched).
 pub fn list_profiles(profiles_path: &Path) -> Vec<Profile> {
     let mut profiles = Vec::new();
-    let mut seen_names = std::collections::HashSet::new();
+    let mut seen_profile_stems = std::collections::HashSet::new();
 
     if !profiles_path.exists() {
         return profiles;
@@ -44,13 +44,30 @@ pub fn list_profiles(profiles_path: &Path) -> Vec<Profile> {
                 if let Ok(content) = fs::read_to_string(&path) {
                     if let Ok(profile) = serde_json::from_str::<Profile>(&content) {
                         let profile = hide_app_created_by(profile);
-                        seen_names.insert(profile.name.clone());
+                        seen_profile_stems.insert(profile.name.clone());
+                        seen_profile_stems.insert(sanitize_filename(&profile.name));
+                        if !profile.id.trim().is_empty() {
+                            seen_profile_stems.insert(profile.id.clone());
+                            seen_profile_stems.insert(sanitize_filename(&profile.id));
+                        }
+                        seen_profile_stems.insert(profile_file_stem(&profile));
                         profiles.push(profile);
                     }
                 }
             }
         }
     }
+
+    profiles.sort_by(|a, b| {
+        let name_order = a.name.cmp(&b.name);
+        if name_order != std::cmp::Ordering::Equal {
+            return name_order;
+        }
+        let a_has_id = !a.id.trim().is_empty();
+        let b_has_id = !b.id.trim().is_empty();
+        b_has_id.cmp(&a_has_id)
+    });
+    profiles.dedup_by(|a, b| a.name.eq_ignore_ascii_case(&b.name));
 
     // Second pass: create placeholder entries for .share files without matching .json
     if let Ok(entries) = fs::read_dir(profiles_path) {
@@ -62,7 +79,7 @@ pub fn list_profiles(profiles_path: &Path) -> Vec<Profile> {
                     .unwrap_or_default()
                     .to_string_lossy()
                     .to_string();
-                if !seen_names.contains(&stem) {
+                if !seen_profile_stems.contains(&stem) {
                     // Create a placeholder profile -- will be fetched from GitHub on activation
                     profiles.push(Profile {
                         id: new_profile_id(),
@@ -75,7 +92,7 @@ pub fn list_profiles(profiles_path: &Path) -> Vec<Profile> {
                         public: None,
                         mod_extras: Default::default(),
                     });
-                    seen_names.insert(stem);
+                    seen_profile_stems.insert(stem);
                 }
             }
         }
@@ -276,25 +293,35 @@ fn load_profile_from_path(path: &Path) -> Result<Profile> {
 }
 
 fn find_profile_json(name_or_id: &str, profiles_path: &Path) -> Option<std::path::PathBuf> {
-    let direct = profiles_path.join(format!("{}.json", sanitize_filename(name_or_id)));
-    if direct.exists() {
-        return Some(direct);
-    }
+    let mut name_match: Option<std::path::PathBuf> = None;
     for entry in fs::read_dir(profiles_path).ok()?.flatten() {
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
         }
-        let Ok(profile) = load_profile_from_path(&path) else {
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(profile) = serde_json::from_str::<Profile>(&content) else {
             continue;
         };
         if profile.id.eq_ignore_ascii_case(name_or_id)
-            || profile.name.eq_ignore_ascii_case(name_or_id)
         {
             return Some(path);
         }
+        if profile.name.eq_ignore_ascii_case(name_or_id) {
+            let has_id = !profile.id.trim().is_empty();
+            if has_id {
+                return Some(path);
+            }
+            name_match.get_or_insert(path);
+        }
     }
-    None
+    if let Some(path) = name_match {
+        return Some(path);
+    }
+    let direct = profiles_path.join(format!("{}.json", sanitize_filename(name_or_id)));
+    direct.exists().then_some(direct)
 }
 
 pub(crate) fn profile_name_exists(
@@ -790,6 +817,78 @@ mod persist_profile_mod_sources_tests {
         );
         assert_eq!(entry.note.as_deref(), Some("hand-checked"), "note survives");
         assert!(!entry.github_auto_detected, "stays user-authored");
+    }
+}
+
+#[cfg(test)]
+mod profile_identity_storage_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn sample_profile(id: &str, name: &str, mods: usize) -> Profile {
+        Profile {
+            id: id.into(),
+            name: name.into(),
+            game_version: None,
+            created_by: None,
+            mods: (0..mods)
+                .map(|i| ProfileMod {
+                    name: format!("Mod {i}"),
+                    version: "1.0.0".into(),
+                    source: None,
+                    hash: None,
+                    files: vec![format!("Mod{i}.dll")],
+                    folder_name: None,
+                    mod_id: None,
+                    enabled: true,
+                    bundle_url: None,
+                    bundle_sha256: None,
+                    bundle_members: vec![],
+                })
+                .collect(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+            mod_extras: Default::default(),
+        }
+    }
+
+    #[test]
+    fn id_named_share_sidecar_does_not_create_placeholder_profile() {
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path();
+        let profile = sample_profile("profile-123", "TesterW", 2);
+        save_profile(&profile, dir).unwrap();
+        std::fs::write(dir.join("profile-123.share"), "{}").unwrap();
+
+        let profiles = list_profiles(dir);
+
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].id, "profile-123");
+        assert_eq!(profiles[0].name, "TesterW");
+        assert_eq!(profiles[0].mods.len(), 2);
+    }
+
+    #[test]
+    fn id_backed_duplicate_name_wins_over_legacy_name_file() {
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path();
+        let legacy = sample_profile("", "TesterW", 0);
+        std::fs::write(
+            dir.join("TesterW.json"),
+            serde_json::to_string_pretty(&legacy).unwrap(),
+        )
+        .unwrap();
+        let profile = sample_profile("profile-123", "TesterW", 2);
+        save_profile(&profile, dir).unwrap();
+
+        let profiles = list_profiles(dir);
+        let loaded = load_profile("TesterW", dir).unwrap();
+
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].id, "profile-123");
+        assert_eq!(loaded.id, "profile-123");
+        assert_eq!(loaded.mods.len(), 2);
     }
 }
 

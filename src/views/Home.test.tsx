@@ -159,6 +159,7 @@ describe('<HomeView> single-block launcher shape (v7)', () => {
   it.each([
     ['installed', { kind: 'installed', profile: { name: 'JessPack', mods: [{}, {}] } }],
     ['activated', { kind: 'activated', profileName: 'JessPack' }],
+    ['activated with details', { kind: 'activated', profileName: 'JessPack', result: { downloaded: 1, failed_downloads: [], missing_mods: [] } }],
     ['reapplied with details', { kind: 'reapplied', profileName: 'JessPack', result: { downloaded: 1, failed_downloads: ['x'], missing_mods: ['y'] } }],
     ['reapplied no changes', { kind: 'reapplied', profileName: 'JessPack', result: { downloaded: 0, failed_downloads: [], missing_mods: [] } }],
     ['synced', { kind: 'synced', profileName: 'JessPack' }],

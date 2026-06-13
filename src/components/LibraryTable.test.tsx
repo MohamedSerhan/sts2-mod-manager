@@ -620,6 +620,62 @@ describe('<LibraryTable>', () => {
     expect(orderedMods?.map((m) => m.name)).toEqual(['Second', 'First']);
   });
 
+  it('drag reorder failure shows a toast and reloads the membership grid', async () => {
+    let membershipLoads = 0;
+    registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+    registerInvokeHandler('get_profile_memberships', () => {
+      membershipLoads += 1;
+      return {
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [
+          {
+            name: 'First',
+            version: '1.0',
+            folder_name: 'First',
+            mod_id: 'First',
+            installed_enabled: true,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+          },
+          {
+            name: 'Second',
+            version: '1.0',
+            folder_name: 'Second',
+            mod_id: 'Second',
+            installed_enabled: true,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+          },
+        ],
+      };
+    });
+    registerInvokeHandler('set_profile_load_order', () => {
+      throw new Error('settings write failed');
+    });
+
+    const { container } = render(<Wrap modpackName="Stable" enableReorder />);
+    await screen.findByText('#1');
+    await screen.findByText('#2');
+    const rows = Array.from(container.querySelectorAll('.gf-profile-library-row')) as HTMLElement[];
+    const [firstRow, secondRow] = rows;
+    const dataTransfer = {
+      data: new Map<string, string>(),
+      setData(type: string, value: string) { this.data.set(type, value); },
+      getData(type: string) { return this.data.get(type) ?? ''; },
+      effectAllowed: '',
+      dropEffect: '',
+      get types() { return Array.from(this.data.keys()); },
+    };
+
+    fireEvent.dragStart(secondRow, { dataTransfer });
+    fireEvent.dragOver(firstRow, { dataTransfer });
+    fireEvent.drop(firstRow, { dataTransfer });
+    fireEvent.dragEnd(secondRow, { dataTransfer });
+
+    expect(await screen.findByText(/Failed to save load order: settings write failed/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(membershipLoads).toBeGreaterThanOrEqual(2);
+    });
+  });
+
   // ── T16 review fix — migrated from .skip'd Profiles.test.tsx ──────
   // The "Mod Library workspace" was extracted into <LibraryTable> in
   // T16. Seven legacy behaviors stopped being exercised when the old

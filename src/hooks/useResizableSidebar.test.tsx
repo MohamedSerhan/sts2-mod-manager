@@ -46,6 +46,18 @@ describe('useResizableSidebar', () => {
     expect(localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY)).toBe('264');
   });
 
+  it('left arrow shrinks the sidebar and unrelated keys are ignored', () => {
+    render(<Harness />);
+    const handle = screen.getByRole('separator');
+    fireEvent.keyDown(handle, { key: 'ArrowLeft' });
+    expect(screen.getByTestId('w')).toHaveTextContent('232');
+    expect(localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY)).toBe('232');
+
+    fireEvent.keyDown(handle, { key: 'Home' });
+    expect(screen.getByTestId('w')).toHaveTextContent('232');
+    expect(localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY)).toBe('232');
+  });
+
   it('double-click resets to the default', () => {
     render(<Harness />);
     const handle = screen.getByRole('separator');

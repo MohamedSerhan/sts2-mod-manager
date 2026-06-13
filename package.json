@@ -22,7 +22,7 @@
     "qa": "npm run qa:matrix && npm run qa:rust && npm run qa:rust:cassette && npm run qa:coverage && npm run qa:smoke:build && npm run qa:smoke && npm run qa:smoke:cassette",
     "qa:rust": "cargo test --manifest-path=src-tauri/Cargo.toml",
     "qa:rust:cassette": "cargo test --manifest-path=src-tauri/Cargo.toml --features qa-cassette",
-    "qa:matrix": "node --test scripts/qa-coverage-matrix.test.mjs",
+    "qa:matrix": "node scripts/qa-coverage-matrix.mjs",
     "qa:github-stress": "cross-env STS2_GITHUB_STRESS=1 cargo test --manifest-path=src-tauri/Cargo.toml --lib github_api_stress_40_mods_various_sizes -- --ignored --nocapture",
     "qa:i18n": "vitest run src/i18n/locales/parity.test.ts",
     "qa:unit": "vitest run",

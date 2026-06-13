@@ -166,12 +166,13 @@ fi
 # --- QA suite gate ---
 #
 # The QA harness is our last line of defence before users see bugs.
-# It runs four suites:
-#   1. Rust unit + integration tests (default features)
-#   2. Rust integration tests with `qa-cassette` (proves the HTTP
+# It runs five suites:
+#   1. QA matrix and interaction inventory completeness
+#   2. Rust unit + integration tests (default features)
+#   3. Rust integration tests with `qa-cassette` (proves the HTTP
 #      intercept didn't regress)
-#   3. Frontend parser unit tests via Vitest
-#   4. WebDriver smoke against a built binary, in both modes
+#   4. Frontend parser unit tests via Vitest
+#   5. WebDriver smoke against a built binary, in both modes
 #      (non-cassette + CASSETTE=1) on Windows, where the harness is supported
 #
 # This blocks a release if anything is red. To bypass for an
@@ -183,19 +184,22 @@ if [[ "${SKIP_QA:-0}" == "1" ]]; then
   echo "⚠  SKIP_QA=1 — skipping the QA suite. You are flying blind." >&2
 else
   echo "==== QA suite ===="
-  echo "[1/4] Rust tests (default features)..."
+  echo "[1/5] QA matrix and interaction inventory..."
+  npm run --silent qa:matrix
+
+  echo "[2/5] Rust tests (default features)..."
   cargo test --manifest-path=src-tauri/Cargo.toml --quiet
 
-  echo "[2/4] Rust tests (qa-cassette feature)..."
+  echo "[3/5] Rust tests (qa-cassette feature)..."
   cargo test --manifest-path=src-tauri/Cargo.toml --features qa-cassette --quiet
 
-  echo "[3/4] Frontend unit tests + coverage gate (vitest)..."
+  echo "[4/5] Frontend unit tests + coverage gate (vitest)..."
   # qa:coverage runs Vitest with the v8 coverage reporter AND enforces
   # the thresholds declared in vitest.config.ts. A regression that
   # drops coverage below the floor blocks the release.
   npm run --silent qa:coverage
 
-  echo "[4/4] WebDriver smoke..."
+  echo "[5/5] WebDriver smoke..."
   PLATFORM=$(node -p "process.platform")
   if [[ "$PLATFORM" == "win32" ]]; then
     # Ensure the matching msedgedriver is on disk. The auto-fetch

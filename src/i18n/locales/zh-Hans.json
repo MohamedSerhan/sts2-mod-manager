@@ -654,6 +654,7 @@
     "updateAvailableBanner": "Mod Manager v{{version}} 可用",
     "willRestart": "应用将在完成后重启。",
     "currentVersion": "当前版本 v{{version}}。",
+    "windowsSecurityNote": "Windows Defender 可能会提示这个未签名安装程序。请先在 VirusTotal 验证；如果只有通用启发式检测，再允许更新。",
     "downloadManual": "打开 GitHub 发布页面手动下载",
     "download": "下载",
     "installingLabel": "安装中...",
@@ -1112,7 +1113,17 @@
     },
     "recent": {
       "title": "最近的模组包",
-      "switchTitle": "切换到 {{name}}"
+      "hint": "快速回到你实际玩过的模组包。",
+      "switchTitle": "切换到 {{name}}",
+      "lastPlayed": "上次游玩 {{date}}",
+      "modCount_one": "{{count}} 个模组",
+      "modCount_few": "{{count}} 个模组",
+      "modCount_many": "{{count}} 个模组",
+      "modCount_other": "{{count}} 个模组",
+      "enabledCount_one": "{{count}} 个启用",
+      "enabledCount_few": "{{count}} 个启用",
+      "enabledCount_many": "{{count}} 个启用",
+      "enabledCount_other": "{{count}} 个启用"
     },
     "syncPillReady": "可同步",
     "sharePillReady": "尚未分享",

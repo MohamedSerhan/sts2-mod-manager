@@ -653,6 +653,7 @@
     "updateAvailableBanner": "Mod Manager v{{version}} is available",
     "willRestart": "The app will restart when this finishes.",
     "currentVersion": "You're on v{{version}}.",
+    "windowsSecurityNote": "Windows Defender may warn on this unsigned installer. Verify it on VirusTotal, then allow the update if detections are only generic heuristics.",
     "downloadManual": "Open GitHub releases page to download manually",
     "download": "Download",
     "installingLabel": "Installing...",
@@ -1111,7 +1112,17 @@
     },
     "recent": {
       "title": "Recent modpacks",
-      "switchTitle": "Switch to {{name}}"
+      "hint": "Jump back into the packs you actually played.",
+      "switchTitle": "Switch to {{name}}",
+      "lastPlayed": "Last played {{date}}",
+      "modCount_one": "{{count}} mod",
+      "modCount_few": "{{count}} mods",
+      "modCount_many": "{{count}} mods",
+      "modCount_other": "{{count}} mods",
+      "enabledCount_one": "{{count}} active",
+      "enabledCount_few": "{{count}} active",
+      "enabledCount_many": "{{count}} active",
+      "enabledCount_other": "{{count}} active"
     },
     "syncPillReady": "Sync available",
     "sharePillReady": "Not yet shared",

@@ -1757,15 +1757,103 @@ body {
   flex-wrap: wrap;
   gap: 8px;
 }
-/* FR5 — leading label on the Recent-modpacks strip; aligns with the
-   gf-btn-3 chips it sits next to without reading as a button itself. */
-.gf-home-recent-label {
+.gf-home-recent {
+  margin-top: 18px;
+}
+.gf-home-recent-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+.gf-home-recent-title {
+  margin: 0;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.gf-home-recent-hint {
+  margin: 4px 0 0;
   font-size: 12px;
-  opacity: 0.75;
+  color: var(--ink-mute);
+}
+.gf-home-recent-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+.gf-home-recent-item {
+  border: 1px solid var(--indigo-line);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 12px;
+  min-height: 78px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: 1fr auto;
+  gap: 8px 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+.gf-home-recent-item:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.055);
+  border-color: var(--indigo-line2);
+  transform: translateY(-1px);
+}
+.gf-home-recent-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+.gf-home-recent-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.gf-home-recent-name {
+  font-size: 13px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gf-home-recent-meta {
+  font-size: 11.5px;
+  color: var(--ink-mute);
+}
+.gf-home-recent-stats {
+  grid-column: 1 / 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.gf-home-recent-stats span {
+  border: 1px solid var(--indigo-line);
+  border-radius: 999px;
+  padding: 3px 7px;
+  font-size: 11px;
+  color: var(--ink-soft);
+  background: rgba(0, 0, 0, 0.12);
+}
+.gf-home-recent-action {
+  grid-column: 2 / 3;
+  grid-row: 1 / 3;
   align-self: center;
+  justify-self: end;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--indigo-elev);
+  color: var(--gf);
 }
 .gf-home-footer {
   margin-top: auto;
@@ -2070,6 +2158,11 @@ body {
   background: color-mix(in oklch, var(--info) 14%, transparent);
   border-color: color-mix(in oklch, var(--info) 40%, transparent);
   color: var(--info-text);
+}
+.gf-banner-security-note {
+  font-size: 12px;
+  margin-top: 4px;
+  opacity: 0.72;
 }
 .gf-modpack-out-sync {
   align-items: center;

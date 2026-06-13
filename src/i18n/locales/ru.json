@@ -654,6 +654,7 @@
     "updateAvailableBanner": "Доступен Менеджер модов v{{version}}",
     "willRestart": "Приложение перезапустится по завершении.",
     "currentVersion": "У вас v{{version}}.",
+    "windowsSecurityNote": "Windows Defender может предупредить об этом неподписанном установщике. Проверьте файл на VirusTotal и разрешайте обновление, если срабатывания только эвристические.",
     "downloadManual": "Открыть страницу релизов на GitHub для ручной загрузки",
     "download": "Скачать",
     "installingLabel": "Установка…",
@@ -1112,7 +1113,17 @@
     },
     "recent": {
       "title": "Недавние сборки",
-      "switchTitle": "Переключиться на {{name}}"
+      "hint": "Быстро вернитесь к сборкам, в которые вы уже играли.",
+      "switchTitle": "Переключиться на {{name}}",
+      "lastPlayed": "Последний запуск: {{date}}",
+      "modCount_one": "{{count}} мод",
+      "modCount_few": "{{count}} мода",
+      "modCount_many": "{{count}} модов",
+      "modCount_other": "{{count}} мода",
+      "enabledCount_one": "{{count}} активен",
+      "enabledCount_few": "{{count}} активны",
+      "enabledCount_many": "{{count}} активны",
+      "enabledCount_other": "{{count}} активны"
     },
     "syncPillReady": "Доступна синхронизация",
     "sharePillReady": "Ещё не опубликовано",

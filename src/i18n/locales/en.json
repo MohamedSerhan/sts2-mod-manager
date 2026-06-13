@@ -978,6 +978,7 @@
     "includeNotesDesc": "Friends who install this pack inherit your per-mod notes, custom links, and tags (their own annotations are never overwritten). Uncheck to keep them private.",
     "publicRepoNote": "The manager will create a <0>public</0> repo called <1>sts2mm-profiles</1> on your GitHub account (if you don't already have one) to hold your published packs + mod bundles. You can re-publish updates later to the same code; you can also delete or make it private on GitHub at any time.",
     "uploadingManifest": "Uploading modpack manifest…",
+    "checkingBundle": "Checking mod {{current}} of {{total}}: {{name}}",
     "bundlingMod": "Bundling mod {{current}} of {{total}}: {{name}}",
     "preparing": "Preparing…",
     "progressNote": "This can take a minute or two for big packs — your mod files are being zipped + uploaded to your <0>sts2mm-profiles</0> repo one at a time. Don't close the window.",

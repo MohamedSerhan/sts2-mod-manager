@@ -979,6 +979,7 @@
     "includeNotesDesc": "安装此包的朋友将继承你为每个模组写的备注、自定义链接和标签（他们自己的标注永远不会被覆盖）。取消勾选可保持私密。",
     "publicRepoNote": "管理器将在你的 GitHub 账户上创建一个名为 <1>sts2mm-profiles</1> 的<0>公开</0>仓库（如果你还没有的话），用于存放你发布的包和模组捆绑包。稍后你可以重新发布更新到同一代码；你也可以随时在 GitHub 上删除或将其设为私有。",
     "uploadingManifest": "正在上传整合包清单…",
+    "checkingBundle": "正在检查模组 {{current}}/{{total}}：{{name}}",
     "bundlingMod": "正在打包模组 {{current}}/{{total}}：{{name}}",
     "preparing": "准备中…",
     "progressNote": "大型包可能需要一两分钟 — 你的模组文件正在被压缩并逐个上传到你的 <0>sts2mm-profiles</0> 仓库。不要关闭此窗口。",

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
 
@@ -48,8 +49,8 @@ use github::{
 // directly — orchestration always goes through `zip_profile_mod_files`
 // (which has the enabled-vs-disabled-path fallback baked in), so the
 // raw `zip_mod_files` lives in `upload.rs` as an implementation detail.
-pub(crate) use upload::zip_profile_mod_files;
 use upload::{ensure_profile_publish_complete, restore_profile_after_failed_publish};
+pub(crate) use upload::{fingerprint_profile_mod_files, zip_profile_mod_files};
 
 /// One mod skipped during a modpack install because it declared a
 /// `min_game_version` higher than the user's STS2 build. Surfaced in
@@ -191,6 +192,11 @@ struct ShareInfo {
     /// Absent in `.share` files written before this field existed.
     #[serde(default)]
     published_signature: Option<String>,
+    /// Per-mod content fingerprints from the last successful publish.
+    /// Used only by the owner on re-share to skip rebuilding zip bundles
+    /// whose source files are unchanged.
+    #[serde(default)]
+    bundle_source_fingerprints: HashMap<String, String>,
 }
 
 fn save_share_info(path: &Path, info: &ShareInfo) -> Result<()> {
@@ -223,6 +229,7 @@ fn recover_owned_share_info_sidecar(
         file_sha: None,
         share_format_version: SHARE_FORMAT_VERSION,
         published_signature: Some(profile_publish_signature(published_profile)),
+        bundle_source_fingerprints: HashMap::new(),
     };
     let share_info_path = profiles_path.join(format!("{}.share", profile_name));
     save_share_info(&share_info_path, &info)?;
@@ -348,10 +355,11 @@ async fn recover_owned_share_info_from_subscription(
 #[derive(Debug, Serialize, Clone)]
 pub(super) struct ShareProgress {
     profile_name: String,
-    /// "bundling" while uploading mod zips; "uploading-manifest" while
-    /// PUTting the profile JSON; "done" right before the success
-    /// resolves. Frontend doesn't have to render all of them but a
-    /// stable vocabulary makes future additions cheap.
+    /// "checking-bundle" while fingerprinting mod files, "bundling"
+    /// while building/uploading mod zips, "uploading-manifest" while
+    /// PUTting the profile JSON, and "done" right before success resolves.
+    /// Frontend doesn't have to render all of them but a stable vocabulary
+    /// makes future additions cheap.
     stage: &'static str,
     /// 1-indexed position within the current stage. 0 when irrelevant.
     current: usize,
@@ -520,6 +528,30 @@ fn publish_profile_mods_match(a: &ProfileMod, b: &ProfileMod) -> bool {
     let a_keys = publish_identity_keys(&a.name, a.folder_name.as_deref(), a.mod_id.as_deref());
     let b_keys = publish_identity_keys(&b.name, b.folder_name.as_deref(), b.mod_id.as_deref());
     publish_keys_intersect(&a_keys, &b_keys)
+}
+
+fn bundle_source_fingerprint_key(pm: &ProfileMod) -> String {
+    if let Some(mod_id) = pm
+        .mod_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        return format!("mod_id:{}", mod_id.to_lowercase());
+    }
+    if let Some(folder) = pm
+        .folder_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        return format!("folder:{}", folder.to_lowercase());
+    }
+    format!("name:{}", pm.name.trim().to_lowercase())
+}
+
+fn bundle_source_fingerprint_value(pm: &ProfileMod, file_fingerprint: &str) -> String {
+    format!("v1:{}:{}", pm.version.trim(), file_fingerprint)
 }
 
 /// Merge publish-side enrichment from the just-uploaded (filtered) profile
@@ -888,7 +920,15 @@ pub async fn share_profile(
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ShareResult, String> {
     use tauri::Emitter;
-    let (profiles_path, mods_path, disabled_path, config_path, token, game_version, exclude_stored_members) = {
+    let (
+        profiles_path,
+        mods_path,
+        disabled_path,
+        config_path,
+        token,
+        game_version,
+        exclude_stored_members,
+    ) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let token = s
             .github_token
@@ -966,10 +1006,7 @@ pub async fn share_profile(
             // was just published — refresh the snapshot so the update poll
             // doesn't flag their own publish (see the helper's doc).
             if let Ok(published) = crate::profiles::load_profile(&name, &profiles_path) {
-                crate::subscriptions::sync_own_subscription_after_publish(
-                    &config_path,
-                    &published,
-                );
+                crate::subscriptions::sync_own_subscription_after_publish(&config_path, &published);
             }
             Ok(result)
         }
@@ -1026,12 +1063,37 @@ pub(super) async fn share_profile_impl(
     let total_bundlable = bundlable.len();
     let mut bundles_reused = 0usize;
     let mut bundles_uploaded = 0usize;
+    let mut bundle_source_fingerprints: HashMap<String, String> = HashMap::new();
 
     // Bundle ALL mods to guarantee version matching.
     // Friends get the exact same files the curator has installed.
     // GitHub sources are kept as metadata but bundles are preferred during install.
     for (pos, idx) in bundlable.into_iter().enumerate() {
         let mod_name = profile.mods[idx].name.clone();
+        if let Some(e) = emit {
+            e(
+                "share-progress",
+                ShareProgress {
+                    profile_name: profile.name.clone(),
+                    stage: "checking-bundle",
+                    current: pos + 1,
+                    total: total_bundlable,
+                    mod_name: Some(mod_name.clone()),
+                },
+            );
+        }
+
+        let pm = &mut profile.mods[idx];
+        let fingerprint_key = bundle_source_fingerprint_key(pm);
+        let source_fingerprint = match fingerprint_profile_mod_files(pm, mods_path, disabled_path) {
+            Ok(fingerprint) => bundle_source_fingerprint_value(pm, &fingerprint),
+            Err(e) => {
+                log::error!("Failed to fingerprint mod '{}': {}", pm.name, e);
+                failed_upload_reasons.push((pm.name.clone(), e.to_string()));
+                failed_uploads.push(pm.name.clone());
+                continue;
+            }
+        };
         if let Some(e) = emit {
             e(
                 "share-progress",
@@ -1044,8 +1106,6 @@ pub(super) async fn share_profile_impl(
                 },
             );
         }
-
-        let pm = &mut profile.mods[idx];
         log::info!("Bundling mod '{}' ({} files)", pm.name, pm.files.len());
         match zip_profile_mod_files(pm, mods_path, disabled_path) {
             Ok(zip_data) => {
@@ -1068,6 +1128,8 @@ pub(super) async fn share_profile_impl(
                         }
                         pm.bundle_url = Some(url);
                         pm.bundle_sha256 = Some(hash);
+                        bundle_source_fingerprints
+                            .insert(fingerprint_key.clone(), source_fingerprint.clone());
                         log::info!(
                             "Bundled mod '{}' successfully ({} bytes)",
                             pm.name,
@@ -1168,6 +1230,7 @@ pub(super) async fn share_profile_impl(
         file_sha: Some(file_sha),
         share_format_version: SHARE_FORMAT_VERSION,
         published_signature: Some(profile_publish_signature(&merged)),
+        bundle_source_fingerprints,
     };
     let share_info_path = profiles_path.join(format!("{}.share", profile.name));
     save_share_info(&share_info_path, &share_info)?;
@@ -1309,7 +1372,15 @@ pub async fn reshare_profile(
     use tauri::Emitter;
     let _guard = ShareGuard::try_acquire(state.inner(), &name)?;
 
-    let (profiles_path, mods_path, disabled_path, config_path, token, game_version, exclude_stored_members) = {
+    let (
+        profiles_path,
+        mods_path,
+        disabled_path,
+        config_path,
+        token,
+        game_version,
+        exclude_stored_members,
+    ) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let token = s
             .github_token
@@ -1379,6 +1450,7 @@ pub async fn reshare_profile(
             )
         })
         .collect();
+    let prior_bundle_source_fingerprints = share_info.bundle_source_fingerprints.clone();
     let bundlable: Vec<usize> = profile
         .mods
         .iter()
@@ -1388,10 +1460,47 @@ pub async fn reshare_profile(
     let total_bundlable = bundlable.len();
     let mut bundles_reused = 0usize;
     let mut bundles_uploaded = 0usize;
+    let mut bundle_source_fingerprints: HashMap<String, String> = HashMap::new();
 
     // Bundle ALL mods to guarantee version matching (same as share_profile).
     for (pos, idx) in bundlable.into_iter().enumerate() {
         let mod_name = profile.mods[idx].name.clone();
+        let _ = app_handle.emit(
+            "share-progress",
+            ShareProgress {
+                profile_name: profile.name.clone(),
+                stage: "checking-bundle",
+                current: pos + 1,
+                total: total_bundlable,
+                mod_name: Some(mod_name.clone()),
+            },
+        );
+
+        let pm = &mut profile.mods[idx];
+        let fingerprint_key = bundle_source_fingerprint_key(pm);
+        let source_fingerprint = match fingerprint_profile_mod_files(pm, &mods_path, &disabled_path)
+        {
+            Ok(fingerprint) => bundle_source_fingerprint_value(pm, &fingerprint),
+            Err(e) => {
+                log::error!("Failed to fingerprint mod '{}': {}", pm.name, e);
+                failed_upload_reasons.push((pm.name.clone(), e.to_string()));
+                failed_uploads.push(pm.name.clone());
+                continue;
+            }
+        };
+        if pm.bundle_url.is_some()
+            && pm.bundle_sha256.is_some()
+            && prior_bundle_source_fingerprints.get(&fingerprint_key) == Some(&source_fingerprint)
+        {
+            bundles_reused += 1;
+            bundle_source_fingerprints.insert(fingerprint_key, source_fingerprint);
+            log::info!(
+                "Reusing existing bundle for '{}' (source fingerprint match)",
+                pm.name
+            );
+            continue;
+        }
+
         let _ = app_handle.emit(
             "share-progress",
             ShareProgress {
@@ -1402,8 +1511,6 @@ pub async fn reshare_profile(
                 mod_name: Some(mod_name.clone()),
             },
         );
-
-        let pm = &mut profile.mods[idx];
         log::info!("Re-bundling mod '{}' ({} files)", pm.name, pm.files.len());
         match zip_profile_mod_files(pm, &mods_path, &disabled_path) {
             Ok(zip_data) => {
@@ -1426,6 +1533,8 @@ pub async fn reshare_profile(
                         }
                         pm.bundle_url = Some(url);
                         pm.bundle_sha256 = Some(hash);
+                        bundle_source_fingerprints
+                            .insert(fingerprint_key.clone(), source_fingerprint.clone());
                         log::info!(
                             "Re-bundled mod '{}' successfully ({} bytes)",
                             pm.name,
@@ -1534,6 +1643,7 @@ pub async fn reshare_profile(
         file_sha: Some(file_sha),
         share_format_version: SHARE_FORMAT_VERSION,
         published_signature: Some(profile_publish_signature(&merged)),
+        bundle_source_fingerprints,
     };
     save_share_info(&share_info_path, &updated_info).map_err(|e| e.to_string())?;
 
@@ -1678,6 +1788,7 @@ mod listing_tests {
             file_sha: Some("old".into()),
             share_format_version: 1,
             published_signature: None,
+            bundle_source_fingerprints: HashMap::new(),
         };
         let second = ShareInfo {
             code: "AAAA-BBBB-CCCC".into(),
@@ -1685,6 +1796,7 @@ mod listing_tests {
             file_sha: Some("new".into()),
             share_format_version: SHARE_FORMAT_VERSION,
             published_signature: None,
+            bundle_source_fingerprints: HashMap::new(),
         };
 
         save_share_info(&path, &first).unwrap();
@@ -2060,7 +2172,10 @@ mod share_orchestration_tests {
         let mut stale_pm = profile_mod("End Run Graph", "EndRunGraph");
         stale_pm.mod_id = None;
         stale_pm.folder_name = None;
-        stale_pm.files = vec!["EndRunGraph/EndRunGraph.json".into(), "EndRunGraph/EndRunGraph.dll".into()];
+        stale_pm.files = vec![
+            "EndRunGraph/EndRunGraph.json".into(),
+            "EndRunGraph/EndRunGraph.dll".into(),
+        ];
         stale_pm.version = "0.9.0".into();
 
         let profile = Profile {
@@ -2099,8 +2214,7 @@ mod share_orchestration_tests {
         // this is what makes `zip_profile_mod_files` succeed instead of
         // erroring with "missing declared file". (Sorted order: .dll
         // before .json; normalize separators for cross-platform CI.)
-        let normalized_files: Vec<String> =
-            pm.files.iter().map(|f| f.replace('\\', "/")).collect();
+        let normalized_files: Vec<String> = pm.files.iter().map(|f| f.replace('\\', "/")).collect();
         assert_eq!(
             normalized_files,
             vec![
@@ -2291,7 +2405,11 @@ mod share_orchestration_tests {
 
         // Bundling must succeed against the stored member's files --
         // `zip_profile_mod_files` falls back to the disabled folder.
-        let stored_pm = prepared.mods.iter().find(|m| m.name == "Stored Mod").unwrap();
+        let stored_pm = prepared
+            .mods
+            .iter()
+            .find(|m| m.name == "Stored Mod")
+            .unwrap();
         super::upload::zip_profile_mod_files(stored_pm, &mods_path, &disabled_path)
             .expect("stored member must bundle from the disabled folder");
     }
@@ -2533,7 +2651,7 @@ mod share_orchestration_tests {
             &profiles_path,
             "test-token",
             None,
-        Vec::new(),
+            Vec::new(),
         )
         .await
         .expect("share should succeed");
@@ -2560,6 +2678,17 @@ mod share_orchestration_tests {
             m.bundle_url
         );
         assert!(m.bundle_sha256.is_some(), "expected hash to be persisted");
+
+        let share_info_text = std::fs::read_to_string(profiles_path.join("test.share")).unwrap();
+        let share_info: ShareInfo = serde_json::from_str(&share_info_text).unwrap();
+        let fingerprint = share_info
+            .bundle_source_fingerprints
+            .get("folder:testmod")
+            .expect("successful share should persist the source fingerprint for future re-share skips");
+        assert!(
+            fingerprint.starts_with("v1:1.0.0:"),
+            "source fingerprint must include the profile mod version: {fingerprint}"
+        );
     }
 
     /// Bug fix (publish-nonactive-pack), test 2: sharing a NON-active pack
@@ -2950,7 +3079,7 @@ mod share_orchestration_tests {
             &profiles_path,
             "test-token",
             None,
-        Vec::new(),
+            Vec::new(),
         )
         .await
         .expect("share should upload bundle and manifest through the GitHub API");
@@ -3272,9 +3401,15 @@ mod publish_signature_tests {
         // Opt-in (default): extras ride along.
         let mut profile = base_profile();
         backfill_profile_extras_from_db(&mut profile, &config_path);
-        let extras = profile.mod_extras.get("ModA").expect("ModA extras published");
+        let extras = profile
+            .mod_extras
+            .get("ModA")
+            .expect("ModA extras published");
         assert_eq!(extras.note.as_deref(), Some("downloaded from Patreon"));
-        assert_eq!(extras.custom_url.as_deref(), Some("https://patreon.com/author"));
+        assert_eq!(
+            extras.custom_url.as_deref(),
+            Some("https://patreon.com/author")
+        );
         assert_eq!(extras.tags, vec!["anime".to_string()]);
         // ModB has no annotations — no empty entry is published for it.
         assert!(!profile.mod_extras.contains_key("ModB"));
@@ -3282,7 +3417,10 @@ mod publish_signature_tests {
         // Round-trip through the manifest JSON (what friends download).
         let json = serde_json::to_string(&profile).unwrap();
         let parsed: Profile = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.mod_extras.get("ModA"), profile.mod_extras.get("ModA"));
+        assert_eq!(
+            parsed.mod_extras.get("ModA"),
+            profile.mod_extras.get("ModA")
+        );
     }
 
     /// Step B test 1: signature is stable across updated_at and bundle fields.
@@ -3385,6 +3523,7 @@ mod publish_signature_tests {
             file_sha: Some("abc123".into()),
             share_format_version: 1,
             published_signature: None,
+            bundle_source_fingerprints: HashMap::new(),
         };
         save_share_info(&share_info_path, &legacy_info).unwrap();
 
@@ -3465,7 +3604,10 @@ mod merge_publish_enrichment_tests {
     fn merge_preserves_on_disk_members_missing_from_uploaded() {
         let on_disk = make_profile(
             "Pack",
-            vec![make_mod("Active Mod", "1.0.0"), make_mod("Stored Mod", "2.0.0")],
+            vec![
+                make_mod("Active Mod", "1.0.0"),
+                make_mod("Stored Mod", "2.0.0"),
+            ],
         );
 
         // Uploaded copy only has the active mod (stored mod was excluded).

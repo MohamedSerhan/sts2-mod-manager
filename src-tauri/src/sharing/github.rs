@@ -3218,6 +3218,7 @@ mod github_api_stress_tests {
         }
 
         Ok(Profile {
+            id: crate::profiles::new_profile_id(),
             name: profile_name.to_string(),
             game_version: Some("0.105.0".to_string()),
             created_by: Some("stress".to_string()),

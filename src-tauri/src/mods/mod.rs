@@ -1707,6 +1707,7 @@ mod profile_manifest_refresh_tests {
     fn profile_with_mod(name: &str, mod_name: &str, version: &str) -> Profile {
         let now = chrono::Utc::now();
         Profile {
+            id: crate::profiles::new_profile_id(),
             name: name.into(),
             game_version: None,
             created_by: None,

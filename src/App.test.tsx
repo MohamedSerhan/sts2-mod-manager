@@ -1861,7 +1861,11 @@ describe('<App>', () => {
     ]);
     registerInvokeHandler('check_subscription_updates', () => []); // no pending
     registerInvokeHandler('consume_pending_deep_link', () => null);
-    registerInvokeHandler('switch_profile', () => null);
+    registerInvokeHandler('switch_profile', () => ({
+      downloaded: 0,
+      missing_mods: [],
+      activated: true,
+    }));
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });

@@ -401,6 +401,7 @@ mod publish_bundle_contract_tests {
 
     fn profile_with_mod(pm: crate::profiles::ProfileMod) -> Profile {
         Profile {
+            id: crate::profiles::new_profile_id(),
             name: "contract".into(),
             game_version: None,
             created_by: None,

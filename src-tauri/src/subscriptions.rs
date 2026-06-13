@@ -452,7 +452,7 @@ async fn apply_subscription_update_inner(
 
     // Fetch the latest remote profile, using the PAT if set for the
     // higher rate limit.
-    let remote = if let Some(idx) = share_id.find(':') {
+    let mut remote = if let Some(idx) = share_id.find(':') {
         let owner = &share_id[..idx];
         let code = &share_id[idx + 1..];
         let filename = format!("{}.json", code.to_lowercase());
@@ -462,6 +462,15 @@ async fn apply_subscription_update_inner(
     } else {
         return Err(format!("Invalid subscription ID: {}", share_id));
     };
+    let subscription_name = load_subscriptions(&config_path)
+        .subscriptions
+        .get(&share_id)
+        .map(|sub| sub.profile_name.clone())
+        .unwrap_or_else(|| remote.name.clone());
+    if let Ok(local_profile) = crate::profiles::load_profile(&subscription_name, &profiles_path) {
+        remote.id = local_profile.id;
+    }
+    remote.name = subscription_name;
 
     // Save the profile locally
     crate::profiles::save_profile(&remote, &profiles_path).map_err(|e| e.to_string())?;
@@ -841,6 +850,7 @@ mod rename_helper_tests {
                 profile_name: "Old".into(),
                 curator: Some("o".into()),
                 last_synced_profile: crate::profiles::Profile {
+                    id: crate::profiles::new_profile_id(),
                     name: "Old".into(),
                     game_version: None,
                     created_by: None,
@@ -867,6 +877,7 @@ mod own_subscription_sync_tests {
     fn profile(name: &str, mod_names: &[(&str, &str)]) -> Profile {
         let now = chrono::Utc::now();
         Profile {
+            id: crate::profiles::new_profile_id(),
             name: name.into(),
             game_version: None,
             created_by: None,

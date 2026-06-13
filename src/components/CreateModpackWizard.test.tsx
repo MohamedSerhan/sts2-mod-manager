@@ -49,6 +49,7 @@ const baseMod = (overrides: Partial<ModInfo> = {}): ModInfo => ({
 });
 
 const baseProfile = (overrides: Partial<Profile> = {}): Profile => ({
+  id: 'profile-existing-pack',
   name: 'Existing Pack',
   game_version: null,
   created_by: null,

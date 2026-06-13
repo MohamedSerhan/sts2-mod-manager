@@ -242,7 +242,7 @@ describe('<ProfileSwitcher>', () => {
     await user.click(await screen.findByRole('button', { name: 'Switch anyway' }));
 
     await waitFor(() => {
-      expect(screen.getByText(/1 downloaded, 1 still missing/)).toBeInTheDocument();
+      expect(screen.getByText(/1 mod\(s\) downloaded\. 1 still missing/)).toBeInTheDocument();
     });
     expect(onClose).toHaveBeenCalled();
   });

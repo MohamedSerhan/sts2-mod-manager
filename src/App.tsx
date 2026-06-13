@@ -32,6 +32,7 @@ import { ROW_MENU_OPEN_EVENT } from './lib/rowMenuConfig';
 import { loadAutoAddInstallsToModpack } from './lib/installPolicy';
 import { UiScaleProvider } from './display/UiScaleContext';
 import { importShareCodeSmart } from './lib/shareImport';
+import { switchResultDetails } from './lib/switchResultSummary';
 import { getSubscriptions } from './hooks/useTauri';
 import { OnboardingOverlay } from './components/OnboardingOverlay';
 import { LaunchSpinner } from './components/LaunchSpinner';
@@ -365,15 +366,14 @@ function AppInner() {
           t('home.toast.installedModpack', { name: outcome.profile.name, count: outcome.profile.mods.length }),
         );
         } else if (outcome.kind === 'activated') {
-          toast.success(t('profiles.toast.activated', { name: outcome.profileName }));
-        } else if (outcome.kind === 'reapplied') {
-          const parts: string[] = [];
-          if (outcome.result.downloaded > 0) parts.push(t('common.parts.downloaded', { count: outcome.result.downloaded }));
-          if (outcome.result.failed_downloads.length > 0) parts.push(t('common.parts.failed', { count: outcome.result.failed_downloads.length }));
-          if (outcome.result.missing_mods.length > 0) parts.push(t('common.parts.stillMissing', { count: outcome.result.missing_mods.length }));
-          if ((outcome.result.failed_enables ?? []).length > 0) parts.push(t('common.parts.enableFailed', { count: outcome.result.failed_enables?.length ?? 0 }));
+          const parts = switchResultDetails(outcome.result, t, { includeLists: false });
           toast.info(parts.length > 0
-            ? t('profiles.toast.reappliedWithDetails', { name: outcome.profileName, details: parts.join(', ') })
+            ? parts.join(', ')
+            : t('profiles.toast.activated', { name: outcome.profileName }));
+        } else if (outcome.kind === 'reapplied') {
+          const parts = switchResultDetails(outcome.result, t, { includeLists: false });
+          toast.info(parts.length > 0
+            ? parts.join(', ')
             : t('profiles.toast.reapplied', { name: outcome.profileName }));
         } else if (outcome.kind === 'synced') {
           toast.success(t('profiles.toast.syncedUpToDate', { name: outcome.profileName }));

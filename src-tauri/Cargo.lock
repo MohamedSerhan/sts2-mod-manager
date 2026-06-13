@@ -4168,6 +4168,7 @@ dependencies = [
  "unrar",
  "url",
  "urlencoding",
+ "uuid",
  "walkdir",
  "winreg 0.56.0",
  "wiremock",

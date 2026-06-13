@@ -114,7 +114,7 @@ export function buildShareMessage(packName: string, code: string, t: TFunction):
  */
 export type ImportOutcome =
   | { kind: 'installed'; profile: Profile }
-  | { kind: 'activated'; profileName: string }
+  | { kind: 'activated'; profileName: string; result: SwitchProfileResult }
   | { kind: 'reapplied'; profileName: string; result: SwitchProfileResult }
   | { kind: 'synced'; profileName: string }
   | { kind: 'already-active'; profileName: string }
@@ -404,8 +404,8 @@ export async function importShareCodeSmart(
   if (!ok) return { kind: 'cancelled' };
   opts.onBusyChange?.(true);
   try {
-    await switchProfile(match.profile_name);
-    return { kind: 'activated', profileName: match.profile_name };
+    const result = await switchProfile(match.profile_name);
+    return { kind: 'activated', profileName: match.profile_name, result };
   } finally {
     opts.onBusyChange?.(false);
   }

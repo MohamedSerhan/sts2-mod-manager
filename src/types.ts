@@ -51,6 +51,7 @@ export interface SharedModExtras {
 }
 
 export interface Profile {
+  id: string;
   name: string;
   game_version: string | null;
   created_by: string | null;

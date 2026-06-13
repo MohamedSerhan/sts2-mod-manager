@@ -31,6 +31,7 @@ import {
   getProfileDrift,
 } from '../hooks/useTauri';
 import { buildShareMessage, buildShareLink, importShareCodeSmart } from '../lib/shareImport';
+import { switchResultDetails } from '../lib/switchResultSummary';
 import { getModpackUsage, recordModpackLaunch } from '../lib/modpackUsage';
 import type { ShareResult, Profile } from '../types';
 import { PublishModal } from '../components/PublishModal';
@@ -269,11 +270,16 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
     }
     try {
       setRecentSwitching(name);
-      await switchProfile(name);
+      const result = await switchProfile(name);
       setActiveProfile(name);
       recordModpackLaunch(name);
       await refreshAll();
-      toast.success(t('profiles.toast.switched', { name }));
+      const parts = switchResultDetails(result, t);
+      if (parts.length > 0) {
+        toast.info(parts.join('. '));
+      } else {
+        toast.success(t('profiles.toast.switched', { name }));
+      }
     } catch (e) {
       toast.error(t('profiles.toast.switchFailed', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
@@ -359,14 +365,11 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
           t('profiles.toast.importedModpack', { name: outcome.profile.name, count: outcome.profile.mods.length }),
         );
       } else if (outcome.kind === 'activated') {
-        toast.success(t('profiles.toast.activated', { name: outcome.profileName }));
+        const parts = switchResultDetails(outcome.result, t, { includeLists: false });
+        toast.info(parts.length ? parts.join(', ') : t('profiles.toast.activated', { name: outcome.profileName }));
       } else if (outcome.kind === 'reapplied') {
-        const parts: string[] = [];
-        if (outcome.result.downloaded > 0) parts.push(t('common.parts.downloaded', { count: outcome.result.downloaded }));
-        if (outcome.result.failed_downloads.length > 0) parts.push(t('common.parts.failed', { count: outcome.result.failed_downloads.length }));
-        if (outcome.result.missing_mods.length > 0) parts.push(t('common.parts.stillMissing', { count: outcome.result.missing_mods.length }));
-        if ((outcome.result.failed_enables ?? []).length > 0) parts.push(t('common.parts.enableFailed', { count: outcome.result.failed_enables?.length ?? 0 }));
-        toast.info(parts.length ? t('profiles.toast.reappliedWithDetails', { name: outcome.profileName, details: parts.join(', ') }) : t('profiles.toast.reapplied', { name: outcome.profileName }));
+        const parts = switchResultDetails(outcome.result, t, { includeLists: false });
+        toast.info(parts.length ? parts.join(', ') : t('profiles.toast.reapplied', { name: outcome.profileName }));
       } else if (outcome.kind === 'synced') {
         toast.success(t('profiles.toast.syncedUpToDate', { name: outcome.profileName }));
       } else if (outcome.kind === 'already-active') {

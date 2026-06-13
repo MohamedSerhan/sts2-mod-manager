@@ -6,6 +6,7 @@ import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
 import type { Profile } from '../types';
 
 const profile = (name: string): Profile => ({
+  id: `profile-${name.toLowerCase()}`,
   name, game_version: null, created_by: null, mods: [],
   created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
 });

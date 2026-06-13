@@ -37,6 +37,7 @@ pub use crud::{
     export_profile, import_profile, list_profiles, load_profile, persist_profile_mod_sources,
     save_profile,
 };
+pub(crate) use crud::{profile_file_stem, profile_name_exists, unique_profile_name};
 pub use drift::{ProfileDrift, RepairProfileResult, VersionMismatch};
 pub use membership::SetProfileModsEnabledResult;
 
@@ -118,6 +119,10 @@ impl SharedModExtras {
 /// A saved profile capturing a snapshot of installed/enabled mods.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Profile {
+    /// Stable local identity for storage and sidecars. Display names can be
+    /// renamed; this must not change with them.
+    #[serde(default = "new_profile_id")]
+    pub id: String,
     pub name: String,
     pub game_version: Option<String>,
     pub created_by: Option<String>,
@@ -138,6 +143,10 @@ pub struct Profile {
     /// older app versions ignore the unknown field.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub mod_extras: HashMap<String, SharedModExtras>,
+}
+
+pub fn new_profile_id() -> String {
+    uuid::Uuid::new_v4().to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -332,13 +341,20 @@ pub fn create_profile(
 ) -> std::result::Result<Profile, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Name can't be empty".to_string());
+    }
+    if profile_name_exists(name, &s.profiles_path, None) {
+        return Err(format!("A modpack named '{}' already exists", name));
+    }
     // Explicit user action — apply the bug-#21 filter using the cached
     // game_version so incompatible mods don't get saved into a new
     // profile. AppState.game_version is set on the canonical
     // game root, so this is also the macOS-correct source.
     let game_version = s.game_version.clone();
     snapshot_current_with_sources(
-        &name,
+        name,
         mods_path,
         &s.profiles_path,
         Some(&s.config_path),
@@ -427,7 +443,15 @@ pub fn duplicate_profile(
 ) -> std::result::Result<Profile, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     let mut profile = load_profile(&name, &s.profiles_path).map_err(|e| e.to_string())?;
-    profile.name = new_name;
+    let new_name = new_name.trim();
+    if new_name.is_empty() {
+        return Err("Name can't be empty".to_string());
+    }
+    if profile_name_exists(new_name, &s.profiles_path, None) {
+        return Err(format!("A modpack named '{}' already exists", new_name));
+    }
+    profile.id = new_profile_id();
+    profile.name = new_name.to_string();
     profile.updated_at = chrono::Utc::now();
     save_profile(&profile, &s.profiles_path).map_err(|e| e.to_string())?;
     log::info!("Duplicated profile '{}' as '{}'", name, profile.name);

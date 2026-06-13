@@ -411,6 +411,7 @@ mod reconcile_tests {
 
     fn base_profile(name: &str, mods: Vec<ProfileMod>) -> Profile {
         Profile {
+            id: crate::profiles::new_profile_id(),
             name: name.into(),
             game_version: Some("0.105.0".into()),
             created_by: None,

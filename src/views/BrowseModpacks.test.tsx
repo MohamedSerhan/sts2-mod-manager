@@ -257,6 +257,7 @@ describe('<BrowseModpacksView>', () => {
     );
 
     const profile: Profile = {
+      id: 'profile-click-me-pack',
       name: 'Click Me Pack',
       game_version: null,
       created_by: 'somebody',

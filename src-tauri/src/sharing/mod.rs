@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -216,8 +216,41 @@ fn save_share_info(path: &Path, info: &ShareInfo) -> Result<()> {
     Ok(())
 }
 
+fn share_info_path_for_profile(profile: &Profile, profiles_path: &Path) -> PathBuf {
+    profiles_path.join(format!(
+        "{}.share",
+        crate::profiles::profile_file_stem(profile)
+    ))
+}
+
+fn legacy_profile_name_stem(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn find_share_info_path(name: &str, profiles_path: &Path) -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Ok(profile) = crate::profiles::load_profile(name, profiles_path) {
+        candidates.push(share_info_path_for_profile(&profile, profiles_path));
+        candidates.push(profiles_path.join(format!("{}.share", profile.name)));
+    }
+    candidates.push(profiles_path.join(format!(
+        "{}.share",
+        legacy_profile_name_stem(name)
+    )));
+    candidates.push(profiles_path.join(format!("{}.share", name)));
+    candidates.into_iter().find(|path| path.exists())
+}
+
 fn recover_owned_share_info_sidecar(
-    profile_name: &str,
+    _profile_name: &str,
     profiles_path: &Path,
     owner: &str,
     profile_code: &str,
@@ -231,7 +264,7 @@ fn recover_owned_share_info_sidecar(
         published_signature: Some(profile_publish_signature(published_profile)),
         bundle_source_fingerprints: HashMap::new(),
     };
-    let share_info_path = profiles_path.join(format!("{}.share", profile_name));
+    let share_info_path = share_info_path_for_profile(published_profile, profiles_path);
     save_share_info(&share_info_path, &info)?;
     Ok(info)
 }
@@ -959,8 +992,7 @@ pub async fn share_profile(
     // If already shared, reuse the existing code (same as reshare). Drop our
     // would-be guard before delegating so reshare_profile can acquire its own
     // without "already in progress" tripping.
-    let share_info_path = profiles_path.join(format!("{}.share", name));
-    if share_info_path.exists() {
+    if find_share_info_path(&name, &profiles_path).is_some() {
         log::info!(
             "Profile '{}' already shared, reusing code via reshare",
             name
@@ -1232,7 +1264,7 @@ pub(super) async fn share_profile_impl(
         published_signature: Some(profile_publish_signature(&merged)),
         bundle_source_fingerprints,
     };
-    let share_info_path = profiles_path.join(format!("{}.share", profile.name));
+    let share_info_path = share_info_path_for_profile(&merged, &profiles_path);
     save_share_info(&share_info_path, &share_info)?;
 
     // Reclaim disk on the `bundles` release: any asset no profile manifest
@@ -1291,9 +1323,10 @@ pub async fn get_share_info(
             s.github_token.clone(),
         )
     };
-    let share_info_path = profiles_path.join(format!("{}.share", name));
-    let info: ShareInfo = match std::fs::read_to_string(&share_info_path) {
-        Ok(content) => match serde_json::from_str(&content) {
+    let info: ShareInfo = match find_share_info_path(&name, &profiles_path)
+        .and_then(|path| std::fs::read_to_string(path).ok())
+    {
+        Some(content) => match serde_json::from_str(&content) {
             Ok(info) => info,
             Err(e) => {
                 log::warn!(
@@ -1314,7 +1347,7 @@ pub async fn get_share_info(
                 }
             }
         },
-        Err(_) => match recover_owned_share_info_from_subscription(
+        None => match recover_owned_share_info_from_subscription(
             &name,
             &profiles_path,
             &config_path,
@@ -1406,10 +1439,10 @@ pub async fn reshare_profile(
     };
 
     // Load existing share info
-    let share_info_path = profiles_path.join(format!("{}.share", name));
+    let existing_share_info_path = find_share_info_path(&name, &profiles_path)
+        .ok_or_else(|| "Profile has not been shared yet. Use 'Share' first.".to_string())?;
     let share_info: ShareInfo = serde_json::from_str(
-        &std::fs::read_to_string(&share_info_path)
-            .map_err(|_| "Profile has not been shared yet. Use 'Share' first.".to_string())?,
+        &std::fs::read_to_string(&existing_share_info_path).map_err(|e| e.to_string())?,
     )
     .map_err(|e| e.to_string())?;
 
@@ -1645,7 +1678,11 @@ pub async fn reshare_profile(
         published_signature: Some(profile_publish_signature(&merged)),
         bundle_source_fingerprints,
     };
+    let share_info_path = share_info_path_for_profile(&merged, &profiles_path);
     save_share_info(&share_info_path, &updated_info).map_err(|e| e.to_string())?;
+    if existing_share_info_path != share_info_path && existing_share_info_path.exists() {
+        let _ = std::fs::remove_file(&existing_share_info_path);
+    }
 
     // Self-subscribed curators are by definition in sync with what was just
     // published — refresh the subscription snapshot so the update poll
@@ -1734,10 +1771,10 @@ pub async fn set_modpack_listing(
         (s.profiles_path.clone(), token)
     };
 
-    let share_info_path = profiles_path.join(format!("{}.share", name));
+    let existing_share_info_path = find_share_info_path(&name, &profiles_path)
+        .ok_or_else(|| "Profile has not been shared yet.".to_string())?;
     let mut share_info: ShareInfo = serde_json::from_str(
-        &std::fs::read_to_string(&share_info_path)
-            .map_err(|_| "Profile has not been shared yet.".to_string())?,
+        &std::fs::read_to_string(&existing_share_info_path).map_err(|e| e.to_string())?,
     )
     .map_err(|e| e.to_string())?;
 
@@ -1764,7 +1801,11 @@ pub async fn set_modpack_listing(
     .map_err(|e| e.to_string())?;
 
     share_info.file_sha = Some(file_sha);
+    let share_info_path = share_info_path_for_profile(&profile, &profiles_path);
     save_share_info(&share_info_path, &share_info).map_err(|e| e.to_string())?;
+    if existing_share_info_path != share_info_path && existing_share_info_path.exists() {
+        let _ = std::fs::remove_file(&existing_share_info_path);
+    }
 
     if let Ok(mut s) = state.lock() {
         s.modpack_browser_cache.clear();
@@ -1862,7 +1903,7 @@ mod listing_tests {
             "recovered sidecar must compare future local edits against the remote manifest, not the already-drifted local one"
         );
         assert!(
-            profiles_path.join("Solo Pack.share").exists(),
+            share_info_path_for_profile(&remote, &profiles_path).exists(),
             "the recovery path must leave get_share_info/profile_is_owned with a durable ownership marker"
         );
     }
@@ -1917,7 +1958,7 @@ mod listing_tests {
         crate::subscriptions::save_subscriptions(&db, config_path).unwrap();
 
         assert!(
-            !profiles_path.join("Solo Pack.share").exists(),
+            !share_info_path_for_profile(&remote, &profiles_path).exists(),
             "test setup should match the broken install state"
         );
 
@@ -1962,11 +2003,12 @@ mod listing_tests {
             saved.published_signature.unwrap(),
             "the recovered marker must keep the tester's local edits visible as drift"
         );
-        assert!(profiles_path.join("Solo Pack.share").exists());
+        assert!(share_info_path_for_profile(&remote, &profiles_path).exists());
     }
 
     fn make_profile(name: &str, public: Option<bool>) -> Profile {
         Profile {
+            id: crate::profiles::new_profile_id(),
             name: name.into(),
             game_version: None,
             created_by: None,
@@ -2068,6 +2110,7 @@ mod share_orchestration_tests {
         write_mod(&mods_path, "LibraryExtra", "Library Extra");
 
         let profile = Profile {
+            id: crate::profiles::new_profile_id(),
             name: "Stable".into(),
             game_version: Some("0.105.0".into()),
             created_by: None,
@@ -2111,6 +2154,7 @@ mod share_orchestration_tests {
         write_mod_with_min_game_version(&mods_path, "FutureBeta", "Future Beta", Some("9.0.0"));
 
         let profile = Profile {
+            id: crate::profiles::new_profile_id(),
             name: "Stable".into(),
             game_version: Some("0.105.0".into()),
             created_by: None,
@@ -2179,6 +2223,7 @@ mod share_orchestration_tests {
         stale_pm.version = "0.9.0".into();
 
         let profile = Profile {
+            id: crate::profiles::new_profile_id(),
             name: "Stable".into(),
             game_version: None,
             created_by: None,
@@ -2249,6 +2294,7 @@ mod share_orchestration_tests {
         write_mod(&mods_path, "StillHere", "Still Here");
 
         let profile = Profile {
+            id: crate::profiles::new_profile_id(),
             name: "Stable".into(),
             game_version: None,
             created_by: None,
@@ -2319,6 +2365,7 @@ mod share_orchestration_tests {
         write_mod(&disabled_path, "StoredMod", "Stored Mod");
 
         let profile = Profile {
+            id: crate::profiles::new_profile_id(),
             name: "Stable".into(),
             game_version: None,
             created_by: None,
@@ -2370,6 +2417,7 @@ mod share_orchestration_tests {
         write_mod(&disabled_path, "StoredMod", "Stored Mod");
 
         let profile = Profile {
+            id: crate::profiles::new_profile_id(),
             name: "Stable".into(),
             game_version: None,
             created_by: None,
@@ -2445,6 +2493,7 @@ mod share_orchestration_tests {
         crate::mod_sources::save_sources(&db, tmpdir.path()).unwrap();
 
         let profile = Profile {
+            id: crate::profiles::new_profile_id(),
             name: "Stable".into(),
             game_version: None,
             created_by: None,
@@ -2515,6 +2564,7 @@ mod share_orchestration_tests {
         let mut pm = profile_mod("AutoPath", "AutoPath");
         pm.source = Some("github:correct/AutoPath".into());
         let profile = Profile {
+            id: crate::profiles::new_profile_id(),
             name: "Stable".into(),
             game_version: None,
             created_by: None,
@@ -2619,6 +2669,7 @@ mod share_orchestration_tests {
         std::fs::create_dir_all(&profiles_path).unwrap();
 
         let profile = Profile {
+            id: crate::profiles::new_profile_id(),
             name: "test".into(),
             game_version: None,
             created_by: None,
@@ -2664,9 +2715,7 @@ mod share_orchestration_tests {
         );
 
         // Verify the persisted profile got both bundle_url and bundle_sha256.
-        let saved_path = profiles_path.join("test.json");
-        let saved_text = std::fs::read_to_string(&saved_path).unwrap();
-        let saved: Profile = serde_json::from_str(&saved_text).unwrap();
+        let saved = crate::profiles::load_profile("test", &profiles_path).unwrap();
         assert_eq!(saved.created_by.as_deref(), Some("octo"));
         let m = &saved.mods[0];
         assert!(
@@ -2679,7 +2728,8 @@ mod share_orchestration_tests {
         );
         assert!(m.bundle_sha256.is_some(), "expected hash to be persisted");
 
-        let share_info_text = std::fs::read_to_string(profiles_path.join("test.share")).unwrap();
+        let share_info_text =
+            std::fs::read_to_string(share_info_path_for_profile(&saved, &profiles_path)).unwrap();
         let share_info: ShareInfo = serde_json::from_str(&share_info_text).unwrap();
         let fingerprint = share_info
             .bundle_source_fingerprints
@@ -2764,6 +2814,7 @@ mod share_orchestration_tests {
         write_mod(&disabled_path, "StoredMod", "Stored Mod");
 
         let profile = Profile {
+            id: crate::profiles::new_profile_id(),
             name: "NonActivePack".into(),
             game_version: None,
             created_by: None,
@@ -2902,6 +2953,7 @@ mod share_orchestration_tests {
         write_mod(&disabled_path, "StoredMod", "Stored Mod");
 
         let profile = Profile {
+            id: crate::profiles::new_profile_id(),
             name: "ActivePack".into(),
             game_version: None,
             created_by: None,
@@ -2961,7 +3013,7 @@ mod share_orchestration_tests {
         // The stored .share sidecar's published_signature must match the
         // signature of the LOCAL (merged) manifest -- not the filtered
         // upload -- so get_share_info reports in-sync right after publish.
-        let share_info_path = profiles_path.join("ActivePack.share");
+        let share_info_path = share_info_path_for_profile(&saved, &profiles_path);
         let share_info: ShareInfo =
             serde_json::from_str(&std::fs::read_to_string(&share_info_path).unwrap()).unwrap();
         let local_sig = profile_publish_signature(&saved);
@@ -3050,6 +3102,7 @@ mod share_orchestration_tests {
         std::fs::create_dir_all(&profiles_path).unwrap();
 
         let profile = Profile {
+            id: crate::profiles::new_profile_id(),
             name: "api-round-trip".into(),
             game_version: None,
             created_by: None,
@@ -3102,7 +3155,10 @@ mod share_orchestration_tests {
                 result.file_path
             )))
             .respond_with(ResponseTemplate::new(200).set_body_string(
-                std::fs::read_to_string(profiles_path.join("api-round-trip.json")).unwrap(),
+                serde_json::to_string_pretty(
+                    &crate::profiles::load_profile("api-round-trip", &profiles_path).unwrap(),
+                )
+                .unwrap(),
             ))
             .expect(1)
             .mount(&server)
@@ -3340,6 +3396,7 @@ mod publish_signature_tests {
 
     fn base_profile() -> Profile {
         Profile {
+            id: crate::profiles::new_profile_id(),
             name: "TestPack".into(),
             game_version: None,
             created_by: Some("alice".into()),
@@ -3504,7 +3561,7 @@ mod publish_signature_tests {
         );
 
         // --- Case 2: modify the local profile → out of sync ---
-        let mut mutated = base_profile();
+        let mut mutated = profile.clone();
         mutated.mods[0].enabled = false; // toggle a mod
         crate::profiles::save_profile(&mutated, &profiles_path).unwrap();
 
@@ -3565,6 +3622,7 @@ mod merge_publish_enrichment_tests {
 
     fn make_profile(name: &str, mods: Vec<crate::profiles::ProfileMod>) -> Profile {
         Profile {
+            id: crate::profiles::new_profile_id(),
             name: name.into(),
             game_version: None,
             created_by: None,

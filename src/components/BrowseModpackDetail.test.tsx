@@ -38,6 +38,7 @@ const card: BrowserCard = {
 };
 
 const profile: Profile = {
+  id: 'profile-cool-pack',
   name: 'Cool Pack',
   game_version: '1.0',
   created_by: 'alice',

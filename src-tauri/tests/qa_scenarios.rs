@@ -593,6 +593,7 @@ fn flow_11_apply_profile_pins_override_profile_state() {
 
     let now = chrono::Utc::now();
     let profile = Profile {
+        id: sts2_mod_manager_lib::profiles::new_profile_id(),
         name: "off-pack".into(),
         game_version: Some("0.103.2".into()),
         created_by: None,
@@ -793,6 +794,7 @@ fn flow_11_apply_profile_without_pin_enables_included_mod() {
 
     let now = chrono::Utc::now();
     let profile = Profile {
+        id: sts2_mod_manager_lib::profiles::new_profile_id(),
         name: "off-pack".into(),
         game_version: Some("0.103.2".into()),
         created_by: None,

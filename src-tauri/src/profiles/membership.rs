@@ -612,6 +612,7 @@ mod profile_membership_tests {
 
     fn empty_profile(name: &str) -> Profile {
         Profile {
+            id: crate::profiles::new_profile_id(),
             name: name.into(),
             game_version: Some("0.105.0".into()),
             created_by: None,

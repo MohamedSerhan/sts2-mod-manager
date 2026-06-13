@@ -24,7 +24,7 @@ use std::path::Path;
 use crate::error::{AppError, Result};
 use crate::mods::ModInfo;
 
-use super::{Profile, ProfileMod, APP_CREATED_BY};
+use super::{new_profile_id, Profile, ProfileMod, APP_CREATED_BY};
 
 /// List all saved profiles.
 /// Includes profiles that only have a .share file (remote profiles not yet fetched).
@@ -65,6 +65,7 @@ pub fn list_profiles(profiles_path: &Path) -> Vec<Profile> {
                 if !seen_names.contains(&stem) {
                     // Create a placeholder profile -- will be fetched from GitHub on activation
                     profiles.push(Profile {
+                        id: new_profile_id(),
                         name: stem.clone(),
                         game_version: None,
                         created_by: Some("Shared (click Activate to fetch)".to_string()),
@@ -86,7 +87,7 @@ pub fn list_profiles(profiles_path: &Path) -> Vec<Profile> {
 
 /// Save a profile to disk.
 pub fn save_profile(profile: &Profile, profiles_path: &Path) -> Result<()> {
-    let file_name = sanitize_filename(&profile.name);
+    let file_name = profile_file_stem(profile);
     let path = profiles_path.join(format!("{}.json", file_name));
     let json = serde_json::to_string_pretty(profile)?;
     // atomic_write creates the parent dir (propagating any error, unlike the
@@ -97,21 +98,15 @@ pub fn save_profile(profile: &Profile, profiles_path: &Path) -> Result<()> {
 
 /// Load a profile by name.
 pub fn load_profile(name: &str, profiles_path: &Path) -> Result<Profile> {
-    let file_name = sanitize_filename(name);
-    let path = profiles_path.join(format!("{}.json", file_name));
-    if !path.exists() {
-        return Err(AppError::InvalidProfile(format!(
-            "Profile '{}' not found",
-            name
-        )));
-    }
-    let content = fs::read_to_string(&path)?;
-    let profile: Profile = serde_json::from_str(&content)?;
-    Ok(profile)
+    let path = find_profile_json(name, profiles_path)
+        .ok_or_else(|| AppError::InvalidProfile(format!("Profile '{}' not found", name)))?;
+    load_profile_from_path(&path)
 }
 
 /// Delete a profile (both .json and .share files).
 pub fn delete_profile(name: &str, profiles_path: &Path) -> Result<()> {
+    let loaded = find_profile_json(name, profiles_path)
+        .and_then(|path| load_profile_from_path(&path).ok().map(|profile| (path, profile)));
     let file_name = sanitize_filename(name);
     let json_path = profiles_path.join(format!("{}.json", file_name));
     let share_path = profiles_path.join(format!("{}.share", file_name));
@@ -120,6 +115,18 @@ pub fn delete_profile(name: &str, profiles_path: &Path) -> Result<()> {
 
     let mut deleted_any = false;
 
+    if let Some((path, profile)) = loaded {
+        if path.exists() {
+            fs::remove_file(&path)?;
+            deleted_any = true;
+        }
+        for share in profile_share_candidates(&profile, profiles_path) {
+            if share.exists() {
+                fs::remove_file(share)?;
+                deleted_any = true;
+            }
+        }
+    }
     if json_path.exists() {
         fs::remove_file(&json_path)?;
         deleted_any = true;
@@ -152,16 +159,16 @@ pub fn rename_profile(old: &str, new: &str, profiles_path: &Path) -> Result<Prof
     if new_trimmed.is_empty() {
         return Err(AppError::InvalidProfile("Name can't be empty".into()));
     }
-    let mut profile = load_profile(old, profiles_path)?; // errors if old missing
+    let old_json = find_profile_json(old, profiles_path)
+        .ok_or_else(|| AppError::InvalidProfile(format!("Profile '{}' not found", old)))?;
+    let mut profile = load_profile_from_path(&old_json)?;
 
     // Collision: a DIFFERENT profile already named `new`. (A no-op rename to the
     // same on-disk file is allowed.) Compare by canonical identity, not path
     // string: on a case-insensitive FS a case-only rename ("My Pack" → "my
     // pack") aliases the same inode, so a string `!=` check would wrongly
     // reject it as a collision with itself.
-    let old_json = profiles_path.join(format!("{}.json", sanitize_filename(old)));
-    let new_json = profiles_path.join(format!("{}.json", sanitize_filename(new_trimmed)));
-    if new_json.exists() && !paths_refer_to_same_file(&new_json, &old_json) {
+    if profile_name_exists(new_trimmed, profiles_path, Some(&profile.id)) {
         return Err(AppError::InvalidProfile(format!(
             "A modpack named '{}' already exists",
             new_trimmed
@@ -177,14 +184,18 @@ pub fn rename_profile(old: &str, new: &str, profiles_path: &Path) -> Result<Prof
     profile.name = new_trimmed.to_string();
     profile.updated_at = chrono::Utc::now();
     save_profile(&profile, profiles_path)?;
+    let new_json = profiles_path.join(format!("{}.json", profile_file_stem(&profile)));
 
     // Move the .share sidecar (raw old → raw new), mirroring delete_profile's
     // raw+sanitized lookup. Preserve bytes verbatim so the share code stays.
-    let share_candidates = [
-        profiles_path.join(format!("{}.share", old)),
-        profiles_path.join(format!("{}.share", sanitize_filename(old))),
-    ];
-    let dest_share = profiles_path.join(format!("{}.share", new_trimmed));
+    let share_candidates = profile_share_candidates(&profile, profiles_path)
+        .into_iter()
+        .chain([
+            profiles_path.join(format!("{}.share", old)),
+            profiles_path.join(format!("{}.share", sanitize_filename(old))),
+        ])
+        .collect::<Vec<_>>();
+    let dest_share = profiles_path.join(format!("{}.share", profile_file_stem(&profile)));
     if let Some(src) = share_candidates.iter().find(|p| p.exists()) {
         let bytes = fs::read(src)?;
         crate::fs_safety::atomic_write(&dest_share, &bytes)?;
@@ -244,6 +255,78 @@ pub(super) fn sanitize_filename(name: &str) -> String {
             }
         })
         .collect()
+}
+
+pub(crate) fn profile_file_stem(profile: &Profile) -> String {
+    let id = profile.id.trim();
+    if id.is_empty() {
+        sanitize_filename(&profile.name)
+    } else {
+        sanitize_filename(id)
+    }
+}
+
+fn load_profile_from_path(path: &Path) -> Result<Profile> {
+    let content = fs::read_to_string(path)?;
+    let mut profile: Profile = serde_json::from_str(&content)?;
+    if profile.id.trim().is_empty() {
+        profile.id = new_profile_id();
+    }
+    Ok(profile)
+}
+
+fn find_profile_json(name_or_id: &str, profiles_path: &Path) -> Option<std::path::PathBuf> {
+    let direct = profiles_path.join(format!("{}.json", sanitize_filename(name_or_id)));
+    if direct.exists() {
+        return Some(direct);
+    }
+    for entry in fs::read_dir(profiles_path).ok()?.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(profile) = load_profile_from_path(&path) else {
+            continue;
+        };
+        if profile.id.eq_ignore_ascii_case(name_or_id)
+            || profile.name.eq_ignore_ascii_case(name_or_id)
+        {
+            return Some(path);
+        }
+    }
+    None
+}
+
+pub(crate) fn profile_name_exists(
+    name: &str,
+    profiles_path: &Path,
+    except_id: Option<&str>,
+) -> bool {
+    list_profiles(profiles_path).into_iter().any(|profile| {
+        profile.name.eq_ignore_ascii_case(name)
+            && except_id.is_none_or(|id| !profile.id.eq_ignore_ascii_case(id))
+    })
+}
+
+pub(crate) fn unique_profile_name(name: &str, profiles_path: &Path) -> String {
+    if !profile_name_exists(name, profiles_path, None) {
+        return name.to_string();
+    }
+    for n in 2.. {
+        let candidate = format!("{name} ({n})");
+        if !profile_name_exists(&candidate, profiles_path, None) {
+            return candidate;
+        }
+    }
+    unreachable!()
+}
+
+fn profile_share_candidates(profile: &Profile, profiles_path: &Path) -> Vec<std::path::PathBuf> {
+    vec![
+        profiles_path.join(format!("{}.share", profile_file_stem(profile))),
+        profiles_path.join(format!("{}.share", sanitize_filename(&profile.name))),
+        profiles_path.join(format!("{}.share", profile.name)),
+    ]
 }
 
 pub(super) fn hide_app_created_by(mut profile: Profile) -> Profile {
@@ -446,6 +529,14 @@ pub(super) fn subscribed_profile_names(config_path: &Path) -> std::collections::
 /// under the raw profile name, so an owned pack like `mods (copy)` has a
 /// `mods (copy).share`, not `mods__copy_.share`.
 pub(super) fn profile_is_owned(name: &str, profiles_path: &Path) -> bool {
+    if let Ok(profile) = load_profile(name, profiles_path) {
+        if profile_share_candidates(&profile, profiles_path)
+            .into_iter()
+            .any(|path| path.exists())
+        {
+            return true;
+        }
+    }
     let sanitized = profiles_path.join(format!("{}.share", sanitize_filename(name)));
     let raw = profiles_path.join(format!("{}.share", name));
     sanitized.exists() || raw.exists()
@@ -467,9 +558,7 @@ pub(super) fn profile_is_edit_locked(name: &str, profiles_path: &Path, config_pa
 }
 
 pub(super) fn profile_has_json(profile_name: &str, profiles_path: &Path) -> bool {
-    profiles_path
-        .join(format!("{}.json", sanitize_filename(profile_name)))
-        .exists()
+    find_profile_json(profile_name, profiles_path).is_some()
 }
 
 /// Treat a version string as a wildcard if it's missing or a placeholder.
@@ -501,6 +590,7 @@ mod public_field_tests {
     #[test]
     fn none_value_is_omitted_in_serialized_json() {
         let profile = Profile {
+            id: crate::profiles::new_profile_id(),
             name: "test".into(),
             game_version: None,
             created_by: None,
@@ -517,6 +607,7 @@ mod public_field_tests {
     #[test]
     fn true_value_roundtrips() {
         let profile = Profile {
+            id: crate::profiles::new_profile_id(),
             name: "test".into(),
             game_version: None,
             created_by: None,
@@ -723,6 +814,7 @@ mod edit_lock_tests {
                 profile_name: profile_name.to_string(),
                 curator: Some("owner".into()),
                 last_synced_profile: Profile {
+                    id: crate::profiles::new_profile_id(),
                     name: profile_name.to_string(),
                     game_version: None,
                     created_by: Some("owner".into()),
@@ -811,6 +903,7 @@ mod rename_tests {
 
     fn sample(name: &str) -> Profile {
         Profile {
+            id: crate::profiles::new_profile_id(),
             name: name.into(),
             game_version: None,
             created_by: None,
@@ -844,10 +937,12 @@ mod rename_tests {
             r#"{"code":"AA5A-315D-61AE","owner":"me","file_sha":"abc","share_format_version":3}"#;
         std::fs::write(dir.join("Old Pack.share"), share_body).unwrap();
 
-        rename_profile("Old Pack", "New Pack", dir).unwrap();
+        let renamed = rename_profile("Old Pack", "New Pack", dir).unwrap();
 
         assert!(!dir.join("Old Pack.share").exists(), "old share moved away");
-        let moved = std::fs::read_to_string(dir.join("New Pack.share")).unwrap();
+        let moved =
+            std::fs::read_to_string(dir.join(format!("{}.share", profile_file_stem(&renamed))))
+                .unwrap();
         assert_eq!(moved, share_body, "share code preserved verbatim");
     }
 
@@ -897,7 +992,9 @@ mod rename_tests {
             "profile must survive a case-only rename"
         );
         // And its share code must be preserved under the new name (not deleted).
-        let moved = std::fs::read_to_string(dir.join("my pack.share")).unwrap();
+        let moved =
+            std::fs::read_to_string(dir.join(format!("{}.share", profile_file_stem(&renamed))))
+                .unwrap();
         assert_eq!(
             moved, share_body,
             "share code must survive a case-only rename"

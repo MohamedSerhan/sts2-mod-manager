@@ -373,6 +373,7 @@ mod tests {
 
     fn make_profile(name: &str, public: Option<bool>) -> Profile {
         Profile {
+            id: crate::profiles::new_profile_id(),
             name: name.into(),
             game_version: None,
             created_by: None,

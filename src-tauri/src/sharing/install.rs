@@ -110,9 +110,11 @@ pub async fn install_shared_profile(
     };
 
     let filename = code_to_filename(&profile_code);
-    let profile = fetch_shared_profile(&owner, &filename, token.as_deref())
+    let mut profile = fetch_shared_profile(&owner, &filename, token.as_deref())
         .await
         .map_err(|e| e.to_string())?;
+    profile.id = crate::profiles::new_profile_id();
+    profile.name = crate::profiles::unique_profile_name(&profile.name, &profiles_path);
     let total_mods = profile.mods.len();
 
     // Mods skipped because they declare a min_game_version higher than the

@@ -28,6 +28,7 @@ import { PublishModal } from '../components/PublishModal';
 import { CreateModpackWizard } from '../components/CreateModpackWizard';
 import { HelpHint } from '../components/HelpHint';
 import { BrowseModpacksView } from './BrowseModpacks';
+import { switchResultDetails } from '../lib/switchResultSummary';
 import {
   listProfiles,
   switchProfile,
@@ -618,28 +619,10 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       await loadProfiles();
       bumpRevision();
 
-      const parts: string[] = [];
-      if (result.downloaded > 0) parts.push(t('common.parts.modsDownloaded', { count: result.downloaded }));
-      if (result.failed_downloads && result.failed_downloads.length > 0) {
-        parts.push(t('common.parts.failedWithList', { count: result.failed_downloads.length, list: result.failed_downloads.join(', ') }));
-      }
-      if (result.missing_mods.length > 0) {
-        parts.push(t('common.parts.stillMissingWithList', { count: result.missing_mods.length, list: result.missing_mods.join(', ') }));
-      }
-      // Bug 4: name the mods we replaced and the ones whose update failed but
-      // whose old version we kept (so the user knows nothing was lost).
-      if (result.replaced_mods && result.replaced_mods.length > 0) {
-        parts.push(t('common.parts.replacedWithList', { count: result.replaced_mods.length, list: result.replaced_mods.join(', ') }));
-      }
-      if (result.replace_failures && result.replace_failures.length > 0) {
-        parts.push(t('common.parts.replaceFailedWithList', { count: result.replace_failures.length, list: result.replace_failures.join(', ') }));
-      }
-      if (result.failed_enables && result.failed_enables.length > 0) {
-        parts.push(t('common.parts.enableFailedWithList', { count: result.failed_enables.length, list: result.failed_enables.join(', ') }));
-      }
+      const parts = switchResultDetails(result, t);
 
       if (parts.length > 0) {
-        toastCtx.info(t('profiles.toast.switchedWithDetails', { name, details: parts.join('. ') }));
+        toastCtx.info(parts.join('. '));
       } else {
         toastCtx.success(t('profiles.toast.switched', { name }));
       }
@@ -893,14 +876,13 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
         );
       } else if (outcome.kind === 'activated') {
         recordModpackLaunch(outcome.profileName);
-        toastCtx.success(t('profiles.toast.activated', { name: outcome.profileName }));
+        const parts = switchResultDetails(outcome.result, t, { includeLists: false });
+        toastCtx.info(parts.length > 0
+          ? parts.join(', ')
+          : t('profiles.toast.activated', { name: outcome.profileName }));
       } else if (outcome.kind === 'reapplied') {
-        const parts: string[] = [];
-        if (outcome.result.downloaded > 0) parts.push(t('common.parts.downloaded', { count: outcome.result.downloaded }));
-        if (outcome.result.failed_downloads.length > 0) parts.push(t('common.parts.failed', { count: outcome.result.failed_downloads.length }));
-        if (outcome.result.missing_mods.length > 0) parts.push(t('common.parts.stillMissing', { count: outcome.result.missing_mods.length }));
-        if ((outcome.result.failed_enables ?? []).length > 0) parts.push(t('common.parts.enableFailed', { count: outcome.result.failed_enables?.length ?? 0 }));
-        toastCtx.info(parts.length ? t('profiles.toast.reappliedWithDetails', { name: outcome.profileName, details: parts.join(', ') }) : t('profiles.toast.reapplied', { name: outcome.profileName }));
+        const parts = switchResultDetails(outcome.result, t, { includeLists: false });
+        toastCtx.info(parts.length ? parts.join(', ') : t('profiles.toast.reapplied', { name: outcome.profileName }));
       } else if (outcome.kind === 'synced') {
         toastCtx.success(t('profiles.toast.syncedUpToDate', { name: outcome.profileName }));
       } else if (outcome.kind === 'already-active') {

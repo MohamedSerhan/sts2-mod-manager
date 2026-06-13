@@ -264,6 +264,11 @@ fn snapshot_current_inner(
     }
 
     let profile = Profile {
+        id: existing_profile
+            .as_ref()
+            .map(|p| p.id.clone())
+            .filter(|id| !id.trim().is_empty())
+            .unwrap_or_else(crate::profiles::new_profile_id),
         name: name.to_string(),
         game_version: existing_profile
             .as_ref()
@@ -1177,6 +1182,7 @@ mod snapshot_metadata_tests {
         let now = chrono::Utc::now();
         save_profile(
             &Profile {
+                id: crate::profiles::new_profile_id(),
                 name: "Active Pack".into(),
                 game_version: Some("0.105.0".into()),
                 created_by: Some("alice".into()),
@@ -1523,6 +1529,7 @@ mod modpack_flow_tests {
     fn save_pack(name: &str, profiles: &Path, mods: Vec<PublishedMod>) -> Profile {
         let now = chrono::Utc::now();
         let profile = Profile {
+            id: crate::profiles::new_profile_id(),
             name: name.into(),
             game_version: Some("0.105.0".into()),
             created_by: Some("qa-curator".into()),
@@ -2069,6 +2076,7 @@ mod modpack_flow_tests {
         let paths = flow_paths();
         let now = chrono::Utc::now();
         let profile = Profile {
+            id: crate::profiles::new_profile_id(),
             name: "Stored Pack".into(),
             game_version: Some("0.105.0".into()),
             created_by: Some("qa-curator".into()),

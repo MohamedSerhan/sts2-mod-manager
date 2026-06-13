@@ -7,7 +7,7 @@ use zip::write::SimpleFileOptions;
 
 use crate::error::{AppError, Result};
 use crate::mods::install_mod_from_zip;
-use crate::profiles::{list_profiles, load_profile, save_profile, Profile};
+use crate::profiles::{load_profile, new_profile_id, save_profile, unique_profile_name, Profile};
 use crate::sharing::zip_profile_mod_files;
 
 const PROFILE_ENTRY: &str = "profile.json";
@@ -27,23 +27,6 @@ fn safe_archive_segment(name: &str) -> String {
     } else {
         trimmed.to_string()
     }
-}
-
-fn unique_profile_name(name: &str, profiles_path: &Path) -> String {
-    let existing = list_profiles(profiles_path);
-    if !existing.iter().any(|p| p.name.eq_ignore_ascii_case(name)) {
-        return name.to_string();
-    }
-    for n in 2.. {
-        let candidate = format!("{name} ({n})");
-        if !existing
-            .iter()
-            .any(|p| p.name.eq_ignore_ascii_case(&candidate))
-        {
-            return candidate;
-        }
-    }
-    unreachable!()
 }
 
 pub fn export_profile_to_sts2pack_from_paths(
@@ -112,6 +95,7 @@ pub fn import_sts2pack_from_paths(
         install_mod_from_zip(tmp.path(), mods_path)?;
     }
 
+    profile.id = new_profile_id();
     profile.name = unique_profile_name(&profile.name, profiles_path);
     save_profile(&profile, profiles_path)?;
     Ok(profile)
@@ -176,6 +160,7 @@ mod tests {
 
     fn profile(name: &str) -> Profile {
         Profile {
+            id: crate::profiles::new_profile_id(),
             name: name.to_string(),
             game_version: Some("0.105.0".to_string()),
             created_by: Some("tester".to_string()),

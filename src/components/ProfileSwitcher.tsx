@@ -6,6 +6,7 @@ import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from './ConfirmDialog';
 import { recordModpackLaunch } from '../lib/modpackUsage';
+import { switchResultDetails } from '../lib/switchResultSummary';
 import type { Profile, SubscriptionUpdate } from '../types';
 
 // v5 — Profile switcher popover. Opens from the top-bar profile chip.
@@ -117,22 +118,9 @@ export function ProfileSwitcher({ onClose, onAddPack, onManageAll }: Props) {
       setActiveProfile(name);
       recordModpackLaunch(name);
       await refreshAll();
-      const failedEnables = result.failed_enables ?? [];
-      if (result.missing_mods.length > 0 || failedEnables.length > 0) {
-        const details = [
-          result.missing_mods.length > 0
-            ? t('profileSwitcher.downloadedStatus', { downloaded: result.downloaded, missing: result.missing_mods.length })
-            : null,
-          failedEnables.length > 0
-            ? t('common.parts.enableFailedWithList', { count: failedEnables.length, list: failedEnables.join(', ') })
-            : null,
-        ].filter(Boolean).join(' ');
-        toast.info(
-          t('profiles.toast.switchedWithDetails', {
-            name,
-            details,
-          }),
-        );
+      const parts = switchResultDetails(result, t);
+      if (parts.length > 0) {
+        toast.info(parts.join('. '));
       } else {
         toast.success(t('profiles.toast.switched', { name }));
       }

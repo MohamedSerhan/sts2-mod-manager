@@ -82,7 +82,14 @@ export function EditModpackModal({ profile, onClose, onSaved }: Props) {
       // a manifest edit with no matching disk move.
       for (const m of toAdd) {
         if (isActive) await toggleMod(m.name, m.folder_name ?? null, true);
-        await setProfileModMembership(profile.name, m.name, m.folder_name ?? null, m.mod_id ?? null, true);
+        await setProfileModMembership(
+          profile.name,
+          m.name,
+          m.folder_name ?? null,
+          m.mod_id ?? null,
+          true,
+          m.source ?? m.github_url ?? m.nexus_url ?? null,
+        );
       }
       for (const m of toRemove) {
         if (isActive) await toggleMod(m.name, m.folder_name ?? null, false);

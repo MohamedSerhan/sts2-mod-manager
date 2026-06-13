@@ -190,6 +190,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
       mod.folder_name ?? null,
       mod.mod_id ?? null,
       true,
+      mod.source ?? mod.github_url ?? mod.nexus_url ?? null,
     );
     onTargetPackChanged?.();
   }

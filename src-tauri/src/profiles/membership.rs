@@ -81,7 +81,7 @@ pub(crate) fn profile_membership_matrix(
                     ProfileMembershipState {
                         profile_name: profile.name.clone(),
                         included: matched.is_some(),
-                        enabled: matched.map(|pm| pm.enabled).unwrap_or(false),
+                        enabled: matched.is_some(),
                         editable: profile_row.editable,
                     }
                 })
@@ -111,6 +111,7 @@ pub(crate) fn set_profile_mod_membership_from_paths(
     folder_name: Option<&str>,
     mod_id: Option<&str>,
     included: bool,
+    source_hint: Option<&str>,
     mods_path: &Path,
     disabled_path: &Path,
     profiles_path: &Path,
@@ -126,21 +127,31 @@ pub(crate) fn set_profile_mod_membership_from_paths(
     let mut profile = load_profile(profile_name, profiles_path)?;
 
     if included {
-        let already_in_profile = profile
-            .mods
-            .iter()
-            .any(|pm| profile_mod_matches_target(pm, mod_name, folder_name, mod_id));
+        let source_hint = source_hint.and_then(crate::mod_sources::parse_source_url);
+        let already_in_profile = profile.mods.iter().any(|pm| {
+            profile_mod_matches_target(pm, mod_name, folder_name, mod_id)
+                || source_hint.as_ref().is_some_and(|hint| {
+                    crate::mod_sources::profile_source_matches_entry(pm.source.as_deref(), hint)
+                })
+        });
         if !already_in_profile {
-            let installed =
-                merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path))
-                    .into_iter()
-                    .find(|m| installed_mod_matches_target(m, mod_name, folder_name, mod_id))
-                    .ok_or_else(|| {
-                        AppError::ModNotFound(format!(
-                            "Installed mod '{}' was not found; refresh the mod list and try again.",
-                            mod_name
-                        ))
-                    })?;
+            let mut installed_mods =
+                merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
+            crate::mod_sources::enrich_mods_with_sources(&mut installed_mods, config_path);
+            let installed = installed_mods
+                .into_iter()
+                .find(|m| {
+                    installed_mod_matches_target(m, mod_name, folder_name, mod_id)
+                        || source_hint.as_ref().is_some_and(|hint| {
+                            crate::mod_sources::mod_info_source_matches_entry(m, hint)
+                        })
+                })
+                .ok_or_else(|| {
+                    AppError::ModNotFound(format!(
+                        "Installed mod '{}' was not found; refresh the mod list and try again.",
+                        mod_name
+                    ))
+                })?;
             profile.mods.push(profile_mod_from_installed(&installed));
         }
     } else {
@@ -437,7 +448,7 @@ pub(crate) fn write_profile_load_order_to_settings_file(
         }
         mod_list.push(settings_entry_with_state(
             &id,
-            pm.enabled,
+            true,
             existing_by_id.get(&id),
         ));
     }
@@ -453,8 +464,7 @@ pub(crate) fn write_profile_load_order_to_settings_file(
         ));
     }
 
-    let mods_enabled =
-        profile.mods.iter().any(|pm| pm.enabled) || extra_mods.iter().any(|m| m.enabled);
+    let mods_enabled = !profile.mods.is_empty() || extra_mods.iter().any(|m| m.enabled);
 
     let root = settings.as_object_mut().ok_or_else(|| {
         AppError::InvalidProfile("settings.save must contain a JSON object".into())
@@ -807,6 +817,7 @@ mod profile_membership_tests {
             Some("LibraryOnly"),
             Some("LibraryOnly"),
             true,
+            None,
             &mods_path,
             &disabled_path,
             &profiles_path,
@@ -867,6 +878,7 @@ mod profile_membership_tests {
             Some("LibraryOnly"),
             Some("LibraryOnly"),
             true,
+            None,
             &mods_path,
             &disabled_path,
             &profiles_path,
@@ -986,6 +998,7 @@ mod profile_membership_tests {
             Some("card_art_editor_v2"),
             Some("card_art_editor_v2"),
             false,
+            None,
             &mods_path,
             &disabled_path,
             &profiles_path,
@@ -1002,6 +1015,51 @@ mod profile_membership_tests {
             .join("card_art_editor_v2")
             .join("card_art_editor_v2.dll")
             .exists());
+    }
+
+    #[test]
+    fn set_profile_mod_membership_adds_by_source_when_folder_name_drifted() {
+        let game_tmp = tempfile::tempdir().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let mods_path = game_tmp.path().join("mods");
+        let disabled_path = game_tmp.path().join("mods_disabled");
+        let profiles_path = config_tmp.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        write_mod(&mods_path, "Flagellant", "Flagellant", "unknown");
+        crate::mod_sources::attach_nexus_source(
+            "Flagellant",
+            Some("Flagellant"),
+            "https://www.nexusmods.com/slaythespire2/mods/1073".into(),
+            "slaythespire2".into(),
+            1073,
+            config_tmp.path(),
+        );
+        save_profile(&empty_profile("Solo Pack"), &profiles_path).unwrap();
+
+        let updated = set_profile_mod_membership_from_paths(
+            "Solo Pack",
+            "Flagellant 0.1.7-1073-0-1-7-1781082503",
+            Some("Flagellant 0.1.7-1073-0-1-7-1781082503"),
+            None,
+            true,
+            Some("https://www.nexusmods.com/slaythespire2/mods/1073"),
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config_tmp.path(),
+        )
+        .unwrap();
+
+        assert_eq!(updated.mods.len(), 1);
+        assert_eq!(updated.mods[0].folder_name.as_deref(), Some("Flagellant"));
+        assert_eq!(
+            updated.mods[0].source.as_deref(),
+            None,
+            "membership records the installed manifest data; publish backfills source from mod_sources"
+        );
     }
 
     #[test]
@@ -1041,6 +1099,7 @@ mod profile_membership_tests {
             Some("BaseLib"),
             Some("BaseLib"),
             true,
+            None,
             &mods_path,
             &disabled_path,
             &profiles_path,
@@ -1176,7 +1235,7 @@ mod profile_membership_tests {
             .map(|entry| entry["id"].as_str().unwrap())
             .collect::<Vec<_>>();
         assert_eq!(ids, vec!["CardArtEditor", "BaseLib", "PinnedUtility"]);
-        assert_eq!(mod_list[1]["is_enabled"].as_bool(), Some(false));
+        assert_eq!(mod_list[1]["is_enabled"].as_bool(), Some(true));
         assert_eq!(mod_list[1]["note"].as_str(), Some("keep"));
         assert_eq!(mod_list[2]["custom"].as_i64(), Some(9));
         assert_eq!(saved["mod_settings"]["mods_enabled"].as_bool(), Some(true));

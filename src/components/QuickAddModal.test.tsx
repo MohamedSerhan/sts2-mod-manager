@@ -95,6 +95,32 @@ describe('<QuickAddModal>', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it('does not close or re-enter while an install is busy', async () => {
+    let resolveInstall: (value: unknown) => void = () => {};
+    registerInvokeHandler('quick_add_mod', () => new Promise((resolve) => {
+      resolveInstall = resolve;
+    }));
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    const { container } = render(<Wrap onClose={onClose} />);
+
+    await user.type(screen.getByPlaceholderText(/github\.com\/owner\/repo/), 'github.com/foo/bar');
+    await user.click(screen.getByRole('button', { name: /Add & install/i }));
+    await screen.findByRole('button', { name: /Adding/i });
+
+    await user.click(container.querySelector('.gf-modal-back') as Element);
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByTitle('Close')).toBeDisabled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(getInvokeCalls().filter((c) => c.cmd === 'quick_add_mod')).toHaveLength(1);
+
+    resolveInstall({
+      type: 'github_installed',
+      mod_info: { name: 'AutoPath', version: '1.0', enabled: true, files: [] },
+    });
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
   it('Install of a GitHub URL invokes quick_add_mod + refreshes + closes', async () => {
     registerInvokeHandler('quick_add_mod', () => ({
       type: 'github_installed',

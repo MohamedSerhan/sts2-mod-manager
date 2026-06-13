@@ -66,6 +66,7 @@ export function QuickAddModal({ open, onClose }: Props) {
   if (!open) return null;
 
   async function handleInstall() {
+    if (busy) return;
     const input = url.trim();
     if (!input) return;
     setBusy(true);
@@ -98,7 +99,7 @@ export function QuickAddModal({ open, onClose }: Props) {
   }
 
   return (
-    <div className="gf-modal-back" onClick={onClose}>
+    <div className="gf-modal-back" onClick={busy ? undefined : onClose}>
       <div
         className="gf-modal"
         role="dialog"
@@ -114,7 +115,7 @@ export function QuickAddModal({ open, onClose }: Props) {
               {t('quickAdd.subtitle')}
             </div>
           </div>
-          <button className="gf-btn-3 gf-btn-icon" onClick={onClose} title={t('common.close')}>
+          <button className="gf-btn-3 gf-btn-icon" onClick={onClose} disabled={busy} title={t('common.close')}>
             <X size={14} />
           </button>
         </div>
@@ -127,7 +128,8 @@ export function QuickAddModal({ open, onClose }: Props) {
               placeholder={t('quickAdd.urlPlaceholder')}
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && detected.kind && handleInstall()}
+              onKeyDown={(e) => e.key === 'Enter' && detected.kind && !busy && handleInstall()}
+              disabled={busy}
               autoFocus
               style={{ width: '100%' }}
             />
@@ -181,7 +183,7 @@ export function QuickAddModal({ open, onClose }: Props) {
         </div>
 
         <div className="gf-modal-foot">
-          <button className="gf-btn-3" onClick={onClose}>{t('common.cancel')}</button>
+          <button className="gf-btn-3" onClick={onClose} disabled={busy}>{t('common.cancel')}</button>
           <div style={{ flex: 1 }} />
           <button
             className="gf-btn"

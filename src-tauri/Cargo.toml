@@ -52,7 +52,7 @@ tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "blocking", "query", "charset", "http2", "system-proxy", "native-tls"] }
 sha2 = "0.11"
 hex = "0.4"
-zip = "4"
+zip = "8"
 # Multi-format archive support. STS2 mods get shared as .zip most of the
 # time but Patreon/Discord drops sometimes use .7z (smaller) or .rar (older
 # packagers); without these the install gives users a "not a supported
@@ -84,7 +84,7 @@ futures = "0.3"
 regex = "1"
 semver = "1"
 base64 = "0.22"
-sysinfo = { version = "0.32", default-features = false, features = ["system"] }
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 # Used by sharing.rs::upload_release_asset to safely encode asset
 # filenames into the `?name=<...>` query param of GitHub's release-asset
 # upload endpoint. Pure-Rust, no transitive bloat — smaller than pulling

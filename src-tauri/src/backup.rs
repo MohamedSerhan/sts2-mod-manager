@@ -25,11 +25,10 @@ pub struct BackupInfo {
 /// Default and maximum number of backups to retain. Older backups are pruned
 /// after each successful create. The user-configurable retention setting is
 /// clamped to `0..=MAX_BACKUPS`; `0` disables automatic backups entirely.
-pub const MAX_BACKUPS: usize = 5;
+pub const MAX_BACKUPS: usize = 10;
 
-/// Default retention used when the persisted setting is absent. Matches the
-/// historical hardcoded behavior so existing users are unaffected.
-pub const DEFAULT_BACKUP_RETENTION: u8 = MAX_BACKUPS as u8;
+/// Default retention used when the persisted setting is absent.
+pub const DEFAULT_BACKUP_RETENTION: u8 = 2;
 
 /// Config items stored in the app data directory that are included in every
 /// backup and restored alongside mods.
@@ -70,8 +69,13 @@ pub fn create_backup_with_retention(
         log::info!("Backup retention is 0 (off); skipping automatic backup creation");
         return Ok(None);
     }
-    create_backup_preserving_keep(mods_path, backup_dir, None, (keep as usize).min(MAX_BACKUPS))
-        .map(Some)
+    create_backup_preserving_keep(
+        mods_path,
+        backup_dir,
+        None,
+        (keep as usize).min(MAX_BACKUPS),
+    )
+    .map(Some)
 }
 
 /// Create a backup while keeping a named restore target safe from retention
@@ -845,9 +849,9 @@ mod backup_pure_tests {
     }
 
     #[test]
-    fn default_backup_retention_is_five() {
-        assert_eq!(DEFAULT_BACKUP_RETENTION, 5);
-        assert_eq!(MAX_BACKUPS, 5);
+    fn default_backup_retention_is_two_with_ten_allowed() {
+        assert_eq!(DEFAULT_BACKUP_RETENTION, 2);
+        assert_eq!(MAX_BACKUPS, 10);
     }
 
     #[test]
@@ -855,14 +859,15 @@ mod backup_pure_tests {
         assert_eq!(clamp_retention(0), 0);
         assert_eq!(clamp_retention(3), 3);
         assert_eq!(clamp_retention(5), 5);
-        assert_eq!(clamp_retention(99), 5);
+        assert_eq!(clamp_retention(10), 10);
+        assert_eq!(clamp_retention(99), 10);
     }
 
     #[test]
     fn load_persisted_backup_retention_defaults_and_clamps() {
         let dir = tempfile::tempdir().unwrap();
-        // Absent file ⇒ default 5.
-        assert_eq!(load_persisted_backup_retention(dir.path()), 5);
+        // Absent file ⇒ default 2.
+        assert_eq!(load_persisted_backup_retention(dir.path()), 2);
         // Valid value round-trips.
         fs::write(dir.path().join("backup_retention.txt"), b"2").unwrap();
         assert_eq!(load_persisted_backup_retention(dir.path()), 2);
@@ -871,10 +876,10 @@ mod backup_pure_tests {
         assert_eq!(load_persisted_backup_retention(dir.path()), 0);
         // Out-of-range is clamped.
         fs::write(dir.path().join("backup_retention.txt"), b"42").unwrap();
-        assert_eq!(load_persisted_backup_retention(dir.path()), 5);
+        assert_eq!(load_persisted_backup_retention(dir.path()), 10);
         // Garbage falls back to default.
         fs::write(dir.path().join("backup_retention.txt"), b"nope").unwrap();
-        assert_eq!(load_persisted_backup_retention(dir.path()), 5);
+        assert_eq!(load_persisted_backup_retention(dir.path()), 2);
     }
 
     #[test]
@@ -1112,14 +1117,14 @@ fn manual_backup_keep(retention: u8) -> usize {
     }
 }
 
-/// Return the user-configured backup-retention count (`0..=5`).
+/// Return the user-configured backup-retention count (`0..=MAX_BACKUPS`).
 #[tauri::command]
 pub fn get_backup_retention(state: tauri::State<'_, AppState>) -> std::result::Result<u8, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     Ok(clamp_retention(s.backup_retention))
 }
 
-/// Persist a new backup-retention count. Validated/clamped to `0..=5`
+/// Persist a new backup-retention count. Validated/clamped to `0..=MAX_BACKUPS`
 /// server-side. `0` disables automatic backups (existing backups are kept).
 #[tauri::command]
 pub fn set_backup_retention(

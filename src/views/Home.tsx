@@ -156,8 +156,9 @@ interface HomeProps {
   /** Opens the Modpacks page and the guided Create-modpack wizard. */
   onCreateModpack?: () => void;
   onLaunch?: () => void;
+  onBlockingOperationChange?: (busy: boolean) => void;
 }
-export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfiles, onGoToBrowseModpacks, onCreateModpack, onLaunch }: HomeProps) {
+export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfiles, onGoToBrowseModpacks, onCreateModpack, onLaunch, onBlockingOperationChange }: HomeProps) {
   const { t } = useTranslation();
   const { gameInfo, mods, refreshAll, activeProfile, setActiveProfile, refreshSubUpdates } = useApp();
   const toast = useToast();
@@ -331,6 +332,7 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
         activeProfile,
         subUpdates,
         t,
+        onBusyChange: onBlockingOperationChange,
       });
       if (outcome.kind === 'cancelled') return;
       setImportCode('');

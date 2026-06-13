@@ -591,7 +591,12 @@ describe('<ModpackDetail>', () => {
   // ── Membership: Add (available section) ───────────────────────────
   it('Add on an available row calls set_profile_mod_membership with included=true', async () => {
     const profile = setupPack({
-      available: [modInfo({ name: 'LibMod', folder_name: 'LibMod', mod_id: 'LibMod' })],
+      available: [modInfo({
+        name: 'LibMod',
+        folder_name: 'LibMod',
+        mod_id: 'LibMod',
+        nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/1073',
+      })],
     });
     registerInvokeHandler('set_profile_mod_membership', () => baseProfile());
     const onLibraryChanged = vi.fn();
@@ -612,6 +617,7 @@ describe('<ModpackDetail>', () => {
       folderName: 'LibMod',
       modId: 'LibMod',
       included: true,
+      sourceHint: 'https://www.nexusmods.com/slaythespire2/mods/1073',
     });
     await waitFor(() => expect(onLibraryChanged).toHaveBeenCalled());
   });

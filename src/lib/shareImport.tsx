@@ -138,6 +138,7 @@ export async function installSharedProfileWithConfirm(
   code: string,
   confirm: ConfirmFn,
   t: TFunction,
+  onBusyChange?: (busy: boolean) => void,
 ): Promise<Profile | null> {
   // Fetch metadata only — no mod files downloaded yet.
   const preview = await fetchSharedProfile(code);
@@ -211,7 +212,12 @@ export async function installSharedProfileWithConfirm(
   });
 
   if (!result) return null;
-  return await installSharedProfile(code);
+  onBusyChange?.(true);
+  try {
+    return await installSharedProfile(code);
+  } finally {
+    onBusyChange?.(false);
+  }
 }
 
 interface SmartImportOpts {
@@ -220,6 +226,7 @@ interface SmartImportOpts {
   activeProfile: string | null;
   subUpdates: SubscriptionUpdate[];
   t: TFunction;
+  onBusyChange?: (busy: boolean) => void;
 }
 
 /**
@@ -252,7 +259,7 @@ export async function importShareCodeSmart(
     // Let the existing install path produce the parse error the user is
     // used to seeing — it has more context (it'll mention "owner/CODE"
     // expected shape).
-    const profile = await installSharedProfileWithConfirm(input, opts.confirm, opts.t);
+    const profile = await installSharedProfileWithConfirm(input, opts.confirm, opts.t, opts.onBusyChange);
     return profile
       ? { kind: 'installed', profile }
       : { kind: 'cancelled' };
@@ -274,7 +281,7 @@ export async function importShareCodeSmart(
   );
 
   if (!match) {
-    const profile = await installSharedProfileWithConfirm(pretty, opts.confirm, opts.t);
+    const profile = await installSharedProfileWithConfirm(pretty, opts.confirm, opts.t, opts.onBusyChange);
     return profile
       ? { kind: 'installed', profile }
       : { kind: 'cancelled' };
@@ -348,8 +355,13 @@ export async function importShareCodeSmart(
       width: 480,
     });
     if (!ok) return { kind: 'cancelled' };
-    await applySubscriptionUpdate(match.share_id);
-    return { kind: 'synced', profileName: match.profile_name };
+    opts.onBusyChange?.(true);
+    try {
+      await applySubscriptionUpdate(match.share_id);
+      return { kind: 'synced', profileName: match.profile_name };
+    } finally {
+      opts.onBusyChange?.(false);
+    }
   }
 
   // Case 2: already active, no pending update — re-apply. A friend may
@@ -357,8 +369,13 @@ export async function importShareCodeSmart(
   // mod; switchProfile is the Rust path that restores missing bundle_url
   // entries from the saved manifest.
   if (isActive) {
-    const result = await switchProfile(match.profile_name);
-    return { kind: 'reapplied', profileName: match.profile_name, result };
+    opts.onBusyChange?.(true);
+    try {
+      const result = await switchProfile(match.profile_name);
+      return { kind: 'reapplied', profileName: match.profile_name, result };
+    } finally {
+      opts.onBusyChange?.(false);
+    }
   }
 
   // Case 3: subscribed but not active — offer to switch.
@@ -385,6 +402,11 @@ export async function importShareCodeSmart(
     width: 480,
   });
   if (!ok) return { kind: 'cancelled' };
-  await switchProfile(match.profile_name);
-  return { kind: 'activated', profileName: match.profile_name };
+  opts.onBusyChange?.(true);
+  try {
+    await switchProfile(match.profile_name);
+    return { kind: 'activated', profileName: match.profile_name };
+  } finally {
+    opts.onBusyChange?.(false);
+  }
 }

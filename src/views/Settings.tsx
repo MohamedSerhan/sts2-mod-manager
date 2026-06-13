@@ -112,7 +112,7 @@ export function SettingsView({
   // ── Backups ─────────────────────────────────────────
   const [backups, setBackups] = useState<BackupInfo[]>([]);
   const [backupBusy, setBackupBusy] = useState<string | null>(null);
-  const [backupRetention, setBackupRetentionValue] = useState<number>(5);
+  const [backupRetention, setBackupRetentionValue] = useState<number>(2);
   const [savingRetention, setSavingRetention] = useState(false);
 
   // ── Updates (Advanced) ──────────────────────────────
@@ -855,7 +855,7 @@ export function SettingsView({
                   onChange={(e) => handleChangeBackupRetention(Number(e.target.value))}
                   style={{ width: 'auto', minWidth: 140 }}
                 >
-                  {[0, 1, 2, 3, 4, 5].map((n) => (
+                  {Array.from({ length: 11 }, (_, n) => n).map((n) => (
                     <option key={n} value={n}>
                       {n === 0 ? t('settings.backups.retentionOff') : String(n)}
                     </option>

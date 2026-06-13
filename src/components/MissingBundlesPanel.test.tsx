@@ -150,17 +150,29 @@ describe('<MissingBundlesPanel>', () => {
     ).toBeInTheDocument();
   });
 
-  it('shows the last backend error and disables repair for GitHub upload failures', () => {
+  it('shows the last backend error and hides repair for GitHub upload failures', () => {
     render(
       <Wrap
         modNames={["Ascender's Sandbox"]}
         errorDetails="Ascender's Sandbox: Upload failed with 422 already_exists"
       />,
     );
+    expect(
+      screen.getByRole('heading', { name: /Upload to GitHub didn't finish/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/GitHub returned an upload error after the app retried/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Repair will not help this case/i),
+    ).toBeInTheDocument();
     expect(screen.getByText(/Last error:/i)).toHaveTextContent('already_exists');
     expect(
-      screen.getByRole('button', { name: /Repair these mods/i }),
-    ).toBeDisabled();
+      screen.queryByRole('button', { name: /Repair these mods/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /Try sharing again/i }),
+    ).toBeInTheDocument();
   });
 
   it('"Repair these mods" calls repair_mod sequentially for every mod', async () => {

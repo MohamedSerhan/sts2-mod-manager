@@ -1020,8 +1020,11 @@
     "failedUploadsHelp": "Friends installing this code will see \"missing mod\" for these - re-publish to retry.",
     "missingBundles": {
       "title": "Some mod uploads didn't finish",
+      "uploadTitle": "Upload to GitHub didn't finish",
       "body": "The app couldn't finish uploading bundles for these mods. Try sharing again first: mods that already uploaded are skipped.",
+      "uploadBody": "GitHub returned an upload error after the app retried. Wait a minute if GitHub is rate-limiting you, then try sharing again; bundles that already uploaded are skipped.",
       "repairHint": "Repair only helps when local files are missing or broken. It will not fix GitHub upload errors.",
+      "uploadHint": "Repair will not help this case because your local mod files were readable.",
       "lastError": "Last error: {{error}}",
       "shareAgainBtn": "Try sharing again",
       "sharingAgain": "Sharing…",

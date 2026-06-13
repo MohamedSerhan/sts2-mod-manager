@@ -89,7 +89,7 @@ export function MissingBundlesPanel({
   const [sharing, setSharing] = useState(false);
 
   const busy = repairing || sharing;
-  const repairBlockedByUploadError = isUploadFailureDetail(errorDetails);
+  const uploadFailure = isUploadFailureDetail(errorDetails);
 
   // Primary remedy for the transient-upload case (issue #164): just run
   // the share again. The Rust share flow re-attempts only the bundles
@@ -150,13 +150,19 @@ export function MissingBundlesPanel({
         <AlertTriangle size={16} className="gf-missing-bundles-icon" />
         <div>
           <h2 className="gf-missing-bundles-title">
-            {t('publish.missingBundles.title')}
+            {uploadFailure
+              ? t('publish.missingBundles.uploadTitle')
+              : t('publish.missingBundles.title')}
           </h2>
           <p className="gf-missing-bundles-body">
-            {t('publish.missingBundles.body')}
+            {uploadFailure
+              ? t('publish.missingBundles.uploadBody')
+              : t('publish.missingBundles.body')}
           </p>
           <p className="gf-missing-bundles-subbody">
-            {t('publish.missingBundles.repairHint')}
+            {uploadFailure
+              ? t('publish.missingBundles.uploadHint')
+              : t('publish.missingBundles.repairHint')}
           </p>
           {errorDetails && (
             <p className="gf-missing-bundles-detail">
@@ -210,24 +216,22 @@ export function MissingBundlesPanel({
           {t('common.cancel')}
         </button>
         <div style={{ flex: 1 }} />
-        {/* Secondary remedy: repair genuinely-broken local files. Needs a
-            linked GitHub source; does nothing for a pure upload failure. */}
-        <button
-          type="button"
-          className="gf-btn-2"
-          disabled={busy || repairBlockedByUploadError}
-          onClick={handleRepair}
-          title={
-            repairBlockedByUploadError
-              ? t('publish.missingBundles.repairUploadDisabledTitle')
-              : t('publish.missingBundles.repairBtnTitle')
-          }
-        >
-          <RotateCw size={12} />
-          {repairing
-            ? t('publish.missingBundles.repairing')
-            : t('publish.missingBundles.repairBtn')}
-        </button>
+        {!uploadFailure && (
+          /* Secondary remedy: repair genuinely-broken local files. Needs a
+              linked GitHub source; does nothing for a pure upload failure. */
+          <button
+            type="button"
+            className="gf-btn-2"
+            disabled={busy}
+            onClick={handleRepair}
+            title={t('publish.missingBundles.repairBtnTitle')}
+          >
+            <RotateCw size={12} />
+            {repairing
+              ? t('publish.missingBundles.repairing')
+              : t('publish.missingBundles.repairBtn')}
+          </button>
+        )}
         {/* Primary remedy: re-run the share. Re-uploads only the bundles
             that failed; the common transient-failure fix for issue #164. */}
         <button

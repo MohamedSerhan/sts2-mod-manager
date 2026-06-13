@@ -96,9 +96,10 @@ interface ProfilesViewProps {
    *  when on the list or another tab). App uses it to auto-add a
    *  drag-dropped zip to the pack being viewed. */
   onViewedModpackChange?: (name: string | null) => void;
+  onBlockingOperationChange?: (busy: boolean) => void;
 }
 
-export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, initialTab = 'yours', focusQuickAddSignal, openCreateWizardSignal, onCreateWizardConsumed, onViewedModpackChange }: ProfilesViewProps = {}) {
+export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, initialTab = 'yours', focusQuickAddSignal, openCreateWizardSignal, onCreateWizardConsumed, onViewedModpackChange, onBlockingOperationChange }: ProfilesViewProps = {}) {
   // 1.7.0 outer Yours/Browse tabs. 'yours' renders the user's
   // followed/published modpack list (the legacy Profiles content);
   // 'browse' renders the public modpack browser (formerly its own
@@ -870,6 +871,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
         activeProfile,
         subUpdates,
         t,
+        onBusyChange: onBlockingOperationChange,
       });
       if (outcome.kind === 'cancelled') return;
 

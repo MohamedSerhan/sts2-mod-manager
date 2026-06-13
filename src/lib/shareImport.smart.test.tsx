@@ -34,17 +34,20 @@ describe('importShareCodeSmart', () => {
       mods: [],
       created_at: '2026-01-01',
     }));
+    const busyStates: boolean[] = [];
     const outcome = await importShareCodeSmart('alice/AA5A-315D-61AE', {
       confirm: confirmAccept,
       subscriptions: [],
       activeProfile: null,
       subUpdates: [],
       t: mockT,
+      onBusyChange: (busy) => busyStates.push(busy),
     });
     expect(outcome.kind).toBe('installed');
     if (outcome.kind === 'installed') {
       expect(outcome.profile.name).toBe('Imported');
     }
+    expect(busyStates).toEqual([true, false]);
   });
 
   it('Case 1: brand-new pack with confirm rejected → cancelled outcome', async () => {
@@ -59,6 +62,9 @@ describe('importShareCodeSmart', () => {
       activeProfile: null,
       subUpdates: [],
       t: mockT,
+      onBusyChange: () => {
+        throw new Error('busy callback must not run after a rejected confirm');
+      },
     });
     expect(outcome.kind).toBe('cancelled');
   });

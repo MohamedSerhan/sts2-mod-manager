@@ -177,7 +177,7 @@ function registerSafeDefaults(): void {
   }));
   invokeHandlers.set('get_launch_mode', () => 'steam');
   invokeHandlers.set('get_nexus_download_dir', () => null);
-  invokeHandlers.set('get_backup_retention', () => 5);
+  invokeHandlers.set('get_backup_retention', () => 2);
   invokeHandlers.set('list_backups_cmd', () => []);
   invokeHandlers.set('detect_game_path', () => ({
     game_path: null,

@@ -1,6 +1,7 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -776,7 +777,129 @@ pub fn install_mod_from_file(
     // any edits the user makes in the meantime. No preservation pass
     // happens here — there's nothing to preserve from.
     snapshot_after_fresh_install(&result, &mods_path, &config_path);
+    attach_pending_nexus_source_for_file(&result, &archive_path, &config_path, state.inner());
     Ok(result)
+}
+
+/// If Quick Add queued a Nexus URL and the user installs the downloaded archive
+/// through the Mod Library rather than the downloads watcher, preserve the
+/// Nexus source link on the installed mod.
+fn attach_pending_nexus_source_for_file(
+    installed: &ModInfo,
+    archive_path: &Path,
+    config_path: &Path,
+    state: &AppState,
+) {
+    let file_name = archive_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    let installed_folder = installed.folder_name.as_deref();
+    let consumed = {
+        let mut s = match state.lock() {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        s.pending_nexus_installs
+            .retain(|p| Instant::now().duration_since(p.queued_at) < Duration::from_secs(30 * 60));
+
+        let stem_lower = file_name.to_lowercase();
+        let installed_norm = normalize_pending_nexus_name(&installed.name);
+        let single_pending_filename_match = s.pending_nexus_installs.len() == 1
+            && pending_nexus_filename_matches_installed(
+                file_name,
+                &installed.name,
+                installed_folder,
+            );
+
+        let idx = s.pending_nexus_installs.iter().position(|p| {
+            let id_marker = format!("-{}-", p.mod_id);
+            if stem_lower.contains(&id_marker) || stem_lower.ends_with(&format!("-{}", p.mod_id)) {
+                return true;
+            }
+            let pending_norm = normalize_pending_nexus_name(&p.mod_name);
+            (!pending_norm.is_empty()
+                && (installed_norm.contains(&pending_norm)
+                    || pending_norm.contains(&installed_norm)
+                    || pending_nexus_identities_overlap(&installed.name, &p.mod_name)))
+                || single_pending_filename_match
+        });
+
+        idx.map(|i| s.pending_nexus_installs.remove(i))
+    };
+
+    let Some(pending) = consumed else { return };
+    let mod_id = pending.mod_id;
+    crate::mod_sources::attach_nexus_source(
+        &installed.name,
+        installed_folder,
+        pending.nexus_url,
+        pending.game_domain,
+        pending.mod_id,
+        config_path,
+    );
+    log::info!(
+        "Auto-attached Nexus source to manually installed '{}' (folder {:?}, mod_id {})",
+        installed.name,
+        installed_folder,
+        mod_id
+    );
+}
+
+fn normalize_pending_nexus_name(name: &str) -> String {
+    name.to_lowercase()
+        .replace(" lite", "")
+        .replace(" full", "")
+        .replace(" plus", "")
+        .replace(" pro", "")
+        .trim()
+        .to_string()
+}
+
+fn compact_pending_nexus_identity(name: &str) -> String {
+    name.chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .map(|c| c.to_ascii_lowercase())
+        .collect()
+}
+
+fn pending_nexus_identities_overlap(a: &str, b: &str) -> bool {
+    let a = compact_pending_nexus_identity(&normalize_pending_nexus_name(a));
+    let b = compact_pending_nexus_identity(&normalize_pending_nexus_name(b));
+    a.len() >= 4 && b.len() >= 4 && (a.contains(&b) || b.contains(&a))
+}
+
+fn pending_nexus_filename_matches_installed(
+    file_name: &str,
+    installed_name: &str,
+    installed_folder: Option<&str>,
+) -> bool {
+    let stem = Path::new(file_name)
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let clean_stem = strip_pending_nexus_suffix(&stem);
+    pending_nexus_identities_overlap(&clean_stem, installed_name)
+        || installed_folder
+            .map(|folder| pending_nexus_identities_overlap(&clean_stem, folder))
+            .unwrap_or(false)
+}
+
+fn strip_pending_nexus_suffix(stem: &str) -> String {
+    for (idx, ch) in stem.char_indices() {
+        if ch != '-' {
+            continue;
+        }
+        let suffix = &stem[idx + ch.len_utf8()..];
+        if !suffix.is_empty()
+            && suffix.chars().any(|c| c.is_ascii_digit())
+            && suffix.chars().all(|c| c.is_ascii_digit() || c == '-')
+        {
+            return stem[..idx].to_string();
+        }
+    }
+    stem.to_string()
 }
 
 // ── Dependency Resolution ──────────────────────────────────────────────────
@@ -832,6 +955,67 @@ pub fn get_mod_dependents(
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
     Ok(get_dependents(&name, mods_path))
+}
+
+#[cfg(test)]
+mod pending_nexus_manual_install_tests {
+    use super::*;
+    use crate::state::{create_app_state, PendingNexusInstall};
+
+    #[test]
+    fn manual_archive_install_consumes_pending_nexus_hint_by_file_id() {
+        let state = create_app_state();
+        {
+            let mut s = state.lock().unwrap();
+            s.pending_nexus_installs.push(PendingNexusInstall {
+                mod_name: "Flagellant".into(),
+                nexus_url: "https://www.nexusmods.com/slaythespire2/mods/1073".into(),
+                game_domain: "slaythespire2".into(),
+                mod_id: 1073,
+                queued_at: Instant::now(),
+            });
+        }
+        let config = tempfile::tempdir().unwrap();
+        let installed = ModInfo {
+            name: "Flagellant".into(),
+            version: "unknown".into(),
+            description: String::new(),
+            enabled: true,
+            files: vec![],
+            source: None,
+            hash: None,
+            dependencies: vec![],
+            size_bytes: 0,
+            folder_name: Some("Flagellant".into()),
+            mod_id: None,
+            github_url: None,
+            nexus_url: None,
+            custom_url: None,
+            pinned: false,
+            min_game_version: None,
+            author: None,
+            note: None,
+            tags: vec![],
+            display_name: None,
+            display_description: None,
+            bundle_members: vec![],
+        };
+
+        attach_pending_nexus_source_for_file(
+            &installed,
+            Path::new("Flagellant 0.1.7-1073-0-1-7-1781082503.zip"),
+            config.path(),
+            &state,
+        );
+
+        let sources = crate::mod_sources::load_sources(config.path());
+        let entry = sources.mods.get("Flagellant").unwrap();
+        assert_eq!(
+            entry.nexus_url.as_deref(),
+            Some("https://www.nexusmods.com/slaythespire2/mods/1073")
+        );
+        assert!(state.lock().unwrap().pending_nexus_installs.is_empty());
+    }
 }
 
 #[cfg(test)]

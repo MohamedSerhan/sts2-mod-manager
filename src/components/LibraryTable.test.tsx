@@ -209,6 +209,7 @@ describe('<LibraryTable>', () => {
           folderName: 'NewMod',
           modId: 'NewMod',
           included: true,
+          sourceHint: null,
         },
       });
     });

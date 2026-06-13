@@ -304,9 +304,18 @@ pub(super) fn profile_mod_matches_installed(pm: &ProfileMod, installed: &ModInfo
         installed.folder_name.as_deref(),
         installed.mod_id.as_deref(),
     );
+    let profile_source = pm
+        .source
+        .as_deref()
+        .and_then(crate::mod_sources::parse_source_url);
 
     if !profile_strong.is_empty() && !installed_strong.is_empty() {
-        return identity_lists_intersect(&profile_strong, &installed_strong);
+        if identity_lists_intersect(&profile_strong, &installed_strong) {
+            return true;
+        }
+        return profile_source.as_ref().is_some_and(|source| {
+            crate::mod_sources::mod_info_source_matches_entry(installed, source)
+        });
     }
 
     mod_identity_keys(&pm.name, pm.folder_name.as_deref(), pm.mod_id.as_deref())
@@ -318,6 +327,9 @@ pub(super) fn profile_mod_matches_installed(pm: &ProfileMod, installed: &ModInfo
                 installed.mod_id.as_deref(),
             )
             .contains(key)
+        })
+        || profile_source.as_ref().is_some_and(|source| {
+            crate::mod_sources::mod_info_source_matches_entry(installed, source)
         })
 }
 

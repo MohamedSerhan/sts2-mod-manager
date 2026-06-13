@@ -129,6 +129,20 @@ describe('<PublishModal>', () => {
     expect(screen.getAllByText('1').length).toBeGreaterThan(0);
   });
 
+  it('explains the sharing repo must stay public while shared codes are active', async () => {
+    tokenIsSet(true);
+    render(<Wrap />);
+    await screen.findByText(/Publish My Pack/);
+
+    expect(document.body.textContent).toContain('Keep it public while sharing with friends');
+    expect(document.body.textContent).toContain(
+      'deleting it or making it private will make shared codes and bundle downloads stop working',
+    );
+    expect(document.body.textContent).not.toContain(
+      'delete or make it private on GitHub at any time',
+    );
+  });
+
   it('preview counts come from saved profile membership, not the entire mod library', async () => {
     // Regression: Mod Library lets users trim a profile down to the mods it
     // references. Publishing must respect that saved manifest instead of
@@ -758,11 +772,58 @@ describe('<PublishModal>', () => {
     await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
     await user.click(publishBtn);
     await screen.findByText('Preparing…');
+    expect(document.body.textContent).toContain('Big packs can take several minutes or longer');
+    expect(document.body.textContent).not.toContain('This can take a minute or two');
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Publishing…' })).toBeDisabled();
     // Header close button is disabled while busy.
     expect(screen.getByTitle('Close')).toBeDisabled();
     resolveShare(shareOk);
     await waitForModalTitle('Modpack published');
+  });
+
+  it('busy footer Cancel requests backend publish cancellation', async () => {
+    tokenIsSet(true);
+    let resolveShare!: (v: typeof shareOk) => void;
+    registerInvokeHandler(
+      'share_profile',
+      () => new Promise<typeof shareOk>((res) => { resolveShare = res; }),
+    );
+    registerInvokeHandler('cancel_profile_share', () => true);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    const publishBtn = await screen.findByRole('button', { name: /Publish/ });
+    await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
+    await user.click(publishBtn);
+    await screen.findByText('Preparing…');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls().some(
+        (c) => c.cmd === 'cancel_profile_share' && c.args?.name === 'My Pack',
+      )).toBe(true);
+    });
+    expect(screen.getByRole('button', { name: 'Canceling...' })).toBeDisabled();
+    resolveShare(shareOk);
+    await waitForModalTitle('Modpack published');
+  });
+
+  it('backend cancellation closes without a failed-publish toast', async () => {
+    tokenIsSet(true);
+    registerInvokeHandler('share_profile', () => {
+      throw new Error('Sharing canceled.');
+    });
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    render(<Wrap onClose={onClose} />);
+    const publishBtn = await screen.findByRole('button', { name: /Publish/ });
+    await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
+    await user.click(publishBtn);
+
+    await waitFor(() => {
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+    expect(screen.queryByText(/Failed to publish/)).toBeNull();
   });
 
   it('share-progress listener: bundling event renders mod counter + progress bar', async () => {

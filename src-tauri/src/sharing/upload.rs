@@ -1,5 +1,5 @@
 //! Asset-bundling helpers: zip a mod's declared files into an in-memory
-//! buffer for release-asset upload, validate that every mod in the
+//! buffer or temporary file, validate that every mod in the
 //! profile has a bundle URL before declaring the publish complete,
 //! and (best-effort) restore the prior on-disk profile when a publish
 //! fails partway through.
@@ -15,12 +15,28 @@
 //! alongside the HTTP plumbing it composes.
 
 use std::fs::File;
-use std::io::{Seek, Write};
+use std::io::{Read, Seek, Write};
 use std::path::{Component, Path, PathBuf};
 use walkdir::WalkDir;
 
 use crate::error::{AppError, Result};
 use crate::profiles::Profile;
+
+type CancelCheck<'a> = Option<&'a (dyn Fn() -> bool + Send + Sync)>;
+
+fn sharing_canceled_error() -> AppError {
+    AppError::Other("Sharing canceled.".into())
+}
+
+fn check_cancel(cancel_requested: CancelCheck<'_>) -> Result<()> {
+    if cancel_requested
+        .map(|cancelled| cancelled())
+        .unwrap_or(false)
+    {
+        return Err(sharing_canceled_error());
+    }
+    Ok(())
+}
 
 fn validate_bundle_relpath(mod_name: &str, file_rel: &str) -> Result<String> {
     let normalized = file_rel.replace('\\', "/");
@@ -55,18 +71,28 @@ pub(crate) fn zip_mod_files(
     mods_path: &std::path::Path,
 ) -> Result<Vec<u8>> {
     let buf = std::io::Cursor::new(Vec::new());
-    let cursor = zip_mod_files_into_writer(mod_name, files, mods_path, buf)?;
+    let cursor = zip_mod_files_into_writer(mod_name, files, mods_path, buf, None)?;
     Ok(cursor.into_inner())
 }
 
+#[allow(dead_code)]
 pub(crate) fn zip_mod_files_to_tempfile(
     mod_name: &str,
     files: &[String],
     mods_path: &std::path::Path,
 ) -> Result<tempfile::NamedTempFile> {
+    zip_mod_files_to_tempfile_with_cancel(mod_name, files, mods_path, None)
+}
+
+fn zip_mod_files_to_tempfile_with_cancel(
+    mod_name: &str,
+    files: &[String],
+    mods_path: &std::path::Path,
+    cancel_requested: CancelCheck<'_>,
+) -> Result<tempfile::NamedTempFile> {
     let file = tempfile::NamedTempFile::new()
         .map_err(|e| AppError::Other(format!("Create temp bundle for '{}': {}", mod_name, e)))?;
-    zip_mod_files_into_writer(mod_name, files, mods_path, file)
+    zip_mod_files_into_writer(mod_name, files, mods_path, file, cancel_requested)
 }
 
 fn zip_mod_files_into_writer<W: Write + Seek>(
@@ -74,6 +100,7 @@ fn zip_mod_files_into_writer<W: Write + Seek>(
     files: &[String],
     mods_path: &std::path::Path,
     writer: W,
+    cancel_requested: CancelCheck<'_>,
 ) -> Result<W> {
     let mut zip_writer = zip::ZipWriter::new(writer);
     let mut written_files = 0usize;
@@ -88,6 +115,7 @@ fn zip_mod_files_into_writer<W: Write + Seek>(
         .last_modified_time(zip::DateTime::default());
 
     for file_rel in files {
+        check_cancel(cancel_requested)?;
         let normalized = validate_bundle_relpath(mod_name, file_rel)?;
         let file_path = mods_path.join(&normalized);
 
@@ -98,8 +126,7 @@ fn zip_mod_files_into_writer<W: Write + Seek>(
             let mut file = File::open(&file_path).map_err(|e| {
                 AppError::Other(format!("Read error for '{}': {}", file_path.display(), e))
             })?;
-            std::io::copy(&mut file, &mut zip_writer)
-                .map_err(|e| AppError::Other(format!("Zip write error: {}", e)))?;
+            copy_file_into_zip(&mut file, &mut zip_writer, cancel_requested)?;
             written_files += 1;
         } else if file_path.is_dir() {
             // sort_by_file_name: walk order must not depend on filesystem
@@ -113,6 +140,7 @@ fn zip_mod_files_into_writer<W: Write + Seek>(
                 if !entry.file_type().is_file() {
                     continue;
                 }
+                check_cancel(cancel_requested)?;
                 let rel = entry.path().strip_prefix(mods_path).map_err(|e| {
                     AppError::Other(format!(
                         "Could not make '{}' relative to '{}': {}",
@@ -127,8 +155,7 @@ fn zip_mod_files_into_writer<W: Write + Seek>(
                     .map_err(|e| AppError::Other(format!("Zip error: {}", e)))?;
                 let mut file = File::open(entry.path())
                     .map_err(|e| AppError::Other(format!("Read error: {}", e)))?;
-                std::io::copy(&mut file, &mut zip_writer)
-                    .map_err(|e| AppError::Other(format!("Zip write error: {}", e)))?;
+                copy_file_into_zip(&mut file, &mut zip_writer, cancel_requested)?;
                 written_files += 1;
             }
         } else {
@@ -152,19 +179,51 @@ fn zip_mod_files_into_writer<W: Write + Seek>(
     Ok(cursor)
 }
 
+fn copy_file_into_zip<R: Read, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    cancel_requested: CancelCheck<'_>,
+) -> Result<()> {
+    let mut buf = [0u8; 1024 * 1024];
+    loop {
+        check_cancel(cancel_requested)?;
+        let read = reader
+            .read(&mut buf)
+            .map_err(|e| AppError::Other(format!("Zip read error: {}", e)))?;
+        if read == 0 {
+            break;
+        }
+        writer
+            .write_all(&buf[..read])
+            .map_err(|e| AppError::Other(format!("Zip write error: {}", e)))?;
+    }
+    Ok(())
+}
+
 /// Hash the exact source files that would be bundled, without building
 /// the zip. This lets re-share skip both compression and upload when the
 /// profile already has a bundle URL/hash and the on-disk inputs are
 /// byte-for-byte unchanged since the last successful publish.
+#[allow(dead_code)]
 pub(crate) fn fingerprint_mod_files(
     mod_name: &str,
     files: &[String],
     mods_path: &Path,
 ) -> Result<String> {
+    fingerprint_mod_files_with_cancel(mod_name, files, mods_path, None)
+}
+
+fn fingerprint_mod_files_with_cancel(
+    mod_name: &str,
+    files: &[String],
+    mods_path: &Path,
+    cancel_requested: CancelCheck<'_>,
+) -> Result<String> {
     use sha2::{Digest, Sha256};
 
     let mut entries: Vec<(String, PathBuf)> = Vec::new();
     for file_rel in files {
+        check_cancel(cancel_requested)?;
         let normalized = validate_bundle_relpath(mod_name, file_rel)?;
         let file_path = mods_path.join(&normalized);
         if file_path.is_file() {
@@ -178,6 +237,7 @@ pub(crate) fn fingerprint_mod_files(
                 if !entry.file_type().is_file() {
                     continue;
                 }
+                check_cancel(cancel_requested)?;
                 let rel = entry.path().strip_prefix(mods_path).map_err(|e| {
                     AppError::Other(format!(
                         "Could not make '{}' relative to '{}': {}",
@@ -209,13 +269,125 @@ pub(crate) fn fingerprint_mod_files(
     entries.sort_by(|a, b| a.0.cmp(&b.0));
     let mut hasher = Sha256::new();
     for (rel, path) in entries {
-        let data = std::fs::read(&path)
+        check_cancel(cancel_requested)?;
+        let mut file = File::open(&path)
             .map_err(|e| AppError::Other(format!("Read error for '{}': {}", path.display(), e)))?;
+        let len = file
+            .metadata()
+            .map_err(|e| AppError::Other(format!("Stat error for '{}': {}", path.display(), e)))?
+            .len();
         hasher.update(rel.as_bytes());
         hasher.update([0x1f]);
-        hasher.update((data.len() as u64).to_le_bytes());
+        hasher.update(len.to_le_bytes());
         hasher.update([0x1f]);
-        hasher.update(&data);
+        let mut buf = [0u8; 1024 * 1024];
+        loop {
+            check_cancel(cancel_requested)?;
+            let read = file.read(&mut buf).map_err(|e| {
+                AppError::Other(format!("Read error for '{}': {}", path.display(), e))
+            })?;
+            if read == 0 {
+                break;
+            }
+            hasher.update(&buf[..read]);
+        }
+        hasher.update([0x1e]);
+    }
+
+    Ok(hex::encode(hasher.finalize()))
+}
+
+/// Fast fingerprint for deciding whether a previously-uploaded bundle's
+/// source files changed. This intentionally hashes file identity metadata
+/// (relative path, size, modified timestamp) instead of file bytes so repeat
+/// shares of large packs do not reread gigabytes just to decide there is
+/// nothing to zip or upload.
+#[allow(dead_code)]
+pub(crate) fn fingerprint_mod_file_metadata(
+    mod_name: &str,
+    files: &[String],
+    mods_path: &Path,
+) -> Result<String> {
+    fingerprint_mod_file_metadata_with_cancel(mod_name, files, mods_path, None)
+}
+
+fn fingerprint_mod_file_metadata_with_cancel(
+    mod_name: &str,
+    files: &[String],
+    mods_path: &Path,
+    cancel_requested: CancelCheck<'_>,
+) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    use std::time::UNIX_EPOCH;
+
+    let mut entries: Vec<(String, PathBuf)> = Vec::new();
+    for file_rel in files {
+        check_cancel(cancel_requested)?;
+        let normalized = validate_bundle_relpath(mod_name, file_rel)?;
+        let file_path = mods_path.join(&normalized);
+        if file_path.is_file() {
+            entries.push((normalized, file_path));
+        } else if file_path.is_dir() {
+            for entry in WalkDir::new(&file_path)
+                .sort_by_file_name()
+                .into_iter()
+                .flatten()
+            {
+                if !entry.file_type().is_file() {
+                    continue;
+                }
+                check_cancel(cancel_requested)?;
+                let rel = entry.path().strip_prefix(mods_path).map_err(|e| {
+                    AppError::Other(format!(
+                        "Could not make '{}' relative to '{}': {}",
+                        entry.path().display(),
+                        mods_path.display(),
+                        e
+                    ))
+                })?;
+                entries.push((
+                    rel.to_string_lossy().replace('\\', "/"),
+                    entry.path().to_path_buf(),
+                ));
+            }
+        } else {
+            return Err(AppError::Other(format!(
+                "Mod '{}' is missing declared file '{}'",
+                mod_name, normalized
+            )));
+        }
+    }
+
+    if entries.is_empty() {
+        return Err(AppError::Other(format!(
+            "Mod '{}' produced an empty bundle metadata fingerprint; no declared files were readable",
+            mod_name
+        )));
+    }
+
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut hasher = Sha256::new();
+    for (rel, path) in entries {
+        check_cancel(cancel_requested)?;
+        let metadata = path
+            .metadata()
+            .map_err(|e| AppError::Other(format!("Stat error for '{}': {}", path.display(), e)))?;
+        let modified = metadata
+            .modified()
+            .map_err(|e| {
+                AppError::Other(format!("Stat mtime error for '{}': {}", path.display(), e))
+            })?
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| {
+                AppError::Other(format!("Invalid mtime for '{}': {}", path.display(), e))
+            })?;
+        hasher.update(rel.as_bytes());
+        hasher.update([0x1f]);
+        hasher.update(metadata.len().to_le_bytes());
+        hasher.update([0x1f]);
+        hasher.update(modified.as_secs().to_le_bytes());
+        hasher.update([0x1f]);
+        hasher.update(modified.subsec_nanos().to_le_bytes());
         hasher.update([0x1e]);
     }
 
@@ -272,12 +444,28 @@ pub(crate) fn zip_profile_mod_files_to_tempfile(
     mods_path: &std::path::Path,
     disabled_path: &std::path::Path,
 ) -> Result<tempfile::NamedTempFile> {
+    zip_profile_mod_files_to_tempfile_with_cancel(pm, mods_path, disabled_path, None)
+}
+
+pub(crate) fn zip_profile_mod_files_to_tempfile_with_cancel(
+    pm: &crate::profiles::ProfileMod,
+    mods_path: &std::path::Path,
+    disabled_path: &std::path::Path,
+    cancel_requested: CancelCheck<'_>,
+) -> Result<tempfile::NamedTempFile> {
     let base = if pm.enabled { mods_path } else { disabled_path };
-    match zip_mod_files_to_tempfile(&pm.name, &pm.files, base) {
+    match zip_mod_files_to_tempfile_with_cancel(&pm.name, &pm.files, base, cancel_requested) {
         Ok(zip) => Ok(zip),
         Err(first_err) => {
+            if cancel_requested
+                .map(|cancelled| cancelled())
+                .unwrap_or(false)
+            {
+                return Err(first_err);
+            }
             let fallback = if pm.enabled { disabled_path } else { mods_path };
-            zip_mod_files_to_tempfile(&pm.name, &pm.files, fallback).map_err(|_| first_err)
+            zip_mod_files_to_tempfile_with_cancel(&pm.name, &pm.files, fallback, cancel_requested)
+                .map_err(|_| first_err)
         }
     }
 }
@@ -287,12 +475,64 @@ pub(crate) fn fingerprint_profile_mod_files(
     mods_path: &Path,
     disabled_path: &Path,
 ) -> Result<String> {
+    fingerprint_profile_mod_files_with_cancel(pm, mods_path, disabled_path, None)
+}
+
+pub(crate) fn fingerprint_profile_mod_files_with_cancel(
+    pm: &crate::profiles::ProfileMod,
+    mods_path: &Path,
+    disabled_path: &Path,
+    cancel_requested: CancelCheck<'_>,
+) -> Result<String> {
     let base = if pm.enabled { mods_path } else { disabled_path };
-    match fingerprint_mod_files(&pm.name, &pm.files, base) {
+    match fingerprint_mod_files_with_cancel(&pm.name, &pm.files, base, cancel_requested) {
         Ok(fingerprint) => Ok(fingerprint),
         Err(first_err) => {
+            if cancel_requested
+                .map(|cancelled| cancelled())
+                .unwrap_or(false)
+            {
+                return Err(first_err);
+            }
             let fallback = if pm.enabled { disabled_path } else { mods_path };
-            fingerprint_mod_files(&pm.name, &pm.files, fallback).map_err(|_| first_err)
+            fingerprint_mod_files_with_cancel(&pm.name, &pm.files, fallback, cancel_requested)
+                .map_err(|_| first_err)
+        }
+    }
+}
+
+pub(crate) fn fingerprint_profile_mod_file_metadata(
+    pm: &crate::profiles::ProfileMod,
+    mods_path: &Path,
+    disabled_path: &Path,
+) -> Result<String> {
+    fingerprint_profile_mod_file_metadata_with_cancel(pm, mods_path, disabled_path, None)
+}
+
+pub(crate) fn fingerprint_profile_mod_file_metadata_with_cancel(
+    pm: &crate::profiles::ProfileMod,
+    mods_path: &Path,
+    disabled_path: &Path,
+    cancel_requested: CancelCheck<'_>,
+) -> Result<String> {
+    let base = if pm.enabled { mods_path } else { disabled_path };
+    match fingerprint_mod_file_metadata_with_cancel(&pm.name, &pm.files, base, cancel_requested) {
+        Ok(fingerprint) => Ok(fingerprint),
+        Err(first_err) => {
+            if cancel_requested
+                .map(|cancelled| cancelled())
+                .unwrap_or(false)
+            {
+                return Err(first_err);
+            }
+            let fallback = if pm.enabled { disabled_path } else { mods_path };
+            fingerprint_mod_file_metadata_with_cancel(
+                &pm.name,
+                &pm.files,
+                fallback,
+                cancel_requested,
+            )
+            .map_err(|_| first_err)
         }
     }
 }
@@ -517,6 +757,44 @@ mod publish_bundle_contract_tests {
     }
 
     #[test]
+    fn fingerprint_mod_file_metadata_is_stable_for_unchanged_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mod_dir = tmp.path().join("ContractMod");
+        std::fs::create_dir_all(mod_dir.join("sub")).unwrap();
+        std::fs::write(mod_dir.join("ContractMod.json"), b"{}").unwrap();
+        std::fs::write(mod_dir.join("sub/data.bin"), b"alpha").unwrap();
+
+        let files: Vec<String> = vec!["ContractMod".into()];
+        let first = fingerprint_mod_file_metadata("ContractMod", &files, tmp.path()).unwrap();
+        let second = fingerprint_mod_file_metadata("ContractMod", &files, tmp.path()).unwrap();
+
+        assert_eq!(
+            first, second,
+            "unchanged file metadata should let repeat re-shares skip without rereading bytes"
+        );
+    }
+
+    #[test]
+    fn fingerprint_mod_file_metadata_changes_when_file_size_changes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mod_dir = tmp.path().join("ContractMod");
+        std::fs::create_dir_all(&mod_dir).unwrap();
+        let dll_path = mod_dir.join("ContractMod.dll");
+        std::fs::write(mod_dir.join("ContractMod.json"), b"{}").unwrap();
+        std::fs::write(&dll_path, b"alpha").unwrap();
+
+        let files: Vec<String> = vec!["ContractMod".into()];
+        let first = fingerprint_mod_file_metadata("ContractMod", &files, tmp.path()).unwrap();
+        std::fs::write(&dll_path, b"alpha plus more bytes").unwrap();
+        let second = fingerprint_mod_file_metadata("ContractMod", &files, tmp.path()).unwrap();
+
+        assert_ne!(
+            first, second,
+            "size changes must force the next share back onto the zip/upload path"
+        );
+    }
+
+    #[test]
     fn fingerprint_profile_mod_files_reads_disabled_mods_from_disabled_base() {
         let tmp = tempfile::tempdir().unwrap();
         let mods_path = tmp.path().join("mods");
@@ -532,6 +810,25 @@ mod publish_bundle_contract_tests {
         assert!(
             !fingerprint.is_empty(),
             "fingerprint helper must support the same enabled/disabled fallback as bundling"
+        );
+    }
+
+    #[test]
+    fn fingerprint_profile_mod_file_metadata_reads_disabled_mods_from_disabled_base() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mods_path = tmp.path().join("mods");
+        let disabled_path = tmp.path().join("mods_disabled");
+        let disabled_mod = disabled_path.join("ContractMod");
+        std::fs::create_dir_all(&disabled_mod).unwrap();
+        std::fs::write(disabled_mod.join("ContractMod.json"), b"{}").unwrap();
+
+        let fingerprint =
+            fingerprint_profile_mod_file_metadata(&profile_mod(false), &mods_path, &disabled_path)
+                .expect("disabled profile mods must fingerprint metadata from mods_disabled");
+
+        assert!(
+            !fingerprint.is_empty(),
+            "metadata fingerprint helper must support the same enabled/disabled fallback as bundling"
         );
     }
 
@@ -592,6 +889,35 @@ mod publish_bundle_contract_tests {
         assert_eq!(
             roundtripped, large_payload,
             "streamed bundle entry must preserve large file bytes exactly"
+        );
+    }
+
+    #[test]
+    fn zip_mod_files_to_tempfile_with_cancel_stops_during_large_file_copy() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let mod_dir = tmp.path().join("LargeArtMod");
+        std::fs::create_dir_all(&mod_dir).unwrap();
+        std::fs::write(mod_dir.join("LargeArtMod.json"), b"{}").unwrap();
+        let large_payload: Vec<u8> = (0..(8 * 1024 * 1024)).map(|i| (i % 251) as u8).collect();
+        std::fs::write(mod_dir.join("art.pck"), &large_payload).unwrap();
+
+        let calls = AtomicUsize::new(0);
+        let cancel = || calls.fetch_add(1, Ordering::SeqCst) > 1;
+
+        let err = zip_mod_files_to_tempfile_with_cancel(
+            "LargeArtMod",
+            &["LargeArtMod".into()],
+            tmp.path(),
+            Some(&cancel),
+        )
+        .expect_err("cancel should interrupt large bundle compression");
+
+        assert!(
+            err.to_string().contains("Sharing canceled"),
+            "unexpected error: {}",
+            err
         );
     }
 

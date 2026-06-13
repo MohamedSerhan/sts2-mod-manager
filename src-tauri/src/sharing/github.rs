@@ -16,6 +16,7 @@
 //! call into these helpers, and `sharing/code.rs` for the pure
 //! share-code parsing/validation layer.
 
+use std::future::Future;
 use std::io::Read;
 use std::path::Path;
 use std::time::Duration;
@@ -35,12 +36,64 @@ pub(super) const HTTP_TOTAL_TIMEOUT: Duration = Duration::from_secs(60);
 /// Connect timeout for sharing HTTP clients. A connect that's still
 /// pending after 10s is almost certainly a routing/DNS issue.
 pub(super) const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(100);
+type CancelCheck<'a> = Option<&'a (dyn Fn() -> bool + Send + Sync)>;
 
 /// Tag used for the rolling "bundles" release on every curator's
 /// `sts2mm-profiles` repo. One release = one stable tag = one stable
 /// URL prefix for every shared bundle. Asset names carry the version
 /// (`<mod>_v<ver>_<sha8>.zip`), so versioning happens at the asset layer.
 pub(super) const BUNDLES_RELEASE_TAG: &str = "bundles";
+
+fn sharing_canceled_error() -> AppError {
+    AppError::Other("Sharing canceled.".into())
+}
+
+fn check_cancel(cancel_requested: CancelCheck<'_>) -> Result<()> {
+    if cancel_requested
+        .map(|cancelled| cancelled())
+        .unwrap_or(false)
+    {
+        return Err(sharing_canceled_error());
+    }
+    Ok(())
+}
+
+async fn wait_for_cancel(cancel_requested: CancelCheck<'_>) -> Result<()> {
+    loop {
+        check_cancel(cancel_requested)?;
+        tokio::time::sleep(CANCEL_POLL_INTERVAL).await;
+    }
+}
+
+async fn await_with_cancel<F, T>(future: F, cancel_requested: CancelCheck<'_>) -> Result<T>
+where
+    F: Future<Output = T>,
+{
+    check_cancel(cancel_requested)?;
+    if cancel_requested.is_none() {
+        return Ok(future.await);
+    }
+    tokio::select! {
+        result = future => Ok(result),
+        cancelled = wait_for_cancel(cancel_requested) => {
+            cancelled?;
+            unreachable!("wait_for_cancel only returns on cancellation")
+        }
+    }
+}
+
+async fn sleep_or_cancel(duration: Duration, cancel_requested: CancelCheck<'_>) -> Result<()> {
+    check_cancel(cancel_requested)?;
+    if cancel_requested.is_none() {
+        tokio::time::sleep(duration).await;
+        return Ok(());
+    }
+    tokio::select! {
+        _ = tokio::time::sleep(duration) => Ok(()),
+        cancelled = wait_for_cancel(cancel_requested) => cancelled,
+    }
+}
 
 // ── GitHub API Response Shapes ─────────────────────────────────────────────
 
@@ -470,10 +523,12 @@ pub(super) async fn upload_release_asset(
         filename,
         label,
         AssetUploadPayload::Bytes(data),
+        None,
     )
     .await
 }
 
+#[allow(dead_code)]
 pub(super) async fn upload_release_asset_file(
     client: &reqwest::Client,
     upload_url_template: &str,
@@ -481,12 +536,25 @@ pub(super) async fn upload_release_asset_file(
     label: Option<&str>,
     path: &Path,
 ) -> Result<ReleaseAsset> {
+    upload_release_asset_file_with_cancel(client, upload_url_template, filename, label, path, None)
+        .await
+}
+
+async fn upload_release_asset_file_with_cancel(
+    client: &reqwest::Client,
+    upload_url_template: &str,
+    filename: &str,
+    label: Option<&str>,
+    path: &Path,
+    cancel_requested: CancelCheck<'_>,
+) -> Result<ReleaseAsset> {
     upload_release_asset_payload(
         client,
         upload_url_template,
         filename,
         label,
         AssetUploadPayload::File(path),
+        cancel_requested,
     )
     .await
 }
@@ -497,6 +565,7 @@ async fn upload_release_asset_payload(
     filename: &str,
     label: Option<&str>,
     payload: AssetUploadPayload<'_>,
+    cancel_requested: CancelCheck<'_>,
 ) -> Result<ReleaseAsset> {
     let base = upload_url_template
         .split_once('{')
@@ -521,6 +590,7 @@ async fn upload_release_asset_payload(
 
     let mut attempt: u32 = 0;
     loop {
+        check_cancel(cancel_requested)?;
         attempt += 1;
 
         // Classify this attempt without holding the response borrow across
@@ -532,22 +602,26 @@ async fn upload_release_asset_payload(
         request = match payload {
             AssetUploadPayload::Bytes(data) => request.body(data.to_vec()),
             AssetUploadPayload::File(path) => {
-                let file = tokio::fs::File::open(path).await.map_err(|e| {
-                    AppError::Other(format!(
-                        "Failed to open release asset '{}' for upload from '{}': {}",
-                        filename,
-                        path.display(),
-                        e
-                    ))
-                })?;
-                let size = file.metadata().await.map_err(|e| {
-                    AppError::Other(format!(
-                        "Failed to stat release asset '{}' at '{}': {}",
-                        filename,
-                        path.display(),
-                        e
-                    ))
-                })?;
+                let file = await_with_cancel(tokio::fs::File::open(path), cancel_requested)
+                    .await?
+                    .map_err(|e| {
+                        AppError::Other(format!(
+                            "Failed to open release asset '{}' for upload from '{}': {}",
+                            filename,
+                            path.display(),
+                            e
+                        ))
+                    })?;
+                let size = await_with_cancel(file.metadata(), cancel_requested)
+                    .await?
+                    .map_err(|e| {
+                        AppError::Other(format!(
+                            "Failed to stat release asset '{}' at '{}': {}",
+                            filename,
+                            path.display(),
+                            e
+                        ))
+                    })?;
                 let stream = tokio_util::io::ReaderStream::new(file);
                 request
                     .header(reqwest::header::CONTENT_LENGTH, size.len())
@@ -555,11 +629,12 @@ async fn upload_release_asset_payload(
             }
         };
 
-        let outcome: std::result::Result<ReleaseAsset, RetryClass> = match request.send().await {
+        let send_result = await_with_cancel(request.send(), cancel_requested).await?;
+        let outcome: std::result::Result<ReleaseAsset, RetryClass> = match send_result {
             Ok(resp) => {
                 let status = resp.status();
                 if status.is_success() {
-                    match resp.json::<ReleaseAsset>().await {
+                    match await_with_cancel(resp.json::<ReleaseAsset>(), cancel_requested).await? {
                         Ok(asset) => Ok(asset),
                         // A malformed success body isn't something a retry
                         // fixes — surface it.
@@ -623,7 +698,7 @@ async fn upload_release_asset_payload(
                 let backoff = RETRY_BASE_DELAY
                     .saturating_mul(1u32 << (attempt - 1))
                     .max(retry_after.unwrap_or(Duration::ZERO));
-                tokio::time::sleep(backoff).await;
+                sleep_or_cancel(backoff, cancel_requested).await?;
             }
         }
     }
@@ -654,10 +729,12 @@ pub(super) async fn upload_release_asset_recovering(
         filename,
         label,
         AssetUploadPayload::Bytes(data),
+        None,
     )
     .await
 }
 
+#[allow(dead_code)]
 pub(super) async fn upload_release_asset_file_recovering(
     client: &reqwest::Client,
     owner: &str,
@@ -667,6 +744,29 @@ pub(super) async fn upload_release_asset_file_recovering(
     label: Option<&str>,
     path: &Path,
 ) -> Result<ReleaseAsset> {
+    upload_release_asset_file_recovering_with_cancel(
+        client,
+        owner,
+        repo,
+        upload_url_template,
+        filename,
+        label,
+        path,
+        None,
+    )
+    .await
+}
+
+async fn upload_release_asset_file_recovering_with_cancel(
+    client: &reqwest::Client,
+    owner: &str,
+    repo: &str,
+    upload_url_template: &str,
+    filename: &str,
+    label: Option<&str>,
+    path: &Path,
+    cancel_requested: CancelCheck<'_>,
+) -> Result<ReleaseAsset> {
     upload_release_asset_recovering_payload(
         client,
         owner,
@@ -675,6 +775,7 @@ pub(super) async fn upload_release_asset_file_recovering(
         filename,
         label,
         AssetUploadPayload::File(path),
+        cancel_requested,
     )
     .await
 }
@@ -687,16 +788,27 @@ async fn upload_release_asset_recovering_payload(
     filename: &str,
     label: Option<&str>,
     payload: AssetUploadPayload<'_>,
+    cancel_requested: CancelCheck<'_>,
 ) -> Result<ReleaseAsset> {
-    match upload_release_asset_payload(client, upload_url_template, filename, label, payload).await
+    match upload_release_asset_payload(
+        client,
+        upload_url_template,
+        filename,
+        label,
+        payload,
+        cancel_requested,
+    )
+    .await
     {
         Ok(asset) => Ok(asset),
         Err(AppError::Other(msg)) if msg.contains("already_exists") => {
+            check_cancel(cancel_requested)?;
             log::warn!(
                 "Asset '{}' returned 422 already_exists — refetching release listing and replacing via DELETE-then-POST",
                 filename
             );
             let fresh = ensure_bundles_release(client, owner, repo).await?;
+            check_cancel(cancel_requested)?;
             let canonical = decode_asset_name(filename);
             let existing = fresh
                 .assets
@@ -705,12 +817,14 @@ async fn upload_release_asset_recovering_payload(
             match existing {
                 Some(asset) => {
                     delete_release_asset(client, owner, repo, asset.id).await?;
+                    check_cancel(cancel_requested)?;
                     upload_release_asset_payload(
                         client,
                         &fresh.upload_url,
                         filename,
                         label,
                         payload,
+                        cancel_requested,
                     )
                     .await
                 }
@@ -782,6 +896,7 @@ pub(super) async fn replace_release_asset_via_delete_post(
     Ok(asset.browser_download_url)
 }
 
+#[allow(dead_code)]
 pub(super) async fn replace_release_asset_via_delete_post_file(
     client: &reqwest::Client,
     owner: &str,
@@ -792,9 +907,42 @@ pub(super) async fn replace_release_asset_via_delete_post_file(
     old_asset_id: u64,
     path: &Path,
 ) -> Result<String> {
+    replace_release_asset_via_delete_post_file_with_cancel(
+        client,
+        owner,
+        repo,
+        upload_url_template,
+        canonical_name,
+        label,
+        old_asset_id,
+        path,
+        None,
+    )
+    .await
+}
+
+async fn replace_release_asset_via_delete_post_file_with_cancel(
+    client: &reqwest::Client,
+    owner: &str,
+    repo: &str,
+    upload_url_template: &str,
+    canonical_name: &str,
+    label: Option<&str>,
+    old_asset_id: u64,
+    path: &Path,
+    cancel_requested: CancelCheck<'_>,
+) -> Result<String> {
     delete_release_asset(client, owner, repo, old_asset_id).await?;
-    let asset =
-        upload_release_asset_file(client, upload_url_template, canonical_name, label, path).await?;
+    check_cancel(cancel_requested)?;
+    let asset = upload_release_asset_file_with_cancel(
+        client,
+        upload_url_template,
+        canonical_name,
+        label,
+        path,
+        cancel_requested,
+    )
+    .await?;
     Ok(asset.browser_download_url)
 }
 
@@ -844,10 +992,12 @@ pub(super) async fn upload_mod_bundle_via_release(
         prior_sha256,
         repo,
         AssetUploadPayload::Bytes(zip_data),
+        None,
     )
     .await
 }
 
+#[allow(dead_code)]
 pub(super) async fn upload_mod_bundle_file_via_release(
     token: &str,
     username: &str,
@@ -857,7 +1007,30 @@ pub(super) async fn upload_mod_bundle_file_via_release(
     prior_sha256: Option<&str>,
     repo: &str,
 ) -> Result<(String, String)> {
-    let local_hash = sha256_hex_file(zip_path)?;
+    upload_mod_bundle_file_via_release_with_cancel(
+        token,
+        username,
+        mod_name,
+        version,
+        zip_path,
+        prior_sha256,
+        repo,
+        None,
+    )
+    .await
+}
+
+pub(super) async fn upload_mod_bundle_file_via_release_with_cancel(
+    token: &str,
+    username: &str,
+    mod_name: &str,
+    version: &str,
+    zip_path: &Path,
+    prior_sha256: Option<&str>,
+    repo: &str,
+    cancel_requested: CancelCheck<'_>,
+) -> Result<(String, String)> {
+    let local_hash = sha256_hex_file_with_cancel(zip_path, cancel_requested)?;
     upload_mod_bundle_via_release_payload(
         token,
         username,
@@ -867,6 +1040,7 @@ pub(super) async fn upload_mod_bundle_file_via_release(
         prior_sha256,
         repo,
         AssetUploadPayload::File(zip_path),
+        cancel_requested,
     )
     .await
 }
@@ -880,26 +1054,27 @@ async fn upload_mod_bundle_via_release_payload(
     prior_sha256: Option<&str>,
     repo: &str,
     payload: AssetUploadPayload<'_>,
+    cancel_requested: CancelCheck<'_>,
 ) -> Result<(String, String)> {
+    check_cancel(cancel_requested)?;
     let client = build_client(token);
     let asset_name = release_asset_name(mod_name, version, &local_hash);
     // GitHub strips non-ASCII chars from the asset filename it stores
-    // (Chinese ideographs, emoji, etc.) — undocumented but consistent
+    // (Chinese ideographs, emoji, etc.) -- undocumented but consistent
     // behavior, see https://docs.github.com/en/rest/releases/assets.
     // The `label` query param is described as "an alternate short
-    // description of the asset, used in place of the filename" — it's
+    // description of the asset, used in place of the filename" -- it's
     // shown on the release-page UI instead of the mangled stored name,
     // so we put the human-readable "<mod> v<version>" form there.
     let asset_label = format!("{} v{}", mod_name, version);
 
     let release = ensure_bundles_release(&client, username, repo).await?;
+    check_cancel(cancel_requested)?;
 
     // Lookup compares percent-decoded names on both sides so the same
     // logical filename matches whether GitHub returns the raw UTF-8 form
-    // (`皮皮.zip`) or an already-encoded one (`%E7%9A%AE.zip`). Without
-    // this, mods with non-ASCII names round-tripped to a POST → 422
-    // already_exists loop, which is what motivated the old ASCII-only
-    // sanitiser. We can now keep the Unicode in filenames (issue #44).
+    // or an already-encoded one. Without this, mods with non-ASCII names
+    // round-tripped to a POST -> 422 already_exists loop.
     let canonical = decode_asset_name(&asset_name);
     if let Some(existing) = release
         .assets
@@ -908,87 +1083,110 @@ async fn upload_mod_bundle_via_release_payload(
     {
         let hash_matches = prior_sha256
             .map(|p| p == local_hash.as_str())
-            .unwrap_or(false);
+            // The canonical asset name already includes the local hash
+            // prefix. If GitHub has that exact name but local state lost
+            // `prior_sha256` (for example, the app crashed after upload
+            // and before saving the manifest), reusing is safer and much
+            // faster than deleting and re-uploading identical bytes.
+            .unwrap_or(true);
         if hash_matches {
-            log::info!(
-                "Bundle for '{}' v{} unchanged (sha256 match) — reusing existing release asset",
-                mod_name,
-                version
-            );
+            if prior_sha256.is_some() {
+                log::info!(
+                    "Bundle for '{}' v{} unchanged (sha256 match) -- reusing existing release asset",
+                    mod_name,
+                    version
+                );
+            } else {
+                log::info!(
+                    "Bundle for '{}' v{} already exists under the content-addressed name -- reusing existing release asset",
+                    mod_name,
+                    version
+                );
+            }
             return Ok((existing.browser_download_url.clone(), local_hash));
         }
+
         // Name collision but content differs (or we can't prove it doesn't).
         // Replace via DELETE-then-POST. Brief atomicity gap on the canonical
         // URL during upload, but it never strands `.stale` orphans that
         // break subsequent replaces (see replace_release_asset_via_delete_post).
         log::info!(
-            "Bundle for '{}' v{} content changed since last share — replacing release asset",
+            "Bundle for '{}' v{} content changed since last share -- replacing release asset",
             mod_name,
             version
         );
-        let url = replace_release_asset_via_delete_post(
-            &client,
-            username,
-            repo,
-            &release.upload_url,
-            &asset_name,
-            Some(&asset_label),
-            existing.id,
-            match payload {
-                AssetUploadPayload::Bytes(data) => data,
-                AssetUploadPayload::File(path) => {
-                    return replace_release_asset_via_delete_post_file(
-                        &client,
-                        username,
-                        repo,
-                        &release.upload_url,
-                        &asset_name,
-                        Some(&asset_label),
-                        existing.id,
-                        path,
-                    )
-                    .await
-                    .map(|url| (url, local_hash));
-                }
-            },
-        )
-        .await?;
-        return Ok((url, local_hash));
-    }
-
-    // Net-new upload, with 422 already_exists recovery — see
-    // upload_release_asset_recovering for the rationale.
-    let asset = upload_release_asset_recovering(
-        &client,
-        username,
-        repo,
-        &release.upload_url,
-        &asset_name,
-        Some(&asset_label),
-        match payload {
-            AssetUploadPayload::Bytes(data) => data,
-            AssetUploadPayload::File(path) => {
-                let asset = upload_release_asset_file_recovering(
+        let url = match payload {
+            AssetUploadPayload::Bytes(data) => {
+                replace_release_asset_via_delete_post(
                     &client,
                     username,
                     repo,
                     &release.upload_url,
                     &asset_name,
                     Some(&asset_label),
-                    path,
+                    existing.id,
+                    data,
                 )
-                .await?;
-                return Ok((asset.browser_download_url, local_hash));
+                .await?
             }
-        },
-    )
-    .await?;
+            AssetUploadPayload::File(path) => {
+                replace_release_asset_via_delete_post_file_with_cancel(
+                    &client,
+                    username,
+                    repo,
+                    &release.upload_url,
+                    &asset_name,
+                    Some(&asset_label),
+                    existing.id,
+                    path,
+                    cancel_requested,
+                )
+                .await?
+            }
+        };
+        return Ok((url, local_hash));
+    }
+
+    // Net-new upload, with 422 already_exists recovery; see
+    // upload_release_asset_recovering for the rationale.
+    let asset = match payload {
+        AssetUploadPayload::Bytes(data) => {
+            upload_release_asset_recovering(
+                &client,
+                username,
+                repo,
+                &release.upload_url,
+                &asset_name,
+                Some(&asset_label),
+                data,
+            )
+            .await?
+        }
+        AssetUploadPayload::File(path) => {
+            upload_release_asset_file_recovering_with_cancel(
+                &client,
+                username,
+                repo,
+                &release.upload_url,
+                &asset_name,
+                Some(&asset_label),
+                path,
+                cancel_requested,
+            )
+            .await?
+        }
+    };
     Ok((asset.browser_download_url, local_hash))
 }
-
+#[allow(dead_code)]
 fn sha256_hex_file(path: &Path) -> Result<String> {
+    sha256_hex_file_with_cancel(path, None)
+}
+
+fn sha256_hex_file_with_cancel(path: &Path, cancel_requested: CancelCheck<'_>) -> Result<String> {
     use sha2::{Digest, Sha256};
 
+    check_cancel(cancel_requested)?;
     let mut file = std::fs::File::open(path).map_err(|e| {
         AppError::Other(format!(
             "Failed to open bundle '{}' for hashing: {}",
@@ -999,6 +1197,7 @@ fn sha256_hex_file(path: &Path) -> Result<String> {
     let mut hasher = Sha256::new();
     let mut buf = [0u8; 1024 * 1024];
     loop {
+        check_cancel(cancel_requested)?;
         let read = file.read(&mut buf).map_err(|e| {
             AppError::Other(format!(
                 "Failed to read bundle '{}' for hashing: {}",
@@ -2171,17 +2370,17 @@ pub(super) mod release_upload_tests {
     }
 
     #[tokio::test]
-    async fn upload_mod_bundle_via_release_replaces_when_same_bytes_same_name_no_prior_hash() {
+    async fn upload_mod_bundle_via_release_reuses_same_bytes_same_name_no_prior_hash() {
         // Edge case: fresh install (no prior hash in profile JSON) but
         // the canonical content-addressed name happens to be on the
         // release already (curator re-installed app and lost local
-        // manifest). Orchestrator looks the asset up, can't compare
-        // hashes (no prior), and takes the DELETE-then-POST replace path
-        // to be safe.
+        // manifest, or the app crashed after upload but before saving).
+        // Because the asset name already embeds the local hash prefix,
+        // the exact name match proves this is the same bundle and should
+        // skip upload.
         let (server, _env_guard) = mock_github().await;
         let bytes = b"data";
         let name = expected_asset_name("TheCursedMod", "0.2.7", bytes);
-        let download_url = expected_download_url("TheCursedMod", "0.2.7", bytes);
 
         Mock::given(method("GET"))
             .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
@@ -2205,25 +2404,7 @@ pub(super) mod release_upload_tests {
             .mount(&server)
             .await;
 
-        Mock::given(method("DELETE"))
-            .and(path("/repos/octo/sts2mm-profiles/releases/assets/555"))
-            .respond_with(ResponseTemplate::new(204))
-            .expect(1)
-            .mount(&server)
-            .await;
-
-        Mock::given(method("POST"))
-            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
-            .and(query_param("name", &name))
-            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
-                "id": 1001, "name": name,
-                "browser_download_url": download_url,
-            })))
-            .expect(1)
-            .mount(&server)
-            .await;
-
-        let (_, _) = upload_mod_bundle_via_release(
+        let (url, hash) = upload_mod_bundle_via_release(
             "test-token",
             "octo",
             "TheCursedMod",
@@ -2233,7 +2414,9 @@ pub(super) mod release_upload_tests {
             "sts2mm-profiles",
         )
         .await
-        .expect("no-prior-hash + name-collision must replace");
+        .expect("no-prior-hash + exact content-addressed name should reuse");
+        assert_eq!(url, "https://example/whatever");
+        assert_eq!(hash, sha256_hex(bytes));
     }
 
     #[tokio::test]
@@ -2633,6 +2816,69 @@ pub(super) mod release_upload_tests {
         .await
         .expect("a 403 rate-limit then 201 must succeed after one retry");
         assert_eq!(asset.id, 9);
+    }
+
+    #[tokio::test]
+    async fn upload_release_asset_cancel_interrupts_retry_backoff() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
+        use std::time::{Duration, Instant};
+
+        let (server, _env_guard) = mock_github().await;
+        let upload_url_template = format!(
+            "{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}",
+            server.uri()
+        );
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), b"bytes").unwrap();
+
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("name", "CancelMe_v1.0.0.zip"))
+            .respond_with(
+                ResponseTemplate::new(500)
+                    .insert_header("Retry-After", "30")
+                    .set_body_string("temporary outage"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        let cancel_task_flag = Arc::clone(&cancel_flag);
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            cancel_task_flag.store(true, Ordering::SeqCst);
+        });
+        let cancel_check_flag = Arc::clone(&cancel_flag);
+        let cancel_check = move || cancel_check_flag.load(Ordering::SeqCst);
+
+        let client = build_client("test-token");
+        let started = Instant::now();
+        let err = upload_release_asset_file_recovering_with_cancel(
+            &client,
+            "octo",
+            "sts2mm-profiles",
+            &upload_url_template,
+            "CancelMe_v1.0.0.zip",
+            None,
+            tmp.path(),
+            Some(&cancel_check),
+        )
+        .await
+        .expect_err("cancel should interrupt retry backoff");
+
+        assert!(
+            err.to_string().contains("Sharing canceled"),
+            "unexpected error: {}",
+            err
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "cancel should not wait out Retry-After backoff"
+        );
     }
 
     #[tokio::test]
@@ -3109,6 +3355,7 @@ mod github_api_stress_tests {
             disabled_path,
             profiles_path,
             token,
+            None,
             None,
             Vec::new(),
         )

@@ -98,6 +98,10 @@ pub struct AppStateInner {
     /// upload that races the first one against the same gist files (causing
     /// 409 conflicts on GitHub's create-or-update endpoint).
     pub sharing_in_flight: HashSet<String>,
+    /// Profile names whose active share/re-share should stop at the next
+    /// cancellation checkpoint. The publish modal writes this through its
+    /// Cancel button; ShareGuard clears it when the operation unwinds.
+    pub sharing_cancel_requested: HashSet<String>,
     /// Slay the Spire 2 build version, parsed from `<game>/release_info.json`
     /// at startup or whenever the game path changes. Stored as a plain
     /// string ("v0.103.2", "0.105.0", etc.) so we can compare against
@@ -219,6 +223,7 @@ impl AppStateInner {
             active_profile: None,
             pending_nexus_installs: Vec::new(),
             sharing_in_flight: HashSet::new(),
+            sharing_cancel_requested: HashSet::new(),
             game_version: None,
             pending_deep_link: None,
             launch_mode: LaunchMode::default(),
@@ -393,6 +398,7 @@ mod game_path_persistence_tests {
             active_profile: None,
             pending_nexus_installs: Vec::new(),
             sharing_in_flight: HashSet::new(),
+            sharing_cancel_requested: HashSet::new(),
             game_version: None,
             pending_deep_link: None,
             launch_mode: LaunchMode::default(),

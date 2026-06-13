@@ -41,7 +41,7 @@ use github::{
     cleanup_orphan_bundle_assets as github_cleanup_orphan_bundle_assets,
     download_bundle as github_download_bundle, ensure_profiles_repo as github_ensure_profiles_repo,
     fetch_shared_profile as github_fetch_shared_profile, get_github_username,
-    upload_mod_bundle_file_via_release as github_upload_mod_bundle_file_via_release,
+    upload_mod_bundle_file_via_release_with_cancel as github_upload_mod_bundle_file_via_release_with_cancel,
     upload_mod_bundle_via_release as github_upload_mod_bundle_via_release,
     upsert_file as github_upsert_file,
 };
@@ -52,7 +52,10 @@ use github::{
 // raw `zip_mod_files` lives in `upload.rs` as an implementation detail.
 use upload::{ensure_profile_publish_complete, restore_profile_after_failed_publish};
 pub(crate) use upload::{
-    fingerprint_profile_mod_files, zip_profile_mod_files, zip_profile_mod_files_to_tempfile,
+    fingerprint_profile_mod_file_metadata, fingerprint_profile_mod_file_metadata_with_cancel,
+    fingerprint_profile_mod_files, fingerprint_profile_mod_files_with_cancel,
+    zip_profile_mod_files, zip_profile_mod_files_to_tempfile,
+    zip_profile_mod_files_to_tempfile_with_cancel,
 };
 
 /// One mod skipped during a modpack install because it declared a
@@ -85,6 +88,7 @@ impl ShareGuard {
                 name
             ));
         }
+        s.sharing_cancel_requested.remove(name);
         Ok(Self {
             state: state.clone(),
             name: name.to_string(),
@@ -96,8 +100,20 @@ impl Drop for ShareGuard {
     fn drop(&mut self) {
         if let Ok(mut s) = self.state.lock() {
             s.sharing_in_flight.remove(&self.name);
+            s.sharing_cancel_requested.remove(&self.name);
         }
     }
+}
+
+fn sharing_cancel_requested(state: &AppState, name: &str) -> bool {
+    state
+        .lock()
+        .map(|s| s.sharing_cancel_requested.contains(name))
+        .unwrap_or(false)
+}
+
+fn is_sharing_canceled_error(error: &crate::error::AppError) -> bool {
+    error.to_string().contains("Sharing canceled")
 }
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -196,10 +212,16 @@ struct ShareInfo {
     #[serde(default)]
     published_signature: Option<String>,
     /// Per-mod content fingerprints from the last successful publish.
-    /// Used only by the owner on re-share to skip rebuilding zip bundles
-    /// whose source files are unchanged.
+    /// Legacy strong fingerprints from the last successful publish. Used
+    /// as a migration fallback for sidecars written before the fast metadata
+    /// map existed.
     #[serde(default)]
     bundle_source_fingerprints: HashMap<String, String>,
+    /// Per-mod metadata fingerprints from the last successful publish.
+    /// The normal unchanged-bundle skip path reads only paths, sizes, and
+    /// modified timestamps instead of hashing and zipping large mod files.
+    #[serde(default)]
+    bundle_source_fast_fingerprints: HashMap<String, String>,
 }
 
 fn save_share_info(path: &Path, info: &ShareInfo) -> Result<()> {
@@ -217,6 +239,11 @@ fn save_share_info(path: &Path, info: &ShareInfo) -> Result<()> {
     temp.as_file().sync_all()?;
     temp.persist(path).map_err(|e| e.error)?;
     Ok(())
+}
+
+fn load_share_info(path: &Path) -> Result<ShareInfo> {
+    let content = std::fs::read_to_string(path)?;
+    Ok(serde_json::from_str(&content)?)
 }
 
 fn share_info_path_for_profile(profile: &Profile, profiles_path: &Path) -> PathBuf {
@@ -244,10 +271,7 @@ fn find_share_info_path(name: &str, profiles_path: &Path) -> Option<PathBuf> {
         candidates.push(share_info_path_for_profile(&profile, profiles_path));
         candidates.push(profiles_path.join(format!("{}.share", profile.name)));
     }
-    candidates.push(profiles_path.join(format!(
-        "{}.share",
-        legacy_profile_name_stem(name)
-    )));
+    candidates.push(profiles_path.join(format!("{}.share", legacy_profile_name_stem(name))));
     candidates.push(profiles_path.join(format!("{}.share", name)));
     candidates.into_iter().find(|path| path.exists())
 }
@@ -266,6 +290,7 @@ fn recover_owned_share_info_sidecar(
         share_format_version: SHARE_FORMAT_VERSION,
         published_signature: Some(profile_publish_signature(published_profile)),
         bundle_source_fingerprints: HashMap::new(),
+        bundle_source_fast_fingerprints: HashMap::new(),
     };
     let share_info_path = share_info_path_for_profile(published_profile, profiles_path);
     save_share_info(&share_info_path, &info)?;
@@ -421,6 +446,10 @@ async fn ensure_profiles_repo(token: &str, username: &str) -> Result<()> {
     github_ensure_profiles_repo(token, username, &profiles_repo()).await
 }
 
+pub(crate) async fn authenticated_github_username(token: &str) -> Result<String> {
+    get_github_username(token).await
+}
+
 async fn upsert_file(
     token: &str,
     username: &str,
@@ -462,6 +491,7 @@ pub(crate) async fn upload_mod_bundle_via_release(
     .await
 }
 
+#[allow(dead_code)]
 pub(crate) async fn upload_mod_bundle_file_via_release(
     token: &str,
     username: &str,
@@ -470,7 +500,28 @@ pub(crate) async fn upload_mod_bundle_file_via_release(
     zip_path: &Path,
     prior_sha256: Option<&str>,
 ) -> Result<(String, String)> {
-    github_upload_mod_bundle_file_via_release(
+    upload_mod_bundle_file_via_release_with_cancel(
+        token,
+        username,
+        mod_name,
+        version,
+        zip_path,
+        prior_sha256,
+        None,
+    )
+    .await
+}
+
+pub(crate) async fn upload_mod_bundle_file_via_release_with_cancel(
+    token: &str,
+    username: &str,
+    mod_name: &str,
+    version: &str,
+    zip_path: &Path,
+    prior_sha256: Option<&str>,
+    cancel_requested: Option<&(dyn Fn() -> bool + Send + Sync)>,
+) -> Result<(String, String)> {
+    github_upload_mod_bundle_file_via_release_with_cancel(
         token,
         username,
         mod_name,
@@ -478,6 +529,7 @@ pub(crate) async fn upload_mod_bundle_file_via_release(
         zip_path,
         prior_sha256,
         &profiles_repo(),
+        cancel_requested,
     )
     .await
 }
@@ -611,6 +663,129 @@ fn bundle_source_fingerprint_value(pm: &ProfileMod, file_fingerprint: &str) -> S
     format!("v1:{}:{}", pm.version.trim(), file_fingerprint)
 }
 
+fn bundle_source_fast_fingerprint_value(pm: &ProfileMod, file_fingerprint: &str) -> String {
+    format!("v1-meta:{}:{}", pm.version.trim(), file_fingerprint)
+}
+
+fn existing_bundle_matches_source(
+    pm: &ProfileMod,
+    prior_bundle_source_fingerprints: &HashMap<String, String>,
+    fingerprint_key: &str,
+    source_fingerprint: &str,
+) -> bool {
+    pm.bundle_url.is_some()
+        && pm.bundle_sha256.is_some()
+        && prior_bundle_source_fingerprints
+            .get(fingerprint_key)
+            .map(String::as_str)
+            == Some(source_fingerprint)
+}
+
+fn existing_bundle_matches_fast_source(
+    pm: &ProfileMod,
+    prior_bundle_source_fast_fingerprints: &HashMap<String, String>,
+    fingerprint_key: &str,
+    source_fast_fingerprint: &str,
+) -> bool {
+    pm.bundle_url.is_some()
+        && pm.bundle_sha256.is_some()
+        && prior_bundle_source_fast_fingerprints
+            .get(fingerprint_key)
+            .map(String::as_str)
+            == Some(source_fast_fingerprint)
+}
+
+#[derive(Clone, Debug)]
+struct ReusableBundle {
+    bundle_url: String,
+    bundle_sha256: String,
+    profile_name: String,
+}
+
+#[derive(Default)]
+struct ReusableBundleIndex {
+    fast: HashMap<(String, String), ReusableBundle>,
+    strong: HashMap<(String, String), ReusableBundle>,
+}
+
+impl ReusableBundleIndex {
+    fn find_fast(&self, fingerprint_key: &str, fingerprint_value: &str) -> Option<ReusableBundle> {
+        self.fast
+            .get(&(fingerprint_key.to_string(), fingerprint_value.to_string()))
+            .cloned()
+    }
+
+    fn find_strong(
+        &self,
+        fingerprint_key: &str,
+        fingerprint_value: &str,
+    ) -> Option<ReusableBundle> {
+        self.strong
+            .get(&(fingerprint_key.to_string(), fingerprint_value.to_string()))
+            .cloned()
+    }
+}
+
+fn reusable_bundle_index(profiles_path: &Path, owner: &str) -> ReusableBundleIndex {
+    let mut index = ReusableBundleIndex::default();
+    let owner = owner.trim();
+    if owner.is_empty() {
+        return index;
+    }
+
+    for profile in crate::profiles::list_profiles(profiles_path) {
+        let Some(share_info_path) = find_share_info_path(&profile.name, profiles_path) else {
+            continue;
+        };
+        let share_info = match load_share_info(&share_info_path) {
+            Ok(info) => info,
+            Err(e) => {
+                log::warn!(
+                    "Share '{}': could not read reusable bundle metadata at '{}': {}",
+                    profile.name,
+                    share_info_path.display(),
+                    e
+                );
+                continue;
+            }
+        };
+        if !share_info.owner.eq_ignore_ascii_case(owner) {
+            continue;
+        }
+
+        for pm in &profile.mods {
+            let (Some(bundle_url), Some(bundle_sha256)) =
+                (pm.bundle_url.as_deref(), pm.bundle_sha256.as_deref())
+            else {
+                continue;
+            };
+            let bundle = ReusableBundle {
+                bundle_url: bundle_url.to_string(),
+                bundle_sha256: bundle_sha256.to_string(),
+                profile_name: profile.name.clone(),
+            };
+            let fingerprint_key = bundle_source_fingerprint_key(pm);
+            if let Some(fingerprint) = share_info
+                .bundle_source_fast_fingerprints
+                .get(&fingerprint_key)
+            {
+                index
+                    .fast
+                    .entry((fingerprint_key.clone(), fingerprint.clone()))
+                    .or_insert_with(|| bundle.clone());
+            }
+            if let Some(fingerprint) = share_info.bundle_source_fingerprints.get(&fingerprint_key) {
+                index
+                    .strong
+                    .entry((fingerprint_key.clone(), fingerprint.clone()))
+                    .or_insert_with(|| bundle.clone());
+            }
+        }
+    }
+
+    index
+}
+
 /// Merge publish-side enrichment from the just-uploaded (filtered) profile
 /// back onto the current on-disk profile, WITHOUT overwriting the on-disk
 /// profile's membership. The uploaded profile may be missing members (e.g.
@@ -620,6 +795,8 @@ fn bundle_source_fingerprint_value(pm: &ProfileMod, file_fingerprint: &str) -> S
 ///
 /// For each mod in `uploaded`, finds the matching mod in `on_disk` (by the
 /// same identity convention used throughout publish) and copies over:
+///   - refreshed disk-derived fields (`version`, `files`, `folder_name`,
+///     `mod_id`, and bundle members) from publish preparation.
 ///   - `bundle_url`, `bundle_sha256` -- always, from the upload result.
 ///   - `source` -- fill-only (mirrors `backfill_profile_sources_from_db`):
 ///     only set on `on_disk` if it was `None` there.
@@ -643,6 +820,11 @@ fn merge_publish_enrichment(on_disk: &Profile, uploaded: &Profile) -> Profile {
             continue;
         };
 
+        target.version = uploaded_pm.version.clone();
+        target.files = uploaded_pm.files.clone();
+        target.folder_name = uploaded_pm.folder_name.clone();
+        target.mod_id = uploaded_pm.mod_id.clone();
+        target.bundle_members = uploaded_pm.bundle_members.clone();
         if uploaded_pm.bundle_url.is_some() {
             target.bundle_url = uploaded_pm.bundle_url.clone();
         }
@@ -960,6 +1142,20 @@ fn profile_publish_signature(profile: &Profile) -> String {
 
 // ── Tauri Commands ──────────────────────────────────────────────────────────
 
+#[tauri::command]
+pub fn cancel_profile_share(
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    if s.sharing_in_flight.contains(&name) {
+        s.sharing_cancel_requested.insert(name);
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
 /// Share a profile by uploading to a GitHub repo. Returns a short profile code.
 /// If already shared, reuses the existing code (delegates to reshare logic).
 ///
@@ -1025,6 +1221,9 @@ pub async fn share_profile(
     }
 
     let _guard = ShareGuard::try_acquire(state.inner(), &name)?;
+    let cancel_state = state.inner().clone();
+    let cancel_name = name.clone();
+    let cancel_check = move || sharing_cancel_requested(&cancel_state, &cancel_name);
 
     let old_profile =
         crate::profiles::load_profile(&name, &profiles_path).map_err(|e| e.to_string())?;
@@ -1053,6 +1252,7 @@ pub async fn share_profile(
         &profiles_path,
         &token,
         Some(&emit_fn),
+        Some(&cancel_check),
         not_installed,
     )
     .await
@@ -1086,6 +1286,7 @@ pub(super) async fn share_profile_impl(
     profiles_path: &std::path::Path,
     token: &str,
     emit: Option<&(dyn Fn(&str, ShareProgress) + Send + Sync)>,
+    cancel_requested: Option<&(dyn Fn() -> bool + Send + Sync)>,
     failed_uploads_seed: Vec<String>,
 ) -> Result<ShareResult> {
     // Get username
@@ -1117,14 +1318,41 @@ pub(super) async fn share_profile_impl(
         .filter_map(|(i, m)| if !m.files.is_empty() { Some(i) } else { None })
         .collect();
     let total_bundlable = bundlable.len();
+    let mut bundles_skipped_before_zip = 0usize;
     let mut bundles_reused = 0usize;
     let mut bundles_uploaded = 0usize;
     let mut bundle_source_fingerprints: HashMap<String, String> = HashMap::new();
+    let mut bundle_source_fast_fingerprints: HashMap<String, String> = HashMap::new();
+    let (prior_bundle_source_fingerprints, prior_bundle_source_fast_fingerprints) =
+        find_share_info_path(&profile.name, profiles_path)
+            .and_then(|path| match load_share_info(&path) {
+                Ok(info) => Some((
+                    info.bundle_source_fingerprints,
+                    info.bundle_source_fast_fingerprints,
+                )),
+                Err(e) => {
+                    log::warn!(
+                        "Share '{}': could not read existing share metadata at '{}': {}",
+                        profile.name,
+                        path.display(),
+                        e
+                    );
+                    None
+                }
+            })
+            .unwrap_or_default();
+    let reusable_bundles = reusable_bundle_index(profiles_path, &username);
 
     // Bundle ALL mods to guarantee version matching.
     // Friends get the exact same files the curator has installed.
     // GitHub sources are kept as metadata but bundles are preferred during install.
     for (pos, idx) in bundlable.into_iter().enumerate() {
+        if cancel_requested
+            .map(|cancelled| cancelled())
+            .unwrap_or(false)
+        {
+            return Err(crate::error::AppError::Other("Sharing canceled.".into()));
+        }
         let mod_name = profile.mods[idx].name.clone();
         if let Some(e) = emit {
             e(
@@ -1141,15 +1369,99 @@ pub(super) async fn share_profile_impl(
 
         let pm = &mut profile.mods[idx];
         let fingerprint_key = bundle_source_fingerprint_key(pm);
-        let source_fingerprint = match fingerprint_profile_mod_files(pm, mods_path, disabled_path) {
+        let source_fast_fingerprint = match fingerprint_profile_mod_file_metadata_with_cancel(
+            pm,
+            mods_path,
+            disabled_path,
+            cancel_requested,
+        ) {
+            Ok(fingerprint) => bundle_source_fast_fingerprint_value(pm, &fingerprint),
+            Err(e) => {
+                if is_sharing_canceled_error(&e) {
+                    return Err(e);
+                }
+                log::error!("Failed to fingerprint mod metadata '{}': {}", pm.name, e);
+                failed_upload_reasons.push((pm.name.clone(), e.to_string()));
+                failed_uploads.push(pm.name.clone());
+                continue;
+            }
+        };
+        if existing_bundle_matches_fast_source(
+            pm,
+            &prior_bundle_source_fast_fingerprints,
+            &fingerprint_key,
+            &source_fast_fingerprint,
+        ) {
+            bundles_skipped_before_zip += 1;
+            bundle_source_fast_fingerprints.insert(fingerprint_key, source_fast_fingerprint);
+            log::info!(
+                "Share '{}': skipping bundle for '{}' (source metadata unchanged)",
+                profile.name,
+                pm.name
+            );
+            continue;
+        }
+        if let Some(bundle) = reusable_bundles.find_fast(&fingerprint_key, &source_fast_fingerprint)
+        {
+            bundles_skipped_before_zip += 1;
+            pm.bundle_url = Some(bundle.bundle_url);
+            pm.bundle_sha256 = Some(bundle.bundle_sha256);
+            bundle_source_fast_fingerprints.insert(fingerprint_key, source_fast_fingerprint);
+            log::info!(
+                "Share '{}': reusing bundle for '{}' from profile '{}' (source metadata unchanged)",
+                profile.name,
+                pm.name,
+                bundle.profile_name
+            );
+            continue;
+        }
+        let source_fingerprint = match fingerprint_profile_mod_files_with_cancel(
+            pm,
+            mods_path,
+            disabled_path,
+            cancel_requested,
+        ) {
             Ok(fingerprint) => bundle_source_fingerprint_value(pm, &fingerprint),
             Err(e) => {
+                if is_sharing_canceled_error(&e) {
+                    return Err(e);
+                }
                 log::error!("Failed to fingerprint mod '{}': {}", pm.name, e);
                 failed_upload_reasons.push((pm.name.clone(), e.to_string()));
                 failed_uploads.push(pm.name.clone());
                 continue;
             }
         };
+        if existing_bundle_matches_source(
+            pm,
+            &prior_bundle_source_fingerprints,
+            &fingerprint_key,
+            &source_fingerprint,
+        ) {
+            bundles_skipped_before_zip += 1;
+            bundle_source_fingerprints.insert(fingerprint_key.clone(), source_fingerprint);
+            bundle_source_fast_fingerprints.insert(fingerprint_key, source_fast_fingerprint);
+            log::info!(
+                "Share '{}': skipping bundle for '{}' (source fingerprint unchanged)",
+                profile.name,
+                pm.name
+            );
+            continue;
+        }
+        if let Some(bundle) = reusable_bundles.find_strong(&fingerprint_key, &source_fingerprint) {
+            bundles_skipped_before_zip += 1;
+            pm.bundle_url = Some(bundle.bundle_url);
+            pm.bundle_sha256 = Some(bundle.bundle_sha256);
+            bundle_source_fingerprints.insert(fingerprint_key.clone(), source_fingerprint);
+            bundle_source_fast_fingerprints.insert(fingerprint_key, source_fast_fingerprint);
+            log::info!(
+                "Share '{}': reusing bundle for '{}' from profile '{}' (source fingerprint unchanged)",
+                profile.name,
+                pm.name,
+                bundle.profile_name
+            );
+            continue;
+        }
         if let Some(e) = emit {
             e(
                 "share-progress",
@@ -1163,17 +1475,29 @@ pub(super) async fn share_profile_impl(
             );
         }
         log::info!("Bundling mod '{}' ({} files)", pm.name, pm.files.len());
-        match zip_profile_mod_files_to_tempfile(pm, mods_path, disabled_path) {
+        if cancel_requested
+            .map(|cancelled| cancelled())
+            .unwrap_or(false)
+        {
+            return Err(crate::error::AppError::Other("Sharing canceled.".into()));
+        }
+        match zip_profile_mod_files_to_tempfile_with_cancel(
+            pm,
+            mods_path,
+            disabled_path,
+            cancel_requested,
+        ) {
             Ok(zip_file) => {
                 let zip_len = zip_file.as_file().metadata().map(|m| m.len()).unwrap_or(0);
                 let prior_sha256 = pm.bundle_sha256.clone();
-                match upload_mod_bundle_file_via_release(
+                match upload_mod_bundle_file_via_release_with_cancel(
                     token,
                     &username,
                     &pm.name,
                     &pm.version,
                     zip_file.path(),
                     prior_sha256.as_deref(),
+                    cancel_requested,
                 )
                 .await
                 {
@@ -1187,9 +1511,14 @@ pub(super) async fn share_profile_impl(
                         pm.bundle_sha256 = Some(hash);
                         bundle_source_fingerprints
                             .insert(fingerprint_key.clone(), source_fingerprint.clone());
+                        bundle_source_fast_fingerprints
+                            .insert(fingerprint_key.clone(), source_fast_fingerprint.clone());
                         log::info!("Bundled mod '{}' successfully ({} bytes)", pm.name, zip_len);
                     }
                     Err(e) => {
+                        if is_sharing_canceled_error(&e) {
+                            return Err(e);
+                        }
                         log::error!("Failed to upload bundle for '{}': {}", pm.name, e);
                         failed_upload_reasons.push((pm.name.clone(), e.to_string()));
                         // If bundling fails AND there's no GitHub source either, the
@@ -1204,6 +1533,9 @@ pub(super) async fn share_profile_impl(
                 }
             }
             Err(e) => {
+                if is_sharing_canceled_error(&e) {
+                    return Err(e);
+                }
                 log::error!("Failed to zip mod '{}': {}", pm.name, e);
                 failed_upload_reasons.push((pm.name.clone(), e.to_string()));
                 failed_uploads.push(pm.name.clone());
@@ -1211,13 +1543,21 @@ pub(super) async fn share_profile_impl(
         }
     }
     log::info!(
-        "Share '{}': bundles {} reused (sha256 match), {} uploaded",
+        "Share '{}': bundles {} skipped before zip, {} reused after zip hash, {} uploaded",
         profile.name,
+        bundles_skipped_before_zip,
         bundles_reused,
         bundles_uploaded
     );
 
     ensure_profile_publish_complete(&profile, &failed_uploads, &failed_upload_reasons)?;
+
+    if cancel_requested
+        .map(|cancelled| cancelled())
+        .unwrap_or(false)
+    {
+        return Err(crate::error::AppError::Other("Sharing canceled.".into()));
+    }
 
     // Generate code and filename
     let code = generate_code(&profile);
@@ -1284,6 +1624,7 @@ pub(super) async fn share_profile_impl(
         share_format_version: SHARE_FORMAT_VERSION,
         published_signature: Some(profile_publish_signature(&merged)),
         bundle_source_fingerprints,
+        bundle_source_fast_fingerprints,
     };
     let share_info_path = share_info_path_for_profile(&merged, &profiles_path);
     save_share_info(&share_info_path, &share_info)?;
@@ -1425,6 +1766,9 @@ pub async fn reshare_profile(
 ) -> std::result::Result<ShareResult, String> {
     use tauri::Emitter;
     let _guard = ShareGuard::try_acquire(state.inner(), &name)?;
+    let cancel_state = state.inner().clone();
+    let cancel_name = name.clone();
+    let cancel_check = move || sharing_cancel_requested(&cancel_state, &cancel_name);
 
     let (
         profiles_path,
@@ -1505,6 +1849,7 @@ pub async fn reshare_profile(
         })
         .collect();
     let prior_bundle_source_fingerprints = share_info.bundle_source_fingerprints.clone();
+    let prior_bundle_source_fast_fingerprints = share_info.bundle_source_fast_fingerprints.clone();
     let bundlable: Vec<usize> = profile
         .mods
         .iter()
@@ -1512,12 +1857,19 @@ pub async fn reshare_profile(
         .filter_map(|(i, m)| if !m.files.is_empty() { Some(i) } else { None })
         .collect();
     let total_bundlable = bundlable.len();
+    let mut bundles_skipped_before_zip = 0usize;
     let mut bundles_reused = 0usize;
     let mut bundles_uploaded = 0usize;
     let mut bundle_source_fingerprints: HashMap<String, String> = HashMap::new();
+    let mut bundle_source_fast_fingerprints: HashMap<String, String> = HashMap::new();
+    let reusable_bundles = reusable_bundle_index(&profiles_path, &share_info.owner);
 
     // Bundle ALL mods to guarantee version matching (same as share_profile).
     for (pos, idx) in bundlable.into_iter().enumerate() {
+        if cancel_check() {
+            restore_profile_after_failed_publish(old_profile.as_ref(), &profiles_path);
+            return Err("Sharing canceled.".to_string());
+        }
         let mod_name = profile.mods[idx].name.clone();
         let _ = app_handle.emit(
             "share-progress",
@@ -1532,6 +1884,45 @@ pub async fn reshare_profile(
 
         let pm = &mut profile.mods[idx];
         let fingerprint_key = bundle_source_fingerprint_key(pm);
+        let source_fast_fingerprint =
+            match fingerprint_profile_mod_file_metadata(pm, &mods_path, &disabled_path) {
+                Ok(fingerprint) => bundle_source_fast_fingerprint_value(pm, &fingerprint),
+                Err(e) => {
+                    log::error!("Failed to fingerprint mod metadata '{}': {}", pm.name, e);
+                    failed_upload_reasons.push((pm.name.clone(), e.to_string()));
+                    failed_uploads.push(pm.name.clone());
+                    continue;
+                }
+            };
+        if existing_bundle_matches_fast_source(
+            pm,
+            &prior_bundle_source_fast_fingerprints,
+            &fingerprint_key,
+            &source_fast_fingerprint,
+        ) {
+            bundles_skipped_before_zip += 1;
+            bundle_source_fast_fingerprints.insert(fingerprint_key, source_fast_fingerprint);
+            log::info!(
+                "Re-share '{}': skipping bundle for '{}' (source metadata unchanged)",
+                profile.name,
+                pm.name
+            );
+            continue;
+        }
+        if let Some(bundle) = reusable_bundles.find_fast(&fingerprint_key, &source_fast_fingerprint)
+        {
+            bundles_skipped_before_zip += 1;
+            pm.bundle_url = Some(bundle.bundle_url);
+            pm.bundle_sha256 = Some(bundle.bundle_sha256);
+            bundle_source_fast_fingerprints.insert(fingerprint_key, source_fast_fingerprint);
+            log::info!(
+                "Re-share '{}': reusing bundle for '{}' from profile '{}' (source metadata unchanged)",
+                profile.name,
+                pm.name,
+                bundle.profile_name
+            );
+            continue;
+        }
         let source_fingerprint = match fingerprint_profile_mod_files(pm, &mods_path, &disabled_path)
         {
             Ok(fingerprint) => bundle_source_fingerprint_value(pm, &fingerprint),
@@ -1542,15 +1933,33 @@ pub async fn reshare_profile(
                 continue;
             }
         };
-        if pm.bundle_url.is_some()
-            && pm.bundle_sha256.is_some()
-            && prior_bundle_source_fingerprints.get(&fingerprint_key) == Some(&source_fingerprint)
-        {
-            bundles_reused += 1;
-            bundle_source_fingerprints.insert(fingerprint_key, source_fingerprint);
+        if existing_bundle_matches_source(
+            pm,
+            &prior_bundle_source_fingerprints,
+            &fingerprint_key,
+            &source_fingerprint,
+        ) {
+            bundles_skipped_before_zip += 1;
+            bundle_source_fingerprints.insert(fingerprint_key.clone(), source_fingerprint);
+            bundle_source_fast_fingerprints.insert(fingerprint_key, source_fast_fingerprint);
             log::info!(
-                "Reusing existing bundle for '{}' (source fingerprint match)",
+                "Re-share '{}': skipping bundle for '{}' (source fingerprint unchanged)",
+                profile.name,
                 pm.name
+            );
+            continue;
+        }
+        if let Some(bundle) = reusable_bundles.find_strong(&fingerprint_key, &source_fingerprint) {
+            bundles_skipped_before_zip += 1;
+            pm.bundle_url = Some(bundle.bundle_url);
+            pm.bundle_sha256 = Some(bundle.bundle_sha256);
+            bundle_source_fingerprints.insert(fingerprint_key.clone(), source_fingerprint);
+            bundle_source_fast_fingerprints.insert(fingerprint_key, source_fast_fingerprint);
+            log::info!(
+                "Re-share '{}': reusing bundle for '{}' from profile '{}' (source fingerprint unchanged)",
+                profile.name,
+                pm.name,
+                bundle.profile_name
             );
             continue;
         }
@@ -1566,6 +1975,10 @@ pub async fn reshare_profile(
             },
         );
         log::info!("Re-bundling mod '{}' ({} files)", pm.name, pm.files.len());
+        if cancel_check() {
+            restore_profile_after_failed_publish(old_profile.as_ref(), &profiles_path);
+            return Err("Sharing canceled.".to_string());
+        }
         match zip_profile_mod_files_to_tempfile(pm, &mods_path, &disabled_path) {
             Ok(zip_file) => {
                 let zip_len = zip_file.as_file().metadata().map(|m| m.len()).unwrap_or(0);
@@ -1590,6 +2003,8 @@ pub async fn reshare_profile(
                         pm.bundle_sha256 = Some(hash);
                         bundle_source_fingerprints
                             .insert(fingerprint_key.clone(), source_fingerprint.clone());
+                        bundle_source_fast_fingerprints
+                            .insert(fingerprint_key.clone(), source_fast_fingerprint.clone());
                         log::info!(
                             "Re-bundled mod '{}' successfully ({} bytes)",
                             pm.name,
@@ -1611,8 +2026,9 @@ pub async fn reshare_profile(
         }
     }
     log::info!(
-        "Re-share '{}': bundles {} reused (sha256 match), {} uploaded",
+        "Re-share '{}': bundles {} skipped before zip, {} reused after zip hash, {} uploaded",
         profile.name,
+        bundles_skipped_before_zip,
         bundles_reused,
         bundles_uploaded
     );
@@ -1622,6 +2038,11 @@ pub async fn reshare_profile(
     {
         restore_profile_after_failed_publish(old_profile.as_ref(), &profiles_path);
         return Err(e.to_string());
+    }
+
+    if cancel_check() {
+        restore_profile_after_failed_publish(old_profile.as_ref(), &profiles_path);
+        return Err("Sharing canceled.".to_string());
     }
 
     let filename = code_to_filename(&share_info.code);
@@ -1699,6 +2120,7 @@ pub async fn reshare_profile(
         share_format_version: SHARE_FORMAT_VERSION,
         published_signature: Some(profile_publish_signature(&merged)),
         bundle_source_fingerprints,
+        bundle_source_fast_fingerprints,
     };
     let share_info_path = share_info_path_for_profile(&merged, &profiles_path);
     save_share_info(&share_info_path, &updated_info).map_err(|e| e.to_string())?;
@@ -1852,6 +2274,7 @@ mod listing_tests {
             share_format_version: 1,
             published_signature: None,
             bundle_source_fingerprints: HashMap::new(),
+            bundle_source_fast_fingerprints: HashMap::new(),
         };
         let second = ShareInfo {
             code: "AAAA-BBBB-CCCC".into(),
@@ -1860,6 +2283,7 @@ mod listing_tests {
             share_format_version: SHARE_FORMAT_VERSION,
             published_signature: None,
             bundle_source_fingerprints: HashMap::new(),
+            bundle_source_fast_fingerprints: HashMap::new(),
         };
 
         save_share_info(&path, &first).unwrap();
@@ -2724,6 +3148,7 @@ mod share_orchestration_tests {
             &profiles_path,
             "test-token",
             None,
+            None,
             Vec::new(),
         )
         .await
@@ -2762,6 +3187,630 @@ mod share_orchestration_tests {
         assert!(
             fingerprint.starts_with("v1:1.0.0:"),
             "source fingerprint must include the profile mod version: {fingerprint}"
+        );
+    }
+
+    #[tokio::test]
+    async fn share_profile_skips_existing_bundle_when_source_fingerprint_matches() {
+        let _env_guard = super::github::release_upload_tests::ENV_LOCK.lock().await;
+        let server = MockServer::start().await;
+        std::env::set_var("STS2_GITHUB_API_BASE", server.uri());
+
+        Mock::given(method("GET"))
+            .and(path("/user"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"login": "octo"})),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"name": "sts2mm-profiles"})),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"/repos/octo/sts2mm-profiles/contents/.+\.json"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path_regex(r"/repos/octo/sts2mm-profiles/contents/.+\.json"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "content": {"sha": "abc", "html_url": "https://github.com/octo/sts2mm-profiles/blob/main/x.json"}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mods_path = tmpdir.path().join("mods");
+        let mod_dir = mods_path.join("TestMod");
+        std::fs::create_dir_all(&mod_dir).unwrap();
+        std::fs::write(mod_dir.join("TestMod.json"), b"{}").unwrap();
+        std::fs::write(mod_dir.join("large.pck"), vec![7u8; 1024 * 1024]).unwrap();
+
+        let disabled_path = tmpdir.path().join("mods_disabled");
+        let profiles_path = tmpdir.path().join("profiles");
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        std::fs::create_dir_all(&profiles_path).unwrap();
+
+        let profile_mod = crate::profiles::ProfileMod {
+            name: "TestMod".into(),
+            version: "1.0.0".into(),
+            source: None,
+            hash: None,
+            files: vec!["TestMod".into()],
+            folder_name: Some("TestMod".into()),
+            mod_id: None,
+            enabled: true,
+            bundle_url: Some(
+                "https://github.com/octo/sts2mm-profiles/releases/download/bundles/TestMod_v1.0.0.zip"
+                    .into(),
+            ),
+            bundle_sha256: Some("already-uploaded-zip-hash".into()),
+            bundle_members: vec![],
+        };
+        let fingerprint_key = bundle_source_fingerprint_key(&profile_mod);
+        let source_fingerprint = bundle_source_fingerprint_value(
+            &profile_mod,
+            &fingerprint_profile_mod_files(&profile_mod, &mods_path, &disabled_path).unwrap(),
+        );
+        let profile = Profile {
+            id: crate::profiles::new_profile_id(),
+            name: "test".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![profile_mod],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+            mod_extras: Default::default(),
+        };
+        crate::profiles::save_profile(&profile, &profiles_path).unwrap();
+        let share_info = ShareInfo {
+            code: "AAAA-BBBB-CCCC".into(),
+            owner: "octo".into(),
+            file_sha: Some("old-sha".into()),
+            share_format_version: SHARE_FORMAT_VERSION,
+            published_signature: None,
+            bundle_source_fingerprints: HashMap::from([(fingerprint_key, source_fingerprint)]),
+            bundle_source_fast_fingerprints: HashMap::new(),
+        };
+        save_share_info(
+            &share_info_path_for_profile(&profile, &profiles_path),
+            &share_info,
+        )
+        .unwrap();
+
+        let progress_events =
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::<ShareProgress>::new()));
+        let progress_events_for_emit = progress_events.clone();
+        let emit = move |_event: &str, payload: ShareProgress| {
+            progress_events_for_emit.lock().unwrap().push(payload);
+        };
+
+        let result = share_profile_impl(
+            profile,
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            "test-token",
+            Some(&emit),
+            None,
+            Vec::new(),
+        )
+        .await
+        .expect("share should reuse existing bundle and publish manifest");
+
+        assert!(result.failed_uploads.is_empty());
+        let stages: Vec<&'static str> = progress_events
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|event| event.stage)
+            .collect();
+        assert!(
+            stages.contains(&"checking-bundle"),
+            "publish should still fingerprint before deciding to reuse: {stages:?}"
+        );
+        assert!(
+            !stages.contains(&"bundling"),
+            "unchanged existing bundles must skip the expensive zip/upload stage: {stages:?}"
+        );
+        assert!(
+            stages.contains(&"uploading-manifest"),
+            "publish should still update the profile manifest after reusing bundles: {stages:?}"
+        );
+        let saved = crate::profiles::load_profile("test", &profiles_path).unwrap();
+        assert_eq!(
+            saved.mods[0].bundle_sha256.as_deref(),
+            Some("already-uploaded-zip-hash"),
+            "unchanged bundle should be reused before zip/upload"
+        );
+        let saved_share_info: ShareInfo = serde_json::from_str(
+            &std::fs::read_to_string(share_info_path_for_profile(&saved, &profiles_path)).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            saved_share_info
+                .bundle_source_fast_fingerprints
+                .contains_key("folder:testmod"),
+            "legacy strong-fingerprint skips should backfill the fast map for the next re-share"
+        );
+    }
+
+    #[tokio::test]
+    async fn share_profile_skips_existing_bundle_when_fast_metadata_fingerprint_matches() {
+        let _env_guard = super::github::release_upload_tests::ENV_LOCK.lock().await;
+        let server = MockServer::start().await;
+        std::env::set_var("STS2_GITHUB_API_BASE", server.uri());
+
+        Mock::given(method("GET"))
+            .and(path("/user"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"login": "octo"})),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"name": "sts2mm-profiles"})),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"/repos/octo/sts2mm-profiles/contents/.+\.json"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path_regex(r"/repos/octo/sts2mm-profiles/contents/.+\.json"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "content": {"sha": "abc", "html_url": "https://github.com/octo/sts2mm-profiles/blob/main/x.json"}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mods_path = tmpdir.path().join("mods");
+        let mod_dir = mods_path.join("TestMod");
+        std::fs::create_dir_all(&mod_dir).unwrap();
+        std::fs::write(mod_dir.join("TestMod.json"), b"{}").unwrap();
+        std::fs::write(mod_dir.join("large.pck"), vec![9u8; 1024 * 1024]).unwrap();
+
+        let disabled_path = tmpdir.path().join("mods_disabled");
+        let profiles_path = tmpdir.path().join("profiles");
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        std::fs::create_dir_all(&profiles_path).unwrap();
+
+        let profile_mod = crate::profiles::ProfileMod {
+            name: "TestMod".into(),
+            version: "1.0.0".into(),
+            source: None,
+            hash: None,
+            files: vec!["TestMod".into()],
+            folder_name: Some("TestMod".into()),
+            mod_id: None,
+            enabled: true,
+            bundle_url: Some(
+                "https://github.com/octo/sts2mm-profiles/releases/download/bundles/TestMod_v1.0.0.zip"
+                    .into(),
+            ),
+            bundle_sha256: Some("already-uploaded-zip-hash".into()),
+            bundle_members: vec![],
+        };
+        let fingerprint_key = bundle_source_fingerprint_key(&profile_mod);
+        let source_fast_fingerprint = bundle_source_fast_fingerprint_value(
+            &profile_mod,
+            &fingerprint_profile_mod_file_metadata(&profile_mod, &mods_path, &disabled_path)
+                .unwrap(),
+        );
+        let profile = Profile {
+            id: crate::profiles::new_profile_id(),
+            name: "test-fast".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![profile_mod],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+            mod_extras: Default::default(),
+        };
+        crate::profiles::save_profile(&profile, &profiles_path).unwrap();
+        let share_info = ShareInfo {
+            code: "AAAA-BBBB-CCCC".into(),
+            owner: "octo".into(),
+            file_sha: Some("old-sha".into()),
+            share_format_version: SHARE_FORMAT_VERSION,
+            published_signature: None,
+            bundle_source_fingerprints: HashMap::new(),
+            bundle_source_fast_fingerprints: HashMap::from([(
+                fingerprint_key,
+                source_fast_fingerprint,
+            )]),
+        };
+        save_share_info(
+            &share_info_path_for_profile(&profile, &profiles_path),
+            &share_info,
+        )
+        .unwrap();
+
+        let progress_events =
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::<ShareProgress>::new()));
+        let progress_events_for_emit = progress_events.clone();
+        let emit = move |_event: &str, payload: ShareProgress| {
+            progress_events_for_emit.lock().unwrap().push(payload);
+        };
+
+        let result = share_profile_impl(
+            profile,
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            "test-token",
+            Some(&emit),
+            None,
+            Vec::new(),
+        )
+        .await
+        .expect("share should skip zip/upload from the fast metadata fingerprint");
+
+        assert!(result.failed_uploads.is_empty());
+        let stages: Vec<&'static str> = progress_events
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|event| event.stage)
+            .collect();
+        assert!(stages.contains(&"checking-bundle"));
+        assert!(
+            !stages.contains(&"bundling"),
+            "fast metadata matches must skip the expensive zip/upload stage: {stages:?}"
+        );
+        assert!(stages.contains(&"uploading-manifest"));
+    }
+
+    #[tokio::test]
+    async fn share_profile_reuses_matching_bundle_from_another_owned_profile_before_zip() {
+        let _env_guard = super::github::release_upload_tests::ENV_LOCK.lock().await;
+        let server = MockServer::start().await;
+        std::env::set_var("STS2_GITHUB_API_BASE", server.uri());
+
+        Mock::given(method("GET"))
+            .and(path("/user"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"login": "octo"})),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"name": "sts2mm-profiles"})),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"/repos/octo/sts2mm-profiles/contents/.+\.json"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path_regex(r"/repos/octo/sts2mm-profiles/contents/.+\.json"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "content": {"sha": "abc", "html_url": "https://github.com/octo/sts2mm-profiles/blob/main/x.json"}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mods_path = tmpdir.path().join("mods");
+        let mod_dir = mods_path.join("TestMod");
+        std::fs::create_dir_all(&mod_dir).unwrap();
+        std::fs::write(mod_dir.join("TestMod.json"), b"{}").unwrap();
+        std::fs::write(mod_dir.join("large.pck"), vec![3u8; 1024 * 1024]).unwrap();
+
+        let disabled_path = tmpdir.path().join("mods_disabled");
+        let profiles_path = tmpdir.path().join("profiles");
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        std::fs::create_dir_all(&profiles_path).unwrap();
+
+        let shared_mod = crate::profiles::ProfileMod {
+            name: "TestMod".into(),
+            version: "1.0.0".into(),
+            source: None,
+            hash: None,
+            files: vec!["TestMod".into()],
+            folder_name: Some("TestMod".into()),
+            mod_id: Some("test.mod".into()),
+            enabled: true,
+            bundle_url: Some(
+                "https://github.com/octo/sts2mm-profiles/releases/download/bundles/TestMod_v1.0.0.zip"
+                    .into(),
+            ),
+            bundle_sha256: Some("already-uploaded-zip-hash".into()),
+            bundle_members: vec![],
+        };
+        let fingerprint_key = bundle_source_fingerprint_key(&shared_mod);
+        let source_fast_fingerprint = bundle_source_fast_fingerprint_value(
+            &shared_mod,
+            &fingerprint_profile_mod_file_metadata(&shared_mod, &mods_path, &disabled_path)
+                .unwrap(),
+        );
+        let seed_profile = Profile {
+            id: crate::profiles::new_profile_id(),
+            name: "Seed Pack".into(),
+            game_version: None,
+            created_by: Some("octo".into()),
+            mods: vec![shared_mod],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+            mod_extras: Default::default(),
+        };
+        crate::profiles::save_profile(&seed_profile, &profiles_path).unwrap();
+        let seed_share_info = ShareInfo {
+            code: "SEED-BBBB-CCCC".into(),
+            owner: "octo".into(),
+            file_sha: Some("old-sha".into()),
+            share_format_version: SHARE_FORMAT_VERSION,
+            published_signature: None,
+            bundle_source_fingerprints: HashMap::new(),
+            bundle_source_fast_fingerprints: HashMap::from([(
+                fingerprint_key,
+                source_fast_fingerprint,
+            )]),
+        };
+        save_share_info(
+            &share_info_path_for_profile(&seed_profile, &profiles_path),
+            &seed_share_info,
+        )
+        .unwrap();
+
+        let current_profile = Profile {
+            id: crate::profiles::new_profile_id(),
+            name: "Current Pack".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![crate::profiles::ProfileMod {
+                name: "TestMod".into(),
+                version: "1.0.0".into(),
+                source: None,
+                hash: None,
+                files: vec!["TestMod".into()],
+                folder_name: Some("TestMod".into()),
+                mod_id: Some("test.mod".into()),
+                enabled: true,
+                bundle_url: None,
+                bundle_sha256: None,
+                bundle_members: vec![],
+            }],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+            mod_extras: Default::default(),
+        };
+        crate::profiles::save_profile(&current_profile, &profiles_path).unwrap();
+
+        let progress_events =
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::<ShareProgress>::new()));
+        let progress_events_for_emit = progress_events.clone();
+        let emit = move |_event: &str, payload: ShareProgress| {
+            progress_events_for_emit.lock().unwrap().push(payload);
+        };
+
+        let result = share_profile_impl(
+            current_profile,
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            "test-token",
+            Some(&emit),
+            None,
+            Vec::new(),
+        )
+        .await
+        .expect("share should reuse another owned profile's matching bundle");
+
+        assert!(result.failed_uploads.is_empty());
+        let stages: Vec<&'static str> = progress_events
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|event| event.stage)
+            .collect();
+        assert!(stages.contains(&"checking-bundle"));
+        assert!(
+            !stages.contains(&"bundling"),
+            "matching bundles from other owned packs must skip zip/upload: {stages:?}"
+        );
+        assert!(stages.contains(&"uploading-manifest"));
+        let saved = crate::profiles::load_profile("Current Pack", &profiles_path).unwrap();
+        assert_eq!(
+            saved.mods[0].bundle_url.as_deref(),
+            Some("https://github.com/octo/sts2mm-profiles/releases/download/bundles/TestMod_v1.0.0.zip")
+        );
+        assert_eq!(
+            saved.mods[0].bundle_sha256.as_deref(),
+            Some("already-uploaded-zip-hash")
+        );
+    }
+
+    #[tokio::test]
+    async fn share_profile_honors_cancel_before_bundling_first_mod() {
+        let _env_guard = super::github::release_upload_tests::ENV_LOCK.lock().await;
+        let server = MockServer::start().await;
+        std::env::set_var("STS2_GITHUB_API_BASE", server.uri());
+
+        Mock::given(method("GET"))
+            .and(path("/user"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"login": "octo"})),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"name": "sts2mm-profiles"})),
+            )
+            .mount(&server)
+            .await;
+
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mods_path = tmpdir.path().join("mods");
+        let mod_dir = mods_path.join("TestMod");
+        std::fs::create_dir_all(&mod_dir).unwrap();
+        std::fs::write(mod_dir.join("TestMod.json"), b"{}").unwrap();
+
+        let disabled_path = tmpdir.path().join("mods_disabled");
+        let profiles_path = tmpdir.path().join("profiles");
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        std::fs::create_dir_all(&profiles_path).unwrap();
+
+        let profile = Profile {
+            id: crate::profiles::new_profile_id(),
+            name: "cancel-me".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![crate::profiles::ProfileMod {
+                name: "TestMod".into(),
+                version: "1.0.0".into(),
+                source: None,
+                hash: None,
+                files: vec!["TestMod".into()],
+                folder_name: Some("TestMod".into()),
+                mod_id: None,
+                enabled: true,
+                bundle_url: None,
+                bundle_sha256: None,
+                bundle_members: vec![],
+            }],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+            mod_extras: Default::default(),
+        };
+
+        let progress_events =
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::<ShareProgress>::new()));
+        let progress_events_for_emit = progress_events.clone();
+        let emit = move |_event: &str, payload: ShareProgress| {
+            progress_events_for_emit.lock().unwrap().push(payload);
+        };
+        let cancel = || true;
+
+        let err = share_profile_impl(
+            profile,
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            "test-token",
+            Some(&emit),
+            Some(&cancel),
+            Vec::new(),
+        )
+        .await
+        .expect_err("cancel should stop share before bundling starts");
+
+        assert!(
+            err.to_string().contains("Sharing canceled"),
+            "unexpected cancel error: {err}"
+        );
+        assert!(
+            progress_events.lock().unwrap().is_empty(),
+            "cancel before the first mod should not emit bundling or upload progress"
+        );
+    }
+
+    #[tokio::test]
+    async fn share_profile_bubbles_cancel_from_bundle_checks() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let _env_guard = super::github::release_upload_tests::ENV_LOCK.lock().await;
+        let server = MockServer::start().await;
+        std::env::set_var("STS2_GITHUB_API_BASE", server.uri());
+
+        Mock::given(method("GET"))
+            .and(path("/user"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"login": "octo"})),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"name": "sts2mm-profiles"})),
+            )
+            .mount(&server)
+            .await;
+
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mods_path = tmpdir.path().join("mods");
+        let mod_dir = mods_path.join("TestMod");
+        std::fs::create_dir_all(&mod_dir).unwrap();
+        std::fs::write(mod_dir.join("TestMod.json"), b"{}").unwrap();
+        std::fs::write(mod_dir.join("asset.bin"), vec![42u8; 2 * 1024 * 1024]).unwrap();
+
+        let disabled_path = tmpdir.path().join("mods_disabled");
+        let profiles_path = tmpdir.path().join("profiles");
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        std::fs::create_dir_all(&profiles_path).unwrap();
+
+        let profile = Profile {
+            id: crate::profiles::new_profile_id(),
+            name: "cancel-during-check".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![crate::profiles::ProfileMod {
+                name: "TestMod".into(),
+                version: "1.0.0".into(),
+                source: None,
+                hash: None,
+                files: vec!["TestMod".into()],
+                folder_name: Some("TestMod".into()),
+                mod_id: None,
+                enabled: true,
+                bundle_url: None,
+                bundle_sha256: None,
+                bundle_members: vec![],
+            }],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+            mod_extras: Default::default(),
+        };
+
+        let calls = AtomicUsize::new(0);
+        let cancel = || calls.fetch_add(1, Ordering::SeqCst) > 2;
+
+        let err = share_profile_impl(
+            profile,
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            "test-token",
+            None,
+            Some(&cancel),
+            Vec::new(),
+        )
+        .await
+        .expect_err("cancel inside bundle checks should stop the share");
+
+        assert!(
+            err.to_string().contains("Sharing canceled"),
+            "unexpected cancel error: {err}"
         );
     }
 
@@ -2878,6 +3927,7 @@ mod share_orchestration_tests {
             &disabled_path,
             &profiles_path,
             "test-token",
+            None,
             None,
             not_installed,
         )
@@ -3019,6 +4069,7 @@ mod share_orchestration_tests {
             &profiles_path,
             "test-token",
             None,
+            None,
             not_installed,
         )
         .await
@@ -3156,6 +4207,7 @@ mod share_orchestration_tests {
             &profiles_path,
             "test-token",
             None,
+            None,
             Vec::new(),
         )
         .await
@@ -3178,12 +4230,14 @@ mod share_orchestration_tests {
                 "/repos/octo/sts2mm-profiles/contents/{}",
                 result.file_path
             )))
-            .respond_with(ResponseTemplate::new(200).set_body_string(
-                serde_json::to_string_pretty(
-                    &crate::profiles::load_profile("api-round-trip", &profiles_path).unwrap(),
-                )
-                .unwrap(),
-            ))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string(
+                    serde_json::to_string_pretty(
+                        &crate::profiles::load_profile("api-round-trip", &profiles_path).unwrap(),
+                    )
+                    .unwrap(),
+                ),
+            )
             .expect(1)
             .mount(&server)
             .await;
@@ -3605,6 +4659,7 @@ mod publish_signature_tests {
             share_format_version: 1,
             published_signature: None,
             bundle_source_fingerprints: HashMap::new(),
+            bundle_source_fast_fingerprints: HashMap::new(),
         };
         save_share_info(&share_info_path, &legacy_info).unwrap();
 
@@ -3677,6 +4732,55 @@ mod merge_publish_enrichment_tests {
             Some("https://example.com/a.zip")
         );
         assert_eq!(merged.mods[0].bundle_sha256.as_deref(), Some("deadbeef"));
+    }
+
+    /// Publish preparation can refresh stale saved entries (for example,
+    /// after a mod is reinstalled into a new folder or an older installed
+    /// version replaces a stale manifest row). The local manifest must get
+    /// those refreshed disk-derived fields back, or later shares compare
+    /// bundles against stale visible metadata.
+    #[test]
+    fn merge_copies_refreshed_disk_fields_onto_matching_on_disk_mod() {
+        let mut stale_mod = make_mod("BaseLib", "v3.1.4");
+        stale_mod.files = vec!["BaseLib/BaseLib.dll".into()];
+        stale_mod.folder_name = Some("BaseLib".into());
+        stale_mod.mod_id = Some("BaseLib".into());
+        let on_disk = make_profile("Pack", vec![stale_mod]);
+
+        let mut uploaded_mod = make_mod("BaseLib", "v3.1.3");
+        uploaded_mod.files = vec![
+            "BaseLib/BaseLib.dll".into(),
+            "BaseLib/BaseLib.json".into(),
+            "BaseLib/assets/config.json".into(),
+        ];
+        uploaded_mod.folder_name = Some("BaseLib".into());
+        uploaded_mod.mod_id = Some("BaseLib".into());
+        uploaded_mod.bundle_members = vec!["BaseLib".into(), "BaseLib UI".into()];
+        uploaded_mod.bundle_url = Some("https://example.com/BaseLib_v3.1.3.zip".into());
+        uploaded_mod.bundle_sha256 = Some("deadbeef".into());
+        let uploaded = make_profile("Pack", vec![uploaded_mod]);
+
+        let merged = merge_publish_enrichment(&on_disk, &uploaded);
+
+        assert_eq!(merged.mods[0].version, "v3.1.3");
+        assert_eq!(
+            merged.mods[0].files,
+            vec![
+                "BaseLib/BaseLib.dll".to_string(),
+                "BaseLib/BaseLib.json".to_string(),
+                "BaseLib/assets/config.json".to_string()
+            ]
+        );
+        assert_eq!(merged.mods[0].folder_name.as_deref(), Some("BaseLib"));
+        assert_eq!(merged.mods[0].mod_id.as_deref(), Some("BaseLib"));
+        assert_eq!(
+            merged.mods[0].bundle_members,
+            vec!["BaseLib".to_string(), "BaseLib UI".to_string()]
+        );
+        assert_eq!(
+            merged.mods[0].bundle_url.as_deref(),
+            Some("https://example.com/BaseLib_v3.1.3.zip")
+        );
     }
 
     /// On-disk members that have no counterpart in the uploaded (filtered)

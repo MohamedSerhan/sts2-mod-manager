@@ -386,6 +386,7 @@ pub fn run() {
             backup::get_backup_retention,
             backup::set_backup_retention,
             // Sharing
+            sharing::cancel_profile_share,
             sharing::share_profile,
             sharing::reshare_profile,
             sharing::set_modpack_listing,

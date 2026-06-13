@@ -3,7 +3,7 @@ import { useTranslation, Trans } from 'react-i18next';
 import { AlertTriangle, Check, Copy, ExternalLink, Info, Link as LinkIcon, MessageSquare, Upload, X } from 'lucide-react';
 import { listen } from '@tauri-apps/api/event';
 import type { Profile, ShareResult } from '../types';
-import { shareProfile, reshareProfile, getApiKeyStatus, setModpackListing, openExternalUrl } from '../hooks/useTauri';
+import { shareProfile, cancelProfileShare, reshareProfile, getApiKeyStatus, setModpackListing, openExternalUrl } from '../hooks/useTauri';
 import { useToast } from '../contexts/ToastContext';
 import { useClipboard } from '../hooks/useClipboard';
 import { buildShareMessage, buildShareLink } from '../lib/shareImport';
@@ -55,6 +55,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onLi
   // chip on a list row.
   const { copy, copied } = useClipboard({ resetMs: 1800 });
   const [busy, setBusy] = useState(false);
+  const [canceling, setCanceling] = useState(false);
   const [shared, setShared] = useState<ShareResult | null>(null);
   const [tokenSet, setTokenSet] = useState<boolean | null>(null);
   const [progress, setProgress] = useState<ShareProgress | null>(null);
@@ -82,6 +83,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onLi
       setShared(null);
       setProgress(null);
       setBusy(false);
+      setCanceling(false);
       setMissingBundles(null);
       return;
     }
@@ -133,6 +135,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onLi
     if (!profile) return;
     const listPublic = visibility === 'public';
     setBusy(true);
+    setCanceling(false);
     setProgress({
       profile_name: profile.name,
       stage: 'bundling',
@@ -161,6 +164,10 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onLi
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      if (/sharing canceled/i.test(msg)) {
+        handleDone();
+        return;
+      }
       // Solo bug repro: when the Rust side rejects with "missing bundles
       // for N mod(s): …", swap the raw-error toast for an in-modal
       // recovery panel that repairs the bundles and auto-retries the
@@ -175,6 +182,18 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onLi
     } finally {
       setBusy(false);
       setProgress(null);
+      setCanceling(false);
+    }
+  }
+
+  async function handleCancelPublish() {
+    if (!profile || canceling) return;
+    setCanceling(true);
+    try {
+      await cancelProfileShare(profile.name);
+    } catch (e) {
+      setCanceling(false);
+      toast.error(t('publish.cancelFailed', { error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
@@ -200,6 +219,7 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onLi
   function handleDone() {
     setShared(null);
     setBusy(false);
+    setCanceling(false);
     setProgress(null);
     setMissingBundles(null);
     onClose();
@@ -625,6 +645,9 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onLi
             </>
           ) : busy ? (
             <>
+              <button className="gf-btn-3" onClick={handleCancelPublish} disabled={canceling}>
+                {canceling ? t('common.canceling') : t('common.cancel')}
+              </button>
               <div style={{ flex: 1 }} />
               <button className="gf-btn-3" disabled>{t('common.publishing')}</button>
             </>

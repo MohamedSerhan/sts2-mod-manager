@@ -183,6 +183,7 @@ pub(crate) fn zip_profile_mod_files(
 pub(super) fn ensure_profile_publish_complete(
     profile: &Profile,
     failed_uploads: &[String],
+    failed_upload_reasons: &[(String, String)],
 ) -> Result<()> {
     let mut missing: Vec<String> = Vec::new();
 
@@ -199,15 +200,42 @@ pub(super) fn ensure_profile_publish_complete(
     }
 
     if !missing.is_empty() {
+        let details: Vec<String> = failed_upload_reasons
+            .iter()
+            .filter(|(name, _)| missing.contains(name))
+            .map(|(name, reason)| format!("{}: {}", name, compact_publish_error(reason)))
+            .collect();
+        let detail_suffix = if details.is_empty() {
+            String::new()
+        } else {
+            format!(" Details: {}.", details.join(" | "))
+        };
         return Err(AppError::Other(format!(
-            "Could not publish profile '{}': missing bundles for {} mod(s): {}. Restore or reinstall these mods, then share again so the manifest can repair them later.",
+            "Could not publish profile '{}': missing bundles for {} mod(s): {}.{} Restore or reinstall these mods, then share again so the manifest can repair them later.",
             profile.name,
             missing.len(),
-            missing.join(", ")
+            missing.join(", "),
+            detail_suffix
         )));
     }
 
     Ok(())
+}
+
+fn compact_publish_error(reason: &str) -> String {
+    const MAX_CHARS: usize = 700;
+    let mut text = reason
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .trim_end_matches('.')
+        .to_string();
+    if text.chars().count() > MAX_CHARS {
+        text = text.chars().take(MAX_CHARS).collect();
+        text.push_str("...");
+    }
+    text
 }
 
 /// Best-effort rollback: write the prior on-disk copy of the profile
@@ -364,7 +392,7 @@ mod publish_bundle_contract_tests {
     #[test]
     fn publish_completion_rejects_any_mod_without_bundle_url() {
         let profile = profile_with_mod(profile_mod(true));
-        let err = ensure_profile_publish_complete(&profile, &[])
+        let err = ensure_profile_publish_complete(&profile, &[], &[])
             .expect_err("publishing a partially restorable manifest must be blocked");
 
         assert!(
@@ -372,6 +400,24 @@ mod publish_bundle_contract_tests {
             "unexpected error: {}",
             err
         );
+    }
+
+    #[test]
+    fn publish_completion_includes_failed_upload_reason_when_known() {
+        let profile = profile_with_mod(profile_mod(true));
+        let err = ensure_profile_publish_complete(
+            &profile,
+            &["Test Mod".to_string()],
+            &[(
+                "Test Mod".to_string(),
+                "Upload of 'Test_Mod_v1.0.0_abc.zip' failed with 422 already_exists.".to_string(),
+            )],
+        )
+        .expect_err("known upload failures should block with details");
+
+        let msg = err.to_string();
+        assert!(msg.contains("Details: Test Mod: Upload of"));
+        assert!(msg.contains("already_exists"));
     }
 
     #[test]

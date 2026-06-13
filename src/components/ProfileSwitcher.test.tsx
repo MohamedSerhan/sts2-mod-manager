@@ -157,6 +157,29 @@ describe('<ProfileSwitcher>', () => {
     expect(switched[0].args).toEqual({ name: 'Other' });
   });
 
+  it('switching to a different profile records the launch for Home "Recent modpacks"', async () => {
+    registerInvokeHandler('list_profiles_cmd', () => PROFILES);
+    registerInvokeHandler('get_active_profile', () => 'My Pack');
+    registerInvokeHandler('switch_profile', () => ({
+      downloaded: 0,
+      missing_mods: [],
+      activated: true,
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => {
+      expect(screen.getByText('Other')).toBeInTheDocument();
+    });
+    const before = Date.now();
+    await user.click(screen.getByText('Other'));
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'switch_profile')).toBe(true);
+    });
+    const map = JSON.parse(localStorage.getItem('sts2mm-modpack-launches') ?? '{}');
+    expect(typeof map.Other).toBe('number');
+    expect(map.Other).toBeGreaterThanOrEqual(before);
+  });
+
   it('keeps the current profile active when drift confirmation is cancelled', async () => {
     registerInvokeHandler('list_profiles_cmd', () => PROFILES);
     registerInvokeHandler('get_active_profile', () => 'My Pack');

@@ -504,6 +504,77 @@ fn publish_profile_mod_matches_installed(pm: &ProfileMod, installed: &ModInfo) -
     publish_keys_intersect(&profile_keys, &installed_keys)
 }
 
+/// Same identity-matching convention as `publish_profile_mod_matches_installed`,
+/// but between two `ProfileMod`s -- used by `merge_publish_enrichment` to find
+/// the on-disk profile entry corresponding to an uploaded (and possibly
+/// filtered/refreshed) profile entry. Folder/mod_id ("strong" keys) win when
+/// both sides have them; otherwise falls back to name/folder/mod_id keys.
+fn publish_profile_mods_match(a: &ProfileMod, b: &ProfileMod) -> bool {
+    let a_strong = publish_strong_identity_keys(a.folder_name.as_deref(), a.mod_id.as_deref());
+    let b_strong = publish_strong_identity_keys(b.folder_name.as_deref(), b.mod_id.as_deref());
+
+    if !a_strong.is_empty() && !b_strong.is_empty() {
+        return publish_keys_intersect(&a_strong, &b_strong);
+    }
+
+    let a_keys = publish_identity_keys(&a.name, a.folder_name.as_deref(), a.mod_id.as_deref());
+    let b_keys = publish_identity_keys(&b.name, b.folder_name.as_deref(), b.mod_id.as_deref());
+    publish_keys_intersect(&a_keys, &b_keys)
+}
+
+/// Merge publish-side enrichment from the just-uploaded (filtered) profile
+/// back onto the current on-disk profile, WITHOUT overwriting the on-disk
+/// profile's membership. The uploaded profile may be missing members (e.g.
+/// a non-active pack's stored mods are still excluded by the active-pack-only
+/// filter in some flows, or a pack entry that resolved to no installed mod) --
+/// those on-disk entries are left untouched, never deleted.
+///
+/// For each mod in `uploaded`, finds the matching mod in `on_disk` (by the
+/// same identity convention used throughout publish) and copies over:
+///   - `bundle_url`, `bundle_sha256` -- always, from the upload result.
+///   - `source` -- fill-only (mirrors `backfill_profile_sources_from_db`):
+///     only set on `on_disk` if it was `None` there.
+///
+/// Also copies profile-level publish attribution onto `on_disk`:
+///   - `created_by` -- the owner attribution the publish set.
+///   - `public` -- the `list_public` value the publish set, if any.
+///
+/// Returns the merged profile (a clone of `on_disk` with the above applied)
+/// so callers can both persist it locally and compute the publish signature
+/// from it.
+fn merge_publish_enrichment(on_disk: &Profile, uploaded: &Profile) -> Profile {
+    let mut merged = on_disk.clone();
+
+    for uploaded_pm in &uploaded.mods {
+        let Some(target) = merged
+            .mods
+            .iter_mut()
+            .find(|pm| publish_profile_mods_match(pm, uploaded_pm))
+        else {
+            continue;
+        };
+
+        if uploaded_pm.bundle_url.is_some() {
+            target.bundle_url = uploaded_pm.bundle_url.clone();
+        }
+        if uploaded_pm.bundle_sha256.is_some() {
+            target.bundle_sha256 = uploaded_pm.bundle_sha256.clone();
+        }
+        // Fill-only, mirroring backfill_profile_sources_from_db: never
+        // downgrade a source the on-disk profile already had.
+        if target.source.is_none() && uploaded_pm.source.is_some() {
+            target.source = uploaded_pm.source.clone();
+        }
+    }
+
+    merged.created_by = uploaded.created_by.clone();
+    if uploaded.public.is_some() {
+        merged.public = uploaded.public;
+    }
+
+    merged
+}
+
 /// Refresh a saved pack entry's on-disk-derived fields (`files`,
 /// `folder_name`, `version`) from the currently-installed mod it resolves
 /// to (issue #174). The saved manifest can go stale when the curator
@@ -541,9 +612,10 @@ fn filter_profile_for_publish_compatibility(
     mods_path: &std::path::Path,
     disabled_path: &std::path::Path,
     game_version: Option<&str>,
+    exclude_stored_members: bool,
 ) -> Vec<String> {
-    // We always need the installed scan so we can drop stored (disabled)
-    // members — that exclusion does not depend on the game version.
+    // We always need the installed scan so we can refresh stale paths and
+    // (for the active pack) drop stored (disabled) members.
     let installed_mods =
         merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
     let profile_name = profile.name.clone();
@@ -563,12 +635,16 @@ fn filter_profile_for_publish_compatibility(
             .find(|installed| publish_profile_mod_matches_installed(pm, installed));
         match installed {
             // A mod that is stored (disabled on disk, i.e. living in the
-            // mods_disabled folder) is never uploaded, even when it
-            // belongs to the modpack. Sharing publishes the active set the
-            // curator is actually running — this also fixes the
-            // disable-in-game-then-reshare leak where a stored mod was
-            // still bundled from the disabled folder.
-            Some(m) if !m.enabled => {
+            // mods_disabled folder) is excluded from the ACTIVE pack's
+            // publish even when it belongs to the modpack -- sharing the
+            // active pack publishes the set the curator is actually
+            // running, and this also fixes the disable-in-game-then-reshare
+            // leak where a stored mod was still bundled from the disabled
+            // folder. Non-active packs publish all members regardless of
+            // whether they're currently enabled on disk -- their members
+            // are usually stored, and excluding them here would silently
+            // drop them from the pack entirely (see Part A).
+            Some(m) if !m.enabled && exclude_stored_members => {
                 log::info!(
                     "Publish '{}': excluding stored (disabled) mod '{}'",
                     profile_name,
@@ -672,10 +748,16 @@ fn load_profile_for_publish_from_paths(
     disabled_path: &std::path::Path,
     config_path: &std::path::Path,
     game_version: Option<&str>,
+    exclude_stored_members: bool,
 ) -> Result<(Profile, Vec<String>)> {
     let mut profile = crate::profiles::load_profile(name, profiles_path)?;
-    let not_installed =
-        filter_profile_for_publish_compatibility(&mut profile, mods_path, disabled_path, game_version);
+    let not_installed = filter_profile_for_publish_compatibility(
+        &mut profile,
+        mods_path,
+        disabled_path,
+        game_version,
+        exclude_stored_members,
+    );
     backfill_profile_sources_from_db(&mut profile, config_path);
     if include_notes {
         backfill_profile_extras_from_db(&mut profile, config_path);
@@ -806,7 +888,7 @@ pub async fn share_profile(
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ShareResult, String> {
     use tauri::Emitter;
-    let (profiles_path, mods_path, disabled_path, config_path, token, game_version) = {
+    let (profiles_path, mods_path, disabled_path, config_path, token, game_version, exclude_stored_members) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let token = s
             .github_token
@@ -814,6 +896,15 @@ pub async fn share_profile(
             .ok_or("GitHub token required to share profiles. Set it in Settings.")?;
         let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
         let disabled_path = s.disabled_mods_path.clone().ok_or("Game path not set")?;
+        // Only the ACTIVE pack publishes the "currently running" set --
+        // excluding members that are stored (disabled on disk). A
+        // non-active pack's members are usually stored, so excluding them
+        // here would silently drop them from the pack (see Part A of the
+        // publish-nonactive-pack fix).
+        let exclude_stored_members = s
+            .active_profile
+            .as_deref()
+            .is_some_and(|active| active.eq_ignore_ascii_case(&name));
         (
             s.profiles_path.clone(),
             mods_path,
@@ -821,6 +912,7 @@ pub async fn share_profile(
             s.config_path.clone(),
             token,
             s.game_version.clone(),
+            exclude_stored_members,
         )
     };
 
@@ -849,6 +941,7 @@ pub async fn share_profile(
         &disabled_path,
         &config_path,
         game_version.as_deref(),
+        exclude_stored_members,
     )
     .map_err(|e| e.to_string())?;
 
@@ -922,6 +1015,8 @@ pub(super) async fn share_profile_impl(
         .filter_map(|(i, m)| if !m.files.is_empty() { Some(i) } else { None })
         .collect();
     let total_bundlable = bundlable.len();
+    let mut bundles_reused = 0usize;
+    let mut bundles_uploaded = 0usize;
 
     // Bundle ALL mods to guarantee version matching.
     // Friends get the exact same files the curator has installed.
@@ -945,17 +1040,23 @@ pub(super) async fn share_profile_impl(
         log::info!("Bundling mod '{}' ({} files)", pm.name, pm.files.len());
         match zip_profile_mod_files(pm, mods_path, disabled_path) {
             Ok(zip_data) => {
+                let prior_sha256 = pm.bundle_sha256.clone();
                 match upload_mod_bundle_via_release(
                     token,
                     &username,
                     &pm.name,
                     &pm.version,
                     &zip_data,
-                    pm.bundle_sha256.as_deref(),
+                    prior_sha256.as_deref(),
                 )
                 .await
                 {
                     Ok((url, hash)) => {
+                        if prior_sha256.as_deref() == Some(hash.as_str()) {
+                            bundles_reused += 1;
+                        } else {
+                            bundles_uploaded += 1;
+                        }
                         pm.bundle_url = Some(url);
                         pm.bundle_sha256 = Some(hash);
                         log::info!(
@@ -983,6 +1084,12 @@ pub(super) async fn share_profile_impl(
             }
         }
     }
+    log::info!(
+        "Share '{}': bundles {} reused (sha256 match), {} uploaded",
+        profile.name,
+        bundles_reused,
+        bundles_uploaded
+    );
 
     ensure_profile_publish_complete(&profile, &failed_uploads)?;
 
@@ -1019,21 +1126,37 @@ pub(super) async fn share_profile_impl(
     )
     .await?;
 
-    // Save the enriched profile back to local JSON (with bundle_urls)
-    // This is critical: switch_profile loads local JSON, which needs bundle_urls
-    crate::profiles::save_profile(&profile, profiles_path)?;
+    // Merge publish enrichment (bundle_url/bundle_sha256/source/created_by/
+    // public) onto the CURRENT on-disk profile rather than overwriting it
+    // with the filtered upload copy -- the upload copy may be missing
+    // members (stored mods on a non-active pack, or pack entries with no
+    // installed match), and overwriting would silently delete them from the
+    // curator's local manifest. See `merge_publish_enrichment`. Falls back
+    // to the uploaded profile itself if the on-disk file is somehow
+    // missing (defensive only -- the normal `share_profile` entry point
+    // always loads it first).
+    let on_disk = crate::profiles::load_profile(&profile.name, profiles_path)
+        .unwrap_or_else(|_| profile.clone());
+    let merged = merge_publish_enrichment(&on_disk, &profile);
+    crate::profiles::save_profile(&merged, profiles_path)?;
     log::info!(
-        "Saved enriched profile '{}' with bundle_urls to local JSON",
-        profile.name
+        "Saved enriched profile '{}' with bundle_urls to local JSON ({} mod(s))",
+        merged.name,
+        merged.mods.len()
     );
 
-    // Store share info locally for re-sharing
+    // Store share info locally for re-sharing. The published signature is
+    // computed from the MERGED ON-DISK profile (the local manifest as of
+    // this publish), not the filtered upload copy -- otherwise an active
+    // pack with stored members would mismatch immediately (the upload
+    // excludes them, the local manifest keeps them), producing a
+    // permanent false "Out of sync" banner.
     let share_info = ShareInfo {
         code: code.clone(),
         owner: username.clone(),
         file_sha: Some(file_sha),
         share_format_version: SHARE_FORMAT_VERSION,
-        published_signature: Some(profile_publish_signature(&profile)),
+        published_signature: Some(profile_publish_signature(&merged)),
     };
     let share_info_path = profiles_path.join(format!("{}.share", profile.name));
     save_share_info(&share_info_path, &share_info)?;
@@ -1175,7 +1298,7 @@ pub async fn reshare_profile(
     use tauri::Emitter;
     let _guard = ShareGuard::try_acquire(state.inner(), &name)?;
 
-    let (profiles_path, mods_path, disabled_path, config_path, token, game_version) = {
+    let (profiles_path, mods_path, disabled_path, config_path, token, game_version, exclude_stored_members) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let token = s
             .github_token
@@ -1183,6 +1306,12 @@ pub async fn reshare_profile(
             .ok_or("GitHub token required. Set it in Settings.")?;
         let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
         let disabled_path = s.disabled_mods_path.clone().ok_or("Game path not set")?;
+        // See share_profile: only the ACTIVE pack excludes stored
+        // (disabled-on-disk) members from the publish.
+        let exclude_stored_members = s
+            .active_profile
+            .as_deref()
+            .is_some_and(|active| active.eq_ignore_ascii_case(&name));
         (
             s.profiles_path.clone(),
             mods_path,
@@ -1190,6 +1319,7 @@ pub async fn reshare_profile(
             s.config_path.clone(),
             token,
             s.game_version.clone(),
+            exclude_stored_members,
         )
     };
 
@@ -1212,6 +1342,7 @@ pub async fn reshare_profile(
         &disabled_path,
         &config_path,
         game_version.as_deref(),
+        exclude_stored_members,
     )
     .map_err(|e| e.to_string())?;
 
@@ -1235,6 +1366,8 @@ pub async fn reshare_profile(
         .filter_map(|(i, m)| if !m.files.is_empty() { Some(i) } else { None })
         .collect();
     let total_bundlable = bundlable.len();
+    let mut bundles_reused = 0usize;
+    let mut bundles_uploaded = 0usize;
 
     // Bundle ALL mods to guarantee version matching (same as share_profile).
     for (pos, idx) in bundlable.into_iter().enumerate() {
@@ -1254,17 +1387,23 @@ pub async fn reshare_profile(
         log::info!("Re-bundling mod '{}' ({} files)", pm.name, pm.files.len());
         match zip_profile_mod_files(pm, &mods_path, &disabled_path) {
             Ok(zip_data) => {
+                let prior_sha256 = pm.bundle_sha256.clone();
                 match upload_mod_bundle_via_release(
                     &token,
                     &share_info.owner,
                     &pm.name,
                     &pm.version,
                     &zip_data,
-                    pm.bundle_sha256.as_deref(),
+                    prior_sha256.as_deref(),
                 )
                 .await
                 {
                     Ok((url, hash)) => {
+                        if prior_sha256.as_deref() == Some(hash.as_str()) {
+                            bundles_reused += 1;
+                        } else {
+                            bundles_uploaded += 1;
+                        }
                         pm.bundle_url = Some(url);
                         pm.bundle_sha256 = Some(hash);
                         log::info!(
@@ -1285,6 +1424,12 @@ pub async fn reshare_profile(
             }
         }
     }
+    log::info!(
+        "Re-share '{}': bundles {} reused (sha256 match), {} uploaded",
+        profile.name,
+        bundles_reused,
+        bundles_uploaded
+    );
 
     if let Err(e) = ensure_profile_publish_complete(&profile, &failed_uploads) {
         restore_profile_after_failed_publish(old_profile.as_ref(), &profiles_path);
@@ -1332,28 +1477,46 @@ pub async fn reshare_profile(
         }
     };
 
-    // Save enriched profile back to local JSON (with bundle_urls)
-    crate::profiles::save_profile(&profile, &profiles_path).map_err(|e| e.to_string())?;
-    log::info!("Saved re-shared enriched profile '{}' to local JSON", name);
+    // Merge publish enrichment onto the CURRENT on-disk profile rather than
+    // overwriting it with the filtered upload copy -- see
+    // `merge_publish_enrichment` and the matching comment in
+    // `share_profile_impl`. Reload fresh in case the on-disk profile
+    // changed since `old_profile` was captured at the top of this command;
+    // fall back to `old_profile` (or the uploaded profile) if the on-disk
+    // file is somehow missing.
+    let on_disk = crate::profiles::load_profile(&name, &profiles_path)
+        .ok()
+        .or_else(|| old_profile.clone())
+        .unwrap_or_else(|| profile.clone());
+    let merged = merge_publish_enrichment(&on_disk, &profile);
+    crate::profiles::save_profile(&merged, &profiles_path).map_err(|e| e.to_string())?;
+    log::info!(
+        "Saved re-shared enriched profile '{}' to local JSON ({} mod(s))",
+        merged.name,
+        merged.mods.len()
+    );
 
     let owner = share_info.owner.clone();
     let code = share_info.code.clone();
 
     // Update local share info with new SHA and stamp the current format
     // version, so the re-share nudge clears once the curator re-publishes.
+    // The published signature is computed from the MERGED ON-DISK profile
+    // (the local manifest as of this publish), not the filtered upload
+    // copy -- see the matching comment in `share_profile_impl`.
     let updated_info = ShareInfo {
         code: share_info.code,
         owner: share_info.owner,
         file_sha: Some(file_sha),
         share_format_version: SHARE_FORMAT_VERSION,
-        published_signature: Some(profile_publish_signature(&profile)),
+        published_signature: Some(profile_publish_signature(&merged)),
     };
     save_share_info(&share_info_path, &updated_info).map_err(|e| e.to_string())?;
 
     // Self-subscribed curators are by definition in sync with what was just
     // published — refresh the subscription snapshot so the update poll
     // doesn't flag the curator's own re-share as a pending update.
-    crate::subscriptions::sync_own_subscription_after_publish(&config_path, &profile);
+    crate::subscriptions::sync_own_subscription_after_publish(&config_path, &merged);
 
     // Reclaim disk on the `bundles` release: any asset no profile
     // manifest still references after this re-share is dead weight.
@@ -1789,6 +1952,7 @@ mod share_orchestration_tests {
             &disabled_path,
             tmpdir.path(),
             Some("0.105.0"),
+            false,
         )
         .unwrap();
 
@@ -1834,6 +1998,7 @@ mod share_orchestration_tests {
             &disabled_path,
             tmpdir.path(),
             Some("0.105.0"),
+            false,
         )
         .unwrap();
 
@@ -1895,6 +2060,7 @@ mod share_orchestration_tests {
             &disabled_path,
             tmpdir.path(),
             None,
+            false,
         )
         .unwrap();
 
@@ -1968,6 +2134,7 @@ mod share_orchestration_tests {
             &disabled_path,
             tmpdir.path(),
             None,
+            false,
         )
         .unwrap();
 
@@ -1995,12 +2162,13 @@ mod share_orchestration_tests {
     }
 
     #[test]
-    fn publish_preparation_excludes_stored_disabled_mods_even_when_pack_members() {
+    fn publish_preparation_excludes_stored_disabled_mods_for_active_pack() {
         // 4.7 — a mod that lives in mods_disabled (stored / disabled on
         // disk) must not be bundled for upload even though it's listed as
-        // a member of the modpack. This also covers the disable-in-game-
-        // then-reshare leak. Stored exclusion applies regardless of game
-        // version, so we pass None here.
+        // a member of the modpack -- but ONLY when this is the ACTIVE
+        // pack (`exclude_stored_members = true`). This also covers the
+        // disable-in-game-then-reshare leak. Stored exclusion applies
+        // regardless of game version, so we pass None here.
         let tmpdir = tempfile::tempdir().unwrap();
         let mods_path = tmpdir.path().join("mods");
         let disabled_path = tmpdir.path().join("mods_disabled");
@@ -2036,11 +2204,72 @@ mod share_orchestration_tests {
             &disabled_path,
             tmpdir.path(),
             None,
+            true,
         )
         .unwrap();
 
         assert_eq!(prepared.mods.len(), 1);
         assert_eq!(prepared.mods[0].name, "Active Mod");
+    }
+
+    #[test]
+    fn publish_preparation_keeps_stored_disabled_mods_for_nonactive_pack() {
+        // Bug fix: a NON-active pack's members are usually stored
+        // (disabled on disk) -- excluding them here would silently strip
+        // them from the published pack (and, before the merge-not-overwrite
+        // fix in Part A, from the local manifest too). With
+        // `exclude_stored_members = false`, a stored member survives the
+        // filter and is bundled from the disabled folder.
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mods_path = tmpdir.path().join("mods");
+        let disabled_path = tmpdir.path().join("mods_disabled");
+        let profiles_path = tmpdir.path().join("profiles");
+        std::fs::create_dir_all(&mods_path).unwrap();
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        std::fs::create_dir_all(&profiles_path).unwrap();
+
+        write_mod(&mods_path, "ActiveMod", "Active Mod");
+        write_mod(&disabled_path, "StoredMod", "Stored Mod");
+
+        let profile = Profile {
+            name: "Stable".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![
+                profile_mod("Active Mod", "ActiveMod"),
+                profile_mod("Stored Mod", "StoredMod"),
+            ],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+            mod_extras: Default::default(),
+        };
+        crate::profiles::save_profile(&profile, &profiles_path).unwrap();
+
+        let (prepared, _not_installed) = load_profile_for_publish_from_paths(
+            "Stable",
+            None,
+            true,
+            &profiles_path,
+            &mods_path,
+            &disabled_path,
+            tmpdir.path(),
+            None,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(prepared.mods.len(), 2);
+        assert!(
+            prepared.mods.iter().any(|m| m.name == "Stored Mod"),
+            "stored member must survive the filter for a non-active pack"
+        );
+
+        // Bundling must succeed against the stored member's files --
+        // `zip_profile_mod_files` falls back to the disabled folder.
+        let stored_pm = prepared.mods.iter().find(|m| m.name == "Stored Mod").unwrap();
+        super::upload::zip_profile_mod_files(stored_pm, &mods_path, &disabled_path)
+            .expect("stored member must bundle from the disabled folder");
     }
 
     #[test]
@@ -2097,6 +2326,7 @@ mod share_orchestration_tests {
             &disabled_path,
             tmpdir.path(),
             None,
+            false,
         )
         .unwrap();
 
@@ -2163,6 +2393,7 @@ mod share_orchestration_tests {
             &disabled_path,
             tmpdir.path(),
             None,
+            false,
         )
         .unwrap();
 
@@ -2305,6 +2536,288 @@ mod share_orchestration_tests {
             m.bundle_url
         );
         assert!(m.bundle_sha256.is_some(), "expected hash to be persisted");
+    }
+
+    /// Bug fix (publish-nonactive-pack), test 2: sharing a NON-active pack
+    /// with `exclude_stored_members = false` must publish AND keep ALL
+    /// members -- including one that's stored (disabled on disk) -- in the
+    /// LOCAL on-disk manifest. Before the merge-not-overwrite fix in Part A,
+    /// `share_profile_impl` saved the filtered (upload) copy back over the
+    /// local JSON, silently deleting the stored member from the pack.
+    #[tokio::test]
+    async fn share_nonactive_pack_keeps_stored_member_in_local_manifest() {
+        let _env_guard = super::github::release_upload_tests::ENV_LOCK.lock().await;
+        let server = MockServer::start().await;
+        std::env::set_var("STS2_GITHUB_API_BASE", server.uri());
+
+        Mock::given(method("GET"))
+            .and(path("/user"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"login": "octo"})),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"name": "sts2mm-profiles"})),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET")).and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 42,
+                "upload_url": format!("{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}", server.uri()),
+                "assets": []
+            })))
+            .mount(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST")).and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": 100, "name": "Bundle_v1.0.0.zip",
+                "browser_download_url": "https://github.com/octo/sts2mm-profiles/releases/download/bundles/Bundle_v1.0.0.zip"
+            })))
+            .expect(2) // both members get bundled for a non-active pack
+            .mount(&server).await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"/repos/octo/sts2mm-profiles/contents/.+\.json"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT")).and(path_regex(r"/repos/octo/sts2mm-profiles/contents/.+\.json"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "content": {"sha": "abc", "html_url": "https://github.com/octo/sts2mm-profiles/blob/main/x.json"}
+            })))
+            .expect(1)
+            .mount(&server).await;
+
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mods_path = tmpdir.path().join("mods");
+        let disabled_path = tmpdir.path().join("mods_disabled");
+        let profiles_path = tmpdir.path().join("profiles");
+        std::fs::create_dir_all(&mods_path).unwrap();
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        std::fs::create_dir_all(&profiles_path).unwrap();
+
+        // ActiveMod is enabled (in mods/); StoredMod is disabled (in
+        // mods_disabled/) -- as it would be for a non-active pack, whose
+        // members are usually not the ones currently enabled.
+        write_mod(&mods_path, "ActiveMod", "Active Mod");
+        write_mod(&disabled_path, "StoredMod", "Stored Mod");
+
+        let profile = Profile {
+            name: "NonActivePack".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![
+                profile_mod("Active Mod", "ActiveMod"),
+                profile_mod("Stored Mod", "StoredMod"),
+            ],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+            mod_extras: Default::default(),
+        };
+        crate::profiles::save_profile(&profile, &profiles_path).unwrap();
+
+        // Non-active pack: exclude_stored_members = false.
+        let (uploaded, not_installed) = load_profile_for_publish_from_paths(
+            "NonActivePack",
+            None,
+            true,
+            &profiles_path,
+            &mods_path,
+            &disabled_path,
+            tmpdir.path(),
+            None,
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            uploaded.mods.len(),
+            2,
+            "both members must survive the filter for a non-active pack"
+        );
+
+        let result = share_profile_impl(
+            uploaded,
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            "test-token",
+            None,
+            not_installed,
+        )
+        .await
+        .expect("share of a non-active pack should succeed");
+        assert!(result.failed_uploads.is_empty());
+
+        // The LOCAL manifest must still contain BOTH members -- the stored
+        // one must NOT have been deleted.
+        let saved = crate::profiles::load_profile("NonActivePack", &profiles_path).unwrap();
+        assert_eq!(
+            saved.mods.len(),
+            2,
+            "local manifest must keep all pack members after sharing a non-active pack"
+        );
+        assert!(
+            saved.mods.iter().any(|m| m.name == "Stored Mod"),
+            "stored member must not be deleted from the local manifest: {:?}",
+            saved.mods.iter().map(|m| &m.name).collect::<Vec<_>>()
+        );
+        // And it must have picked up bundle enrichment too.
+        let stored = saved.mods.iter().find(|m| m.name == "Stored Mod").unwrap();
+        assert!(
+            stored.bundle_url.is_some() && stored.bundle_sha256.is_some(),
+            "stored member must be enriched with its uploaded bundle info"
+        );
+    }
+
+    /// Bug fix (publish-nonactive-pack), test 3: sharing the ACTIVE pack
+    /// with `exclude_stored_members = true` still excludes the stored
+    /// member from the UPLOADED manifest (existing behavior), but the
+    /// LOCAL manifest keeps it (no deletion), and the stored
+    /// `published_signature` is computed from the LOCAL manifest so
+    /// `get_share_info`'s out-of-sync check reports in-sync right after
+    /// publish (no false "Out of sync" banner).
+    #[tokio::test]
+    async fn share_active_pack_excludes_stored_member_from_upload_but_keeps_it_locally() {
+        let _env_guard = super::github::release_upload_tests::ENV_LOCK.lock().await;
+        let server = MockServer::start().await;
+        std::env::set_var("STS2_GITHUB_API_BASE", server.uri());
+
+        Mock::given(method("GET"))
+            .and(path("/user"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"login": "octo"})),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"name": "sts2mm-profiles"})),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET")).and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 42,
+                "upload_url": format!("{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}", server.uri()),
+                "assets": []
+            })))
+            .mount(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST")).and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": 100, "name": "Bundle_v1.0.0.zip",
+                "browser_download_url": "https://github.com/octo/sts2mm-profiles/releases/download/bundles/Bundle_v1.0.0.zip"
+            })))
+            .expect(1) // only the active (non-stored) member is bundled
+            .mount(&server).await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"/repos/octo/sts2mm-profiles/contents/.+\.json"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT")).and(path_regex(r"/repos/octo/sts2mm-profiles/contents/.+\.json"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "content": {"sha": "abc", "html_url": "https://github.com/octo/sts2mm-profiles/blob/main/x.json"}
+            })))
+            .expect(1)
+            .mount(&server).await;
+
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mods_path = tmpdir.path().join("mods");
+        let disabled_path = tmpdir.path().join("mods_disabled");
+        let profiles_path = tmpdir.path().join("profiles");
+        std::fs::create_dir_all(&mods_path).unwrap();
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        std::fs::create_dir_all(&profiles_path).unwrap();
+
+        write_mod(&mods_path, "ActiveMod", "Active Mod");
+        write_mod(&disabled_path, "StoredMod", "Stored Mod");
+
+        let profile = Profile {
+            name: "ActivePack".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![
+                profile_mod("Active Mod", "ActiveMod"),
+                profile_mod("Stored Mod", "StoredMod"),
+            ],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+            mod_extras: Default::default(),
+        };
+        crate::profiles::save_profile(&profile, &profiles_path).unwrap();
+
+        // Active pack: exclude_stored_members = true.
+        let (uploaded, not_installed) = load_profile_for_publish_from_paths(
+            "ActivePack",
+            None,
+            true,
+            &profiles_path,
+            &mods_path,
+            &disabled_path,
+            tmpdir.path(),
+            None,
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            uploaded.mods.len(),
+            1,
+            "the stored member must be excluded from the uploaded manifest"
+        );
+        assert_eq!(uploaded.mods[0].name, "Active Mod");
+
+        let result = share_profile_impl(
+            uploaded,
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            "test-token",
+            None,
+            not_installed,
+        )
+        .await
+        .expect("share of the active pack should succeed");
+        assert!(result.failed_uploads.is_empty());
+
+        // The LOCAL manifest must still contain BOTH members.
+        let saved = crate::profiles::load_profile("ActivePack", &profiles_path).unwrap();
+        assert_eq!(
+            saved.mods.len(),
+            2,
+            "local manifest must keep the stored member even though it wasn't uploaded"
+        );
+        assert!(saved.mods.iter().any(|m| m.name == "Stored Mod"));
+
+        // The stored .share sidecar's published_signature must match the
+        // signature of the LOCAL (merged) manifest -- not the filtered
+        // upload -- so get_share_info reports in-sync right after publish.
+        let share_info_path = profiles_path.join("ActivePack.share");
+        let share_info: ShareInfo =
+            serde_json::from_str(&std::fs::read_to_string(&share_info_path).unwrap()).unwrap();
+        let local_sig = profile_publish_signature(&saved);
+        assert_eq!(
+            share_info.published_signature.as_deref(),
+            Some(local_sig.as_str()),
+            "published_signature must be computed from the local (merged) manifest, \
+             not the filtered upload, to avoid a false 'Out of sync' banner"
+        );
     }
 
     #[tokio::test]
@@ -2862,6 +3375,165 @@ mod publish_signature_tests {
         assert!(
             !out_of_sync_legacy,
             "legacy .share with no published_signature should return false (don't nag)"
+        );
+    }
+}
+
+#[cfg(test)]
+mod merge_publish_enrichment_tests {
+    use super::*;
+    use chrono::Utc;
+
+    fn make_mod(name: &str, version: &str) -> crate::profiles::ProfileMod {
+        crate::profiles::ProfileMod {
+            name: name.into(),
+            version: version.into(),
+            source: None,
+            hash: None,
+            files: vec![format!("{name}/{name}.dll")],
+            folder_name: Some(name.into()),
+            mod_id: Some(name.into()),
+            enabled: true,
+            bundle_url: None,
+            bundle_sha256: None,
+            bundle_members: vec![],
+        }
+    }
+
+    fn make_profile(name: &str, mods: Vec<crate::profiles::ProfileMod>) -> Profile {
+        Profile {
+            name: name.into(),
+            game_version: None,
+            created_by: None,
+            mods,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            public: None,
+            mod_extras: Default::default(),
+        }
+    }
+
+    /// bundle_url/bundle_sha256 from the uploaded (filtered) profile must
+    /// land on the matching on-disk mod, without disturbing other fields.
+    #[test]
+    fn merge_copies_bundle_url_and_sha256_onto_matching_on_disk_mod() {
+        let on_disk = make_profile("Pack", vec![make_mod("Mod A", "1.0.0")]);
+
+        let mut uploaded_mod = make_mod("Mod A", "1.0.0");
+        uploaded_mod.bundle_url = Some("https://example.com/a.zip".into());
+        uploaded_mod.bundle_sha256 = Some("deadbeef".into());
+        let uploaded = make_profile("Pack", vec![uploaded_mod]);
+
+        let merged = merge_publish_enrichment(&on_disk, &uploaded);
+
+        assert_eq!(merged.mods.len(), 1);
+        assert_eq!(
+            merged.mods[0].bundle_url.as_deref(),
+            Some("https://example.com/a.zip")
+        );
+        assert_eq!(merged.mods[0].bundle_sha256.as_deref(), Some("deadbeef"));
+    }
+
+    /// On-disk members that have no counterpart in the uploaded (filtered)
+    /// profile -- e.g. a stored mod excluded from an active-pack upload --
+    /// must be preserved untouched by the merge.
+    #[test]
+    fn merge_preserves_on_disk_members_missing_from_uploaded() {
+        let on_disk = make_profile(
+            "Pack",
+            vec![make_mod("Active Mod", "1.0.0"), make_mod("Stored Mod", "2.0.0")],
+        );
+
+        // Uploaded copy only has the active mod (stored mod was excluded).
+        let mut uploaded_mod = make_mod("Active Mod", "1.0.0");
+        uploaded_mod.bundle_url = Some("https://example.com/active.zip".into());
+        uploaded_mod.bundle_sha256 = Some("cafef00d".into());
+        let uploaded = make_profile("Pack", vec![uploaded_mod]);
+
+        let merged = merge_publish_enrichment(&on_disk, &uploaded);
+
+        assert_eq!(
+            merged.mods.len(),
+            2,
+            "stored mod absent from the upload must still be present after merge"
+        );
+        let stored = merged.mods.iter().find(|m| m.name == "Stored Mod").unwrap();
+        assert!(stored.bundle_url.is_none());
+        assert!(stored.bundle_sha256.is_none());
+
+        let active = merged.mods.iter().find(|m| m.name == "Active Mod").unwrap();
+        assert_eq!(
+            active.bundle_url.as_deref(),
+            Some("https://example.com/active.zip")
+        );
+    }
+
+    /// `source` is fill-only: it's copied from the uploaded profile only
+    /// when the on-disk mod doesn't already have one. An existing on-disk
+    /// source (e.g. a curator-set value) must never be clobbered.
+    #[test]
+    fn merge_source_is_fill_only() {
+        // Case 1: on-disk has no source -> filled from uploaded.
+        let on_disk = make_profile("Pack", vec![make_mod("Mod A", "1.0.0")]);
+        let mut uploaded_mod = make_mod("Mod A", "1.0.0");
+        uploaded_mod.source = Some("nexus:123".into());
+        let uploaded = make_profile("Pack", vec![uploaded_mod]);
+
+        let merged = merge_publish_enrichment(&on_disk, &uploaded);
+        assert_eq!(merged.mods[0].source.as_deref(), Some("nexus:123"));
+
+        // Case 2: on-disk already has a source -> kept, not overwritten.
+        let mut existing_mod = make_mod("Mod A", "1.0.0");
+        existing_mod.source = Some("curator:override".into());
+        let on_disk_with_source = make_profile("Pack", vec![existing_mod]);
+
+        let mut uploaded_mod2 = make_mod("Mod A", "1.0.0");
+        uploaded_mod2.source = Some("nexus:123".into());
+        let uploaded2 = make_profile("Pack", vec![uploaded_mod2]);
+
+        let merged2 = merge_publish_enrichment(&on_disk_with_source, &uploaded2);
+        assert_eq!(
+            merged2.mods[0].source.as_deref(),
+            Some("curator:override"),
+            "existing on-disk source must not be clobbered by the uploaded value"
+        );
+    }
+
+    /// `created_by` and `public` are publish-time metadata that should be
+    /// taken from the uploaded profile (the source of truth for "what was
+    /// just published").
+    #[test]
+    fn merge_updates_created_by_and_public_from_uploaded() {
+        let on_disk = make_profile("Pack", vec![make_mod("Mod A", "1.0.0")]);
+        assert_eq!(on_disk.created_by, None);
+        assert_eq!(on_disk.public, None);
+
+        let mut uploaded = make_profile("Pack", vec![make_mod("Mod A", "1.0.0")]);
+        uploaded.created_by = Some("octo".into());
+        uploaded.public = Some(true);
+
+        let merged = merge_publish_enrichment(&on_disk, &uploaded);
+        assert_eq!(merged.created_by.as_deref(), Some("octo"));
+        assert_eq!(merged.public, Some(true));
+    }
+
+    /// `public = None` on the uploaded profile must not clobber an
+    /// existing on-disk `public` value (e.g. when re-sharing without
+    /// changing visibility, callers that don't set `public` shouldn't
+    /// silently reset it).
+    #[test]
+    fn merge_keeps_on_disk_public_when_uploaded_public_is_none() {
+        let mut on_disk = make_profile("Pack", vec![make_mod("Mod A", "1.0.0")]);
+        on_disk.public = Some(true);
+
+        let uploaded = make_profile("Pack", vec![make_mod("Mod A", "1.0.0")]);
+        assert_eq!(uploaded.public, None);
+
+        let merged = merge_publish_enrichment(&on_disk, &uploaded);
+        assert_eq!(
+            merged.public,
+            Some(true),
+            "on-disk public flag must survive when uploaded profile doesn't specify one"
         );
     }
 }

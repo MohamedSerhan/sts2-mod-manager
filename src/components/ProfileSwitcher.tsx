@@ -5,6 +5,7 @@ import { listProfiles, switchProfile, checkSubscriptionUpdates, getProfileDrift 
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from './ConfirmDialog';
+import { recordModpackLaunch } from '../lib/modpackUsage';
 import type { Profile, SubscriptionUpdate } from '../types';
 
 // v5 — Profile switcher popover. Opens from the top-bar profile chip.
@@ -114,6 +115,7 @@ export function ProfileSwitcher({ onClose, onAddPack, onManageAll }: Props) {
     try {
       const result = await switchProfile(name);
       setActiveProfile(name);
+      recordModpackLaunch(name);
       await refreshAll();
       if (result.missing_mods.length > 0) {
         toast.info(

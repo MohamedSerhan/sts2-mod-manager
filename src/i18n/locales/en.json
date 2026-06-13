@@ -617,7 +617,7 @@
   "modpacks": {
     "tabs": {
       "yours": "Installed",
-      "browse": "Browse community packs"
+      "browse": "Browse modpacks"
     },
     "quickAdd": {
       "label": "Add a modpack by code",

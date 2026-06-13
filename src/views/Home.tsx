@@ -365,6 +365,7 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
         if (outcome.result.downloaded > 0) parts.push(t('common.parts.downloaded', { count: outcome.result.downloaded }));
         if (outcome.result.failed_downloads.length > 0) parts.push(t('common.parts.failed', { count: outcome.result.failed_downloads.length }));
         if (outcome.result.missing_mods.length > 0) parts.push(t('common.parts.stillMissing', { count: outcome.result.missing_mods.length }));
+        if ((outcome.result.failed_enables ?? []).length > 0) parts.push(t('common.parts.enableFailed', { count: outcome.result.failed_enables?.length ?? 0 }));
         toast.info(parts.length ? t('profiles.toast.reappliedWithDetails', { name: outcome.profileName, details: parts.join(', ') }) : t('profiles.toast.reapplied', { name: outcome.profileName }));
       } else if (outcome.kind === 'synced') {
         toast.success(t('profiles.toast.syncedUpToDate', { name: outcome.profileName }));

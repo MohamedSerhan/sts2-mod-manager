@@ -247,6 +247,30 @@ describe('<ProfileSwitcher>', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it('reports installed pack mods that could not be activated after switch retries', async () => {
+    registerInvokeHandler('list_profiles_cmd', () => PROFILES);
+    registerInvokeHandler('get_active_profile', () => 'My Pack');
+    registerInvokeHandler('switch_profile', () => ({
+      downloaded: 0,
+      missing_mods: [],
+      failed_downloads: [],
+      failed_enables: ['LockedMod'],
+      activated: true,
+    }));
+
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    render(<Wrap onClose={onClose} />);
+
+    await screen.findByText('Other');
+    await user.click(screen.getByText('Other'));
+
+    await waitFor(() => {
+      expect(screen.getByText(/1 could not activate: LockedMod/)).toBeInTheDocument();
+    });
+    expect(onClose).toHaveBeenCalled();
+  });
+
   it('foot buttons call onAddPack / onManageAll AND onClose', async () => {
     registerInvokeHandler('list_profiles_cmd', () => PROFILES);
     const onClose = vi.fn();

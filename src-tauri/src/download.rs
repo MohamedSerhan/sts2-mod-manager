@@ -16,6 +16,14 @@ const HTTP_TOTAL_TIMEOUT: Duration = Duration::from_secs(60);
 /// Connect timeout for HTTP clients. A connect that's still pending
 /// after 10s is almost certainly a routing/DNS issue, not a slow handshake.
 const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// One initial download try plus two automatic retries for transient
+/// network/server failures. Auth/not-found/validation failures still stop
+/// immediately because another attempt cannot repair them.
+const DOWNLOAD_RETRY_MAX_ATTEMPTS: u32 = 3;
+#[cfg(not(test))]
+const DOWNLOAD_RETRY_BASE_DELAY: Duration = Duration::from_secs(2);
+#[cfg(test)]
+const DOWNLOAD_RETRY_BASE_DELAY: Duration = Duration::from_millis(1);
 
 // ── GitHub API Types ────────────────────────────────────────────────────────
 
@@ -89,6 +97,83 @@ fn build_client(token: Option<&str>) -> reqwest::Client {
         .connect_timeout(HTTP_CONNECT_TIMEOUT)
         .build()
         .unwrap_or_default()
+}
+
+fn download_status_is_transient(status: reqwest::StatusCode) -> bool {
+    status.is_server_error()
+        || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+        || status == reqwest::StatusCode::FORBIDDEN
+}
+
+fn download_error_is_transient(error: &reqwest::Error) -> bool {
+    error.is_timeout() || error.is_connect() || error.is_request() || error.is_body()
+}
+
+enum DownloadAttemptError {
+    Transient(String),
+    Permanent(AppError),
+}
+
+async fn download_file_once<F>(
+    client: &reqwest::Client,
+    url: &str,
+    dest: &Path,
+    on_progress: &F,
+) -> std::result::Result<(), DownloadAttemptError>
+where
+    F: Fn(u64, u64),
+{
+    let resp = client.get(url).send().await.map_err(|e| {
+        if download_error_is_transient(&e) {
+            DownloadAttemptError::Transient(e.to_string())
+        } else {
+            DownloadAttemptError::Permanent(e.into())
+        }
+    })?;
+    let status = resp.status();
+    if !status.is_success() {
+        return Err(if download_status_is_transient(status) {
+            DownloadAttemptError::Transient(format!("HTTP {}", status))
+        } else {
+            DownloadAttemptError::Permanent(AppError::Other(format!(
+                "Download failed with HTTP {}",
+                status
+            )))
+        });
+    }
+    let total = resp.content_length().unwrap_or(0);
+
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(AppError::from)
+            .map_err(DownloadAttemptError::Permanent)?;
+    }
+
+    let mut file = std::fs::File::create(dest)
+        .map_err(AppError::from)
+        .map_err(DownloadAttemptError::Permanent)?;
+    let mut downloaded: u64 = 0;
+    let mut stream = resp.bytes_stream();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| {
+            if download_error_is_transient(&e) {
+                DownloadAttemptError::Transient(e.to_string())
+            } else {
+                DownloadAttemptError::Permanent(e.into())
+            }
+        })?;
+        file.write_all(&chunk)
+            .map_err(AppError::from)
+            .map_err(DownloadAttemptError::Permanent)?;
+        downloaded += chunk.len() as u64;
+        on_progress(downloaded, total);
+    }
+
+    file.flush()
+        .map_err(AppError::from)
+        .map_err(DownloadAttemptError::Permanent)?;
+    Ok(())
 }
 
 /// Fetch the latest release from a GitHub repository.
@@ -519,26 +604,33 @@ where
         .build()
         .unwrap_or_default();
 
-    let resp = client.get(url).send().await?.error_for_status()?;
-    let total = resp.content_length().unwrap_or(0);
-
-    if let Some(parent) = dest.parent() {
-        std::fs::create_dir_all(parent)?;
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
+        match download_file_once(&client, url, dest, &on_progress).await {
+            Ok(()) => return Ok(()),
+            Err(DownloadAttemptError::Permanent(e)) => return Err(e),
+            Err(DownloadAttemptError::Transient(reason)) => {
+                if attempt >= DOWNLOAD_RETRY_MAX_ATTEMPTS {
+                    let _ = std::fs::remove_file(dest);
+                    return Err(AppError::Other(format!(
+                        "Download failed after {} attempts: {}",
+                        DOWNLOAD_RETRY_MAX_ATTEMPTS, reason
+                    )));
+                }
+                log::warn!(
+                    "Transient download failure for '{}' (attempt {}/{}): {}",
+                    url,
+                    attempt,
+                    DOWNLOAD_RETRY_MAX_ATTEMPTS,
+                    reason
+                );
+                let _ = std::fs::remove_file(dest);
+                let backoff = DOWNLOAD_RETRY_BASE_DELAY.saturating_mul(1u32 << (attempt - 1));
+                tokio::time::sleep(backoff).await;
+            }
+        }
     }
-
-    let mut file = std::fs::File::create(dest)?;
-    let mut downloaded: u64 = 0;
-    let mut stream = resp.bytes_stream();
-
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk?;
-        file.write_all(&chunk)?;
-        downloaded += chunk.len() as u64;
-        on_progress(downloaded, total);
-    }
-
-    file.flush()?;
-    Ok(())
 }
 
 /// Sanitize an arbitrary string into a path-safe slug. Used to scope
@@ -734,7 +826,9 @@ pub async fn install_compatible_github_mod(
     if walked_back {
         log::info!(
             "install_compatible_github_mod: picked {}/{}@{} for game v{} (skipped newer release with min_game_version={})",
-            owner, repo, chosen.tag,
+            owner,
+            repo,
+            chosen.tag,
             user_game_version.unwrap_or("?"),
             chosen.min_game_version.as_deref().unwrap_or("?"),
         );
@@ -1156,6 +1250,59 @@ pub async fn download_url_mod(
         })
     } else {
         Err(format!("Unsupported file type: {}", file_name))
+    }
+}
+
+#[cfg(test)]
+mod download_retry_tests {
+    use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn download_file_retries_transient_500_then_succeeds() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/mod.zip"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("not yet"))
+            .up_to_n_times(1)
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/mod.zip"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"zip-bytes"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("mod.zip");
+        download_file(&format!("{}/mod.zip", server.uri()), &dest, |_, _| {})
+            .await
+            .expect("transient 500 should be retried");
+
+        assert_eq!(std::fs::read(&dest).unwrap(), b"zip-bytes");
+    }
+
+    #[tokio::test]
+    async fn download_file_does_not_retry_permanent_404() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/missing.zip"))
+            .respond_with(ResponseTemplate::new(404))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("missing.zip");
+        let err = download_file(&format!("{}/missing.zip", server.uri()), &dest, |_, _| {})
+            .await
+            .expect_err("permanent 404 should fail without retry");
+
+        assert!(err.to_string().contains("404"));
+        assert!(!dest.exists());
     }
 }
 

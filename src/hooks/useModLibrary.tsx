@@ -97,8 +97,8 @@ export interface UseModLibraryOptions {
    *  pack's membership immediately. Unset = All Mods (install to disk only). */
   targetPack?: string | null;
   targetPackLabel?: string | null;
-  /** Fired when a target-pack install changed that pack's local manifest. */
-  onTargetPackChanged?: () => void;
+  /** Fired when a target-pack edit changed that pack's local manifest. */
+  onTargetPackChanged?: () => void | Promise<void>;
   /** When set, the Audit action checks ONLY these mods (the modpack view
    *  audits just its pack). Unset = audit everything (All Mods view).
    *  A function so callers can read the latest pack contents at click time. */
@@ -195,7 +195,33 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
       true,
       mod.source ?? mod.github_url ?? mod.nexus_url ?? null,
     );
-    onTargetPackChanged?.();
+    await onTargetPackChanged?.();
+  }
+
+  function sourceHintForMod(mod: ModInfo): string | null {
+    return mod.source ?? mod.github_url ?? mod.nexus_url ?? null;
+  }
+
+  async function syncTargetPackUpdatedMods(updated: ModInfo[], scopedNames?: string[]) {
+    if (!targetPack || updated.length === 0) return;
+    if (await targetPackIsFollowed()) return;
+    const scoped = scopedNames
+      ? new Set(scopedNames.map((name) => name.toLocaleLowerCase()))
+      : null;
+    let synced = false;
+    for (const mod of updated) {
+      if (scoped && !scoped.has(mod.name.toLocaleLowerCase())) continue;
+      await setProfileModMembership(
+        targetPack,
+        mod.name,
+        mod.folder_name ?? null,
+        mod.mod_id ?? null,
+        true,
+        sourceHintForMod(mod),
+      );
+      synced = true;
+    }
+    if (synced) await onTargetPackChanged?.();
   }
 
   function showInstallToast(mod: ModInfo, addedToPack: boolean) {
@@ -255,6 +281,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     setUpdatingKey(key);
     try {
       const info = await updateMod(mod.name, mod.folder_name);
+      await syncTargetPackUpdatedMods([info]);
       toast.success(t('mods.toast.updated', { name: mod.name, version: info.version }));
       await refreshAll();
       const names = info.name !== mod.name ? [mod.name, info.name] : [mod.name];
@@ -265,6 +292,15 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     } finally {
       setUpdatingKey(null);
     }
+  }
+
+  async function updateAllGithubForSurface(githubUpdateNames: string[]) {
+    return updateAllGithub(
+      githubUpdateNames,
+      targetPack
+        ? { afterUpdate: (updated) => syncTargetPackUpdatedMods(updated, githubUpdateNames) }
+        : undefined,
+    );
   }
 
   async function handleTogglePin(mod: ModInfo) {
@@ -685,7 +721,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     auditResults,
     auditing,
     updatingAll,
-    updateAllGithub,
+    updateAllGithub: updateAllGithubForSurface,
     // Toolbar state.
     showQuickAdd,
     setShowQuickAdd,

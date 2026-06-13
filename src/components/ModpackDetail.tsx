@@ -165,13 +165,18 @@ export function ModpackDetail({
   const markSharedLocalEdit = () => {
     if (isShared) onLocalOutOfSync?.(profileKey);
   };
+  const refreshAfterMutation = async () => {
+    markSharedLocalEdit();
+    await refreshAll();
+    onLibraryChanged?.();
+  };
   // Shared mod-library surface (toolbar + install actions), scoped so a
   // mod installed from here auto-joins THIS pack, and the Audit action
   // checks only this pack's mods. The same hook powers the All Mods view.
   const lib = useModLibrary({
     targetPack: profileKey,
     targetPackLabel: profile.name,
-    onTargetPackChanged: markSharedLocalEdit,
+    onTargetPackChanged: refreshAfterMutation,
     auditScope: () => profile.mods.map((m) => m.name),
   });
   // Scroll-pin safety net (shared with LibraryTable via usePinScroll). The
@@ -304,12 +309,6 @@ export function ModpackDetail({
       );
     });
   }, [availableMods, availableQuery]);
-
-  const refreshAfterMutation = async () => {
-    markSharedLocalEdit();
-    await refreshAll();
-    onLibraryChanged?.();
-  };
 
   const setBusy = (key: string, busy: boolean) => {
     setBusyKeys((prev) => {

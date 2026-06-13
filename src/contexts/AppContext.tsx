@@ -45,7 +45,10 @@ interface AppContextType {
   /** Run a bulk update across every GitHub-sourced row in `names`. Shows
    *  a confirm, toasts a summary, then re-audits just the touched rows.
    *  Safe to call with a single name. */
-  updateAllGithub: (githubUpdateNames: string[]) => Promise<void>;
+  updateAllGithub: (
+    githubUpdateNames: string[],
+    opts?: { afterUpdate?: (updated: ModInfo[]) => Promise<void> | void },
+  ) => Promise<ModInfo[]>;
 }
 
 /** Failsafe — if the watcher never fires (user closed the browser without
@@ -260,17 +263,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const updateAllGithub = useCallback(async (githubUpdateNames: string[]) => {
-    if (updatingAll || githubUpdateNames.length === 0) return;
+  const updateAllGithub = useCallback(async (
+    githubUpdateNames: string[],
+    opts?: { afterUpdate?: (updated: ModInfo[]) => Promise<void> | void },
+  ): Promise<ModInfo[]> => {
+    if (updatingAll || githubUpdateNames.length === 0) return [];
     const ok = await confirm({
       title: t('app.updateConfirmTitle', { count: githubUpdateNames.length }),
       body: t('app.updateConfirmBody'),
       confirmLabel: t('app.updateConfirmLabel', { count: githubUpdateNames.length }),
     });
-    if (!ok) return;
+    if (!ok) return [];
     setUpdatingAll(true);
     try {
       const updated = await updateAllMods();
+      await opts?.afterUpdate?.(updated);
       toast.success(
         updated.length === 0
           ? t('app.nothingToUpdate')
@@ -281,12 +288,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         new Set([...githubUpdateNames, ...updated.map((m) => m.name)]),
       );
       await refreshAuditEntries(names);
+      return updated;
     } catch (e) {
       toast.error(t('app.updateFailed', { error: e instanceof Error ? e.message : String(e) }));
+      return [];
     } finally {
       setUpdatingAll(false);
     }
-  }, [updatingAll, confirm, toast, refreshAll, refreshAuditEntries]);
+  }, [updatingAll, confirm, toast, t, refreshAll, refreshAuditEntries]);
 
   // Auto-refresh audit rows when the downloads watcher catches a new mod
   // — only if an audit is currently loaded (don't surprise the user by

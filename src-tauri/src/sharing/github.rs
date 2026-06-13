@@ -16,6 +16,8 @@
 //! call into these helpers, and `sharing/code.rs` for the pure
 //! share-code parsing/validation layer.
 
+use std::io::Read;
+use std::path::Path;
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -404,6 +406,12 @@ enum RetryClass {
     Permanent(String),
 }
 
+#[derive(Clone, Copy)]
+enum AssetUploadPayload<'a> {
+    Bytes(&'a [u8]),
+    File(&'a Path),
+}
+
 /// Parse a `Retry-After` header value (delay-seconds form only — GitHub's
 /// rate-limit responses use integer seconds) into a capped `Duration`.
 /// Returns `None` for missing/garbage values so the caller falls back to
@@ -456,6 +464,40 @@ pub(super) async fn upload_release_asset(
     label: Option<&str>,
     data: &[u8],
 ) -> Result<ReleaseAsset> {
+    upload_release_asset_payload(
+        client,
+        upload_url_template,
+        filename,
+        label,
+        AssetUploadPayload::Bytes(data),
+    )
+    .await
+}
+
+pub(super) async fn upload_release_asset_file(
+    client: &reqwest::Client,
+    upload_url_template: &str,
+    filename: &str,
+    label: Option<&str>,
+    path: &Path,
+) -> Result<ReleaseAsset> {
+    upload_release_asset_payload(
+        client,
+        upload_url_template,
+        filename,
+        label,
+        AssetUploadPayload::File(path),
+    )
+    .await
+}
+
+async fn upload_release_asset_payload(
+    client: &reqwest::Client,
+    upload_url_template: &str,
+    filename: &str,
+    label: Option<&str>,
+    payload: AssetUploadPayload<'_>,
+) -> Result<ReleaseAsset> {
     let base = upload_url_template
         .split_once('{')
         .map(|(b, _)| b)
@@ -484,13 +526,36 @@ pub(super) async fn upload_release_asset(
         // Classify this attempt without holding the response borrow across
         // the backoff sleep: resolve to `Ok(asset)`, retry, or a permanent
         // error before we decide whether to loop.
-        let outcome: std::result::Result<ReleaseAsset, RetryClass> = match client
+        let mut request = client
             .post(&url)
-            .header(reqwest::header::CONTENT_TYPE, "application/zip")
-            .body(data.to_vec())
-            .send()
-            .await
-        {
+            .header(reqwest::header::CONTENT_TYPE, "application/zip");
+        request = match payload {
+            AssetUploadPayload::Bytes(data) => request.body(data.to_vec()),
+            AssetUploadPayload::File(path) => {
+                let file = tokio::fs::File::open(path).await.map_err(|e| {
+                    AppError::Other(format!(
+                        "Failed to open release asset '{}' for upload from '{}': {}",
+                        filename,
+                        path.display(),
+                        e
+                    ))
+                })?;
+                let size = file.metadata().await.map_err(|e| {
+                    AppError::Other(format!(
+                        "Failed to stat release asset '{}' at '{}': {}",
+                        filename,
+                        path.display(),
+                        e
+                    ))
+                })?;
+                let stream = tokio_util::io::ReaderStream::new(file);
+                request
+                    .header(reqwest::header::CONTENT_LENGTH, size.len())
+                    .body(reqwest::Body::wrap_stream(stream))
+            }
+        };
+
+        let outcome: std::result::Result<ReleaseAsset, RetryClass> = match request.send().await {
             Ok(resp) => {
                 let status = resp.status();
                 if status.is_success() {
@@ -581,7 +646,50 @@ pub(super) async fn upload_release_asset_recovering(
     label: Option<&str>,
     data: &[u8],
 ) -> Result<ReleaseAsset> {
-    match upload_release_asset(client, upload_url_template, filename, label, data).await {
+    upload_release_asset_recovering_payload(
+        client,
+        owner,
+        repo,
+        upload_url_template,
+        filename,
+        label,
+        AssetUploadPayload::Bytes(data),
+    )
+    .await
+}
+
+pub(super) async fn upload_release_asset_file_recovering(
+    client: &reqwest::Client,
+    owner: &str,
+    repo: &str,
+    upload_url_template: &str,
+    filename: &str,
+    label: Option<&str>,
+    path: &Path,
+) -> Result<ReleaseAsset> {
+    upload_release_asset_recovering_payload(
+        client,
+        owner,
+        repo,
+        upload_url_template,
+        filename,
+        label,
+        AssetUploadPayload::File(path),
+    )
+    .await
+}
+
+async fn upload_release_asset_recovering_payload(
+    client: &reqwest::Client,
+    owner: &str,
+    repo: &str,
+    upload_url_template: &str,
+    filename: &str,
+    label: Option<&str>,
+    payload: AssetUploadPayload<'_>,
+) -> Result<ReleaseAsset> {
+    match upload_release_asset_payload(client, upload_url_template, filename, label, payload).await
+    {
         Ok(asset) => Ok(asset),
         Err(AppError::Other(msg)) if msg.contains("already_exists") => {
             log::warn!(
@@ -597,7 +705,14 @@ pub(super) async fn upload_release_asset_recovering(
             match existing {
                 Some(asset) => {
                     delete_release_asset(client, owner, repo, asset.id).await?;
-                    upload_release_asset(client, &fresh.upload_url, filename, label, data).await
+                    upload_release_asset_payload(
+                        client,
+                        &fresh.upload_url,
+                        filename,
+                        label,
+                        payload,
+                    )
+                    .await
                 }
                 None => Err(AppError::Other(format!(
                     "Upload of '{}' failed with 422 already_exists but the asset is not visible in the release listing — \
@@ -667,6 +782,22 @@ pub(super) async fn replace_release_asset_via_delete_post(
     Ok(asset.browser_download_url)
 }
 
+pub(super) async fn replace_release_asset_via_delete_post_file(
+    client: &reqwest::Client,
+    owner: &str,
+    repo: &str,
+    upload_url_template: &str,
+    canonical_name: &str,
+    label: Option<&str>,
+    old_asset_id: u64,
+    path: &Path,
+) -> Result<String> {
+    delete_release_asset(client, owner, repo, old_asset_id).await?;
+    let asset =
+        upload_release_asset_file(client, upload_url_template, canonical_name, label, path).await?;
+    Ok(asset.browser_download_url)
+}
+
 /// Upload a mod's zip bundle as a release asset on the curator's
 /// `sts2mm-profiles` repo. Returns (download_url, sha256_hex) so the
 /// caller can persist the hash to the profile manifest for next-share
@@ -679,6 +810,7 @@ pub(super) async fn replace_release_asset_via_delete_post(
 ///   - If the name collides but the hash differs (or no prior hash to
 ///     compare to) → replace via DELETE-then-POST.
 ///   - If the name doesn't exist on the release → POST under canonical name.
+#[allow(dead_code)]
 pub(super) async fn upload_mod_bundle_via_release(
     token: &str,
     username: &str,
@@ -689,8 +821,6 @@ pub(super) async fn upload_mod_bundle_via_release(
     repo: &str,
 ) -> Result<(String, String)> {
     use sha2::{Digest, Sha256};
-
-    let client = build_client(token);
 
     // Hash first so the asset filename can carry the content prefix.
     // Content-addressed names mean: identical bytes → identical filename
@@ -705,6 +835,53 @@ pub(super) async fn upload_mod_bundle_via_release(
     hasher.update(zip_data);
     let local_hash = hex::encode(hasher.finalize());
 
+    upload_mod_bundle_via_release_payload(
+        token,
+        username,
+        mod_name,
+        version,
+        local_hash,
+        prior_sha256,
+        repo,
+        AssetUploadPayload::Bytes(zip_data),
+    )
+    .await
+}
+
+pub(super) async fn upload_mod_bundle_file_via_release(
+    token: &str,
+    username: &str,
+    mod_name: &str,
+    version: &str,
+    zip_path: &Path,
+    prior_sha256: Option<&str>,
+    repo: &str,
+) -> Result<(String, String)> {
+    let local_hash = sha256_hex_file(zip_path)?;
+    upload_mod_bundle_via_release_payload(
+        token,
+        username,
+        mod_name,
+        version,
+        local_hash,
+        prior_sha256,
+        repo,
+        AssetUploadPayload::File(zip_path),
+    )
+    .await
+}
+
+async fn upload_mod_bundle_via_release_payload(
+    token: &str,
+    username: &str,
+    mod_name: &str,
+    version: &str,
+    local_hash: String,
+    prior_sha256: Option<&str>,
+    repo: &str,
+    payload: AssetUploadPayload<'_>,
+) -> Result<(String, String)> {
+    let client = build_client(token);
     let asset_name = release_asset_name(mod_name, version, &local_hash);
     // GitHub strips non-ASCII chars from the asset filename it stores
     // (Chinese ideographs, emoji, etc.) — undocumented but consistent
@@ -757,7 +934,23 @@ pub(super) async fn upload_mod_bundle_via_release(
             &asset_name,
             Some(&asset_label),
             existing.id,
-            zip_data,
+            match payload {
+                AssetUploadPayload::Bytes(data) => data,
+                AssetUploadPayload::File(path) => {
+                    return replace_release_asset_via_delete_post_file(
+                        &client,
+                        username,
+                        repo,
+                        &release.upload_url,
+                        &asset_name,
+                        Some(&asset_label),
+                        existing.id,
+                        path,
+                    )
+                    .await
+                    .map(|url| (url, local_hash));
+                }
+            },
         )
         .await?;
         return Ok((url, local_hash));
@@ -772,10 +965,53 @@ pub(super) async fn upload_mod_bundle_via_release(
         &release.upload_url,
         &asset_name,
         Some(&asset_label),
-        zip_data,
+        match payload {
+            AssetUploadPayload::Bytes(data) => data,
+            AssetUploadPayload::File(path) => {
+                let asset = upload_release_asset_file_recovering(
+                    &client,
+                    username,
+                    repo,
+                    &release.upload_url,
+                    &asset_name,
+                    Some(&asset_label),
+                    path,
+                )
+                .await?;
+                return Ok((asset.browser_download_url, local_hash));
+            }
+        },
     )
     .await?;
     Ok((asset.browser_download_url, local_hash))
+}
+
+fn sha256_hex_file(path: &Path) -> Result<String> {
+    use sha2::{Digest, Sha256};
+
+    let mut file = std::fs::File::open(path).map_err(|e| {
+        AppError::Other(format!(
+            "Failed to open bundle '{}' for hashing: {}",
+            path.display(),
+            e
+        ))
+    })?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 1024 * 1024];
+    loop {
+        let read = file.read(&mut buf).map_err(|e| {
+            AppError::Other(format!(
+                "Failed to read bundle '{}' for hashing: {}",
+                path.display(),
+                e
+            ))
+        })?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buf[..read]);
+    }
+    Ok(hex::encode(hasher.finalize()))
 }
 
 /// Delete every asset on the curator's `bundles` release that no profile
@@ -1647,6 +1883,47 @@ pub(super) mod release_upload_tests {
         assert_eq!(
             asset.browser_download_url,
             "https://github.com/octo/sts2mm-profiles/releases/download/bundles/TheCursedMod_v0.2.7.zip"
+        );
+    }
+
+    #[tokio::test]
+    async fn upload_release_asset_file_posts_streamed_file_with_content_length() {
+        let (server, _env_guard) = mock_github().await;
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), b"PK\x03\x04...file-backed-zip-bytes").unwrap();
+
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("name", "LargeArtMod_v1.0.0.zip"))
+            .and(header("content-type", "application/zip"))
+            .and(header("content-length", "28"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": 1000,
+                "name": "LargeArtMod_v1.0.0.zip",
+                "browser_download_url": "https://github.com/octo/sts2mm-profiles/releases/download/bundles/LargeArtMod_v1.0.0.zip"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let upload_url_template = format!(
+            "{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}",
+            server.uri()
+        );
+        let client = build_client("test-token");
+        let asset = upload_release_asset_file(
+            &client,
+            &upload_url_template,
+            "LargeArtMod_v1.0.0.zip",
+            None,
+            tmp.path(),
+        )
+        .await
+        .expect("file-backed upload should succeed");
+
+        assert_eq!(
+            asset.browser_download_url,
+            "https://github.com/octo/sts2mm-profiles/releases/download/bundles/LargeArtMod_v1.0.0.zip"
         );
     }
 

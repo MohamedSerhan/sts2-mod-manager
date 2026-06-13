@@ -847,26 +847,40 @@ fn attach_pending_nexus_source_for_file(
 }
 
 fn normalize_pending_nexus_name(name: &str) -> String {
-    name.to_lowercase()
-        .replace(" lite", "")
-        .replace(" full", "")
-        .replace(" plus", "")
-        .replace(" pro", "")
-        .trim()
-        .to_string()
+    name.to_lowercase().trim().to_string()
 }
 
 fn compact_pending_nexus_identity(name: &str) -> String {
-    name.chars()
+    let without_version = strip_pending_nexus_display_version_suffix(name);
+    let compact: String = without_version
+        .chars()
         .filter(|c| c.is_ascii_alphanumeric())
         .map(|c| c.to_ascii_lowercase())
-        .collect()
+        .collect();
+    compact
+        .strip_prefix("sts2")
+        .unwrap_or(compact.as_str())
+        .to_string()
+}
+
+fn strip_pending_nexus_display_version_suffix(name: &str) -> &str {
+    for (idx, ch) in name.char_indices().rev() {
+        if (ch == 'v' || ch == 'V')
+            && name[idx + ch.len_utf8()..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_digit())
+        {
+            return name[..idx].trim();
+        }
+    }
+    name
 }
 
 fn pending_nexus_identities_overlap(a: &str, b: &str) -> bool {
     let a = compact_pending_nexus_identity(&normalize_pending_nexus_name(a));
     let b = compact_pending_nexus_identity(&normalize_pending_nexus_name(b));
-    a.len() >= 4 && b.len() >= 4 && (a.contains(&b) || b.contains(&a))
+    !a.is_empty() && a == b
 }
 
 fn pending_nexus_filename_matches_installed(
@@ -961,6 +975,22 @@ pub fn get_mod_dependents(
 mod pending_nexus_manual_install_tests {
     use super::*;
     use crate::state::{create_app_state, PendingNexusInstall};
+
+    #[test]
+    fn pending_nexus_identity_does_not_merge_lite_variants() {
+        assert!(
+            !pending_nexus_identities_overlap("BetterSpire2", "BetterSpire2 Lite"),
+            "variant suffixes must not collapse separate manual-install source hints"
+        );
+        assert!(
+            !pending_nexus_filename_matches_installed(
+                "BetterSpire2-123-1-0-0-1780000000.zip",
+                "BetterSpire2 Lite",
+                Some("BetterSpire2Lite"),
+            ),
+            "Nexus filename matching must not treat BetterSpire2 as BetterSpire2 Lite"
+        );
+    }
 
     #[test]
     fn manual_archive_install_consumes_pending_nexus_hint_by_file_id() {

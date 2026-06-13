@@ -14,7 +14,8 @@
 //! `replace_release_asset_via_delete_post`) lives in `sharing/github.rs`
 //! alongside the HTTP plumbing it composes.
 
-use std::io::Write;
+use std::fs::File;
+use std::io::{Seek, Write};
 use std::path::{Component, Path, PathBuf};
 use walkdir::WalkDir;
 
@@ -54,7 +55,27 @@ pub(crate) fn zip_mod_files(
     mods_path: &std::path::Path,
 ) -> Result<Vec<u8>> {
     let buf = std::io::Cursor::new(Vec::new());
-    let mut zip_writer = zip::ZipWriter::new(buf);
+    let cursor = zip_mod_files_into_writer(mod_name, files, mods_path, buf)?;
+    Ok(cursor.into_inner())
+}
+
+pub(crate) fn zip_mod_files_to_tempfile(
+    mod_name: &str,
+    files: &[String],
+    mods_path: &std::path::Path,
+) -> Result<tempfile::NamedTempFile> {
+    let file = tempfile::NamedTempFile::new()
+        .map_err(|e| AppError::Other(format!("Create temp bundle for '{}': {}", mod_name, e)))?;
+    zip_mod_files_into_writer(mod_name, files, mods_path, file)
+}
+
+fn zip_mod_files_into_writer<W: Write + Seek>(
+    mod_name: &str,
+    files: &[String],
+    mods_path: &std::path::Path,
+    writer: W,
+) -> Result<W> {
+    let mut zip_writer = zip::ZipWriter::new(writer);
     let mut written_files = 0usize;
 
     // Deterministic output: pin every entry's mtime to the DOS epoch
@@ -74,11 +95,10 @@ pub(crate) fn zip_mod_files(
             zip_writer
                 .start_file(&normalized, options)
                 .map_err(|e| AppError::Other(format!("Zip error for '{}': {}", mod_name, e)))?;
-            let data = std::fs::read(&file_path).map_err(|e| {
+            let mut file = File::open(&file_path).map_err(|e| {
                 AppError::Other(format!("Read error for '{}': {}", file_path.display(), e))
             })?;
-            zip_writer
-                .write_all(&data)
+            std::io::copy(&mut file, &mut zip_writer)
                 .map_err(|e| AppError::Other(format!("Zip write error: {}", e)))?;
             written_files += 1;
         } else if file_path.is_dir() {
@@ -105,10 +125,9 @@ pub(crate) fn zip_mod_files(
                 zip_writer
                     .start_file(&entry_rel, options)
                     .map_err(|e| AppError::Other(format!("Zip error: {}", e)))?;
-                let data = std::fs::read(entry.path())
+                let mut file = File::open(entry.path())
                     .map_err(|e| AppError::Other(format!("Read error: {}", e)))?;
-                zip_writer
-                    .write_all(&data)
+                std::io::copy(&mut file, &mut zip_writer)
                     .map_err(|e| AppError::Other(format!("Zip write error: {}", e)))?;
                 written_files += 1;
             }
@@ -130,7 +149,7 @@ pub(crate) fn zip_mod_files(
     let cursor = zip_writer
         .finish()
         .map_err(|e| AppError::Other(format!("Zip finalize error: {}", e)))?;
-    Ok(cursor.into_inner())
+    Ok(cursor)
 }
 
 /// Hash the exact source files that would be bundled, without building
@@ -244,6 +263,21 @@ pub(crate) fn zip_profile_mod_files(
         Err(first_err) => {
             let fallback = if pm.enabled { disabled_path } else { mods_path };
             zip_mod_files(&pm.name, &pm.files, fallback).map_err(|_| first_err)
+        }
+    }
+}
+
+pub(crate) fn zip_profile_mod_files_to_tempfile(
+    pm: &crate::profiles::ProfileMod,
+    mods_path: &std::path::Path,
+    disabled_path: &std::path::Path,
+) -> Result<tempfile::NamedTempFile> {
+    let base = if pm.enabled { mods_path } else { disabled_path };
+    match zip_mod_files_to_tempfile(&pm.name, &pm.files, base) {
+        Ok(zip) => Ok(zip),
+        Err(first_err) => {
+            let fallback = if pm.enabled { disabled_path } else { mods_path };
+            zip_mod_files_to_tempfile(&pm.name, &pm.files, fallback).map_err(|_| first_err)
         }
     }
 }
@@ -535,6 +569,29 @@ mod publish_bundle_contract_tests {
             (mtime.year(), mtime.month(), mtime.day()),
             (1980, 1, 1),
             "entry mtimes must be pinned to the DOS epoch for determinism"
+        );
+    }
+
+    #[test]
+    fn zip_mod_files_streams_large_files_without_losing_content() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mod_dir = tmp.path().join("LargeArtMod");
+        std::fs::create_dir_all(&mod_dir).unwrap();
+        std::fs::write(mod_dir.join("LargeArtMod.json"), b"{}").unwrap();
+        let large_payload: Vec<u8> = (0..(4 * 1024 * 1024)).map(|i| (i % 251) as u8).collect();
+        std::fs::write(mod_dir.join("art.pck"), &large_payload).unwrap();
+
+        let zip_data = zip_mod_files("LargeArtMod", &["LargeArtMod".into()], tmp.path())
+            .expect("large bundle should zip successfully");
+
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip_data)).unwrap();
+        let mut entry = archive.by_name("LargeArtMod/art.pck").unwrap();
+        let mut roundtripped = Vec::new();
+        std::io::copy(&mut entry, &mut roundtripped).unwrap();
+
+        assert_eq!(
+            roundtripped, large_payload,
+            "streamed bundle entry must preserve large file bytes exactly"
         );
     }
 

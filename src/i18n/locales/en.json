@@ -1289,9 +1289,10 @@
     },
     "display": {
       "label": "Display size",
-      "desc": "Scale the entire interface. Affects both text and layout.",
+      "desc": "Scale the interface layout separately from text size.",
       "scaleLabel": "Interface scale",
-      "reset": "Reset to 100%"
+      "reset": "Reset to 100%",
+      "fontLabel": "Text size"
     },
     "accounts": {
       "nexusKey": "Nexus Mods API Key",

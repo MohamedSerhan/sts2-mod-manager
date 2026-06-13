@@ -35,7 +35,7 @@ function modCount(profile: Profile): number {
 
 export function ProfileSwitcher({ onClose, onAddPack, onManageAll }: Props) {
   const { t } = useTranslation();
-  const { activeProfile, setActiveProfile, refreshAll } = useApp();
+  const { activeProfile, activeProfileId, setActiveProfile, refreshAll } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -90,14 +90,18 @@ export function ProfileSwitcher({ onClose, onAddPack, onManageAll }: Props) {
     };
   }, [onClose]);
 
-  async function handleSwitch(name: string) {
-    if (name === activeProfile) {
+  const profileKey = (profile: Profile) => profile.id || profile.name;
+
+  async function handleSwitch(profile: Profile) {
+    const key = profileKey(profile);
+    const name = profile.name;
+    if (key === activeProfileId || name === activeProfile) {
       onClose();
       return;
     }
     if (activeProfile) {
       try {
-        const drift = await getProfileDrift(activeProfile);
+        const drift = await getProfileDrift(activeProfileId ?? activeProfile);
         if (drift.has_drift) {
           const ok = await confirm({
             title: t('profiles.confirm.switch.title', { name: activeProfile }),
@@ -114,9 +118,9 @@ export function ProfileSwitcher({ onClose, onAddPack, onManageAll }: Props) {
     }
     setSwitching(name);
     try {
-      const result = await switchProfile(name);
+      const result = await switchProfile(key);
       setActiveProfile(name);
-      recordModpackLaunch(name);
+      recordModpackLaunch(key);
       await refreshAll();
       const parts = switchResultDetails(result, t);
       if (parts.length > 0) {
@@ -161,15 +165,16 @@ export function ProfileSwitcher({ onClose, onAddPack, onManageAll }: Props) {
         </div>
       ) : (
         visibleProfiles.map((p) => {
-          const isActive = activeProfile === p.name;
+          const key = profileKey(p);
+          const isActive = activeProfileId === key || activeProfile === p.name;
           const count = modCount(p);
           const updateCount = updateCountFor(p.name);
           const initials = packInitials(p.name) || 'P';
           return (
             <button
-              key={p.name}
+              key={key}
               className={`gf-pop-item ${isActive ? 'active' : ''}`}
-              onClick={() => handleSwitch(p.name)}
+              onClick={() => handleSwitch(p)}
               disabled={switching !== null}
               style={{ background: 'transparent', border: 0, width: '100%', textAlign: 'start', font: 'inherit', cursor: 'pointer' }}
             >

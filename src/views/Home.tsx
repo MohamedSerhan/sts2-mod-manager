@@ -161,7 +161,7 @@ interface HomeProps {
 }
 export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfiles, onGoToBrowseModpacks, onCreateModpack, onLaunch, onBlockingOperationChange }: HomeProps) {
   const { t } = useTranslation();
-  const { gameInfo, mods, refreshAll, activeProfile, setActiveProfile, refreshSubUpdates } = useApp();
+  const { gameInfo, mods, refreshAll, activeProfile, activeProfileId, setActiveProfile, refreshSubUpdates } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
   const [subUpdates, setSubUpdates] = useState<SubscriptionUpdate[]>([]);
@@ -184,6 +184,8 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
   // to filter stale launch-history entries and enrich the shelf with counts.
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [recentSwitching, setRecentSwitching] = useState<string | null>(null);
+  const activeProfileKey = activeProfileId ?? activeProfile;
+  const profileKey = (profile: Profile) => profile.id || profile.name;
 
   useEffect(() => {
     loadSubscriptions();
@@ -197,9 +199,9 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
   useEffect(() => {
     let cancelled = false;
     async function loadShareInfo() {
-      if (!activeProfile) { setActiveProfileShare(null); return; }
+      if (!activeProfileKey) { setActiveProfileShare(null); return; }
       try {
-        const info = await getShareInfo(activeProfile);
+        const info = await getShareInfo(activeProfileKey);
         if (!cancelled) setActiveProfileShare(info);
       } catch {
         if (!cancelled) setActiveProfileShare(null);
@@ -207,7 +209,7 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
     }
     loadShareInfo();
     return () => { cancelled = true; };
-  }, [activeProfile, mods]);
+  }, [activeProfileKey, mods]);
 
   async function loadSubscriptions() {
     try {
@@ -225,25 +227,30 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
       .then((list) => { if (!cancelled) setProfiles(list); })
       .catch(() => { /* keep last known names */ });
     return () => { cancelled = true; };
-  }, [activeProfile]);
+  }, [activeProfileKey]);
 
   // Up to 3 recently launched packs, excluding the one already active.
   const recent = useMemo(() => {
-    const byName = new Map(profiles.map((profile) => [profile.name, profile]));
+    const findByStoredKey = (key: string) => profiles.find((profile) =>
+      profileKey(profile) === key || profile.name === key
+    );
     return Object.entries(getModpackUsage())
-      .filter(([name]) => byName.has(name) && name !== activeProfile)
-      .sort((a, b) => b[1] - a[1])
+      .map(([key, lastPlayed]) => ({ key, lastPlayed, profile: findByStoredKey(key) }))
+      .filter((item): item is { key: string; lastPlayed: number; profile: Profile } =>
+        !!item.profile &&
+        item.key !== activeProfileKey &&
+        (activeProfileId != null || item.profile.name !== activeProfile)
+      )
+      .sort((a, b) => b.lastPlayed - a.lastPlayed)
       .slice(0, 3)
-      .map(([name, lastPlayed]) => {
-        const profile = byName.get(name)!;
-        return {
-          name,
-          lastPlayed,
-          modCount: profile.mods.length,
-          enabledCount: profile.mods.filter((mod) => mod.enabled).length,
-        };
-      });
-  }, [activeProfile, profiles]);
+      .map(({ key, lastPlayed, profile }) => ({
+        key,
+        name: profile.name,
+        lastPlayed,
+        modCount: profile.mods.length,
+        enabledCount: profile.mods.filter((mod) => mod.enabled).length,
+      }));
+  }, [activeProfile, activeProfileKey, profiles]);
 
   const formatRecentDate = (ts: number) =>
     new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(ts));
@@ -251,11 +258,13 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
   /** FR5 — one-click switch from the Recent strip. Mirrors Profiles'
    *  handleSwitch semantics: warn when the current active pack has
    *  unsaved drift, record the launch, refresh app state. */
-  async function handleQuickSwitch(name: string) {
+  async function handleQuickSwitch(key: string) {
     if (recentSwitching) return;
-    if (activeProfile) {
+    const target = profiles.find((profile) => profileKey(profile) === key || profile.name === key);
+    const targetName = target?.name ?? key;
+    if (activeProfile && activeProfileKey) {
       try {
-        const drift = await getProfileDrift(activeProfile);
+        const drift = await getProfileDrift(activeProfileKey);
         if (drift?.has_drift) {
           const ok = await confirm({
             title: t('profiles.confirm.switch.title', { name: activeProfile }),
@@ -269,16 +278,16 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
       } catch { /* drift lookup failed — proceed with the switch */ }
     }
     try {
-      setRecentSwitching(name);
-      const result = await switchProfile(name);
-      setActiveProfile(name);
-      recordModpackLaunch(name);
+      setRecentSwitching(key);
+      const result = await switchProfile(key);
+      setActiveProfile(targetName);
+      recordModpackLaunch(key);
       await refreshAll();
       const parts = switchResultDetails(result, t);
       if (parts.length > 0) {
         toast.info(parts.join('. '));
       } else {
-        toast.success(t('profiles.toast.switched', { name }));
+        toast.success(t('profiles.toast.switched', { name: targetName }));
       }
     } catch (e) {
       toast.error(t('profiles.toast.switchFailed', { error: e instanceof Error ? e.message : String(e) }));
@@ -292,14 +301,18 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
       const u = await checkSubscriptionUpdates();
       const updates = u.filter((s) => s.has_update);
       setSubUpdates(updates);
+      /* v8 ignore start -- Home only calls checkSubs() without showToast; Settings owns manual update checks. */
       if (showToast && updates.length === 0) {
         toast.success(t('home.toast.allUpToDate'));
       }
+      /* v8 ignore stop */
     } catch (e) {
+      /* v8 ignore start -- Home mount polling is silent; manual failure toasts live in explicit check flows. */
       if (showToast) {
         const errMsg = e instanceof Error ? e.message : String(e);
         toast.error(t('home.toast.checkFailed', { error: errMsg }));
       }
+      /* v8 ignore stop */
     }
   }
 
@@ -326,11 +339,11 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
    *  Share button. Looks up the on-disk Profile so PublishModal gets
    *  the exact same shape it sees from Profiles view. */
   async function openPublishForActive(profileName?: string) {
-    const target = profileName ?? activeProfile;
+    const target = profileName ?? activeProfileKey;
     if (!target) return;
     try {
       const list = await listProfiles();
-      const p = list.find((q) => q.name === target);
+      const p = list.find((q) => profileKey(q) === target || q.name === target);
       if (p) setPublishTarget({ profile: p, isReshare: false });
       else toast.error(t('home.toast.profileNotFoundOnDisk'));
     } catch (e) {
@@ -614,11 +627,11 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
           <div className="gf-home-recent-list">
             {recent.map((item) => (
               <button
-                key={item.name}
+                key={item.key}
                 type="button"
                 className="gf-home-recent-item"
                 disabled={recentSwitching !== null}
-                onClick={() => handleQuickSwitch(item.name)}
+                onClick={() => handleQuickSwitch(item.key)}
                 title={t('home.recent.switchTitle', { name: item.name })}
                 aria-label={t('home.recent.switchTitle', { name: item.name })}
               >
@@ -633,7 +646,7 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
                   <span>{t('home.recent.enabledCount', { count: item.enabledCount })}</span>
                 </span>
                 <span className="gf-home-recent-action" aria-hidden>
-                  {recentSwitching === item.name ? (
+                  {recentSwitching === item.key ? (
                     <RefreshCw size={13} className="animate-spin" />
                   ) : (
                     <Play size={13} />
@@ -679,9 +692,9 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
         onGoToSettings={onGoToSettings}
         onClose={async () => {
           setPublishTarget(null);
-          if (activeProfile) {
+          if (activeProfileKey) {
             try {
-              const info = await getShareInfo(activeProfile);
+              const info = await getShareInfo(activeProfileKey);
               setActiveProfileShare(info);
             } catch { /* leave stale; harmless */ }
           }

@@ -377,10 +377,13 @@ pub fn delete_profile_cmd(
     // the action down rather than half-doing it — the running-game state
     // already tells the user mods can't be changed. (A non-active pack is just
     // a manifest delete, so it stays allowed while the game runs.)
-    let is_active = s
-        .active_profile
-        .as_deref()
-        .is_some_and(|a| a.eq_ignore_ascii_case(&name));
+    let deleted_id = load_profile(&name, &s.profiles_path).ok().map(|p| p.id);
+    let is_active = s.active_profile.as_deref().is_some_and(|a| {
+        a.eq_ignore_ascii_case(&name)
+            || deleted_id
+                .as_deref()
+                .is_some_and(|id| a.eq_ignore_ascii_case(id))
+    });
     if is_active {
         crate::game::ensure_game_not_running()?;
     }
@@ -388,7 +391,12 @@ pub fn delete_profile_cmd(
     // Bug 3: if the deleted pack was the active one, drop the active-profile
     // pointer (in-memory + active_profile.txt). Without this the UI keeps the
     // gone pack flagged "active" and the next launch tries to restore it.
-    let was_active = clear_active_profile_if_deleted(&mut s.active_profile, &config_path, &name);
+    let was_active = clear_active_profile_if_deleted(
+        &mut s.active_profile,
+        &config_path,
+        &name,
+        deleted_id.as_deref(),
+    );
     drop(s);
 
     if was_active {
@@ -484,6 +492,17 @@ fn stamp_duplicate_profile_metadata(profile: &mut Profile, owner: Option<&str>) 
     profile.public = None;
 }
 
+pub(crate) fn profile_identifier_matches(profile: &Profile, identifier: &str) -> bool {
+    profile.id.eq_ignore_ascii_case(identifier) || profile.name.eq_ignore_ascii_case(identifier)
+}
+
+pub(crate) fn active_profile_matches(
+    active_profile: Option<&str>,
+    profile: &Profile,
+) -> bool {
+    active_profile.is_some_and(|active| profile_identifier_matches(profile, active))
+}
+
 /// Rename a profile, preserving its `.share` code, active state, and any
 /// subscriptions pointing at it.
 #[tauri::command]
@@ -497,16 +516,14 @@ pub fn rename_profile(
         crud::rename_profile(&old_name, &new_name, &s.profiles_path).map_err(|e| e.to_string())?;
     let new = renamed.name.clone();
 
-    // (c) If the renamed pack was active, follow it. Compare case-insensitively
-    // so a casing difference between the stored active-profile pointer and the
-    // requested old name doesn't strand active_profile.txt at the gone name
-    // (mirrors the case-insensitive active-pointer handling on the delete path).
-    if s.active_profile
-        .as_deref()
-        .is_some_and(|active| active.eq_ignore_ascii_case(&old_name))
-    {
-        s.active_profile = Some(new.clone());
-        persist_active_profile(&s.config_path, &new);
+    // (c) If the renamed pack was active, follow it by stable id. Older
+    // installs may still have the active pointer stored as the old display
+    // name, so accept both the old name and the profile id.
+    if s.active_profile.as_deref().is_some_and(|active| {
+        active.eq_ignore_ascii_case(&old_name) || active.eq_ignore_ascii_case(&renamed.id)
+    }) {
+        s.active_profile = Some(renamed.id.clone());
+        persist_active_profile(&s.config_path, &renamed.id);
     }
     let config_path = s.config_path.clone();
     drop(s);
@@ -552,19 +569,21 @@ pub async fn switch_profile(
     )
     .await?;
 
-    // Update active profile (also persist to disk)
+    // Update active profile by stable id (also persist to disk)
+    let switched_profile =
+        load_profile(&name, &profiles_path).map_err(|e| e.to_string())?;
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    s.active_profile = Some(name.clone());
-    persist_active_profile(&s.config_path, &name);
+    s.active_profile = Some(switched_profile.id.clone());
+    persist_active_profile(&s.config_path, &switched_profile.id);
 
     Ok(result)
 }
 
-/// Persist the active profile name to active_profile.txt, logging (not
+/// Persist the active profile id to active_profile.txt, logging (not
 /// silently swallowing) any write error. (Audit L-7)
-fn persist_active_profile(config_path: &std::path::Path, name: &str) {
+pub(crate) fn persist_active_profile(config_path: &std::path::Path, profile_id: &str) {
     let path = config_path.join("active_profile.txt");
-    if let Err(e) = std::fs::write(&path, name) {
+    if let Err(e) = std::fs::write(&path, profile_id) {
         log::error!(
             "Failed to persist active profile to {}: {}",
             path.display(),
@@ -585,11 +604,13 @@ fn persist_active_profile(config_path: &std::path::Path, name: &str) {
 fn clear_active_profile_if_deleted(
     active_profile: &mut Option<String>,
     config_path: &std::path::Path,
-    deleted: &str,
+    deleted_name: &str,
+    deleted_id: Option<&str>,
 ) -> bool {
-    let was_active = active_profile
-        .as_deref()
-        .is_some_and(|a| a.eq_ignore_ascii_case(deleted));
+    let was_active = active_profile.as_deref().is_some_and(|a| {
+        a.eq_ignore_ascii_case(deleted_name)
+            || deleted_id.is_some_and(|id| a.eq_ignore_ascii_case(id))
+    });
     if was_active {
         *active_profile = None;
         let path = config_path.join("active_profile.txt");
@@ -598,7 +619,7 @@ fn clear_active_profile_if_deleted(
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => log::error!(
                 "Failed to clear active_profile.txt after deleting active profile '{}': {}",
-                deleted,
+                deleted_name,
                 e
             ),
         }
@@ -697,9 +718,11 @@ pub async fn repair_profile(
     )
     .await?;
 
+    let repaired_profile =
+        load_profile(&name, &profiles_path).map_err(|e| e.to_string())?;
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    s.active_profile = Some(name.clone());
-    persist_active_profile(&s.config_path, &name);
+    s.active_profile = Some(repaired_profile.id.clone());
+    persist_active_profile(&s.config_path, &repaired_profile.id);
 
     Ok(result)
 }
@@ -767,7 +790,7 @@ mod active_profile_clear_tests {
         write_active(config, "MyPack");
         let mut active = Some("MyPack".to_string());
 
-        let was_active = clear_active_profile_if_deleted(&mut active, config, "MyPack");
+        let was_active = clear_active_profile_if_deleted(&mut active, config, "MyPack", None);
 
         assert!(
             was_active,
@@ -789,7 +812,7 @@ mod active_profile_clear_tests {
 
         // The user deletes "mypack" (different case). On a case-insensitive
         // filesystem it's the same pack, so the pointer must still clear.
-        let was_active = clear_active_profile_if_deleted(&mut active, config, "mypack");
+        let was_active = clear_active_profile_if_deleted(&mut active, config, "mypack", None);
 
         assert!(was_active);
         assert_eq!(active, None);
@@ -803,7 +826,7 @@ mod active_profile_clear_tests {
         write_active(config, "MyPack");
         let mut active = Some("MyPack".to_string());
 
-        let was_active = clear_active_profile_if_deleted(&mut active, config, "OtherPack");
+        let was_active = clear_active_profile_if_deleted(&mut active, config, "OtherPack", None);
 
         assert!(
             !was_active,
@@ -827,9 +850,25 @@ mod active_profile_clear_tests {
         let config = tmp.path();
         let mut active: Option<String> = None;
 
-        let was_active = clear_active_profile_if_deleted(&mut active, config, "Whatever");
+        let was_active = clear_active_profile_if_deleted(&mut active, config, "Whatever", None);
 
         assert!(!was_active);
         assert_eq!(active, None);
+    }
+
+    #[test]
+    fn clears_pointer_when_active_is_stored_as_profile_id() {
+        let tmp = tempdir().unwrap();
+        let config = tmp.path();
+        let id = "profile-stable-id";
+        write_active(config, id);
+        let mut active = Some(id.to_string());
+
+        let was_active =
+            clear_active_profile_if_deleted(&mut active, config, "Renamed Pack", Some(id));
+
+        assert!(was_active);
+        assert_eq!(active, None);
+        assert!(!config.join("active_profile.txt").exists());
     }
 }

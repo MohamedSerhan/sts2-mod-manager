@@ -95,8 +95,14 @@ pub fn import_sts2pack_from_paths(
         install_mod_from_zip(tmp.path(), mods_path)?;
     }
 
-    profile.id = new_profile_id();
-    profile.name = unique_profile_name(&profile.name, profiles_path);
+    if profile.id.trim().is_empty() {
+        profile.id = new_profile_id();
+    }
+    if let Ok(existing) = load_profile(&profile.id, profiles_path) {
+        profile.name = existing.name;
+    } else {
+        profile.name = unique_profile_name(&profile.name, profiles_path);
+    }
     save_profile(&profile, profiles_path)?;
     Ok(profile)
 }
@@ -187,6 +193,12 @@ mod tests {
         }
     }
 
+    fn profile_with_id(name: &str, id: &str) -> Profile {
+        let mut profile = profile(name);
+        profile.id = id.to_string();
+        profile
+    }
+
     fn seed_mod(mods_path: &Path) {
         write(
             &mods_path.join("BaseMod/manifest.json"),
@@ -263,5 +275,45 @@ mod tests {
         assert_eq!(saved.mods[0].name, "BaseMod");
         assert!(!dest_profiles.join("Daily Pack (2).share").exists());
         assert!(!dest.path().join("subscriptions.json").exists());
+    }
+
+    #[test]
+    fn import_updates_existing_profile_with_same_stable_id() {
+        let profile_id = "profile-sharedtester";
+        let source = TempDir::new().unwrap();
+        let source_profiles = source.path().join("profiles");
+        let source_mods = source.path().join("mods");
+        let source_disabled = source.path().join("mods_disabled");
+        fs::create_dir_all(&source_disabled).unwrap();
+        seed_mod(&source_mods);
+        let mut remote_profile = profile_with_id("SharedTester", profile_id);
+        remote_profile.created_by = Some("remote-author".to_string());
+        save_profile(&remote_profile, &source_profiles).unwrap();
+        let pack = source.path().join("SharedTester.sts2pack");
+        export_profile_to_sts2pack_from_paths(
+            "SharedTester",
+            &pack,
+            &source_profiles,
+            &source_mods,
+            &source_disabled,
+        )
+        .unwrap();
+
+        let dest = TempDir::new().unwrap();
+        let dest_profiles = dest.path().join("profiles");
+        let dest_mods = dest.path().join("mods");
+        let mut local_profile = profile_with_id("TesterW", profile_id);
+        local_profile.created_by = Some("local-user".to_string());
+        save_profile(&local_profile, &dest_profiles).unwrap();
+
+        let imported = import_sts2pack_from_paths(&pack, &dest_profiles, &dest_mods).unwrap();
+
+        assert_eq!(imported.id, profile_id);
+        assert_eq!(imported.name, "TesterW");
+        assert_eq!(imported.created_by.as_deref(), Some("remote-author"));
+        assert!(dest_mods.join("BaseMod/manifest.json").exists());
+        assert!(load_profile(profile_id, &dest_profiles).is_ok());
+        assert!(load_profile("TesterW", &dest_profiles).is_ok());
+        assert!(load_profile("SharedTester", &dest_profiles).is_err());
     }
 }

@@ -221,6 +221,22 @@ describe('<ProfilesView>', () => {
     expect(screen.getByText('ACTIVE')).toBeInTheDocument();
   });
 
+  it('uses the active profile id so duplicate names do not both render active', async () => {
+    seedProfiles([
+      baseProfile({ id: 'profile-a', name: 'SharedTester', created_by: 'MohamedSerhan' }),
+      baseProfile({ id: 'profile-b', name: 'SharedTester', created_by: 'dr-pepis' }),
+    ]);
+    registerInvokeHandler('get_active_profile', () => 'SharedTester');
+    registerInvokeHandler('get_active_profile_id', () => 'profile-b');
+
+    render(<Wrap />);
+
+    const cards = await screen.findAllByRole('button', { name: /Open SharedTester modpack/i });
+    expect(cards).toHaveLength(2);
+    expect(cards.filter((card) => within(card).queryByText('ACTIVE')).length).toBe(1);
+    expect(within(cards[1]).getByText('ACTIVE')).toBeInTheDocument();
+  });
+
   // The bare "name your modpack" inline form was removed in 1.7.0 — the
   // toolbar's Create modpack button now opens the guided wizard
   // (CreateModpackWizard). The full create flow + name validation +

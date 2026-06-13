@@ -242,7 +242,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
   // webview's drag events — so reordering uses pointer events instead.
   const loadOrderListRef = useRef<HTMLDivElement>(null);
   const { t, i18n } = useTranslation();
-  const { refreshAll, setActiveProfile, activeProfile, subUpdates, refreshSubUpdates, mods } = useApp();
+  const { refreshAll, setActiveProfile, activeProfile, activeProfileId, subUpdates, refreshSubUpdates, mods } = useApp();
   const toastCtx = useToast();
   // Shared clipboard hook — same one Home + PublishModal use, so a
   // wording change for "Couldn't copy" propagates everywhere without
@@ -250,6 +250,20 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
   const clipboard = useClipboard();
   const confirm = useConfirm();
   const [applyingSubId, setApplyingSubId] = useState<string | null>(null);
+
+  const profileKey = useCallback((profile: Profile) => profile.id || profile.name, []);
+  const findProfileByKey = useCallback((key: string | null | undefined) => {
+    if (!key) return null;
+    return profiles.find((profile) =>
+      profile.id === key || profile.name.toLowerCase() === key.toLowerCase()
+    ) ?? null;
+  }, [profiles]);
+  const activeProfileObject = useMemo(
+    () => findProfileByKey(activeProfileId) ?? findProfileByKey(activeProfile),
+    [activeProfile, activeProfileId, findProfileByKey],
+  );
+  const activeProfileKey = activeProfileObject ? profileKey(activeProfileObject) : activeProfileId ?? activeProfile;
+  const activeProfileName = activeProfileObject?.name ?? activeProfile;
 
   async function handleApplySub(shareId: string) {
     if (applyingSubId) return;
@@ -279,10 +293,13 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
    * toast as PublishModal.handleCopy.
    */
   async function handleCardCopy(
-    profileName: string,
+    profileKeyOrName: string,
     kind: 'code' | 'link' | 'msg',
   ): Promise<void> {
-    const info = shareInfoMap[profileName];
+    const profile = findProfileByKey(profileKeyOrName);
+    const key = profile ? profileKey(profile) : profileKeyOrName;
+    const profileName = profile?.name ?? profileKeyOrName;
+    const info = shareInfoMap[key];
     if (!info) return;
     const codeStr = `${info.owner}/${info.code}`;
     const text
@@ -311,8 +328,8 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
   const [profileRevision, setProfileRevision] = useState(0);
   const bumpRevision = useCallback(() => setProfileRevision((r) => r + 1), []);
 
-  const activeProfileRef = useRef(activeProfile);
-  useEffect(() => { activeProfileRef.current = activeProfile; }, [activeProfile]);
+  const activeProfileKeyRef = useRef(activeProfileKey);
+  useEffect(() => { activeProfileKeyRef.current = activeProfileKey; }, [activeProfileKey]);
 
   // FB2-C bridge: when the installed mods set changes (toggle, delete,
   // install from a sibling surface), bump the revision so drift is
@@ -350,16 +367,17 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     (async () => {
       const shareMap: Record<string, ShareResult> = {};
       for (const p of profiles) {
+        const key = profileKey(p);
         try {
-          const info = await getShareInfo(p.name);
-          if (info) shareMap[p.name] = info;
+          const info = await getShareInfo(key);
+          if (info) shareMap[key] = info;
         } catch { /* no share info */ }
       }
 
       const subs = await getSubscriptions().catch(() => []);
 
       const driftEntries: Record<string, ProfileDrift> = {};
-      const ap = activeProfileRef.current;
+      const ap = activeProfileKeyRef.current;
       if (ap) {
         try {
           const drift = await getProfileDrift(ap);
@@ -374,24 +392,25 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     })();
 
     return () => { cancelled = true; };
-  }, [profileRevision, profiles, activeProfile]);
+  }, [profileRevision, profiles, activeProfileKey, profileKey]);
 
   // Subscriptions can point at our own packs when a curator installs their
   // own share code again. Local share info proves ownership, so only followed
   // packs from someone else should lose "Save changes".
   const activeIsFollowed =
-    !!activeProfile
-    && subscriptions.some((s) => s.profile_name.toLowerCase() === activeProfile.toLowerCase())
-    && !shareInfoMap[activeProfile];
+    !!activeProfileName
+    && !!activeProfileKey
+    && subscriptions.some((s) => s.profile_name.toLowerCase() === activeProfileName.toLowerCase())
+    && !shareInfoMap[activeProfileKey];
 
   // 1.7.0 T16 — open the active modpack's detail view when a sibling
   // surface pumps the signal (Mods view's "Manage active modpack →"
   // link). If there's no active modpack, fall through to the list.
   useEffect(() => {
-    if (openActiveModpackSignal > 0 && activeProfile) {
-      setSelectedModpack(activeProfile);
+    if (openActiveModpackSignal > 0 && activeProfileKey) {
+      setSelectedModpack(activeProfileKey);
     }
-  }, [openActiveModpackSignal, activeProfile]);
+  }, [openActiveModpackSignal, activeProfileKey]);
 
   // 1.7.0 T8 — open the guided Create-modpack wizard when the App
   // shell pumps the signal (branched onboarding's creator-path CTA).
@@ -410,9 +429,9 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
   // Report the currently-viewed modpack up to App so a drag-dropped zip
   // can auto-join it. Clear on unmount (leaving the Modpacks view).
   useEffect(() => {
-    onViewedModpackChange?.(selectedModpack);
+    onViewedModpackChange?.(findProfileByKey(selectedModpack)?.name ?? null);
     return () => onViewedModpackChange?.(null);
-  }, [selectedModpack, onViewedModpackChange]);
+  }, [findProfileByKey, selectedModpack, onViewedModpackChange]);
 
   // T16 review fix — orphan-modpack guard. If the open detail view's
   // modpack disappears (deleted while detail is open, or signal bumped
@@ -423,11 +442,11 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     if (
       selectedModpack !== null
       && profiles.length > 0
-      && !profiles.find((p) => p.name === selectedModpack)
+      && !findProfileByKey(selectedModpack)
     ) {
       setSelectedModpack(null);
     }
-  }, [profiles, selectedModpack]);
+  }, [findProfileByKey, profiles, selectedModpack]);
 
   async function loadProfiles(opts?: { silent?: boolean }) {
     try {
@@ -556,7 +575,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     try {
       setLoadOrderSaving(true);
       const result = await setProfileLoadOrder(
-        loadOrderProfile.name,
+        profileKey(loadOrderProfile),
         loadOrderDraft.map((mod) => ({
           name: mod.name,
           folder_name: mod.folder_name,
@@ -564,7 +583,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
         })),
       );
       setProfiles((prev) => prev.map((profile) => (
-        profile.name === result.profile.name ? result.profile : profile
+        profileKey(profile) === profileKey(result.profile) ? result.profile : profile
       )));
       setLoadOrderProfile(null);
       setLoadOrderDraft([]);
@@ -599,9 +618,12 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
   }
 
   async function handleSwitch(name: string) {
-    if (activeProfile && activeProfile !== name && driftMap[activeProfile]?.has_drift) {
+    const target = findProfileByKey(name);
+    const targetKey = target ? profileKey(target) : name;
+    const targetName = target?.name ?? name;
+    if (activeProfileKey && activeProfileKey !== targetKey && driftMap[activeProfileKey]?.has_drift) {
       const ok = await confirm({
-        title: t('profiles.confirm.switch.title', { name: activeProfile }),
+        title: t('profiles.confirm.switch.title', { name: activeProfileName ?? activeProfileKey }),
         body: t('profiles.confirm.switch.body'),
         warning: t('profiles.confirm.switch.warning'),
         confirmLabel: t('profiles.confirm.switch.confirmLabel'),
@@ -611,10 +633,10 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     }
 
     try {
-      setSwitchingProfile(name);
-      const result = await switchProfile(name);
-      setActiveProfile(name);
-      recordModpackLaunch(name);
+      setSwitchingProfile(targetKey);
+      const result = await switchProfile(targetKey);
+      setActiveProfile(targetName);
+      recordModpackLaunch(targetKey);
       await refreshAll();
       await loadProfiles();
       bumpRevision();
@@ -624,7 +646,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       if (parts.length > 0) {
         toastCtx.info(parts.join('. '));
       } else {
-        toastCtx.success(t('profiles.toast.switched', { name }));
+        toastCtx.success(t('profiles.toast.switched', { name: targetName }));
       }
     } catch (e) {
       toastCtx.error(t('profiles.toast.switchFailed', { error: e instanceof Error ? e.message : String(e) }));
@@ -645,7 +667,10 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     // also disabled while switchingProfile is set; this guards the
     // programmatic / detail-view callers too.
     if (switchingProfile) return;
-    const drift = driftMap[name];
+    const target = findProfileByKey(name);
+    const targetKey = target ? profileKey(target) : name;
+    const targetName = target?.name ?? name;
+    const drift = driftMap[targetKey];
     const orphanCount = drift?.added.length ?? 0;
     const orphans = drift?.added ?? [];
     const orphanList = orphans.length > 8
@@ -653,7 +678,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       : orphans.join(', ');
 
     const ok = await confirm({
-      title: t('profiles.confirm.repair.title', { name }),
+      title: t('profiles.confirm.repair.title', { name: targetName }),
       body: orphanCount > 0
         ? t('profiles.confirm.repair.bodyWithOrphans', { count: orphanCount, list: orphanList })
         : t('profiles.confirm.repair.bodyNoOrphans'),
@@ -666,14 +691,14 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     if (!ok) return;
 
     try {
-      setSwitchingProfile(name);
+      setSwitchingProfile(targetKey);
       if (ok.checked) {
         try { await createBackup(); }
         catch (e) { toastCtx.error(t('profiles.toast.backupFailed', { error: e instanceof Error ? e.message : String(e) })); }
       }
-      const result = await repairProfile(name);
-      setActiveProfile(name);
-      recordModpackLaunch(name);
+      const result = await repairProfile(targetKey);
+      setActiveProfile(targetName);
+      recordModpackLaunch(targetKey);
       await refreshAll();
       await loadProfiles();
       bumpRevision();
@@ -707,7 +732,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       toastCtx.success(
         summary.length > 0
           ? t('profiles.toast.repairedWithDetails', { name, details: summary.join(', ') })
-          : t('profiles.toast.repaired', { name })
+          : t('profiles.toast.repaired', { name: targetName })
       );
     } catch (e) {
       toastCtx.error(t('profiles.toast.repairFailed', { error: e instanceof Error ? e.message : String(e) }));
@@ -718,37 +743,40 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
 
   async function handleSaveDrift(name: string) {
     if (savingProfile) return;
+    const target = findProfileByKey(name);
+    const targetKey = target ? profileKey(target) : name;
+    const targetName = target?.name ?? name;
     // Capture the drift BEFORE the save clears it, so the toast can name what
     // changed (FB-C: "I can't see what Save removed"). added = mods folded into
     // the manifest; removed = manifest entries dropped because they're missing
     // on disk (the "disappearing" mods).
-    const drift = driftMap[name];
+    const drift = driftMap[targetKey];
     try {
-      setSavingProfile(name);
+      setSavingProfile(targetKey);
       // Apply only the drift diff — NOT a full re-snapshot. snapshotProfile
       // would pull every enabled + disabled mod on disk into the pack,
       // flooding a curated pack with the whole library. saveProfileDrift
       // adds just the enabled extras, drops missing mods, and syncs
       // toggled/version for mods still present.
-      const profile = await saveProfileDrift(name);
-      if (shareInfoMap[name]) markLocalOutOfSync(name);
+      const profile = await saveProfileDrift(targetKey);
+      if (shareInfoMap[targetKey]) markLocalOutOfSync(targetKey);
       setProfiles((prev) => {
-        const exists = prev.some((p) => p.name === profile.name);
+        const exists = prev.some((p) => profileKey(p) === profileKey(profile));
         return exists
-          ? prev.map((p) => (p.name === profile.name ? profile : p))
+          ? prev.map((p) => (profileKey(p) === profileKey(profile) ? profile : p))
           : [...prev, profile];
       });
       setDriftMap((prev) => {
         const next = { ...prev };
-        delete next[name];
+        delete next[targetKey];
         return next;
       });
       await refreshAll();
       await loadProfiles();
       bumpRevision();
-      const base = shareInfoMap[name]
-        ? t('profiles.toast.savedChangesWithReShare', { name })
-        : t('profiles.toast.savedChanges', { name });
+      const base = shareInfoMap[targetKey]
+        ? t('profiles.toast.savedChangesWithReShare', { name: targetName })
+        : t('profiles.toast.savedChanges', { name: targetName });
       const parts: string[] = [];
       const added = drift?.added ?? [];
       const removed = drift?.removed ?? [];
@@ -767,53 +795,62 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
   }
 
   async function handleExport(name: string) {
+    const target = findProfileByKey(name);
+    const targetKey = target ? profileKey(target) : name;
+    const targetName = target?.name ?? name;
     try {
-      const safeName = name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_');
+      const safeName = targetName.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_');
       const path = await save({
         defaultPath: `${safeName}.sts2pack`,
         filters: STS2PACK_DIALOG_FILTERS,
       });
       if (!path) return;
-      await exportProfileToFile(name, path);
-      toastCtx.success(t('profiles.toast.exportedFile', { name }));
+      await exportProfileToFile(targetKey, path);
+      toastCtx.success(t('profiles.toast.exportedFile', { name: targetName }));
     } catch (e) {
       toastCtx.error(t('profiles.toast.exportFailed', { error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
   async function handleDelete(name: string) {
+    const target = findProfileByKey(name);
+    const targetKey = target ? profileKey(target) : name;
+    const targetName = target?.name ?? name;
     const ok = await confirm({
-      title: t('profiles.confirm.delete.title', { name }),
+      title: t('profiles.confirm.delete.title', { name: targetName }),
       body: t('profiles.confirm.delete.body'),
       confirmLabel: t('profiles.confirm.delete.confirmLabel'),
       destructive: true,
     });
     if (!ok) return;
     try {
-      await deleteProfile(name);
-      setProfiles((prev) => prev.filter((p) => p.name !== name));
-      clearLocalOutOfSync(name);
-      forgetModpackUsage(name);
+      await deleteProfile(targetKey);
+      setProfiles((prev) => prev.filter((p) => profileKey(p) !== targetKey));
+      clearLocalOutOfSync(targetKey);
+      forgetModpackUsage(targetName);
       // Bug 3: if we just deleted the active pack, clear the AppContext
       // active pointer too (the backend clears active_profile.txt) so nothing
       // keeps flagging the now-gone pack as active until an app restart.
       // Case-insensitive to match the backend clear (profile names collide
       // case-insensitively on Windows/macOS) — otherwise a case-mismatched
       // active pointer would stay stale until restart.
-      if (activeProfile && name.toLowerCase() === activeProfile.toLowerCase()) {
+      if (activeProfileKey && targetKey === activeProfileKey) {
         setActiveProfile(null);
       }
-      toastCtx.success(t('profiles.toast.deleted', { name }));
+      toastCtx.success(t('profiles.toast.deleted', { name: targetName }));
     } catch (e) {
       toastCtx.error(t('profiles.toast.deleteFailed', { error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
   async function handleDuplicate(name: string) {
-    const newName = prompt(t('profiles.prompt.duplicateAs', { name }), t('profiles.prompt.duplicateDefault', { name }));
+    const target = findProfileByKey(name);
+    const targetKey = target ? profileKey(target) : name;
+    const targetName = target?.name ?? name;
+    const newName = prompt(t('profiles.prompt.duplicateAs', { name: targetName }), t('profiles.prompt.duplicateDefault', { name: targetName }));
     if (!newName?.trim()) return;
     try {
-      const profile = await duplicateProfile(name, newName.trim());
+      const profile = await duplicateProfile(targetKey, newName.trim());
       setProfiles((prev) => [...prev, profile]);
       toastCtx.success(t('profiles.toast.duplicated', { name: profile.name }));
     } catch (e) {
@@ -831,7 +868,9 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       const path = Array.isArray(selected) ? selected[0] : selected;
       if (!path) return;
       const profile = await importSts2pack(path);
-      setProfiles((prev) => [...prev, profile]);
+      setProfiles((prev) => prev.some((p) => profileKey(p) === profileKey(profile))
+        ? prev.map((p) => (profileKey(p) === profileKey(profile) ? profile : p))
+        : [...prev, profile]);
       await refreshAll();
       bumpRevision();
       toastCtx.success(t('profiles.toast.imported', { name: profile.name }));
@@ -870,7 +909,9 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       bumpRevision();
 
       if (outcome.kind === 'installed') {
-        setProfiles((prev) => [...prev, outcome.profile]);
+        setProfiles((prev) => prev.some((p) => profileKey(p) === profileKey(outcome.profile))
+          ? prev.map((p) => (profileKey(p) === profileKey(outcome.profile) ? outcome.profile : p))
+          : [...prev, outcome.profile]);
         toastCtx.success(
           t('profiles.toast.importedModpack', { name: outcome.profile.name, count: outcome.profile.mods.length }),
         );
@@ -1165,7 +1206,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
           (profile deleted while detail open) is handled by a
           useEffect above — render here is pure. */}
       {outerTab === 'yours' && selectedModpack !== null && !loading && (() => {
-        const profile = profiles.find((p) => p.name === selectedModpack);
+        const profile = findProfileByKey(selectedModpack);
         // The effect above clears selectedModpack on the next tick when
         // the profile disappears; until that runs we render nothing so
         // we don't flash a stale view.
@@ -1173,40 +1214,40 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
         return (
           <ModpackDetail
             profile={profile}
-            shareInfo={shareInfoMap[profile.name] ?? null}
-            drift={driftMap[profile.name] ?? null}
-            localOutOfSync={!!localOutOfSyncMap[profile.name]}
+            shareInfo={shareInfoMap[profileKey(profile)] ?? null}
+            drift={driftMap[profileKey(profile)] ?? null}
+            localOutOfSync={!!localOutOfSyncMap[profileKey(profile)]}
             onLocalOutOfSync={markLocalOutOfSync}
             switchingProfile={switchingProfile}
             onBack={() => setSelectedModpack(null)}
-            onSwitch={handleSwitch}
+            onSwitch={() => handleSwitch(profileKey(profile))}
             onShare={(p) =>
-              setPublishTarget({ profile: p, isReshare: !!shareInfoMap[p.name] })
+              setPublishTarget({ profile: p, isReshare: !!shareInfoMap[profileKey(p)] })
             }
-            onDelete={async (name) => {
-              await handleDelete(name);
+            onDelete={async () => {
+              await handleDelete(profileKey(profile));
               // Bounce back to the list if we just deleted the open pack.
-              if (name === selectedModpack) setSelectedModpack(null);
+              if (profileKey(profile) === selectedModpack) setSelectedModpack(null);
             }}
-            onDuplicate={handleDuplicate}
-            onExportFile={handleExport}
+            onDuplicate={() => handleDuplicate(profileKey(profile))}
+            onExportFile={() => handleExport(profileKey(profile))}
             onOpenLoadOrder={openLoadOrderEditor}
-            onRepairDrift={handleRepairDrift}
+            onRepairDrift={() => handleRepairDrift(profileKey(profile))}
             onLibraryChanged={handleLibraryChanged}
             renameExistingNames={profiles.map((p) => p.name)}
             onRenamed={async (oldName, newName) => {
-              if (activeProfile === oldName) setActiveProfile(newName);
+              if (activeProfileKey === profileKey(profile)) setActiveProfile(newName);
               renameModpackUsage(oldName, newName);
               setLocalOutOfSyncMap((prev) => {
-                if (!prev[oldName]) return prev;
+                const key = profileKey(profile);
+                if (!prev[key]) return prev;
                 const next = { ...prev };
-                delete next[oldName];
-                next[newName] = true;
+                next[key] = true;
                 return next;
               });
               await loadProfiles();
               bumpRevision();
-              setSelectedModpack(newName);
+              setSelectedModpack(profile.id || newName);
             }}
           />
         );
@@ -1295,17 +1336,17 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       )}
 
       {/* Drift banner on the active profile (v5 batch 3) */}
-      {activeProfile && driftMap[activeProfile] && (
+      {activeProfileKey && activeProfileName && driftMap[activeProfileKey] && (
         <div className="gf-banner gf-banner-warn" style={{ marginBottom: 14 }}>
           <AlertTriangle size={16} className="gf-banner-icon" />
           <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 600 }}>{t('profiles.drift.title', { name: activeProfile })}</div>
+            <div style={{ fontWeight: 600 }}>{t('profiles.drift.title', { name: activeProfileName })}</div>
             <div style={{ fontSize: 12, opacity: 0.85 }}>
               {[
-                driftMap[activeProfile].added.length && t('profiles.drift.newItems', { count: driftMap[activeProfile].added.length }),
-                driftMap[activeProfile].removed.length && t('profiles.drift.removedItems', { count: driftMap[activeProfile].removed.length }),
-                driftMap[activeProfile].toggled.length && t('profiles.drift.toggledItems', { count: driftMap[activeProfile].toggled.length }),
-                (driftMap[activeProfile].version_changed?.length ?? 0) && t('profiles.drift.versionChanged', { count: driftMap[activeProfile].version_changed.length }),
+                driftMap[activeProfileKey].added.length && t('profiles.drift.newItems', { count: driftMap[activeProfileKey].added.length }),
+                driftMap[activeProfileKey].removed.length && t('profiles.drift.removedItems', { count: driftMap[activeProfileKey].removed.length }),
+                driftMap[activeProfileKey].toggled.length && t('profiles.drift.toggledItems', { count: driftMap[activeProfileKey].toggled.length }),
+                (driftMap[activeProfileKey].version_changed?.length ?? 0) && t('profiles.drift.versionChanged', { count: driftMap[activeProfileKey].version_changed.length }),
               ].filter(Boolean).join(' · ') || t('profiles.drift.outOfSyncFallback')}
               {' '}{t(activeIsFollowed ? 'profiles.drift.followedHint' : 'profiles.drift.hint')}
             </div>
@@ -1315,11 +1356,11 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
             <Button
               variant="secondary"
               size="sm"
-              onClick={() => handleSaveDrift(activeProfile)}
+              onClick={() => handleSaveDrift(activeProfileKey)}
               title={t('profiles.drift.saveChanges')}
               disabled={savingProfile !== null}
             >
-              {savingProfile === activeProfile ? (
+              {savingProfile === activeProfileKey ? (
                 <RefreshCw size={12} className="animate-spin" />
               ) : (
                 <Save size={12} />
@@ -1330,7 +1371,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => handleRepairDrift(activeProfile)}
+            onClick={() => handleRepairDrift(activeProfileKey)}
             title={t('profiles.drift.repairTitle')}
             // Repair runs through switchingProfile (NOT savingProfile), so it
             // must also disable while a switch/repair is in flight — otherwise
@@ -1369,7 +1410,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
         </div>
       ) : (() => {
         const filtered = tab === 'published'
-          ? profiles.filter((p) => shareInfoMap[p.name])
+          ? profiles.filter((p) => shareInfoMap[profileKey(p)])
           : profiles;
         // FR4 — sort a copy; `profiles` keeps backend order for everything
         // else (drift maps, detail lookups are name-keyed and unaffected).
@@ -1419,9 +1460,10 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
         // remain as compact card meta so the user can scan at a glance.
         <div className="gf-modpack-cards">
           {visible.map((profile) => {
-            const isActive = activeProfile === profile.name;
-            const isShared = !!shareInfoMap[profile.name];
-            const hasDrift = !!driftMap[profile.name];
+            const key = profileKey(profile);
+            const isActive = activeProfileKey === key;
+            const isShared = !!shareInfoMap[key];
+            const hasDrift = !!driftMap[key];
             const hasUpdate = subUpdates.some(
               (u) => u.profile_name === profile.name,
             );
@@ -1430,8 +1472,8 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
             // dismissed it for this pack.
             const showReshareNudge =
               isShared &&
-              !!shareInfoMap[profile.name]?.reshare_recommended &&
-              !reshareNudgeDismissed[profile.name];
+              !!shareInfoMap[key]?.reshare_recommended &&
+              !reshareNudgeDismissed[key];
             // T16 review fix — shared cards now host inline Copy chips
             // (share code / install link / share message). Because nested
             // <button> isn't valid HTML, the card itself is a div with
@@ -1439,11 +1481,11 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
             // buttons that stopPropagation so they don't navigate.
             return (
               <div
-                key={profile.name}
+                key={key}
                 role="button"
                 tabIndex={0}
                 className={`gf-modpack-card ${isActive ? 'is-active' : ''}`}
-                onClick={() => setSelectedModpack(profile.name)}
+                onClick={() => setSelectedModpack(key)}
                 onKeyDown={(e) => {
                   // Only the card itself should activate on Enter/Space. A
                   // keydown from a focused inner Copy chip bubbles here too;
@@ -1454,7 +1496,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
                     (e.key === 'Enter' || e.key === ' ')
                   ) {
                     e.preventDefault();
-                    setSelectedModpack(profile.name);
+                    setSelectedModpack(key);
                   }
                 }}
                 aria-label={t('modpack.openDetailAria', { name: profile.name })}
@@ -1515,7 +1557,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
                         className="gf-modpack-card-reshare-dismiss"
                         onClick={(e) => {
                           e.stopPropagation();
-                          dismissReshareNudge(profile.name);
+                          dismissReshareNudge(key);
                         }}
                         title={t('profiles.reshareNudge.dismiss')}
                         aria-label={t('profiles.reshareNudge.dismissAria', {
@@ -1545,7 +1587,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
                         className="gf-modpack-card-copy-chip"
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleCardCopy(profile.name, 'code');
+                          handleCardCopy(key, 'code');
                         }}
                         title={t('profiles.kebab.copyShareCode')}
                         aria-label={t('profiles.kebab.copyShareCode')}
@@ -1557,7 +1599,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
                         className="gf-modpack-card-copy-chip"
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleCardCopy(profile.name, 'link');
+                          handleCardCopy(key, 'link');
                         }}
                         title={t('profiles.kebab.copyShareLink')}
                         aria-label={t('profiles.kebab.copyShareLink')}
@@ -1569,7 +1611,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
                         className="gf-modpack-card-copy-chip"
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleCardCopy(profile.name, 'msg');
+                          handleCardCopy(key, 'msg');
                         }}
                         title={t('profiles.kebab.copyShareMessageLabel')}
                         aria-label={t('profiles.kebab.copyShareMessageLabel')}
@@ -1618,10 +1660,11 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
         onClose={() => setPublishTarget(null)}
         onListingChanged={() => { void loadProfiles().then(bumpRevision); }}
         onShared={(result) => {
-          const sharedName = publishTarget?.profile.name;
-          if (sharedName) {
-            setShareInfoMap((prev) => ({ ...prev, [sharedName]: result }));
-            clearLocalOutOfSync(sharedName);
+          const sharedProfile = publishTarget?.profile;
+          const sharedKey = sharedProfile ? profileKey(sharedProfile) : null;
+          if (sharedKey) {
+            setShareInfoMap((prev) => ({ ...prev, [sharedKey]: result }));
+            clearLocalOutOfSync(sharedKey);
           }
           loadProfiles().then(bumpRevision);
         }}

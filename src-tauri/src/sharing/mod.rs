@@ -1194,10 +1194,11 @@ pub async fn share_profile(
         // non-active pack's members are usually stored, so excluding them
         // here would silently drop them from the pack (see Part A of the
         // publish-nonactive-pack fix).
-        let exclude_stored_members = s
-            .active_profile
-            .as_deref()
-            .is_some_and(|active| active.eq_ignore_ascii_case(&name));
+        let exclude_stored_members = crate::profiles::load_profile(&name, &s.profiles_path)
+            .ok()
+            .is_some_and(|profile| {
+                crate::profiles::active_profile_matches(s.active_profile.as_deref(), &profile)
+            });
         (
             s.profiles_path.clone(),
             mods_path,
@@ -1324,7 +1325,7 @@ pub(super) async fn share_profile_impl(
     let mut bundle_source_fingerprints: HashMap<String, String> = HashMap::new();
     let mut bundle_source_fast_fingerprints: HashMap<String, String> = HashMap::new();
     let (prior_bundle_source_fingerprints, prior_bundle_source_fast_fingerprints) =
-        find_share_info_path(&profile.name, profiles_path)
+        find_share_info_path(&profile.id, profiles_path)
             .and_then(|path| match load_share_info(&path) {
                 Ok(info) => Some((
                     info.bundle_source_fingerprints,
@@ -1601,7 +1602,7 @@ pub(super) async fn share_profile_impl(
     // to the uploaded profile itself if the on-disk file is somehow
     // missing (defensive only -- the normal `share_profile` entry point
     // always loads it first).
-    let on_disk = crate::profiles::load_profile(&profile.name, profiles_path)
+    let on_disk = crate::profiles::load_profile(&profile.id, profiles_path)
         .unwrap_or_else(|_| profile.clone());
     let merged = merge_publish_enrichment(&on_disk, &profile);
     crate::profiles::save_profile(&merged, profiles_path)?;
@@ -1788,10 +1789,11 @@ pub async fn reshare_profile(
         let disabled_path = s.disabled_mods_path.clone().ok_or("Game path not set")?;
         // See share_profile: only the ACTIVE pack excludes stored
         // (disabled-on-disk) members from the publish.
-        let exclude_stored_members = s
-            .active_profile
-            .as_deref()
-            .is_some_and(|active| active.eq_ignore_ascii_case(&name));
+        let exclude_stored_members = crate::profiles::load_profile(&name, &s.profiles_path)
+            .ok()
+            .is_some_and(|profile| {
+                crate::profiles::active_profile_matches(s.active_profile.as_deref(), &profile)
+            });
         (
             s.profiles_path.clone(),
             mods_path,
@@ -2093,7 +2095,7 @@ pub async fn reshare_profile(
     // changed since `old_profile` was captured at the top of this command;
     // fall back to `old_profile` (or the uploaded profile) if the on-disk
     // file is somehow missing.
-    let on_disk = crate::profiles::load_profile(&name, &profiles_path)
+    let on_disk = crate::profiles::load_profile(&profile.id, &profiles_path)
         .ok()
         .or_else(|| old_profile.clone())
         .unwrap_or_else(|| profile.clone());

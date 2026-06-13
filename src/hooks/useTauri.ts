@@ -160,6 +160,10 @@ export async function listProfiles(): Promise<Profile[]> {
   return invoke('list_profiles_cmd');
 }
 
+export async function getActiveProfileId(): Promise<string | null> {
+  return invoke('get_active_profile_id');
+}
+
 export async function createProfile(name: string): Promise<Profile> {
   return invoke('create_profile', { name });
 }

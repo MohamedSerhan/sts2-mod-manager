@@ -1248,23 +1248,59 @@ pub fn get_active_profile(
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Option<String>, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
-    Ok(s.active_profile.clone())
+    let Some(active) = s.active_profile.clone() else {
+        return Ok(None);
+    };
+    let name = crate::profiles::list_profiles(&s.profiles_path)
+        .into_iter()
+        .find(|profile| crate::profiles::profile_identifier_matches(profile, &active))
+        .map(|profile| profile.name)
+        .unwrap_or(active);
+    Ok(Some(name))
 }
 
-/// Set the active profile name (also persists to disk).
+/// Get the active profile's stable id. Older installs may still have a
+/// display name stored in active_profile.txt; resolve and persist the id on
+/// read so the app naturally migrates forward after update.
+#[tauri::command]
+pub fn get_active_profile_id(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Option<String>, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let Some(active) = s.active_profile.clone() else {
+        return Ok(None);
+    };
+    let Some(profile) = crate::profiles::list_profiles(&s.profiles_path)
+        .into_iter()
+        .find(|profile| crate::profiles::profile_identifier_matches(profile, &active))
+    else {
+        return Ok(Some(active));
+    };
+    if active != profile.id {
+        s.active_profile = Some(profile.id.clone());
+        crate::profiles::persist_active_profile(&s.config_path, &profile.id);
+    }
+    Ok(Some(profile.id))
+}
+
+/// Set the active profile name/id (also persists to disk as a stable id).
 #[tauri::command]
 pub fn set_active_profile(
     name: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<bool, String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    s.active_profile = name.clone();
-    // Persist to disk so it survives app restarts
-    let path = s.config_path.join("active_profile.txt");
     if let Some(ref n) = name {
-        let _ = std::fs::write(&path, n);
+        let active_id = crate::profiles::list_profiles(&s.profiles_path)
+            .into_iter()
+            .find(|profile| crate::profiles::profile_identifier_matches(profile, n))
+            .map(|profile| profile.id)
+            .unwrap_or_else(|| n.clone());
+        s.active_profile = Some(active_id.clone());
+        crate::profiles::persist_active_profile(&s.config_path, &active_id);
     } else {
-        let _ = std::fs::remove_file(&path);
+        s.active_profile = None;
+        let _ = std::fs::remove_file(s.config_path.join("active_profile.txt"));
     }
     Ok(true)
 }

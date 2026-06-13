@@ -6,6 +6,8 @@
 //! `active_profile.txt` pointing at whatever profile was active before.
 //! Re-share of that "active" profile then snapshotted the imported
 //! loadout into the wrong profile's JSON and pushed it out to subscribers.
+//! The active pointer now stores the stable profile id rather than the
+//! display name, so duplicate-name packs cannot both appear active.
 //!
 //! `apply_subscription_update` already had the active-profile write; the
 //! same operation in `install_shared_profile` was missing. This test pins
@@ -55,15 +57,16 @@ fn install_shared_profile_claims_active_profile_slot() {
     let source = read_source("sharing/install.rs");
     let body = function_body(&source, "pub async fn install_shared_profile(");
     assert!(
-        body.contains("s.active_profile = Some(profile.name.clone())"),
+        body.contains("s.active_profile = Some(profile.id.clone())"),
         "install_shared_profile must set state.active_profile after apply_profile_with_pins; \
          otherwise the previously-active profile is silently drifted (see bug where Re-share \
-         snapshotted an imported loadout into the wrong profile's JSON)."
+         snapshotted an imported loadout into the wrong profile's JSON). It must store the \
+         stable profile id so duplicate display names do not collide."
     );
     assert!(
-        body.contains("active_profile.txt"),
-        "install_shared_profile must persist active_profile.txt so the next launch restores \
-         the imported pack rather than the pre-import profile."
+        body.contains("persist_active_profile(&s.config_path, &profile.id)"),
+        "install_shared_profile must persist active_profile.txt via persist_active_profile so \
+         the next launch restores the imported pack rather than the pre-import profile."
     );
 }
 
@@ -72,12 +75,14 @@ fn apply_subscription_update_claims_active_profile_slot() {
     let source = read_source("subscriptions.rs");
     let body = function_body(&source, "async fn apply_subscription_update_inner(");
     assert!(
-        body.contains("s.active_profile = Some(remote.name.clone())"),
+        body.contains("s.active_profile = Some(remote.id.clone())"),
         "apply_subscription_update_inner must set state.active_profile after \
-         apply_profile_with_pins (same invariant as install_shared_profile)."
+         apply_profile_with_pins (same invariant as install_shared_profile), using the \
+         stable profile id rather than the display name."
     );
     assert!(
-        body.contains("active_profile.txt"),
-        "apply_subscription_update_inner must persist active_profile.txt."
+        body.contains("persist_active_profile(&s.config_path, &remote.id)"),
+        "apply_subscription_update_inner must persist active_profile.txt via \
+         persist_active_profile."
     );
 }

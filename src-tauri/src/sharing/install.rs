@@ -113,8 +113,14 @@ pub async fn install_shared_profile(
     let mut profile = fetch_shared_profile(&owner, &filename, token.as_deref())
         .await
         .map_err(|e| e.to_string())?;
-    profile.id = crate::profiles::new_profile_id();
-    profile.name = crate::profiles::unique_profile_name(&profile.name, &profiles_path);
+    if profile.id.trim().is_empty() {
+        profile.id = crate::profiles::new_profile_id();
+    }
+    if let Ok(existing) = crate::profiles::load_profile(&profile.id, &profiles_path) {
+        profile.name = existing.name;
+    } else {
+        profile.name = crate::profiles::unique_profile_name(&profile.name, &profiles_path);
+    }
     let total_mods = profile.mods.len();
 
     // Mods skipped because they declare a min_game_version higher than the
@@ -442,16 +448,12 @@ pub async fn install_shared_profile(
     // to disk, so both must claim ownership of the active slot.
     {
         let mut s = state.lock().map_err(|e| e.to_string())?;
-        s.active_profile = Some(profile.name.clone());
-        if let Err(e) = std::fs::write(s.config_path.join("active_profile.txt"), &profile.name) {
-            log::error!(
-                "Failed to persist active_profile.txt after install_shared_profile: {}",
-                e
-            );
-        }
+        s.active_profile = Some(profile.id.clone());
+        crate::profiles::persist_active_profile(&s.config_path, &profile.id);
         log::info!(
-            "install_shared_profile: active profile set to '{}'",
-            profile.name
+            "install_shared_profile: active profile set to '{}' ({})",
+            profile.name,
+            profile.id
         );
     }
 

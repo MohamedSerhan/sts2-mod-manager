@@ -170,6 +170,7 @@ function registerSafeDefaults(): void {
   }));
   invokeHandlers.set('get_subscriptions', () => []);
   invokeHandlers.set('get_active_profile', () => null);
+  invokeHandlers.set('get_active_profile_id', () => null);
   invokeHandlers.set('get_mod_sources', () => ({}));
   invokeHandlers.set('get_api_key_status', () => ({
     nexus_api_key_set: false,

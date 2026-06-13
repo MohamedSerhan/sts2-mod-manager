@@ -280,6 +280,9 @@
   /* Global UI scale (#119). The Display-size slider drives --ui-scale; the
      whole page zooms uniformly, scaling the hardcoded-px type + layout. */
   zoom: var(--ui-scale, 1);
+  /* Text-only scale. This intentionally stays separate from webview zoom so
+     players can make copy easier to read without widening every panel. */
+  font-size: calc(16px * var(--font-scale, 1));
 }
 
 body {
@@ -287,6 +290,7 @@ body {
   background-color: var(--indigo-bg);
   color: var(--ink);
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-size: calc(14px * var(--font-scale, 1));
   -webkit-font-smoothing: antialiased;
 }
 

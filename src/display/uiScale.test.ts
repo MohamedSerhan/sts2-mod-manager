@@ -1,12 +1,20 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_UI_SCALE,
+  DEFAULT_FONT_SCALE,
+  FONT_SCALE_STORAGE_KEY,
+  MIN_FONT_SCALE,
+  MAX_FONT_SCALE,
   MIN_UI_SCALE,
   MAX_UI_SCALE,
   UI_SCALE_STORAGE_KEY,
+  applyFontScale,
   applyUiScale,
+  clampFontScale,
   clampUiScale,
+  loadFontScale,
   loadUiScale,
+  saveFontScale,
   saveUiScale,
 } from './uiScale';
 
@@ -14,6 +22,7 @@ afterEach(() => {
   localStorage.clear();
   vi.unstubAllGlobals();
   document.documentElement.style.removeProperty('--ui-scale');
+  document.documentElement.style.removeProperty('--font-scale');
 });
 
 describe('ui scale', () => {
@@ -24,6 +33,13 @@ describe('ui scale', () => {
     expect(clampUiScale(Number.NaN)).toBe(DEFAULT_UI_SCALE);
   });
 
+  it('clamps font scale independently from interface scale', () => {
+    expect(clampFontScale(0.5)).toBe(MIN_FONT_SCALE);
+    expect(clampFontScale(3)).toBe(MAX_FONT_SCALE);
+    expect(clampFontScale(1.15)).toBe(1.15);
+    expect(clampFontScale(Number.NaN)).toBe(DEFAULT_FONT_SCALE);
+  });
+
   it('defaults to 1 and round-trips a saved value', () => {
     expect(loadUiScale()).toBe(DEFAULT_UI_SCALE);
     saveUiScale(1.2);
@@ -31,19 +47,35 @@ describe('ui scale', () => {
     expect(loadUiScale()).toBe(1.2);
   });
 
+  it('defaults text size to 1 and round-trips a saved value', () => {
+    expect(loadFontScale()).toBe(DEFAULT_FONT_SCALE);
+    saveFontScale(1.15);
+    expect(localStorage.getItem(FONT_SCALE_STORAGE_KEY)).toBe('1.15');
+    expect(loadFontScale()).toBe(1.15);
+  });
+
   it('clamps an out-of-range stored value on load', () => {
     localStorage.setItem(UI_SCALE_STORAGE_KEY, '9');
     expect(loadUiScale()).toBe(MAX_UI_SCALE);
+    localStorage.setItem(FONT_SCALE_STORAGE_KEY, '9');
+    expect(loadFontScale()).toBe(MAX_FONT_SCALE);
   });
 
   it('falls back to the default on an unparseable stored value', () => {
     localStorage.setItem(UI_SCALE_STORAGE_KEY, 'huge');
     expect(loadUiScale()).toBe(DEFAULT_UI_SCALE);
+    localStorage.setItem(FONT_SCALE_STORAGE_KEY, 'huge');
+    expect(loadFontScale()).toBe(DEFAULT_FONT_SCALE);
   });
 
   it('applyUiScale sets the --ui-scale custom property', () => {
     applyUiScale(1.3);
     expect(document.documentElement.style.getPropertyValue('--ui-scale')).toBe('1.3');
+  });
+
+  it('applyFontScale sets the --font-scale custom property', () => {
+    applyFontScale(1.2);
+    expect(document.documentElement.style.getPropertyValue('--font-scale')).toBe('1.2');
   });
 
   it('applyUiScale clears the property at the default scale', () => {
@@ -52,10 +84,17 @@ describe('ui scale', () => {
     expect(document.documentElement.style.getPropertyValue('--ui-scale')).toBe('');
   });
 
+  it('applyFontScale clears the property at the default scale', () => {
+    applyFontScale(1.2);
+    applyFontScale(1);
+    expect(document.documentElement.style.getPropertyValue('--font-scale')).toBe('');
+  });
+
   it('applyUiScale is a no-op without a document', () => {
     vi.stubGlobal('document', undefined);
     try {
       expect(() => applyUiScale(1.2)).not.toThrow();
+      expect(() => applyFontScale(1.2)).not.toThrow();
     } finally {
       vi.unstubAllGlobals();
     }
@@ -68,6 +107,7 @@ describe('ui scale', () => {
       removeItem: () => {}, clear: () => {}, key: () => null, length: 0,
     } as unknown as Storage;
     expect(loadUiScale(hostile)).toBe(DEFAULT_UI_SCALE);
+    expect(loadFontScale(hostile)).toBe(DEFAULT_FONT_SCALE);
   });
 
   it('save degrades when storage writes throw', () => {
@@ -77,6 +117,7 @@ describe('ui scale', () => {
       removeItem: () => {}, clear: () => {}, key: () => null, length: 0,
     } as unknown as Storage;
     expect(() => saveUiScale(1.2, hostile)).not.toThrow();
+    expect(() => saveFontScale(1.2, hostile)).not.toThrow();
   });
 
   it('treats absent localStorage as no storage', () => {
@@ -84,6 +125,8 @@ describe('ui scale', () => {
     try {
       expect(loadUiScale()).toBe(DEFAULT_UI_SCALE);
       expect(() => saveUiScale(1.2)).not.toThrow();
+      expect(loadFontScale()).toBe(DEFAULT_FONT_SCALE);
+      expect(() => saveFontScale(1.2)).not.toThrow();
     } finally {
       vi.unstubAllGlobals();
     }
@@ -100,6 +143,8 @@ describe('ui scale', () => {
     try {
       expect(loadUiScale()).toBe(DEFAULT_UI_SCALE);
       expect(() => saveUiScale(1.2)).not.toThrow();
+      expect(loadFontScale()).toBe(DEFAULT_FONT_SCALE);
+      expect(() => saveFontScale(1.2)).not.toThrow();
     } finally {
       if (original) {
         Object.defineProperty(globalThis, 'localStorage', original);

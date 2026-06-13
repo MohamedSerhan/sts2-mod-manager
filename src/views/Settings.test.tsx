@@ -1398,9 +1398,11 @@ describe('<SettingsView>', () => {
 
   it('shows the Display size slider on the General tab', async () => {
     render(<Wrap />);
-    const slider = (await screen.findByLabelText('Interface scale')) as HTMLInputElement;
-    expect(slider.value).toBe('100');
+    const interfaceSlider = (await screen.findByLabelText('Interface scale')) as HTMLInputElement;
+    const fontSlider = screen.getByLabelText('Text size') as HTMLInputElement;
+    expect(interfaceSlider.value).toBe('100');
+    expect(fontSlider.value).toBe('100');
     expect(screen.getByText('Display size')).toBeInTheDocument();
-    expect(screen.getByText('Reset to 100%')).toBeInTheDocument();
+    expect(screen.getAllByText('Reset to 100%')).toHaveLength(2);
   });
 });

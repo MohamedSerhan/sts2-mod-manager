@@ -35,9 +35,11 @@
     "parts": {
       "downloaded": "{{count}} загружено",
       "failed": "{{count}} не удалось",
+      "enableFailed": "{{count}} не удалось активировать",
       "stillMissing": "{{count}} ещё не хватает",
       "modsDownloaded": "загружено модов: {{count}}",
       "failedWithList": "{{count}} не удалось: {{list}}",
+      "enableFailedWithList": "{{count}} не удалось активировать: {{list}}",
       "stillMissingWithList": "{{count}} ещё не хватает: {{list}}",
       "disabledOrphans_one": "отключён {{count}} лишний мод",
       "disabledOrphans_few": "отключено {{count}} лишних мода",

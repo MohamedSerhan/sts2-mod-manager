@@ -371,6 +371,7 @@ function AppInner() {
           if (outcome.result.downloaded > 0) parts.push(t('common.parts.downloaded', { count: outcome.result.downloaded }));
           if (outcome.result.failed_downloads.length > 0) parts.push(t('common.parts.failed', { count: outcome.result.failed_downloads.length }));
           if (outcome.result.missing_mods.length > 0) parts.push(t('common.parts.stillMissing', { count: outcome.result.missing_mods.length }));
+          if ((outcome.result.failed_enables ?? []).length > 0) parts.push(t('common.parts.enableFailed', { count: outcome.result.failed_enables?.length ?? 0 }));
           toast.info(parts.length > 0
             ? t('profiles.toast.reappliedWithDetails', { name: outcome.profileName, details: parts.join(', ') })
             : t('profiles.toast.reapplied', { name: outcome.profileName }));

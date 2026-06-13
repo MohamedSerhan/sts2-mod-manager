@@ -516,6 +516,143 @@ fn profile_content_matches_disk(pm: &ProfileMod, disk_mod: &crate::mods::ModInfo
     }
 }
 
+const PROFILE_ENABLE_MAX_ATTEMPTS: usize = 3;
+
+fn profile_mod_has_active_match(pm: &ProfileMod, mods_path: &Path) -> bool {
+    scan_mods(mods_path)
+        .iter()
+        .any(|disk_mod| profile_mod_matches_installed(pm, disk_mod))
+}
+
+fn find_disabled_profile_mod(
+    pm: &ProfileMod,
+    disabled_path: &Path,
+) -> Option<crate::mods::ModInfo> {
+    scan_disabled_mods(disabled_path)
+        .into_iter()
+        .find(|disk_mod| profile_mod_matches_installed(pm, disk_mod))
+}
+
+fn enable_mod_with_identity_fallbacks(
+    disk_mod: &crate::mods::ModInfo,
+    disabled_path: &Path,
+    mods_path: &Path,
+) -> Result<()> {
+    match crate::mods::move_mod_by_info(disk_mod, disabled_path, mods_path) {
+        Ok(()) => return Ok(()),
+        Err(primary) => {
+            log::warn!(
+                "Profile switch: direct enable move failed for '{}' (folder={:?}, mod_id={:?}): {}",
+                disk_mod.name,
+                disk_mod.folder_name,
+                disk_mod.mod_id,
+                primary
+            );
+        }
+    }
+
+    let mut candidates = Vec::new();
+    if let Some(folder) = disk_mod.folder_name.as_deref() {
+        candidates.push(folder);
+    }
+    candidates.push(&disk_mod.name);
+    if let Some(mod_id) = disk_mod.mod_id.as_deref() {
+        candidates.push(mod_id);
+    }
+
+    let mut last_error = None;
+    for candidate in candidates {
+        match crate::mods::enable_mod(candidate, mods_path, disabled_path) {
+            Ok(()) => return Ok(()),
+            Err(e) => last_error = Some(e),
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| {
+        crate::error::AppError::ModNotFound(format!(
+            "No enable candidate found for '{}'",
+            disk_mod.name
+        ))
+    }))
+}
+
+fn retry_enable_profile_mod(pm: &ProfileMod, mods_path: &Path, disabled_path: &Path) -> bool {
+    for attempt in 1..=PROFILE_ENABLE_MAX_ATTEMPTS {
+        if profile_mod_has_active_match(pm, mods_path) {
+            return true;
+        }
+
+        let Some(disabled_mod) = find_disabled_profile_mod(pm, disabled_path) else {
+            return false;
+        };
+
+        match enable_mod_with_identity_fallbacks(&disabled_mod, disabled_path, mods_path) {
+            Ok(()) => {
+                if profile_mod_has_active_match(pm, mods_path) {
+                    return true;
+                }
+                log::warn!(
+                    "Profile switch: '{}' moved without error but is not active after attempt {}/{}",
+                    pm.name,
+                    attempt,
+                    PROFILE_ENABLE_MAX_ATTEMPTS
+                );
+            }
+            Err(e) => {
+                log::warn!(
+                    "Profile switch: enable attempt {}/{} failed for '{}': {}",
+                    attempt,
+                    PROFILE_ENABLE_MAX_ATTEMPTS,
+                    pm.name,
+                    e
+                );
+            }
+        }
+
+        if attempt < PROFILE_ENABLE_MAX_ATTEMPTS {
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }
+    }
+
+    profile_mod_has_active_match(pm, mods_path)
+}
+
+fn retry_enable_included_profile_mods(
+    profile: &Profile,
+    mods_path: &Path,
+    disabled_path: &Path,
+    pinned: &std::collections::HashSet<String>,
+) -> Vec<String> {
+    let mut failed = Vec::new();
+
+    for pm in &profile.mods {
+        if profile_mod_matches_pin(pm, pinned) {
+            continue;
+        }
+        if profile_mod_has_active_match(pm, mods_path) {
+            continue;
+        }
+        if find_disabled_profile_mod(pm, disabled_path).is_none() {
+            continue;
+        }
+
+        log::info!(
+            "Profile switch: '{}' is still stored after apply; retrying enable",
+            pm.name
+        );
+        if !retry_enable_profile_mod(pm, mods_path, disabled_path) {
+            log::error!(
+                "Profile switch: '{}' is still not active after {} enable attempts",
+                pm.name,
+                PROFILE_ENABLE_MAX_ATTEMPTS
+            );
+            failed.push(pm.name.clone());
+        }
+    }
+
+    failed
+}
+
 /// Result of switching profiles, including download stats and any mods that couldn't be restored.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SwitchProfileResult {
@@ -532,6 +669,10 @@ pub struct SwitchProfileResult {
     /// `failed_downloads`, which are missing mods with no working source. (Bug 4.)
     #[serde(default)]
     pub replace_failures: Vec<String>,
+    /// Mods that were installed and included in the pack but could not be
+    /// moved into the active mods folder after automatic retries.
+    #[serde(default)]
+    pub failed_enables: Vec<String>,
 }
 
 /// Bug 4: stash a mod's on-disk folder (and the install-target slot, if
@@ -613,6 +754,7 @@ pub(crate) async fn switch_profile_from_paths(
             failed_downloads: vec![],
             replaced_mods: vec![],
             replace_failures: vec![],
+            failed_enables: vec![],
         });
     }
 
@@ -976,6 +1118,8 @@ pub(crate) async fn switch_profile_from_paths(
     // ── STEP 2: Apply profile AFTER downloads ──
     apply_profile_with_pins(&profile, mods_path, disabled_path, &pinned_set)
         .map_err(|e| e.to_string())?;
+    let failed_enables =
+        retry_enable_included_profile_mods(&profile, mods_path, disabled_path, &pinned_set);
 
     let (load_order_status, load_order_path) =
         sync_profile_load_order_to_settings(&profile, mods_path, disabled_path, config_path);
@@ -992,33 +1136,13 @@ pub(crate) async fn switch_profile_from_paths(
         .chain(scan_disabled_mods(disabled_path).into_iter())
         .collect();
     crate::mod_sources::enrich_mods_with_sources(&mut final_on_disk, config_path);
-    // Build comprehensive identifier set (name, folder_name, mod_id)
-    let mut final_identifiers: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for m in &final_on_disk {
-        final_identifiers.insert(m.name.clone());
-        if let Some(ref folder) = m.folder_name {
-            final_identifiers.insert(folder.clone());
-        }
-        if let Some(ref id) = m.mod_id {
-            final_identifiers.insert(id.clone());
-        }
-    }
     let still_missing: Vec<String> = profile
         .mods
         .iter()
         .filter(|pm| {
-            !final_identifiers.contains(&pm.name)
-                && !pm
-                    .folder_name
-                    .as_ref()
-                    .map_or(false, |f| final_identifiers.contains(f))
-                && !pm
-                    .mod_id
-                    .as_ref()
-                    .map_or(false, |id| final_identifiers.contains(id))
-                && !final_on_disk
-                    .iter()
-                    .any(|disk_mod| profile_mod_matches_installed(pm, disk_mod))
+            !final_on_disk
+                .iter()
+                .any(|disk_mod| profile_mod_matches_installed(pm, disk_mod))
         })
         .map(|pm| pm.name.clone())
         .collect();
@@ -1030,6 +1154,7 @@ pub(crate) async fn switch_profile_from_paths(
         failed_downloads: download_failures,
         replaced_mods,
         replace_failures,
+        failed_enables,
     })
 }
 
@@ -1670,6 +1795,11 @@ mod modpack_flow_tests {
             "switch B failed downloads: {:?}",
             switch_b.failed_downloads
         );
+        assert!(
+            switch_b.failed_enables.is_empty(),
+            "switch B failed enables: {:?}",
+            switch_b.failed_enables
+        );
         assert_enabled(
             &paths,
             &["SharedCore", "BetaOnly", "BetaDisabled", "SameInBoth"],
@@ -1698,6 +1828,11 @@ mod modpack_flow_tests {
             switch_a.failed_downloads.is_empty(),
             "switch A failed downloads: {:?}",
             switch_a.failed_downloads
+        );
+        assert!(
+            switch_a.failed_enables.is_empty(),
+            "switch A failed enables: {:?}",
+            switch_a.failed_enables
         );
         assert_enabled(
             &paths,
@@ -1927,6 +2062,49 @@ mod modpack_flow_tests {
             .join("UnpinnedExtra")
             .join("UnpinnedExtra.dll")
             .exists());
+    }
+
+    #[test]
+    fn retry_enable_included_profile_mods_activates_stored_pack_mod() {
+        let paths = flow_paths();
+        let now = chrono::Utc::now();
+        let profile = Profile {
+            name: "Stored Pack".into(),
+            game_version: Some("0.105.0".into()),
+            created_by: Some("qa-curator".into()),
+            mods: vec![ProfileMod {
+                name: "Stored".into(),
+                version: "1.0.0".into(),
+                source: None,
+                hash: None,
+                files: vec!["Stored/Stored.json".into(), "Stored/Stored.dll".into()],
+                folder_name: Some("Stored".into()),
+                mod_id: Some("Stored".into()),
+                enabled: true,
+                bundle_url: None,
+                bundle_sha256: None,
+                bundle_members: vec![],
+            }],
+            created_at: now,
+            updated_at: now,
+            public: Some(false),
+            mod_extras: Default::default(),
+        };
+        install_loose_mod(&paths.disabled, "Stored", "stored-disabled");
+
+        let failed = retry_enable_included_profile_mods(
+            &profile,
+            &paths.mods,
+            &paths.disabled,
+            &std::collections::HashSet::new(),
+        );
+
+        assert!(
+            failed.is_empty(),
+            "retry should activate installed stored mods without reporting failures: {failed:?}"
+        );
+        assert_enabled(&paths, &["Stored"]);
+        assert!(!paths.disabled.join("Stored").exists());
     }
 
     #[tokio::test]

@@ -393,6 +393,7 @@ describe('<ProfilesView>', () => {
       downloaded: 3,
       missing_mods: ['Missing1'],
       failed_downloads: ['FailedA'],
+      failed_enables: ['LockedMod'],
     }));
     const user = userEvent.setup();
     render(<Wrap />);
@@ -403,6 +404,7 @@ describe('<ProfilesView>', () => {
     });
     expect(screen.getByText(/1 failed: FailedA/)).toBeInTheDocument();
     expect(screen.getByText(/1 still missing: Missing1/)).toBeInTheDocument();
+    expect(screen.getByText(/1 could not activate: LockedMod/)).toBeInTheDocument();
   });
 
   it('Quick-Add code input is always visible on the Yours tab', async () => {

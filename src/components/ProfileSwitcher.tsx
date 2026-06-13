@@ -117,11 +117,20 @@ export function ProfileSwitcher({ onClose, onAddPack, onManageAll }: Props) {
       setActiveProfile(name);
       recordModpackLaunch(name);
       await refreshAll();
-      if (result.missing_mods.length > 0) {
+      const failedEnables = result.failed_enables ?? [];
+      if (result.missing_mods.length > 0 || failedEnables.length > 0) {
+        const details = [
+          result.missing_mods.length > 0
+            ? t('profileSwitcher.downloadedStatus', { downloaded: result.downloaded, missing: result.missing_mods.length })
+            : null,
+          failedEnables.length > 0
+            ? t('common.parts.enableFailedWithList', { count: failedEnables.length, list: failedEnables.join(', ') })
+            : null,
+        ].filter(Boolean).join(' ');
         toast.info(
           t('profiles.toast.switchedWithDetails', {
             name,
-            details: t('profileSwitcher.downloadedStatus', { downloaded: result.downloaded, missing: result.missing_mods.length }),
+            details,
           }),
         );
       } else {

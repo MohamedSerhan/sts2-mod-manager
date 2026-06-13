@@ -139,6 +139,8 @@ export interface SwitchProfileResult {
   /** Mods whose update/replace failed; the old on-disk version was rolled
    *  back and kept, so they are not lost (vs. `failed_downloads`). */
   replace_failures?: string[];
+  /** Mods that were present for the pack but could not be activated after retries. */
+  failed_enables?: string[];
 }
 
 /** Result of bulk enable/disable of a modpack's mods. */

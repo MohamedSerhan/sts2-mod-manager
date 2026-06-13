@@ -634,6 +634,9 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       if (result.replace_failures && result.replace_failures.length > 0) {
         parts.push(t('common.parts.replaceFailedWithList', { count: result.replace_failures.length, list: result.replace_failures.join(', ') }));
       }
+      if (result.failed_enables && result.failed_enables.length > 0) {
+        parts.push(t('common.parts.enableFailedWithList', { count: result.failed_enables.length, list: result.failed_enables.join(', ') }));
+      }
 
       if (parts.length > 0) {
         toastCtx.info(t('profiles.toast.switchedWithDetails', { name, details: parts.join('. ') }));
@@ -714,6 +717,9 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       }
       if (result.missing_mods.length > 0) {
         summary.push(t('common.parts.stillMissingWithList', { count: result.missing_mods.length, list: result.missing_mods.join(', ') }));
+      }
+      if (result.failed_enables && result.failed_enables.length > 0) {
+        summary.push(t('common.parts.enableFailedWithList', { count: result.failed_enables.length, list: result.failed_enables.join(', ') }));
       }
       toastCtx.success(
         summary.length > 0
@@ -893,6 +899,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
         if (outcome.result.downloaded > 0) parts.push(t('common.parts.downloaded', { count: outcome.result.downloaded }));
         if (outcome.result.failed_downloads.length > 0) parts.push(t('common.parts.failed', { count: outcome.result.failed_downloads.length }));
         if (outcome.result.missing_mods.length > 0) parts.push(t('common.parts.stillMissing', { count: outcome.result.missing_mods.length }));
+        if ((outcome.result.failed_enables ?? []).length > 0) parts.push(t('common.parts.enableFailed', { count: outcome.result.failed_enables?.length ?? 0 }));
         toastCtx.info(parts.length ? t('profiles.toast.reappliedWithDetails', { name: outcome.profileName, details: parts.join(', ') }) : t('profiles.toast.reapplied', { name: outcome.profileName }));
       } else if (outcome.kind === 'synced') {
         toastCtx.success(t('profiles.toast.syncedUpToDate', { name: outcome.profileName }));

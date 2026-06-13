@@ -35,9 +35,11 @@
     "parts": {
       "downloaded": "{{count}} تم تنزيلها",
       "failed": "{{count}} فشلت",
+      "enableFailed": "تعذر تفعيل {{count}}",
       "stillMissing": "{{count}} لا تزال مفقودة",
       "modsDownloaded": "تم تنزيل {{count}} مود",
       "failedWithList": "{{count}} فشلت: {{list}}",
+      "enableFailedWithList": "تعذر تفعيل {{count}}: {{list}}",
       "stillMissingWithList": "{{count}} لا تزال مفقودة: {{list}}",
       "disabledOrphans_one": "تم تعطيل {{count}} مود إضافي",
       "disabledOrphans_few": "تم تعطيل {{count}} مودات إضافية",

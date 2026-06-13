@@ -35,9 +35,11 @@
     "parts": {
       "downloaded": "{{count}} downloaded",
       "failed": "{{count}} failed",
+      "enableFailed": "{{count}} could not activate",
       "stillMissing": "{{count}} still missing",
       "modsDownloaded": "{{count}} mod(s) downloaded",
       "failedWithList": "{{count}} failed: {{list}}",
+      "enableFailedWithList": "{{count}} could not activate: {{list}}",
       "stillMissingWithList": "{{count}} still missing: {{list}}",
       "disabledOrphans_one": "disabled {{count}} extra mod",
       "disabledOrphans_few": "disabled {{count}} extra mods",

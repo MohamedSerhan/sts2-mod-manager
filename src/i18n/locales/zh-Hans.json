@@ -1021,8 +1021,11 @@
     "failedUploadsHelp": "朋友安装此代码时会看到这些模组缺失；请重新发布以重试。",
     "missingBundles": {
       "title": "部分模组未能完成上传",
+      "uploadTitle": "上传到 GitHub 未完成",
       "body": "应用未能完成这些模组包的上传。请先重新分享：已上传成功的模组会被跳过。",
+      "uploadBody": "应用重试后，GitHub 仍返回上传错误。如果 GitHub 正在限制频率，请等待一分钟再重新分享；已上传的包会被跳过。",
       "repairHint": "修复只适用于本地文件缺失或损坏的情况，不能解决 GitHub 上传错误。",
+      "uploadHint": "Repair 对这种情况没有帮助，因为本地模组文件已经可以读取。",
       "lastError": "上次错误：{{error}}",
       "shareAgainBtn": "重新分享",
       "sharingAgain": "分享中…",

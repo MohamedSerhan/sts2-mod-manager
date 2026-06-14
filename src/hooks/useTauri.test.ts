@@ -54,6 +54,7 @@ import {
   repairMod,
   repairModpackSubscription,
   repairProfile,
+  restoreProfileModFromShare,
   resetToVanilla,
   rollbackMod,
   reshareProfile,
@@ -252,6 +253,17 @@ describe('useTauri wrappers — command names + arg shapes', () => {
     expect(lastCall()).toEqual({
       cmd: 'repair_mod',
       args: { name: 'BaseLib', folderName: 'BaseLib-v2' },
+    });
+
+    await restoreProfileModFromShare('profile-1', 'BaseLib', 'BaseLib-v2', 'baselib-id');
+    expect(lastCall()).toEqual({
+      cmd: 'restore_profile_mod_from_share',
+      args: {
+        profileId: 'profile-1',
+        modName: 'BaseLib',
+        folderName: 'BaseLib-v2',
+        modId: 'baselib-id',
+      },
     });
 
     await rollbackMod('BaseLib', 'BaseLib-v2');

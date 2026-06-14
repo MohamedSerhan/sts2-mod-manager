@@ -1,32 +1,31 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, Check, FolderOpen, RotateCw, Upload, X } from 'lucide-react';
-import { openModsFolder, repairMod } from '../hooks/useTauri';
+import { AlertTriangle, Check, FolderOpen, RotateCw, Trash2, Upload, X } from 'lucide-react';
+import type { Profile } from '../types';
+import {
+  openModsFolder,
+  restoreProfileModFromShare,
+  setProfileModMembership,
+} from '../hooks/useTauri';
 
 /**
  * Recovery panel rendered inline inside PublishModal when the Rust
  * `share_profile` / `reshare_profile` command rejects with the "missing
  * bundles for N mod(s): …" pattern.
  *
- * Issue #164: the overwhelmingly common cause of this error is a TRANSIENT
- * upload failure — a network blip or a GitHub rate-limit while uploading
- * one mod's bundle — which is why "a different mod fails every time". The
- * right remedy for that is simply to share again: the share flow skips
- * bundles that already uploaded and only re-attempts the ones that failed.
- * So the PRIMARY action here is "Try sharing again" (`onRetryPublish`).
+ * Transient GitHub upload failures lead with "Try sharing again" because
+ * the Rust share flow skips bundles that already uploaded and only
+ * re-attempts the ones that failed.
  *
- * "Repair these mods" remains as a SECONDARY remedy for the genuinely-
- * broken case (corrupt/missing local files), where repairing reinstalls
- * each mod from its linked GitHub source. That needs a linked source and
- * does nothing for a pure upload failure, so it's deliberately demoted.
- * On partial failure, each failed row gets an "Open mod folder" link so
- * the curator can fix the underlying problem manually; already-succeeded
- * rows are skipped on the retry pass.
+ * Missing local files need local action instead: remove the stale modpack
+ * row, or reinstall that one mod from the last shared bundle / linked
+ * source before publishing again.
  */
 
-export type ModRepairStatus = 'pending' | 'repairing' | 'success' | 'failed';
+export type ModRepairStatus = 'pending' | 'repairing' | 'removing' | 'success' | 'removed' | 'failed';
 
 interface Props {
+  profile: Profile;
   /** Mod names parsed out of the Rust error message. */
   modNames: string[];
   /** Last backend error for the failed uploads, when Rust could identify it. */
@@ -76,6 +75,7 @@ function isUploadFailureDetail(details: string | null | undefined): boolean {
 }
 
 export function MissingBundlesPanel({
+  profile,
   modNames,
   errorDetails,
   onRetryPublish,
@@ -90,6 +90,11 @@ export function MissingBundlesPanel({
 
   const busy = repairing || sharing;
   const uploadFailure = isUploadFailureDetail(errorDetails);
+  const profileKey = profile.id || profile.name;
+
+  function profileModForName(name: string) {
+    return profile.mods.find((mod) => mod.name === name);
+  }
 
   // Primary remedy for the transient-upload case (issue #164): just run
   // the share again. The Rust share flow re-attempts only the bundles
@@ -106,7 +111,7 @@ export function MissingBundlesPanel({
     }
   }
 
-  async function handleRepair() {
+  async function handleReinstall() {
     setRepairing(true);
     // Track results across the pass so we don't have to chase React state
     // for the auto-retry decision (setState is batched and stale closures
@@ -116,7 +121,13 @@ export function MissingBundlesPanel({
       if (passResults[name] === 'success') continue; // skip already-fixed
       setStatuses((prev) => ({ ...prev, [name]: 'repairing' }));
       try {
-        await repairMod(name);
+        const mod = profileModForName(name);
+        await restoreProfileModFromShare(
+          profileKey,
+          mod?.name ?? name,
+          mod?.folder_name ?? null,
+          mod?.mod_id ?? null,
+        );
         passResults[name] = 'success';
         setStatuses((prev) => ({ ...prev, [name]: 'success' }));
       } catch {
@@ -132,6 +143,40 @@ export function MissingBundlesPanel({
       } catch {
         // The parent's catch in handlePublish() already surfaces a toast.
         // Swallow here so a follow-up failure doesn't crash the panel.
+      }
+    }
+  }
+
+  async function handleRemoveFromPack() {
+    setRepairing(true);
+    const passResults: Record<string, ModRepairStatus> = { ...statuses };
+    for (const name of modNames) {
+      if (passResults[name] === 'removed') continue;
+      const mod = profileModForName(name);
+      setStatuses((prev) => ({ ...prev, [name]: 'removing' }));
+      try {
+        await setProfileModMembership(
+          profileKey,
+          mod?.name ?? name,
+          mod?.folder_name ?? null,
+          mod?.mod_id ?? null,
+          false,
+          mod?.source ?? null,
+        );
+        passResults[name] = 'removed';
+        setStatuses((prev) => ({ ...prev, [name]: 'removed' }));
+      } catch {
+        passResults[name] = 'failed';
+        setStatuses((prev) => ({ ...prev, [name]: 'failed' }));
+      }
+    }
+    setRepairing(false);
+    const allOk = modNames.every((n) => passResults[n] === 'removed');
+    if (allOk) {
+      try {
+        await onRetryPublish();
+      } catch {
+        // The parent's catch in handlePublish() already surfaces a toast.
       }
     }
   }
@@ -152,17 +197,17 @@ export function MissingBundlesPanel({
           <h2 className="gf-missing-bundles-title">
             {uploadFailure
               ? t('publish.missingBundles.uploadTitle')
-              : t('publish.missingBundles.title')}
+              : t('publish.missingBundles.localTitle')}
           </h2>
           <p className="gf-missing-bundles-body">
             {uploadFailure
               ? t('publish.missingBundles.uploadBody')
-              : t('publish.missingBundles.body')}
+              : t('publish.missingBundles.localBody')}
           </p>
           <p className="gf-missing-bundles-subbody">
             {uploadFailure
               ? t('publish.missingBundles.uploadHint')
-              : t('publish.missingBundles.repairHint')}
+              : t('publish.missingBundles.localHint')}
           </p>
           {errorDetails && (
             <p className="gf-missing-bundles-detail">
@@ -181,7 +226,7 @@ export function MissingBundlesPanel({
             >
               <span className="gf-missing-bundles-name">{name}</span>
               <span className={`gf-missing-bundles-status status-${status}`}>
-                {status === 'success' && (
+                {(status === 'success' || status === 'removed') && (
                   <Check size={12} className="gf-missing-bundles-status-icon" />
                 )}
                 {status === 'failed' && (
@@ -189,7 +234,9 @@ export function MissingBundlesPanel({
                 )}
                 {status === 'pending' && t('publish.missingBundles.statusPending')}
                 {status === 'repairing' && t('publish.missingBundles.statusRepairing')}
+                {status === 'removing' && t('publish.missingBundles.statusRemoving')}
                 {status === 'success' && t('publish.missingBundles.statusSuccess')}
+                {status === 'removed' && t('publish.missingBundles.statusRemoved')}
                 {status === 'failed' && t('publish.missingBundles.statusFailed')}
               </span>
               {status === 'failed' && (
@@ -216,35 +263,46 @@ export function MissingBundlesPanel({
           {t('common.cancel')}
         </button>
         <div style={{ flex: 1 }} />
-        {!uploadFailure && (
-          /* Secondary remedy: repair genuinely-broken local files. Needs a
-              linked GitHub source; does nothing for a pure upload failure. */
+        {uploadFailure ? (
           <button
             type="button"
-            className="gf-btn-2"
+            className="gf-btn"
             disabled={busy}
-            onClick={handleRepair}
-            title={t('publish.missingBundles.repairBtnTitle')}
+            onClick={handleShareAgain}
           >
-            <RotateCw size={12} />
-            {repairing
-              ? t('publish.missingBundles.repairing')
-              : t('publish.missingBundles.repairBtn')}
+            <Upload size={12} />
+            {sharing
+              ? t('publish.missingBundles.sharingAgain')
+              : t('publish.missingBundles.shareAgainBtn')}
           </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="gf-btn-2"
+              disabled={busy}
+              onClick={handleRemoveFromPack}
+              title={t('publish.missingBundles.removeBtnTitle')}
+            >
+              <Trash2 size={12} />
+              {repairing
+                ? t('publish.missingBundles.fixing')
+                : t('publish.missingBundles.removeBtn')}
+            </button>
+            <button
+              type="button"
+              className="gf-btn"
+              disabled={busy}
+              onClick={handleReinstall}
+              title={t('publish.missingBundles.reinstallBtnTitle')}
+            >
+              <RotateCw size={12} />
+              {repairing
+                ? t('publish.missingBundles.fixing')
+                : t('publish.missingBundles.reinstallBtn')}
+            </button>
+          </>
         )}
-        {/* Primary remedy: re-run the share. Re-uploads only the bundles
-            that failed; the common transient-failure fix for issue #164. */}
-        <button
-          type="button"
-          className="gf-btn"
-          disabled={busy}
-          onClick={handleShareAgain}
-        >
-          <Upload size={12} />
-          {sharing
-            ? t('publish.missingBundles.sharingAgain')
-            : t('publish.missingBundles.shareAgainBtn')}
-        </button>
       </div>
     </section>
   );

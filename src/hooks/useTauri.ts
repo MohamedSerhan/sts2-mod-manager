@@ -284,6 +284,20 @@ export async function repairMod(name: string, folderName: string | null = null):
   return invoke('repair_mod', { name, folderName });
 }
 
+export async function restoreProfileModFromShare(
+  profileId: string,
+  modName: string,
+  folderName: string | null = null,
+  modId: string | null = null,
+): Promise<ModInfo> {
+  return invoke('restore_profile_mod_from_share', {
+    profileId,
+    modName,
+    folderName,
+    modId,
+  });
+}
+
 export async function rollbackMod(name: string, folderName: string | null = null): Promise<ModInfo> {
   return invoke('rollback_mod', { name, folderName });
 }

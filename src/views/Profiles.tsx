@@ -939,6 +939,8 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
         toastCtx.success(t('profiles.toast.syncedUpToDate', { name: outcome.profileName }));
       } else if (outcome.kind === 'already-active') {
         toastCtx.info(t('profiles.toast.alreadyActive', { name: outcome.profileName }));
+      } else if (outcome.kind === 'own-published-exists') {
+        toastCtx.info(t('profiles.toast.ownPublishedAlreadyExists', { name: outcome.profileName }));
       }
     } catch (e) {
       toastCtx.error(t('profiles.toast.importFailed', { error: e instanceof Error ? e.message : String(e) }));

@@ -535,6 +535,7 @@
       "reappliedWithDetails": "أُعيد تطبيق «{{name}}» — {{details}}.",
       "syncedUpToDate": "تمت مزامنة «{{name}}» — أنت محدَّث!",
       "alreadyActive": "أنت بالفعل على «{{name}}».",
+      "ownPublishedAlreadyExists": "«{{name}}» منشورة بواسطتك وموجودة بالفعل في Mod Manager.",
       "shareCodeCopied": "تم نسخ رمز المشاركة",
       "installLinkCopied": "تم نسخ رابط التثبيت — الصقه في Discord / الدردشة",
       "cantCopyToClipboard": "تعذّر النسخ إلى الحافظة",

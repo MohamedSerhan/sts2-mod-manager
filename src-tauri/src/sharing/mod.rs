@@ -276,6 +276,39 @@ fn find_share_info_path(name: &str, profiles_path: &Path) -> Option<PathBuf> {
     candidates.into_iter().find(|path| path.exists())
 }
 
+fn load_share_info_for_profile(profile: &Profile, profiles_path: &Path) -> Option<ShareInfo> {
+    let mut candidates = vec![
+        share_info_path_for_profile(profile, profiles_path),
+        profiles_path.join(format!("{}.share", profile.name)),
+    ];
+    if !profile.id.trim().is_empty() {
+        candidates.push(profiles_path.join(format!("{}.share", profile.id)));
+    }
+    candidates
+        .push(profiles_path.join(format!("{}.share", legacy_profile_name_stem(&profile.name))));
+
+    candidates
+        .into_iter()
+        .find(|path| path.exists())
+        .and_then(|path| load_share_info(&path).ok())
+}
+
+pub(super) fn find_owned_profile_by_share_code(
+    profiles_path: &Path,
+    owner: &str,
+    profile_code: &str,
+) -> Option<Profile> {
+    let target_code = format_code(profile_code);
+    crate::profiles::list_profiles(profiles_path)
+        .into_iter()
+        .find(|profile| {
+            let Some(info) = load_share_info_for_profile(profile, profiles_path) else {
+                return false;
+            };
+            info.owner.eq_ignore_ascii_case(owner) && format_code(&info.code) == target_code
+        })
+}
+
 fn recover_owned_share_info_sidecar(
     _profile_name: &str,
     profiles_path: &Path,
@@ -2353,6 +2386,39 @@ mod listing_tests {
         assert!(
             share_info_path_for_profile(&remote, &profiles_path).exists(),
             "the recovery path must leave get_share_info/profile_is_owned with a durable ownership marker"
+        );
+    }
+
+    #[test]
+    fn owned_share_code_lookup_returns_existing_local_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let profiles_path = dir.path().join("profiles");
+        std::fs::create_dir_all(&profiles_path).unwrap();
+
+        let profile = make_profile("Solo Pack", Some(true));
+        crate::profiles::save_profile(&profile, &profiles_path).unwrap();
+        save_share_info(
+            &share_info_path_for_profile(&profile, &profiles_path),
+            &ShareInfo {
+                code: "AA5A-315D-61AE".into(),
+                owner: "alice".into(),
+                file_sha: None,
+                share_format_version: SHARE_FORMAT_VERSION,
+                published_signature: Some(profile_publish_signature(&profile)),
+                bundle_source_fingerprints: HashMap::new(),
+                bundle_source_fast_fingerprints: HashMap::new(),
+            },
+        )
+        .unwrap();
+
+        let found = find_owned_profile_by_share_code(&profiles_path, "ALICE", "aa5a315d61ae")
+            .expect("owned share code should resolve to the existing local profile");
+
+        assert_eq!(found.id, profile.id);
+        assert_eq!(found.name, "Solo Pack");
+        assert!(
+            find_owned_profile_by_share_code(&profiles_path, "bob", "aa5a315d61ae").is_none(),
+            "a matching code from a different owner must still be installable"
         );
     }
 

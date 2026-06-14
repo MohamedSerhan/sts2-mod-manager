@@ -4,7 +4,9 @@ import { Trans } from 'react-i18next';
 import type { Profile, Subscription, SubscriptionUpdate, SwitchProfileResult } from '../types';
 import {
   fetchSharedProfile,
+  getShareInfo,
   installSharedProfile,
+  listProfiles,
   switchProfile,
   applySubscriptionUpdate,
 } from '../hooks/useTauri';
@@ -51,9 +53,11 @@ export function canonicalShareCode(input: string): string | null {
   s = s.split('?')[0].split('#')[0];
 
   const slashIdx = s.indexOf('/');
-  if (slashIdx <= 0) return null;
-  const owner = s.slice(0, slashIdx).toLowerCase();
-  const code = s.slice(slashIdx + 1).replace(/-/g, '').toLowerCase();
+  const colonIdx = s.indexOf(':');
+  const separatorIdx = slashIdx > 0 ? slashIdx : colonIdx;
+  if (separatorIdx <= 0) return null;
+  const owner = s.slice(0, separatorIdx).toLowerCase();
+  const code = s.slice(separatorIdx + 1).replace(/-/g, '').toLowerCase();
   if (!owner || !code) return null;
   return `${owner}/${code}`;
 }
@@ -118,7 +122,24 @@ export type ImportOutcome =
   | { kind: 'reapplied'; profileName: string; result: SwitchProfileResult }
   | { kind: 'synced'; profileName: string }
   | { kind: 'already-active'; profileName: string }
+  | { kind: 'own-published-exists'; profileName: string }
   | { kind: 'cancelled' };
+
+async function findOwnedPublishedProfile(canonical: string): Promise<Profile | null> {
+  const profiles = await listProfiles().catch(() => []);
+  for (const profile of profiles) {
+    const keys = Array.from(new Set([profile.id, profile.name].filter(Boolean)));
+    for (const key of keys) {
+      const info = await getShareInfo(key).catch(() => null);
+      if (!info) continue;
+      const ownedCanonical = canonicalShareCode(`${info.owner}/${info.code}`);
+      if (ownedCanonical === canonical) {
+        return profile;
+      }
+    }
+  }
+  return null;
+}
 
 /**
  * Fetch a shared profile's manifest, show the user every host we'd
@@ -282,6 +303,11 @@ export async function importShareCodeSmart(
   );
 
   if (!match) {
+    const ownedProfile = await findOwnedPublishedProfile(canonical);
+    if (ownedProfile) {
+      return { kind: 'own-published-exists', profileName: ownedProfile.name };
+    }
+
     const profile = await installSharedProfileWithConfirm(pretty, opts.confirm, opts.t, opts.onBusyChange);
     return profile
       ? { kind: 'installed', profile }

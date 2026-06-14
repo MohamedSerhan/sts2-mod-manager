@@ -98,6 +98,66 @@ describe('importShareCodeSmart', () => {
     expect(getInvokeCalls().filter((c) => c.cmd === 'switch_profile')).toHaveLength(1);
   });
 
+  it('Case 2: already subscribed with legacy owner:code share_id still matches', async () => {
+    registerInvokeHandler('switch_profile', () => ({
+      applied: true,
+      downloaded: 0,
+      missing_mods: [],
+      failed_downloads: [],
+    }));
+
+    const outcome = await importShareCodeSmart('alice/AA5A-315D-61AE', {
+      confirm: confirmAccept,
+      subscriptions: [{
+        share_id: 'alice:AA5A-315D-61AE',
+        profile_name: 'Imported',
+        last_synced: '2026-05-01',
+        last_known_remote_sha: 'sha',
+        subscribed_at: '2026-01-01',
+      } as any],
+      activeProfile: 'Imported',
+      subUpdates: [],
+      t: mockT,
+    });
+
+    expect(outcome.kind).toBe('reapplied');
+    expect(getInvokeCalls().some((c) => c.cmd === 'install_shared_profile')).toBe(false);
+  });
+
+  it('owned published share code points to the existing local profile instead of installing a copy', async () => {
+    registerInvokeHandler('list_profiles_cmd', () => ([
+      {
+        id: 'profile-1',
+        name: 'Solo Pack',
+        mods: [],
+        created_at: '2026-01-01',
+      },
+    ]));
+    registerInvokeHandler('get_share_info', (args) => {
+      const name = args?.name;
+      if (name === 'profile-1') {
+        return {
+          code: 'AA5A-315D-61AE',
+          owner: 'alice',
+          out_of_sync: false,
+        };
+      }
+      return null;
+    });
+
+    const outcome = await importShareCodeSmart('alice/AA5A-315D-61AE', {
+      confirm: confirmAccept,
+      subscriptions: [],
+      activeProfile: 'OtherPack',
+      subUpdates: [],
+      t: mockT,
+    });
+
+    expect(outcome).toEqual({ kind: 'own-published-exists', profileName: 'Solo Pack' });
+    expect(getInvokeCalls().some((c) => c.cmd === 'fetch_shared_profile_cmd')).toBe(false);
+    expect(getInvokeCalls().some((c) => c.cmd === 'install_shared_profile')).toBe(false);
+  });
+
   it('Case 3: subscribed but not active → activated outcome after confirm', async () => {
     registerInvokeHandler('switch_profile', () => ({
       activated: true,

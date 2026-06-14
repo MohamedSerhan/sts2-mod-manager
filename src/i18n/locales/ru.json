@@ -535,6 +535,7 @@
       "reappliedWithDetails": "«{{name}}» применена заново — {{details}}.",
       "syncedUpToDate": "«{{name}}» синхронизирована — у вас всё актуально!",
       "alreadyActive": "Вы уже на «{{name}}».",
+      "ownPublishedAlreadyExists": "«{{name}}» опубликована вами и уже есть в Mod Manager.",
       "shareCodeCopied": "Код для обмена скопирован",
       "installLinkCopied": "Ссылка для установки скопирована — вставьте в Discord / чат",
       "cantCopyToClipboard": "Не удалось скопировать в буфер обмена",

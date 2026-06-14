@@ -392,6 +392,8 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
         toast.success(t('profiles.toast.syncedUpToDate', { name: outcome.profileName }));
       } else if (outcome.kind === 'already-active') {
         toast.info(t('profiles.toast.alreadyActive', { name: outcome.profileName }));
+      } else if (outcome.kind === 'own-published-exists') {
+        toast.info(t('profiles.toast.ownPublishedAlreadyExists', { name: outcome.profileName }));
       }
     } catch (e) {
       toast.error(t('profiles.toast.importFailed', { error: e instanceof Error ? e.message : String(e) }));

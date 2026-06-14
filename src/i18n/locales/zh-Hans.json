@@ -463,6 +463,7 @@
       "reappliedWithDetails": "已重新应用 \"{{name}}\" — {{details}}。",
       "syncedUpToDate": "已同步 \"{{name}}\" — 你已是最新版本！",
       "alreadyActive": "你已经在使用 \"{{name}}\"。",
+      "ownPublishedAlreadyExists": "\"{{name}}\" 由你发布，并且已存在于 Mod Manager 中。",
       "shareCodeCopied": "分享码已复制",
       "installLinkCopied": "安装链接已复制 — 粘贴到 Discord / 聊天",
       "cantCopyToClipboard": "无法复制到剪贴板",

@@ -18,7 +18,8 @@ use crate::state::AppState;
 
 use super::code::{code_to_filename, format_code, parse_share_code};
 use super::{
-    download_bundle, fetch_shared_profile, recover_owned_share_info_sidecar_for_install, SkippedMod,
+    download_bundle, fetch_shared_profile, find_owned_profile_by_share_code,
+    recover_owned_share_info_sidecar_for_install, SkippedMod,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -108,6 +109,14 @@ pub async fn install_shared_profile(
         let game_version = s.game_version.clone();
         (mods, disabled, profiles, config, cache, token, game_version)
     };
+
+    if let Some(existing) = find_owned_profile_by_share_code(&profiles_path, &owner, &profile_code)
+    {
+        return Err(format!(
+            "\"{}\" is published by you and already exists in Mod Manager.",
+            existing.name
+        ));
+    }
 
     let filename = code_to_filename(&profile_code);
     let mut profile = fetch_shared_profile(&owner, &filename, token.as_deref())

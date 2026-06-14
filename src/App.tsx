@@ -387,6 +387,8 @@ function AppInner() {
           toast.success(t('profiles.toast.syncedUpToDate', { name: outcome.profileName }));
         } else if (outcome.kind === 'already-active') {
           toast.info(t('profiles.toast.alreadyActive', { name: outcome.profileName }));
+        } else if (outcome.kind === 'own-published-exists') {
+          toast.info(t('profiles.toast.ownPublishedAlreadyExists', { name: outcome.profileName }));
         }
       } catch (e) {
         const errMsg = e instanceof Error ? e.message : String(e);

@@ -534,6 +534,7 @@
       "reappliedWithDetails": "Re-applied \"{{name}}\" - {{details}}.",
       "syncedUpToDate": "Synced \"{{name}}\" — you're up to date!",
       "alreadyActive": "You're already on \"{{name}}\".",
+      "ownPublishedAlreadyExists": "\"{{name}}\" is published by you and already exists in Mod Manager.",
       "shareCodeCopied": "Share code copied",
       "installLinkCopied": "Install link copied — paste into Discord / chat",
       "cantCopyToClipboard": "Couldn't copy to clipboard",

@@ -11,6 +11,7 @@ describe('canonicalShareCode', () => {
   it.each([
     ['jess/AA5A-315D-61AE',                      'jess/aa5a315d61ae'],
     ['jess/aa5a315d61ae',                        'jess/aa5a315d61ae'],
+    ['jess:AA5A-315D-61AE',                      'jess/aa5a315d61ae'],
     ['JESS/aa5a-315d-61ae',                      'jess/aa5a315d61ae'],
     ['sts2mm://import/jess/AA5A-315D-61AE',      'jess/aa5a315d61ae'],
     ['sts2mm://install/JESS/AA5A-315D-61AE',     'jess/aa5a315d61ae'],

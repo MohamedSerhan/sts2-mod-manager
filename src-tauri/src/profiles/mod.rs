@@ -37,7 +37,9 @@ pub use crud::{
     export_profile, import_profile, list_profiles, load_profile, persist_profile_mod_sources,
     save_profile,
 };
-pub(crate) use crud::{profile_file_stem, profile_name_exists, unique_profile_name};
+pub(crate) use crud::{
+    migrate_profile_identity_storage, profile_file_stem, profile_name_exists, unique_profile_name,
+};
 pub use drift::{ProfileDrift, RepairProfileResult, VersionMismatch};
 pub use membership::SetProfileModsEnabledResult;
 
@@ -157,6 +159,7 @@ pub struct ProfileMembershipGrid {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProfileMembershipProfile {
+    pub id: String,
     pub name: String,
     pub editable: bool,
 }
@@ -174,6 +177,7 @@ pub struct ProfileMembershipMod {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProfileMembershipState {
+    pub profile_id: String,
     pub profile_name: String,
     pub included: bool,
     pub enabled: bool,
@@ -235,7 +239,7 @@ pub fn get_profile_memberships(
 
 #[tauri::command]
 pub fn set_profile_mod_membership(
-    profile_name: String,
+    profile_id: String,
     mod_name: String,
     folder_name: Option<String>,
     mod_id: Option<String>,
@@ -247,7 +251,7 @@ pub fn set_profile_mod_membership(
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
     let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
     set_profile_mod_membership_from_paths(
-        &profile_name,
+        &profile_id,
         &mod_name,
         folder_name.as_deref(),
         mod_id.as_deref(),
@@ -266,7 +270,7 @@ pub fn set_profile_mod_membership(
 /// on-disk mod, so it works even when the manifest folder name has drifted.
 #[tauri::command]
 pub fn set_profile_mods_enabled(
-    name: String,
+    profile_id: String,
     enabled: bool,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<SetProfileModsEnabledResult, String> {
@@ -282,13 +286,19 @@ pub fn set_profile_mods_enabled(
             s.profiles_path.clone(),
         )
     };
-    set_profile_mods_enabled_from_paths(&name, enabled, &mods_path, &disabled_path, &profiles_path)
-        .map_err(|e| e.to_string())
+    set_profile_mods_enabled_from_paths(
+        &profile_id,
+        enabled,
+        &mods_path,
+        &disabled_path,
+        &profiles_path,
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn set_profile_load_order(
-    profile_name: String,
+    profile_id: String,
     ordered_mods: Vec<ProfileModOrderKey>,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ProfileLoadOrderUpdate, String> {
@@ -303,29 +313,29 @@ pub fn set_profile_load_order(
         )
     };
 
-    let profile = set_profile_load_order_from_paths(
-        &profile_name,
-        ordered_mods,
-        &profiles_path,
-        &config_path,
-    )
-    .map_err(|e| e.to_string())?;
+    let profile =
+        set_profile_load_order_from_paths(&profile_id, ordered_mods, &profiles_path, &config_path)
+            .map_err(|e| e.to_string())?;
 
-    let (settings_status, settings_path) = if active_profile.as_deref()
-        == Some(profile_name.as_str())
-    {
-        if crate::game::is_game_running() {
-            (LoadOrderSettingsStatus::SkippedGameRunning, None)
-        } else if let (Some(mods_path), Some(disabled_path)) =
-            (mods_path.as_ref(), disabled_path.as_ref())
-        {
-            sync_profile_load_order_to_settings(&profile, mods_path, disabled_path, &config_path)
+    let (settings_status, settings_path) =
+        if active_profile_matches(active_profile.as_deref(), &profile) {
+            if crate::game::is_game_running() {
+                (LoadOrderSettingsStatus::SkippedGameRunning, None)
+            } else if let (Some(mods_path), Some(disabled_path)) =
+                (mods_path.as_ref(), disabled_path.as_ref())
+            {
+                sync_profile_load_order_to_settings(
+                    &profile,
+                    mods_path,
+                    disabled_path,
+                    &config_path,
+                )
+            } else {
+                (LoadOrderSettingsStatus::SkippedMissing, None)
+            }
         } else {
-            (LoadOrderSettingsStatus::SkippedMissing, None)
-        }
-    } else {
-        (LoadOrderSettingsStatus::SkippedInactive, None)
-    };
+            (LoadOrderSettingsStatus::SkippedInactive, None)
+        };
 
     Ok(ProfileLoadOrderUpdate {
         profile,
@@ -365,7 +375,7 @@ pub fn create_profile(
 
 #[tauri::command]
 pub fn delete_profile_cmd(
-    name: String,
+    profile_id: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<bool, String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
@@ -377,9 +387,14 @@ pub fn delete_profile_cmd(
     // the action down rather than half-doing it — the running-game state
     // already tells the user mods can't be changed. (A non-active pack is just
     // a manifest delete, so it stays allowed while the game runs.)
-    let deleted_id = load_profile(&name, &s.profiles_path).ok().map(|p| p.id);
+    let deleted = load_profile(&profile_id, &s.profiles_path).ok();
+    let deleted_id = deleted.as_ref().map(|p| p.id.clone());
+    let deleted_name = deleted
+        .as_ref()
+        .map(|p| p.name.clone())
+        .unwrap_or_else(|| profile_id.clone());
     let is_active = s.active_profile.as_deref().is_some_and(|a| {
-        a.eq_ignore_ascii_case(&name)
+        a.eq_ignore_ascii_case(&profile_id)
             || deleted_id
                 .as_deref()
                 .is_some_and(|id| a.eq_ignore_ascii_case(id))
@@ -387,14 +402,14 @@ pub fn delete_profile_cmd(
     if is_active {
         crate::game::ensure_game_not_running()?;
     }
-    delete_profile(&name, &s.profiles_path).map_err(|e| e.to_string())?;
+    delete_profile(&profile_id, &s.profiles_path).map_err(|e| e.to_string())?;
     // Bug 3: if the deleted pack was the active one, drop the active-profile
     // pointer (in-memory + active_profile.txt). Without this the UI keeps the
     // gone pack flagged "active" and the next launch tries to restore it.
     let was_active = clear_active_profile_if_deleted(
         &mut s.active_profile,
         &config_path,
-        &name,
+        &deleted_name,
         deleted_id.as_deref(),
     );
     drop(s);
@@ -402,7 +417,7 @@ pub fn delete_profile_cmd(
     if was_active {
         log::info!(
             "Cleared active profile after deleting active pack '{}'",
-            name
+            deleted_name
         );
         // FB-B: clearing the pointer left the deleted pack's mods sitting in the
         // active folder, so a "modded" launch loaded them with errors. Empty the
@@ -413,7 +428,7 @@ pub fn delete_profile_cmd(
             if !moved.is_empty() {
                 log::info!(
                     "Reset active mods folder to vanilla after deleting active pack '{}': stored {} mod(s)",
-                    name,
+                    deleted_name,
                     moved.len()
                 );
             }
@@ -425,7 +440,12 @@ pub fn delete_profile_cmd(
     let to_remove: Vec<String> = db
         .subscriptions
         .iter()
-        .filter(|(_, sub)| sub.profile_name == name)
+        .filter(|(_, sub)| {
+            deleted_id
+                .as_deref()
+                .is_some_and(|id| sub.profile_id.eq_ignore_ascii_case(id))
+                || sub.profile_name.eq_ignore_ascii_case(&deleted_name)
+        })
         .map(|(id, _)| id.clone())
         .collect();
     for id in &to_remove {
@@ -436,7 +456,7 @@ pub fn delete_profile_cmd(
         log::info!(
             "Cleaned up {} subscription(s) for deleted profile '{}'",
             to_remove.len(),
-            name
+            deleted_name
         );
     }
     Ok(true)
@@ -445,7 +465,7 @@ pub fn delete_profile_cmd(
 /// Duplicate an existing profile with a new name.
 #[tauri::command]
 pub async fn duplicate_profile(
-    name: String,
+    profile_id: String,
     new_name: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Profile, String> {
@@ -453,7 +473,7 @@ pub async fn duplicate_profile(
         let s = state.lock().map_err(|e| e.to_string())?;
         (s.profiles_path.clone(), s.github_token.clone())
     };
-    let mut profile = load_profile(&name, &profiles_path).map_err(|e| e.to_string())?;
+    let mut profile = load_profile(&profile_id, &profiles_path).map_err(|e| e.to_string())?;
     let new_name = new_name.trim();
     if new_name.is_empty() {
         return Err("Name can't be empty".to_string());
@@ -467,7 +487,7 @@ pub async fn duplicate_profile(
             Err(e) => {
                 log::warn!(
                     "Could not resolve GitHub username while duplicating '{}': {}",
-                    name,
+                    profile_id,
                     e
                 );
                 None
@@ -480,7 +500,7 @@ pub async fn duplicate_profile(
     profile.updated_at = chrono::Utc::now();
     stamp_duplicate_profile_metadata(&mut profile, duplicate_owner.as_deref());
     save_profile(&profile, &profiles_path).map_err(|e| e.to_string())?;
-    log::info!("Duplicated profile '{}' as '{}'", name, profile.name);
+    log::info!("Duplicated profile '{}' as '{}'", profile_id, profile.name);
     Ok(profile)
 }
 
@@ -496,10 +516,7 @@ pub(crate) fn profile_identifier_matches(profile: &Profile, identifier: &str) ->
     profile.id.eq_ignore_ascii_case(identifier) || profile.name.eq_ignore_ascii_case(identifier)
 }
 
-pub(crate) fn active_profile_matches(
-    active_profile: Option<&str>,
-    profile: &Profile,
-) -> bool {
+pub(crate) fn active_profile_matches(active_profile: Option<&str>, profile: &Profile) -> bool {
     active_profile.is_some_and(|active| profile_identifier_matches(profile, active))
 }
 
@@ -507,20 +524,20 @@ pub(crate) fn active_profile_matches(
 /// subscriptions pointing at it.
 #[tauri::command]
 pub fn rename_profile(
-    old_name: String,
+    profile_id: String,
     new_name: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Profile, String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    let renamed =
-        crud::rename_profile(&old_name, &new_name, &s.profiles_path).map_err(|e| e.to_string())?;
+    let renamed = crud::rename_profile(&profile_id, &new_name, &s.profiles_path)
+        .map_err(|e| e.to_string())?;
     let new = renamed.name.clone();
 
     // (c) If the renamed pack was active, follow it by stable id. Older
     // installs may still have the active pointer stored as the old display
     // name, so accept both the old name and the profile id.
     if s.active_profile.as_deref().is_some_and(|active| {
-        active.eq_ignore_ascii_case(&old_name) || active.eq_ignore_ascii_case(&renamed.id)
+        active.eq_ignore_ascii_case(&profile_id) || active.eq_ignore_ascii_case(&renamed.id)
     }) {
         s.active_profile = Some(renamed.id.clone());
         persist_active_profile(&s.config_path, &renamed.id);
@@ -530,16 +547,16 @@ pub fn rename_profile(
 
     // (d) Re-point subscriptions, mirroring delete_profile_cmd's cleanup.
     let mut db = crate::subscriptions::load_subscriptions(&config_path);
-    if crate::subscriptions::rename_profile_name(&mut db, &old_name, &new) {
+    if crate::subscriptions::rename_profile_display(&mut db, &renamed.id, &new) {
         let _ = crate::subscriptions::save_subscriptions(&db, &config_path);
     }
-    log::info!("Renamed profile '{}' to '{}'", old_name, new);
+    log::info!("Renamed profile '{}' to '{}'", profile_id, new);
     Ok(renamed)
 }
 
 #[tauri::command]
 pub async fn switch_profile(
-    name: String,
+    profile_id: String,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<SwitchProfileResult, String> {
     crate::game::ensure_game_not_running()?;
@@ -559,7 +576,7 @@ pub async fn switch_profile(
     };
 
     let result = switch_profile_from_paths(
-        &name,
+        &profile_id,
         &mods_path,
         &disabled_path,
         &profiles_path,
@@ -570,8 +587,7 @@ pub async fn switch_profile(
     .await?;
 
     // Update active profile by stable id (also persist to disk)
-    let switched_profile =
-        load_profile(&name, &profiles_path).map_err(|e| e.to_string())?;
+    let switched_profile = load_profile(&profile_id, &profiles_path).map_err(|e| e.to_string())?;
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.active_profile = Some(switched_profile.id.clone());
     persist_active_profile(&s.config_path, &switched_profile.id);
@@ -718,8 +734,7 @@ pub async fn repair_profile(
     )
     .await?;
 
-    let repaired_profile =
-        load_profile(&name, &profiles_path).map_err(|e| e.to_string())?;
+    let repaired_profile = load_profile(&name, &profiles_path).map_err(|e| e.to_string())?;
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.active_profile = Some(repaired_profile.id.clone());
     persist_active_profile(&s.config_path, &repaired_profile.id);

@@ -18,7 +18,8 @@ use crate::state::AppState;
 
 use super::code::{code_to_filename, format_code, parse_share_code};
 use super::{
-    download_bundle, fetch_shared_profile, recover_owned_share_info_sidecar_for_install, SkippedMod,
+    download_bundle, fetch_shared_profile, find_owned_profile_by_share_code,
+    recover_owned_share_info_sidecar_for_install, SkippedMod,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -109,16 +110,35 @@ pub async fn install_shared_profile(
         (mods, disabled, profiles, config, cache, token, game_version)
     };
 
+    if let Some(existing) = find_owned_profile_by_share_code(&profiles_path, &owner, &profile_code)
+    {
+        return Err(format!(
+            "\"{}\" is published by you and already exists in Mod Manager.",
+            existing.name
+        ));
+    }
+
     let filename = code_to_filename(&profile_code);
     let mut profile = fetch_shared_profile(&owner, &filename, token.as_deref())
         .await
         .map_err(|e| e.to_string())?;
-    if profile.id.trim().is_empty() {
-        profile.id = crate::profiles::new_profile_id();
-    }
-    if let Ok(existing) = crate::profiles::load_profile(&profile.id, &profiles_path) {
+    let share_key = format!("{}:{}", owner, profile_code);
+    let existing_subscription = crate::subscriptions::load_subscriptions(&config_path)
+        .subscriptions
+        .get(&share_key)
+        .cloned();
+    let existing_profile = existing_subscription.as_ref().and_then(|sub| {
+        if sub.profile_id.trim().is_empty() {
+            None
+        } else {
+            crate::profiles::load_profile(&sub.profile_id, &profiles_path).ok()
+        }
+    });
+    if let Some(existing) = existing_profile {
+        profile.id = existing.id;
         profile.name = existing.name;
     } else {
+        profile.id = crate::profiles::new_profile_id();
         profile.name = crate::profiles::unique_profile_name(&profile.name, &profiles_path);
     }
     let total_mods = profile.mods.len();
@@ -474,7 +494,6 @@ pub async fn install_shared_profile(
         total_mods,
         None,
     );
-    let share_key = format!("{}:{}", owner, profile_code);
     let now = chrono::Utc::now();
     let snapshot =
         crate::subscriptions::build_synced_profile_snapshot(&profile, &skipped_incompatible);
@@ -482,6 +501,7 @@ pub async fn install_shared_profile(
         share_id: share_key.clone(),
         share_url: format!("{}/{}", owner, format_code(&profile_code)),
         profile_name: profile.name.clone(),
+        profile_id: profile.id.clone(),
         curator: profile.created_by.clone(),
         last_synced_profile: snapshot,
         last_checked: now,

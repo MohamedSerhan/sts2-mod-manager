@@ -40,6 +40,12 @@ describe('sidebar width', () => {
     expect(loadSidebarWidth()).toBe(DEFAULT_SIDEBAR_WIDTH);
   });
 
+  it('degrades when storage is unavailable', () => {
+    const noStorage = null as unknown as Storage | undefined;
+    expect(loadSidebarWidth(noStorage)).toBe(DEFAULT_SIDEBAR_WIDTH);
+    expect(() => saveSidebarWidth(300, noStorage)).not.toThrow();
+  });
+
   it('degrades when storage throws', () => {
     const hostile = {
       getItem: () => { throw new Error('x'); },

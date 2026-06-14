@@ -203,11 +203,11 @@ describe('<AppProvider>', () => {
     );
     await waitFor(() => { expect(captured?.loading).toBe(false); });
     act(() => {
-      captured!.setActiveProfile('New Pack');
+      captured!.setActiveProfile('profile-new-pack', 'New Pack');
     });
     expect(captured?.activeProfile).toBe('New Pack');
     await waitFor(() => {
-      expect(getInvokeCalls().some((c) => c.cmd === 'set_active_profile' && c.args?.name === 'New Pack')).toBe(true);
+      expect(getInvokeCalls().some((c) => c.cmd === 'set_active_profile' && c.args?.name === 'profile-new-pack')).toBe(true);
     });
   });
 
@@ -220,7 +220,7 @@ describe('<AppProvider>', () => {
       </Wrap>,
     );
     await waitFor(() => { expect(captured?.loading).toBe(false); });
-    act(() => { captured!.setActiveProfile('Doomed Pack'); });
+    act(() => { captured!.setActiveProfile('profile-doomed-pack', 'Doomed Pack'); });
     // The optimistic state update happens regardless; the rejection is
     // swallowed by the inline .catch(() => {}) so React doesn't see an
     // unhandled rejection.
@@ -596,15 +596,16 @@ describe('<AppProvider>', () => {
     // Kick the bulk update — confirm dialog will appear, click its primary
     // button to proceed.
     const user = userEvent.setup();
-    let bulkPromise: Promise<void> | null = null;
+    let bulkPromise: Promise<unknown> | null = null;
     act(() => {
       bulkPromise = bulkCaptured!.updateAllGithub(['A']);
     });
     const confirmBtn = await screen.findByRole('button', { name: /^Update 1 mod$/ });
     await user.click(confirmBtn);
-    await bulkPromise!;
+    const updated = await bulkPromise!;
 
     expect(updateAllCalls).toBe(1);
+    expect(updated).toEqual([{ name: 'A', version: '2.0.0', enabled: true, files: [] }]);
     // Targeted re-audit happens after the bulk update completes.
     expect(auditCallsBulk).toBe(1);
   });
@@ -722,7 +723,7 @@ describe('<AppProvider>', () => {
     await waitFor(() => { expect(captured?.loading).toBe(false); });
 
     const user = userEvent.setup();
-    let bulkPromise: Promise<void> | null = null;
+    let bulkPromise: Promise<unknown> | null = null;
     act(() => { bulkPromise = captured!.updateAllGithub(['A', 'B']); });
     // Dismiss the confirm via Cancel — `!ok` short-circuits before any
     // backend update runs. The modal exposes two "Cancel" controls (the
@@ -750,7 +751,7 @@ describe('<AppProvider>', () => {
     await waitFor(() => { expect(captured?.loading).toBe(false); });
 
     const user = userEvent.setup();
-    let bulkPromise: Promise<void> | null = null;
+    let bulkPromise: Promise<unknown> | null = null;
     act(() => { bulkPromise = captured!.updateAllGithub(['A']); });
     const confirmBtn = await screen.findByRole('button', { name: /^Update 1 mod$/ });
     await user.click(confirmBtn);
@@ -771,7 +772,7 @@ describe('<AppProvider>', () => {
     await waitFor(() => { expect(captured?.loading).toBe(false); });
 
     const user = userEvent.setup();
-    let bulkPromise: Promise<void> | null = null;
+    let bulkPromise: Promise<unknown> | null = null;
     act(() => { bulkPromise = captured!.updateAllGithub(['A']); });
     const confirmBtn = await screen.findByRole('button', { name: /^Update 1 mod$/ });
     await user.click(confirmBtn);
@@ -794,7 +795,7 @@ describe('<AppProvider>', () => {
     await waitFor(() => { expect(captured?.loading).toBe(false); });
 
     const user = userEvent.setup();
-    let bulkPromise: Promise<void> | null = null;
+    let bulkPromise: Promise<unknown> | null = null;
     act(() => { bulkPromise = captured!.updateAllGithub(['A']); });
     const confirmBtn = await screen.findByRole('button', { name: /^Update 1 mod$/ });
     await user.click(confirmBtn);

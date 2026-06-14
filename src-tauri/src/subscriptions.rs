@@ -21,6 +21,9 @@ pub struct Subscription {
     pub share_url: String,
     /// Name of the profile as set by the curator
     pub profile_name: String,
+    /// Stable local profile id for the installed copy of this share.
+    #[serde(default)]
+    pub profile_id: String,
     /// Who shared it (if known)
     pub curator: Option<String>,
     /// The profile snapshot we last applied
@@ -35,6 +38,7 @@ pub struct Subscription {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubscriptionUpdate {
     pub share_id: String,
+    pub profile_id: String,
     pub profile_name: String,
     pub has_update: bool,
     /// Mods that were added in the remote version
@@ -107,7 +111,12 @@ pub fn sync_own_subscription_after_publish(config_path: &Path, profile: &Profile
     let mut db = load_subscriptions(config_path);
     let mut changed = false;
     for sub in db.subscriptions.values_mut() {
-        if sub.profile_name.to_lowercase() == profile.name.to_lowercase() {
+        let matches_id =
+            !sub.profile_id.trim().is_empty() && sub.profile_id.eq_ignore_ascii_case(&profile.id);
+        let matches_legacy_name = sub.profile_name.eq_ignore_ascii_case(&profile.name);
+        if matches_id || matches_legacy_name {
+            sub.profile_id = profile.id.clone();
+            sub.profile_name = profile.name.clone();
             sub.last_synced_profile = profile.clone();
             sub.last_synced = Utc::now();
             changed = true;
@@ -150,6 +159,13 @@ fn subs_path(config_path: &Path) -> std::path::PathBuf {
 }
 
 pub fn load_subscriptions(config_path: &Path) -> SubscriptionsDb {
+    let mut db = load_subscriptions_without_migration(config_path);
+    let profiles_path = config_path.join("profiles");
+    hydrate_subscription_profile_ids(&mut db, &profiles_path);
+    db
+}
+
+fn load_subscriptions_without_migration(config_path: &Path) -> SubscriptionsDb {
     let path = subs_path(config_path);
     if !path.exists() {
         return SubscriptionsDb::default();
@@ -174,6 +190,46 @@ pub fn load_subscriptions(config_path: &Path) -> SubscriptionsDb {
         },
         Err(_) => SubscriptionsDb::default(),
     }
+}
+
+pub fn migrate_subscription_profile_ids(config_path: &Path, profiles_path: &Path) -> bool {
+    let mut db = load_subscriptions_without_migration(config_path);
+    if hydrate_subscription_profile_ids(&mut db, profiles_path) {
+        if let Err(e) = save_subscriptions(&db, config_path) {
+            log::warn!(
+                "Failed to persist subscription profile-id migration at {}: {}",
+                subs_path(config_path).display(),
+                e
+            );
+            return false;
+        }
+        return true;
+    }
+    false
+}
+
+fn hydrate_subscription_profile_ids(db: &mut SubscriptionsDb, profiles_path: &Path) -> bool {
+    let mut changed = false;
+    for sub in db.subscriptions.values_mut() {
+        let profile = if sub.profile_id.trim().is_empty() {
+            None
+        } else {
+            crate::profiles::load_profile(&sub.profile_id, profiles_path).ok()
+        }
+        .or_else(|| crate::profiles::load_profile(&sub.profile_name, profiles_path).ok());
+
+        if let Some(profile) = profile {
+            if sub.profile_id != profile.id {
+                sub.profile_id = profile.id.clone();
+                changed = true;
+            }
+            if sub.profile_name != profile.name {
+                sub.profile_name = profile.name.clone();
+                changed = true;
+            }
+        }
+    }
+    changed
 }
 
 pub fn save_subscriptions(db: &SubscriptionsDb, config_path: &Path) -> Result<()> {
@@ -253,6 +309,7 @@ pub fn subscribe_to_profile(
         share_id: share_id.clone(),
         share_url,
         profile_name: profile.name.clone(),
+        profile_id: profile.id.clone(),
         curator: profile.created_by.clone(),
         last_synced_profile: profile,
         last_checked: now,
@@ -337,6 +394,7 @@ pub async fn check_subscription_updates(
 
                 results.push(SubscriptionUpdate {
                     share_id: share_id.clone(),
+                    profile_id: sub.profile_id.clone(),
                     profile_name: sub.profile_name.clone(),
                     has_update,
                     added_mods: added,
@@ -462,15 +520,32 @@ async fn apply_subscription_update_inner(
     } else {
         return Err(format!("Invalid subscription ID: {}", share_id));
     };
-    let subscription_name = load_subscriptions(&config_path)
+    let subscription = load_subscriptions(&config_path)
         .subscriptions
         .get(&share_id)
+        .cloned();
+    let subscription_name = subscription
+        .as_ref()
         .map(|sub| sub.profile_name.clone())
         .unwrap_or_else(|| remote.name.clone());
-    if let Ok(local_profile) = crate::profiles::load_profile(&subscription_name, &profiles_path) {
-        remote.id = local_profile.id;
-    }
-    remote.name = subscription_name;
+    let local_profile = subscription
+        .as_ref()
+        .and_then(|sub| {
+            if sub.profile_id.trim().is_empty() {
+                None
+            } else {
+                crate::profiles::load_profile(&sub.profile_id, &profiles_path).ok()
+            }
+        })
+        .or_else(|| crate::profiles::load_profile(&subscription_name, &profiles_path).ok());
+    remote.id = local_profile
+        .as_ref()
+        .map(|profile| profile.id.clone())
+        .unwrap_or_else(crate::profiles::new_profile_id);
+    remote.name = local_profile
+        .as_ref()
+        .map(|profile| profile.name.clone())
+        .unwrap_or(subscription_name);
 
     // Save the profile locally
     crate::profiles::save_profile(&remote, &profiles_path).map_err(|e| e.to_string())?;
@@ -809,6 +884,8 @@ async fn apply_subscription_update_inner(
     let snapshot = build_synced_profile_snapshot(&remote, &skipped_incompatible);
     let mut db = load_subscriptions(&config_path);
     if let Some(sub) = db.subscriptions.get_mut(&share_id) {
+        sub.profile_id = remote.id.clone();
+        sub.profile_name = remote.name.clone();
         sub.last_synced_profile = snapshot;
         sub.last_synced = Utc::now();
         sub.last_checked = Utc::now();
@@ -818,12 +895,12 @@ async fn apply_subscription_update_inner(
     Ok(remote)
 }
 
-/// Re-point every subscription whose `profile_name` matches `old` at `new`.
+/// Update the cached display name for subscriptions targeting this local profile.
 /// Returns true if any entry changed (caller decides whether to save).
-pub fn rename_profile_name(db: &mut SubscriptionsDb, old: &str, new: &str) -> bool {
+pub fn rename_profile_display(db: &mut SubscriptionsDb, profile_id: &str, new: &str) -> bool {
     let mut changed = false;
     for sub in db.subscriptions.values_mut() {
-        if sub.profile_name == old {
+        if sub.profile_id.eq_ignore_ascii_case(profile_id) {
             sub.profile_name = new.to_string();
             changed = true;
         }
@@ -838,15 +915,17 @@ mod rename_helper_tests {
     fn repoints_matching_subscriptions() {
         let mut db = SubscriptionsDb::default();
         let now = chrono::Utc::now();
+        let profile_id = crate::profiles::new_profile_id();
         db.subscriptions.insert(
             "id1".into(),
             Subscription {
                 share_id: "id1".into(),
                 share_url: "o/c".into(),
                 profile_name: "Old".into(),
+                profile_id: profile_id.clone(),
                 curator: Some("o".into()),
                 last_synced_profile: crate::profiles::Profile {
-                    id: crate::profiles::new_profile_id(),
+                    id: profile_id.clone(),
                     name: "Old".into(),
                     game_version: None,
                     created_by: None,
@@ -860,9 +939,9 @@ mod rename_helper_tests {
                 last_synced: now,
             },
         );
-        assert!(rename_profile_name(&mut db, "Old", "New"));
+        assert!(rename_profile_display(&mut db, &profile_id, "New"));
         assert_eq!(db.subscriptions["id1"].profile_name, "New");
-        assert!(!rename_profile_name(&mut db, "Nope", "X"));
+        assert!(!rename_profile_display(&mut db, "missing", "X"));
     }
 }
 
@@ -902,10 +981,12 @@ mod own_subscription_sync_tests {
 
     fn subscription(profile_name: &str, snapshot: Profile) -> Subscription {
         let now = chrono::Utc::now();
+        let profile_id = snapshot.id.clone();
         Subscription {
             share_id: format!("solomag:{}", profile_name.to_lowercase()),
             share_url: "solomag/CODE".into(),
             profile_name: profile_name.into(),
+            profile_id,
             curator: Some("solomag".into()),
             last_synced_profile: snapshot,
             last_checked: now,

@@ -614,7 +614,7 @@ describe('<PublishModal>', () => {
     await user.click(publishBtn);
     // Inline panel renders with the parsed mod list.
     await screen.findByRole('heading', {
-      name: /Some mod uploads didn.t finish/i,
+      name: /Some mods aren.t installed locally/i,
     });
     expect(screen.getByText('ModA')).toBeInTheDocument();
     expect(screen.getByText('ModB')).toBeInTheDocument();
@@ -635,8 +635,8 @@ describe('<PublishModal>', () => {
       }
       return shareOk;
     });
-    registerInvokeHandler('repair_mod', async (args) => ({
-      name: String(args?.name ?? ''),
+    registerInvokeHandler('restore_profile_mod_from_share', async (args) => ({
+      name: String(args?.modName ?? ''),
       version: '1.0',
       enabled: true,
       files: [],
@@ -651,15 +651,15 @@ describe('<PublishModal>', () => {
     await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
     await user.click(publishBtn);
     await screen.findByRole('heading', {
-      name: /Some mod uploads didn.t finish/i,
+      name: /Some mods aren.t installed locally/i,
     });
-    await user.click(screen.getByRole('button', { name: /Repair these mods/i }));
+    await user.click(screen.getByRole('button', { name: /Reinstall missing mods/i }));
     // Auto-retry kicks in once both repairs succeed → publish lands the
     // success state with the share code.
     await waitForModalTitle('Modpack published');
     expect(publishCalls).toBe(2);
     // Both repairs were attempted.
-    const repairCalls = getInvokeCalls().filter((c) => c.cmd === 'repair_mod');
+    const repairCalls = getInvokeCalls().filter((c) => c.cmd === 'restore_profile_mod_from_share');
     expect(repairCalls.length).toBe(2);
   });
 
@@ -675,7 +675,7 @@ describe('<PublishModal>', () => {
     await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
     await user.click(publishBtn);
     await screen.findByRole('heading', {
-      name: /Some mod uploads didn.t finish/i,
+      name: /Some mods aren.t installed locally/i,
     });
     // Use the panel's Cancel button — the modal footer is hidden while
     // the panel owns the action surface, so there's only one Cancel.
@@ -693,8 +693,8 @@ describe('<PublishModal>', () => {
       }
       return shareOk;
     });
-    registerInvokeHandler('repair_mod', async (args) => ({
-      name: String(args?.name ?? ''),
+    registerInvokeHandler('restore_profile_mod_from_share', async (args) => ({
+      name: String(args?.modName ?? ''),
       version: '1.0',
       enabled: true,
       files: [],
@@ -709,11 +709,11 @@ describe('<PublishModal>', () => {
     await waitFor(() => { expect(pushBtn).not.toBeDisabled(); });
     await user.click(pushBtn);
     await screen.findByRole('heading', {
-      name: /Some mod uploads didn.t finish/i,
+      name: /Some mods aren.t installed locally/i,
     });
     // Chinese mod name from Solo's actual bug report renders unmangled.
     expect(screen.getByText('Solo尖塔铭者卡图强化')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /Repair these mods/i }));
+    await user.click(screen.getByRole('button', { name: /Reinstall missing mods/i }));
     await waitForModalTitle('Update pushed');
     // Auto-retry called reshare_profile a second time, not share_profile.
     const reshareCalls = getInvokeCalls().filter(
@@ -732,10 +732,10 @@ describe('<PublishModal>', () => {
       publishCalls++;
       throw new Error(missingBundlesError('My Pack', ['Good', 'Bad']));
     });
-    registerInvokeHandler('repair_mod', (args) => {
-      if (args?.name === 'Bad') throw new Error('locked file');
+    registerInvokeHandler('restore_profile_mod_from_share', (args) => {
+      if (args?.modName === 'Bad') throw new Error('locked file');
       return {
-        name: String(args?.name ?? ''),
+        name: String(args?.modName ?? ''),
         version: '1.0',
         enabled: true,
         files: [],
@@ -751,9 +751,9 @@ describe('<PublishModal>', () => {
     await waitFor(() => { expect(publishBtn).not.toBeDisabled(); });
     await user.click(publishBtn);
     await screen.findByRole('heading', {
-      name: /Some mod uploads didn.t finish/i,
+      name: /Some mods aren.t installed locally/i,
     });
-    await user.click(screen.getByRole('button', { name: /Repair these mods/i }));
+    await user.click(screen.getByRole('button', { name: /Reinstall missing mods/i }));
     // Wait for the failure marker to appear.
     await waitFor(() => {
       expect(screen.getByText(/Failed/i)).toBeInTheDocument();

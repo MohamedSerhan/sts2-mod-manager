@@ -259,7 +259,7 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
         // pruned (a name-keyed check would treat both as selected and leak it).
         if (selectedMods.has(pm.folder_name ?? pm.name)) continue;
         await setProfileModMembership(
-          trimmed,
+          created.id || created.name,
           pm.name,
           pm.folder_name ?? null,
           pm.mod_id ?? null,
@@ -274,7 +274,7 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
         const mod = mods.find((m) => (m.folder_name ?? m.name) === key);
         if (!mod) continue;
         await setProfileModMembership(
-          trimmed,
+          created.id || created.name,
           mod.name,
           mod.folder_name ?? null,
           mod.mod_id ?? null,

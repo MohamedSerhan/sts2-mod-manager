@@ -96,8 +96,9 @@ export interface UseModLibraryOptions {
   /** When set, installs (Quick add URL / Import) add the new mod to this
    *  pack's membership immediately. Unset = All Mods (install to disk only). */
   targetPack?: string | null;
-  /** Fired when a target-pack install changed that pack's local manifest. */
-  onTargetPackChanged?: () => void;
+  targetPackLabel?: string | null;
+  /** Fired when a target-pack edit changed that pack's local manifest. */
+  onTargetPackChanged?: () => void | Promise<void>;
   /** When set, the Audit action checks ONLY these mods (the modpack view
    *  audits just its pack). Unset = audit everything (All Mods view).
    *  A function so callers can read the latest pack contents at click time. */
@@ -105,7 +106,8 @@ export interface UseModLibraryOptions {
 }
 
 export function useModLibrary(opts: UseModLibraryOptions = {}) {
-  const { targetPack, onTargetPackChanged, auditScope } = opts;
+  const { targetPack, targetPackLabel, onTargetPackChanged, auditScope } = opts;
+  const targetPackDisplay = targetPackLabel ?? targetPack;
   const { t } = useTranslation();
   const {
     mods,
@@ -120,6 +122,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     updatingAll,
     updateAllGithub,
     activeProfile,
+    activeProfileId,
     refreshAuditEntries,
   } = useApp();
   const toast = useToast();
@@ -181,7 +184,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     // pack: toggle_mod guards on the game running (and can fail the move) while
     // the membership write doesn't — toggling first keeps disk + manifest in
     // sync instead of recording a membership the live folder never received.
-    if (activeProfile === targetPack && !mod.enabled) {
+    if ((activeProfileId === targetPack || (!activeProfileId && activeProfile === targetPack)) && !mod.enabled) {
       await toggleMod(mod.name, mod.folder_name ?? null, true);
     }
     await setProfileModMembership(
@@ -192,12 +195,51 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
       true,
       mod.source ?? mod.github_url ?? mod.nexus_url ?? null,
     );
-    onTargetPackChanged?.();
+    await onTargetPackChanged?.();
+  }
+
+  function sourceHintForMod(mod: ModInfo): string | null {
+    return mod.source ?? mod.github_url ?? mod.nexus_url ?? null;
+  }
+
+  async function syncTargetPackUpdatedMods(updated: ModInfo[], scopedNames?: string[]) {
+    if (!targetPack || updated.length === 0) return;
+    if (await targetPackIsFollowed()) return;
+    const scoped = scopedNames
+      ? new Set(scopedNames.map((name) => name.toLocaleLowerCase()))
+      : null;
+    let synced = false;
+    for (const mod of updated) {
+      if (scoped && !scoped.has(mod.name.toLocaleLowerCase())) continue;
+      await setProfileModMembership(
+        targetPack,
+        mod.name,
+        mod.folder_name ?? null,
+        mod.mod_id ?? null,
+        true,
+        sourceHintForMod(mod),
+      );
+      synced = true;
+    }
+    if (synced) await onTargetPackChanged?.();
+  }
+
+  async function removeFromTargetPack(mod: ModInfo) {
+    if (!targetPack || await targetPackIsFollowed()) return;
+    await setProfileModMembership(
+      targetPack,
+      mod.name,
+      mod.folder_name ?? null,
+      mod.mod_id ?? null,
+      false,
+      sourceHintForMod(mod),
+    );
+    await onTargetPackChanged?.();
   }
 
   function showInstallToast(mod: ModInfo, addedToPack: boolean) {
     if (targetPack && addedToPack) {
-      toast.success(t('mods.toast.installedAndAddedToPack', { name: mod.name, pack: targetPack }));
+      toast.success(t('mods.toast.installedAndAddedToPack', { name: mod.name, pack: targetPackDisplay }));
       return;
     }
     if (targetPack) {
@@ -224,7 +266,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     try {
       const subs = await getSubscriptions();
       const subscribed = subs.some(
-        (s) => s.profile_name.toLowerCase() === targetPack.toLowerCase(),
+        (s) => s.profile_id === targetPack || s.profile_name.toLowerCase() === targetPack.toLowerCase(),
       );
       if (!subscribed) return false;
       // Subscribed — but if we own it (have a local .share), it's still ours.
@@ -252,6 +294,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     setUpdatingKey(key);
     try {
       const info = await updateMod(mod.name, mod.folder_name);
+      await syncTargetPackUpdatedMods([info]);
       toast.success(t('mods.toast.updated', { name: mod.name, version: info.version }));
       await refreshAll();
       const names = info.name !== mod.name ? [mod.name, info.name] : [mod.name];
@@ -262,6 +305,15 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     } finally {
       setUpdatingKey(null);
     }
+  }
+
+  async function updateAllGithubForSurface(githubUpdateNames: string[]) {
+    return updateAllGithub(
+      githubUpdateNames,
+      targetPack
+        ? { afterUpdate: (updated) => syncTargetPackUpdatedMods(updated, githubUpdateNames) }
+        : undefined,
+    );
   }
 
   async function handleTogglePin(mod: ModInfo) {
@@ -297,6 +349,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     setRepairingKey(key);
     try {
       const info = await repairMod(mod.name, mod.folder_name);
+      await syncTargetPackUpdatedMods([info]);
       toast.success(t('mods.toast.repaired', { name: info.name, version: info.version }));
       await refreshAll();
     } catch (e) {
@@ -325,6 +378,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     setRollingBackKey(key);
     try {
       const info = await rollbackMod(mod.name, mod.folder_name);
+      await syncTargetPackUpdatedMods([info]);
       toast.success(t('mods.toast.rolledBack', { name: info.name, version: info.version }));
       await refreshAll();
       const names = info.name !== mod.name ? [mod.name, info.name] : [mod.name];
@@ -346,6 +400,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     if (!ok) return;
     try {
       await deleteMod(mod.name, mod.folder_name);
+      await removeFromTargetPack(mod);
       await refreshMods();
       toast.success(t('mods.toast.deleted', { name: mod.name }));
     } catch (e) {
@@ -358,7 +413,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     try {
       const autoAddToTargetPack = !!targetPack && loadAutoAddInstallsToModpack();
       if (autoAddToTargetPack && await targetPackIsFollowed()) {
-        toast.info(t('mods.toast.followedPackNoAdd', { pack: targetPack }));
+        toast.info(t('mods.toast.followedPackNoAdd', { pack: targetPackDisplay }));
         return;
       }
       const selected = await open({
@@ -384,7 +439,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     if (!quickAddUrl.trim()) return;
     const autoAddToTargetPack = !!targetPack && loadAutoAddInstallsToModpack();
     if (autoAddToTargetPack && await targetPackIsFollowed()) {
-      toast.info(t('mods.toast.followedPackNoAdd', { pack: targetPack }));
+      toast.info(t('mods.toast.followedPackNoAdd', { pack: targetPackDisplay }));
       return;
     }
     const input = quickAddUrl.trim();
@@ -569,6 +624,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
         onClose={() => { setShowAutoDetect(false); setAutoDetectFocusMod(null); }}
         onApplied={() => {
           refreshMods();
+          onTargetPackChanged?.();
           // If an audit already ran, re-run it so the newly-linked rows
           // pick up their update status without a manual re-audit.
           if (auditResults) runAudit();
@@ -596,6 +652,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
         onSave={async (gh, nx, note, customUrl, displayName, displayDescription, tagsInput) => {
           try {
             setSavingSource(true);
+            let manifestChanged = false;
             const nextGithub = cleanOptional(gh);
             const nextNexus = cleanOptional(nx);
             if (
@@ -603,6 +660,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
               || nextNexus !== (mod.nexus_url ?? null)
             ) {
               await setModSourcesFull(mod.name, nextGithub, nextNexus, mod.folder_name);
+              manifestChanged = true;
             }
 
             const nextNote = cleanOptional(note);
@@ -612,6 +670,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
               || nextCustomUrl !== (mod.custom_url ?? null)
             ) {
               await setModExtras(mod.name, nextNote, nextCustomUrl, mod.folder_name);
+              manifestChanged = true;
             }
 
             const nextDisplayName = cleanOptional(displayName);
@@ -626,12 +685,15 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
                 nextDisplayDescription,
                 mod.folder_name,
               );
+              manifestChanged = true;
             }
 
             const nextTags = parseManagerTags(tagsInput);
             if (!sameTags(nextTags, mod.tags ?? [])) {
               await setModTags(mod.name, nextTags, mod.folder_name);
+              manifestChanged = true;
             }
+            if (manifestChanged) await onTargetPackChanged?.();
             await refreshMods();
             toast.success(t('mods.toast.sourcesSaved', { name: displayNameFor(mod) }));
             setSourceEditorRowKey(null);
@@ -682,7 +744,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     auditResults,
     auditing,
     updatingAll,
-    updateAllGithub,
+    updateAllGithub: updateAllGithubForSurface,
     // Toolbar state.
     showQuickAdd,
     setShowQuickAdd,

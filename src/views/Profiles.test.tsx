@@ -372,6 +372,39 @@ describe('<ProfilesView>', () => {
     });
   });
 
+  it('shows the modpack name, not its UUID, while activating', async () => {
+    const uuid = '731aeaec-7f3d-4859-baec-16219701e2e7';
+    let finishSwitch!: () => void;
+    seedProfiles([
+      baseProfile({ id: 'active-id', name: 'A' }),
+      baseProfile({ id: uuid, name: 'Display Pack' }),
+    ]);
+    registerInvokeHandler('get_active_profile', () => 'A');
+    registerInvokeHandler('get_active_profile_id', () => 'active-id');
+    registerInvokeHandler('switch_profile', () => new Promise((resolve) => {
+      finishSwitch = () => resolve({
+        applied: true,
+        downloaded: 0,
+        missing_mods: [],
+        failed_downloads: [],
+      });
+    }));
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await openDetailFor(user, 'Display Pack');
+    await user.click(screen.getAllByRole('button', { name: /Switch to/i })[0]);
+
+    expect(await screen.findByText(/Activating "Display Pack"/)).toBeInTheDocument();
+    expect(screen.queryByText(new RegExp(uuid))).toBeNull();
+    expect(getInvokeCalls().some((c) => c.cmd === 'switch_profile' && c.args?.profileId === uuid)).toBe(true);
+
+    finishSwitch();
+    await waitFor(() => {
+      expect(screen.getByText(/Switched to modpack "Display Pack"/)).toBeInTheDocument();
+    });
+  });
+
   it('Switch cancel leaves a drifted active profile untouched', async () => {
     seedProfiles([
       baseProfile({ name: 'A' }),
@@ -1249,7 +1282,7 @@ describe('<ProfilesView>', () => {
       }),
     ]);
     registerInvokeHandler('set_profile_load_order', (args) => {
-      expect(args?.profileName).toBe('Stable');
+      expect(args?.profileId).toBe('Stable');
       expect(args?.orderedMods).toEqual([
         { name: 'Card Art Editor', folderName: 'CardArtEditor', modId: 'CardArtEditor' },
         { name: 'BaseLib', folderName: 'BaseLib', modId: 'BaseLib' },
@@ -2017,7 +2050,7 @@ describe('<ProfilesView>', () => {
     await user.click(modal.getByRole('button', { name: /Delete modpack/i }));
     await waitFor(() => {
       expect(getInvokeCalls().some(
-        (c) => c.cmd === 'delete_profile_cmd' && c.args?.name === 'Doomed',
+        (c) => c.cmd === 'delete_profile_cmd' && c.args?.profileId === 'Doomed',
       )).toBe(true);
     });
     await waitFor(() => {
@@ -2049,7 +2082,7 @@ describe('<ProfilesView>', () => {
     await user.click(modal.getByRole('button', { name: /Delete modpack/i }));
     await waitFor(() => {
       expect(getInvokeCalls().some(
-        (c) => c.cmd === 'delete_profile_cmd' && c.args?.name === 'A',
+        (c) => c.cmd === 'delete_profile_cmd' && c.args?.profileId === 'A',
       )).toBe(true);
     });
 
@@ -2084,7 +2117,7 @@ describe('<ProfilesView>', () => {
     await user.click(modal.getByRole('button', { name: /Delete modpack/i }));
     await waitFor(() => {
       expect(getInvokeCalls().some(
-        (c) => c.cmd === 'delete_profile_cmd' && c.args?.name === 'mypack',
+        (c) => c.cmd === 'delete_profile_cmd' && c.args?.profileId === 'mypack',
       )).toBe(true);
     });
     await waitFor(() => {
@@ -2115,7 +2148,7 @@ describe('<ProfilesView>', () => {
     await user.click(modal.getByRole('button', { name: /Delete modpack/i }));
     await waitFor(() => {
       expect(getInvokeCalls().some(
-        (c) => c.cmd === 'delete_profile_cmd' && c.args?.name === 'B',
+        (c) => c.cmd === 'delete_profile_cmd' && c.args?.profileId === 'B',
       )).toBe(true);
     });
 
@@ -2248,6 +2281,28 @@ describe('<ProfilesView>', () => {
     });
   });
 
+  it('Import-by-code for your own published share points to the existing local modpack', async () => {
+    seedProfiles([baseProfile({ id: 'profile-1', name: 'Solo Pack' })]);
+    registerInvokeHandler('get_subscriptions', () => []);
+    registerInvokeHandler('check_subscription_updates', () => []);
+    registerInvokeHandler('get_share_info', (args) => (
+      args?.name === 'profile-1'
+        ? { code: 'AA5A-315D-61AE', owner: 'alice', out_of_sync: false }
+        : null
+    ));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Solo Pack')).toBeInTheDocument(); });
+    const input = screen.getByLabelText(/Add a modpack by code/i);
+    await user.type(input, 'alice/AA5A-315D-61AE');
+    await user.click(screen.getByRole('button', { name: /^Add$/ }));
+    await waitFor(() => {
+      expect(screen.getByText(/"Solo Pack" is published by you and already exists in Mod Manager/)).toBeInTheDocument();
+    });
+    expect(getInvokeCalls().some((c) => c.cmd === 'fetch_shared_profile_cmd')).toBe(false);
+    expect(getInvokeCalls().some((c) => c.cmd === 'install_shared_profile')).toBe(false);
+  });
+
   it('Import-by-code already-active path re-applies the active pack', async () => {
     seedProfiles([baseProfile({ name: 'Match' })]);
     registerInvokeHandler('get_active_profile', () => 'Match');
@@ -2305,7 +2360,7 @@ describe('<ProfilesView>', () => {
     // hit. The row's Switch-to button on OtherInstalled is gated by the
     // disabled flag while switching, but we still want to disambiguate.
     expect(getInvokeCalls().some(
-      (c) => c.cmd === 'switch_profile' && c.args?.name === 'OtherInstalled',
+      (c) => c.cmd === 'switch_profile' && c.args?.profileId === 'OtherInstalled',
     )).toBe(true);
   });
 

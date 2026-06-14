@@ -276,6 +276,176 @@ fn find_share_info_path(name: &str, profiles_path: &Path) -> Option<PathBuf> {
     candidates.into_iter().find(|path| path.exists())
 }
 
+fn load_share_info_for_profile(profile: &Profile, profiles_path: &Path) -> Option<ShareInfo> {
+    let mut candidates = vec![
+        share_info_path_for_profile(profile, profiles_path),
+        profiles_path.join(format!("{}.share", profile.name)),
+    ];
+    if !profile.id.trim().is_empty() {
+        candidates.push(profiles_path.join(format!("{}.share", profile.id)));
+    }
+    candidates
+        .push(profiles_path.join(format!("{}.share", legacy_profile_name_stem(&profile.name))));
+
+    candidates
+        .into_iter()
+        .find(|path| path.exists())
+        .and_then(|path| load_share_info(&path).ok())
+}
+
+pub(super) fn find_owned_profile_by_share_code(
+    profiles_path: &Path,
+    owner: &str,
+    profile_code: &str,
+) -> Option<Profile> {
+    let target_code = format_code(profile_code);
+    crate::profiles::list_profiles(profiles_path)
+        .into_iter()
+        .find(|profile| {
+            let Some(info) = load_share_info_for_profile(profile, profiles_path) else {
+                return false;
+            };
+            info.owner.eq_ignore_ascii_case(owner) && format_code(&info.code) == target_code
+        })
+}
+
+fn profile_mod_matches_restore_target(
+    pm: &ProfileMod,
+    mod_name: &str,
+    folder_name: Option<&str>,
+    mod_id: Option<&str>,
+) -> bool {
+    pm.name == mod_name
+        || folder_name.is_some_and(|folder| pm.folder_name.as_deref() == Some(folder))
+        || mod_id.is_some_and(|id| pm.mod_id.as_deref() == Some(id))
+}
+
+fn installed_mod_matches_profile_mod(installed: &ModInfo, pm: &ProfileMod) -> bool {
+    installed.name == pm.name
+        || pm
+            .folder_name
+            .as_ref()
+            .is_some_and(|folder| installed.folder_name.as_deref() == Some(folder))
+        || pm
+            .mod_id
+            .as_ref()
+            .is_some_and(|id| installed.mod_id.as_deref() == Some(id))
+}
+
+async fn restore_profile_mod_from_github_source(
+    pm: &ProfileMod,
+    source: &str,
+    mods_path: &Path,
+    cache_path: &Path,
+    token: Option<&str>,
+) -> std::result::Result<ModInfo, String> {
+    let (owner, repo) = crate::quick_add::resolve_github_url(source).map_err(|_| {
+        format!(
+            "Mod '{}' has no restorable shared bundle or GitHub source.",
+            pm.name
+        )
+    })?;
+    crate::download::download_and_install_github_mod(
+        &owner, &repo, None, mods_path, cache_path, token,
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn restore_profile_mod_from_share(
+    profile_id: String,
+    mod_name: String,
+    folder_name: Option<String>,
+    mod_id: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<ModInfo, String> {
+    crate::game::ensure_game_not_running()?;
+    let (profiles_path, mods_path, cache_path, config_path, token) = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        let profiles_path = s.profiles_path.clone();
+        let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
+        let cache_path = s.cache_path.clone();
+        let config_path = s.config_path.clone();
+        let token = s.github_token.clone();
+        (profiles_path, mods_path, cache_path, config_path, token)
+    };
+
+    let profile =
+        crate::profiles::load_profile(&profile_id, &profiles_path).map_err(|e| e.to_string())?;
+    let target = profile
+        .mods
+        .iter()
+        .find(|pm| {
+            profile_mod_matches_restore_target(
+                pm,
+                &mod_name,
+                folder_name.as_deref(),
+                mod_id.as_deref(),
+            )
+        })
+        .cloned()
+        .ok_or_else(|| format!("Mod '{}' is no longer in this modpack.", mod_name))?;
+
+    let share_info = load_share_info_for_profile(&profile, &profiles_path);
+    if let Some(info) = share_info {
+        let filename = code_to_filename(&info.code);
+        if let Ok(remote) = fetch_shared_profile(&info.owner, &filename, token.as_deref()).await {
+            if let Some(remote_mod) = remote
+                .mods
+                .iter()
+                .find(|pm| publish_profile_mods_match(pm, &target))
+                .or_else(|| remote.mods.iter().find(|pm| pm.name == target.name))
+            {
+                if let Some(bundle_url) = remote_mod.bundle_url.as_deref() {
+                    download_bundle(
+                        bundle_url,
+                        &remote_mod.name,
+                        &mods_path,
+                        remote_mod.bundle_sha256.as_deref(),
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
+                    if let Some(installed) = scan_mods(&mods_path)
+                        .into_iter()
+                        .find(|m| installed_mod_matches_profile_mod(m, remote_mod))
+                    {
+                        return Ok(installed);
+                    }
+                }
+            }
+        }
+    }
+
+    let db = crate::mod_sources::load_sources(&config_path);
+    let source = target
+        .source
+        .clone()
+        .or_else(|| {
+            crate::mod_sources::shareable_source_for(
+                &db,
+                target.folder_name.as_deref(),
+                &target.name,
+                target.mod_id.as_deref(),
+            )
+        })
+        .ok_or_else(|| {
+            format!(
+                "Mod '{}' has no restorable shared bundle or GitHub source.",
+                target.name
+            )
+        })?;
+
+    restore_profile_mod_from_github_source(
+        &target,
+        &source,
+        &mods_path,
+        &cache_path,
+        token.as_deref(),
+    )
+    .await
+}
+
 fn recover_owned_share_info_sidecar(
     _profile_name: &str,
     profiles_path: &Path,
@@ -2356,6 +2526,39 @@ mod listing_tests {
         );
     }
 
+    #[test]
+    fn owned_share_code_lookup_returns_existing_local_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let profiles_path = dir.path().join("profiles");
+        std::fs::create_dir_all(&profiles_path).unwrap();
+
+        let profile = make_profile("Solo Pack", Some(true));
+        crate::profiles::save_profile(&profile, &profiles_path).unwrap();
+        save_share_info(
+            &share_info_path_for_profile(&profile, &profiles_path),
+            &ShareInfo {
+                code: "AA5A-315D-61AE".into(),
+                owner: "alice".into(),
+                file_sha: None,
+                share_format_version: SHARE_FORMAT_VERSION,
+                published_signature: Some(profile_publish_signature(&profile)),
+                bundle_source_fingerprints: HashMap::new(),
+                bundle_source_fast_fingerprints: HashMap::new(),
+            },
+        )
+        .unwrap();
+
+        let found = find_owned_profile_by_share_code(&profiles_path, "ALICE", "aa5a315d61ae")
+            .expect("owned share code should resolve to the existing local profile");
+
+        assert_eq!(found.id, profile.id);
+        assert_eq!(found.name, "Solo Pack");
+        assert!(
+            find_owned_profile_by_share_code(&profiles_path, "bob", "aa5a315d61ae").is_none(),
+            "a matching code from a different owner must still be installable"
+        );
+    }
+
     #[tokio::test]
     async fn missing_owned_sidecar_recovers_from_subscription_and_token_owner() {
         use wiremock::matchers::{method, path};
@@ -2397,6 +2600,7 @@ mod listing_tests {
                 share_id: "Solomag:290a56edb15d".into(),
                 share_url: "Solomag/290A-56ED-B15D".into(),
                 profile_name: "Solo Pack".into(),
+                profile_id: local.id.clone(),
                 curator: Some("Solomag".into()),
                 last_synced_profile: remote.clone(),
                 last_checked: Utc::now(),

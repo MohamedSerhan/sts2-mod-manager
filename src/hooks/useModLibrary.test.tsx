@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 
@@ -21,13 +22,7 @@ const membershipCalls = () => getInvokeCalls().filter((c) => c.cmd === 'set_prof
 const updateModCalls = () => getInvokeCalls().filter((c) => c.cmd === 'update_mod');
 
 /** Minimal ModInfo shape used by update tests. */
-function makeMod(overrides: Partial<{
-  name: string;
-  version: string;
-  folder_name: string | null;
-  github_url: string | null;
-  nexus_url: string | null;
-}> = {}) {
+function makeMod(overrides: Partial<ModInfo> = {}): ModInfo {
   return {
     name: 'TestMod',
     version: '1.0.0',
@@ -104,10 +99,43 @@ describe('useModLibrary', () => {
 
     await waitFor(() => expect(membershipCalls()).toHaveLength(1));
     expect(membershipCalls()[0].args).toMatchObject({
-      profileName: 'MyPack',
+      profileId: 'MyPack',
       modName: 'Cool',
       folderName: 'Cool',
       included: true,
+    });
+  });
+
+  it('handleImportFile enables a disabled mod before adding it to the active target pack', async () => {
+    localStorage.setItem(AUTO_ADD_INSTALLS_TO_MODPACK_KEY, 'true');
+    vi.mocked(open).mockResolvedValueOnce('C:\\downloads\\Cool.zip');
+    registerInvokeHandler('get_active_profile_id', () => 'MyPack');
+    registerInvokeHandler('get_active_profile', () => 'MyPack');
+    registerInvokeHandler('install_mod_from_file', () => makeMod({
+      name: 'Cool',
+      folder_name: 'Cool',
+      enabled: false,
+    }));
+    registerInvokeHandler('toggle_mod', () => ({}));
+    registerInvokeHandler('set_profile_mod_membership', () => ({}));
+    const { result } = renderHook(() => useModLibrary({ targetPack: 'MyPack' }), {
+      wrapper: AllProviders,
+    });
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'get_active_profile')).toBe(true);
+    });
+
+    await act(async () => { await result.current.handleImportFile(); });
+
+    const calls = getInvokeCalls();
+    const toggleIndex = calls.findIndex((c) => c.cmd === 'toggle_mod');
+    const membershipIndex = calls.findIndex((c) => c.cmd === 'set_profile_mod_membership');
+    expect(toggleIndex).toBeGreaterThanOrEqual(0);
+    expect(membershipIndex).toBeGreaterThan(toggleIndex);
+    expect(calls[toggleIndex].args).toMatchObject({
+      name: 'Cool',
+      folderName: 'Cool',
+      enable: true,
     });
   });
 
@@ -233,7 +261,7 @@ describe('useModLibrary', () => {
 
     await waitFor(() => expect(membershipCalls()).toHaveLength(1));
     expect(membershipCalls()[0].args).toMatchObject({
-      profileName: 'MyPack',
+      profileId: 'MyPack',
       modName: 'Cool',
       folderName: 'Cool',
       included: true,
@@ -301,6 +329,231 @@ describe('useModLibrary', () => {
     expect(updateModCalls()[0].args?.name).toBe('RelicsReminder');
     // Must NOT have opened any URL in the browser for the GitHub path.
     expect(openUrl).not.toHaveBeenCalled();
+  });
+
+  it('handleInlineUpdate syncs a targeted modpack manifest before marking the pack changed', async () => {
+    const githubMod = makeMod({
+      name: 'RelicsReminder',
+      folder_name: 'RelicsReminder',
+      github_url: 'https://github.com/some/relics-reminder',
+      nexus_url: null,
+    });
+    registerInvokeHandler('update_mod', () => makeMod({
+      name: 'RelicsReminder',
+      version: '2.0.0',
+      folder_name: 'RelicsReminder',
+      mod_id: 'relics-reminder',
+      github_url: 'https://github.com/some/relics-reminder',
+    }));
+    registerInvokeHandler('set_profile_mod_membership', () => ({}));
+    const onTargetPackChanged = vi.fn();
+    const { result } = renderHook(() => useModLibrary({
+      targetPack: 'profile-123',
+      onTargetPackChanged,
+    }), { wrapper: AllProviders });
+
+    await act(async () => {
+      await result.current.tableActionProps.onUpdate(githubMod);
+    });
+
+    await waitFor(() => expect(updateModCalls()).toHaveLength(1));
+    expect(membershipCalls()).toHaveLength(1);
+    expect(membershipCalls()[0].args).toMatchObject({
+      profileId: 'profile-123',
+      modName: 'RelicsReminder',
+      folderName: 'RelicsReminder',
+      modId: 'relics-reminder',
+      included: true,
+      sourceHint: 'https://github.com/some/relics-reminder',
+    });
+    expect(onTargetPackChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('bulk GitHub updates sync only targeted mods into the target pack manifest', async () => {
+    registerInvokeHandler('update_all_mods', () => [
+      makeMod({
+        name: 'PackMod',
+        version: '2.0.0',
+        folder_name: 'PackMod',
+        mod_id: 'pack-mod',
+        github_url: 'https://github.com/some/pack-mod',
+      }),
+      makeMod({
+        name: 'LibraryOnly',
+        version: '2.0.0',
+        folder_name: 'LibraryOnly',
+        mod_id: 'library-only',
+        github_url: 'https://github.com/some/library-only',
+      }),
+    ]);
+    registerInvokeHandler('audit_mod_versions', () => []);
+    registerInvokeHandler('set_profile_mod_membership', () => ({}));
+    const onTargetPackChanged = vi.fn();
+    const { result } = renderHook(() => useModLibrary({
+      targetPack: 'profile-123',
+      onTargetPackChanged,
+    }), { wrapper: AllProviders });
+    const user = userEvent.setup();
+
+    let updatePromise: Promise<unknown> | null = null;
+    act(() => {
+      updatePromise = result.current.updateAllGithub(['PackMod']);
+    });
+    await user.click(await screen.findByRole('button', { name: /^Update 1 mod$/ }));
+    await updatePromise;
+
+    expect(membershipCalls()).toHaveLength(1);
+    expect(membershipCalls()[0].args).toMatchObject({
+      profileId: 'profile-123',
+      modName: 'PackMod',
+      folderName: 'PackMod',
+      modId: 'pack-mod',
+      included: true,
+      sourceHint: 'https://github.com/some/pack-mod',
+    });
+    expect(onTargetPackChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not sync updated mods into a followed target pack', async () => {
+    const githubMod = makeMod({
+      name: 'FriendPackMod',
+      folder_name: 'FriendPackMod',
+      github_url: 'https://github.com/some/friend-pack-mod',
+      nexus_url: null,
+    });
+    registerInvokeHandler('get_subscriptions', () => [
+      {
+        profile_id: 'profile-123',
+        profile_name: 'Friend Pack',
+        source_repo: 'friend/packs',
+        source_owner: 'friend',
+        auto_update: true,
+      },
+    ]);
+    registerInvokeHandler('get_share_info', () => null);
+    registerInvokeHandler('update_mod', () => makeMod({
+      name: 'FriendPackMod',
+      version: '2.0.0',
+      folder_name: 'FriendPackMod',
+      github_url: 'https://github.com/some/friend-pack-mod',
+    }));
+    registerInvokeHandler('set_profile_mod_membership', () => ({}));
+    const onTargetPackChanged = vi.fn();
+    const { result } = renderHook(() => useModLibrary({
+      targetPack: 'profile-123',
+      onTargetPackChanged,
+    }), { wrapper: AllProviders });
+
+    await act(async () => {
+      await result.current.tableActionProps.onUpdate(githubMod);
+    });
+
+    expect(updateModCalls()).toHaveLength(1);
+    expect(membershipCalls()).toHaveLength(0);
+    expect(onTargetPackChanged).not.toHaveBeenCalled();
+  });
+
+  it('still syncs targeted updates when subscription lookup fails', async () => {
+    const githubMod = makeMod({
+      name: 'LocalPackMod',
+      folder_name: 'LocalPackMod',
+      github_url: 'https://github.com/some/local-pack-mod',
+      nexus_url: null,
+    });
+    registerInvokeHandler('get_subscriptions', () => {
+      throw new Error('offline');
+    });
+    registerInvokeHandler('update_mod', () => makeMod({
+      name: 'LocalPackMod',
+      version: '2.0.0',
+      folder_name: 'LocalPackMod',
+      github_url: 'https://github.com/some/local-pack-mod',
+    }));
+    registerInvokeHandler('set_profile_mod_membership', () => ({}));
+    const onTargetPackChanged = vi.fn();
+    const { result } = renderHook(() => useModLibrary({
+      targetPack: 'profile-123',
+      onTargetPackChanged,
+    }), { wrapper: AllProviders });
+
+    await act(async () => {
+      await result.current.tableActionProps.onUpdate(githubMod);
+    });
+
+    expect(membershipCalls()).toHaveLength(1);
+    expect(onTargetPackChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('repair syncs the refreshed mod into a targeted modpack manifest', async () => {
+    const githubMod = makeMod({
+      name: 'PackMod',
+      folder_name: 'PackMod',
+      github_url: 'https://github.com/some/pack-mod',
+      nexus_url: null,
+    });
+    registerInvokeHandler('repair_mod', () => makeMod({
+      name: 'PackMod',
+      version: '2.0.0',
+      folder_name: 'PackMod',
+      mod_id: 'pack-mod',
+      github_url: 'https://github.com/some/pack-mod',
+    }));
+    registerInvokeHandler('set_profile_mod_membership', () => ({}));
+    const onTargetPackChanged = vi.fn();
+    const { result } = renderHook(() => useModLibrary({
+      targetPack: 'profile-123',
+      onTargetPackChanged,
+    }), { wrapper: AllProviders });
+    const user = userEvent.setup();
+
+    let repairPromise: Promise<void> | null = null;
+    act(() => {
+      repairPromise = result.current.tableActionProps.onRepair(githubMod);
+    });
+    await user.click(await screen.findByRole('button', { name: /^Repair now$/i }));
+    await repairPromise;
+
+    expect(membershipCalls()).toHaveLength(1);
+    expect(membershipCalls()[0].args).toMatchObject({
+      profileId: 'profile-123',
+      modName: 'PackMod',
+      modId: 'pack-mod',
+      included: true,
+    });
+    expect(onTargetPackChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('delete removes the mod from a targeted modpack manifest after deleting from disk', async () => {
+    const githubMod = makeMod({
+      name: 'PackMod',
+      folder_name: 'PackMod',
+      github_url: 'https://github.com/some/pack-mod',
+    });
+    registerInvokeHandler('delete_mod_cmd', () => ({}));
+    registerInvokeHandler('set_profile_mod_membership', () => ({}));
+    const onTargetPackChanged = vi.fn();
+    const { result } = renderHook(() => useModLibrary({
+      targetPack: 'profile-123',
+      onTargetPackChanged,
+    }), { wrapper: AllProviders });
+    const user = userEvent.setup();
+
+    let deletePromise: Promise<void> | null = null;
+    act(() => {
+      deletePromise = result.current.tableActionProps.onDelete(githubMod);
+    });
+    await user.click(await screen.findByRole('button', { name: /^Delete$/i }));
+    await deletePromise;
+
+    expect(getInvokeCalls().some((c) => c.cmd === 'delete_mod_cmd')).toBe(true);
+    expect(membershipCalls()).toHaveLength(1);
+    expect(membershipCalls()[0].args).toMatchObject({
+      profileId: 'profile-123',
+      modName: 'PackMod',
+      folderName: 'PackMod',
+      included: false,
+    });
+    expect(onTargetPackChanged).toHaveBeenCalledTimes(1);
   });
 });
 

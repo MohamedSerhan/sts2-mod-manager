@@ -88,7 +88,7 @@ export interface ModpackDetailProps {
   /** Optional snapshot of the active "switching..." state so the
    *  Switch button can show a spinner without us reaching into the
    *  parent's state shape. */
-  switchingProfile?: string | null;
+  switchingProfile?: string | { key: string; name: string } | null;
   shareInfo?: ShareResult | null;
   drift?: ProfileDrift | null;
   /** Local edits to a shared pack that have not been uploaded yet. */
@@ -165,12 +165,18 @@ export function ModpackDetail({
   const markSharedLocalEdit = () => {
     if (isShared) onLocalOutOfSync?.(profileKey);
   };
+  const refreshAfterMutation = async () => {
+    markSharedLocalEdit();
+    await refreshAll();
+    onLibraryChanged?.();
+  };
   // Shared mod-library surface (toolbar + install actions), scoped so a
   // mod installed from here auto-joins THIS pack, and the Audit action
   // checks only this pack's mods. The same hook powers the All Mods view.
   const lib = useModLibrary({
-    targetPack: profile.name,
-    onTargetPackChanged: markSharedLocalEdit,
+    targetPack: profileKey,
+    targetPackLabel: profile.name,
+    onTargetPackChanged: refreshAfterMutation,
     auditScope: () => profile.mods.map((m) => m.name),
   });
   // Scroll-pin safety net (shared with LibraryTable via usePinScroll). The
@@ -194,7 +200,9 @@ export function ModpackDetail({
   // never go the other way.)
   const missingMods = drift?.removed ?? [];
   const missingCount = missingMods.length;
-  const switchingThis = switchingProfile === profileKey || switchingProfile === profile.name;
+  const switchingProfileKey = typeof switchingProfile === 'string' ? switchingProfile : switchingProfile?.key;
+  const switchingProfileName = typeof switchingProfile === 'string' ? switchingProfile : switchingProfile?.name;
+  const switchingThis = switchingProfileKey === profileKey || switchingProfileName === profile.name;
   const switchingOther = !!switchingProfile && !switchingThis;
 
   // Per-row in-flight keys so a double-click can't double-fire the
@@ -304,12 +312,6 @@ export function ModpackDetail({
     });
   }, [availableMods, availableQuery]);
 
-  const refreshAfterMutation = async () => {
-    markSharedLocalEdit();
-    await refreshAll();
-    onLibraryChanged?.();
-  };
-
   const setBusy = (key: string, busy: boolean) => {
     setBusyKeys((prev) => {
       const next = new Set(prev);
@@ -337,7 +339,7 @@ export function ModpackDetail({
         await toggleMod(mod.name, mod.folder_name ?? null, true);
       }
       await setProfileModMembership(
-        profile.name,
+        profileKey,
         mod.name,
         mod.folder_name ?? null,
         mod.mod_id ?? null,
@@ -385,6 +387,7 @@ export function ModpackDetail({
       const targets = profile.mods.map((m) => ({ name: m.name, folder_name: m.folder_name ?? null }));
       for (const m of targets) {
         await deleteMod(m.name, m.folder_name);
+        await setProfileModMembership(profileKey, m.name, m.folder_name, null, false);
       }
       await refreshAfterMutation();
       toast.success(
@@ -439,7 +442,7 @@ export function ModpackDetail({
         }));
       }
       if (issues.length > 0) {
-        toast.info(`${base} ${issues.join(' ')}`);
+        toast.error(`${base} ${issues.join(' ')}`);
       } else {
         toast.success(base);
       }
@@ -838,7 +841,8 @@ export function ModpackDetail({
             each row's visible action into "Remove from pack". reloadToken
             re-syncs when membership changes from outside the table. */}
         <LibraryTable
-          modpackName={profile.name}
+          modpackName={profileKey}
+          modpackLabel={profile.name}
           packScoped
           coupleActiveStorage
           reloadToken={`${membershipSignature}|active:${activeProfile ?? ''}|bulk:${bulkReloadNonce}`}
@@ -846,7 +850,7 @@ export function ModpackDetail({
           bulkActionsBar={packBulkBar}
           filterRow={(row) => {
             const included = !!row.profiles.find(
-              (p) => p.profile_name === profile.name,
+              (p) => p.profile_id === profileKey || p.profile_name === profile.name,
             )?.included;
             if (!included) return false;
             if (!tagFilter) return true;

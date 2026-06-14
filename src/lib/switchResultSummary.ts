@@ -59,3 +59,10 @@ export function switchResultDetails(
   }
   return parts;
 }
+
+export function switchResultHasProblems(result: SwitchProfileResult): boolean {
+  return (result.failed_downloads?.length ?? 0) > 0
+    || (result.missing_mods?.length ?? 0) > 0
+    || (result.replace_failures?.length ?? 0) > 0
+    || (result.failed_enables?.length ?? 0) > 0;
+}

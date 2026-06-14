@@ -54,6 +54,7 @@ import {
   repairMod,
   repairModpackSubscription,
   repairProfile,
+  restoreProfileModFromShare,
   resetToVanilla,
   rollbackMod,
   reshareProfile,
@@ -201,19 +202,19 @@ describe('useTauri wrappers — command names + arg shapes', () => {
     await createProfile('My Pack');
     expect(lastCall()).toEqual({ cmd: 'create_profile', args: { name: 'My Pack' } });
 
-    await switchProfile('My Pack');
-    expect(lastCall()).toEqual({ cmd: 'switch_profile', args: { name: 'My Pack' } });
+    await switchProfile('profile-1');
+    expect(lastCall()).toEqual({ cmd: 'switch_profile', args: { profileId: 'profile-1' } });
 
     await repairProfile('My Pack');
     expect(lastCall()).toEqual({ cmd: 'repair_profile', args: { name: 'My Pack' } });
 
-    await deleteProfile('Old');
-    expect(lastCall()).toEqual({ cmd: 'delete_profile_cmd', args: { name: 'Old' } });
+    await deleteProfile('profile-old');
+    expect(lastCall()).toEqual({ cmd: 'delete_profile_cmd', args: { profileId: 'profile-old' } });
 
-    await duplicateProfile('Source', 'Copy');
+    await duplicateProfile('profile-source', 'Copy');
     expect(lastCall()).toEqual({
       cmd: 'duplicate_profile',
-      args: { name: 'Source', newName: 'Copy' },
+      args: { profileId: 'profile-source', newName: 'Copy' },
     });
 
     await exportProfileToFile('Source', '/tmp/Source.sts2pack');
@@ -252,6 +253,17 @@ describe('useTauri wrappers — command names + arg shapes', () => {
     expect(lastCall()).toEqual({
       cmd: 'repair_mod',
       args: { name: 'BaseLib', folderName: 'BaseLib-v2' },
+    });
+
+    await restoreProfileModFromShare('profile-1', 'BaseLib', 'BaseLib-v2', 'baselib-id');
+    expect(lastCall()).toEqual({
+      cmd: 'restore_profile_mod_from_share',
+      args: {
+        profileId: 'profile-1',
+        modName: 'BaseLib',
+        folderName: 'BaseLib-v2',
+        modId: 'baselib-id',
+      },
     });
 
     await rollbackMod('BaseLib', 'BaseLib-v2');

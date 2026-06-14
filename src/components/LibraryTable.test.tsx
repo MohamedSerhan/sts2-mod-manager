@@ -204,7 +204,7 @@ describe('<LibraryTable>', () => {
       expect(getInvokeCalls()).toContainEqual({
         cmd: 'set_profile_mod_membership',
         args: {
-          profileName: 'Stable',
+          profileId: 'Stable',
           modName: 'NewMod',
           folderName: 'NewMod',
           modId: 'NewMod',
@@ -373,6 +373,54 @@ describe('<LibraryTable>', () => {
         args: { name: 'Idle', folderName: 'Idle', enable: false },
       });
     });
+  });
+
+  it('row Active/stored switch refreshes saved membership state for included modpack rows', async () => {
+    registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [
+        {
+          name: 'Idle',
+          version: '1.0',
+          folder_name: 'Idle',
+          mod_id: 'Idle',
+          installed_enabled: true,
+          profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+        },
+      ],
+    }));
+    registerInvokeHandler('toggle_mod', () => undefined);
+    registerInvokeHandler('set_profile_mod_membership', () => baseProfile({ name: 'Stable' }));
+    const onMembershipChanged = vi.fn();
+    const modInfoByKey = new Map([['Idle', mkModInfo({ name: 'Idle', folder_name: 'Idle', mod_id: 'Idle' })]]);
+
+    const user = userEvent.setup();
+    render(
+      <Wrap
+        modpackName="Stable"
+        modInfoByKey={modInfoByKey}
+        onMembershipChanged={onMembershipChanged}
+      />,
+    );
+    await screen.findAllByText('Idle');
+
+    await user.click(screen.getByRole('switch', { name: /toggle whether Idle is active in game/i }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls()).toContainEqual({
+        cmd: 'set_profile_mod_membership',
+        args: {
+          profileId: 'Stable',
+          modName: 'Idle',
+          folderName: 'Idle',
+          modId: 'Idle',
+          included: true,
+          sourceHint: null,
+        },
+      });
+    });
+    expect(onMembershipChanged).toHaveBeenCalled();
   });
 
   it('pack-scoped active rows keep core controls even when ModInfo lookup is missing', async () => {

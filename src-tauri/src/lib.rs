@@ -214,7 +214,9 @@ pub fn run() {
             if !identifier.is_empty() {
                 let resolved = crate::profiles::list_profiles(&s.profiles_path)
                     .into_iter()
-                    .find(|profile| crate::profiles::profile_identifier_matches(profile, &identifier));
+                    .find(|profile| {
+                        crate::profiles::profile_identifier_matches(profile, &identifier)
+                    });
                 if let Some(profile) = resolved {
                     log::info!(
                         "Restored active profile from previous session: {} ({})",
@@ -411,6 +413,7 @@ pub fn run() {
             sharing::set_modpack_listing,
             sharing::get_share_info,
             sharing::fetch_shared_profile_cmd,
+            sharing::restore_profile_mod_from_share,
             sharing::install::install_shared_profile,
             modpack_browser::fetch_modpack_browser_page,
             export_import::export_profile_to_file,

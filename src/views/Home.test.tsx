@@ -164,6 +164,7 @@ describe('<HomeView> single-block launcher shape (v7)', () => {
     ['reapplied no changes', { kind: 'reapplied', profileName: 'JessPack', result: { downloaded: 0, failed_downloads: [], missing_mods: [] } }],
     ['synced', { kind: 'synced', profileName: 'JessPack' }],
     ['already-active', { kind: 'already-active', profileName: 'JessPack' }],
+    ['own-published-exists', { kind: 'own-published-exists', profileName: 'JessPack' }],
   ])('empty-state Quick-Add imports a pasted code (%s) and clears the field', async (_label, outcome) => {
     vi.mocked(importShareCodeSmart).mockResolvedValue(outcome as never);
     const { input } = await typeCodeAndAdd();
@@ -1092,7 +1093,7 @@ describe('<HomeView> Recent modpacks strip', () => {
     await waitFor(() => {
       const call = getInvokeCalls().find((c) => c.cmd === 'switch_profile');
       expect(call).toBeDefined();
-      expect(call!.args).toEqual({ name: 'profile-other' });
+      expect(call!.args).toEqual({ profileId: 'profile-other' });
     });
     const map = JSON.parse(localStorage.getItem(USAGE_KEY) ?? '{}');
     expect(map['profile-other']).toBeGreaterThan(2000);

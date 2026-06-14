@@ -31,6 +31,17 @@ describe('install policy preferences', () => {
     expect(loadAutoAddInstallsToModpack()).toBe(true);
   });
 
+  it('uses explicit storage when provided', () => {
+    const storage = window.sessionStorage;
+    storage.clear();
+
+    saveAutoAddInstallsToModpack(true, storage);
+
+    expect(storage.getItem(AUTO_ADD_INSTALLS_TO_MODPACK_KEY)).toBe('true');
+    expect(localStorage.getItem(AUTO_ADD_INSTALLS_TO_MODPACK_KEY)).toBeNull();
+    expect(loadAutoAddInstallsToModpack(storage)).toBe(true);
+  });
+
   it('falls back to library-only when browser storage is unavailable', () => {
     const originalStorage = Object.getOwnPropertyDescriptor(window, 'localStorage');
     Object.defineProperty(window, 'localStorage', {

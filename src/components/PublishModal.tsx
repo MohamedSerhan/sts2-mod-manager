@@ -271,11 +271,12 @@ export function PublishModal({ open, profile, isReshare, onClose, onShared, onLi
               "missing bundles for N mod(s)", the user used to see only a
               raw error toast and was left guessing what "Restore or
               reinstall these mods" meant. The inline panel below lists
-              the affected mods with per-mod status, repairs them
-              sequentially via `repair_mod`, and auto-retries the publish
-              on full success. */}
+              the affected mods with per-mod status, lets the curator
+              remove them from the pack or restore the missing local files,
+              and auto-retries the publish on full success. */}
           {missingBundles && missingBundles.mods.length > 0 && (
             <MissingBundlesPanel
+              profile={profile}
               modNames={missingBundles.mods}
               errorDetails={missingBundles.details}
               onRetryPublish={async () => {

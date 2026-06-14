@@ -18,6 +18,7 @@
 //!   - Sanity helpers reused across modules: `sanitize_filename`,
 //!     `hide_app_created_by`, `version_is_wildcard`,
 //!     `subscribed_profile_names`, `profile_has_json`.
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
@@ -29,11 +30,12 @@ use super::{new_profile_id, Profile, ProfileMod, APP_CREATED_BY};
 /// List all saved profiles.
 /// Includes profiles that only have a .share file (remote profiles not yet fetched).
 pub fn list_profiles(profiles_path: &Path) -> Vec<Profile> {
-    let mut profiles = Vec::new();
     let mut seen_profile_stems = std::collections::HashSet::new();
+    let mut seen_profile_ids = std::collections::HashSet::new();
+    let mut loaded_profiles = Vec::new();
 
     if !profiles_path.exists() {
-        return profiles;
+        return Vec::new();
     }
 
     // First pass: load all .json profiles
@@ -41,33 +43,39 @@ pub fn list_profiles(profiles_path: &Path) -> Vec<Profile> {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) == Some("json") {
-                if let Ok(content) = fs::read_to_string(&path) {
-                    if let Ok(profile) = serde_json::from_str::<Profile>(&content) {
-                        let profile = hide_app_created_by(profile);
-                        seen_profile_stems.insert(profile.name.clone());
-                        seen_profile_stems.insert(sanitize_filename(&profile.name));
-                        if !profile.id.trim().is_empty() {
-                            seen_profile_stems.insert(profile.id.clone());
-                            seen_profile_stems.insert(sanitize_filename(&profile.id));
-                        }
-                        seen_profile_stems.insert(profile_file_stem(&profile));
-                        profiles.push(profile);
-                    }
+                let legacy_without_id = profile_file_missing_id(&path);
+                if let Ok(profile) = load_profile_from_path(&path) {
+                    loaded_profiles.push((hide_app_created_by(profile), legacy_without_id));
                 }
             }
         }
     }
 
-    profiles.sort_by(|a, b| {
-        let name_order = a.name.cmp(&b.name);
-        if name_order != std::cmp::Ordering::Equal {
-            return name_order;
+    let id_backed_names: HashSet<String> = loaded_profiles
+        .iter()
+        .filter(|(_, legacy_without_id)| !*legacy_without_id)
+        .map(|(profile, _)| profile.name.to_lowercase())
+        .collect();
+
+    let mut profiles = Vec::new();
+    for (profile, legacy_without_id) in loaded_profiles {
+        if legacy_without_id && id_backed_names.contains(&profile.name.to_lowercase()) {
+            continue;
         }
-        let a_has_id = !a.id.trim().is_empty();
-        let b_has_id = !b.id.trim().is_empty();
-        b_has_id.cmp(&a_has_id)
-    });
-    profiles.dedup_by(|a, b| a.name.eq_ignore_ascii_case(&b.name));
+        let profile_id_key = profile.id.to_lowercase();
+        if seen_profile_ids.contains(&profile_id_key) {
+            continue;
+        }
+        seen_profile_ids.insert(profile_id_key);
+        seen_profile_stems.insert(profile.name.clone());
+        seen_profile_stems.insert(sanitize_filename(&profile.name));
+        if !profile.id.trim().is_empty() {
+            seen_profile_stems.insert(profile.id.clone());
+            seen_profile_stems.insert(sanitize_filename(&profile.id));
+        }
+        seen_profile_stems.insert(profile_file_stem(&profile));
+        profiles.push(profile);
+    }
 
     // Second pass: create placeholder entries for .share files without matching .json
     if let Ok(entries) = fs::read_dir(profiles_path) {
@@ -113,7 +121,7 @@ pub fn save_profile(profile: &Profile, profiles_path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Load a profile by name.
+/// Load a profile by stable id, with legacy display-name fallback.
 pub fn load_profile(name: &str, profiles_path: &Path) -> Result<Profile> {
     let path = find_profile_json(name, profiles_path)
         .ok_or_else(|| AppError::InvalidProfile(format!("Profile '{}' not found", name)))?;
@@ -122,8 +130,11 @@ pub fn load_profile(name: &str, profiles_path: &Path) -> Result<Profile> {
 
 /// Delete a profile (both .json and .share files).
 pub fn delete_profile(name: &str, profiles_path: &Path) -> Result<()> {
-    let loaded = find_profile_json(name, profiles_path)
-        .and_then(|path| load_profile_from_path(&path).ok().map(|profile| (path, profile)));
+    let loaded = find_profile_json(name, profiles_path).and_then(|path| {
+        load_profile_from_path(&path)
+            .ok()
+            .map(|profile| (path, profile))
+    });
     let file_name = sanitize_filename(name);
     let json_path = profiles_path.join(format!("{}.json", file_name));
     let share_path = profiles_path.join(format!("{}.share", file_name));
@@ -292,6 +303,17 @@ fn load_profile_from_path(path: &Path) -> Result<Profile> {
     Ok(profile)
 }
 
+fn profile_file_missing_id(path: &Path) -> bool {
+    let Ok(content) = fs::read_to_string(path) else {
+        return false;
+    };
+    serde_json::from_str::<serde_json::Value>(&content)
+        .ok()
+        .and_then(|value| value.get("id").cloned())
+        .and_then(|value| value.as_str().map(str::trim).map(str::is_empty))
+        .unwrap_or(true)
+}
+
 fn find_profile_json(name_or_id: &str, profiles_path: &Path) -> Option<std::path::PathBuf> {
     let mut name_match: Option<std::path::PathBuf> = None;
     for entry in fs::read_dir(profiles_path).ok()?.flatten() {
@@ -305,8 +327,7 @@ fn find_profile_json(name_or_id: &str, profiles_path: &Path) -> Option<std::path
         let Ok(profile) = serde_json::from_str::<Profile>(&content) else {
             continue;
         };
-        if profile.id.eq_ignore_ascii_case(name_or_id)
-        {
+        if profile.id.eq_ignore_ascii_case(name_or_id) {
             return Some(path);
         }
         if profile.name.eq_ignore_ascii_case(name_or_id) {
@@ -354,6 +375,74 @@ fn profile_share_candidates(profile: &Profile, profiles_path: &Path) -> Vec<std:
         profiles_path.join(format!("{}.share", sanitize_filename(&profile.name))),
         profiles_path.join(format!("{}.share", profile.name)),
     ]
+}
+
+fn move_sidecar_to_profile_id(profile: &Profile, profiles_path: &Path) -> Result<()> {
+    let dest = profiles_path.join(format!("{}.share", profile_file_stem(profile)));
+    let candidates = profile_share_candidates(profile, profiles_path);
+    if let Some(src) = candidates.iter().find(|path| path.exists()) {
+        if !paths_refer_to_same_file(src, &dest) {
+            let bytes = fs::read(src)?;
+            crate::fs_safety::atomic_write(&dest, &bytes)?;
+        }
+        for path in candidates {
+            if path.exists() && !paths_refer_to_same_file(&path, &dest) {
+                let _ = fs::remove_file(path);
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn migrate_profile_identity_storage(
+    profiles_path: &Path,
+    config_path: &Path,
+) -> Result<()> {
+    if !profiles_path.exists() {
+        return Ok(());
+    }
+
+    let mut migrated_profiles: Vec<Profile> = Vec::new();
+    for entry in fs::read_dir(profiles_path)?.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let mut profile = load_profile_from_path(&path)?;
+        if profile.id.trim().is_empty() {
+            profile.id = new_profile_id();
+        }
+        let desired = profiles_path.join(format!("{}.json", profile_file_stem(&profile)));
+        let json = serde_json::to_string_pretty(&profile)?;
+        crate::fs_safety::atomic_write(&desired, json.as_bytes())?;
+        if path.exists() && !paths_refer_to_same_file(&path, &desired) {
+            let _ = fs::remove_file(&path);
+        }
+        move_sidecar_to_profile_id(&profile, profiles_path)?;
+        migrated_profiles.push(profile);
+    }
+
+    migrate_active_profile_pointer(config_path, &migrated_profiles);
+    crate::subscriptions::migrate_subscription_profile_ids(config_path, profiles_path);
+    Ok(())
+}
+
+fn migrate_active_profile_pointer(config_path: &Path, profiles: &[Profile]) {
+    let path = config_path.join("active_profile.txt");
+    let Ok(raw) = fs::read_to_string(&path) else {
+        return;
+    };
+    let identifier = raw.trim();
+    if identifier.is_empty() {
+        return;
+    }
+    let Some(profile) = profiles
+        .iter()
+        .find(|profile| crate::profiles::profile_identifier_matches(profile, identifier))
+    else {
+        return;
+    };
+    crate::profiles::persist_active_profile(config_path, &profile.id);
 }
 
 pub(super) fn hide_app_created_by(mut profile: Profile) -> Profile {
@@ -538,14 +627,6 @@ pub fn persist_profile_mod_sources(mods: &[ProfileMod], config_path: &Path) {
     }
 }
 
-pub(super) fn subscribed_profile_names(config_path: &Path) -> std::collections::HashSet<String> {
-    crate::subscriptions::load_subscriptions(config_path)
-        .subscriptions
-        .values()
-        .map(|sub| sub.profile_name.to_lowercase())
-        .collect()
-}
-
 /// True when this profile was published by *this* user — i.e. a local
 /// `.share` sidecar exists for it. The `.share` file is written only by the
 /// share / reshare path (`sharing::share_profile`), so its presence is proof
@@ -580,8 +661,22 @@ pub(super) fn profile_is_owned(name: &str, profiles_path: &Path) -> bool {
 /// clobber a pack you merely *follow*, since a sync would overwrite your
 /// edits — while letting you freely edit packs you published.
 pub(super) fn profile_is_edit_locked(name: &str, profiles_path: &Path, config_path: &Path) -> bool {
-    subscribed_profile_names(config_path).contains(&name.to_lowercase())
-        && !profile_is_owned(name, profiles_path)
+    let Ok(profile) = load_profile(name, profiles_path) else {
+        let subscribed_by_legacy_name = crate::subscriptions::load_subscriptions(config_path)
+            .subscriptions
+            .values()
+            .any(|sub| sub.profile_name.eq_ignore_ascii_case(name));
+        return subscribed_by_legacy_name && !profile_is_owned(name, profiles_path);
+    };
+    let subscribed = crate::subscriptions::load_subscriptions(config_path)
+        .subscriptions
+        .values()
+        .any(|sub| {
+            let sub_id = sub.profile_id.trim();
+            (!sub_id.is_empty() && sub_id.eq_ignore_ascii_case(&profile.id))
+                || sub.profile_name.eq_ignore_ascii_case(&profile.name)
+        });
+    subscribed && !profile_is_owned(&profile.id, profiles_path)
 }
 
 pub(super) fn profile_has_json(profile_name: &str, profiles_path: &Path) -> bool {
@@ -904,6 +999,7 @@ mod edit_lock_tests {
 
     fn seed_subscription(config_path: &Path, profile_name: &str) {
         let now = chrono::Utc::now();
+        let profile_id = crate::profiles::new_profile_id();
         let mut db = crate::subscriptions::SubscriptionsDb::default();
         db.subscriptions.insert(
             format!("owner:{profile_name}"),
@@ -911,9 +1007,10 @@ mod edit_lock_tests {
                 share_id: format!("owner:{profile_name}"),
                 share_url: format!("owner/{profile_name}"),
                 profile_name: profile_name.to_string(),
+                profile_id: profile_id.clone(),
                 curator: Some("owner".into()),
                 last_synced_profile: Profile {
-                    id: crate::profiles::new_profile_id(),
+                    id: profile_id,
                     name: profile_name.to_string(),
                     game_version: None,
                     created_by: Some("owner".into()),

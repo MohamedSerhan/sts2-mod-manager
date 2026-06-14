@@ -507,7 +507,7 @@ describe('<App>', () => {
       const call = getInvokeCalls().find(
         (c) => c.cmd === 'set_profile_mod_membership' && c.args?.modName === 'Dropped',
       );
-      expect(call?.args).toMatchObject({ profileName: 'Stable', included: true });
+      expect(call?.args).toMatchObject({ profileId: 'Stable', included: true });
     });
   }, 10000);
 
@@ -1446,6 +1446,29 @@ describe('<App>', () => {
     });
   });
 
+  it('deep-link: own published share code points to the existing local modpack', async () => {
+    registerInvokeHandler('get_active_profile', () => null);
+    registerInvokeHandler('get_subscriptions', () => []);
+    registerInvokeHandler('check_subscription_updates', () => []);
+    registerInvokeHandler('list_profiles_cmd', () => [
+      { id: 'profile-1', name: 'Solo Pack', mods: [], created_at: '2026-01-01' },
+    ]);
+    registerInvokeHandler('get_share_info', (args) => (
+      args?.name === 'profile-1'
+        ? { code: 'AA5A-315D-61AE', owner: 'alice', out_of_sync: false }
+        : null
+    ));
+    registerInvokeHandler('consume_pending_deep_link', () => null);
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    await fireTauriEvent('sts2mm-open-url', 'sts2mm://import/alice/AA5A-315D-61AE');
+    await waitFor(() => {
+      expect(screen.getByText(/"Solo Pack" is published by you and already exists in Mod Manager/)).toBeInTheDocument();
+    });
+    expect(getInvokeCalls().some((c) => c.cmd === 'fetch_shared_profile_cmd')).toBe(false);
+    expect(getInvokeCalls().some((c) => c.cmd === 'install_shared_profile')).toBe(false);
+  });
+
   it('deep-link: dedupe window swallows repeat URL within 2s', async () => {
     registerInvokeHandler('get_active_profile', () => 'alice-pack');
     registerInvokeHandler('get_subscriptions', () => [
@@ -2067,23 +2090,45 @@ describe('<App>', () => {
     });
   });
 
-  it('enabledCount/totalCount reflect get_installed_mods output', async () => {
-    // App.tsx:311 — `mods.filter((m) => m.enabled).length`. Triggering
-    // this with a non-empty mods list exercises the `(m) => m.enabled`
-    // arrow function on every mod, and surfaces the count in the
-    // sidebar status block + top-bar profile chip.
-    registerInvokeHandler('get_installed_mods', () => [
-      { name: 'A', version: '1', enabled: true, files: [] },
-      { name: 'B', version: '1', enabled: false, files: [] },
-      { name: 'C', version: '1', enabled: true, files: [] },
+  it('active profile chip counts mods from the active modpack, not the whole library', async () => {
+    registerInvokeHandler('get_active_profile', () => 'Solo Pack');
+    registerInvokeHandler('get_active_profile_id', () => 'solo-id');
+    registerInvokeHandler('get_installed_mods', () =>
+      Array.from({ length: 65 }, (_, i) => ({
+        name: `Library ${i + 1}`,
+        version: '1',
+        enabled: i < 11,
+        files: [],
+      })),
+    );
+    registerInvokeHandler('list_profiles_cmd', () => [
+      {
+        id: 'solo-id',
+        name: 'Solo Pack',
+        game_version: null,
+        created_by: null,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+        mods: Array.from({ length: 11 }, (_, i) => ({
+          name: `Solo ${i + 1}`,
+          version: '1',
+          source: null,
+          hash: null,
+          files: [],
+          enabled: true,
+          bundle_url: null,
+          folder_name: `Solo-${i + 1}`,
+          mod_id: null,
+        })),
+      },
     ]);
+
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    // "2 active / 3 mods" appears in both the sidebar foot and top-bar
-    // profile chip.
     await waitFor(() => {
-      expect(screen.queryAllByText(/2 active \/ 3 mods/).length).toBeGreaterThan(0);
+      expect(screen.queryAllByText(/11 active \/ 11 mods/).length).toBeGreaterThan(0);
     });
+    expect(screen.queryByText(/11 active \/ 65 mods/)).not.toBeInTheDocument();
   });
 
   // ── Smaller branch coverage knobs ────────────────────────────────

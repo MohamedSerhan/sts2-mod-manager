@@ -95,14 +95,8 @@ pub fn import_sts2pack_from_paths(
         install_mod_from_zip(tmp.path(), mods_path)?;
     }
 
-    if profile.id.trim().is_empty() {
-        profile.id = new_profile_id();
-    }
-    if let Ok(existing) = load_profile(&profile.id, profiles_path) {
-        profile.name = existing.name;
-    } else {
-        profile.name = unique_profile_name(&profile.name, profiles_path);
-    }
+    profile.id = new_profile_id();
+    profile.name = unique_profile_name(&profile.name, profiles_path);
     save_profile(&profile, profiles_path)?;
     Ok(profile)
 }
@@ -278,7 +272,7 @@ mod tests {
     }
 
     #[test]
-    fn import_updates_existing_profile_with_same_stable_id() {
+    fn import_assigns_local_id_instead_of_reusing_exported_id() {
         let profile_id = "profile-sharedtester";
         let source = TempDir::new().unwrap();
         let source_profiles = source.path().join("profiles");
@@ -308,12 +302,13 @@ mod tests {
 
         let imported = import_sts2pack_from_paths(&pack, &dest_profiles, &dest_mods).unwrap();
 
-        assert_eq!(imported.id, profile_id);
-        assert_eq!(imported.name, "TesterW");
+        assert_ne!(imported.id, profile_id);
+        assert_eq!(imported.name, "SharedTester");
         assert_eq!(imported.created_by.as_deref(), Some("remote-author"));
         assert!(dest_mods.join("BaseMod/manifest.json").exists());
-        assert!(load_profile(profile_id, &dest_profiles).is_ok());
-        assert!(load_profile("TesterW", &dest_profiles).is_ok());
-        assert!(load_profile("SharedTester", &dest_profiles).is_err());
+        let existing = load_profile(profile_id, &dest_profiles).unwrap();
+        assert_eq!(existing.name, "TesterW");
+        let saved_import = load_profile(&imported.id, &dest_profiles).unwrap();
+        assert_eq!(saved_import.name, "SharedTester");
     }
 }

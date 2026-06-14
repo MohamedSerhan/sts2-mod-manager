@@ -31,6 +31,14 @@ describe('modpackUsage', () => {
     expect(map.Alpha).toBeUndefined();
   });
 
+  it('records by name when a stable id is absent and ignores blank subjects', () => {
+    recordModpackLaunch({ id: null, name: 'NameOnly' });
+    recordModpackLaunch('');
+    const map = getModpackUsage();
+    expect(typeof map.NameOnly).toBe('number');
+    expect(map['']).toBeUndefined();
+  });
+
   it('resolves launch timestamps from stable ids and legacy names', () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       'profile-alpha': 3000,

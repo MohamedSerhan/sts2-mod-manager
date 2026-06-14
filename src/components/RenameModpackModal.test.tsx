@@ -51,4 +51,42 @@ describe('<RenameModpackModal>', () => {
     expect(screen.getByText(/can't be empty/i)).toBeInTheDocument();
     expect(getInvokeCalls().some((c) => c.cmd === 'rename_profile')).toBe(false);
   });
+
+  it('blocks an unchanged name and clears the validation error after editing', () => {
+    render(<Wrap />);
+    const input = screen.getByLabelText(/new name/i);
+
+    fireEvent.click(screen.getByRole('button', { name: /^rename$/i }));
+    expect(screen.getByText(/current name/i)).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: 'Fresh' } });
+    expect(screen.queryByText(/current name/i)).not.toBeInTheDocument();
+    expect(getInvokeCalls().some((c) => c.cmd === 'rename_profile')).toBe(false);
+  });
+
+  it('submits with Enter', async () => {
+    registerInvokeHandler('rename_profile', (args) => profile(String(args?.newName)));
+    const onRenamed = vi.fn();
+    render(<Wrap onRenamed={onRenamed} />);
+    const input = screen.getByLabelText(/new name/i);
+
+    fireEvent.change(input, { target: { value: 'Fresh' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => expect(onRenamed).toHaveBeenCalledWith('Old', 'Fresh'));
+  });
+
+  it('shows a toast when the backend rename fails', async () => {
+    registerInvokeHandler('rename_profile', () => {
+      throw new Error('disk locked');
+    });
+    render(<Wrap />);
+
+    fireEvent.change(screen.getByLabelText(/new name/i), { target: { value: 'Fresh' } });
+    fireEvent.click(screen.getByRole('button', { name: /^rename$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Rename failed.*disk locked/i)).toBeInTheDocument();
+    });
+  });
 });

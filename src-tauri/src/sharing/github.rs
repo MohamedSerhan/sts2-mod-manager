@@ -807,18 +807,17 @@ async fn upload_release_asset_recovering_payload(
                 "Asset '{}' returned 422 already_exists — refetching release listing and replacing via DELETE-then-POST",
                 filename
             );
-            let fresh = ensure_bundles_release(client, owner, repo).await?;
-            check_cancel(cancel_requested)?;
-            let canonical = decode_asset_name(filename);
-            let existing = fresh
-                .assets
-                .iter()
-                .find(|a| decode_asset_name(&a.name) == canonical);
-            match existing {
-                Some(asset) => {
+            for attempt in 1..=RETRY_MAX_ATTEMPTS {
+                let fresh = ensure_bundles_release(client, owner, repo).await?;
+                check_cancel(cancel_requested)?;
+                if let Some(asset) = fresh
+                    .assets
+                    .iter()
+                    .find(|a| release_asset_names_match(&a.name, filename))
+                {
                     delete_release_asset(client, owner, repo, asset.id).await?;
                     check_cancel(cancel_requested)?;
-                    upload_release_asset_payload(
+                    return upload_release_asset_payload(
                         client,
                         &fresh.upload_url,
                         filename,
@@ -826,17 +825,41 @@ async fn upload_release_asset_recovering_payload(
                         payload,
                         cancel_requested,
                     )
-                    .await
+                    .await;
                 }
-                None => Err(AppError::Other(format!(
-                    "Upload of '{}' failed with 422 already_exists but the asset is not visible in the release listing — \
-                     retry the share or delete the asset manually from GitHub.",
-                    filename
-                ))),
+                if attempt < RETRY_MAX_ATTEMPTS {
+                    sleep_or_cancel(RETRY_BASE_DELAY.saturating_mul(attempt), cancel_requested)
+                        .await?;
+                }
             }
+            Err(AppError::Other(format!(
+                "Upload of '{}' failed with 422 already_exists but the asset is not visible in the release listing after {} checks — \
+                 wait a minute and try sharing again, or delete the asset manually from GitHub.",
+                filename, RETRY_MAX_ATTEMPTS
+            )))
         }
         Err(e) => Err(e),
     }
+}
+
+fn release_asset_names_match(existing_name: &str, requested_name: &str) -> bool {
+    let existing = decode_asset_name(existing_name);
+    let requested = decode_asset_name(requested_name);
+    if existing == requested {
+        return true;
+    }
+
+    let existing_key = github_asset_rename_key(&existing);
+    let requested_key = github_asset_rename_key(&requested);
+    !existing_key.is_empty() && existing_key == requested_key
+}
+
+fn github_asset_rename_key(name: &str) -> String {
+    name.chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        .collect::<String>()
+        .trim_matches(|c| matches!(c, '.' | '_' | '-'))
+        .to_string()
 }
 
 /// DELETE a release asset. Used by the replace flow to free the canonical
@@ -1075,11 +1098,10 @@ async fn upload_mod_bundle_via_release_payload(
     // logical filename matches whether GitHub returns the raw UTF-8 form
     // or an already-encoded one. Without this, mods with non-ASCII names
     // round-tripped to a POST -> 422 already_exists loop.
-    let canonical = decode_asset_name(&asset_name);
     if let Some(existing) = release
         .assets
         .iter()
-        .find(|a| decode_asset_name(&a.name) == canonical)
+        .find(|a| release_asset_names_match(&a.name, &asset_name))
     {
         let hash_matches = prior_sha256
             .map(|p| p == local_hash.as_str())
@@ -2527,6 +2549,54 @@ pub(super) mod release_upload_tests {
         .expect("non-ascii mod names must round-trip into the asset filename");
     }
 
+    #[tokio::test]
+    async fn upload_mod_bundle_via_release_reuses_github_renamed_unicode_asset() {
+        let (server, _env_guard) = mock_github().await;
+        let bytes = b"data";
+        let prior_hash = sha256_hex(bytes);
+        let expected_name = expected_asset_name("皮皮配置: ModConfig", "0.2.3", bytes);
+        let renamed_by_github = expected_name.trim_start_matches("皮皮配置__");
+        let download_url =
+            "https://github.com/octo/sts2mm-profiles/releases/download/bundles/renamed.zip";
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 42,
+                "upload_url": format!("{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}", server.uri()),
+                "assets": []
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("page", "1"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                    "id": 555,
+                    "name": renamed_by_github,
+                    "browser_download_url": download_url
+                }])),
+            )
+            .mount(&server)
+            .await;
+
+        let (url, hash) = upload_mod_bundle_via_release(
+            "test-token",
+            "octo",
+            "皮皮配置: ModConfig",
+            "0.2.3",
+            bytes,
+            Some(&prior_hash),
+            "sts2mm-profiles",
+        )
+        .await
+        .expect("renamed GitHub asset should be reused before posting");
+
+        assert_eq!(url, download_url);
+        assert_eq!(hash, prior_hash);
+    }
+
     /// Regression for Bug A through the orchestrator: an asset on page 2
     /// of the paginated list must still be discovered. Pre-fix, the
     /// orchestrator only saw the inline `assets` (capped at ~30) and
@@ -3027,6 +3097,82 @@ pub(super) mod release_upload_tests {
         )
         .await
         .expect("422 already_exists recovery must still succeed");
+        assert_eq!(asset.id, 777);
+    }
+
+    #[tokio::test]
+    async fn upload_release_asset_recovering_matches_github_renamed_unicode_asset() {
+        let (server, _env_guard) = mock_github().await;
+        let upload_url_template = format!(
+            "{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}",
+            server.uri()
+        );
+        let requested = "皮皮配置__ModConfig_v0.2.3_5a8e5d70.zip";
+        let github_name = "ModConfig_v0.2.3_5a8e5d70.zip";
+
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("name", requested))
+            .respond_with(ResponseTemplate::new(422).set_body_json(serde_json::json!({
+                "message": "Validation Failed",
+                "errors": [{"code": "already_exists"}]
+            })))
+            .up_to_n_times(1)
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 42,
+                "upload_url": format!("{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}", server.uri()),
+                "assets": []
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("page", "1"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                    "id": 555,
+                    "name": github_name,
+                    "browser_download_url": "https://example/renamed"
+                }])),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("DELETE"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/assets/555"))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("name", requested))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": 777,
+                "name": requested,
+                "browser_download_url": "https://github.com/octo/sts2mm-profiles/releases/download/bundles/renamed.zip"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = build_client("test-token");
+        let asset = upload_release_asset_recovering(
+            &client,
+            "octo",
+            "sts2mm-profiles",
+            &upload_url_template,
+            requested,
+            Some("皮皮配置: ModConfig v0.2.3"),
+            b"bytes",
+        )
+        .await
+        .expect("renamed GitHub asset should be deleted and reuploaded");
+
         assert_eq!(asset.id, 777);
     }
 }

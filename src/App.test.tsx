@@ -2067,23 +2067,45 @@ describe('<App>', () => {
     });
   });
 
-  it('enabledCount/totalCount reflect get_installed_mods output', async () => {
-    // App.tsx:311 — `mods.filter((m) => m.enabled).length`. Triggering
-    // this with a non-empty mods list exercises the `(m) => m.enabled`
-    // arrow function on every mod, and surfaces the count in the
-    // sidebar status block + top-bar profile chip.
-    registerInvokeHandler('get_installed_mods', () => [
-      { name: 'A', version: '1', enabled: true, files: [] },
-      { name: 'B', version: '1', enabled: false, files: [] },
-      { name: 'C', version: '1', enabled: true, files: [] },
+  it('active profile chip counts mods from the active modpack, not the whole library', async () => {
+    registerInvokeHandler('get_active_profile', () => 'Solo Pack');
+    registerInvokeHandler('get_active_profile_id', () => 'solo-id');
+    registerInvokeHandler('get_installed_mods', () =>
+      Array.from({ length: 65 }, (_, i) => ({
+        name: `Library ${i + 1}`,
+        version: '1',
+        enabled: i < 11,
+        files: [],
+      })),
+    );
+    registerInvokeHandler('list_profiles_cmd', () => [
+      {
+        id: 'solo-id',
+        name: 'Solo Pack',
+        game_version: null,
+        created_by: null,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+        mods: Array.from({ length: 11 }, (_, i) => ({
+          name: `Solo ${i + 1}`,
+          version: '1',
+          source: null,
+          hash: null,
+          files: [],
+          enabled: true,
+          bundle_url: null,
+          folder_name: `Solo-${i + 1}`,
+          mod_id: null,
+        })),
+      },
     ]);
+
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
-    // "2 active / 3 mods" appears in both the sidebar foot and top-bar
-    // profile chip.
     await waitFor(() => {
-      expect(screen.queryAllByText(/2 active \/ 3 mods/).length).toBeGreaterThan(0);
+      expect(screen.queryAllByText(/11 active \/ 11 mods/).length).toBeGreaterThan(0);
     });
+    expect(screen.queryByText(/11 active \/ 65 mods/)).not.toBeInTheDocument();
   });
 
   // ── Smaller branch coverage knobs ────────────────────────────────

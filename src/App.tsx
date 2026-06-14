@@ -44,7 +44,8 @@ import { HomeView } from './views/Home';
 import { ModsView } from './views/Mods';
 import { ProfilesView } from './views/Profiles';
 import { SettingsView } from './views/Settings';
-import { launchGame, launchVanilla, installModFromFile, openExternalUrl, setProfileModMembership, toggleMod } from './hooks/useTauri';
+import { launchGame, launchVanilla, installModFromFile, listProfiles, openExternalUrl, setProfileModMembership, toggleMod } from './hooks/useTauri';
+import type { Profile } from './types';
 
 // View IDs include legacy ones ('browse-mods', 'browse-modpacks')
 // so internal handlers + deep-links that pre-date the 1.7.0 IA
@@ -141,6 +142,10 @@ function AppInner() {
   const [openRowMenuSettingsSignal, setOpenRowMenuSettingsSignal] = useState(0);
   const [launching, setLaunching] = useState<null | 'modded' | 'vanilla'>(null);
   const [blockingModpackOperation, setBlockingModpackOperation] = useState(false);
+  const [activeProfileSummary, setActiveProfileSummary] = useState<{
+    key: string;
+    profile: Profile | null;
+  } | null>(null);
   const [isDev, setIsDev] = useState(false);
   useEffect(() => {
     isDevBuild().then(setIsDev).catch(() => {});
@@ -464,8 +469,30 @@ function AppInner() {
     }
   }
 
-  const enabledCount = mods.filter((m) => m.enabled).length;
-  const totalCount = mods.length;
+  const activeProfileKey = activeProfileId ?? activeProfile;
+  const activePackMods = activeProfileSummary?.key === activeProfileKey
+    ? activeProfileSummary.profile?.mods ?? []
+    : [];
+  const enabledCount = activePackMods.filter((m) => m.enabled).length;
+  const totalCount = activePackMods.length;
+
+  useEffect(() => {
+    if (!activeProfileKey) {
+      setActiveProfileSummary(null);
+      return;
+    }
+    let cancelled = false;
+    listProfiles()
+      .then((profiles) => {
+        if (cancelled) return;
+        const profile = profiles.find((p) => p.id === activeProfileKey || p.name === activeProfileKey) ?? null;
+        setActiveProfileSummary({ key: activeProfileKey, profile });
+      })
+      .catch(() => {
+        if (!cancelled) setActiveProfileSummary({ key: activeProfileKey, profile: null });
+      });
+    return () => { cancelled = true; };
+  }, [activeProfileKey, mods]);
 
   async function handleLaunchGame() {
     if (launching) return;

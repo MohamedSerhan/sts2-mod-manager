@@ -537,7 +537,7 @@
       "toastSavedApplied": "{{name}} 的加载顺序已保存，并已应用到 settings.save。",
       "toastSavedInactive": "{{name}} 的加载顺序已保存。激活此模组包时会应用该顺序。",
       "toastSavedSettingsMissing": "{{name}} 的加载顺序已保存，但未找到 settings.save。请先启动一次 STS2，然后再激活此模组包。",
-      "toastSavedSettingsMultiple": "{{name}} 的加载顺序已保存，但找到了多个 settings.save，因此没有修改任何文件。",
+      "toastSavedSettingsMultiple": "{{name}} 的加载顺序已保存，但找到了多个 settings.save，因此游戏设置未更改。",
       "toastSavedGameRunning": "{{name}} 的加载顺序已保存，但 STS2 正在运行。关闭游戏后激活该模组包即可应用。",
       "toastSavedSettingsFailed": "{{name}} 的加载顺序已保存，但无法更新 settings.save。",
       "toastFailed": "保存加载顺序失败：{{error}}"

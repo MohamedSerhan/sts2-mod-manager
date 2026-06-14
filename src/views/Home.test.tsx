@@ -1099,6 +1099,25 @@ describe('<HomeView> Recent modpacks strip', () => {
     expect(map['profile-other']).toBeGreaterThan(2000);
   });
 
+  it('excludes the active pack when only legacy name history exists for it', async () => {
+    registerInvokeHandler('get_active_profile', () => 'CurrentPack');
+    registerInvokeHandler('get_active_profile_id', () => 'profile-current');
+    registerInvokeHandler('list_profiles_cmd', () => [
+      { id: 'profile-current', name: 'CurrentPack', mods: [], created_at: '2026-01-01' },
+      { id: 'profile-other', name: 'OtherPack', mods: [], created_at: '2026-01-01' },
+    ]);
+    registerInvokeHandler('get_subscriptions', () => []);
+    localStorage.setItem(USAGE_KEY, JSON.stringify({
+      CurrentPack: 3000,
+      'profile-other': 2000,
+    }));
+
+    render(<Wrap />);
+
+    expect(await screen.findByRole('button', { name: /Switch to OtherPack/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Switch to CurrentPack/i })).toBeNull();
+  });
+
   it('falls back to display name when active profile id is not available yet', async () => {
     registerInvokeHandler('get_active_profile', () => 'SharedTester');
     registerInvokeHandler('get_active_profile_id', () => null);

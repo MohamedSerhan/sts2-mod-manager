@@ -452,7 +452,7 @@
       "toastSavedApplied": "Load order saved for {{name}} and applied to settings.save.",
       "toastSavedInactive": "Load order saved for {{name}}. It will apply when you activate this modpack.",
       "toastSavedSettingsMissing": "Load order saved for {{name}}, but settings.save was not found. Launch STS2 once, then activate this modpack.",
-      "toastSavedSettingsMultiple": "Load order saved for {{name}}, but multiple settings.save files were found so none were changed.",
+      "toastSavedSettingsMultiple": "Load order saved for {{name}}, but multiple settings.save files were found, so the game settings were not changed.",
       "toastSavedGameRunning": "Load order saved for {{name}}, but STS2 is running. Close the game and activate the modpack to apply it.",
       "toastSavedSettingsFailed": "Load order saved for {{name}}, but settings.save could not be updated.",
       "toastFailed": "Failed to save load order: {{error}}"

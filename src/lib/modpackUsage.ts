@@ -13,6 +13,10 @@
 const STORAGE_KEY = 'sts2mm-modpack-launches';
 
 export type ModpackUsageMap = Record<string, number>;
+export type ModpackUsageSubject = string | {
+  id?: string | null;
+  name: string;
+};
 
 export function getModpackUsage(): ModpackUsageMap {
   try {
@@ -38,10 +42,34 @@ function write(map: ModpackUsageMap): void {
   }
 }
 
+function subjectKeys(subject: ModpackUsageSubject): string[] {
+  if (typeof subject === 'string') return subject ? [subject] : [];
+  const keys = [subject.id ?? '', subject.name].filter(Boolean);
+  return Array.from(new Set(keys));
+}
+
+function preferredSubjectKey(subject: ModpackUsageSubject): string | null {
+  if (typeof subject === 'string') return subject || null;
+  return subject.id || subject.name || null;
+}
+
+/** Timestamp for a pack, resolving stable IDs and legacy display-name keys. */
+export function getModpackLastLaunch(
+  subject: ModpackUsageSubject,
+  map: ModpackUsageMap = getModpackUsage(),
+): number {
+  return subjectKeys(subject).reduce((latest, key) => Math.max(latest, map[key] ?? 0), 0);
+}
+
 /** Record that `name` was just launched (switched to / activated). */
-export function recordModpackLaunch(name: string): void {
+export function recordModpackLaunch(subject: ModpackUsageSubject): void {
+  const key = preferredSubjectKey(subject);
+  if (!key) return;
   const map = getModpackUsage();
-  map[name] = Date.now();
+  map[key] = Date.now();
+  for (const staleKey of subjectKeys(subject)) {
+    if (staleKey !== key) delete map[staleKey];
+  }
   write(map);
 }
 
@@ -55,10 +83,15 @@ export function renameModpackUsage(oldName: string, newName: string): void {
 }
 
 /** Drop a deleted pack's history so it never resurfaces in "recent". */
-export function forgetModpackUsage(name: string): void {
+export function forgetModpackUsage(subject: ModpackUsageSubject): void {
   const map = getModpackUsage();
-  if (map[name] === undefined) return;
-  delete map[name];
+  let changed = false;
+  for (const key of subjectKeys(subject)) {
+    if (map[key] === undefined) continue;
+    delete map[key];
+    changed = true;
+  }
+  if (!changed) return;
   write(map);
 }
 
@@ -66,12 +99,15 @@ export function forgetModpackUsage(name: string): void {
  * Names of the most recently launched packs, newest first, filtered to
  * `existing` (stale entries for packs deleted outside the app are skipped).
  */
-export function recentModpacks(existing: readonly string[], limit: number): string[] {
+export function recentModpacks(existing: readonly ModpackUsageSubject[], limit: number): string[] {
   const map = getModpackUsage();
-  const known = new Set(existing);
-  return Object.entries(map)
-    .filter(([name]) => known.has(name))
-    .sort((a, b) => b[1] - a[1])
+  return existing
+    .map((subject) => ({
+      name: typeof subject === 'string' ? subject : subject.name,
+      lastPlayed: getModpackLastLaunch(subject, map),
+    }))
+    .filter((item) => item.lastPlayed > 0)
+    .sort((a, b) => b.lastPlayed - a.lastPlayed)
     .slice(0, limit)
-    .map(([name]) => name);
+    .map((item) => item.name);
 }

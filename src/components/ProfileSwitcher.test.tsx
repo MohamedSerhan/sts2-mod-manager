@@ -180,6 +180,32 @@ describe('<ProfileSwitcher>', () => {
     expect(map.Other).toBeGreaterThanOrEqual(before);
   });
 
+  it('switching from the profile popover records stable ids and clears legacy name history', async () => {
+    registerInvokeHandler('list_profiles_cmd', () => [
+      { id: 'profile-active', name: 'My Pack', mods: [], created_at: '2026-01-01' },
+      { id: 'profile-other', name: 'Other', mods: [], created_at: '2026-02-01' },
+    ]);
+    registerInvokeHandler('get_active_profile', () => 'My Pack');
+    registerInvokeHandler('get_active_profile_id', () => 'profile-active');
+    registerInvokeHandler('switch_profile', () => ({
+      downloaded: 0,
+      missing_mods: [],
+      activated: true,
+    }));
+    localStorage.setItem('sts2mm-modpack-launches', JSON.stringify({ Other: 1000 }));
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.click(await screen.findByText('Other'));
+
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'switch_profile')).toBe(true);
+    });
+    const map = JSON.parse(localStorage.getItem('sts2mm-modpack-launches') ?? '{}');
+    expect(map['profile-other']).toBeGreaterThan(1000);
+    expect(map.Other).toBeUndefined();
+  });
+
   it('keeps the current profile active when drift confirmation is cancelled', async () => {
     registerInvokeHandler('list_profiles_cmd', () => PROFILES);
     registerInvokeHandler('get_active_profile', () => 'My Pack');

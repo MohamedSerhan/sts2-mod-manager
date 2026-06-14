@@ -329,6 +329,40 @@ describe('<App>', () => {
     });
   });
 
+  it('top-bar modded launch records the active modpack by stable id', async () => {
+    registerInvokeHandler('get_active_profile', () => 'Stable');
+    registerInvokeHandler('get_active_profile_id', () => 'profile-stable');
+    registerInvokeHandler('list_profiles_cmd', () => [{
+      id: 'profile-stable',
+      name: 'Stable',
+      mods: [],
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+      created_by: null,
+      game_version: null,
+    }]);
+    registerInvokeHandler('launch_game', () => true);
+    localStorage.setItem('sts2mm-modpack-launches', JSON.stringify({ Stable: 1000 }));
+
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getAllByText('Stable').length).toBeGreaterThan(0);
+    });
+
+    const launchBtn = screen.getAllByRole('button').find(
+      (b) => /^Launch/.test(b.textContent?.trim() ?? '') && !/Vanilla/i.test(b.textContent ?? ''),
+    );
+    expect(launchBtn).toBeDefined();
+    await user.click(launchBtn!);
+
+    await waitFor(() => {
+      const map = JSON.parse(localStorage.getItem('sts2mm-modpack-launches') ?? '{}');
+      expect(map['profile-stable']).toBeGreaterThan(1000);
+      expect(map.Stable).toBeUndefined();
+    });
+  });
+
   it('Vanilla button is rendered', async () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });

@@ -32,7 +32,7 @@ import {
 } from '../hooks/useTauri';
 import { buildShareMessage, buildShareLink, importShareCodeSmart } from '../lib/shareImport';
 import { switchResultDetails, switchResultHasProblems } from '../lib/switchResultSummary';
-import { getModpackUsage, recordModpackLaunch } from '../lib/modpackUsage';
+import { getModpackLastLaunch, recordModpackLaunch } from '../lib/modpackUsage';
 import type { ShareResult, Profile } from '../types';
 import { PublishModal } from '../components/PublishModal';
 import type { SubscriptionUpdate, Subscription } from '../types';
@@ -231,16 +231,16 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
 
   // Up to 3 recently launched packs, excluding the one already active.
   const recent = useMemo(() => {
-    const findByStoredKey = (key: string) => profiles.find((profile) =>
-      profileKey(profile) === key || profile.name === key
-    );
-    return Object.entries(getModpackUsage())
-      .map(([key, lastPlayed]) => ({ key, lastPlayed, profile: findByStoredKey(key) }))
-      .filter((item): item is { key: string; lastPlayed: number; profile: Profile } =>
-        !!item.profile &&
-        item.key !== activeProfileKey &&
-        (activeProfileId != null || item.profile.name !== activeProfile)
-      )
+    const isActiveProfile = (profile: Profile) =>
+      profileKey(profile) === activeProfileKey ||
+      (activeProfileId == null && profile.name === activeProfile);
+    return profiles
+      .map((profile) => ({
+        key: profileKey(profile),
+        lastPlayed: getModpackLastLaunch(profile),
+        profile,
+      }))
+      .filter((item) => item.lastPlayed > 0 && !isActiveProfile(item.profile))
       .sort((a, b) => b.lastPlayed - a.lastPlayed)
       .slice(0, 3)
       .map(({ key, lastPlayed, profile }) => ({
@@ -250,7 +250,7 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
         modCount: profile.mods.length,
         enabledCount: profile.mods.filter((mod) => mod.enabled).length,
       }));
-  }, [activeProfile, activeProfileKey, profiles]);
+  }, [activeProfile, activeProfileId, activeProfileKey, profiles]);
 
   const formatRecentDate = (ts: number) =>
     new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(ts));
@@ -281,7 +281,7 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
       setRecentSwitching(key);
       const result = await switchProfile(key);
       setActiveProfile(key, targetName);
-      recordModpackLaunch(key);
+      recordModpackLaunch(target ?? key);
       await refreshAll();
       const parts = switchResultDetails(result, t);
       if (parts.length > 0) {

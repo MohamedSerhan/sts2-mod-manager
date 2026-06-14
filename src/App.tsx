@@ -39,6 +39,7 @@ import { LaunchSpinner } from './components/LaunchSpinner';
 import { ProfileSwitcher } from './components/ProfileSwitcher';
 import { HelpDrawer } from './components/HelpDrawer';
 import { SidebarResizeHandle } from './components/SidebarResizeHandle';
+import { recordModpackLaunch } from './lib/modpackUsage';
 import { useResizableSidebar } from './hooks/useResizableSidebar';
 import { HomeView } from './views/Home';
 import { ModsView } from './views/Mods';
@@ -501,6 +502,14 @@ function AppInner() {
     setLaunching('modded');
     try {
       await launchGame();
+      const launchedProfile = activeProfileSummary?.profile;
+      if (launchedProfile) {
+        recordModpackLaunch(launchedProfile);
+      } else if (activeProfileId && activeProfile) {
+        recordModpackLaunch({ id: activeProfileId, name: activeProfile });
+      } else if (activeProfileKey) {
+        recordModpackLaunch(activeProfileKey);
+      }
       toast.success(t('app.toast.launching'));
       // Keep the spinner up briefly so the user sees the transition;
       // hide once the Steam launcher takes over the foreground.

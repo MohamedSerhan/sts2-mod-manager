@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import {
   getModpackUsage,
+  getModpackLastLaunch,
   recordModpackLaunch,
   renameModpackUsage,
   forgetModpackUsage,
@@ -22,6 +23,24 @@ describe('modpackUsage', () => {
     expect(map['Alpha']).toBeGreaterThan(0);
   });
 
+  it('records stable ids and clears matching legacy name history', () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ Alpha: 1234 }));
+    recordModpackLaunch({ id: 'profile-alpha', name: 'Alpha' });
+    const map = getModpackUsage();
+    expect(map['profile-alpha']).toBeGreaterThan(1234);
+    expect(map.Alpha).toBeUndefined();
+  });
+
+  it('resolves launch timestamps from stable ids and legacy names', () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      'profile-alpha': 3000,
+      Beta: 2000,
+    }));
+    expect(getModpackLastLaunch({ id: 'profile-alpha', name: 'Alpha' })).toBe(3000);
+    expect(getModpackLastLaunch({ id: 'profile-beta', name: 'Beta' })).toBe(2000);
+    expect(getModpackLastLaunch({ id: 'profile-gamma', name: 'Gamma' })).toBe(0);
+  });
+
   it('recentModpacks orders newest-first and filters to existing packs', () => {
     localStorage.setItem(
       STORAGE_KEY,
@@ -34,6 +53,18 @@ describe('modpackUsage', () => {
   it('recentModpacks respects the limit', () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ A: 1, B: 2, C: 3 }));
     expect(recentModpacks(['A', 'B', 'C'], 2)).toEqual(['C', 'B']);
+  });
+
+  it('recentModpacks resolves id-keyed and legacy name-keyed profile history', () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      'profile-alpha': 3000,
+      Beta: 2000,
+      Ghost: 9000,
+    }));
+    expect(recentModpacks([
+      { id: 'profile-alpha', name: 'Alpha' },
+      { id: 'profile-beta', name: 'Beta' },
+    ], 10)).toEqual(['Alpha', 'Beta']);
   });
 
   it('rename carries the timestamp to the new name', () => {
@@ -53,6 +84,16 @@ describe('modpackUsage', () => {
   it('forget removes the entry', () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ Doomed: 1, Kept: 2 }));
     forgetModpackUsage('Doomed');
+    expect(getModpackUsage()).toEqual({ Kept: 2 });
+  });
+
+  it('forget removes both stable id and legacy name entries', () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      'profile-doomed': 10,
+      Doomed: 1,
+      Kept: 2,
+    }));
+    forgetModpackUsage({ id: 'profile-doomed', name: 'Doomed' });
     expect(getModpackUsage()).toEqual({ Kept: 2 });
   });
 

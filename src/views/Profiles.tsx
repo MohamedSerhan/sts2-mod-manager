@@ -48,6 +48,7 @@ import {
 import { importShareCodeSmart, buildShareLink, buildShareMessage } from '../lib/shareImport';
 import {
   getModpackUsage,
+  getModpackLastLaunch,
   recordModpackLaunch,
   renameModpackUsage,
   forgetModpackUsage,
@@ -639,7 +640,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       setSwitchingProfile({ key: targetKey, name: targetName });
       const result = await switchProfile(targetKey);
       setActiveProfile(targetKey, targetName);
-      recordModpackLaunch(targetKey);
+      recordModpackLaunch(target ?? targetKey);
       await refreshAll();
       await loadProfiles();
       bumpRevision();
@@ -701,7 +702,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       }
       const result = await repairProfile(targetKey);
       setActiveProfile(targetKey, targetName);
-      recordModpackLaunch(targetKey);
+      recordModpackLaunch(target ?? targetKey);
       await refreshAll();
       await loadProfiles();
       bumpRevision();
@@ -835,7 +836,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       await deleteProfile(targetKey);
       setProfiles((prev) => prev.filter((p) => profileKey(p) !== targetKey));
       clearLocalOutOfSync(targetKey);
-      forgetModpackUsage(targetName);
+      forgetModpackUsage(target ?? targetName);
       // Bug 3: if we just deleted the active pack, clear the AppContext
       // active pointer too (the backend clears active_profile.txt) so nothing
       // keeps flagging the now-gone pack as active until an app restart.
@@ -925,7 +926,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
           t('profiles.toast.importedModpack', { name: outcome.profile.name, count: outcome.profile.mods.length }),
         );
       } else if (outcome.kind === 'activated') {
-        recordModpackLaunch(outcome.profileName);
+        recordModpackLaunch(findProfileByKey(outcome.profileName) ?? outcome.profileName);
         const parts = switchResultDetails(outcome.result, t, { includeLists: false });
         (switchResultHasProblems(outcome.result) ? toastCtx.error : toastCtx.info)(parts.length > 0
           ? parts.join(', ')
@@ -1440,8 +1441,8 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
           switch (modpackSort) {
             case 'recent': {
               // Launched packs first (newest launch on top); the rest A–Z.
-              const ua = usage[a.name] ?? 0;
-              const ub = usage[b.name] ?? 0;
+              const ua = getModpackLastLaunch(a, usage);
+              const ub = getModpackLastLaunch(b, usage);
               return ub - ua || byName(a, b);
             }
             case 'edited':

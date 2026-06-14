@@ -890,12 +890,62 @@ fn write_steam_appid_file(dir: &Path) {
     }
 }
 
+#[cfg(target_os = "linux")]
+fn linux_direct_launch_candidates(game_path: &Path) -> Vec<PathBuf> {
+    [
+        "SlayTheSpire2.x86_64",
+        "SlayTheSpire2",
+        "Slay the Spire 2.x86_64",
+        "Slay the Spire 2",
+        "SlayTheSpire2.sh",
+        "Slay the Spire 2.sh",
+    ]
+    .into_iter()
+    .map(|name| game_path.join(name))
+    .collect()
+}
+
+#[cfg(target_os = "linux")]
+fn is_linux_executable(path: &Path) -> std::result::Result<bool, String> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let metadata = path.metadata().map_err(|e| {
+        format!(
+            "Direct launch found {} but couldn't read its permissions: {}",
+            path.display(),
+            e
+        )
+    })?;
+    Ok(metadata.permissions().mode() & 0o111 != 0)
+}
+
+#[cfg(target_os = "linux")]
+fn resolve_linux_direct_launch_candidate(
+    game_path: &Path,
+) -> std::result::Result<Option<PathBuf>, String> {
+    for candidate in linux_direct_launch_candidates(game_path) {
+        if candidate.is_file() {
+            if !is_linux_executable(&candidate)? {
+                return Err(format!(
+                    "Direct launch found {} but it is not executable. Mark it executable and try again, for example: chmod +x \"{}\"",
+                    candidate.display(),
+                    candidate.display()
+                ));
+            }
+            return Ok(Some(candidate));
+        }
+    }
+
+    Ok(None)
+}
+
 /// Direct (no-Steam) launch. Per platform:
 ///   - Windows: spawn `<install>/SlayTheSpire2.exe` (or the space-variant).
 ///   - macOS:   `open` the `.app` bundle. Warn on Apple Silicon that
 ///              STS2 needs Rosetta 2 — we don't fail the launch; if
 ///              Rosetta isn't installed macOS surfaces its own prompt.
-///   - Linux:   spawn the native binary if one's next to the `.pck`.
+///   - Linux:   spawn the native binary if one's next to the `.pck`;
+///              known `.sh` launchers are tried after native binaries.
 ///              Proton-only installs (a `.exe` with no Linux binary)
 ///              are not supported here; we don't try to drive Proton
 ///              ourselves.
@@ -1004,15 +1054,9 @@ fn spawn_game_direct(game_path: Option<&Path>) -> std::result::Result<(), String
     {
         use std::process::Command;
 
-        let linux_candidates = [
-            game_path.join("SlayTheSpire2.x86_64"),
-            game_path.join("SlayTheSpire2"),
-            game_path.join("Slay the Spire 2.x86_64"),
-            game_path.join("Slay the Spire 2"),
-        ];
-        let binary = linux_candidates.iter().find(|p| p.is_file());
+        let binary = resolve_linux_direct_launch_candidate(game_path)?;
 
-        if let Some(bin) = binary {
+        if let Some(bin) = binary.as_ref() {
             write_steam_appid_file(game_path);
             log::info!("Direct launch: spawning {}", bin.display());
             let mut cmd = Command::new(bin);
@@ -1514,6 +1558,64 @@ mod steam_library_detection_tests {
             find_game_in_libraries(&libraries).as_deref(),
             Some(game_path.as_path()),
             "auto-detect must find STS2 in the non-default Steam library"
+        );
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod linux_direct_launch_tests {
+    use super::resolve_linux_direct_launch_candidate;
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
+    use tempfile::tempdir;
+
+    fn write_candidate(game_path: &Path, name: &str, mode: u32) {
+        let candidate = game_path.join(name);
+        fs::write(&candidate, b"#!/bin/sh\n").unwrap();
+        fs::set_permissions(&candidate, fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    #[test]
+    fn linux_direct_launch_prefers_native_binary_before_shell_launcher() {
+        let game = tempdir().unwrap();
+        write_candidate(game.path(), "SlayTheSpire2", 0o755);
+        write_candidate(game.path(), "SlayTheSpire2.sh", 0o755);
+
+        let selected = resolve_linux_direct_launch_candidate(game.path())
+            .unwrap()
+            .expect("expected launch candidate");
+
+        assert_eq!(selected, game.path().join("SlayTheSpire2"));
+    }
+
+    #[test]
+    fn linux_direct_launch_uses_shell_launcher_after_native_candidates() {
+        let game = tempdir().unwrap();
+        write_candidate(game.path(), "Slay the Spire 2.sh", 0o755);
+
+        let selected = resolve_linux_direct_launch_candidate(game.path())
+            .unwrap()
+            .expect("expected shell launch candidate");
+
+        assert_eq!(selected, game.path().join("Slay the Spire 2.sh"));
+    }
+
+    #[test]
+    fn linux_direct_launch_reports_non_executable_candidate_without_skipping_it() {
+        let game = tempdir().unwrap();
+        write_candidate(game.path(), "SlayTheSpire2", 0o644);
+        write_candidate(game.path(), "SlayTheSpire2.sh", 0o755);
+
+        let err = resolve_linux_direct_launch_candidate(game.path()).unwrap_err();
+
+        assert!(
+            err.contains("SlayTheSpire2"),
+            "error should name the candidate: {err}"
+        );
+        assert!(
+            err.contains("not executable") && err.contains("chmod +x"),
+            "error should explain the fix: {err}"
         );
     }
 }

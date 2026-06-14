@@ -1690,6 +1690,27 @@ describe('<ProfilesView>', () => {
     expect(localStorage.getItem('sts2mm-modpack-sort')).toBe('mods');
   });
 
+  it('FR4: recent sort resolves stable id and legacy display-name history', async () => {
+    seedProfiles([
+      baseProfile({ id: 'profile-zebra', name: 'Zebra', mods: [profileMod()] }),
+      baseProfile({ id: 'profile-alpha', name: 'Alpha', mods: [] }),
+      baseProfile({ id: 'profile-mega', name: 'Mega', mods: [] }),
+    ]);
+    localStorage.setItem(
+      'sts2mm-modpack-launches',
+      JSON.stringify({
+        'profile-alpha': 3000,
+        Zebra: 2000,
+      }),
+    );
+    render(<Wrap />);
+
+    await waitFor(() => {
+      expect([...document.querySelectorAll('.gf-modpack-card-name')].map((el) => el.textContent))
+        .toEqual(['Alpha', 'Zebra', 'Mega']);
+    });
+  });
+
   it('FR4: sort by recently edited / recently created uses the manifest timestamps', async () => {
     seedProfiles([
       baseProfile({

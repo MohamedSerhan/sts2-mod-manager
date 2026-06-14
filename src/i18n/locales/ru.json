@@ -453,7 +453,7 @@
       "toastSavedApplied": "Порядок загрузки для {{name}} сохранён и применён к settings.save.",
       "toastSavedInactive": "Порядок загрузки для {{name}} сохранён. Он применится, когда вы активируете эту сборку.",
       "toastSavedSettingsMissing": "Порядок загрузки для {{name}} сохранён, но файл settings.save не найден. Запустите STS2 один раз, затем активируйте эту сборку.",
-      "toastSavedSettingsMultiple": "Порядок загрузки для {{name}} сохранён, но найдено несколько файлов settings.save, поэтому ни один не изменён.",
+      "toastSavedSettingsMultiple": "Порядок загрузки для {{name}} сохранён, но найдено несколько файлов settings.save, поэтому настройки игры не изменены.",
       "toastSavedGameRunning": "Порядок загрузки для {{name}} сохранён, но STS2 запущена. Закройте игру и активируйте сборку, чтобы применить его.",
       "toastSavedSettingsFailed": "Порядок загрузки для {{name}} сохранён, но не удалось обновить settings.save.",
       "toastFailed": "Не удалось сохранить порядок загрузки: {{error}}"

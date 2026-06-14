@@ -453,7 +453,7 @@
       "toastSavedApplied": "تم حفظ ترتيب التحميل لـ {{name}} وتطبيقه على settings.save.",
       "toastSavedInactive": "تم حفظ ترتيب التحميل لـ {{name}}. سيُطبَّق عند تفعيلك لهذه الحزمة.",
       "toastSavedSettingsMissing": "تم حفظ ترتيب التحميل لـ {{name}}، لكن لم يُعثر على settings.save. شغّل STS2 مرة واحدة، ثم فعّل هذه الحزمة.",
-      "toastSavedSettingsMultiple": "تم حفظ ترتيب التحميل لـ {{name}}، لكن عُثر على عدة ملفات settings.save، لذا لم يتغيّر أيٌّ منها.",
+      "toastSavedSettingsMultiple": "تم حفظ ترتيب التحميل لـ {{name}}، لكن عُثر على عدة ملفات settings.save، لذلك لم تتغيّر إعدادات اللعبة.",
       "toastSavedGameRunning": "تم حفظ ترتيب التحميل لـ {{name}}، لكن STS2 قيد التشغيل. أغلق اللعبة وفعّل الحزمة لتطبيقه.",
       "toastSavedSettingsFailed": "تم حفظ ترتيب التحميل لـ {{name}}، لكن تعذّر تحديث settings.save.",
       "toastFailed": "فشل حفظ ترتيب التحميل: {{error}}"

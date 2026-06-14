@@ -120,7 +120,7 @@ export function ProfileSwitcher({ onClose, onAddPack, onManageAll }: Props) {
     try {
       const result = await switchProfile(key);
       setActiveProfile(key, name);
-      recordModpackLaunch(key);
+      recordModpackLaunch(profile);
       await refreshAll();
       const parts = switchResultDetails(result, t);
       if (parts.length > 0) {

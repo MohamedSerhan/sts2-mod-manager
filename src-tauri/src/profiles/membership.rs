@@ -494,10 +494,43 @@ pub(crate) fn write_profile_load_order_to_settings_file(
     Ok(())
 }
 
+#[derive(Debug)]
 enum SettingsSaveResolution {
     Found(PathBuf),
     Missing,
     Multiple(Vec<PathBuf>),
+}
+
+fn resolve_settings_save_candidates(mut candidates: Vec<PathBuf>) -> SettingsSaveResolution {
+    candidates.sort();
+    candidates.dedup();
+
+    let mut resolved = Vec::new();
+    for candidate in candidates {
+        // Multiple discovered paths are only safe to collapse when the OS can
+        // prove they name the same settings.save file.
+        let identity = candidate
+            .canonicalize()
+            .unwrap_or_else(|_| candidate.clone());
+        if resolved
+            .iter()
+            .any(|(_, existing_identity): &(PathBuf, PathBuf)| existing_identity == &identity)
+        {
+            continue;
+        }
+        resolved.push((candidate, identity));
+    }
+
+    match resolved.len() {
+        0 => SettingsSaveResolution::Missing,
+        1 => SettingsSaveResolution::Found(resolved.remove(0).0),
+        _ => SettingsSaveResolution::Multiple(
+            resolved
+                .into_iter()
+                .map(|(candidate, _identity)| candidate)
+                .collect(),
+        ),
+    }
 }
 
 fn settings_save_candidates_under(root: &Path) -> Vec<PathBuf> {
@@ -540,14 +573,7 @@ fn find_settings_save_path() -> SettingsSaveResolution {
             &data_dir.join("SlayTheSpire2"),
         ));
     }
-    candidates.sort();
-    candidates.dedup();
-
-    match candidates.len() {
-        0 => SettingsSaveResolution::Missing,
-        1 => SettingsSaveResolution::Found(candidates.remove(0)),
-        _ => SettingsSaveResolution::Multiple(candidates),
-    }
+    resolve_settings_save_candidates(candidates)
 }
 
 fn profile_contains_disk_mod(profile: &Profile, disk_mod: &ModInfo) -> bool {
@@ -1346,6 +1372,58 @@ mod profile_membership_tests {
                     .starts_with("settings.save.sts2mm-bak")),
             "a successful settings.save rewrite must remove its temporary backup"
         );
+    }
+
+    #[test]
+    fn settings_save_resolution_uses_single_candidate() {
+        let tmp = tempfile::tempdir().unwrap();
+        let settings_path = tmp.path().join("settings.save");
+        fs::write(&settings_path, "{}").unwrap();
+
+        match resolve_settings_save_candidates(vec![settings_path.clone()]) {
+            SettingsSaveResolution::Found(path) => assert_eq!(path, settings_path),
+            other => panic!("expected single settings.save candidate, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn settings_save_resolution_refuses_distinct_multiple_candidates() {
+        let tmp = tempfile::tempdir().unwrap();
+        let first = tmp.path().join("steam").join("111").join("settings.save");
+        let second = tmp.path().join("steam").join("222").join("settings.save");
+        fs::create_dir_all(first.parent().unwrap()).unwrap();
+        fs::create_dir_all(second.parent().unwrap()).unwrap();
+        fs::write(&first, r#"{"account":111}"#).unwrap();
+        fs::write(&second, r#"{"account":222}"#).unwrap();
+
+        match resolve_settings_save_candidates(vec![first.clone(), second.clone()]) {
+            SettingsSaveResolution::Multiple(paths) => assert_eq!(paths, vec![first, second]),
+            other => panic!(
+                "expected distinct settings.save files to remain ambiguous, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn settings_save_resolution_deduplicates_aliases_to_same_candidate() {
+        let tmp = tempfile::tempdir().unwrap();
+        let account_dir = tmp.path().join("steam").join("111");
+        fs::create_dir_all(&account_dir).unwrap();
+        let settings_path = account_dir.join("settings.save");
+        fs::write(&settings_path, "{}").unwrap();
+        let alias = account_dir.join("..").join("111").join("settings.save");
+
+        match resolve_settings_save_candidates(vec![settings_path.clone(), alias]) {
+            SettingsSaveResolution::Found(path) => assert_eq!(
+                path.canonicalize().unwrap(),
+                settings_path.canonicalize().unwrap()
+            ),
+            other => panic!(
+                "expected aliased settings.save paths to resolve to one file, got {:?}",
+                other
+            ),
+        }
     }
 
     #[test]

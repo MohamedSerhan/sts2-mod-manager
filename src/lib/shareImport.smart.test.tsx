@@ -26,6 +26,7 @@ describe('importShareCodeSmart', () => {
   it('Case 1: brand-new pack → installs after confirm (installed outcome)', async () => {
     registerInvokeHandler('fetch_shared_profile_cmd', () => ({
       name: 'Imported',
+      created_by: 'alice',
       mods: [],
       created_at: '2026-01-01',
     }));
@@ -156,6 +157,33 @@ describe('importShareCodeSmart', () => {
     expect(outcome).toEqual({ kind: 'own-published-exists', profileName: 'Solo Pack' });
     expect(getInvokeCalls().some((c) => c.cmd === 'fetch_shared_profile_cmd')).toBe(false);
     expect(getInvokeCalls().some((c) => c.cmd === 'install_shared_profile')).toBe(false);
+  });
+
+  it('profile-list lookup failures do not block a brand-new install', async () => {
+    registerInvokeHandler('list_profiles_cmd', () => {
+      throw new Error('profile list unavailable');
+    });
+    registerInvokeHandler('fetch_shared_profile_cmd', () => ({
+      name: 'Imported',
+      mods: [],
+      created_at: '2026-01-01',
+    }));
+    registerInvokeHandler('install_shared_profile', () => ({
+      name: 'Imported',
+      mods: [],
+      created_at: '2026-01-01',
+    }));
+
+    const outcome = await importShareCodeSmart('alice/AA5A-315D-61AE', {
+      confirm: confirmAccept,
+      subscriptions: [],
+      activeProfile: null,
+      subUpdates: [],
+      t: mockT,
+    });
+
+    expect(outcome.kind).toBe('installed');
+    expect(getInvokeCalls().some((c) => c.cmd === 'install_shared_profile')).toBe(true);
   });
 
   it('Case 3: subscribed but not active → activated outcome after confirm', async () => {

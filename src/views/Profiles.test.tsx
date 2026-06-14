@@ -2281,6 +2281,28 @@ describe('<ProfilesView>', () => {
     });
   });
 
+  it('Import-by-code for your own published share points to the existing local modpack', async () => {
+    seedProfiles([baseProfile({ id: 'profile-1', name: 'Solo Pack' })]);
+    registerInvokeHandler('get_subscriptions', () => []);
+    registerInvokeHandler('check_subscription_updates', () => []);
+    registerInvokeHandler('get_share_info', (args) => (
+      args?.name === 'profile-1'
+        ? { code: 'AA5A-315D-61AE', owner: 'alice', out_of_sync: false }
+        : null
+    ));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Solo Pack')).toBeInTheDocument(); });
+    const input = screen.getByLabelText(/Add a modpack by code/i);
+    await user.type(input, 'alice/AA5A-315D-61AE');
+    await user.click(screen.getByRole('button', { name: /^Add$/ }));
+    await waitFor(() => {
+      expect(screen.getByText(/"Solo Pack" is published by you and already exists in Mod Manager/)).toBeInTheDocument();
+    });
+    expect(getInvokeCalls().some((c) => c.cmd === 'fetch_shared_profile_cmd')).toBe(false);
+    expect(getInvokeCalls().some((c) => c.cmd === 'install_shared_profile')).toBe(false);
+  });
+
   it('Import-by-code already-active path re-applies the active pack', async () => {
     seedProfiles([baseProfile({ name: 'Match' })]);
     registerInvokeHandler('get_active_profile', () => 'Match');

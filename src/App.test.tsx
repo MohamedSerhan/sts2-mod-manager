@@ -1446,6 +1446,29 @@ describe('<App>', () => {
     });
   });
 
+  it('deep-link: own published share code points to the existing local modpack', async () => {
+    registerInvokeHandler('get_active_profile', () => null);
+    registerInvokeHandler('get_subscriptions', () => []);
+    registerInvokeHandler('check_subscription_updates', () => []);
+    registerInvokeHandler('list_profiles_cmd', () => [
+      { id: 'profile-1', name: 'Solo Pack', mods: [], created_at: '2026-01-01' },
+    ]);
+    registerInvokeHandler('get_share_info', (args) => (
+      args?.name === 'profile-1'
+        ? { code: 'AA5A-315D-61AE', owner: 'alice', out_of_sync: false }
+        : null
+    ));
+    registerInvokeHandler('consume_pending_deep_link', () => null);
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    await fireTauriEvent('sts2mm-open-url', 'sts2mm://import/alice/AA5A-315D-61AE');
+    await waitFor(() => {
+      expect(screen.getByText(/"Solo Pack" is published by you and already exists in Mod Manager/)).toBeInTheDocument();
+    });
+    expect(getInvokeCalls().some((c) => c.cmd === 'fetch_shared_profile_cmd')).toBe(false);
+    expect(getInvokeCalls().some((c) => c.cmd === 'install_shared_profile')).toBe(false);
+  });
+
   it('deep-link: dedupe window swallows repeat URL within 2s', async () => {
     registerInvokeHandler('get_active_profile', () => 'alice-pack');
     registerInvokeHandler('get_subscriptions', () => [

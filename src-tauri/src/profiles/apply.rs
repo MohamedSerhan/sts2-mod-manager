@@ -332,7 +332,7 @@ pub fn apply_profile_with_pins(
     };
 
     // Build a map from any identifier (name / folder_name / mod_id) to the
-    // desired enabled state. Pack membership now means "enabled on switch";
+    // desired enabled state. Saved profiles preserve disabled entries too;
     // frozen mods still keep their current disk state. Last write wins, but the same ProfileMod owns all
     // its identifiers so collisions only happen if two profile entries share an
     // identifier — in which case the profile itself is malformed.
@@ -344,12 +344,12 @@ pub fn apply_profile_with_pins(
     // disable a mod that drift considers present.
     let mut profile_state: HashMap<String, bool> = HashMap::new();
     for pm in &profile.mods {
-        profile_state.insert(pm.name.to_lowercase(), true);
+        profile_state.insert(pm.name.to_lowercase(), pm.enabled);
         if let Some(ref folder) = pm.folder_name {
-            profile_state.insert(folder.to_lowercase(), true);
+            profile_state.insert(folder.to_lowercase(), pm.enabled);
         }
         if let Some(ref id) = pm.mod_id {
-            profile_state.insert(id.to_lowercase(), true);
+            profile_state.insert(id.to_lowercase(), pm.enabled);
         }
     }
 
@@ -631,6 +631,9 @@ fn retry_enable_included_profile_mods(
     let mut failed = Vec::new();
 
     for pm in &profile.mods {
+        if !pm.enabled {
+            continue;
+        }
         if profile_mod_matches_pin(pm, pinned) {
             continue;
         }
@@ -1773,12 +1776,10 @@ mod modpack_flow_tests {
             "repair A failed downloads: {:?}",
             repair_a.failed_downloads
         );
-        assert_enabled(
-            &paths,
-            &["SharedCore", "AlphaOnly", "AlphaDisabled", "SameInBoth"],
-        );
-        assert_eq!(folder_names(&paths.disabled), HashSet::new());
+        assert_enabled(&paths, &["SharedCore", "AlphaOnly", "SameInBoth"]);
+        assert_disabled_contains(&paths, &["AlphaDisabled"]);
         assert_marker(&paths.mods, "SharedCore", "shared-from-a");
+        assert_marker(&paths.disabled, "AlphaDisabled", "alpha-disabled");
         assert_no_root_artifacts(&paths);
 
         let switch_b = switch_profile_from_paths(
@@ -1807,12 +1808,10 @@ mod modpack_flow_tests {
             "switch B failed enables: {:?}",
             switch_b.failed_enables
         );
-        assert_enabled(
-            &paths,
-            &["SharedCore", "BetaOnly", "BetaDisabled", "SameInBoth"],
-        );
-        assert_disabled_contains(&paths, &["AlphaOnly", "AlphaDisabled"]);
+        assert_enabled(&paths, &["SharedCore", "BetaOnly", "SameInBoth"]);
+        assert_disabled_contains(&paths, &["AlphaOnly", "AlphaDisabled", "BetaDisabled"]);
         assert_marker(&paths.mods, "SharedCore", "shared-from-b");
+        assert_marker(&paths.disabled, "BetaDisabled", "beta-disabled");
         assert_no_root_artifacts(&paths);
 
         let switch_a = switch_profile_from_paths(
@@ -1841,12 +1840,10 @@ mod modpack_flow_tests {
             "switch A failed enables: {:?}",
             switch_a.failed_enables
         );
-        assert_enabled(
-            &paths,
-            &["SharedCore", "AlphaOnly", "AlphaDisabled", "SameInBoth"],
-        );
-        assert_disabled_contains(&paths, &["BetaOnly", "BetaDisabled"]);
+        assert_enabled(&paths, &["SharedCore", "AlphaOnly", "SameInBoth"]);
+        assert_disabled_contains(&paths, &["BetaOnly", "BetaDisabled", "AlphaDisabled"]);
         assert_marker(&paths.mods, "SharedCore", "shared-from-a");
+        assert_marker(&paths.disabled, "AlphaDisabled", "alpha-disabled");
         assert_no_root_artifacts(&paths);
 
         clear_mod_dirs(&paths);
@@ -1871,12 +1868,10 @@ mod modpack_flow_tests {
             "repair B failed downloads: {:?}",
             repair_b.failed_downloads
         );
-        assert_enabled(
-            &paths,
-            &["SharedCore", "BetaOnly", "BetaDisabled", "SameInBoth"],
-        );
-        assert_eq!(folder_names(&paths.disabled), HashSet::new());
+        assert_enabled(&paths, &["SharedCore", "BetaOnly", "SameInBoth"]);
+        assert_disabled_contains(&paths, &["BetaDisabled"]);
         assert_marker(&paths.mods, "SharedCore", "shared-from-b");
+        assert_marker(&paths.disabled, "BetaDisabled", "beta-disabled");
         assert_no_root_artifacts(&paths);
     }
 
@@ -2115,6 +2110,50 @@ mod modpack_flow_tests {
         assert!(!paths.disabled.join("Stored").exists());
     }
 
+    #[test]
+    fn retry_enable_included_profile_mods_leaves_disabled_pack_mod_stored() {
+        let paths = flow_paths();
+        let now = chrono::Utc::now();
+        let profile = Profile {
+            id: crate::profiles::new_profile_id(),
+            name: "Stored Disabled Pack".into(),
+            game_version: Some("0.105.0".into()),
+            created_by: Some("qa-curator".into()),
+            mods: vec![ProfileMod {
+                name: "Stored".into(),
+                version: "1.0.0".into(),
+                source: None,
+                hash: None,
+                files: vec!["Stored/Stored.json".into(), "Stored/Stored.dll".into()],
+                folder_name: Some("Stored".into()),
+                mod_id: Some("Stored".into()),
+                enabled: false,
+                bundle_url: None,
+                bundle_sha256: None,
+                bundle_members: vec![],
+            }],
+            created_at: now,
+            updated_at: now,
+            public: Some(false),
+            mod_extras: Default::default(),
+        };
+        install_loose_mod(&paths.disabled, "Stored", "stored-disabled");
+
+        let failed = retry_enable_included_profile_mods(
+            &profile,
+            &paths.mods,
+            &paths.disabled,
+            &std::collections::HashSet::new(),
+        );
+
+        assert!(
+            failed.is_empty(),
+            "disabled stored mods should not be treated as failed enables: {failed:?}"
+        );
+        assert_enabled(&paths, &[]);
+        assert!(paths.disabled.join("Stored").join("Stored.dll").exists());
+    }
+
     #[tokio::test]
     async fn failed_replace_keeps_the_existing_on_disk_version() {
         // Bug 4: a version-mismatch replace whose download fails must NOT lose
@@ -2232,12 +2271,12 @@ mod modpack_flow_tests {
     }
 
     #[tokio::test]
-    async fn stored_mod_version_mismatch_replaces_and_enables_without_loss() {
+    async fn stored_mod_version_mismatch_replaces_without_losing_disabled_state() {
         // Review nit: the happy-path replace test only covered the ENABLED
         // path. A pack mod that's DISABLED on disk and version-mismatched must
-        // also be replaced safely. Pack switching now enables included mods,
-        // so the new content lands in mods/, the old disabled copy is not
-        // stranded, and no empty swap dirs are left behind.
+        // also be replaced safely. The new content should keep the manifest's
+        // disabled storage state, the old disabled copy must not be stranded,
+        // and no empty swap dirs are left behind.
         let paths = flow_paths();
         let server = MockServer::start().await;
         save_pack(
@@ -2252,7 +2291,7 @@ mod modpack_flow_tests {
                     "DisMod",
                     "2.0.0",
                     "new-v2",
-                    false, // legacy disabled manifest state is ignored on switch
+                    false,
                     None,
                 )
                 .await,
@@ -2279,11 +2318,9 @@ mod modpack_flow_tests {
             result.replaced_mods
         );
         assert!(result.replace_failures.is_empty());
-        // New content landed active and no old mod files are stranded in
-        // storage. The rollback guard may leave an empty source directory
-        // behind after a successful active replacement, which is harmless.
-        assert_marker(&paths.mods, "DisMod", "new-v2");
-        assert!(!paths.disabled.join("DisMod").join("DisMod.dll").exists());
+        // New content stayed stored and no old mod files are stranded active.
+        assert_marker(&paths.disabled, "DisMod", "new-v2");
+        assert!(!paths.mods.join("DisMod").join("DisMod.dll").exists());
         assert_no_root_artifacts(&paths);
     }
 

@@ -785,7 +785,7 @@ async fn scenario_005_install_from_release_url() {
 }
 
 #[test]
-fn flow_11_apply_profile_without_pin_enables_included_mod() {
+fn flow_11_apply_profile_without_pin_preserves_disabled_profile_mod() {
     use sts2_mod_manager_lib::profiles::{apply_profile_with_pins, Profile, ProfileMod};
 
     let mods_tmp = tempfile::tempdir().unwrap();
@@ -824,11 +824,11 @@ fn flow_11_apply_profile_without_pin_enables_included_mod() {
     let active_baselib = mods_tmp.path().join("BaseLib").join("BaseLib.dll");
     let disabled_baselib = disabled_tmp.path().join("BaseLib").join("BaseLib.dll");
     assert!(
-        active_baselib.exists(),
-        "Without pin, an included BaseLib should stay active in mods/."
+        !active_baselib.exists(),
+        "Without pin, a saved disabled BaseLib should move out of mods/."
     );
     assert!(
-        !disabled_baselib.exists(),
-        "Without pin, an included BaseLib should not be stored in mods_disabled/."
+        disabled_baselib.exists(),
+        "Without pin, a saved disabled BaseLib should stay in mods_disabled/."
     );
 }

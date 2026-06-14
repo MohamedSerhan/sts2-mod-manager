@@ -950,17 +950,33 @@ async function specDisabledLibraryExtrasArePreserved(driver) {
   const suffix = Date.now().toString(36);
   const modpackName = `QA Repair ${suffix}`;
 
-  // Step 1: create + activate a fresh modpack.
+  // Step 1: after the runner rebuilds the fixture tree, force the app to
+  // rescan the fresh mods before creating a pack from the current loadout.
+  await navToMods(driver);
+  const refreshBtn = await waitForElement(
+    driver,
+    By.xpath("//button[normalize-space(.)='Refresh' or contains(., 'Refresh')]"),
+    'Mods toolbar Refresh button',
+  );
+  await refreshBtn.click();
+  await waitForElement(
+    driver,
+    By.xpath("//*[normalize-space(text())='QaTestMod']"),
+    'QaTestMod row after fixture refresh',
+    10_000,
+  );
+
+  // Step 2: create + activate a fresh modpack.
   await navToModpacks(driver);
   await createModpackNamed(driver, modpackName);
   await waitForToastsToClear(driver);
   await activateModpack(driver, modpackName);
   await waitForToastsToClear(driver);
 
-  // Step 2: leave Modpacks so the next visit remounts the view.
+  // Step 3: leave Modpacks so the next visit remounts the view.
   await navToMods(driver);
 
-  // Step 3: seed an orphan folder under mods_disabled/. A proper-ish
+  // Step 4: seed an orphan folder under mods_disabled/. A proper-ish
   // manifest so `scan_disabled_mods` picks it up via PASS 2 (subdir
   // walk → try_load_mod_from finds the json). A bare `{}` would also
   // parse via the file-stem fallback, but giving it explicit fields
@@ -987,7 +1003,7 @@ async function specDisabledLibraryExtrasArePreserved(driver) {
     throw new Error(`orphan seed failed: ${orphanDir} does not exist after mkdir/writeFile`);
   }
 
-  // Step 4: nav back to Modpacks. Disabled library extras should not
+  // Step 5: nav back to Modpacks. Disabled library extras should not
   // render a drift banner with a Repair action.
   await navToModpacks(driver);
   const repairButtonLocator = By.xpath(

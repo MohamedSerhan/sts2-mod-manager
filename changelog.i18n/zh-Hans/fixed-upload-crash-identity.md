@@ -1,1 +1,0 @@
-共享大型模组文件时更加稳定，BetterSpire2 和 BetterSpire2 Lite 这类名称相近的模组也不会再被当成同一个模组。

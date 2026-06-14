@@ -37,6 +37,64 @@ _Changes are tracked as fragments in [`changelog.d/`](changelog.d/) and assemble
 
 ---
 
+## [1.7.4] - 2026-06-13
+
+### Added
+
+- You can now choose how many automatic backups the manager keeps — or turn backups off entirely — from Settings → Backups.
+- Added sort options to the Modpacks list: recently launched, recently edited, recently created, name, and most mods.
+- The Home screen now shows your recently launched modpacks for one-click switching.
+- Sharing a modpack can now include your per-mod notes, links, and tags — with a checkbox to keep them private; friends' own notes are never overwritten.
+- Searching inside a modpack now also filters the Add from Mod Library list, and search matches your tags too.
+- You can now hide the Customize menu entry from each mod's ⋯ menu — reopen the customizer any time from Settings.
+- Display settings now let you adjust text size separately from the overall interface scale.
+
+### Changed
+
+- When a share can't finish, the recovery panel now leads with "Try sharing again" for the common upload-hiccup case, keeping "Repair these mods" as a clearly-labeled fallback for genuinely broken files.
+- Renamed the Browse tabs to Browse modpacks and Browse mods so it's clear what each one shows.
+- The Windows installer now carries publisher information, which reduces antivirus false alarms; a new help section explains how to verify a download and report false positives.
+- The Home recent modpacks section now shows last-played context and mod counts for each pack.
+- Switching modpacks now turns on every unfrozen pack mod, and automatic backups keep two copies by default with options up to ten.
+- Modpacks with unsaved active-mod changes now explain what changed without using manifest terminology.
+- Re-sharing a modpack now skips rebuilding mod bundles whose files have not changed since the last successful share.
+- Windows update and download prompts now explain how to verify Defender false-positive warnings before allowing the installer.
+
+### Fixed
+
+- The three-dot menu on a mod row no longer hides behind the row below it, so its options are always clickable.
+- Sharing a modpack now automatically retries mod uploads that hit a temporary network or GitHub hiccup, instead of failing a random mod each attempt.
+- Sharing a modpack now uploads every file of a mod — including its info file — so friends' games recognize mods that previously installed incomplete.
+- Mod updates now pick the right download for your game build when you're on a Steam beta version (this fixes RitsuLib installing the wrong variant).
+- Fixed the modpack drift and out-of-sync banners sometimes not coming back (or wrongly disappearing) after saving changes or removing mods from a shared modpack.
+- Re-sharing your own modpack no longer makes it show as having updates on your own machine.
+- Re-sharing a modpack now skips re-uploading mods that haven't changed, making re-shares much faster.
+- The modpack header's active-mod count now stays correct after you reinstall one of the pack's mods.
+- If repairing a mod fails partway, your existing mod files are now restored instead of being lost.
+- Sharing a modpack now works after you delete and reinstall one of its mods — the share picks up the mod's new files instead of failing with "missing bundles".
+- Modpack activation screens now show the modpack name instead of its internal ID.
+- Fixed the active modpack count in the top bar so it shows that modpack's own mods instead of the whole library.
+- Sharing now recovers when GitHub reports a duplicate uploaded bundle under a renamed asset filename.
+- Nexus mods installed from a queued download now stay linked and can be added to modpacks even when their folder name changes.
+- Publishing a modpack with a missing local mod now offers to remove that mod from the pack or reinstall it before retrying.
+- Updating mods from a modpack now saves the modpack immediately and only asks you to re-share published changes.
+- Switching modpacks now retries activating each included mod and warns if any installed mod still cannot be enabled.
+- Mods installed from Nexus with broken manifests now keep their Nexus badge and known file version instead of showing as unlinked and unknown.
+- Importing your own share code now points to the existing published modpack instead of creating a duplicate copy.
+- Modpacks now keep the same identity across sharing, imports, saves, and activation so duplicate names no longer create duplicate active or shared cards.
+- Modpacks now keep a stable identity through renames and show warnings when activation only partially succeeds.
+- Modpacks now keep working correctly after renames by using stable local profile IDs while share codes stay tied to the shared pack.
+- Sharing a modpack that isn't currently active no longer removes its stored mods from the pack.
+- Repeat modpack sharing is faster for unchanged packs, publishing can be canceled from the progress window, and duplicated packs no longer keep the original curator name.
+- Switching modpacks from the top bar now updates the Home screen's Recent modpacks list, just like switching from the Modpacks page.
+- Modpacks with mods that have apostrophes in their names can be shared again without getting stuck.
+- Publishing a modpack now updates stale local mod details so shared bundle links match the version shown in the pack.
+- Sharing a modpack now reuses unchanged mod bundles before upload, including matching bundles already published by your other packs, making large shares much faster.
+- Share upload failures now explain that GitHub upload or rate-limit errors should be retried instead of repaired.
+- Published modpacks no longer show a duplicate empty card named after their internal ID.
+- Uploads and downloads now block accidental navigation and automatically retry brief transfer failures before showing an error.
+- Sharing large mod files is more resilient, and similarly named mods like BetterSpire2 and BetterSpire2 Lite are no longer treated as the same mod.
+
 ## [1.7.3] - 2026-06-07
 
 ### Fixed

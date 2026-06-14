@@ -37,6 +37,14 @@ _Changes are tracked as fragments in [`changelog.d/`](changelog.d/) and assemble
 
 ---
 
+## [1.7.5] - 2026-06-14
+
+### Fixed
+
+- Linux Direct launch now recognizes the game's shell launcher and explains how to fix missing execute permission.
+- Load order saves now avoid changing the wrong game settings file when multiple saves are present and explain when the game settings were left unchanged.
+- Recently launched modpacks now sort correctly after switching packs or launching the active pack.
+
 ## [1.7.4] - 2026-06-13
 
 ### Added

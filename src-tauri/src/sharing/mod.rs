@@ -1295,8 +1295,6 @@ fn profile_publish_signature(profile: &Profile) -> String {
         .collect();
     entries.sort();
     let mut hasher = Sha256::new();
-    hasher.update(profile.name.as_bytes());
-    hasher.update([0x1e]);
     hasher.update(profile.created_by.as_deref().unwrap_or("").as_bytes());
     hasher.update([0x1e]);
     hasher.update(match profile.public {
@@ -4783,6 +4781,20 @@ mod publish_signature_tests {
             profile_publish_signature(&profile1),
             profile_publish_signature(&profile2),
             "signature must not change when only updated_at or bundle fields differ"
+        );
+    }
+
+    #[test]
+    fn signature_ignores_profile_display_name() {
+        let profile1 = base_profile();
+        let mut profile2 = base_profile();
+        profile2.name = "Renamed Test Pack".into();
+        profile2.updated_at = profile1.updated_at + chrono::Duration::seconds(1);
+
+        assert_eq!(
+            profile_publish_signature(&profile1),
+            profile_publish_signature(&profile2),
+            "renaming a shared local pack must not mark the share out of sync"
         );
     }
 

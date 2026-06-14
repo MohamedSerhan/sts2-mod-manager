@@ -88,7 +88,7 @@ export interface ModpackDetailProps {
   /** Optional snapshot of the active "switching..." state so the
    *  Switch button can show a spinner without us reaching into the
    *  parent's state shape. */
-  switchingProfile?: string | null;
+  switchingProfile?: string | { key: string; name: string } | null;
   shareInfo?: ShareResult | null;
   drift?: ProfileDrift | null;
   /** Local edits to a shared pack that have not been uploaded yet. */
@@ -200,7 +200,9 @@ export function ModpackDetail({
   // never go the other way.)
   const missingMods = drift?.removed ?? [];
   const missingCount = missingMods.length;
-  const switchingThis = switchingProfile === profileKey || switchingProfile === profile.name;
+  const switchingProfileKey = typeof switchingProfile === 'string' ? switchingProfile : switchingProfile?.key;
+  const switchingProfileName = typeof switchingProfile === 'string' ? switchingProfile : switchingProfile?.name;
+  const switchingThis = switchingProfileKey === profileKey || switchingProfileName === profile.name;
   const switchingOther = !!switchingProfile && !switchingThis;
 
   // Per-row in-flight keys so a double-click can't double-fire the

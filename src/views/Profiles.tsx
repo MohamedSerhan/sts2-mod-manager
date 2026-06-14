@@ -201,7 +201,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     setReshareNudgeDismissed((prev) => ({ ...prev, [profileName]: true }));
   }, []);
   const [driftMap, setDriftMap] = useState<Record<string, ProfileDrift>>({});
-  const [switchingProfile, setSwitchingProfile] = useState<string | null>(null);
+  const [switchingProfile, setSwitchingProfile] = useState<{ key: string; name: string } | null>(null);
   const [savingProfile, setSavingProfile] = useState<string | null>(null);
   // 1.7.0 T16 — detail-view selection. When set, the modpack list
   // area becomes a focused detail view for this pack (header + audit
@@ -636,7 +636,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     }
 
     try {
-      setSwitchingProfile(targetKey);
+      setSwitchingProfile({ key: targetKey, name: targetName });
       const result = await switchProfile(targetKey);
       setActiveProfile(targetKey, targetName);
       recordModpackLaunch(targetKey);
@@ -694,7 +694,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     if (!ok) return;
 
     try {
-      setSwitchingProfile(targetKey);
+      setSwitchingProfile({ key: targetKey, name: targetName });
       if (ok.checked) {
         try { await createBackup(); }
         catch (e) { toastCtx.error(t('profiles.toast.backupFailed', { error: e instanceof Error ? e.message : String(e) })); }
@@ -1084,7 +1084,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
         <div className="gf-modal-back">
           <div className="gf-loading-card">
             <div className="gf-spinner" />
-            <div className="gf-loading-msg">{t('profiles.switching.activating', { name: switchingProfile })}</div>
+            <div className="gf-loading-msg">{t('profiles.switching.activating', { name: switchingProfile.name })}</div>
             <div className="gf-loading-sub">
               {t('profiles.switching.fetching')}
             </div>

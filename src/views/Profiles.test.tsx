@@ -372,6 +372,39 @@ describe('<ProfilesView>', () => {
     });
   });
 
+  it('shows the modpack name, not its UUID, while activating', async () => {
+    const uuid = '731aeaec-7f3d-4859-baec-16219701e2e7';
+    let finishSwitch!: () => void;
+    seedProfiles([
+      baseProfile({ id: 'active-id', name: 'A' }),
+      baseProfile({ id: uuid, name: 'Display Pack' }),
+    ]);
+    registerInvokeHandler('get_active_profile', () => 'A');
+    registerInvokeHandler('get_active_profile_id', () => 'active-id');
+    registerInvokeHandler('switch_profile', () => new Promise((resolve) => {
+      finishSwitch = () => resolve({
+        applied: true,
+        downloaded: 0,
+        missing_mods: [],
+        failed_downloads: [],
+      });
+    }));
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await openDetailFor(user, 'Display Pack');
+    await user.click(screen.getAllByRole('button', { name: /Switch to/i })[0]);
+
+    expect(await screen.findByText(/Activating "Display Pack"/)).toBeInTheDocument();
+    expect(screen.queryByText(new RegExp(uuid))).toBeNull();
+    expect(getInvokeCalls().some((c) => c.cmd === 'switch_profile' && c.args?.profileId === uuid)).toBe(true);
+
+    finishSwitch();
+    await waitFor(() => {
+      expect(screen.getByText(/Switched to modpack "Display Pack"/)).toBeInTheDocument();
+    });
+  });
+
   it('Switch cancel leaves a drifted active profile untouched', async () => {
     seedProfiles([
       baseProfile({ name: 'A' }),

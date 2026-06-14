@@ -116,7 +116,7 @@ export function ProfileSwitcher({ onClose, onAddPack, onManageAll }: Props) {
         // Drift is advisory. If it cannot be checked, keep switching usable.
       }
     }
-    setSwitching(name);
+    setSwitching(key);
     try {
       const result = await switchProfile(key);
       setActiveProfile(key, name);
@@ -202,7 +202,7 @@ export function ProfileSwitcher({ onClose, onAddPack, onManageAll }: Props) {
                   {updateCount > 0 && t('profileSwitcher.updates', { count: updateCount })}
                 </div>
               </div>
-              {switching === p.name ? (
+              {switching === key ? (
                 <RefreshCw size={12} className="animate-spin" style={{ color: 'var(--ink-mute)' }} />
               ) : isActive ? (
                 <span className="gf-pill gf-pill-active">{t('profileSwitcher.active')}</span>

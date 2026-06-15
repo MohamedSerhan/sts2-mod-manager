@@ -37,6 +37,12 @@ _Changes are tracked as fragments in [`changelog.d/`](changelog.d/) and assemble
 
 ---
 
+## [1.7.8] - 2026-06-15
+
+### Fixed
+
+- Windows updates from older 1.7 builds now install back into the normal app folder, so stale Windows install records cannot leave shortcuts pointing at a missing app.
+
 ## [1.7.7] - 2026-06-15
 
 ### Fixed

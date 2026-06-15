@@ -306,6 +306,8 @@ const baseModInfo = (overrides: Partial<ModInfo> = {}): ModInfo => ({
 const baseAudit = (overrides: Partial<ModAuditEntry> = {}): ModAuditEntry => ({
   mod_name: 'BaseLib',
   folder_name: 'BaseLib',
+  manifest_version: '3.1.2',
+  installed_source_version: null,
   installed_version: '3.1.2',
   latest_release_with_assets_tag: 'v3.2.0',
   latest_compatible_tag: 'v3.2.0',
@@ -365,6 +367,20 @@ describe('<LibraryRow> "In N modpacks" indicator', () => {
 });
 
 describe('<LibraryRow> kebab + audit pills', () => {
+  it('renders the fresh ModInfo display name before stale membership-grid data', () => {
+    renderRow({
+      row: baseMod({ name: 'ManifestName', folder_name: 'FolderName', display_name: null }),
+      mod: baseModInfo({
+        name: 'ManifestName',
+        folder_name: 'FolderName',
+        display_name: 'Fresh Friendly Name',
+      }),
+    });
+
+    expect(screen.getByRole('heading', { name: 'Fresh Friendly Name' })).toBeInTheDocument();
+    expect(screen.getByText('ManifestName')).toBeInTheDocument();
+  });
+
   it('clusters source badges + audit pills next to the name (in the title row)', () => {
     const { container } = renderRow({
       mod: baseModInfo({ github_url: 'https://github.com/x/y', nexus_url: 'https://nexusmods.com/z' }),
@@ -1122,6 +1138,9 @@ describe('<LibraryRow> Nexus-only update pill', () => {
         nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/99',
       }),
       audit: baseAudit({
+        github_repo: null,
+        manifest_version: '1.0.0',
+        installed_source_version: '2.0.0',
         installed_version: '2.0.0',
         latest_release_tag: null,
         latest_release_with_assets_tag: null,
@@ -1135,6 +1154,44 @@ describe('<LibraryRow> Nexus-only update pill', () => {
 
     expect(screen.getByText('Nexus v2.0.0')).toBeInTheDocument();
     expect(screen.getByText('manifest v1.0.0')).toBeInTheDocument();
+  });
+
+  it('shows the confirmed GitHub source-installed version ahead of a stale membership manifest version', () => {
+    renderRow({
+      row: baseMod({ version: '1.0.0' }),
+      mod: baseModInfo({
+        version: '1.1.3',
+        github_url: 'https://github.com/owner/repo',
+        github_auto_detected: false,
+      }),
+      audit: baseAudit({
+        manifest_version: '1.0.0',
+        installed_source_version: '1.1.3',
+        installed_version: '1.1.3',
+        latest_release_tag: 'v1.1.3',
+        latest_release_with_assets_tag: 'v1.1.3',
+        latest_compatible_tag: 'v1.1.3',
+        needs_update: false,
+        nexus_update_available: false,
+        nexus_version: null,
+        update_source: null,
+      }),
+    });
+
+    expect(screen.getByText('GitHub v1.1.3')).toBeInTheDocument();
+    expect(screen.getByText('manifest v1.0.0')).toBeInTheDocument();
+    expect(screen.queryByText('v1.0.0')).not.toBeInTheDocument();
+  });
+
+  it('uses fresh ModInfo.version when the membership row version is stale and no source mismatch exists', () => {
+    renderRow({
+      row: baseMod({ version: '1.0.0' }),
+      mod: baseModInfo({ version: '1.1.3' }),
+      audit: undefined,
+    });
+
+    expect(screen.getByText('v1.1.3')).toBeInTheDocument();
+    expect(screen.queryByText('v1.0.0')).not.toBeInTheDocument();
   });
 });
 

@@ -45,6 +45,10 @@ export async function getApiKeyStatus(): Promise<{ nexus_api_key_set: boolean; g
   return invoke('get_api_key_status');
 }
 
+export async function logFrontendError(message: string): Promise<void> {
+  return invoke('log_frontend_error', { message });
+}
+
 // ── Launch Mode ────────────────────────────────────────────────────────────
 
 /**

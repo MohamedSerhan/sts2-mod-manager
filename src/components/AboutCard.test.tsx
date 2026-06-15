@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { AboutCard } from './AboutCard';
@@ -67,6 +67,26 @@ describe('<AboutCard>', () => {
     const btn = screen.getByRole('button', { name: 'Check for updates' });
     await user.click(btn);
     expect(screen.getByRole('button', { name: 'Checking…' })).toBeDisabled();
+    resolveCheck(null);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Check for updates' })).toBeEnabled();
+    });
+  });
+
+  it('ignores a second update-check click while one is already in flight', async () => {
+    const updater = await import('@tauri-apps/plugin-updater');
+    (updater.check as ReturnType<typeof vi.fn>).mockClear();
+    let resolveCheck!: (v: unknown) => void;
+    (updater.check as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      () => new Promise((r) => { resolveCheck = r; }),
+    );
+    render(<Wrapped />);
+    const btn = screen.getByRole('button', { name: 'Check for updates' });
+
+    fireEvent.click(btn);
+    fireEvent.click(btn);
+
+    expect(updater.check).toHaveBeenCalledTimes(1);
     resolveCheck(null);
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Check for updates' })).toBeEnabled();

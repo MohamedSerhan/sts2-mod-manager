@@ -59,11 +59,15 @@ asset_name() {
 }
 
 NSIS=$(asset_name 'setup\\.exe$')
-MSI=$(asset_name '\\.msi$')
 APPIMAGE=$(asset_name '\\.AppImage$')
 DEB=$(asset_name '\\.deb$')
 RPM=$(asset_name '\\.rpm$')
 APP_TAR=$(asset_name '\\.app\\.tar\\.gz$')
+
+if [[ "$TAG" == v* && -z "$NSIS" ]]; then
+  echo "error: Windows releases must include the NSIS setup.exe asset; refusing MSI fallback." >&2
+  exit 1
+fi
 
 PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
 
@@ -92,10 +96,7 @@ add_platform "linux-x86_64-rpm"       "$RPM"
 if [ -n "$NSIS" ]; then
   add_platform "windows-x86_64"       "$NSIS"
   add_platform "windows-x86_64-nsis"  "$NSIS"
-elif [ -n "$MSI" ]; then
-  add_platform "windows-x86_64"       "$MSI"
 fi
-[ -n "$MSI" ] && add_platform "windows-x86_64-msi" "$MSI"
 
 jq -n \
   --arg version "$VERSION" \

@@ -9,6 +9,10 @@ export interface ModInfo {
   dependencies: string[];
   size_bytes: number;
   github_url: string | null;
+  /** True when the GitHub URL came from manager auto-detection rather than
+   *  a user-confirmed/manual source link. Inline update promotes the repo
+   *  before use; audit/repair paths keep treating it as lower-confidence. */
+  github_auto_detected?: boolean;
   nexus_url: string | null;
   folder_name: string | null;
   mod_id: string | null;
@@ -335,6 +339,13 @@ export interface ModAuditEntry {
    *  so the two same-named rows can be pinned independently. */
   folder_name?: string | null;
   github_repo: string | null;
+  /** Version declared by the installed mod's manifest on disk. */
+  manifest_version?: string | null;
+  /** Version/tag the manager last installed from a trusted source. This can
+   *  differ from manifest_version when the upstream manifest is stale. */
+  installed_source_version?: string | null;
+  /** Legacy display/update field. Prefer manifest_version and
+   *  installed_source_version for new UI. */
   installed_version: string;
   latest_release_tag: string | null;
   latest_release_with_assets_tag: string | null;

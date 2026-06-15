@@ -15,7 +15,7 @@
  * up in the pack immediately. When unset (All Mods), installs just land on
  * disk, matching the historical behavior.
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { open } from '@tauri-apps/plugin-dialog';
@@ -142,6 +142,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
   // Per-row spinner state, keyed by `folder_name ?? name` so two same-named
   // mods don't share a spinner.
   const [updatingKey, setUpdatingKey] = useState<string | null>(null);
+  const updatingKeyRef = useRef<string | null>(null);
   const [repairingKey, setRepairingKey] = useState<string | null>(null);
   const [rollingBackKey, setRollingBackKey] = useState<string | null>(null);
 
@@ -278,21 +279,39 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
   }
 
   async function handleInlineUpdate(mod: ModInfo) {
-    // Nexus-only update: open the mod's Nexus page so the user can download
-    // the new version. The downloads-watcher will match the downloaded zip to
-    // this existing mod (via nexus_mod_id in the filename or name/folder
-    // matching) and update it in place — no duplicate is created.
-    if (mod.nexus_url && !mod.github_url) {
-      await openExternalUrl(mod.nexus_url);
-      notifyNexusOpen(mod.display_name?.trim() || mod.name);
-      toast.info(t('mods.toast.nexusUpdateOpened', { name: mod.display_name?.trim() || mod.name }));
-      return;
-    }
-
     const key = mod.folder_name ?? mod.name;
-    if (updatingKey) return;
+    if (updatingKeyRef.current) return;
+    updatingKeyRef.current = key;
     setUpdatingKey(key);
     try {
+      const hasGithub = !!mod.github_url;
+      // Nexus-only update: open the mod's Nexus page so the user can download
+      // the new version. The downloads-watcher will match the downloaded zip to
+      // this existing mod (via nexus_mod_id in the filename or name/folder
+      // matching) and update it in place — no duplicate is created.
+      if (mod.nexus_url && !hasGithub) {
+        await openExternalUrl(mod.nexus_url);
+        notifyNexusOpen(mod.display_name?.trim() || mod.name);
+        toast.info(t('mods.toast.nexusUpdateOpened', { name: mod.display_name?.trim() || mod.name }));
+        return;
+      }
+      if (!hasGithub) {
+        const name = mod.display_name?.trim() || mod.name;
+        toast.error(t('mods.toast.updateFailed', {
+          name,
+          error: t('mods.toast.repairNoGithub', { name }),
+        }));
+        return;
+      }
+
+      if (mod.github_auto_detected) {
+        await setModSourcesFull(
+          mod.name,
+          cleanOptional(ghRepoFromUrl(mod.github_url)),
+          mod.nexus_url ?? null,
+          mod.folder_name,
+        );
+      }
       const info = await updateMod(mod.name, mod.folder_name);
       await syncTargetPackUpdatedMods([info]);
       toast.success(t('mods.toast.updated', { name: mod.name, version: info.version }));
@@ -302,7 +321,19 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     } catch (e) {
       const updateErrMsg = e instanceof Error ? e.message : String(e);
       toast.error(t('mods.toast.updateFailed', { name: mod.name, error: updateErrMsg }));
+      if (mod.nexus_url) {
+        try {
+          const fallbackUrl = nexusFilesUrl(mod.nexus_url) ?? mod.nexus_url;
+          await openExternalUrl(fallbackUrl);
+          notifyNexusOpen(mod.display_name?.trim() || mod.name);
+          toast.info(t('mods.toast.nexusUpdateOpened', { name: mod.display_name?.trim() || mod.name }));
+        } catch (fallbackError) {
+          const fallbackErrMsg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+          toast.error(t('browse.nexus.openFailed', { error: fallbackErrMsg }));
+        }
+      }
     } finally {
+      updatingKeyRef.current = null;
       setUpdatingKey(null);
     }
   }
@@ -334,7 +365,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
 
   async function handleRepair(mod: ModInfo) {
     /* v8 ignore start */
-    if (!mod.github_url) {
+    if (!mod.github_url || mod.github_auto_detected) {
       toast.error(t('mods.toast.repairNoGithub', { name: mod.name }));
       return;
     }
@@ -362,7 +393,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
 
   async function handleRollback(mod: ModInfo) {
     /* v8 ignore start */
-    if (!mod.github_url) {
+    if (!mod.github_url || mod.github_auto_detected) {
       toast.error(t('mods.rollbackNoSource', { name: mod.name }));
       return;
     }
@@ -658,6 +689,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
             if (
               nextGithub !== (cleanOptional(ghRepoFromUrl(mod.github_url)))
               || nextNexus !== (mod.nexus_url ?? null)
+              || (!!nextGithub && !!mod.github_auto_detected)
             ) {
               await setModSourcesFull(mod.name, nextGithub, nextNexus, mod.folder_name);
               manifestChanged = true;

@@ -27,7 +27,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis", "app", "dmg", "deb", "rpm", "appimage"],
     "createUpdaterArtifacts": true,
     "publisher": "Magical Crocs",
     "copyright": "Copyright (c) 2026 MohamedSerhan (Magical Crocs)",
@@ -41,7 +41,12 @@
     ],
     "category": "Game",
     "shortDescription": "Mod manager for Slay the Spire 2 with frictionless sharing",
-    "longDescription": "A cross-platform mod manager for Slay the Spire 2 that lets you install, manage, and share mod profiles with friends via shareable links."
+    "longDescription": "A cross-platform mod manager for Slay the Spire 2 that lets you install, manage, and share mod profiles with friends via shareable links.",
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
   },
   "plugins": {
     "deep-link": {

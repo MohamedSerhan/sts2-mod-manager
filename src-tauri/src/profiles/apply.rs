@@ -1358,6 +1358,7 @@ mod pinned_download_tests {
             folder_name: Some("UnifiedSavePath".into()),
             mod_id: Some("UnifiedSavePath".into()),
             github_url: None,
+            github_auto_detected: false,
             nexus_url: None,
             pinned: true,
             min_game_version: None,

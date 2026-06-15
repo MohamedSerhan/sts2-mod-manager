@@ -161,16 +161,26 @@ function seedFixtureGameTree({ game, config, cache }) {
  */
 function rebuildFixtureTree() {
   if (!FIXTURE_DIRS) return;
-  for (const d of [FIXTURE_DIRS.game, FIXTURE_DIRS.config, FIXTURE_DIRS.cache]) {
-    if (existsSync(d)) {
-      rmSync(d, { recursive: true, force: true });
-    }
+  // Keep the fixture game directory itself alive while the packaged app is
+  // running. Removing the root briefly invalidates STS2_FIXTURE_GAME_PATH and
+  // can race an in-flight scan into a persistent "game not found" UI state.
+  for (const d of [FIXTURE_DIRS.config, FIXTURE_DIRS.cache]) {
+    emptyDir(d);
   }
+  emptyDir(join(FIXTURE_DIRS.game, 'mods'));
+  emptyDir(join(FIXTURE_DIRS.game, 'mods_disabled'));
   seedFixtureGameTree({
     game: FIXTURE_DIRS.game,
     config: FIXTURE_DIRS.config,
     cache: FIXTURE_DIRS.cache,
   });
+}
+
+function emptyDir(dir) {
+  mkdirSync(dir, { recursive: true });
+  for (const entry of readdirSync(dir)) {
+    rmSync(join(dir, entry), { recursive: true, force: true });
+  }
 }
 
 function seedQaTestMod(dir) {
@@ -217,6 +227,46 @@ function seedUpToDateMod(dir) {
     ),
   );
   writeFileSync(join(dir, 'UpToDateMod.dll'), Buffer.from([0]));
+}
+
+function seedAutoDetectedSourceMod(dir) {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, 'AutoDetectedSourceMod.json'),
+    JSON.stringify(
+      {
+        id: 'AutoDetectedSourceMod',
+        name: 'AutoDetectedSourceMod',
+        version: '1.0.0',
+        author: 'QA Bot',
+        description: 'Smoke fixture: no author GitHub, source comes from mod_sources.json.',
+        dependencies: [],
+      },
+      null,
+      2,
+    ),
+  );
+  writeFileSync(join(dir, 'AutoDetectedSourceMod.dll'), Buffer.from([0]));
+}
+
+function seedStaleManifestSourceVersionMod(dir) {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, 'StaleManifestSourceMod.json'),
+    JSON.stringify(
+      {
+        id: 'StaleManifestSourceMod',
+        name: 'StaleManifestSourceMod',
+        version: '1.0.0',
+        author: 'QA Bot',
+        description: 'Smoke fixture: source-installed tag is newer than the manifest version.',
+        dependencies: [],
+      },
+      null,
+      2,
+    ),
+  );
+  writeFileSync(join(dir, 'StaleManifestSourceMod.dll'), Buffer.from([0]));
 }
 
 /**
@@ -492,6 +542,196 @@ async function specAuditButtonClickable(driver) {
     }
     throw new Error(`audit button is disabled at rest. title="${titleAttr}"`);
   }
+}
+
+/**
+ * Source editor display-name override: edit the manager-only name from the
+ * row editor and verify the visible row title updates immediately.
+ */
+async function specDisplayNameOverrideUpdatesRow(driver) {
+  await navToMods(driver);
+  await waitForElement(
+    driver,
+    By.xpath("//h3[contains(@class,'gf-profile-library-title') and normalize-space(.)='QaTestMod']"),
+    'QaTestMod row title before display-name edit',
+  );
+  const row = await waitForElement(
+    driver,
+    By.xpath("//*[normalize-space(text())='QaTestMod']/ancestor::*[@data-testid='library-row'][1]"),
+    'QaTestMod row before display-name edit',
+  );
+  await row.click();
+
+  const input = await waitForElement(
+    driver,
+    By.xpath(
+      "//*[contains(@class,'gf-src-edit-field')][.//*[normalize-space(.)='Display name']]//input",
+    ),
+    'Source editor display-name input',
+  );
+  const displayName = `QA Friendly ${Date.now().toString(36)}`;
+  await input.sendKeys(displayName);
+
+  const save = await waitForElement(
+    driver,
+    By.xpath("//*[contains(@class,'gf-src-edit')]//button[contains(., 'Save sources')]"),
+    'Source editor Save sources button',
+  );
+  await save.click();
+
+  await waitForElement(
+    driver,
+    By.xpath(`//h3[contains(@class,'gf-profile-library-title') and normalize-space(.)='${displayName}']`),
+    'row title after display-name edit',
+    15_000,
+  );
+}
+
+/**
+ * Auto-detected GitHub links shown in Source Editor must become manual when
+ * the user clicks Save, even if they did not edit the field. This owns the
+ * "looks linked but Update says no GitHub source" regression.
+ */
+async function specAutoDetectedGitHubSavePromotesSource(driver) {
+  seedAutoDetectedSourceMod(join(FIXTURE_DIRS.game, 'mods', 'AutoDetectedSourceMod'));
+  const sourcesPath = join(FIXTURE_DIRS.config, 'mod_sources.json');
+  writeFileSync(
+    sourcesPath,
+    JSON.stringify(
+      {
+        mods: {
+          AutoDetectedSourceMod: {
+            github_repo: 'qa-fixture/test-mod',
+            github_auto_detected: true,
+            nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/99999',
+            nexus_game_domain: 'slaythespire2',
+            nexus_mod_id: 99999,
+          },
+        },
+      },
+      null,
+      2,
+    ),
+  );
+
+  await navToMods(driver);
+  const refreshBtn = await waitForElement(
+    driver,
+    By.xpath("//button[normalize-space(.)='Refresh' or contains(., 'Refresh')]"),
+    'Mods toolbar Refresh button',
+  );
+  await refreshBtn.click();
+  await waitForElement(
+    driver,
+    By.xpath("//h3[contains(@class,'gf-profile-library-title') and normalize-space(.)='AutoDetectedSourceMod']"),
+    'AutoDetectedSourceMod row after source fixture refresh',
+    10_000,
+  );
+
+  const row = await waitForElement(
+    driver,
+    By.xpath("//*[normalize-space(text())='AutoDetectedSourceMod']/ancestor::*[@data-testid='library-row'][1]"),
+    'AutoDetectedSourceMod row before Source Editor save',
+  );
+  await row.click();
+
+  const githubInput = await waitForElement(
+    driver,
+    By.xpath(
+      "//*[contains(@class,'gf-src-edit-field')][.//*[contains(., 'GitHub repo')]]//input",
+    ),
+    'Source editor GitHub input',
+  );
+  const githubValue = await githubInput.getAttribute('value');
+  assertEqual(githubValue, 'qa-fixture/test-mod', 'auto-detected GitHub value shown in Source Editor');
+
+  const save = await waitForElement(
+    driver,
+    By.xpath("//*[contains(@class,'gf-src-edit')]//button[contains(., 'Save sources')]"),
+    'Source editor Save sources button',
+  );
+  await save.click();
+
+  await driver.wait(
+    () => {
+      try {
+        const parsed = JSON.parse(readFileSync(sourcesPath, 'utf8').replace(/^\uFEFF/, ''));
+        return parsed.mods?.AutoDetectedSourceMod?.github_auto_detected !== true
+          && parsed.mods?.AutoDetectedSourceMod?.github_repo === 'qa-fixture/test-mod';
+      } catch {
+        return false;
+      }
+    },
+    10_000,
+    'AutoDetectedSourceMod GitHub source was not promoted to manual after Save',
+  );
+}
+
+/**
+ * Cassette-mode regression spec: a post-update source tag can be newer than
+ * the manifest version inside the archive. The row must headline the trusted
+ * source-installed version and keep the manifest version as secondary context.
+ */
+async function specStaleManifestSourceVersionDisplaysInstalledTag(driver) {
+  seedStaleManifestSourceVersionMod(join(FIXTURE_DIRS.game, 'mods', 'StaleManifestSourceMod'));
+  const sourcesPath = join(FIXTURE_DIRS.config, 'mod_sources.json');
+  writeFileSync(
+    sourcesPath,
+    JSON.stringify(
+      {
+        mods: {
+          StaleManifestSourceMod: {
+            github_repo: 'qa-fixture/uptodate-mod',
+            github_auto_detected: false,
+            installed_version: 'v1.1.3',
+          },
+        },
+      },
+      null,
+      2,
+    ),
+  );
+
+  await navToMods(driver);
+  const refreshBtn = await waitForElement(
+    driver,
+    By.xpath("//button[normalize-space(.)='Refresh' or contains(., 'Refresh')]"),
+    'Mods toolbar Refresh button',
+  );
+  await refreshBtn.click();
+  await waitForElement(
+    driver,
+    By.xpath("//h3[contains(@class,'gf-profile-library-title') and normalize-space(.)='StaleManifestSourceMod']"),
+    'StaleManifestSourceMod row after fixture refresh',
+    10_000,
+  );
+
+  const reauditButtons = await driver.findElements(By.css("button[title='Re-audit']"));
+  if (reauditButtons.length > 0) {
+    await reauditButtons[0].click();
+  } else {
+    const auditBtn = await waitForElement(
+      driver,
+      By.xpath(
+        "//button[contains(., 'Audit mods') or contains(., 'Update ') or contains(., 'Up to date')]",
+      ),
+      'audit button',
+    );
+    await auditBtn.click();
+  }
+
+  await waitForElement(
+    driver,
+    By.xpath("//*[contains(@class,'gf-meta-version') and normalize-space(.)='GitHub v1.1.3']"),
+    'source-installed version label for stale manifest mod',
+    30_000,
+  );
+  await waitForElement(
+    driver,
+    By.xpath("//*[contains(@class,'gf-meta-version') and normalize-space(.)='manifest v1.0.0']"),
+    'secondary manifest version label for stale manifest mod',
+    5_000,
+  );
 }
 
 async function specWhatsNewCardRenders(driver) {
@@ -1648,6 +1888,7 @@ const BASE_SPECS = [
 
 const CASSETTE_SPECS = [
   ['audit shows "1 update" with cassette + fixture mods', specAuditAgainstCassettesShowsOnePending],
+  ['stale manifest row shows source-installed version', specStaleManifestSourceVersionDisplaysInstalledTag],
   ['freeze on QaTestMod suppresses its pending update', specFreezeSuppressesPendingUpdate],
   // TODO scenario-005: drive a friend-install of a profile whose bundle_url
   // points at a github.com release asset (e.g. the qa-fixture
@@ -1669,6 +1910,8 @@ const CASSETTE_SPECS = [
 // running both groups would double-mutate the fixture.
 const STATE_SPECS = [
   ['toggle off moves QaTestMod to mods_disabled/', specToggleMovesQaTestModToDisabled],
+  ['display-name override updates the Mod Library row immediately', specDisplayNameOverrideUpdatesRow],
+  ['auto-detected GitHub save promotes the source for updates', specAutoDetectedGitHubSavePromotesSource],
   ['delete UpToDateMod via kebab → Remove mod…', specDeleteUpToDateMod],
   ['create modpack via Modpacks → Create modpack', specCreateModpack],
   ['modpack switch preserves freeze state (v1.3.1 contract)', specModpackSwitchPreservesFreeze],

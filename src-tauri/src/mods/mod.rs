@@ -75,6 +75,10 @@ pub struct ModInfo {
     /// Linked GitHub URL (e.g. "https://github.com/owner/repo")
     #[serde(skip_serializing_if = "Option::is_none")]
     pub github_url: Option<String>,
+    /// True when the GitHub URL came from manager auto-detection rather than
+    /// a user-confirmed/manual source link.
+    #[serde(default)]
+    pub github_auto_detected: bool,
     /// Linked Nexus Mods URL
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nexus_url: Option<String>,
@@ -813,6 +817,15 @@ fn attach_pending_nexus_source_for_file(
             );
 
         let idx = s.pending_nexus_installs.iter().position(|p| {
+            if crate::mod_sources::saved_nexus_source_conflicts(
+                config_path,
+                installed_folder,
+                &installed.name,
+                installed.mod_id.as_deref(),
+                p.mod_id,
+            ) {
+                return false;
+            }
             let id_marker = format!("-{}-", p.mod_id);
             if stem_lower.contains(&id_marker) || stem_lower.ends_with(&format!("-{}", p.mod_id)) {
                 return true;
@@ -1002,6 +1015,7 @@ mod pending_nexus_manual_install_tests {
                 nexus_url: "https://www.nexusmods.com/slaythespire2/mods/1073".into(),
                 game_domain: "slaythespire2".into(),
                 mod_id: 1073,
+                file_id: Some(1781082503),
                 queued_at: Instant::now(),
             });
         }
@@ -1019,6 +1033,7 @@ mod pending_nexus_manual_install_tests {
             folder_name: Some("Flagellant".into()),
             mod_id: None,
             github_url: None,
+            github_auto_detected: false,
             nexus_url: None,
             custom_url: None,
             pinned: false,
@@ -1045,6 +1060,72 @@ mod pending_nexus_manual_install_tests {
             Some("https://www.nexusmods.com/slaythespire2/mods/1073")
         );
         assert!(state.lock().unwrap().pending_nexus_installs.is_empty());
+    }
+
+    #[test]
+    fn manual_archive_install_does_not_overwrite_different_saved_nexus_mod() {
+        let state = create_app_state();
+        {
+            let mut s = state.lock().unwrap();
+            s.pending_nexus_installs.push(PendingNexusInstall {
+                mod_name: "Shared Name".into(),
+                nexus_url: "https://www.nexusmods.com/slaythespire2/mods/1264".into(),
+                game_domain: "slaythespire2".into(),
+                mod_id: 1264,
+                file_id: None,
+                queued_at: Instant::now(),
+            });
+        }
+        let config = tempfile::tempdir().unwrap();
+        crate::mod_sources::attach_nexus_source(
+            "Shared Name",
+            Some("SharedFolder"),
+            "https://www.nexusmods.com/slaythespire2/mods/900".into(),
+            "slaythespire2".into(),
+            900,
+            config.path(),
+        );
+        let installed = ModInfo {
+            name: "Shared Name".into(),
+            version: "unknown".into(),
+            description: String::new(),
+            enabled: true,
+            files: vec![],
+            source: None,
+            hash: None,
+            dependencies: vec![],
+            size_bytes: 0,
+            folder_name: Some("SharedFolder".into()),
+            mod_id: None,
+            github_url: None,
+            github_auto_detected: false,
+            nexus_url: None,
+            custom_url: None,
+            pinned: false,
+            min_game_version: None,
+            author: None,
+            note: None,
+            tags: vec![],
+            display_name: None,
+            display_description: None,
+            bundle_members: vec![],
+        };
+
+        attach_pending_nexus_source_for_file(
+            &installed,
+            Path::new("SharedName-1264-1-0-0-1780000000.zip"),
+            config.path(),
+            &state,
+        );
+
+        let sources = crate::mod_sources::load_sources(config.path());
+        let entry = sources.mods.get("SharedFolder").unwrap();
+        assert_eq!(entry.nexus_mod_id, Some(900));
+        assert_eq!(
+            state.lock().unwrap().pending_nexus_installs.len(),
+            1,
+            "conflicting pending Nexus hint must not be consumed"
+        );
     }
 }
 
@@ -1832,6 +1913,7 @@ mod profile_manifest_refresh_tests {
             folder_name: Some("BadManifest".into()),
             mod_id: Some("BadManifest".into()),
             github_url: None,
+            github_auto_detected: false,
             nexus_url: None,
             pinned: false,
             min_game_version: None,

@@ -1292,6 +1292,41 @@ describe('<LibraryTable modpackName={null}>', () => {
     }
   });
 
+  it('[flow] focused mode: fresh ModInfo.version wins over stale membership row version', async () => {
+    registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'MyPack' })]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'MyPack', editable: true }],
+      mods: [
+        {
+          name: 'Unified Save Path',
+          version: '1.0.0',
+          folder_name: 'UnifiedSavePath',
+          mod_id: 'UnifiedSavePath',
+          installed_enabled: true,
+          profiles: [
+            { profile_name: 'MyPack', included: true, enabled: true, editable: true },
+          ],
+        },
+      ],
+    }));
+    const modInfoByKey = new Map([
+      [
+        'UnifiedSavePath',
+        mkModInfo({
+          name: 'Unified Save Path',
+          version: '1.1.3',
+          folder_name: 'UnifiedSavePath',
+          mod_id: 'UnifiedSavePath',
+        }),
+      ],
+    ]);
+
+    render(<Wrap modpackName="MyPack" modInfoByKey={modInfoByKey} />);
+
+    expect(await screen.findByText('v1.1.3')).toBeInTheDocument();
+    expect(screen.queryByText('v1.0.0')).not.toBeInTheDocument();
+  });
+
   it('[flow] no-modpack mode: display_name from AppContext mods reaches the row title (regression guard)', async () => {
     // In no-modpack mode LibraryTable synthesizes the grid from AppContext's
     // `mods` array (seeded via get_installed_mods). The synthesized row must

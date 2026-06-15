@@ -78,7 +78,7 @@ jobs:
 
   qa-matrix:
     needs: changes
-    if: ${{ needs.changes.outputs.app == 'true' || needs.changes.outputs.qa == 'true' || needs.changes.outputs.scripts == 'true' }}
+    if: ${{ needs.changes.outputs.app == 'true' || needs.changes.outputs.qa == 'true' || needs.changes.outputs.scripts == 'true' || needs.changes.outputs.workflows == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -269,6 +269,7 @@ jobs:
           node --test scripts/make-dev-icon.test.mjs
           node --test scripts/ci-changes.test.mjs
           node --test scripts/qa-coverage-matrix.test.mjs
+          node --test scripts/release-windows-installer-policy.test.mjs
           node --test scripts/changelog-fragments.test.mjs
           node --test scripts/changelog-translations.test.mjs
           node --test scripts/translate-changelog.test.mjs

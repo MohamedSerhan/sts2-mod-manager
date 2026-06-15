@@ -56,6 +56,7 @@ pub struct PendingNexusInstall {
     pub nexus_url: String,
     pub game_domain: String,
     pub mod_id: u64,
+    pub file_id: Option<u64>,
     pub queued_at: Instant,
 }
 

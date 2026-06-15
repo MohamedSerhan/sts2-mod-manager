@@ -46,10 +46,9 @@ export function stampFiles(version, {
     new RegExp(`("productName"\\s*:\\s*")${escapeRegExpLiteral(RELEASE_PRODUCT)}(")`),
     `$1${DEV_PRODUCT}$2`,
   );
-  // Dev builds skip the Windows MSI target: WiX/MSI requires a numeric-only
-  // pre-release version field and rejects our "-dev.pr<N>.g<sha>" version.
-  // NSIS + the portable exe cover dev install/testing; release builds (which
-  // don't run this stamp) keep "all".
+  // Dev builds use the same no-MSI target set as releases. WiX/MSI requires
+  // a numeric-only pre-release version field and also creates a separate
+  // Windows installer family, so NSIS + portable exe cover dev testing.
   conf = conf.replace(
     /("targets"\s*:\s*)"all"/,
     '$1["nsis", "app", "dmg", "deb", "rpm", "appimage"]',

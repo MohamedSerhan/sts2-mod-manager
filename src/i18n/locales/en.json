@@ -698,6 +698,11 @@
     "updated_many": "Updated {{count}} mods.",
     "updated_other": "Updated {{count}} mods.",
     "updateFailed": "Update failed: {{error}}. If you installed via .deb or .rpm, use the AppImage build for seamless updates, or click Download to get the new package manually.",
+    "crash": {
+      "title": "The mod manager hit a display error",
+      "body": "Your mod files were not changed by this screen crash. The error was written to the app log so it can be diagnosed; reload the app to continue.",
+      "reload": "Reload app"
+    },
     "toast": {
       "replacedMod": "Updated \"{{replaced}}\" → \"{{mod}}\" from {{file}}",
       "autoInstalled": "Mod \"{{name}}\" auto-installed from {{file}}",

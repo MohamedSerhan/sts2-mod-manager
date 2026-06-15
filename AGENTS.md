@@ -58,6 +58,33 @@ An internal-only change with nothing a player would notice gets no fragment —
 put the detail in the commit message and label the PR `no-changelog` so the
 gate passes.
 
+## UI coverage ownership is required
+
+Every user-facing UI behavior change must update the QA ownership trail in the
+same change. Do not stop at "the component has a test" when the change touches a
+real player workflow.
+
+For every UI change, do all of this:
+
+1. Add or update the closest row in `qa/interaction-inventory.md`.
+2. Add or update the matching scenario, major-flow, or bug row in
+   `qa/coverage-matrix.md` when the behavior is release-critical or fixes a
+   user-reported regression.
+3. Add a WebDriver smoke in `qa/runner/smoke.mjs` when the changed behavior
+   crosses a real UI save/apply/update boundary, especially Source Editor saves,
+   inline Update/Repair/Rollback, install/import/Quick Add, modpack
+   switch/apply/share, backup restore, delete, or any destructive disk action.
+4. Use Vitest/component tests for branch coverage and error states that would
+   make smoke slow or flaky. The matrix row must name both the smoke owner and
+   the branch-level owner when both are needed.
+5. Run `npm run qa:matrix` after changing the QA docs. Run the targeted Vitest
+   or Rust tests you named in the matrix. If you add a smoke, at minimum run
+   `node --check qa/runner/smoke.mjs`; run `npm run qa:smoke` or
+   `npm run qa:smoke:cassette` when the local release/WebDriver setup is ready.
+
+Only mark a UI behavior `Manual` when it truly crosses an OS boundary the
+current harness cannot drive. Manual rows need a reason and review date.
+
 ## Scalability is a feature requirement
 
 Design mod-management flows for large local libraries and many profiles, not

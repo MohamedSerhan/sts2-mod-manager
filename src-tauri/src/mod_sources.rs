@@ -8,7 +8,7 @@ use crate::download::{
     fetch_latest_release, quota_is_low, search_github_repos_relevance,
     search_github_repos_relevance_outcome, GitHubRepo, RateLimitInfo, SearchOutcome,
 };
-use crate::error::Result;
+use crate::error::{AppError, Result};
 use crate::mods::ModInfo;
 use crate::state::AppState;
 
@@ -21,7 +21,7 @@ pub struct ModSourceEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub github_repo: Option<String>,
     /// Whether the GitHub link was auto-detected (vs manually set by user).
-    /// Auto-detected links are NOT used for update checking since they may be wrong.
+    /// Auto-detected links stay lower-confidence until Source Editor/inline update promotes them.
     #[serde(default, skip_serializing_if = "is_false")]
     pub github_auto_detected: bool,
     /// Full Nexus Mods URL
@@ -226,12 +226,60 @@ fn find_nexus_download_stem_entry<'a>(
     })
 }
 
-fn usable_installed_version(version: &str) -> Option<String> {
-    let trimmed = version.trim();
-    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("unknown") || trimmed == "0.0.0" {
-        return None;
+fn merge_missing_entry_fields(dest: &mut ModSourceEntry, old: ModSourceEntry) -> bool {
+    let mut changed = false;
+
+    if old.github_repo.is_some()
+        && (dest.github_repo.is_none() || (dest.github_auto_detected && !old.github_auto_detected))
+    {
+        dest.github_repo = old.github_repo;
+        dest.github_auto_detected = old.github_auto_detected;
+        changed = true;
     }
-    Some(trimmed.trim_start_matches(['v', 'V']).to_string())
+    if dest.nexus_url.is_none() && old.nexus_url.is_some() {
+        dest.nexus_url = old.nexus_url;
+        dest.nexus_game_domain = old.nexus_game_domain;
+        dest.nexus_mod_id = old.nexus_mod_id;
+        changed = true;
+    }
+    if !dest.pinned && old.pinned {
+        dest.pinned = true;
+        changed = true;
+    }
+    if dest.installed_version.is_none() && old.installed_version.is_some() {
+        dest.installed_version = old.installed_version;
+        changed = true;
+    }
+    if dest.note.is_none() && old.note.is_some() {
+        dest.note = old.note;
+        changed = true;
+    }
+    if dest.custom_url.is_none() && old.custom_url.is_some() {
+        dest.custom_url = old.custom_url;
+        changed = true;
+    }
+    if dest.tags.is_empty() && !old.tags.is_empty() {
+        dest.tags = old.tags;
+        changed = true;
+    }
+    if dest.display_name.is_none() && old.display_name.is_some() {
+        dest.display_name = old.display_name;
+        changed = true;
+    }
+    if dest.display_description.is_none() && old.display_description.is_some() {
+        dest.display_description = old.display_description;
+        changed = true;
+    }
+    if dest.snoozed_until_tag.is_none() && old.snoozed_until_tag.is_some() {
+        dest.snoozed_until_tag = old.snoozed_until_tag;
+        changed = true;
+    }
+    if dest.config_hashes.is_empty() && !old.config_hashes.is_empty() {
+        dest.config_hashes = old.config_hashes;
+        changed = true;
+    }
+
+    changed
 }
 
 /// Result of auto-detecting sources for mods.
@@ -467,45 +515,7 @@ pub fn migrate_source_entry(old_name: &str, new_name: &str, config_path: &Path) 
         None => return, // nothing to migrate
     };
     let dest = db.mods.entry(new_name.to_string()).or_default();
-    if dest.github_repo.is_none() {
-        dest.github_repo = old.github_repo;
-        dest.github_auto_detected = old.github_auto_detected;
-    }
-    if dest.nexus_url.is_none() {
-        dest.nexus_url = old.nexus_url;
-        dest.nexus_game_domain = old.nexus_game_domain;
-        dest.nexus_mod_id = old.nexus_mod_id;
-    }
-    if !dest.pinned {
-        dest.pinned = old.pinned;
-    }
-    if dest.installed_version.is_none() {
-        dest.installed_version = old.installed_version;
-    }
-    if dest.note.is_none() {
-        dest.note = old.note;
-    }
-    if dest.custom_url.is_none() {
-        dest.custom_url = old.custom_url;
-    }
-    if dest.tags.is_empty() {
-        dest.tags = old.tags;
-    }
-    if dest.display_name.is_none() {
-        dest.display_name = old.display_name;
-    }
-    if dest.display_description.is_none() {
-        dest.display_description = old.display_description;
-    }
-    if dest.snoozed_until_tag.is_none() {
-        dest.snoozed_until_tag = old.snoozed_until_tag;
-    }
-    // config_hashes is a rolling cache: take old's only when dest doesn't
-    // already have its own. The next install_update_preserving_configs
-    // pass will refresh it from the post-install on-disk state.
-    if dest.config_hashes.is_empty() {
-        dest.config_hashes = old.config_hashes;
-    }
+    merge_missing_entry_fields(dest, old);
     if let Err(e) = save_sources(&db, config_path) {
         log::error!(
             "Failed to migrate source entry from '{}' to '{}': {}",
@@ -560,45 +570,7 @@ pub fn carry_source_entry(
         .map(|s| s.to_string())
         .unwrap_or_else(|| new_name.to_string());
     let dest = db.mods.entry(dest_key).or_default();
-    if dest.github_repo.is_none() {
-        dest.github_repo = old.github_repo;
-        dest.github_auto_detected = old.github_auto_detected;
-    }
-    if dest.nexus_url.is_none() {
-        dest.nexus_url = old.nexus_url;
-        dest.nexus_game_domain = old.nexus_game_domain;
-        dest.nexus_mod_id = old.nexus_mod_id;
-    }
-    if !dest.pinned {
-        dest.pinned = old.pinned;
-    }
-    if dest.installed_version.is_none() {
-        dest.installed_version = old.installed_version;
-    }
-    if dest.note.is_none() {
-        dest.note = old.note;
-    }
-    if dest.custom_url.is_none() {
-        dest.custom_url = old.custom_url;
-    }
-    if dest.tags.is_empty() {
-        dest.tags = old.tags;
-    }
-    if dest.display_name.is_none() {
-        dest.display_name = old.display_name;
-    }
-    if dest.display_description.is_none() {
-        dest.display_description = old.display_description;
-    }
-    if dest.snoozed_until_tag.is_none() {
-        dest.snoozed_until_tag = old.snoozed_until_tag;
-    }
-    // config_hashes is a rolling cache: take old's only when dest doesn't
-    // already have its own. The next install_update_preserving_configs
-    // pass will refresh it from the post-install on-disk state.
-    if dest.config_hashes.is_empty() {
-        dest.config_hashes = old.config_hashes;
-    }
+    merge_missing_entry_fields(dest, old);
     if let Err(e) = save_sources(&db, config_path) {
         log::error!(
             "Failed to carry source entry forward from ({:?}/{}) to ({:?}/{}): {}",
@@ -651,13 +623,39 @@ pub fn attach_nexus_source(
     }
 }
 
+/// Returns true when a mod already has a saved Nexus identity and a pending
+/// Nexus install points at a different Nexus mod page. Fuzzy filename/name
+/// matching must not cross this boundary, or one Nexus mod can overwrite
+/// another when authors use similar archive names.
+pub fn saved_nexus_source_conflicts(
+    config_path: &Path,
+    folder_name: Option<&str>,
+    display_name: &str,
+    manifest_mod_id: Option<&str>,
+    pending_nexus_mod_id: u64,
+) -> bool {
+    let db = load_sources(config_path);
+    let Some(entry) = lookup_entry(&db.mods, folder_name, display_name, manifest_mod_id) else {
+        return false;
+    };
+    let saved_id = entry.nexus_mod_id.or_else(|| {
+        entry
+            .nexus_url
+            .as_deref()
+            .and_then(parse_source_url)
+            .and_then(|parsed| parsed.nexus_mod_id)
+    });
+    saved_id.is_some_and(|id| id != pending_nexus_mod_id)
+}
+
 // ── Core Logic ──────────────────────────────────────────────────────────────
 
 /// Merge source metadata into ModInfo structs.
 /// This enriches scanned mods with their linked GitHub/Nexus URLs.
 /// Only overwrites URLs that are not already set from the manifest.
 pub fn enrich_mods_with_sources(mods: &mut [ModInfo], config_path: &Path) {
-    let db = load_sources(config_path);
+    let mut db = load_sources(config_path);
+    let mut db_dirty = false;
     for m in mods.iter_mut() {
         // Look up by folder_name FIRST, then display name, then mod_id.
         //
@@ -667,6 +665,26 @@ pub fn enrich_mods_with_sources(mods: &mut [ModInfo], config_path: &Path) {
         // as a fallback for legacy entries created before pin_mod started
         // saving by folder.
         let folder_name = m.folder_name.as_deref();
+        if let Some(folder) = folder_name {
+            for legacy_key in [Some(m.name.as_str()), m.mod_id.as_deref()]
+                .into_iter()
+                .flatten()
+                .filter(|key| *key != folder)
+            {
+                if let Some(old) = db.mods.get(legacy_key).cloned() {
+                    let dest = db.mods.entry(folder.to_string()).or_default();
+                    if merge_missing_entry_fields(dest, old) {
+                        db_dirty = true;
+                        log::info!(
+                            "Merged legacy source entry '{}' into folder-keyed entry '{}' for '{}'",
+                            legacy_key,
+                            folder,
+                            m.name
+                        );
+                    }
+                }
+            }
+        }
         let entry = lookup_entry(&db.mods, folder_name, &m.name, m.mod_id.as_deref())
             .cloned()
             .or_else(|| {
@@ -705,20 +723,12 @@ pub fn enrich_mods_with_sources(mods: &mut [ModInfo], config_path: &Path) {
                     // fills in when the manifest didn't supply a URL.
                     if !entry.github_auto_detected || m.github_url.is_none() {
                         m.github_url = Some(format!("https://github.com/{}", c));
+                        m.github_auto_detected = entry.github_auto_detected;
                     }
                 }
             }
             if m.nexus_url.is_none() {
                 m.nexus_url = entry.nexus_url.clone();
-            }
-            if let Some(version) = entry
-                .installed_version
-                .as_deref()
-                .and_then(usable_installed_version)
-            {
-                if usable_installed_version(&m.version).is_none() {
-                    m.version = version;
-                }
             }
             m.pinned = entry.pinned;
             // User-saved extras: surface on the row so they show up next
@@ -738,6 +748,11 @@ pub fn enrich_mods_with_sources(mods: &mut [ModInfo], config_path: &Path) {
                     m.github_url = Some(src.clone());
                 }
             }
+        }
+    }
+    if db_dirty {
+        if let Err(e) = save_sources(&db, config_path) {
+            log::error!("Failed to save merged legacy source entries: {}", e);
         }
     }
 }
@@ -1110,20 +1125,19 @@ pub fn set_mod_source(
 /// `snoozed_until_tag` survive. The previous implementation overwrote the
 /// whole entry with a fresh one — that silently destroyed pin state and
 /// notes every time the user opened SourceEditor and clicked Save.
-#[tauri::command]
-pub fn set_mod_sources_full(
-    mod_name: String,
-    folder_name: Option<String>,
+pub(crate) fn set_mod_sources_full_from_path(
+    mod_name: &str,
+    folder_name: Option<&str>,
     github_repo: Option<String>,
     nexus_url: Option<String>,
-    state: tauri::State<'_, AppState>,
-) -> std::result::Result<ModSourceEntry, String> {
-    let s = state.lock().map_err(|e| e.to_string())?;
-    let mut db = load_sources(&s.config_path);
-
+    config_path: &Path,
+) -> Result<ModSourceEntry> {
+    let mut db = load_sources(config_path);
     // Folder-first write key matches the rest of the codebase. Fall back
     // to display name for legacy callers / mods scanned without a folder.
-    let key = folder_name.unwrap_or(mod_name);
+    let key = folder_name
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| mod_name.to_string());
 
     // Normalize the GitHub field BEFORE looking at existing state so a bad
     // input bails out without mutating the entry. Pre-1.4.3 this stored the
@@ -1139,10 +1153,10 @@ pub fn set_mod_sources_full(
         Some(raw) => match normalize_github_repo_input(raw) {
             Some(canonical) => Some(canonical),
             None => {
-                return Err(format!(
+                return Err(AppError::Other(format!(
                     "Could not parse GitHub repo '{}'. Use owner/repo or a full GitHub URL.",
                     raw
-                ));
+                )));
             }
         },
     };
@@ -1168,8 +1182,27 @@ pub fn set_mod_sources_full(
     }
 
     let result = entry.clone();
-    save_sources(&db, &s.config_path).map_err(|e| e.to_string())?;
+    save_sources(&db, config_path)?;
     Ok(result)
+}
+
+#[tauri::command]
+pub fn set_mod_sources_full(
+    mod_name: String,
+    folder_name: Option<String>,
+    github_repo: Option<String>,
+    nexus_url: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<ModSourceEntry, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    set_mod_sources_full_from_path(
+        &mod_name,
+        folder_name.as_deref(),
+        github_repo,
+        nexus_url,
+        &s.config_path,
+    )
+    .map_err(|e| e.to_string())
 }
 
 fn clean_optional_string(value: Option<String>) -> Option<String> {
@@ -2292,6 +2325,7 @@ mod enrich_priority_tests {
             folder_name: folder.map(str::to_string),
             mod_id: None,
             github_url: github_url.map(str::to_string),
+            github_auto_detected: false,
             nexus_url: None,
             pinned: false,
             min_game_version: None,
@@ -2366,6 +2400,10 @@ mod enrich_priority_tests {
             mods[0].github_url.as_deref(),
             Some("https://github.com/real/repo"),
         );
+        assert!(
+            !mods[0].github_auto_detected,
+            "the displayed manifest GitHub URL is author-provided, not the manager's auto guess"
+        );
     }
 
     #[test]
@@ -2422,6 +2460,97 @@ mod enrich_priority_tests {
             mods[0].github_url.as_deref(),
             Some("https://github.com/guess/from-nexus"),
         );
+        assert!(
+            mods[0].github_auto_detected,
+            "frontend needs to know this repo is informational until the user saves it"
+        );
+    }
+
+    #[test]
+    fn manual_source_save_promotes_auto_detected_github_to_user_confirmed() {
+        let tmp = tempdir().unwrap();
+        let config = tmp.path();
+        write_entry(
+            config,
+            "SomeMod",
+            ModSourceEntry {
+                github_repo: Some("guess/from-nexus".into()),
+                github_auto_detected: true,
+                nexus_url: Some("https://www.nexusmods.com/slaythespire2/mods/42".into()),
+                nexus_game_domain: Some("slaythespire2".into()),
+                nexus_mod_id: Some(42),
+                ..Default::default()
+            },
+        );
+
+        let saved = set_mod_sources_full_from_path(
+            "SomeMod",
+            Some("SomeMod"),
+            Some("guess/from-nexus".into()),
+            Some("https://www.nexusmods.com/slaythespire2/mods/42".into()),
+            config,
+        )
+        .unwrap();
+
+        assert_eq!(saved.github_repo.as_deref(), Some("guess/from-nexus"));
+        assert!(
+            !saved.github_auto_detected,
+            "clicking Save in SourceEditor confirms the repo for GitHub updates"
+        );
+    }
+
+    #[test]
+    fn enrich_merges_legacy_display_key_into_folder_key_without_overwriting_manual_folder_source() {
+        let tmp = tempdir().unwrap();
+        let config = tmp.path();
+        let mut db = ModSourcesDb::default();
+        db.mods.insert(
+            "UnifiedSavePath".into(),
+            ModSourceEntry {
+                github_repo: Some("manual/folder".into()),
+                github_auto_detected: false,
+                ..Default::default()
+            },
+        );
+        db.mods.insert(
+            "Unified Save Path".into(),
+            ModSourceEntry {
+                github_repo: Some("auto/legacy".into()),
+                github_auto_detected: true,
+                nexus_url: Some("https://www.nexusmods.com/slaythespire2/mods/6".into()),
+                nexus_game_domain: Some("slaythespire2".into()),
+                nexus_mod_id: Some(6),
+                installed_version: Some("1.1.3".into()),
+                tags: vec!["utility".into()],
+                ..Default::default()
+            },
+        );
+        save_sources(&db, config).unwrap();
+
+        let mut mods = vec![mod_with("Unified Save Path", Some("UnifiedSavePath"), None)];
+        enrich_mods_with_sources(&mut mods, config);
+
+        assert_eq!(
+            mods[0].github_url.as_deref(),
+            Some("https://github.com/manual/folder"),
+            "folder-keyed manual GitHub source wins over legacy auto-detect"
+        );
+        assert_eq!(
+            mods[0].nexus_url.as_deref(),
+            Some("https://www.nexusmods.com/slaythespire2/mods/6"),
+            "missing Nexus metadata is carried from the legacy display-name key"
+        );
+        assert_eq!(
+            mods[0].version, "1.0.0",
+            "source installed_version must not overwrite the manifest version"
+        );
+
+        let saved = load_sources(config);
+        let folder_entry = saved.mods.get("UnifiedSavePath").unwrap();
+        assert_eq!(folder_entry.github_repo.as_deref(), Some("manual/folder"));
+        assert_eq!(folder_entry.installed_version.as_deref(), Some("1.1.3"));
+        assert_eq!(folder_entry.nexus_mod_id, Some(6));
+        assert_eq!(folder_entry.tags, vec!["utility"]);
     }
 
     #[test]
@@ -2502,8 +2631,8 @@ mod enrich_priority_tests {
             "the scanned Flagellant row should show Nexus instead of Unlinked"
         );
         assert_eq!(
-            mods[0].version, "0.1.7",
-            "known Nexus file version should replace the broken-manifest unknown version"
+            mods[0].version, "unknown",
+            "source enrichment must not overwrite the scanned manifest version"
         );
         let db = load_sources(config);
         let recovered = db
@@ -3303,6 +3432,7 @@ mod shared_profile_source_tests {
             folder_name: folder.map(String::from),
             mod_id: None,
             github_url: None,
+            github_auto_detected: false,
             nexus_url: None,
             pinned: false,
             min_game_version: None,

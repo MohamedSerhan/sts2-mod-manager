@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   AUTO_ADD_INSTALLS_TO_MODPACK_KEY,
@@ -58,6 +58,17 @@ describe('install policy preferences', () => {
       if (originalStorage) {
         Object.defineProperty(window, 'localStorage', originalStorage);
       }
+    }
+  });
+
+  it('falls back to library-only when no browser window exists', () => {
+    const originalWindow = window;
+    vi.stubGlobal('window', undefined);
+    try {
+      expect(loadAutoAddInstallsToModpack()).toBe(false);
+      expect(() => saveAutoAddInstallsToModpack(true)).not.toThrow();
+    } finally {
+      vi.stubGlobal('window', originalWindow);
     }
   });
 });

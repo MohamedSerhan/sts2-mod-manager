@@ -104,6 +104,43 @@ pub fn install_is_incompatible(
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
+fn validate_update_install_result(
+    old_info: &ModInfo,
+    new_info: &ModInfo,
+    user_game_version: Option<&str>,
+) -> std::result::Result<(), String> {
+    let version = new_info.version.trim();
+    if version.is_empty() || version.eq_ignore_ascii_case("unknown") || version == "0.0.0" {
+        return Err(format!(
+            "Installed archive for '{}' did not produce a parseable manifest version.",
+            old_info.name
+        ));
+    }
+    if new_info.files.is_empty() {
+        return Err(format!(
+            "Installed archive for '{}' did not produce any mod files.",
+            old_info.name
+        ));
+    }
+    if install_is_incompatible(new_info, user_game_version) {
+        return Err(format!(
+            "Installed archive for '{}' requires STS2 v{} but your game is v{}.",
+            new_info.name,
+            new_info.min_game_version.as_deref().unwrap_or("?"),
+            user_game_version.unwrap_or("?"),
+        ));
+    }
+    if let (Some(old_id), Some(new_id)) = (old_info.mod_id.as_deref(), new_info.mod_id.as_deref()) {
+        if old_id != new_id {
+            return Err(format!(
+                "Installed archive changed mod id from '{}' to '{}'.",
+                old_id, new_id,
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Describes an available update for an installed mod.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModUpdate {
@@ -606,6 +643,24 @@ fn best_known_installed_version(
     versions.into_iter().max()
 }
 
+fn installed_source_version_for_display(
+    mod_info: &ModInfo,
+    sources: &std::collections::HashMap<String, ModSourceEntry>,
+) -> Option<String> {
+    lookup_entry(
+        sources,
+        mod_info.folder_name.as_deref(),
+        &mod_info.name,
+        mod_info.mod_id.as_deref(),
+    )
+    .and_then(|entry| entry.installed_version.as_deref())
+    .map(str::trim)
+    .filter(|version| {
+        !version.is_empty() && !version.eq_ignore_ascii_case("unknown") && *version != "0.0.0"
+    })
+    .map(|version| version.trim_start_matches(['v', 'V']).to_string())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum RollbackReleaseTarget {
     PreviousBelow(semver::Version),
@@ -733,6 +788,7 @@ pub async fn update_mod(
         installed.iter().find(|m| m.name == name)
     }
     .ok_or_else(|| format!("Mod '{}' not found", name))?;
+    let old_info_for_validation = mod_info.clone();
 
     let (owner, repo) = resolve_github_repo(mod_info, &sources_db.mods).ok_or_else(|| {
         format!(
@@ -869,21 +925,27 @@ pub async fn update_mod(
         }
     };
 
-    // Extraction succeeded — see repair_mod's matching comment for why the
-    // unhealthy-ModInfo branch below does not roll back: it's a pre-existing
-    // degraded-install condition distinct from the #174 extract-failure
-    // hazard this stash protects against.
+    if let Err(e) =
+        validate_update_install_result(&old_info_for_validation, &info, game_version.as_deref())
+    {
+        if let Some(stash) = stashed_existing {
+            log::error!(
+                "update_mod: validation of '{}' from {}/{}@{} failed ({}); restoring previous install",
+                name, owner, repo, chosen_tag, e,
+            );
+            stash.restore();
+        }
+        return Err(e);
+    }
+
     if let Some(stash) = stashed_existing {
         stash.discard();
     }
 
-    // Only record the new installed_version if the install RESULT looks
-    // healthy. install_mod_from_zip falls through to a stub with
-    // version="unknown" when it can't parse the manifest — bumping
-    // installed_version in that case loses the previously-known-good
-    // version and breaks future Repair walk-backs (we end up not knowing
-    // which version was last working).
-    let install_healthy = info.version != "unknown" && !info.version.is_empty();
+    // Validation already rejected unknown/empty manifests, wrong identities,
+    // empty extracts, and incompatible game versions. Only now is it safe to
+    // forget the stash and remember the release tag we chose.
+    let install_healthy = true;
     if install_healthy {
         // Write under folder_name when available so the installed_version
         // travels with the same DB key the pin lookup uses (folder-first).
@@ -985,6 +1047,7 @@ pub async fn repair_mod(
         installed.iter().find(|m| m.name == name)
     }
     .ok_or_else(|| format!("Mod '{}' not found", name))?;
+    let old_info_for_validation = mod_info.clone();
     let (owner, repo) = resolve_github_repo(mod_info, &sources_db.mods).ok_or_else(|| {
         format!(
             "Mod '{}' has no GitHub source linked. Link one in the Mods view.",
@@ -1068,16 +1131,22 @@ pub async fn repair_mod(
         }
     };
 
-    // Extraction itself succeeded (files are on disk), so the stashed
-    // original is no longer needed regardless of whether the resulting
-    // ModInfo is "healthy". We deliberately do NOT roll back on the
-    // unhealthy branch below: that branch means install_mod_from_zip wrote
-    // files but couldn't parse a clean manifest version, which is a
-    // pre-existing degraded-install condition distinct from the #174
-    // extract-failure hazard this stash protects against. Restoring the old
-    // (also broken, since the user clicked Repair) install in that case
-    // would discard files that may still be usable in-game, trading one
-    // degraded state for another without clear benefit.
+    if let Err(e) =
+        validate_update_install_result(&old_info_for_validation, &info, game_version.as_deref())
+    {
+        if let Some(stash) = stashed_existing {
+            log::error!(
+                "repair_mod: validation of '{}' from {}/{}@{} failed ({}); restoring previous install",
+                name, owner, repo, chosen.tag, e,
+            );
+            stash.restore();
+        }
+        return Err(e);
+    }
+
+    // Validation already rejected unknown/empty manifests, wrong identities,
+    // empty extracts, and incompatible game versions. Only now is it safe to
+    // forget the stash and remember the release tag we chose.
     if let Some(stash) = stashed_existing {
         stash.discard();
     }
@@ -1762,6 +1831,7 @@ mod version_helper_tests {
             folder_name: Some("RitsuLib".into()),
             mod_id: Some("ritsulib".into()),
             github_url: None,
+            github_auto_detected: false,
             nexus_url: None,
             pinned: false,
             min_game_version: None,
@@ -1890,6 +1960,7 @@ mod version_helper_tests {
             folder_name: None,
             mod_id: None,
             github_url: None,
+            github_auto_detected: false,
             nexus_url: None,
             pinned: false,
             min_game_version: min.map(String::from),
@@ -2211,6 +2282,35 @@ mod version_helper_tests {
                 .to_string(),
             "0.2.30",
         );
+    }
+
+    #[test]
+    fn installed_source_version_for_display_preserves_source_tag_separately_from_manifest() {
+        let info = mod_info(|m| {
+            m.name = "Unified Save Path".into();
+            m.folder_name = Some("UnifiedSavePath".into());
+            m.version = "1.0.0".into();
+        });
+        let mut sources = std::collections::HashMap::new();
+        sources.insert(
+            "UnifiedSavePath".into(),
+            ModSourceEntry {
+                installed_version: Some("v1.1.3".into()),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            installed_source_version_for_display(&info, &sources).as_deref(),
+            Some("1.1.3"),
+        );
+        assert_eq!(
+            best_known_installed_version(&info, &sources)
+                .unwrap()
+                .to_string(),
+            "1.1.3",
+        );
+        assert_eq!(info.version, "1.0.0");
     }
 
     #[test]
@@ -2550,6 +2650,14 @@ pub struct ModAuditEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder_name: Option<String>,
     pub github_repo: Option<String>,
+    /// Version declared by the installed mod's manifest on disk.
+    pub manifest_version: String,
+    /// Version/tag the manager last installed from a trusted source. This
+    /// can differ from manifest_version when the upstream manifest is stale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installed_source_version: Option<String>,
+    /// Legacy display/update field. New UI should prefer manifest_version
+    /// and installed_source_version.
     pub installed_version: String,
     /// The tag from /releases/latest (may have no assets).
     pub latest_release_tag: Option<String>,
@@ -3103,10 +3211,14 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
 
     // If no source at all, still include in report
     if !has_any_source {
+        let installed_source_version =
+            installed_source_version_for_display(m, &ctx.sources_db.mods);
         return ModAuditEntry {
             mod_name: m.name.clone(),
             folder_name: m.folder_name.clone(),
             github_repo: None,
+            manifest_version: m.version.clone(),
+            installed_source_version: installed_source_version.clone(),
             installed_version: m.version.clone(),
             latest_release_tag: None,
             latest_release_with_assets_tag: None,
@@ -3175,10 +3287,13 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
     let installed_version = best_known_installed_version(m, &ctx.sources_db.mods)
         .map(|version| version.to_string())
         .unwrap_or_else(|| m.version.clone());
+    let installed_source_version = installed_source_version_for_display(m, &ctx.sources_db.mods);
     ModAuditEntry {
         mod_name: m.name.clone(),
         folder_name: m.folder_name.clone(),
         github_repo: display_github,
+        manifest_version: m.version.clone(),
+        installed_source_version,
         installed_version,
         latest_release_tag,
         latest_release_with_assets_tag,
@@ -3245,6 +3360,7 @@ mod repair_stash_on_failed_extract_tests {
             folder_name: Some(folder.to_string()),
             mod_id: None,
             github_url: None,
+            github_auto_detected: false,
             nexus_url: None,
             pinned: false,
             min_game_version: None,

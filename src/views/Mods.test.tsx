@@ -1394,6 +1394,41 @@ describe('<ModsView>', () => {
     });
   });
 
+  it('Source editor Save promotes an unchanged auto-detected GitHub repo to manual', async () => {
+    seedMods([
+      baseMod({
+        name: 'Route Planner',
+        folder_name: 'route_planner',
+        github_url: 'https://github.com/llzcx/STS2-RoutePlanner',
+        github_auto_detected: true,
+        nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/1260',
+      }),
+    ]);
+    registerInvokeHandler('set_mod_sources_full', () => ({
+      github_repo: 'llzcx/STS2-RoutePlanner',
+      github_auto_detected: false,
+      nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/1260',
+    }));
+    const user = userEvent.setup();
+    render(<Wrap advancedMode />);
+    await waitFor(() => { expect(screen.getByText('Route Planner')).toBeInTheDocument(); });
+    await openSourceEditor(user, 'Route Planner');
+
+    await user.click(screen.getByRole('button', { name: /Save sources/ }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls()).toContainEqual({
+        cmd: 'set_mod_sources_full',
+        args: {
+          modName: 'Route Planner',
+          folderName: 'route_planner',
+          githubRepo: 'llzcx/STS2-RoutePlanner',
+          nexusUrl: 'https://www.nexusmods.com/slaythespire2/mods/1260',
+        },
+      });
+    });
+  });
+
   it('Source editor saves manager tags without changing source links', async () => {
     seedMods([baseMod({ name: 'SrcMod', folder_name: 'SrcMod' })]);
     registerInvokeHandler('set_mod_tags', () => ({

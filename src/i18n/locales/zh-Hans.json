@@ -699,6 +699,11 @@
     "updated_many": "已更新 {{count}} 个模组。",
     "updated_other": "已更新 {{count}} 个模组。",
     "updateFailed": "更新失败：{{error}}。如果你是通过 .deb 或 .rpm 安装的，请使用 AppImage 版本以获得无缝更新，或点击「下载」手动获取新软件包。",
+    "crash": {
+      "title": "模组管理器遇到显示错误",
+      "body": "这次界面崩溃没有更改你的模组文件。错误已写入应用日志，便于诊断；请重新加载应用以继续。",
+      "reload": "重新加载应用"
+    },
     "toast": {
       "replacedMod": "已更新 \"{{replaced}}\" → \"{{mod}}\"（来自 {{file}}）",
       "autoInstalled": "模组 \"{{name}}\" 已从 {{file}} 自动安装",

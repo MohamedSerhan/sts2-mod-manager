@@ -171,6 +171,31 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                             &mods_path,
                             disabled_path.as_deref(),
                         );
+                        let pending_nexus_mod_id =
+                            pending_nexus_mod_id_for_download(&path, &incoming_identity, &state);
+                        if let (Some(existing), Some(pending_mod_id)) =
+                            (existing_mod.as_ref(), pending_nexus_mod_id)
+                        {
+                            if crate::mod_sources::saved_nexus_source_conflicts(
+                                &config_path,
+                                existing.folder_name.as_deref(),
+                                &existing.name,
+                                existing.mod_id.as_deref(),
+                                pending_mod_id,
+                            ) {
+                                log::warn!(
+                                    "Downloads watcher: refusing to auto-install {:?} over '{}' because saved Nexus source conflicts with pending Nexus mod_id {}",
+                                    path,
+                                    existing.name,
+                                    pending_mod_id
+                                );
+                                let _ = app.emit("mod-auto-install-failed", serde_json::json!({
+                                    "file_name": path.file_name().unwrap_or_default().to_string_lossy().to_string(),
+                                    "error": "This Nexus download looks like a different mod than the installed one. The existing mod was left unchanged."
+                                }));
+                                continue;
+                            }
+                        }
 
                         // If the existing mod is pinned, skip auto-install entirely.
                         // Folder-first lookup — without it, a pin saved under
@@ -312,6 +337,7 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                 attach_pending_nexus_source(
                                     &mod_info.name,
                                     mod_info.folder_name.as_deref(),
+                                    mod_info.mod_id.as_deref(),
                                     &file_name,
                                     &config_path,
                                     &state,
@@ -721,6 +747,45 @@ fn download_filename_matches_installed_mod(
             .unwrap_or(false)
 }
 
+fn pending_nexus_mod_id_for_download(
+    archive_path: &Path,
+    identity: &ZipIdentity,
+    state: &AppState,
+) -> Option<u64> {
+    let file_name = archive_path.file_name()?.to_string_lossy().to_string();
+    let stem_lower = file_name.to_lowercase();
+    let clean_stem = archive_path
+        .file_stem()
+        .map(|stem| strip_nexus_suffix(&stem.to_string_lossy()))
+        .unwrap_or_default();
+
+    let mut s = state.lock().ok()?;
+    s.pending_nexus_installs
+        .retain(|p| Instant::now().duration_since(p.queued_at) < Duration::from_secs(30 * 60));
+
+    s.pending_nexus_installs.iter().find_map(|pending| {
+        let id_marker = format!("-{}-", pending.mod_id);
+        if stem_lower.contains(&id_marker) || stem_lower.ends_with(&format!("-{}", pending.mod_id))
+        {
+            return Some(pending.mod_id);
+        }
+        let pending_name = pending.mod_name.as_str();
+        if identity
+            .name
+            .as_deref()
+            .is_some_and(|name| identities_overlap(name, pending_name))
+            || identity
+                .folder_name
+                .as_deref()
+                .is_some_and(|folder| identities_overlap(folder, pending_name))
+            || identities_overlap(&clean_stem, pending_name)
+        {
+            return Some(pending.mod_id);
+        }
+        None
+    })
+}
+
 /// Strip Nexus Mods filename suffixes.
 /// E.g. "RelicsReminder-284-1-1-0-1775500710" -> "RelicsReminder"
 /// Pattern: ModName followed by -digits repeated (mod ID, version parts, file ID)
@@ -1017,6 +1082,7 @@ fn fetch_nexus_version_blocking(
 fn attach_pending_nexus_source(
     installed_name: &str,
     installed_folder: Option<&str>,
+    installed_mod_id: Option<&str>,
     file_name: &str,
     config_path: &Path,
     state: &AppState,
@@ -1036,6 +1102,15 @@ fn attach_pending_nexus_source(
             && download_filename_matches_installed_mod(file_name, installed_name, installed_folder);
 
         let idx = s.pending_nexus_installs.iter().position(|p| {
+            if crate::mod_sources::saved_nexus_source_conflicts(
+                config_path,
+                installed_folder,
+                installed_name,
+                installed_mod_id,
+                p.mod_id,
+            ) {
+                return false;
+            }
             // Nexus filenames look like "ModName-{mod_id}-{version}-...zip"
             let id_marker = format!("-{}-", p.mod_id);
             if stem_lower.contains(&id_marker) {
@@ -1169,6 +1244,7 @@ mod stash_tests {
             folder_name: Some(folder.to_string()),
             mod_id: None,
             github_url: None,
+            github_auto_detected: false,
             nexus_url: None,
             pinned: false,
             min_game_version: None,
@@ -1372,6 +1448,7 @@ mod pending_nexus_source_tests {
                 nexus_url: "https://www.nexusmods.com/slaythespire2/mods/526".into(),
                 game_domain: "slaythespire2".into(),
                 mod_id: 526,
+                file_id: None,
                 queued_at: std::time::Instant::now(),
             });
         }
@@ -1379,6 +1456,7 @@ mod pending_nexus_source_tests {
         attach_pending_nexus_source(
             "Base Camp",
             Some("BaseCamp"),
+            None,
             "STS2BaseCamp V0.4.0.zip",
             config.path(),
             &state,
@@ -1397,6 +1475,53 @@ mod pending_nexus_source_tests {
         assert!(
             state.lock().unwrap().pending_nexus_installs.is_empty(),
             "matching pending Nexus install should be consumed"
+        );
+    }
+
+    #[test]
+    fn attach_pending_nexus_source_does_not_overwrite_different_saved_nexus_mod() {
+        let config = tempdir().unwrap();
+        crate::mod_sources::attach_nexus_source(
+            "Shared Name",
+            Some("SharedFolder"),
+            "https://www.nexusmods.com/slaythespire2/mods/900".into(),
+            "slaythespire2".into(),
+            900,
+            config.path(),
+        );
+        let state = create_app_state();
+        {
+            let mut s = state.lock().unwrap();
+            s.pending_nexus_installs.push(PendingNexusInstall {
+                mod_name: "Shared Name".into(),
+                nexus_url: "https://www.nexusmods.com/slaythespire2/mods/1264".into(),
+                game_domain: "slaythespire2".into(),
+                mod_id: 1264,
+                file_id: None,
+                queued_at: std::time::Instant::now(),
+            });
+        }
+
+        attach_pending_nexus_source(
+            "Shared Name",
+            Some("SharedFolder"),
+            None,
+            "SharedName-1264-1-0-0-1780000000.zip",
+            config.path(),
+            &state,
+        );
+
+        let db = crate::mod_sources::load_sources(config.path());
+        let entry = db.mods.get("SharedFolder").unwrap();
+        assert_eq!(entry.nexus_mod_id, Some(900));
+        assert_eq!(
+            entry.nexus_url.as_deref(),
+            Some("https://www.nexusmods.com/slaythespire2/mods/900")
+        );
+        assert_eq!(
+            state.lock().unwrap().pending_nexus_installs.len(),
+            1,
+            "conflicting pending Nexus hint must not be consumed"
         );
     }
 

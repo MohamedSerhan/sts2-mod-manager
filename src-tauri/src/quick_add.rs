@@ -295,6 +295,7 @@ pub async fn quick_add_mod(
                 nexus_url: format!("https://www.nexusmods.com/{}/mods/{}", game_domain, mod_id),
                 game_domain: game_domain.clone(),
                 mod_id,
+                file_id: None,
                 queued_at: now,
             });
         }

@@ -42,6 +42,7 @@ import {
   launchVanilla,
   listBackups,
   listProfiles,
+  logFrontendError,
   nexusGetLatestAdded,
   nexusGetTrending,
   openGameFolder,
@@ -124,6 +125,10 @@ describe('useTauri wrappers — command names + arg shapes', () => {
 
     await getApiKeyStatus();
     expect(lastCall().cmd).toBe('get_api_key_status');
+
+    await logFrontendError('render exploded');
+    expect(lastCall()).toEqual({ cmd: 'log_frontend_error', args: { message: 'render exploded' } });
+
   });
 
   it('launch mode read/write', async () => {

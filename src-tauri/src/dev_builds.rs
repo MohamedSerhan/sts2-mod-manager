@@ -57,7 +57,7 @@ fn platform_of(name: &str) -> &'static str {
     let n = name.to_ascii_lowercase();
     if n.ends_with("_portable.zip") {
         "Windows (portable)"
-    } else if n.ends_with("-setup.exe") || n.ends_with(".msi") {
+    } else if n.ends_with("-setup.exe") {
         "Windows (installer)"
     } else if n.ends_with(".dmg") {
         "macOS"
@@ -81,10 +81,8 @@ fn parse_dev_builds(releases: Vec<GitHubRelease>) -> Vec<DevBuild> {
             let pr = parse_pr_from_tag(&r.tag_name)?;
             let title = r.name.clone().unwrap_or_else(|| r.tag_name.clone());
             let sha = parse_sha_from_title(&title).unwrap_or_default();
-            // Dev builds ship the NSIS `-setup.exe` on Windows (sub-project D
-            // drops the MSI target for dev builds), so the in-place swap targets
-            // `-setup.exe`. A `.msi`, if ever present, is shown as a download
-            // link via `platform_of` but is not auto-installed.
+            // Dev builds ship the same NSIS `-setup.exe` Windows installer
+            // family as releases, so the in-place swap targets `-setup.exe`.
             let windows_installer_url = r
                 .assets
                 .iter()

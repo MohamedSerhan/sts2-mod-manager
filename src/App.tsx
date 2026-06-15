@@ -39,6 +39,7 @@ import { LaunchSpinner } from './components/LaunchSpinner';
 import { ProfileSwitcher } from './components/ProfileSwitcher';
 import { HelpDrawer } from './components/HelpDrawer';
 import { SidebarResizeHandle } from './components/SidebarResizeHandle';
+import { LocalizedAppErrorBoundary, RendererErrorReporter } from './components/AppErrorBoundary';
 import { recordModpackLaunch } from './lib/modpackUsage';
 import { useResizableSidebar } from './hooks/useResizableSidebar';
 import { HomeView } from './views/Home';
@@ -93,7 +94,10 @@ export default function App() {
           <ToastProvider>
             <ConfirmProvider>
               <AppProvider>
-                <AppInner />
+                <RendererErrorReporter />
+                <LocalizedAppErrorBoundary>
+                  <AppInner />
+                </LocalizedAppErrorBoundary>
               </AppProvider>
             </ConfirmProvider>
           </ToastProvider>

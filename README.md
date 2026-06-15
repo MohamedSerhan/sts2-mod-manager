@@ -226,12 +226,14 @@ what is kept anywhere.
 Grab the latest installer for your platform from the
 [Releases page](https://github.com/MohamedSerhan/sts2-mod-manager/releases/latest):
 
-- **Windows**: `.msi` (recommended) or `.exe`
+- **Windows**: `*_x64-setup.exe` (recommended) or portable `.zip`
 - **macOS**: `.dmg` (universal — Intel + Apple Silicon)
 - **Linux**: `.deb`, `.rpm`, or `.AppImage`
 
 Once installed, the app auto-updates: it checks GitHub for new releases on
 launch (at most once per day) and prompts you to install when one is available.
+On Windows, use the setup `.exe` for the installed app; it is the same
+installer family used by in-app updates.
 
 ## macOS: First Launch Warning
 
@@ -297,7 +299,7 @@ that causes a blank window. If you hit this, install the **`.deb`** or
 **`.rpm`** package instead — they use the system's WebKitGTK directly and work
 around the issue.
 
-**`sts2mm://` deep links:** the `.deb`, `.rpm`, `.msi`, `.exe`, and `.dmg`
+**`sts2mm://` deep links:** the `.deb`, `.rpm`, `.exe`, and `.dmg`
 installers all register the `sts2mm://` URL scheme automatically so clicking
 a share link opens the app. The AppImage is a portable bundle with no install
 step, so it tries to register the scheme at runtime on first launch. If that

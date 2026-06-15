@@ -296,6 +296,48 @@ describe('useModLibrary', () => {
     expect(updateModCalls()).toHaveLength(0);
   });
 
+  it('handleInlineUpdate promotes auto-detected GitHub plus Nexus before using the GitHub update path', async () => {
+    const nexusMod = makeMod({
+      name: 'Route Planner',
+      folder_name: 'route_planner',
+      github_url: 'https://github.com/auto/guess',
+      github_auto_detected: true,
+      nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/1260',
+    });
+    registerInvokeHandler('set_mod_sources_full', () => ({
+      github_repo: 'auto/guess',
+      github_auto_detected: false,
+      nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/1260',
+    }));
+    registerInvokeHandler('update_mod', () => makeMod({
+      name: 'Route Planner',
+      folder_name: 'route_planner',
+      version: '2.0.0',
+      github_url: 'https://github.com/auto/guess',
+      github_auto_detected: false,
+      nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/1260',
+    }));
+    const { result } = renderHook(() => useModLibrary(), { wrapper: AllProviders });
+
+    await act(async () => {
+      await result.current.tableActionProps.onUpdate(nexusMod);
+    });
+
+    expect(openUrl).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(getInvokeCalls()).toContainEqual({
+        cmd: 'set_mod_sources_full',
+        args: {
+          modName: 'Route Planner',
+          folderName: 'route_planner',
+          githubRepo: 'auto/guess',
+          nexusUrl: 'https://www.nexusmods.com/slaythespire2/mods/1260',
+        },
+      });
+    });
+    expect(updateModCalls()).toHaveLength(1);
+  });
+
   it('handleInlineUpdate on a GitHub-linked mod calls update_mod and not openUrl', async () => {
     const githubMod = makeMod({
       name: 'RelicsReminder',
@@ -329,6 +371,61 @@ describe('useModLibrary', () => {
     expect(updateModCalls()[0].args?.name).toBe('RelicsReminder');
     // Must NOT have opened any URL in the browser for the GitHub path.
     expect(openUrl).not.toHaveBeenCalled();
+  });
+
+  it('handleInlineUpdate opens Nexus files as a fallback when GitHub update fails', async () => {
+    const bothSourceMod = makeMod({
+      name: 'Route Planner',
+      folder_name: 'route_planner',
+      github_url: 'https://github.com/llzcx/STS2-RoutePlanner',
+      nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/1260',
+    });
+    registerInvokeHandler('update_mod', () => {
+      throw new Error('GitHub release asset is broken');
+    });
+    const { result } = renderHook(() => useModLibrary(), { wrapper: AllProviders });
+
+    await act(async () => {
+      await result.current.tableActionProps.onUpdate(bothSourceMod);
+    });
+
+    expect(updateModCalls()).toHaveLength(1);
+    await waitFor(() => {
+      expect(openUrl).toHaveBeenCalledWith('https://www.nexusmods.com/slaythespire2/mods/1260?tab=files');
+    });
+  });
+
+  it('suppresses duplicate inline update calls before React state catches up', async () => {
+    const githubMod = makeMod({
+      name: 'RelicsReminder',
+      folder_name: 'RelicsReminder',
+      github_url: 'https://github.com/some/relics-reminder',
+      nexus_url: null,
+    });
+    let resolveUpdate!: (value: ModInfo) => void;
+    registerInvokeHandler('update_mod', () => new Promise<ModInfo>((resolve) => {
+      resolveUpdate = resolve;
+    }));
+    const { result } = renderHook(() => useModLibrary(), { wrapper: AllProviders });
+
+    let first!: Promise<void>;
+    let second!: Promise<void>;
+    act(() => {
+      first = result.current.tableActionProps.onUpdate(githubMod);
+      second = result.current.tableActionProps.onUpdate(githubMod);
+    });
+    expect(updateModCalls()).toHaveLength(1);
+
+    await act(async () => {
+      resolveUpdate(makeMod({
+        name: 'RelicsReminder',
+        version: '2.0.0',
+        folder_name: 'RelicsReminder',
+        github_url: 'https://github.com/some/relics-reminder',
+      }));
+      await Promise.all([first, second]);
+    });
+    expect(updateModCalls()).toHaveLength(1);
   });
 
   it('handleInlineUpdate syncs a targeted modpack manifest before marking the pack changed', async () => {

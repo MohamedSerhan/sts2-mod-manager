@@ -49,6 +49,13 @@ fn consume_pending_deep_link(
     Ok(s.pending_deep_link.take())
 }
 
+/// Let the WebView report render/async crashes into the normal app log.
+/// Without this, a React crash can leave a blank window with no Rust-side clue.
+#[tauri::command]
+fn log_frontend_error(message: String) {
+    log::error!(target: "sts2_mod_manager_lib::frontend", "{}", message);
+}
+
 /// Set up logging to both stderr and a log file in the config directory.
 fn setup_logging(log_path: &std::path::Path) {
     let _ = std::fs::create_dir_all(log_path.parent().unwrap_or(log_path));
@@ -371,6 +378,7 @@ pub fn run() {
             profiles::save_profile_drift,
             bug_report::upload_bug_report,
             bug_report::bug_report_endpoint_host,
+            log_frontend_error,
             // Curator workflow
             updater::check_for_updates,
             updater::update_mod,

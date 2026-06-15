@@ -2857,6 +2857,57 @@ body {
 .gf-loading-sub { font-size: 12px; color: var(--ink-mute); margin-top: 4px; }
 .gf-loading-step { font-size: 11px; color: var(--ink-dim); margin-top: 8px; font-family: ui-monospace, monospace; }
 
+.gf-app-crash-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.gf-app-crash-panel {
+  width: min(640px, 100%);
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 16px;
+  align-items: start;
+  padding: 22px;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow-lg);
+}
+
+.gf-app-crash-panel svg {
+  color: var(--danger);
+}
+
+.gf-app-crash-panel h1 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.gf-app-crash-panel p {
+  margin: 0 0 14px;
+  color: var(--ink-mute);
+  line-height: 1.5;
+}
+
+.gf-app-crash-panel pre {
+  max-height: 140px;
+  overflow: auto;
+  margin: 0 0 16px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--field);
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* Toasts */
 .gf-toasts {
   position: fixed; bottom: 18px; inset-inline-end: 18px; z-index: 70;

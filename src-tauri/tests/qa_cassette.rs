@@ -50,6 +50,7 @@ fn make_mod(name: &str, version: &str, folder: &str) -> ModInfo {
         folder_name: Some(folder.to_string()),
         mod_id: None,
         github_url: None,
+        github_auto_detected: false,
         nexus_url: None,
         pinned: false,
         min_game_version: None,

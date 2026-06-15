@@ -260,7 +260,7 @@ export function LibraryRow({
     ? `${membershipRowKey(row)}::${modpackName}`
     : null;
   const saving = membershipKey != null && membershipSaving === membershipKey;
-  const displayName = membershipDisplayName(row);
+  const displayName = mod?.display_name?.trim() || membershipDisplayName(row);
   // Per-row storage (active/stored) mutation in flight. Drives the small
   // spinner beside the active/stored toggle. `storageSaving` carries the
   // libraryStorageKey of the row being flipped (or BULK_STORAGE_KEY).
@@ -303,12 +303,20 @@ export function LibraryRow({
   const auditError = audit?.error ?? null;
   const minGameViolated =
     !!mod?.min_game_version && !gameVersionSatisfies(gameVersion, mod.min_game_version);
-  const manifestVersion = (row.version || '').replace(/^v/i, '');
-  const effectiveInstalledVersion = audit?.installed_version?.replace(/^v/i, '') ?? null;
-  const showEffectiveNexusVersion =
-    !!effectiveInstalledVersion
-    && effectiveInstalledVersion !== manifestVersion
-    && !!(audit?.nexus_version || mod?.nexus_url);
+  const cleanVersion = (value: string | null | undefined) =>
+    (value ?? '').trim().replace(/^v/i, '');
+  const manifestVersion = cleanVersion(audit?.manifest_version ?? mod?.version ?? row.version);
+  const installedSourceVersion = cleanVersion(audit?.installed_source_version);
+  const hasConfirmedGithub = !!mod?.github_url && !mod.github_auto_detected;
+  const sourceVersionLabel =
+    hasConfirmedGithub || (!!audit?.github_repo && !audit.github_auto_detected)
+      ? t('mods.gitHub')
+      : (audit?.nexus_url || mod?.nexus_url)
+        ? t('mods.nexus')
+        : 'installed';
+  const showInstalledSourceVersion =
+    !!installedSourceVersion
+    && installedSourceVersion !== manifestVersion;
 
   return (
     <Card
@@ -403,9 +411,9 @@ export function LibraryRow({
         <div className="gf-profile-library-identity min-w-0">
           <div className="gf-profile-library-titlerow">
             <h3 className="gf-profile-library-title">
-              {row.display_name?.trim() || row.name}
+              {displayName}
             </h3>
-            {row.display_name && (
+            {displayName !== row.name && (
               <span className="gf-profile-library-rawname">{row.name}</span>
             )}
             {/* Tags, source badges and audit pills all cluster to the
@@ -540,19 +548,16 @@ export function LibraryRow({
                 a folder glyph + tooltip, so version / folder / description
                 read as distinct things instead of three grey lookalikes. */}
             <span className="gf-meta-version" title={t('mods.versionLabel')}>
-              {showEffectiveNexusVersion
-                ? t('mods.manifestVersion', { version: manifestVersion })
+              {showInstalledSourceVersion
+                ? `${sourceVersionLabel} v${installedSourceVersion}`
                 : `v${manifestVersion}`}
             </span>
-            {showEffectiveNexusVersion && (
+            {showInstalledSourceVersion && (
               <span
                 className="gf-meta-version"
-                title={t('mods.nexusEffectiveVersionTitle', {
-                  nexus: effectiveInstalledVersion,
-                  manifest: manifestVersion,
-                })}
+                title={t('mods.versionLabel')}
               >
-                {t('mods.nexusEffectiveVersion', { version: effectiveInstalledVersion })}
+                {t('mods.manifestVersion', { version: manifestVersion })}
               </span>
             )}
             {row.folder_name
@@ -813,6 +818,7 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
   const canSnooze =
     !!audit?.snoozed ||
     (!!audit?.needs_update && !!snoozeTargetVersion);
+  const hasUserConfirmedGithub = !!mod.github_url && !mod.github_auto_detected;
 
   // Rebuilt per render — cheap, and the menu only mounts/opens on demand. Don't memoize (it would force listing every closure capture as a dep).
   // One descriptor per customizable id: contextual availability + how to render.
@@ -938,8 +944,8 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
           key="repair"
           icon={isRepairing ? <RefreshCw size={12} className="animate-spin" /> : <Wrench size={12} />}
           onClick={onRepair}
-          disabled={gameRunning || anyRecoveryInFlight || !mod.github_url || isUpdating}
-          description={mod.github_url ? t('mods.repairDesc') : t('mods.repairNeedSource')}
+          disabled={gameRunning || anyRecoveryInFlight || !hasUserConfirmedGithub || isUpdating}
+          description={hasUserConfirmedGithub ? t('mods.repairDesc') : t('mods.repairNeedSource')}
         >
           {isRepairing ? t('mods.repairing') : t('mods.repairThisMod')}
         </KebabItem>
@@ -952,8 +958,8 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
           key="rollback"
           icon={isRollingBack ? <RefreshCw size={12} className="animate-spin" /> : <RotateCcw size={12} />}
           onClick={onRollback}
-          disabled={gameRunning || anyRecoveryInFlight || !mod.github_url || isUpdating}
-          description={mod.github_url ? t('mods.rollbackDesc') : t('mods.rollbackNeedSource')}
+          disabled={gameRunning || anyRecoveryInFlight || !hasUserConfirmedGithub || isUpdating}
+          description={hasUserConfirmedGithub ? t('mods.rollbackDesc') : t('mods.rollbackNeedSource')}
         >
           {isRollingBack ? t('mods.rollingBack') : t('mods.rollBackOneVersion')}
         </KebabItem>

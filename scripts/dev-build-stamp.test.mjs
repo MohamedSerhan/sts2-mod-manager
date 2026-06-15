@@ -52,8 +52,7 @@ test('stampFiles rewrites version + identity in conf, version in cargo, nothing 
     assert.equal(conf.productName, 'STS2 Mod Manager (Dev)');
     // Untouched nested key stays intact
     assert.equal(conf.app.windows[0].title, 'STS2 Mod Manager');
-    // Dev builds drop the Windows MSI target (WiX rejects the non-numeric
-    // "-dev" pre-release); everything else is preserved.
+    // Dev builds keep the no-MSI Windows target set used by releases.
     assert.deepEqual(conf.bundle.targets, ['nsis', 'app', 'dmg', 'deb', 'rpm', 'appimage'], 'msi dropped from dev targets');
 
     const cargo = readFileSync(cargoPath, 'utf-8');

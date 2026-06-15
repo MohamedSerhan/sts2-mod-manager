@@ -142,6 +142,46 @@ async function expandLibrary(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('<ModpackDetail>', () => {
+  it('in-pack rich rows show fresh installed ModInfo version when the membership grid is stale', async () => {
+    const fresh = modInfo({
+      name: 'Unified Save Path',
+      version: '1.1.3',
+      folder_name: 'UnifiedSavePath',
+      mod_id: 'UnifiedSavePath',
+      enabled: true,
+    });
+    installMods([fresh]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Sample', editable: true }],
+      mods: [
+        {
+          name: 'Unified Save Path',
+          version: '1.0.0',
+          folder_name: 'UnifiedSavePath',
+          mod_id: 'UnifiedSavePath',
+          installed_enabled: true,
+          profiles: [{ profile_name: 'Sample', included: true, enabled: true, editable: true }],
+        },
+      ],
+    }));
+    const profile = baseProfile({
+      name: 'Sample',
+      mods: [
+        profileMod({
+          name: 'Unified Save Path',
+          version: '1.0.0',
+          folder_name: 'UnifiedSavePath',
+          mod_id: 'UnifiedSavePath',
+        }),
+      ],
+    });
+
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+
+    expect(await screen.findByText('v1.1.3')).toBeInTheDocument();
+    expect(screen.queryByText('v1.0.0')).not.toBeInTheDocument();
+  });
+
   // ── Unified search (Solo FR, 2026-06-10) ──────────────────────────
   it('typing in the in-pack search auto-opens and filters Add-from-Library, matching tags', async () => {
     const profile = setupPack({

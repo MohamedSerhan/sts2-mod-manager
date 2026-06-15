@@ -1331,6 +1331,7 @@ mod profile_membership_tests {
             dependencies: Vec::new(),
             size_bytes: 0,
             github_url: None,
+            github_auto_detected: false,
             nexus_url: None,
             folder_name: Some("PinnedUtility".into()),
             mod_id: Some("PinnedUtility".into()),

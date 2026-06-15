@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "last_run_at": "2026-06-05T14:00:15.183Z",
+  "last_run_at": "2026-06-15T16:38:07.233Z",
   "comments": {
     "170022530": {
       "gh_issue_url": "https://github.com/MohamedSerhan/sts2-mod-manager/issues/55",
@@ -21,6 +21,31 @@
       "gh_issue_url": "https://github.com/MohamedSerhan/sts2-mod-manager/issues/121",
       "classification": "feature-request",
       "filed_at": "2026-06-03T14:00:15.000Z"
+    },
+    "170640938": {
+      "gh_issue_url": "https://github.com/MohamedSerhan/sts2-mod-manager/issues/195",
+      "classification": "bug",
+      "filed_at": "2026-06-15T16:38:07.233Z"
+    },
+    "170669618": {
+      "gh_issue_url": "https://github.com/MohamedSerhan/sts2-mod-manager/issues/196",
+      "classification": "question",
+      "filed_at": "2026-06-15T16:38:07.233Z"
+    },
+    "170684330": {
+      "gh_issue_url": "https://github.com/MohamedSerhan/sts2-mod-manager/issues/197",
+      "classification": "bug",
+      "filed_at": "2026-06-15T16:38:07.233Z"
+    },
+    "170844227": {
+      "gh_issue_url": "https://github.com/MohamedSerhan/sts2-mod-manager/issues/198",
+      "classification": "needs-triage",
+      "filed_at": "2026-06-15T16:38:07.233Z"
+    },
+    "170947634": {
+      "gh_issue_url": "https://github.com/MohamedSerhan/sts2-mod-manager/issues/199",
+      "classification": "needs-triage",
+      "filed_at": "2026-06-15T16:38:07.233Z"
     }
   },
   "bugs": {

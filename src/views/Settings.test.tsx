@@ -823,9 +823,10 @@ describe('<SettingsView>', () => {
     });
   });
 
-  it('Check for updates: downloads and relaunches when update is available', async () => {
+  it('Check for updates: invokes backend install when update is available', async () => {
     const updateMock = vi.mocked(checkUpdate);
     const downloadAndInstall = vi.fn(async () => {});
+    registerInvokeHandler('install_app_update', () => null);
     updateMock.mockResolvedValueOnce({
       version: '9.9.9',
       downloadAndInstall,
@@ -837,8 +838,9 @@ describe('<SettingsView>', () => {
     const checkBtn = await screen.findByRole('button', { name: /Check for updates/i });
     await user.click(checkBtn);
     await waitFor(() => {
-      expect(downloadAndInstall).toHaveBeenCalled();
+      expect(getInvokeCalls().some((c) => c.cmd === 'install_app_update')).toBe(true);
     });
+    expect(downloadAndInstall).not.toHaveBeenCalled();
     expect(screen.queryByText(/9\.9\.9 available/)).toBeInTheDocument();
   });
 

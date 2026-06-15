@@ -7,6 +7,7 @@ import { Button } from './Button';
 import { useToast } from '../contexts/ToastContext';
 import { DiagnosticBundle } from './DiagnosticBundle';
 import { useOpenFeedback } from '../hooks/useOpenFeedback';
+import { installAppUpdate } from '../hooks/useTauri';
 
 /**
  * "About" footer for the Home screen. Lives below all primary content as a
@@ -36,7 +37,7 @@ export function AboutCard() {
         return;
       }
       toast.success(t('about.updateAvailable', { version: update.version }));
-      await update.downloadAndInstall();
+      await installAppUpdate();
       await relaunch();
     } catch (e) {
       toast.error(t('about.updateCheckFailed', { error: e instanceof Error ? e.message : String(e) }));

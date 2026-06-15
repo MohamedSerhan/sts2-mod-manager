@@ -28,3 +28,21 @@ test('release workflow does not publish or recommend MSI as a Windows path', () 
   assert.doesNotMatch(workflow, /\.msi\b/i);
   assert.doesNotMatch(workflow, /Alternative MSI installer/i);
 });
+
+test('Windows app updates pin NSIS to the currently running install directory', () => {
+  const rust = read('src-tauri/src/app_update.rs');
+  assert.match(rust, /std::env::current_exe\(\)/);
+  assert.match(rust, /OsString::from\("\/D="\)/);
+  assert.match(rust, /builder\.installer_arg\(arg\)/);
+  assert.match(read('src-tauri/src/lib.rs'), /app_update::install_app_update/);
+  assert.match(read('src-tauri/src/dev_builds.rs'), /pin_current_nsis_install_dir\(app\.updater_builder\(\)\)/);
+  assert.match(read('src/hooks/useTauri.ts'), /invoke\('install_app_update'\)/);
+});
+
+test('user-facing update install buttons do not bypass the pinned backend installer', () => {
+  for (const file of ['src/App.tsx', 'src/components/AboutCard.tsx', 'src/views/Settings.tsx']) {
+    const source = read(file);
+    assert.match(source, /installAppUpdate\(\)/, `${file} must use installAppUpdate()`);
+    assert.doesNotMatch(source, /\.downloadAndInstall\(/, `${file} must not install via JS updater resource`);
+  }
+});

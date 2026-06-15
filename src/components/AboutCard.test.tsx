@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 
 import { AboutCard } from './AboutCard';
 import { AllProviders } from '../__test__/providers';
-import { getInvokeCalls, setMockAppVersion } from '../__test__/setup';
+import { getInvokeCalls, registerInvokeHandler, setMockAppVersion } from '../__test__/setup';
 import { FEEDBACK_NEXUS_POSTS_URL } from '../lib/nexusUrl';
 
 /** Wrap in the full provider stack so DiagnosticBundle's useApp resolves. */
@@ -157,6 +157,7 @@ describe('<AboutCard>', () => {
     const updater = await import('@tauri-apps/plugin-updater');
     const proc = await import('@tauri-apps/plugin-process');
     const downloadAndInstall = vi.fn(async () => {});
+    registerInvokeHandler('install_app_update', () => null);
     (updater.check as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       version: '2.0.0',
       currentVersion: '1.2.3',
@@ -168,7 +169,8 @@ describe('<AboutCard>', () => {
     await waitFor(() => {
       expect(screen.getByText(/v2\.0\.0 available — installing/)).toBeInTheDocument();
     });
-    expect(downloadAndInstall).toHaveBeenCalled();
+    expect(getInvokeCalls().some((c) => c.cmd === 'install_app_update')).toBe(true);
+    expect(downloadAndInstall).not.toHaveBeenCalled();
     expect(proc.relaunch).toHaveBeenCalled();
   });
 

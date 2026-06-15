@@ -182,8 +182,7 @@ fn validate_manifest_url(manifest_url: &str) -> Result<url::Url, String> {
 pub async fn switch_dev_build(app: tauri::AppHandle, manifest_url: String) -> Result<(), String> {
     use tauri_plugin_updater::UpdaterExt;
     let url = validate_manifest_url(&manifest_url)?;
-    let updater = app
-        .updater_builder()
+    let updater = crate::app_update::pin_current_nsis_install_dir(app.updater_builder())
         .endpoints(vec![url])
         .map_err(|e| format!("Updater endpoint error: {e}"))?
         .version_comparator(|_current, _update| true)

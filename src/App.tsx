@@ -46,7 +46,7 @@ import { HomeView } from './views/Home';
 import { ModsView } from './views/Mods';
 import { ProfilesView } from './views/Profiles';
 import { SettingsView } from './views/Settings';
-import { launchGame, launchVanilla, installModFromFile, listProfiles, openExternalUrl, setProfileModMembership, toggleMod } from './hooks/useTauri';
+import { launchGame, launchVanilla, installAppUpdate, installModFromFile, listProfiles, openExternalUrl, setProfileModMembership, toggleMod } from './hooks/useTauri';
 import type { Profile } from './types';
 
 // View IDs include legacy ones ('browse-mods', 'browse-modpacks')
@@ -457,7 +457,7 @@ function AppInner() {
     if (!appUpdate || updateInstalling) return;
     setUpdateInstalling(true);
     try {
-      await appUpdate.downloadAndInstall();
+      await installAppUpdate();
       toast.success(t('app.toast.updateInstalled'));
       await relaunch();
     } catch (e) {

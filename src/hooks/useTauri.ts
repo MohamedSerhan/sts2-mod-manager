@@ -49,6 +49,10 @@ export async function logFrontendError(message: string): Promise<void> {
   return invoke('log_frontend_error', { message });
 }
 
+export async function installAppUpdate(): Promise<void> {
+  return invoke('install_app_update');
+}
+
 // ── Launch Mode ────────────────────────────────────────────────────────────
 
 /**

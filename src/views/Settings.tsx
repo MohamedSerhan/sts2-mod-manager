@@ -54,6 +54,7 @@ import {
   restoreBackup,
   deleteBackup,
   getLaunchMode,
+  installAppUpdate,
   setLaunchMode,
   getNexusDownloadDir,
   setNexusDownloadDir,
@@ -420,7 +421,7 @@ export function SettingsView({
         return;
       }
       toast.success(t('settings.advanced.versionAvailable', { version: update.version }));
-      await update.downloadAndInstall();
+      await installAppUpdate();
       await relaunch();
     } catch (e) {
       toast.error(t('settings.advanced.updateCheckFailed', { error: e instanceof Error ? e.message : String(e) }));

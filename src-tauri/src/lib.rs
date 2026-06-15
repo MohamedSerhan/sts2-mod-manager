@@ -1,3 +1,4 @@
+mod app_update;
 mod backup;
 mod bug_report;
 mod download;
@@ -388,6 +389,7 @@ pub fn run() {
             updater::audit_mod_versions,
             dev_builds::list_dev_builds,
             dev_builds::switch_dev_build,
+            app_update::install_app_update,
             quick_add::quick_add_mod,
             // Mod source linking
             mod_sources::get_mod_sources,

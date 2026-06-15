@@ -1152,10 +1152,11 @@ describe('<App>', () => {
     });
   });
 
-  it('app-update banner Install & Restart calls downloadAndInstall + relaunch', async () => {
+  it('app-update banner Install & Restart invokes backend install + relaunch', async () => {
     const updater = await import('@tauri-apps/plugin-updater');
     const proc = await import('@tauri-apps/plugin-process');
     const downloadAndInstall = vi.fn(async () => {});
+    registerInvokeHandler('install_app_update', () => null);
     (updater.check as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       version: '9.9.9',
       currentVersion: '1.3.4',
@@ -1168,19 +1169,21 @@ describe('<App>', () => {
     });
     await user.click(screen.getByRole('button', { name: /Install & Restart/i }));
     await waitFor(() => {
-      expect(downloadAndInstall).toHaveBeenCalled();
+      expect(getInvokeCalls().some((c) => c.cmd === 'install_app_update')).toBe(true);
       expect(proc.relaunch).toHaveBeenCalled();
     });
+    expect(downloadAndInstall).not.toHaveBeenCalled();
     // Success toast from the install path.
     expect(screen.getByText(/Update installed\. Restarting/)).toBeInTheDocument();
   });
 
   it('app-update banner Install & Restart surfaces error toast on failure', async () => {
     const updater = await import('@tauri-apps/plugin-updater');
+    registerInvokeHandler('install_app_update', () => { throw new Error('disk full'); });
     (updater.check as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       version: '9.9.9',
       currentVersion: '1.3.4',
-      downloadAndInstall: vi.fn(async () => { throw new Error('disk full'); }),
+      downloadAndInstall: vi.fn(async () => {}),
     } as never);
     const user = userEvent.setup();
     render(<App />);
@@ -2293,13 +2296,14 @@ describe('<App>', () => {
     (updater.check as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       version: '9.9.9',
       currentVersion: '1.3.4',
-      downloadAndInstall: vi.fn(async () => { throw 'rough-install'; }),
+      downloadAndInstall: vi.fn(async () => {}),
     } as never);
     const user = userEvent.setup();
     render(<App />);
     await waitFor(() => {
       expect(screen.getByText(/Mod Manager v9\.9\.9 is available/)).toBeInTheDocument();
     });
+    registerInvokeHandler('install_app_update', () => { throw 'rough-install'; });
     await user.click(screen.getByRole('button', { name: /Install & Restart/i }));
     await waitFor(() => {
       expect(screen.getByText(/Update failed: rough-install/)).toBeInTheDocument();

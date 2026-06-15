@@ -51,7 +51,8 @@
     "longDescription": "A cross-platform mod manager for Slay the Spire 2 that lets you install, manage, and share mod profiles with friends via shareable links.",
     "windows": {
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "installerHooks": "nsis-hooks.nsh"
       }
     }
   },

@@ -10,6 +10,7 @@ test('release config builds NSIS/current-user Windows installers and not MSI', (
   const conf = JSON.parse(read('src-tauri/tauri.conf.json'));
   assert.deepEqual(conf.bundle.targets, ['nsis', 'app', 'dmg', 'deb', 'rpm', 'appimage']);
   assert.equal(conf.bundle.windows.nsis.installMode, 'currentUser');
+  assert.equal(conf.bundle.windows.nsis.installerHooks, 'nsis-hooks.nsh');
 });
 
 test('updater manifest refuses MSI fallback for Windows releases', () => {
@@ -37,6 +38,15 @@ test('Windows app updates pin NSIS to the currently running install directory', 
   assert.match(read('src-tauri/src/lib.rs'), /app_update::install_app_update/);
   assert.match(read('src-tauri/src/dev_builds.rs'), /pin_current_nsis_install_dir\(app\.updater_builder\(\)\)/);
   assert.match(read('src/hooks/useTauri.ts'), /invoke\('install_app_update'\)/);
+});
+
+test('Windows setup EXE corrects stale install metadata for updates from old 1.7 builds', () => {
+  const hooks = read('src-tauri/nsis-hooks.nsh');
+  assert.match(hooks, /NSIS_HOOK_PREINSTALL/);
+  assert.match(hooks, /\$UpdateMode\s*==\s*1/);
+  assert.match(hooks, /\$LOCALAPPDATA\\\$\{PRODUCTNAME\}/);
+  assert.match(hooks, /StrCpy\s+\$INSTDIR\s+"\$LOCALAPPDATA\\\$\{PRODUCTNAME\}"/);
+  assert.match(hooks, /SetOutPath\s+"\$INSTDIR"/);
 });
 
 test('user-facing update install buttons do not bypass the pinned backend installer', () => {

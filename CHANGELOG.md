@@ -37,6 +37,14 @@ _Changes are tracked as fragments in [`changelog.d/`](changelog.d/) and assemble
 
 ---
 
+## [1.7.6] - 2026-06-15
+
+### Fixed
+
+- fixed: Nexus installs now keep each mod's source link tied to the correct Nexus file instead of letting a different mod overwrite it.
+- fixed: Saving mod sources now keeps linked updates, displayed mod versions, and manager-only display names in sync, and display errors show a recovery screen instead of a blank window.
+- fixed: Windows updates now use the same setup installer path as normal downloads, preventing parallel installs from reopening an older app.
+
 ## [1.7.5] - 2026-06-14
 
 ### Fixed

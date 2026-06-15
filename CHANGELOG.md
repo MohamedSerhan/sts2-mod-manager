@@ -37,6 +37,12 @@ _Changes are tracked as fragments in [`changelog.d/`](changelog.d/) and assemble
 
 ---
 
+## [1.7.9] - 2026-06-15
+
+### Fixed
+
+- Windows updates now keep the app folder they can identify while still recovering older 1.7 updates that had stale Windows install records.
+
 ## [1.7.8] - 2026-06-15
 
 ### Fixed

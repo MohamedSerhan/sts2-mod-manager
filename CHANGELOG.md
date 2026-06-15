@@ -37,6 +37,12 @@ _Changes are tracked as fragments in [`changelog.d/`](changelog.d/) and assemble
 
 ---
 
+## [1.7.7] - 2026-06-15
+
+### Fixed
+
+- Windows app updates now install over the copy you launched, so old install records cannot leave shortcuts pointing at a missing app.
+
 ## [1.7.6] - 2026-06-15
 
 ### Fixed

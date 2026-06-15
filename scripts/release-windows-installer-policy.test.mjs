@@ -40,10 +40,12 @@ test('Windows app updates pin NSIS to the currently running install directory', 
   assert.match(read('src/hooks/useTauri.ts'), /invoke\('install_app_update'\)/);
 });
 
-test('Windows setup EXE corrects stale install metadata for updates from old 1.7 builds', () => {
+test('Windows setup EXE corrects stale install metadata only when no install dir is pinned', () => {
   const hooks = read('src-tauri/nsis-hooks.nsh');
   assert.match(hooks, /NSIS_HOOK_PREINSTALL/);
+  assert.match(hooks, /GetOptions\}\s+\$CMDLINE\s+"\/D="/);
   assert.match(hooks, /\$UpdateMode\s*==\s*1/);
+  assert.match(hooks, /\$\{AndIf\}\s+\$\{Errors\}/);
   assert.match(hooks, /\$LOCALAPPDATA\\\$\{PRODUCTNAME\}/);
   assert.match(hooks, /StrCpy\s+\$INSTDIR\s+"\$LOCALAPPDATA\\\$\{PRODUCTNAME\}"/);
   assert.match(hooks, /SetOutPath\s+"\$INSTDIR"/);

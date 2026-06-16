@@ -146,12 +146,11 @@ function seedFixtureGameTree({ game, config, cache }) {
 }
 
 /**
- * Tears down everything inside the fixture dirs and re-seeds the
- * tree. Reuses the same paths the running app captured at startup,
- * so STS2_FIXTURE_GAME_PATH / STS2_CONFIG_DIR / STS2_CACHE_DIR remain
- * valid. Called before each STATE_SPECS entry so a stateful spec
- * always sees the pristine fixture state regardless of which mutating
- * specs ran before it.
+ * Tears down the fixture game tree and re-seeds it. Reuses the same paths the
+ * running app captured at startup, so STS2_FIXTURE_GAME_PATH / STS2_CONFIG_DIR
+ * / STS2_CACHE_DIR remain valid. Called before each STATE_SPECS entry so a
+ * stateful spec always sees the pristine game files regardless of which
+ * mutating specs ran before it.
  *
  * NOTE: the running app holds an in-memory snapshot of mods/profiles
  * that this disk-level reset doesn't reach. Specs that need the app
@@ -161,12 +160,10 @@ function seedFixtureGameTree({ game, config, cache }) {
  */
 function rebuildFixtureTree() {
   if (!FIXTURE_DIRS) return;
-  // Keep the fixture game directory itself alive while the packaged app is
-  // running. Removing the root briefly invalidates STS2_FIXTURE_GAME_PATH and
-  // can race an in-flight scan into a persistent "game not found" UI state.
-  for (const d of [FIXTURE_DIRS.config, FIXTURE_DIRS.cache]) {
-    emptyDir(d);
-  }
+  // Keep config/cache alive while the packaged app is running. The app captures
+  // these paths at startup and stores runtime state there; wiping them mid-run
+  // can leave the next spec in a persistent "STS2 not found" state even though
+  // the fixture game directory still exists.
   emptyDir(join(FIXTURE_DIRS.game, 'mods'));
   emptyDir(join(FIXTURE_DIRS.game, 'mods_disabled'));
   seedFixtureGameTree({
@@ -1384,12 +1381,19 @@ async function createModpackNamed(driver, modpackName) {
  */
 async function activateModpack(driver, modpackName) {
   await navToModpacks(driver);
-  const card = await waitForElement(
+  const cardName = await waitForElement(
     driver,
     By.xpath(`//*[contains(@class,'gf-modpack-card-name') and normalize-space(.)='${modpackName}']`),
     `modpack card "${modpackName}"`,
   );
-  await card.click();
+  const card = await cardName.findElement(By.xpath("ancestor::*[contains(@class,'gf-modpack-card')][1]"));
+  await driver.executeScript('arguments[0].scrollIntoView({ block: "center", inline: "center" });', card);
+  await delay(150);
+  try {
+    await card.click();
+  } catch {
+    await driver.executeScript('arguments[0].click();', card);
+  }
   const switchBtn = await waitForElement(
     driver,
     By.xpath(

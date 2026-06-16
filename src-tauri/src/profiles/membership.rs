@@ -420,14 +420,31 @@ where
     Ok(backup_path)
 }
 
+fn parse_settings_save(raw: &str, settings_path: &Path) -> Result<serde_json::Value> {
+    let mut stream = serde_json::Deserializer::from_str(raw).into_iter::<serde_json::Value>();
+    let settings = stream
+        .next()
+        .ok_or_else(|| AppError::InvalidProfile("Invalid settings.save JSON: EOF".into()))?
+        .map_err(|e| AppError::InvalidProfile(format!("Invalid settings.save JSON: {}", e)))?;
+
+    let trailing = &raw[stream.byte_offset()..];
+    if !trailing.trim().is_empty() {
+        log::warn!(
+            "settings.save at {} contains trailing data after the first JSON object; rewriting will discard the trailing data",
+            settings_path.display()
+        );
+    }
+
+    Ok(settings)
+}
+
 pub(crate) fn write_profile_load_order_to_settings_file(
     profile: &Profile,
     settings_path: &Path,
     extra_mods: &[ModInfo],
 ) -> Result<()> {
     let raw = fs::read_to_string(settings_path)?;
-    let mut settings: serde_json::Value = serde_json::from_str(&raw)
-        .map_err(|e| AppError::InvalidProfile(format!("Invalid settings.save JSON: {}", e)))?;
+    let mut settings = parse_settings_save(&raw, settings_path)?;
 
     if !settings.is_object() {
         return Err(AppError::InvalidProfile(
@@ -1372,6 +1389,45 @@ mod profile_membership_tests {
                     .to_string_lossy()
                     .starts_with("settings.save.sts2mm-bak")),
             "a successful settings.save rewrite must remove its temporary backup"
+        );
+    }
+
+    #[test]
+    fn write_profile_load_order_to_settings_save_repairs_trailing_fragment() {
+        let tmp = tempfile::tempdir().unwrap();
+        let settings_path = tmp.path().join("settings.save");
+        fs::write(
+            &settings_path,
+            r#"{
+  "schema_version": 5,
+  "mod_settings": null,
+  "volume_master": 0.5
+}
+  "schema_version": 5,
+  "volume_master": 0.5
+}"#,
+        )
+        .unwrap();
+
+        let mut profile = empty_profile("Stable");
+        profile.mods.push(profile_mod_entry(
+            "Card Art Editor",
+            "CardArtEditor",
+            "2.0.0",
+            true,
+        ));
+
+        write_profile_load_order_to_settings_file(&profile, &settings_path, &[]).unwrap();
+
+        let saved_raw = fs::read_to_string(&settings_path).unwrap();
+        let saved: serde_json::Value = serde_json::from_str(&saved_raw).unwrap();
+        let mod_list = saved["mod_settings"]["mod_list"].as_array().unwrap();
+        assert_eq!(mod_list[0]["id"].as_str(), Some("CardArtEditor"));
+        assert_eq!(saved["schema_version"].as_i64(), Some(5));
+        assert!(
+            !saved_raw.contains("}\n  \"schema_version\"")
+                && !saved_raw.contains("}\r\n  \"schema_version\""),
+            "rewrite should not leave a stale top-level fragment after the root object"
         );
     }
 

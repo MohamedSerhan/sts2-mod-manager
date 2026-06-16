@@ -128,6 +128,17 @@ See `### Translations` in README.md. The routing helpers in
 `src/i18n/language.ts` already handle locale-detection fallbacks — most
 new languages need only a JSON file + a `SUPPORTED_LANGUAGES` entry.
 
+## Context hygiene for agents
+
+Keep durable memory and large files as navigation aids, not as a substitute for
+current evidence. For PR, release, QA, issue, and GitHub state, re-check the
+live repo, local diff, and relevant commands before claiming something is done.
+
+Prefer targeted reads over loading whole large files into context. Start with
+`rg`, `git diff`, file outlines, and narrow line ranges for large modules,
+tests, locale files, lockfiles, screenshots, generated assets, and QA runners.
+Open the full file only when the surrounding context is genuinely needed.
+
 ## Other conventions
 
 - All Tauri commands are registered in `src-tauri/src/lib.rs` and bound

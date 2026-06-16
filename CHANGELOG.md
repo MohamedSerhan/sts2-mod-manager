@@ -37,6 +37,12 @@ _Changes are tracked as fragments in [`changelog.d/`](changelog.d/) and assemble
 
 ---
 
+## [1.7.11] - 2026-06-16
+
+### Fixed
+
+- Fixed an issue where installing a Nexus mod could attach it to the wrong Nexus page and show updates for another mod.
+
 ## [1.7.10] - 2026-06-15
 
 ### Fixed

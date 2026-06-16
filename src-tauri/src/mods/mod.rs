@@ -807,15 +807,6 @@ fn attach_pending_nexus_source_for_file(
         s.pending_nexus_installs
             .retain(|p| Instant::now().duration_since(p.queued_at) < Duration::from_secs(30 * 60));
 
-        let stem_lower = file_name.to_lowercase();
-        let installed_norm = normalize_pending_nexus_name(&installed.name);
-        let single_pending_filename_match = s.pending_nexus_installs.len() == 1
-            && pending_nexus_filename_matches_installed(
-                file_name,
-                &installed.name,
-                installed_folder,
-            );
-
         let idx = s.pending_nexus_installs.iter().position(|p| {
             if crate::mod_sources::saved_nexus_source_conflicts(
                 config_path,
@@ -826,16 +817,19 @@ fn attach_pending_nexus_source_for_file(
             ) {
                 return false;
             }
-            let id_marker = format!("-{}-", p.mod_id);
-            if stem_lower.contains(&id_marker) || stem_lower.ends_with(&format!("-{}", p.mod_id)) {
+            if pending_nexus_filename_contains_id(file_name, p.mod_id)
+                || p.file_id
+                    .is_some_and(|file_id| pending_nexus_filename_contains_id(file_name, file_id))
+            {
                 return true;
             }
-            let pending_norm = normalize_pending_nexus_name(&p.mod_name);
-            (!pending_norm.is_empty()
-                && (installed_norm.contains(&pending_norm)
-                    || pending_norm.contains(&installed_norm)
-                    || pending_nexus_identities_overlap(&installed.name, &p.mod_name)))
-                || single_pending_filename_match
+            pending_nexus_name_matches_installed(
+                &p.mod_name,
+                &installed.name,
+                installed_folder,
+                installed.mod_id.as_deref(),
+                file_name,
+            )
         });
 
         idx.map(|i| s.pending_nexus_installs.remove(i))
@@ -896,21 +890,52 @@ fn pending_nexus_identities_overlap(a: &str, b: &str) -> bool {
     !a.is_empty() && a == b
 }
 
-fn pending_nexus_filename_matches_installed(
-    file_name: &str,
+fn pending_nexus_labels_match(a: &str, b: &str) -> bool {
+    let a_norm = normalize_pending_nexus_name(a);
+    let b_norm = normalize_pending_nexus_name(b);
+    !a_norm.is_empty() && a_norm == b_norm || pending_nexus_identities_overlap(a, b)
+}
+
+fn pending_nexus_name_matches_installed(
+    pending_name: &str,
     installed_name: &str,
     installed_folder: Option<&str>,
+    installed_mod_id: Option<&str>,
+    file_name: &str,
 ) -> bool {
+    if pending_name.trim().is_empty() {
+        return false;
+    }
     let stem = Path::new(file_name)
         .file_stem()
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
     let clean_stem = strip_pending_nexus_suffix(&stem);
-    pending_nexus_identities_overlap(&clean_stem, installed_name)
-        || installed_folder
-            .map(|folder| pending_nexus_identities_overlap(&clean_stem, folder))
-            .unwrap_or(false)
+
+    let matches = [
+        Some(installed_name),
+        installed_folder,
+        installed_mod_id,
+        Some(clean_stem.as_str()),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|candidate| pending_nexus_labels_match(candidate, pending_name));
+    matches
+}
+
+fn pending_nexus_filename_contains_id(file_name: &str, id: u64) -> bool {
+    let stem = Path::new(file_name)
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_lowercase();
+    let id = id.to_string();
+    stem == id
+        || stem.starts_with(&format!("{}-", id))
+        || stem.ends_with(&format!("-{}", id))
+        || stem.contains(&format!("-{}-", id))
 }
 
 fn strip_pending_nexus_suffix(stem: &str) -> String {
@@ -989,6 +1014,34 @@ mod pending_nexus_manual_install_tests {
     use super::*;
     use crate::state::{create_app_state, PendingNexusInstall};
 
+    fn mod_info(name: &str, folder_name: &str, mod_id: Option<&str>) -> ModInfo {
+        ModInfo {
+            name: name.into(),
+            version: "unknown".into(),
+            description: String::new(),
+            enabled: true,
+            files: vec![],
+            source: None,
+            hash: None,
+            dependencies: vec![],
+            size_bytes: 0,
+            folder_name: Some(folder_name.into()),
+            mod_id: mod_id.map(str::to_string),
+            github_url: None,
+            github_auto_detected: false,
+            nexus_url: None,
+            custom_url: None,
+            pinned: false,
+            min_game_version: None,
+            author: None,
+            note: None,
+            tags: vec![],
+            display_name: None,
+            display_description: None,
+            bundle_members: vec![],
+        }
+    }
+
     #[test]
     fn pending_nexus_identity_does_not_merge_lite_variants() {
         assert!(
@@ -996,12 +1049,8 @@ mod pending_nexus_manual_install_tests {
             "variant suffixes must not collapse separate manual-install source hints"
         );
         assert!(
-            !pending_nexus_filename_matches_installed(
-                "BetterSpire2-123-1-0-0-1780000000.zip",
-                "BetterSpire2 Lite",
-                Some("BetterSpire2Lite"),
-            ),
-            "Nexus filename matching must not treat BetterSpire2 as BetterSpire2 Lite"
+            !pending_nexus_labels_match("BetterSpire2", "BetterSpire2 Lite"),
+            "Nexus page-name matching must not treat BetterSpire2 as BetterSpire2 Lite"
         );
     }
 
@@ -1059,6 +1108,102 @@ mod pending_nexus_manual_install_tests {
             entry.nexus_url.as_deref(),
             Some("https://www.nexusmods.com/slaythespire2/mods/1073")
         );
+        assert!(state.lock().unwrap().pending_nexus_installs.is_empty());
+    }
+
+    #[test]
+    fn manual_archive_install_does_not_consume_unrelated_single_pending_nexus_hint() {
+        let state = create_app_state();
+        {
+            let mut s = state.lock().unwrap();
+            s.pending_nexus_installs.push(PendingNexusInstall {
+                mod_name: "LizardSilent".into(),
+                nexus_url: "https://www.nexusmods.com/slaythespire2/mods/1264".into(),
+                game_domain: "slaythespire2".into(),
+                mod_id: 1264,
+                file_id: None,
+                queued_at: Instant::now(),
+            });
+        }
+        let config = tempfile::tempdir().unwrap();
+        let installed = mod_info("ATA Merchant", "ATA_Merchant", Some("ATA_Merchant"));
+
+        attach_pending_nexus_source_for_file(
+            &installed,
+            Path::new("ATA Merchant-900-0-1-5-1780625182.zip"),
+            config.path(),
+            &state,
+        );
+
+        let sources = crate::mod_sources::load_sources(config.path());
+        assert!(
+            sources.mods.get("ATA_Merchant").is_none(),
+            "unrelated Nexus 1264 hint must not be attached to Nexus 900 install"
+        );
+        assert_eq!(
+            state.lock().unwrap().pending_nexus_installs.len(),
+            1,
+            "unrelated pending hint must not be consumed"
+        );
+    }
+
+    #[test]
+    fn manual_archive_install_consumes_clean_lizardsilent_hint_by_folder_name() {
+        let state = create_app_state();
+        {
+            let mut s = state.lock().unwrap();
+            s.pending_nexus_installs.push(PendingNexusInstall {
+                mod_name: "LizardSilent".into(),
+                nexus_url: "https://www.nexusmods.com/slaythespire2/mods/1264".into(),
+                game_domain: "slaythespire2".into(),
+                mod_id: 1264,
+                file_id: None,
+                queued_at: Instant::now(),
+            });
+        }
+        let config = tempfile::tempdir().unwrap();
+        let installed = mod_info("Lizard Silent Skin", "LizardSilent", Some("LizardSilent"));
+
+        attach_pending_nexus_source_for_file(
+            &installed,
+            Path::new("LizardSilent.zip"),
+            config.path(),
+            &state,
+        );
+
+        let sources = crate::mod_sources::load_sources(config.path());
+        let entry = sources.mods.get("LizardSilent").unwrap();
+        assert_eq!(entry.nexus_mod_id, Some(1264));
+        assert!(state.lock().unwrap().pending_nexus_installs.is_empty());
+    }
+
+    #[test]
+    fn manual_archive_install_consumes_ata_merchant_hint_by_nexus_mod_id_filename() {
+        let state = create_app_state();
+        {
+            let mut s = state.lock().unwrap();
+            s.pending_nexus_installs.push(PendingNexusInstall {
+                mod_name: "Untranslated Nexus Title".into(),
+                nexus_url: "https://www.nexusmods.com/slaythespire2/mods/900".into(),
+                game_domain: "slaythespire2".into(),
+                mod_id: 900,
+                file_id: None,
+                queued_at: Instant::now(),
+            });
+        }
+        let config = tempfile::tempdir().unwrap();
+        let installed = mod_info("ATA Merchant", "ATA_Merchant", Some("ATA_Merchant"));
+
+        attach_pending_nexus_source_for_file(
+            &installed,
+            Path::new("ATA Merchant-900-0-1-5-1780625182.zip"),
+            config.path(),
+            &state,
+        );
+
+        let sources = crate::mod_sources::load_sources(config.path());
+        let entry = sources.mods.get("ATA_Merchant").unwrap();
+        assert_eq!(entry.nexus_mod_id, Some(900));
         assert!(state.lock().unwrap().pending_nexus_installs.is_empty());
     }
 

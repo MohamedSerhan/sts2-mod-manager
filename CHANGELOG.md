@@ -37,6 +37,12 @@ _Changes are tracked as fragments in [`changelog.d/`](changelog.d/) and assemble
 
 ---
 
+## [1.7.10] - 2026-06-15
+
+### Fixed
+
+- Fixed load order saves so older damaged game settings are cleaned up and active modpacks can apply their order again.
+
 ## [1.7.9] - 2026-06-15
 
 ### Fixed

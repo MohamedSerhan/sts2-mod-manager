@@ -584,6 +584,7 @@ export function LibraryTable({
       await setProfileModMembership(
         modpackName,
         row.name,
+        row.mod_version_id ?? null,
         row.folder_name,
         row.mod_id,
         nextIncluded,
@@ -664,6 +665,7 @@ export function LibraryTable({
         await setProfileModMembership(
           modpackName,
           row.name,
+          row.mod_version_id ?? null,
           row.folder_name,
           row.mod_id,
           true,

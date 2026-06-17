@@ -65,6 +65,7 @@ pub(crate) fn profile_membership_matrix(
     let mut installed_mods =
         merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
     crate::mod_sources::enrich_mods_with_sources(&mut installed_mods, config_path);
+    crate::mod_versions::enrich_mods_with_versions(&mut installed_mods, config_path);
     let mods = installed_mods
         .into_iter()
         .map(|installed| {
@@ -87,6 +88,7 @@ pub(crate) fn profile_membership_matrix(
                 .collect();
 
             ProfileMembershipMod {
+                mod_version_id: installed.mod_version_id,
                 name: installed.name,
                 version: installed.version,
                 folder_name: installed.folder_name,
@@ -107,6 +109,7 @@ pub(crate) fn profile_membership_matrix(
 pub(crate) fn set_profile_mod_membership_from_paths(
     profile_name: &str,
     mod_name: &str,
+    mod_version_id: Option<&str>,
     folder_name: Option<&str>,
     mod_id: Option<&str>,
     included: bool,
@@ -130,13 +133,27 @@ pub(crate) fn set_profile_mod_membership_from_paths(
         let mut installed_mods =
             merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
         crate::mod_sources::enrich_mods_with_sources(&mut installed_mods, config_path);
+        crate::mod_versions::enrich_mods_with_versions(&mut installed_mods, config_path);
+        let source_match_count = source_hint.as_ref().map_or(0, |hint| {
+            installed_mods
+                .iter()
+                .filter(|m| crate::mod_sources::mod_info_source_matches_entry(m, hint))
+                .count()
+        });
         let installed = installed_mods
-            .into_iter()
+            .iter()
             .find(|m| {
-                installed_mod_matches_target(m, mod_name, folder_name, mod_id)
-                    || source_hint.as_ref().is_some_and(|hint| {
-                        crate::mod_sources::mod_info_source_matches_entry(m, hint)
-                    })
+                installed_mod_matches_target(m, mod_name, mod_version_id, folder_name, mod_id)
+            })
+            .or_else(|| {
+                if source_match_count != 1 {
+                    return None;
+                }
+                source_hint.as_ref().and_then(|hint| {
+                    installed_mods
+                        .iter()
+                        .find(|m| crate::mod_sources::mod_info_source_matches_entry(m, hint))
+                })
             })
             .ok_or_else(|| {
                 AppError::ModNotFound(format!(
@@ -144,21 +161,47 @@ pub(crate) fn set_profile_mod_membership_from_paths(
                     mod_name
                 ))
             })?;
-        let next_entry = profile_mod_from_installed(&installed);
-        if let Some(existing) = profile.mods.iter_mut().find(|pm| {
-            profile_mod_matches_target(pm, mod_name, folder_name, mod_id)
-                || source_hint.as_ref().is_some_and(|hint| {
-                    crate::mod_sources::profile_source_matches_entry(pm.source.as_deref(), hint)
+        let next_entry = profile_mod_from_installed(installed);
+        let existing_index = profile
+            .mods
+            .iter()
+            .position(|pm| {
+                profile_mod_matches_target(pm, mod_name, mod_version_id, folder_name, mod_id)
+            })
+            .or_else(|| {
+                if source_match_count != 1 {
+                    return None;
+                }
+                source_hint.as_ref().and_then(|hint| {
+                    let matches = profile
+                        .mods
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, pm)| {
+                            crate::mod_sources::profile_source_matches_entry(
+                                pm.source.as_deref(),
+                                hint,
+                            )
+                        })
+                        .map(|(index, _)| index)
+                        .collect::<Vec<_>>();
+                    if matches.len() == 1 {
+                        Some(matches[0])
+                    } else {
+                        None
+                    }
                 })
-        }) {
+            });
+        if let Some(index) = existing_index {
+            let existing = &mut profile.mods[index];
             *existing = next_entry;
         } else {
             profile.mods.push(next_entry);
         }
     } else {
-        profile
-            .mods
-            .retain(|pm| !profile_mod_matches_target(pm, mod_name, folder_name, mod_id));
+        profile.mods.retain(|pm| {
+            !profile_mod_matches_target(pm, mod_name, mod_version_id, folder_name, mod_id)
+        });
     }
 
     profile.updated_at = chrono::Utc::now();
@@ -258,6 +301,14 @@ pub(crate) fn set_profile_mods_enabled_from_paths(
 }
 
 fn order_key_identity(key: &ProfileModOrderKey) -> String {
+    if let Some(id) = key
+        .mod_version_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        return format!("version:{id}");
+    }
     mod_key(&key.name, key.folder_name.as_deref(), key.mod_id.as_deref())
 }
 
@@ -321,6 +372,7 @@ pub(crate) fn set_profile_load_order_from_paths(
             profile_mod_matches_target(
                 pm,
                 &key.name,
+                key.mod_version_id.as_deref(),
                 key.folder_name.as_deref(),
                 key.mod_id.as_deref(),
             )
@@ -679,6 +731,7 @@ mod profile_membership_tests {
 
     fn profile_mod_entry(name: &str, folder: &str, version: &str, enabled: bool) -> ProfileMod {
         ProfileMod {
+            mod_version_id: None,
             name: name.into(),
             version: version.into(),
             source: Some(format!("github:example/{folder}")),
@@ -714,6 +767,7 @@ mod profile_membership_tests {
         // Manifest entry: DRIFTED folder_name but the same mod_id.
         let mut pack = empty_profile("Pack");
         pack.mods.push(ProfileMod {
+            mod_version_id: None,
             name: "Cool Mod".into(),
             version: "1.0.0".into(),
             source: None,
@@ -828,6 +882,7 @@ mod profile_membership_tests {
 
         let mut alpha = empty_profile("Alpha");
         alpha.mods.push(ProfileMod {
+            mod_version_id: None,
             name: "BaseLib".into(),
             version: "1.0.0".into(),
             source: None,
@@ -900,6 +955,7 @@ mod profile_membership_tests {
         let updated = set_profile_mod_membership_from_paths(
             "Stable",
             "Library Only",
+            None,
             Some("LibraryOnly"),
             Some("LibraryOnly"),
             true,
@@ -944,6 +1000,7 @@ mod profile_membership_tests {
         write_mod(&mods_path, "LibraryOnly", "Library Only", "1.2.3");
         let mut profile = empty_profile("Stable");
         profile.mods.push(ProfileMod {
+            mod_version_id: None,
             name: "Library Only".into(),
             version: "1.2.3".into(),
             source: None,
@@ -961,6 +1018,7 @@ mod profile_membership_tests {
         let updated = set_profile_mod_membership_from_paths(
             "Stable",
             "Library Only",
+            None,
             Some("LibraryOnly"),
             Some("LibraryOnly"),
             true,
@@ -990,6 +1048,7 @@ mod profile_membership_tests {
         write_mod(&mods_path, "LibraryOnly", "Library Only", "2.0.0");
         let mut profile = empty_profile("Stable");
         profile.mods.push(ProfileMod {
+            mod_version_id: None,
             name: "Library Only".into(),
             version: "1.2.3".into(),
             source: None,
@@ -1007,6 +1066,7 @@ mod profile_membership_tests {
         let updated = set_profile_mod_membership_from_paths(
             "Stable",
             "Library Only",
+            None,
             Some("LibraryOnly"),
             Some("LibraryOnly"),
             true,
@@ -1044,6 +1104,7 @@ mod profile_membership_tests {
         );
         let mut profile = empty_profile("Stable");
         profile.mods.push(ProfileMod {
+            mod_version_id: None,
             name: "Card Art Editor".into(),
             version: "1.0.0".into(),
             source: None,
@@ -1111,6 +1172,7 @@ mod profile_membership_tests {
             ("card_art_editor_v2", "2.0.0"),
         ] {
             profile.mods.push(ProfileMod {
+                mod_version_id: None,
                 name: "Card Art Editor".into(),
                 version: version.into(),
                 source: None,
@@ -1129,6 +1191,7 @@ mod profile_membership_tests {
         let updated = set_profile_mod_membership_from_paths(
             "Beta",
             "Card Art Editor",
+            None,
             Some("card_art_editor_v2"),
             Some("card_art_editor_v2"),
             false,
@@ -1176,6 +1239,7 @@ mod profile_membership_tests {
         let updated = set_profile_mod_membership_from_paths(
             "Solo Pack",
             "Flagellant 0.1.7-1073-0-1-7-1781082503",
+            None,
             Some("Flagellant 0.1.7-1073-0-1-7-1781082503"),
             None,
             true,
@@ -1194,6 +1258,70 @@ mod profile_membership_tests {
             None,
             "membership records the installed manifest data; publish backfills source from mod_sources"
         );
+    }
+
+    #[test]
+    fn set_profile_mod_membership_keeps_same_nexus_page_variants_distinct() {
+        let game_tmp = tempfile::tempdir().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let mods_path = game_tmp.path().join("mods");
+        let disabled_path = game_tmp.path().join("mods_disabled");
+        let profiles_path = config_tmp.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        write_mod(&mods_path, "Necro_Icons", "Necro Icons", "1.0.0");
+        write_mod(&mods_path, "Princess_Icons", "Princess Icons", "1.0.0");
+        for folder in ["Necro_Icons", "Princess_Icons"] {
+            crate::mod_sources::attach_nexus_source(
+                folder,
+                Some(folder),
+                "https://www.nexusmods.com/slaythespire2/mods/895".into(),
+                "slaythespire2".into(),
+                895,
+                config_tmp.path(),
+            );
+        }
+        save_profile(&empty_profile("Icons Pack"), &profiles_path).unwrap();
+
+        let updated = set_profile_mod_membership_from_paths(
+            "Icons Pack",
+            "Necro Icons",
+            None,
+            Some("Necro_Icons"),
+            Some("Necro_Icons"),
+            true,
+            Some("https://www.nexusmods.com/slaythespire2/mods/895"),
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config_tmp.path(),
+        )
+        .unwrap();
+        assert_eq!(updated.mods.len(), 1);
+
+        let updated = set_profile_mod_membership_from_paths(
+            "Icons Pack",
+            "Princess Icons",
+            None,
+            Some("Princess_Icons"),
+            Some("Princess_Icons"),
+            true,
+            Some("https://www.nexusmods.com/slaythespire2/mods/895"),
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config_tmp.path(),
+        )
+        .unwrap();
+
+        let folders = updated
+            .mods
+            .iter()
+            .map(|pm| pm.folder_name.as_deref().unwrap_or(""))
+            .collect::<Vec<_>>();
+        assert_eq!(folders, vec!["Necro_Icons", "Princess_Icons"]);
     }
 
     #[test]
@@ -1233,6 +1361,7 @@ mod profile_membership_tests {
         let err = set_profile_mod_membership_from_paths(
             "Friend Pack",
             "BaseLib",
+            None,
             Some("BaseLib"),
             Some("BaseLib"),
             true,
@@ -1273,11 +1402,13 @@ mod profile_membership_tests {
             "Stable",
             vec![
                 ProfileModOrderKey {
+                    mod_version_id: None,
                     name: "Card Art Editor".into(),
                     folder_name: Some("CardArtEditor".into()),
                     mod_id: Some("CardArtEditor".into()),
                 },
                 ProfileModOrderKey {
+                    mod_version_id: None,
                     name: "BaseLib".into(),
                     folder_name: Some("BaseLib".into()),
                     mod_id: Some("BaseLib".into()),
@@ -1338,6 +1469,7 @@ mod profile_membership_tests {
             .mods
             .push(profile_mod_entry("BaseLib", "BaseLib", "1.0.0", false));
         let pinned = vec![ModInfo {
+            mod_version_id: None,
             name: "Pinned Utility".into(),
             version: "1.0.0".into(),
             description: String::new(),

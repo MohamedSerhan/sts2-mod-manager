@@ -207,6 +207,7 @@ describe('<LibraryTable>', () => {
         args: {
           profileId: 'Stable',
           modName: 'NewMod',
+          modVersionId: null,
           folderName: 'NewMod',
           modId: 'NewMod',
           included: true,
@@ -414,6 +415,7 @@ describe('<LibraryTable>', () => {
         args: {
           profileId: 'Stable',
           modName: 'Idle',
+          modVersionId: null,
           folderName: 'Idle',
           modId: 'Idle',
           included: true,

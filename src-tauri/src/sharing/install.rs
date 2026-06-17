@@ -155,16 +155,21 @@ pub async fn install_shared_profile(
     // ── STEP 1: Download missing mods and restore version-mismatched mods ──
     let local_mods = crate::mods::scan_mods(&mods_path);
     let local_disabled = crate::mods::scan_disabled_mods(&disabled_path);
-    let all_on_disk: Vec<crate::mods::ModInfo> = local_mods
+    let mut all_on_disk: Vec<crate::mods::ModInfo> = local_mods
         .into_iter()
         .chain(local_disabled.into_iter())
         .collect();
+    crate::mod_sources::enrich_mods_with_sources(&mut all_on_disk, &config_path);
+    crate::mod_versions::enrich_mods_with_versions(&mut all_on_disk, &config_path);
 
     // Build a map from identifiers to on-disk mod info (for version comparison)
     let mut on_disk_by_id: std::collections::HashMap<String, &crate::mods::ModInfo> =
         std::collections::HashMap::new();
     for m in &all_on_disk {
         on_disk_by_id.insert(m.name.clone(), m);
+        if let Some(ref version_id) = m.mod_version_id {
+            on_disk_by_id.insert(version_id.clone(), m);
+        }
         if let Some(ref folder) = m.folder_name {
             on_disk_by_id.insert(folder.clone(), m);
         }
@@ -190,7 +195,8 @@ pub async fn install_shared_profile(
 
         // Find matching on-disk mod
         let on_disk_mod = on_disk_by_id
-            .get(&pm.name)
+            .get(pm.mod_version_id.as_deref().unwrap_or(""))
+            .or_else(|| on_disk_by_id.get(&pm.name))
             .or_else(|| pm.folder_name.as_ref().and_then(|f| on_disk_by_id.get(f)))
             .or_else(|| pm.mod_id.as_ref().and_then(|id| on_disk_by_id.get(id)))
             .copied();
@@ -239,15 +245,22 @@ pub async fn install_shared_profile(
                     pm.version
                 );
                 // Cache the current version before deleting (so user can switch back)
-                crate::mods::cache_mod_version(
-                    disk_mod,
-                    if disk_mod.enabled {
-                        &mods_path
-                    } else {
-                        &disabled_path
-                    },
+                let cache_base = if disk_mod.enabled {
+                    &mods_path
+                } else {
+                    &disabled_path
+                };
+                let mut disk_snapshot = disk_mod.clone();
+                if crate::mod_versions::cache_mod_version_by_id(
+                    &mut disk_snapshot,
+                    cache_base,
                     &cache_path,
-                );
+                    &config_path,
+                )
+                .is_none()
+                {
+                    crate::mods::cache_mod_version(disk_mod, cache_base, &cache_path);
+                }
                 // Delete old version
                 let base = if disk_mod.enabled {
                     &mods_path
@@ -290,9 +303,11 @@ pub async fn install_shared_profile(
                     // We need this to read its min_game_version field —
                     // download_bundle returns () so we don't have a ModInfo
                     // back. The fresh scan picks up the install correctly.
-                    let after = crate::mods::scan_mods(&mods_path);
+                    let mut after = crate::mods::scan_mods(&mods_path);
+                    crate::mod_sources::enrich_mods_with_sources(&mut after, &config_path);
+                    crate::mod_versions::enrich_mods_with_versions(&mut after, &config_path);
                     if let Some(installed) = after
-                        .iter()
+                        .iter_mut()
                         .find(|m| m.name == pm.name || Some(&m.name) == pm.folder_name.as_ref())
                     {
                         if crate::updater::install_is_incompatible(
@@ -315,6 +330,13 @@ pub async fn install_shared_profile(
                                 user_game_version: user_game_version.clone().unwrap_or_default(),
                             });
                             continue;
+                        }
+                        if let Some(shared_id) = pm.mod_version_id.as_deref() {
+                            crate::mod_versions::alias_shared_id(
+                                shared_id,
+                                installed,
+                                &config_path,
+                            );
                         }
                     }
                     log::info!("Installed bundled mod '{}'", pm.name);

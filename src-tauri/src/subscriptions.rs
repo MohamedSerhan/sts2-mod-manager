@@ -246,15 +246,35 @@ fn diff_profiles(
     local: &Profile,
     remote: &Profile,
 ) -> (Vec<String>, Vec<String>, Vec<ModVersionChange>) {
-    let local_mods: HashMap<&str, &str> = local
+    fn diff_key(m: &crate::profiles::ProfileMod) -> String {
+        m.mod_version_id
+            .as_ref()
+            .filter(|id| !id.trim().is_empty())
+            .map(|id| format!("id:{id}"))
+            .or_else(|| {
+                m.mod_id
+                    .as_ref()
+                    .filter(|id| !id.trim().is_empty())
+                    .map(|id| format!("mod_id:{}", id.to_lowercase()))
+            })
+            .or_else(|| {
+                m.folder_name
+                    .as_ref()
+                    .filter(|folder| !folder.trim().is_empty())
+                    .map(|folder| format!("folder:{}", folder.to_lowercase()))
+            })
+            .unwrap_or_else(|| format!("name:{}", m.name.to_lowercase()))
+    }
+
+    let local_mods: HashMap<String, (&str, &str)> = local
         .mods
         .iter()
-        .map(|m| (m.name.as_str(), m.version.as_str()))
+        .map(|m| (diff_key(m), (m.name.as_str(), m.version.as_str())))
         .collect();
-    let remote_mods: HashMap<&str, &str> = remote
+    let remote_mods: HashMap<String, (&str, &str)> = remote
         .mods
         .iter()
-        .map(|m| (m.name.as_str(), m.version.as_str()))
+        .map(|m| (diff_key(m), (m.name.as_str(), m.version.as_str())))
         .collect();
 
     let mut added = Vec::new();
@@ -262,14 +282,14 @@ fn diff_profiles(
     let mut updated = Vec::new();
 
     // Mods in remote but not in local = added
-    for (name, version) in &remote_mods {
-        match local_mods.get(name) {
-            None => added.push(name.to_string()),
-            Some(local_ver) if local_ver != version => {
+    for (key, (name, version)) in &remote_mods {
+        match local_mods.get(key) {
+            None => added.push((*name).to_string()),
+            Some((_, local_ver)) if local_ver != version => {
                 updated.push(ModVersionChange {
-                    name: name.to_string(),
-                    old_version: local_ver.to_string(),
-                    new_version: version.to_string(),
+                    name: (*name).to_string(),
+                    old_version: (*local_ver).to_string(),
+                    new_version: (*version).to_string(),
                 });
             }
             _ => {}
@@ -277,9 +297,9 @@ fn diff_profiles(
     }
 
     // Mods in local but not in remote = removed
-    for name in local_mods.keys() {
-        if !remote_mods.contains_key(name) {
-            removed.push(name.to_string());
+    for (key, (name, _)) in &local_mods {
+        if !remote_mods.contains_key(key) {
+            removed.push((*name).to_string());
         }
     }
 
@@ -553,16 +573,21 @@ async fn apply_subscription_update_inner(
     // ── STEP 1: Download missing mods and restore version-mismatched mods ──
     let local_mods = crate::mods::scan_mods(&mods_path);
     let local_disabled = crate::mods::scan_disabled_mods(&disabled_path);
-    let all_on_disk: Vec<crate::mods::ModInfo> = local_mods
+    let mut all_on_disk: Vec<crate::mods::ModInfo> = local_mods
         .into_iter()
         .chain(local_disabled.into_iter())
         .collect();
+    crate::mod_sources::enrich_mods_with_sources(&mut all_on_disk, &config_path);
+    crate::mod_versions::enrich_mods_with_versions(&mut all_on_disk, &config_path);
 
     // Build a map from identifiers to on-disk mod info (for version comparison)
     let mut on_disk_by_id: std::collections::HashMap<String, &crate::mods::ModInfo> =
         std::collections::HashMap::new();
     for m in &all_on_disk {
         on_disk_by_id.insert(m.name.clone(), m);
+        if let Some(ref version_id) = m.mod_version_id {
+            on_disk_by_id.insert(version_id.clone(), m);
+        }
         if let Some(ref folder) = m.folder_name {
             on_disk_by_id.insert(folder.clone(), m);
         }
@@ -577,7 +602,8 @@ async fn apply_subscription_update_inner(
     for pm in &remote.mods {
         // Find matching on-disk mod
         let on_disk_mod = on_disk_by_id
-            .get(&pm.name)
+            .get(pm.mod_version_id.as_deref().unwrap_or(""))
+            .or_else(|| on_disk_by_id.get(&pm.name))
             .or_else(|| pm.folder_name.as_ref().and_then(|f| on_disk_by_id.get(f)))
             .or_else(|| pm.mod_id.as_ref().and_then(|id| on_disk_by_id.get(id)))
             .copied();
@@ -627,32 +653,55 @@ async fn apply_subscription_update_inner(
             );
 
             // Cache current version before deleting
-            crate::mods::cache_mod_version(
-                disk_mod,
-                if disk_mod.enabled {
-                    &mods_path
-                } else {
-                    &disabled_path
-                },
+            let cache_base = if disk_mod.enabled {
+                &mods_path
+            } else {
+                &disabled_path
+            };
+            let mut disk_snapshot = disk_mod.clone();
+            if crate::mod_versions::cache_mod_version_by_id(
+                &mut disk_snapshot,
+                cache_base,
                 &cache_path,
-            );
+                &config_path,
+            )
+            .is_none()
+            {
+                crate::mods::cache_mod_version(disk_mod, cache_base, &cache_path);
+            }
 
             // Try local cache first
-            if crate::mods::get_cached_mod_path(&cache_path, &pm.name, &pm.version).is_some() {
+            let has_id_cache = crate::mod_versions::get_cached_mod_path_for_profile_mod(
+                &cache_path,
+                &config_path,
+                pm,
+            )
+            .is_some();
+            let has_legacy_cache =
+                crate::mods::get_cached_mod_path(&cache_path, &pm.name, &pm.version).is_some();
+            if has_id_cache || has_legacy_cache {
                 let base = if disk_mod.enabled {
                     &mods_path
                 } else {
                     &disabled_path
                 };
                 crate::mods::delete_mod_files_by_info(disk_mod, base);
-                if crate::mods::restore_mod_from_cache(
-                    &cache_path,
-                    &pm.name,
-                    &pm.version,
-                    &mods_path,
-                )
-                .is_ok()
-                {
+                let restored = if has_id_cache {
+                    crate::mod_versions::restore_mod_from_cache_by_id(
+                        &cache_path,
+                        &config_path,
+                        pm,
+                        &mods_path,
+                    )
+                } else {
+                    crate::mods::restore_mod_from_cache(
+                        &cache_path,
+                        &pm.name,
+                        &pm.version,
+                        &mods_path,
+                    )
+                };
+                if restored.is_ok() {
                     log::info!("Restored '{}' v{} from local cache", pm.name, pm.version);
                     continue;
                 }
@@ -691,9 +740,11 @@ async fn apply_subscription_update_inner(
             {
                 Ok(_) => {
                     // Re-scan to read the fresh manifest's min_game_version.
-                    let after = crate::mods::scan_mods(&mods_path);
+                    let mut after = crate::mods::scan_mods(&mods_path);
+                    crate::mod_sources::enrich_mods_with_sources(&mut after, &config_path);
+                    crate::mod_versions::enrich_mods_with_versions(&mut after, &config_path);
                     if let Some(installed) = after
-                        .iter()
+                        .iter_mut()
                         .find(|m| m.name == pm.name || Some(&m.name) == pm.folder_name.as_ref())
                     {
                         if crate::updater::install_is_incompatible(
@@ -717,6 +768,13 @@ async fn apply_subscription_update_inner(
                             });
                             skipped_this_mod = true;
                         } else {
+                            if let Some(shared_id) = pm.mod_version_id.as_deref() {
+                                crate::mod_versions::alias_shared_id(
+                                    shared_id,
+                                    installed,
+                                    &config_path,
+                                );
+                            }
                             log::info!(
                                 "Installed bundled mod '{}' from subscription update",
                                 pm.name
@@ -959,6 +1017,7 @@ mod own_subscription_sync_tests {
             mods: mod_names
                 .iter()
                 .map(|(n, v)| crate::profiles::ProfileMod {
+                    mod_version_id: None,
                     name: (*n).into(),
                     version: (*v).into(),
                     source: None,
@@ -992,6 +1051,26 @@ mod own_subscription_sync_tests {
             last_checked: now,
             last_synced: now,
         }
+    }
+
+    #[test]
+    fn diff_profiles_keeps_same_named_artifacts_distinct() {
+        let mut local = profile("Pack", &[("Variant", "1.0.0"), ("Variant", "2.0.0")]);
+        local.mods[0].mod_version_id = Some("artifact-a".into());
+        local.mods[0].folder_name = Some("VariantA".into());
+        local.mods[1].mod_version_id = Some("artifact-b".into());
+        local.mods[1].folder_name = Some("VariantB".into());
+
+        let mut remote = local.clone();
+        remote.mods[1].version = "2.1.0".into();
+
+        let (added, removed, updated) = diff_profiles(&local, &remote);
+        assert!(added.is_empty());
+        assert!(removed.is_empty());
+        assert_eq!(updated.len(), 1);
+        assert_eq!(updated[0].name, "Variant");
+        assert_eq!(updated[0].old_version, "2.0.0");
+        assert_eq!(updated[0].new_version, "2.1.0");
     }
 
     #[test]

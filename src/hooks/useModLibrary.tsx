@@ -61,6 +61,10 @@ function displayNameFor(mod: ModInfo): string {
   return mod.display_name?.trim() || mod.name;
 }
 
+function modInfoRowKey(mod: ModInfo): string {
+  return mod.mod_version_id ?? mod.folder_name ?? mod.mod_id ?? mod.name;
+}
+
 function ghRepoFromUrl(url: string | null): string {
   if (!url) return '';
   const match = url.match(/^https?:\/\/github\.com\/([^/]+\/[^/?#]+)/);
@@ -139,8 +143,8 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
   const [savingSource, setSavingSource] = useState(false);
   const [findingGithub, setFindingGithub] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  // Per-row spinner state, keyed by `folder_name ?? name` so two same-named
-  // mods don't share a spinner.
+  // Per-row spinner state, keyed by artifact identity so same-named mods
+  // don't share a spinner.
   const [updatingKey, setUpdatingKey] = useState<string | null>(null);
   const updatingKeyRef = useRef<string | null>(null);
   const [repairingKey, setRepairingKey] = useState<string | null>(null);
@@ -163,8 +167,10 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
   const modInfoByKey = useMemo(() => {
     const m = new Map<string, ModInfo>();
     for (const mod of mods) {
-      const key = mod.folder_name ?? mod.name;
-      m.set(key, mod);
+      m.set(modInfoRowKey(mod), mod);
+      if (mod.folder_name) m.set(mod.folder_name, mod);
+      if (mod.mod_id) m.set(mod.mod_id, mod);
+      m.set(mod.name, mod);
     }
     return m;
   }, [mods]);
@@ -191,6 +197,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     await setProfileModMembership(
       targetPack,
       mod.name,
+      mod.mod_version_id ?? null,
       mod.folder_name ?? null,
       mod.mod_id ?? null,
       true,
@@ -215,6 +222,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
       await setProfileModMembership(
         targetPack,
         mod.name,
+        mod.mod_version_id ?? null,
         mod.folder_name ?? null,
         mod.mod_id ?? null,
         true,
@@ -230,6 +238,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     await setProfileModMembership(
       targetPack,
       mod.name,
+      mod.mod_version_id ?? null,
       mod.folder_name ?? null,
       mod.mod_id ?? null,
       false,
@@ -279,7 +288,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
   }
 
   async function handleInlineUpdate(mod: ModInfo) {
-    const key = mod.folder_name ?? mod.name;
+    const key = modInfoRowKey(mod);
     if (updatingKeyRef.current) return;
     updatingKeyRef.current = key;
     setUpdatingKey(key);
@@ -312,7 +321,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
           mod.folder_name,
         );
       }
-      const info = await updateMod(mod.name, mod.folder_name);
+      const info = await updateMod(mod.name, mod.folder_name, targetPack ?? null);
       await syncTargetPackUpdatedMods([info]);
       toast.success(t('mods.toast.updated', { name: mod.name, version: info.version }));
       await refreshAll();
@@ -342,7 +351,10 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     return updateAllGithub(
       githubUpdateNames,
       targetPack
-        ? { afterUpdate: (updated) => syncTargetPackUpdatedMods(updated, githubUpdateNames) }
+        ? {
+            profileId: targetPack,
+            afterUpdate: (updated) => syncTargetPackUpdatedMods(updated, githubUpdateNames),
+          }
         : undefined,
     );
   }
@@ -376,7 +388,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
       confirmLabel: t('mods.repairNow'),
     });
     if (!ok) return;
-    const key = mod.folder_name ?? mod.name;
+    const key = modInfoRowKey(mod);
     setRepairingKey(key);
     try {
       const info = await repairMod(mod.name, mod.folder_name);
@@ -405,7 +417,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
       confirmLabel: t('mods.rollbackNow'),
     });
     if (!ok) return;
-    const key = mod.folder_name ?? mod.name;
+    const key = modInfoRowKey(mod);
     setRollingBackKey(key);
     try {
       const info = await rollbackMod(mod.name, mod.folder_name);
@@ -538,7 +550,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
   }
 
   async function handleFindGithubFromNexus(mod: ModInfo): Promise<string | null> {
-    const key = mod.folder_name ?? mod.name;
+    const key = modInfoRowKey(mod);
     try {
       setFindingGithub(key);
       const repo = await findGithubFromNexus(mod.name, mod.folder_name);
@@ -666,12 +678,12 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
 
   /** Toggle the inline source editor: clicking the open row closes it. */
   function onEditSources(mod: ModInfo) {
-    const key = mod.folder_name ?? mod.name;
+    const key = modInfoRowKey(mod);
     setSourceEditorRowKey((cur) => (cur === key ? null : key));
   }
 
   function renderSourceEditor(mod: ModInfo): ReactNode {
-    const rowKey = mod.folder_name ?? mod.name;
+    const rowKey = modInfoRowKey(mod);
     if (sourceEditorRowKey !== rowKey) return undefined;
     return (
       <SourceEditor

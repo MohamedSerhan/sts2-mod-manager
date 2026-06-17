@@ -1,4 +1,5 @@
 export interface ModInfo {
+  mod_version_id?: string | null;
   name: string;
   version: string;
   description: string;
@@ -71,6 +72,7 @@ export interface Profile {
 }
 
 export interface ProfileMod {
+  mod_version_id?: string | null;
   name: string;
   version: string;
   source: string | null;
@@ -87,6 +89,7 @@ export interface ProfileMod {
 }
 
 export interface ProfileModOrderKey {
+  mod_version_id?: string | null;
   name: string;
   folder_name: string | null;
   mod_id: string | null;
@@ -118,6 +121,7 @@ export interface ProfileMembershipProfile {
 }
 
 export interface ProfileMembershipMod {
+  mod_version_id?: string | null;
   name: string;
   version: string;
   folder_name: string | null;

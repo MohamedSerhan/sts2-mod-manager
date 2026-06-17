@@ -1059,6 +1059,7 @@ pub async fn download_and_install_github_mod(
             .trim_end_matches(".PCK")
             .to_string();
         Ok(ModInfo {
+            mod_version_id: None,
             name: mod_name,
             version: release.tag_name.clone(),
             description: release.body.clone().unwrap_or_default(),
@@ -1131,7 +1132,7 @@ pub async fn download_github_mod(
     // they know what they want. When asking for "latest" (tag=None),
     // route through the compatibility-aware installer so we don't land
     // a release the game can't load.
-    let mod_info = if let Some(t) = tag.as_deref() {
+    let mut mod_info = if let Some(t) = tag.as_deref() {
         download_and_install_github_mod(
             &owner,
             &repo,
@@ -1172,6 +1173,8 @@ pub async fn download_github_mod(
     entry.github_repo = Some(format!("{}/{}", owner, repo));
     let _ = crate::mod_sources::save_sources(&db, &config_path);
 
+    crate::mod_versions::ensure_mod_info_id(&mut mod_info, &config_path);
+
     Ok(mod_info)
 }
 
@@ -1182,11 +1185,12 @@ pub async fn download_url_mod(
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ModInfo, String> {
     crate::game::ensure_game_not_running()?;
-    let (mods_path, cache_path) = {
+    let (mods_path, cache_path, config_path) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
         let cache_path = s.cache_path.clone();
-        (mods_path, cache_path)
+        let config_path = s.config_path.clone();
+        (mods_path, cache_path, config_path)
     };
 
     // Derive a filename from the URL.
@@ -1212,7 +1216,9 @@ pub async fn download_url_mod(
     .map_err(|e| e.to_string())?;
 
     if dest.extension().and_then(|e| e.to_str()) == Some("zip") {
-        install_mod_from_zip(&dest, &mods_path).map_err(|e| e.to_string())
+        let mut info = install_mod_from_zip(&dest, &mods_path).map_err(|e| e.to_string())?;
+        crate::mod_versions::ensure_mod_info_id(&mut info, &config_path);
+        Ok(info)
     } else if dest.extension().and_then(|e| e.to_str()) == Some("dll") {
         let dest_path = mods_path.join(&file_name);
         // Defense-in-depth: even after sanitize_path_segment, confirm the
@@ -1225,7 +1231,8 @@ pub async fn download_url_mod(
         }
         std::fs::copy(&dest, &dest_path).map_err(|e| e.to_string())?;
         let mod_name = file_name.trim_end_matches(".dll").to_string();
-        Ok(ModInfo {
+        let mut info = ModInfo {
+            mod_version_id: None,
             name: mod_name.clone(),
             version: "unknown".to_string(),
             description: String::new(),
@@ -1249,7 +1256,9 @@ pub async fn download_url_mod(
             display_name: None,
             display_description: None,
             bundle_members: vec![],
-        })
+        };
+        crate::mod_versions::ensure_mod_info_id(&mut info, &config_path);
+        Ok(info)
     } else {
         Err(format!("Unsupported file type: {}", file_name))
     }

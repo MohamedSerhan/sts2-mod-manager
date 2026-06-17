@@ -18,6 +18,11 @@ on:
         required: false
         default: false
         type: boolean
+      rebuild_windows_zip:
+        description: "Rebuild the Windows portable zip from the release tag before uploading to Nexus"
+        required: false
+        default: false
+        type: boolean
       diagnose_only:
         description: "Only print Nexus Windows file group state; do not upload"
         required: false
@@ -33,6 +38,7 @@ permissions:
 
 jobs:
   republish-windows:
+    if: ${{ !inputs.rebuild_windows_zip }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -271,3 +277,134 @@ jobs:
             echo "- SHA256: ${ZIP_SHA256}"
             echo "- Repacked: ${{ inputs.repack_windows_zip }}"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  rebuild-and-republish-windows:
+    if: ${{ inputs.rebuild_windows_zip && !inputs.diagnose_only }}
+    runs-on: windows-latest
+    steps:
+      - name: Checkout publisher workflow
+        uses: actions/checkout@v6
+
+      - name: Checkout release source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ startsWith(inputs.version, 'v') && inputs.version || format('v{0}', inputs.version) }}
+          path: release-source
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: release-source/src-tauri
+          key: nexus-rebuild-windows-${{ inputs.version }}
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: release-source/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: release-source
+        run: npm ci
+
+      - name: Build Windows app from release source
+        working-directory: release-source
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          STS2_BUG_REPORT_ENDPOINT: ${{ vars.STS2_BUG_REPORT_ENDPOINT }}
+          STS2_BUG_REPORT_KEY: ${{ secrets.STS2_BUG_REPORT_KEY }}
+        run: npm run tauri build -- --no-bundle
+
+      - name: Package rebuilt portable zip
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = "${{ inputs.version }}".TrimStart("v")
+          $tag = "v$version"
+          $asset = "STS2.Mod.Manager_${version}_x64_portable.zip"
+
+          "VERSION=$version" >> $env:GITHUB_ENV
+          "ASSET=$asset" >> $env:GITHUB_ENV
+
+          New-Item -ItemType Directory -Path original-assets, original-exe, portable-staging, nexus-assets -Force | Out-Null
+          gh release download $tag -R $env:GITHUB_REPOSITORY -D original-assets -p $asset
+          Expand-Archive -Path (Join-Path "original-assets" $asset) -DestinationPath original-exe -Force
+
+          $originalExePath = Join-Path "original-exe" "STS2 Mod Manager.exe"
+          if (-not (Test-Path -LiteralPath $originalExePath)) {
+            throw "Original portable zip did not contain STS2 Mod Manager.exe"
+          }
+          $originalExeSha = (Get-FileHash -Algorithm SHA256 -LiteralPath $originalExePath).Hash.ToUpperInvariant()
+
+          $candidates = Get-ChildItem "release-source/src-tauri/target/release/*.exe" |
+                        Where-Object {
+                          $_.Name -notlike "*-setup.exe" -and
+                          $_.Name -notlike "*build-script*" -and
+                          $_.Name -notlike "*.tmp.exe"
+                        }
+          if ($candidates.Count -ne 1) {
+            throw "Expected exactly one rebuilt app exe in target/release, found $($candidates.Count): $($candidates.Name -join ', ')"
+          }
+
+          $rebuiltExe = $candidates[0]
+          $rebuiltExeSha = (Get-FileHash -Algorithm SHA256 -LiteralPath $rebuiltExe.FullName).Hash.ToUpperInvariant()
+          if ($rebuiltExeSha -eq $originalExeSha) {
+            throw "Rebuilt exe SHA256 still matches the original GitHub portable exe ($rebuiltExeSha); refusing to reupload the same binary."
+          }
+
+          Copy-Item $rebuiltExe.FullName (Join-Path "portable-staging" "STS2 Mod Manager.exe")
+          Copy-Item "release-source/scripts/portable-README.txt" (Join-Path "portable-staging" "README.txt")
+
+          $zipPath = Join-Path "nexus-assets" $asset
+          Compress-Archive -Path "portable-staging/*" -DestinationPath $zipPath -Force
+
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $zipPath))
+          try {
+            $entries = $archive.Entries |
+              Where-Object { -not [string]::IsNullOrEmpty($_.Name) } |
+              ForEach-Object { $_.FullName } |
+              Sort-Object
+          } finally {
+            $archive.Dispose()
+          }
+          $expected = @("README.txt", "STS2 Mod Manager.exe")
+          if (($entries -join "|") -ne ($expected -join "|")) {
+            throw "Unexpected rebuilt zip entries: $($entries -join ', ')"
+          }
+
+          $zipSha = (Get-FileHash -Algorithm SHA256 -LiteralPath $zipPath).Hash.ToUpperInvariant()
+          "ORIGINAL_EXE_SHA256=$originalExeSha" >> $env:GITHUB_ENV
+          "REBUILT_EXE_SHA256=$rebuiltExeSha" >> $env:GITHUB_ENV
+          "ZIP_SHA256=$zipSha" >> $env:GITHUB_ENV
+          Write-Host "Original exe SHA256: $originalExeSha"
+          Write-Host "Rebuilt exe SHA256:  $rebuiltExeSha"
+          Write-Host "Rebuilt zip SHA256:  $zipSha"
+
+      - name: Publish rebuilt Windows portable zip to Nexus
+        env:
+          NEXUS_API_KEY:             ${{ secrets.NEXUS_API_KEY }}
+          NEXUS_FILE_GROUP_ID:       ${{ secrets.NEXUS_FILE_GROUP_ID }}
+          NEXUS_ALLOW_BOOTSTRAP:     "false"
+          NEXUSMODS_MOD_ID:          ${{ vars.NEXUSMODS_MOD_ID || '856' }}
+          NEXUSMODS_GAME_DOMAIN:     slaythespire2
+        run: node scripts/nexus-publish-release.mjs --version "$env:VERSION" --asset-dir nexus-assets --only windows
+
+      - name: Summarize rebuilt republish
+        shell: pwsh
+        run: |
+          @(
+            "### Nexus Windows rebuilt republish"
+            ""
+            "- Version: $env:VERSION"
+            "- Asset: $env:ASSET"
+            "- Original EXE SHA256: $env:ORIGINAL_EXE_SHA256"
+            "- Rebuilt EXE SHA256: $env:REBUILT_EXE_SHA256"
+            "- Rebuilt ZIP SHA256: $env:ZIP_SHA256"
+          ) -join "`n" >> $env:GITHUB_STEP_SUMMARY

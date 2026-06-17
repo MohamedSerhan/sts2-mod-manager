@@ -107,8 +107,11 @@ fn snapshot_current_inner(
     config_path: Option<&Path>,
     game_version_for_filter: Option<&str>,
 ) -> Result<Profile> {
-    let all_mods =
+    let mut all_mods =
         merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
+    if let Some(config_path) = config_path {
+        crate::mod_versions::enrich_mods_with_versions(&mut all_mods, config_path);
+    }
     let now = Utc::now();
 
     // Bug #21 mirror: when this snapshot represents an explicit user
@@ -204,6 +207,10 @@ fn snapshot_current_inner(
         });
 
         ProfileMod {
+            mod_version_id: m
+                .mod_version_id
+                .clone()
+                .or_else(|| existing.and_then(|pm| pm.mod_version_id.clone())),
             name: m.name.clone(),
             version,
             source,
@@ -801,6 +808,7 @@ pub(crate) async fn switch_profile_from_paths(
         .chain(scan_disabled_mods(disabled_path).into_iter())
         .collect();
     crate::mod_sources::enrich_mods_with_sources(&mut all_on_disk, config_path);
+    crate::mod_versions::enrich_mods_with_versions(&mut all_on_disk, config_path);
 
     // Build a map from identifiers to on-disk mod info (for version comparison)
     let mut on_disk_by_id: std::collections::HashMap<String, &crate::mods::ModInfo> =
@@ -887,22 +895,35 @@ pub(crate) async fn switch_profile_from_paths(
             }
 
             // Cache the current version before deleting (so user can switch back later)
-            crate::mods::cache_mod_version(
-                disk_mod,
-                if disk_mod.enabled {
-                    mods_path
-                } else {
-                    disabled_path
-                },
+            let cache_base = if disk_mod.enabled {
+                mods_path
+            } else {
+                disabled_path
+            };
+            let mut disk_snapshot = disk_mod.clone();
+            if crate::mod_versions::cache_mod_version_by_id(
+                &mut disk_snapshot,
+                cache_base,
                 cache_path,
-            );
+                config_path,
+            )
+            .is_none()
+            {
+                crate::mods::cache_mod_version(disk_mod, cache_base, cache_path);
+            }
 
             // Try local cache first for true version mismatches. For same-version
             // content drift the cache key (name + version) is ambiguous, so the
             // exact profile bundle is the only trustworthy restore source.
-            if version_mismatch
-                && crate::mods::get_cached_mod_path(cache_path, &pm.name, &pm.version).is_some()
-            {
+            let has_id_cache = crate::mod_versions::get_cached_mod_path_for_profile_mod(
+                cache_path,
+                config_path,
+                pm,
+            )
+            .is_some();
+            let has_legacy_cache =
+                crate::mods::get_cached_mod_path(cache_path, &pm.name, &pm.version).is_some();
+            if version_mismatch && (has_id_cache || has_legacy_cache) {
                 let base = if disk_mod.enabled {
                     mods_path
                 } else {
@@ -911,34 +932,50 @@ pub(crate) async fn switch_profile_from_paths(
                 // Bug 4: stash the existing copy aside (don't delete) so a
                 // failed cache restore rolls back to the old version.
                 match stash_mod_for_replace(disk_mod, base, mods_path) {
-                    Ok(swap) => match crate::mods::restore_mod_from_cache(
-                        cache_path,
-                        &pm.name,
-                        &pm.version,
-                        mods_path,
-                    ) {
-                        Ok(()) => {
-                            let _ = swap.discard();
-                            log::info!("Restored '{}' v{} from local cache", pm.name, pm.version);
-                            downloaded_count += 1;
-                            replaced_mods.push(pm.name.clone());
-                            continue;
-                        }
-                        Err(e) => {
-                            if let Err(re) = swap.restore() {
-                                log::error!(
-                                    "Rollback after cache-restore failure for '{}' failed: {}",
+                    Ok(swap) => {
+                        let restore_result = if has_id_cache {
+                            crate::mod_versions::restore_mod_from_cache_by_id(
+                                cache_path,
+                                config_path,
+                                pm,
+                                mods_path,
+                            )
+                        } else {
+                            crate::mods::restore_mod_from_cache(
+                                cache_path,
+                                &pm.name,
+                                &pm.version,
+                                mods_path,
+                            )
+                        };
+                        match restore_result {
+                            Ok(()) => {
+                                let _ = swap.discard();
+                                log::info!(
+                                    "Restored '{}' v{} from local cache",
                                     pm.name,
-                                    re
+                                    pm.version
+                                );
+                                downloaded_count += 1;
+                                replaced_mods.push(pm.name.clone());
+                                continue;
+                            }
+                            Err(e) => {
+                                if let Err(re) = swap.restore() {
+                                    log::error!(
+                                        "Rollback after cache-restore failure for '{}' failed: {}",
+                                        pm.name,
+                                        re
+                                    );
+                                }
+                                log::warn!(
+                                    "Cache restore failed for '{}': {} -- trying bundle",
+                                    pm.name,
+                                    e
                                 );
                             }
-                            log::warn!(
-                                "Cache restore failed for '{}': {} -- trying bundle",
-                                pm.name,
-                                e
-                            );
                         }
-                    },
+                    }
                     Err(e) => {
                         log::warn!(
                             "Could not stash '{}' aside for cache restore: {} -- trying bundle",
@@ -1007,10 +1044,14 @@ pub(crate) async fn switch_profile_from_paths(
                     // download_bundle returns () so we re-scan to get a ModInfo.
                     let mut after_scan = scan_mods(mods_path);
                     crate::mod_sources::enrich_mods_with_sources(&mut after_scan, config_path);
+                    crate::mod_versions::enrich_mods_with_versions(&mut after_scan, config_path);
                     if let Some(installed) = after_scan
-                        .iter()
+                        .iter_mut()
                         .find(|m| profile_mod_matches_installed(pm, m))
                     {
+                        if let Some(shared_id) = pm.mod_version_id.as_deref() {
+                            crate::mod_versions::alias_shared_id(shared_id, installed, config_path);
+                        }
                         crate::mods::snapshot_after_fresh_install(
                             installed,
                             mods_path,
@@ -1144,6 +1185,7 @@ pub(crate) async fn switch_profile_from_paths(
         .chain(scan_disabled_mods(disabled_path).into_iter())
         .collect();
     crate::mod_sources::enrich_mods_with_sources(&mut final_on_disk, config_path);
+    crate::mod_versions::enrich_mods_with_versions(&mut final_on_disk, config_path);
     let still_missing: Vec<String> = profile
         .mods
         .iter()
@@ -1190,6 +1232,7 @@ mod snapshot_metadata_tests {
                 game_version: Some("0.105.0".into()),
                 created_by: Some("alice".into()),
                 mods: vec![ProfileMod {
+                    mod_version_id: None,
                     name: "BaseLib".into(),
                     version: "v3.1.2".into(),
                     source: Some("github:Alchyr/STS2-BaseLib".into()),
@@ -1330,6 +1373,7 @@ mod pinned_download_tests {
 
     fn profile_mod() -> ProfileMod {
         ProfileMod {
+            mod_version_id: None,
             name: "Unified Save Path".into(),
             version: "1.0.0".into(),
             source: None,
@@ -1346,6 +1390,7 @@ mod pinned_download_tests {
 
     fn disk_mod() -> crate::mods::ModInfo {
         crate::mods::ModInfo {
+            mod_version_id: None,
             name: "Unified Save Path".into(),
             version: "1.0.0".into(),
             description: String::new(),
@@ -1510,6 +1555,7 @@ mod modpack_flow_tests {
         let dll_hash = sha256_hex(marker.as_bytes());
         PublishedMod {
             profile_mod: ProfileMod {
+                mod_version_id: None,
                 name: display_name.into(),
                 version: version.into(),
                 source: source.map(str::to_string),
@@ -2077,6 +2123,7 @@ mod modpack_flow_tests {
             game_version: Some("0.105.0".into()),
             created_by: Some("qa-curator".into()),
             mods: vec![ProfileMod {
+                mod_version_id: None,
                 name: "Stored".into(),
                 version: "1.0.0".into(),
                 source: None,
@@ -2121,6 +2168,7 @@ mod modpack_flow_tests {
             game_version: Some("0.105.0".into()),
             created_by: Some("qa-curator".into()),
             mods: vec![ProfileMod {
+                mod_version_id: None,
                 name: "Stored".into(),
                 version: "1.0.0".into(),
                 source: None,
@@ -2167,6 +2215,7 @@ mod modpack_flow_tests {
         // Profile wants v2.0.0 from a bundle URL that 404s (no mock mounted)
         // and has no GitHub fallback — so the replace download must fail.
         let pm = ProfileMod {
+            mod_version_id: None,
             name: "Keeper".into(),
             version: "2.0.0".into(),
             source: None,

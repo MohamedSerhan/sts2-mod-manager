@@ -214,6 +214,7 @@ export async function getProfileMemberships(): Promise<ProfileMembershipGrid> {
 export async function setProfileModMembership(
   profileId: string,
   modName: string,
+  modVersionId: string | null,
   folderName: string | null,
   modId: string | null,
   included: boolean,
@@ -222,6 +223,7 @@ export async function setProfileModMembership(
   return invoke('set_profile_mod_membership', {
     profileId,
     modName,
+    modVersionId,
     folderName,
     modId,
     included,
@@ -237,6 +239,7 @@ export async function setProfileLoadOrder(
     profileId,
     orderedMods: orderedMods.map((mod) => ({
       name: mod.name,
+      modVersionId: mod.mod_version_id,
       folderName: mod.folder_name,
       modId: mod.mod_id,
     })),
@@ -275,8 +278,12 @@ export async function checkForUpdates(): Promise<ModUpdate[]> {
   return invoke('check_for_updates');
 }
 
-export async function updateMod(name: string, folderName: string | null = null): Promise<ModInfo> {
-  return invoke('update_mod', { name, folderName });
+export async function updateMod(
+  name: string,
+  folderName: string | null = null,
+  profileId: string | null = null,
+): Promise<ModInfo> {
+  return invoke('update_mod', { name, folderName, profileId });
 }
 
 /**
@@ -310,8 +317,8 @@ export async function rollbackMod(name: string, folderName: string | null = null
   return invoke('rollback_mod', { name, folderName });
 }
 
-export async function updateAllMods(): Promise<ModInfo[]> {
-  return invoke('update_all_mods');
+export async function updateAllMods(profileId: string | null = null): Promise<ModInfo[]> {
+  return invoke('update_all_mods', { profileId });
 }
 
 /**

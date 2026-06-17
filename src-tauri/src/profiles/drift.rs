@@ -395,6 +395,7 @@ mod reconcile_tests {
 
     fn pack_mod(name: &str, folder: &str, version: &str, enabled: bool) -> ProfileMod {
         ProfileMod {
+            mod_version_id: None,
             name: name.into(),
             version: version.into(),
             source: Some(format!("github:example/{folder}")),

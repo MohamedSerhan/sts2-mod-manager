@@ -641,6 +641,7 @@ function AppInner() {
               await setProfileModMembership(
                 pack.id,
                 mod.name,
+                mod.mod_version_id ?? null,
                 mod.folder_name ?? null,
                 mod.mod_id ?? null,
                 true,

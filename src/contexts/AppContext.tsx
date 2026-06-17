@@ -47,7 +47,10 @@ interface AppContextType {
    *  Safe to call with a single name. */
   updateAllGithub: (
     githubUpdateNames: string[],
-    opts?: { afterUpdate?: (updated: ModInfo[]) => Promise<void> | void },
+    opts?: {
+      profileId?: string | null;
+      afterUpdate?: (updated: ModInfo[]) => Promise<void> | void;
+    },
   ) => Promise<ModInfo[]>;
 }
 
@@ -265,7 +268,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const updateAllGithub = useCallback(async (
     githubUpdateNames: string[],
-    opts?: { afterUpdate?: (updated: ModInfo[]) => Promise<void> | void },
+    opts?: {
+      profileId?: string | null;
+      afterUpdate?: (updated: ModInfo[]) => Promise<void> | void;
+    },
   ): Promise<ModInfo[]> => {
     if (updatingAll || githubUpdateNames.length === 0) return [];
     const ok = await confirm({
@@ -276,7 +282,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!ok) return [];
     setUpdatingAll(true);
     try {
-      const updated = await updateAllMods();
+      const updated = await updateAllMods(opts?.profileId ?? null);
       await opts?.afterUpdate?.(updated);
       toast.success(
         updated.length === 0

@@ -86,6 +86,7 @@ export function EditModpackModal({ profile, onClose, onSaved }: Props) {
         await setProfileModMembership(
           profileKey,
           m.name,
+          m.mod_version_id ?? null,
           m.folder_name ?? null,
           m.mod_id ?? null,
           true,
@@ -94,7 +95,14 @@ export function EditModpackModal({ profile, onClose, onSaved }: Props) {
       }
       for (const m of toRemove) {
         if (isActive) await toggleMod(m.name, m.folder_name ?? null, false);
-        await setProfileModMembership(profileKey, m.name, m.folder_name ?? null, m.mod_id ?? null, false);
+        await setProfileModMembership(
+          profileKey,
+          m.name,
+          m.mod_version_id ?? null,
+          m.folder_name ?? null,
+          m.mod_id ?? null,
+          false,
+        );
       }
       toast.success(
         t('modpack.edit.saved', { added: toAdd.length, removed: toRemove.length, name: profile.name }),

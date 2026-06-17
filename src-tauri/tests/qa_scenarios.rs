@@ -598,6 +598,7 @@ fn flow_11_apply_profile_pins_override_profile_state() {
         game_version: Some("0.103.2".into()),
         created_by: None,
         mods: vec![ProfileMod {
+            mod_version_id: None,
             name: "BaseLib".into(),
             version: "v3.1.2".into(),
             source: None,
@@ -799,6 +800,7 @@ fn flow_11_apply_profile_without_pin_preserves_disabled_profile_mod() {
         game_version: Some("0.103.2".into()),
         created_by: None,
         mods: vec![ProfileMod {
+            mod_version_id: None,
             name: "BaseLib".into(),
             version: "v3.1.2".into(),
             source: None,

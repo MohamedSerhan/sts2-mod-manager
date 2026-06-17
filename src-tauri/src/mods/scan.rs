@@ -429,6 +429,7 @@ pub(crate) fn parse_manifest(
         .collect();
 
     Some(ModInfo {
+        mod_version_id: None,
         name,
         version: raw.version,
         description: raw.description,
@@ -530,6 +531,7 @@ pub(super) fn pck_only_mod(pck_path: &Path, base_dir: &Path, enabled: bool) -> M
     let size_bytes = calculate_mod_size(base_dir, &files);
 
     ModInfo {
+        mod_version_id: None,
         name,
         version: "unknown".to_string(),
         description: String::new(),
@@ -598,6 +600,7 @@ pub(super) fn dll_only_mod(dll_path: &Path, base_dir: &Path, enabled: bool) -> M
     let size_bytes = calculate_mod_size(base_dir, &files);
 
     ModInfo {
+        mod_version_id: None,
         name,
         version: "unknown".to_string(),
         description: String::new(),
@@ -949,6 +952,7 @@ pub(super) fn scan_mods_inner(dir: &Path, enabled: bool) -> Vec<ModInfo> {
                     found_names.insert(normalize_name(&container_name));
 
                     let info = ModInfo {
+                        mod_version_id: None,
                         name,
                         version,
                         description: String::new(),
@@ -1188,6 +1192,7 @@ mod dedup_identity_tests {
 
     fn mod_with(name: &str, folder: Option<&str>, version: &str) -> ModInfo {
         ModInfo {
+            mod_version_id: None,
             name: name.to_string(),
             version: version.to_string(),
             description: String::new(),

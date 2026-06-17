@@ -995,6 +995,9 @@ fn merge_publish_enrichment(on_disk: &Profile, uploaded: &Profile) -> Profile {
         target.folder_name = uploaded_pm.folder_name.clone();
         target.mod_id = uploaded_pm.mod_id.clone();
         target.bundle_members = uploaded_pm.bundle_members.clone();
+        if uploaded_pm.mod_version_id.is_some() {
+            target.mod_version_id = uploaded_pm.mod_version_id.clone();
+        }
         if uploaded_pm.bundle_url.is_some() {
             target.bundle_url = uploaded_pm.bundle_url.clone();
         }
@@ -1039,6 +1042,9 @@ fn refresh_profile_mod_from_installed(pm: &mut ProfileMod, installed: &ModInfo) 
     if files_changed {
         pm.files = installed.files.clone();
     }
+    if installed.mod_version_id.is_some() && pm.mod_version_id != installed.mod_version_id {
+        pm.mod_version_id = installed.mod_version_id.clone();
+    }
     if installed.folder_name.is_some() && pm.folder_name != installed.folder_name {
         pm.folder_name = installed.folder_name.clone();
     }
@@ -1052,13 +1058,16 @@ fn filter_profile_for_publish_compatibility(
     profile: &mut Profile,
     mods_path: &std::path::Path,
     disabled_path: &std::path::Path,
+    config_path: &std::path::Path,
     game_version: Option<&str>,
     exclude_stored_members: bool,
 ) -> Vec<String> {
     // We always need the installed scan so we can refresh stale paths and
     // (for the active pack) drop stored (disabled) members.
-    let installed_mods =
+    let mut installed_mods =
         merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
+    crate::mod_sources::enrich_mods_with_sources(&mut installed_mods, config_path);
+    crate::mod_versions::enrich_mods_with_versions(&mut installed_mods, config_path);
     let profile_name = profile.name.clone();
     let mut filtered_incompatible = 0;
     let mut filtered_stored = 0;
@@ -1196,6 +1205,7 @@ fn load_profile_for_publish_from_paths(
         &mut profile,
         mods_path,
         disabled_path,
+        config_path,
         game_version,
         exclude_stored_members,
     );
@@ -2487,6 +2497,7 @@ mod listing_tests {
 
         let mut local = remote.clone();
         local.mods.push(crate::profiles::ProfileMod {
+            mod_version_id: None,
             name: "Local Edit".into(),
             version: "1.0.0".into(),
             source: None,
@@ -2577,6 +2588,7 @@ mod listing_tests {
 
         let mut local = remote.clone();
         local.mods.push(crate::profiles::ProfileMod {
+            mod_version_id: None,
             name: "Local Edit".into(),
             version: "1.0.0".into(),
             source: None,
@@ -2732,6 +2744,7 @@ mod share_orchestration_tests {
 
     fn profile_mod(name: &str, folder: &str) -> crate::profiles::ProfileMod {
         crate::profiles::ProfileMod {
+            mod_version_id: None,
             name: name.into(),
             version: "1.0.0".into(),
             source: None,
@@ -3324,6 +3337,7 @@ mod share_orchestration_tests {
             game_version: None,
             created_by: None,
             mods: vec![crate::profiles::ProfileMod {
+                mod_version_id: None,
                 name: "TestMod".into(),
                 version: "1.0.0".into(),
                 source: None,
@@ -3442,6 +3456,7 @@ mod share_orchestration_tests {
         std::fs::create_dir_all(&profiles_path).unwrap();
 
         let profile_mod = crate::profiles::ProfileMod {
+            mod_version_id: None,
             name: "TestMod".into(),
             version: "1.0.0".into(),
             source: None,
@@ -3594,6 +3609,7 @@ mod share_orchestration_tests {
         std::fs::create_dir_all(&profiles_path).unwrap();
 
         let profile_mod = crate::profiles::ProfileMod {
+            mod_version_id: None,
             name: "TestMod".into(),
             version: "1.0.0".into(),
             source: None,
@@ -3728,6 +3744,7 @@ mod share_orchestration_tests {
         std::fs::create_dir_all(&profiles_path).unwrap();
 
         let shared_mod = crate::profiles::ProfileMod {
+            mod_version_id: None,
             name: "TestMod".into(),
             version: "1.0.0".into(),
             source: None,
@@ -3785,6 +3802,7 @@ mod share_orchestration_tests {
             game_version: None,
             created_by: None,
             mods: vec![crate::profiles::ProfileMod {
+                mod_version_id: None,
                 name: "TestMod".into(),
                 version: "1.0.0".into(),
                 source: None,
@@ -3887,6 +3905,7 @@ mod share_orchestration_tests {
             game_version: None,
             created_by: None,
             mods: vec![crate::profiles::ProfileMod {
+                mod_version_id: None,
                 name: "TestMod".into(),
                 version: "1.0.0".into(),
                 source: None,
@@ -3978,6 +3997,7 @@ mod share_orchestration_tests {
             game_version: None,
             created_by: None,
             mods: vec![crate::profiles::ProfileMod {
+                mod_version_id: None,
                 name: "TestMod".into(),
                 version: "1.0.0".into(),
                 source: None,
@@ -4386,6 +4406,7 @@ mod share_orchestration_tests {
             game_version: None,
             created_by: None,
             mods: vec![crate::profiles::ProfileMod {
+                mod_version_id: None,
                 name: "TestMod".into(),
                 version: "1.0.0".into(),
                 source: None,
@@ -4576,6 +4597,7 @@ mod bundle_share_roundtrip_tests {
         // bundle_members from the installed ModInfo into the ProfileMod so
         // the shared manifest carries member info.
         let pm = crate::profiles::ProfileMod {
+            mod_version_id: None,
             name: bundle.name.clone(),
             version: bundle.version.clone(),
             source: bundle.source.clone(),
@@ -4662,6 +4684,7 @@ mod publish_signature_tests {
 
     fn make_mod(name: &str, version: &str, enabled: bool) -> crate::profiles::ProfileMod {
         crate::profiles::ProfileMod {
+            mod_version_id: None,
             name: name.into(),
             version: version.into(),
             source: None,
@@ -4691,6 +4714,20 @@ mod publish_signature_tests {
             public: Some(false),
             mod_extras: Default::default(),
         }
+    }
+
+    #[test]
+    fn signature_ignores_mod_version_ids() {
+        let plain = base_profile();
+        let mut migrated = base_profile();
+        migrated.mods[0].mod_version_id = Some("local-artifact-id".into());
+        migrated.mods[1].mod_version_id = Some("another-local-artifact-id".into());
+
+        assert_eq!(
+            profile_publish_signature(&plain),
+            profile_publish_signature(&migrated),
+            "lazy mod_version_id migration must not mark an owned pack out of sync"
+        );
     }
 
     /// Curator extras (notes/links/tags) are publish metadata, not pack
@@ -4903,6 +4940,7 @@ mod merge_publish_enrichment_tests {
 
     fn make_mod(name: &str, version: &str) -> crate::profiles::ProfileMod {
         crate::profiles::ProfileMod {
+            mod_version_id: None,
             name: name.into(),
             version: version.into(),
             source: None,

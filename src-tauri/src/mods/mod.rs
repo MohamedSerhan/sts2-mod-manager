@@ -56,6 +56,10 @@ use state::{move_mod_files, safe_mod_relative_path, sanitize_for_filename};
 /// Information about an installed mod.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModInfo {
+    /// Stable manager-owned ID for this exact local/shared mod artifact.
+    /// Missing for legacy scans until `mod_versions` enriches the row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mod_version_id: Option<String>,
     pub name: String,
     pub version: String,
     pub description: String,
@@ -336,6 +340,7 @@ pub fn get_installed_mods(
 
     // Enrich with source metadata (GitHub/Nexus links)
     crate::mod_sources::enrich_mods_with_sources(&mut all_mods, &s.config_path);
+    crate::mod_versions::enrich_mods_with_versions(&mut all_mods, &s.config_path);
     all_mods.sort_by(|a, b| {
         a.display_name
             .as_deref()
@@ -1016,6 +1021,7 @@ mod pending_nexus_manual_install_tests {
 
     fn mod_info(name: &str, folder_name: &str, mod_id: Option<&str>) -> ModInfo {
         ModInfo {
+            mod_version_id: None,
             name: name.into(),
             version: "unknown".into(),
             description: String::new(),
@@ -1070,6 +1076,7 @@ mod pending_nexus_manual_install_tests {
         }
         let config = tempfile::tempdir().unwrap();
         let installed = ModInfo {
+            mod_version_id: None,
             name: "Flagellant".into(),
             version: "unknown".into(),
             description: String::new(),
@@ -1231,6 +1238,7 @@ mod pending_nexus_manual_install_tests {
             config.path(),
         );
         let installed = ModInfo {
+            mod_version_id: None,
             name: "Shared Name".into(),
             version: "unknown".into(),
             description: String::new(),
@@ -1938,6 +1946,7 @@ mod profile_manifest_refresh_tests {
             game_version: None,
             created_by: None,
             mods: vec![ProfileMod {
+                mod_version_id: None,
                 name: mod_name.into(),
                 version: version.into(),
                 source: None,
@@ -2043,6 +2052,7 @@ mod profile_manifest_refresh_tests {
         fs::write(&protected, b"game binary").unwrap();
 
         let info = ModInfo {
+            mod_version_id: None,
             name: "BadManifest".into(),
             version: "1.0.0".into(),
             description: String::new(),

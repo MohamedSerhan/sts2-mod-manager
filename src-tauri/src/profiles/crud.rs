@@ -497,7 +497,16 @@ fn identity_lists_intersect(a: &[String], b: &[String]) -> bool {
     a.iter().any(|key| b.contains(key))
 }
 
-pub(super) fn profile_mod_matches_installed(pm: &ProfileMod, installed: &ModInfo) -> bool {
+pub(crate) fn profile_mod_matches_installed(pm: &ProfileMod, installed: &ModInfo) -> bool {
+    if let (Some(profile_id), Some(installed_id)) = (
+        pm.mod_version_id.as_deref(),
+        installed.mod_version_id.as_deref(),
+    ) {
+        if profile_id == installed_id {
+            return true;
+        }
+    }
+
     let profile_strong = strong_mod_identity_keys(pm.folder_name.as_deref(), pm.mod_id.as_deref());
     let installed_strong = strong_mod_identity_keys(
         installed.folder_name.as_deref(),
@@ -535,9 +544,16 @@ pub(super) fn profile_mod_matches_installed(pm: &ProfileMod, installed: &ModInfo
 pub(super) fn profile_mod_matches_target(
     pm: &ProfileMod,
     name: &str,
+    mod_version_id: Option<&str>,
     folder_name: Option<&str>,
     mod_id: Option<&str>,
 ) -> bool {
+    if let Some(version_id) = mod_version_id.map(str::trim).filter(|v| !v.is_empty()) {
+        return pm
+            .mod_version_id
+            .as_deref()
+            .is_some_and(|candidate| candidate == version_id);
+    }
     if let Some(folder) = folder_name.map(str::trim).filter(|v| !v.is_empty()) {
         return pm
             .folder_name
@@ -556,9 +572,16 @@ pub(super) fn profile_mod_matches_target(
 pub(super) fn installed_mod_matches_target(
     installed: &ModInfo,
     name: &str,
+    mod_version_id: Option<&str>,
     folder_name: Option<&str>,
     mod_id: Option<&str>,
 ) -> bool {
+    if let Some(version_id) = mod_version_id.map(str::trim).filter(|v| !v.is_empty()) {
+        return installed
+            .mod_version_id
+            .as_deref()
+            .is_some_and(|candidate| candidate == version_id);
+    }
     if let Some(folder) = folder_name.map(str::trim).filter(|v| !v.is_empty()) {
         return installed
             .folder_name
@@ -576,6 +599,7 @@ pub(super) fn installed_mod_matches_target(
 
 pub(super) fn profile_mod_from_installed(installed: &ModInfo) -> ProfileMod {
     ProfileMod {
+        mod_version_id: installed.mod_version_id.clone(),
         name: installed.name.clone(),
         version: installed.version.clone(),
         source: installed.source.clone(),
@@ -771,6 +795,7 @@ mod profile_schema_compat_tests {
     #[test]
     fn profile_without_sha_serializes_without_the_field() {
         let pm = ProfileMod {
+            mod_version_id: None,
             name: "test".into(),
             version: "1.0.0".into(),
             source: None,
@@ -794,6 +819,7 @@ mod profile_schema_compat_tests {
     #[test]
     fn profile_with_sha_round_trips() {
         let pm = ProfileMod {
+            mod_version_id: None,
             name: "test".into(),
             version: "1.0.0".into(),
             source: None,
@@ -825,6 +851,7 @@ mod persist_profile_mod_sources_tests {
 
     fn pm_with_source(name: &str, folder: &str, source: Option<&str>) -> ProfileMod {
         ProfileMod {
+            mod_version_id: None,
             name: name.into(),
             version: "1.0.0".into(),
             source: source.map(str::to_string),
@@ -928,6 +955,7 @@ mod profile_identity_storage_tests {
             created_by: None,
             mods: (0..mods)
                 .map(|i| ProfileMod {
+                    mod_version_id: None,
                     name: format!("Mod {i}"),
                     version: "1.0.0".into(),
                     source: None,

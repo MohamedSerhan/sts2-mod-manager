@@ -246,12 +246,12 @@ describe('useTauri wrappers — command names + arg shapes', () => {
     await updateMod('BaseLib');
     expect(lastCall()).toEqual({
       cmd: 'update_mod',
-      args: { name: 'BaseLib', folderName: null },
+      args: { name: 'BaseLib', folderName: null, profileId: null },
     });
-    await updateMod('BaseLib', 'BaseLib-v2');
+    await updateMod('BaseLib', 'BaseLib-v2', 'profile-1');
     expect(lastCall()).toEqual({
       cmd: 'update_mod',
-      args: { name: 'BaseLib', folderName: 'BaseLib-v2' },
+      args: { name: 'BaseLib', folderName: 'BaseLib-v2', profileId: 'profile-1' },
     });
 
     await repairMod('BaseLib', 'BaseLib-v2');
@@ -278,7 +278,10 @@ describe('useTauri wrappers — command names + arg shapes', () => {
     });
 
     await updateAllMods();
-    expect(lastCall().cmd).toBe('update_all_mods');
+    expect(lastCall()).toEqual({
+      cmd: 'update_all_mods',
+      args: { profileId: null },
+    });
 
     // The audit command omits the `only` field when no filter is passed,
     // mirroring how the Rust side distinguishes "audit everything" from

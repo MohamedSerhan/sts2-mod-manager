@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  allAssetsHaveConfiguredGroups,
   buildModFileBody,
   buildUpdateGroupBody,
+  configuredGroupIdForAsset,
   filenameForAsset,
   orderedReleaseAssets,
   uploadDisplayName,
@@ -42,6 +44,30 @@ test('--only windows preserves Windows Nexus publish flags', () => {
   assert.equal(body.archive_existing_file, true);
   assert.equal(body.primary_mod_manager_download, true);
   assert.equal(body.allow_mod_manager_download, true);
+});
+
+test('configured group lookup reads the selected Nexus asset environment variable', () => {
+  const [windows] = orderedReleaseAssets('windows');
+
+  assert.equal(
+    configuredGroupIdForAsset(windows, { NEXUS_FILE_GROUP_ID: ' 38293928411992 ' }),
+    '38293928411992',
+  );
+});
+
+test('group discovery can be skipped only when every selected asset has a configured group', () => {
+  const env = {
+    NEXUS_FILE_GROUP_ID_MACOS: 'macos-group',
+    NEXUS_FILE_GROUP_ID_LINUX: 'linux-group',
+    NEXUS_FILE_GROUP_ID: 'windows-group',
+  };
+
+  assert.equal(allAssetsHaveConfiguredGroups(orderedReleaseAssets('windows'), env), true);
+  assert.equal(allAssetsHaveConfiguredGroups(orderedReleaseAssets(), env), true);
+  assert.equal(
+    allAssetsHaveConfiguredGroups(orderedReleaseAssets(), { ...env, NEXUS_FILE_GROUP_ID_LINUX: '' }),
+    false,
+  );
 });
 
 test('Windows is the primary mod-manager download and other platforms are not', () => {

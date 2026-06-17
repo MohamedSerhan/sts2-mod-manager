@@ -23,6 +23,11 @@ on:
         required: false
         default: false
         type: boolean
+      source_ref:
+        description: "Optional Git ref to build for rebuilt Windows uploads; defaults to the release tag"
+        required: false
+        default: ""
+        type: string
       diagnose_only:
         description: "Only print Nexus Windows file group state; do not upload"
         required: false
@@ -288,7 +293,7 @@ jobs:
       - name: Checkout release source
         uses: actions/checkout@v6
         with:
-          ref: ${{ startsWith(inputs.version, 'v') && inputs.version || format('v{0}', inputs.version) }}
+          ref: ${{ inputs.source_ref || (startsWith(inputs.version, 'v') && inputs.version || format('v{0}', inputs.version)) }}
           path: release-source
 
       - name: Install Rust stable
@@ -407,4 +412,5 @@ jobs:
             "- Original EXE SHA256: $env:ORIGINAL_EXE_SHA256"
             "- Rebuilt EXE SHA256: $env:REBUILT_EXE_SHA256"
             "- Rebuilt ZIP SHA256: $env:ZIP_SHA256"
+            "- Source ref: ${{ inputs.source_ref || (startsWith(inputs.version, 'v') && inputs.version || format('v{0}', inputs.version)) }}"
           ) -join "`n" >> $env:GITHUB_STEP_SUMMARY

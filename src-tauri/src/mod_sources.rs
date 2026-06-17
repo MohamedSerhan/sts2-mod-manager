@@ -2313,6 +2313,7 @@ mod enrich_priority_tests {
 
     fn mod_with(name: &str, folder: Option<&str>, github_url: Option<&str>) -> ModInfo {
         ModInfo {
+            mod_version_id: None,
             name: name.into(),
             version: "1.0.0".into(),
             description: String::new(),
@@ -3420,6 +3421,7 @@ mod shared_profile_source_tests {
 
     fn make_mod(name: &str, folder: Option<&str>) -> crate::mods::ModInfo {
         crate::mods::ModInfo {
+            mod_version_id: None,
             name: name.to_string(),
             version: "1.0.0".to_string(),
             description: String::new(),

@@ -165,6 +165,7 @@ mod tests {
             game_version: Some("0.105.0".to_string()),
             created_by: Some("tester".to_string()),
             mods: vec![ProfileMod {
+                mod_version_id: None,
                 name: "BaseMod".to_string(),
                 version: "1.0.0".to_string(),
                 source: None,

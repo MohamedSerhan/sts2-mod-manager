@@ -38,7 +38,8 @@ pub use crud::{
     save_profile,
 };
 pub(crate) use crud::{
-    migrate_profile_identity_storage, profile_file_stem, profile_name_exists, unique_profile_name,
+    migrate_profile_identity_storage, profile_file_stem, profile_mod_matches_installed,
+    profile_name_exists, unique_profile_name,
 };
 pub use drift::{ProfileDrift, RepairProfileResult, VersionMismatch};
 pub use membership::SetProfileModsEnabledResult;
@@ -58,6 +59,10 @@ pub(super) const APP_CREATED_BY: &str = "sts2-mod-manager";
 /// A mod entry within a profile.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProfileMod {
+    /// Stable manager-owned ID for the exact artifact this profile points at.
+    /// Legacy profiles deserialize with None and are migrated lazily.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mod_version_id: Option<String>,
     pub name: String,
     pub version: String,
     pub source: Option<String>,
@@ -166,6 +171,8 @@ pub struct ProfileMembershipProfile {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProfileMembershipMod {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mod_version_id: Option<String>,
     pub name: String,
     pub version: String,
     pub folder_name: Option<String>,
@@ -186,6 +193,8 @@ pub struct ProfileMembershipState {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProfileModOrderKey {
+    #[serde(default, alias = "modVersionId")]
+    pub mod_version_id: Option<String>,
     pub name: String,
     #[serde(default, alias = "folderName")]
     pub folder_name: Option<String>,
@@ -241,6 +250,7 @@ pub fn get_profile_memberships(
 pub fn set_profile_mod_membership(
     profile_id: String,
     mod_name: String,
+    mod_version_id: Option<String>,
     folder_name: Option<String>,
     mod_id: Option<String>,
     included: bool,
@@ -253,6 +263,7 @@ pub fn set_profile_mod_membership(
     set_profile_mod_membership_from_paths(
         &profile_id,
         &mod_name,
+        mod_version_id.as_deref(),
         folder_name.as_deref(),
         mod_id.as_deref(),
         included,

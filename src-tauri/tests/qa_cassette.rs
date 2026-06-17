@@ -38,6 +38,7 @@ fn install_cassette_env() {
 /// `version`, and the source linkage actually matter.
 fn make_mod(name: &str, version: &str, folder: &str) -> ModInfo {
     ModInfo {
+        mod_version_id: None,
         name: name.to_string(),
         version: version.to_string(),
         description: String::new(),

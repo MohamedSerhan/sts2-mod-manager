@@ -618,6 +618,7 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
         None => {
             let mod_name = fallback_mod_name;
             Ok(ModInfo {
+                mod_version_id: None,
                 name: mod_name.clone(),
                 version: "unknown".to_string(),
                 description: String::new(),
@@ -1670,6 +1671,7 @@ mod config_snapshot_tests {
         let config_path = config_tmp.path();
 
         let info = ModInfo {
+            mod_version_id: None,
             name: "MyMod".to_string(),
             version: "2.0".to_string(),
             description: String::new(),

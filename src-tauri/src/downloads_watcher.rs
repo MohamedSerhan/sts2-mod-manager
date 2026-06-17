@@ -1265,6 +1265,7 @@ mod stash_tests {
     /// top-level manifest/config file.
     fn fixture_mod_info(folder: &str, extra_files: &[&str]) -> ModInfo {
         ModInfo {
+            mod_version_id: None,
             name: folder.to_string(),
             version: "1.0.0".into(),
             description: String::new(),

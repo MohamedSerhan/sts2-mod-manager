@@ -59,7 +59,7 @@ import { KebabDivider, KebabItem, KebabMenu, KebabSection } from './KebabMenu';
 import { EditModpackModal } from './EditModpackModal';
 import { RenameModpackModal } from './RenameModpackModal';
 import { AddModsMenu } from './AddModsMenu';
-import { LibraryTable } from './LibraryTable';
+import { LibraryTable, NO_TAGS_FILTER_VALUE } from './LibraryTable';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from './ConfirmDialog';
@@ -108,11 +108,10 @@ export interface ModpackDetailProps {
   renameExistingNames?: string[];
 }
 
-/** Identity key for a profile mod / installed mod: prefer the on-disk
- *  folder name, fall back to the manifest name. Matches the convention
+/** Identity key for a profile mod / installed mod. Matches the convention
  *  used across the membership grid. */
-function modKey(mod: { folder_name: string | null; name: string }): string {
-  return mod.folder_name ?? mod.name;
+function modKey(mod: { mod_version_id?: string | null; folder_name: string | null; mod_id?: string | null; name: string }): string {
+  return mod.mod_version_id ?? mod.folder_name ?? mod.mod_id ?? mod.name;
 }
 
 /** Source badges for a row, derived from the matching installed
@@ -218,7 +217,9 @@ export function ModpackDetail({
     const seen = new Map<string, string>();
     for (const pm of profile.mods) {
       const info =
+        lib.modInfoByKey.get(pm.mod_version_id ?? '') ??
         lib.modInfoByKey.get(pm.folder_name ?? pm.name) ??
+        lib.modInfoByKey.get(pm.mod_id ?? '') ??
         lib.modInfoByKey.get(pm.name);
       for (const tag of info?.tags ?? []) {
         const trimmed = tag.trim();
@@ -234,7 +235,11 @@ export function ModpackDetail({
   // Clear a stale tagFilter when the tag it references is no longer present
   // among the pack's mods (e.g. after removing the last mod that carried it).
   useEffect(() => {
-    if (tagFilter && !packTagOptions.includes(tagFilter)) setTagFilter('');
+    if (
+      tagFilter
+      && tagFilter !== NO_TAGS_FILTER_VALUE
+      && !packTagOptions.includes(tagFilter)
+    ) setTagFilter('');
   }, [packTagOptions, tagFilter]);
 
   // Build a set of mod-names that belong to this pack so the updates
@@ -341,6 +346,7 @@ export function ModpackDetail({
       await setProfileModMembership(
         profileKey,
         mod.name,
+        mod.mod_version_id ?? null,
         mod.folder_name ?? null,
         mod.mod_id ?? null,
         true,
@@ -384,10 +390,14 @@ export function ModpackDetail({
     setDeletingAll(true);
     try {
       // Snapshot the list first — refreshing mid-loop would mutate it.
-      const targets = profile.mods.map((m) => ({ name: m.name, folder_name: m.folder_name ?? null }));
+      const targets = profile.mods.map((m) => ({
+        name: m.name,
+        mod_version_id: m.mod_version_id ?? null,
+        folder_name: m.folder_name ?? null,
+      }));
       for (const m of targets) {
         await deleteMod(m.name, m.folder_name);
-        await setProfileModMembership(profileKey, m.name, m.folder_name, null, false);
+        await setProfileModMembership(profileKey, m.name, m.mod_version_id, m.folder_name, null, false);
       }
       await refreshAfterMutation();
       toast.success(
@@ -462,7 +472,7 @@ export function ModpackDetail({
   // methods are consolidated into the one dropdown to keep the row calm.
   const packToolbarActions = (
     <>
-      {packTagOptions.length > 0 && (
+      {profile.mods.length > 0 && (
         <label className="gf-sort-control">
           <span>{t('mods.tags.label')}</span>
           <select
@@ -471,6 +481,7 @@ export function ModpackDetail({
             onChange={(e) => setTagFilter(e.target.value)}
           >
             <option value="">{t('mods.tags.all')}</option>
+            <option value={NO_TAGS_FILTER_VALUE}>{t('mods.tags.noTags')}</option>
             {packTagOptions.map((tag) => (
               <option key={tag} value={tag}>
                 {tag}
@@ -855,8 +866,13 @@ export function ModpackDetail({
             if (!included) return false;
             if (!tagFilter) return true;
             const info =
+              lib.modInfoByKey.get(row.mod_version_id ?? '') ??
               lib.modInfoByKey.get(row.folder_name ?? row.name) ??
+              lib.modInfoByKey.get(row.mod_id ?? '') ??
               lib.modInfoByKey.get(row.name);
+            if (tagFilter === NO_TAGS_FILTER_VALUE) {
+              return !(info?.tags ?? []).some((tg) => tg.trim().length > 0);
+            }
             return (info?.tags ?? []).some(
               (tg) => tg.toLocaleLowerCase() === tagFilter.toLocaleLowerCase(),
             );

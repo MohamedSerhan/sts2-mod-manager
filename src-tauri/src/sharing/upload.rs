@@ -655,6 +655,7 @@ mod publish_bundle_contract_tests {
 
     fn profile_mod(enabled: bool) -> crate::profiles::ProfileMod {
         crate::profiles::ProfileMod {
+            mod_version_id: None,
             name: "ContractMod".into(),
             version: "1.0.0".into(),
             source: None,

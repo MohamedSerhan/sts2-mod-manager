@@ -1300,6 +1300,26 @@ describe('<ModpackDetail>', () => {
       await waitFor(() => expect(screen.queryByText('UiMod')).toBeNull());
       expect(screen.getAllByText('CombatMod').length).toBeGreaterThan(0);
     });
+
+    it('filters the pack rows to mods with no tags', async () => {
+      const profile = setupPack({
+        packName: 'Sample',
+        inPack: [
+          modInfo({ name: 'TaggedMod', folder_name: 'TaggedMod', tags: ['combat'] }),
+          modInfo({ name: 'UntaggedMod', folder_name: 'UntaggedMod', tags: [] }),
+        ],
+      });
+      render(<Wrap {...baseProps()} profile={profile} />);
+      expect((await screen.findAllByText('TaggedMod')).length).toBeGreaterThan(0);
+      expect(screen.getAllByText('UntaggedMod').length).toBeGreaterThan(0);
+
+      const tagSelect = screen.getByRole('combobox', { name: 'Tag' }) as HTMLSelectElement;
+      expect(within(tagSelect).getByRole('option', { name: /No tags/i })).toBeInTheDocument();
+      fireEvent.change(tagSelect, { target: { value: '__no_tags__' } });
+
+      await waitFor(() => expect(screen.queryByText('TaggedMod')).toBeNull());
+      expect(screen.getAllByText('UntaggedMod').length).toBeGreaterThan(0);
+    });
   });
 
   // ── Inactive-pack toggle hint ─────────────────────────────────────

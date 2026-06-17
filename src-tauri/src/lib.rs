@@ -15,6 +15,7 @@ mod http;
 // reachable through the IPC surface; this just makes the integration
 // tests tractable.
 pub mod mod_sources;
+pub mod mod_versions;
 mod modpack_browser;
 pub mod mods;
 mod nexus;

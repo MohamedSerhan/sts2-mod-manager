@@ -16,6 +16,34 @@ test('Nexus release assets publish Windows last so it stays the newest/top file'
   );
 });
 
+test('--only accepts a known Nexus release asset key', () => {
+  assert.deepEqual(
+    orderedReleaseAssets('windows').map((asset) => asset.key),
+    ['windows'],
+  );
+});
+
+test('--only rejects unknown Nexus release asset keys', () => {
+  assert.throws(
+    () => orderedReleaseAssets('steamdeck'),
+    /Unknown --only asset "steamdeck"\. Expected one of: macos, linux, windows/,
+  );
+});
+
+test('--only windows preserves Windows Nexus publish flags', () => {
+  const [windows] = orderedReleaseAssets('windows');
+  const body = buildUpdateGroupBody({
+    uploadId: 'upload-1',
+    version: '1.7.11',
+    asset: windows,
+  });
+
+  assert.equal(filenameForAsset('1.7.11', windows), 'STS2.Mod.Manager_1.7.11_x64_portable.zip');
+  assert.equal(body.archive_existing_file, true);
+  assert.equal(body.primary_mod_manager_download, true);
+  assert.equal(body.allow_mod_manager_download, true);
+});
+
 test('Windows is the primary mod-manager download and other platforms are not', () => {
   const bodies = orderedReleaseAssets().map((asset) => (
     buildUpdateGroupBody({ uploadId: 'upload-1', version: '1.7.4', asset })

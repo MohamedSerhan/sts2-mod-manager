@@ -1,0 +1,129 @@
+name: Nexus republish
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version to republish, with or without v prefix"
+        required: true
+        default: "1.7.11"
+        type: string
+      expected_sha256:
+        description: "Expected SHA256 for the exact GitHub Windows portable zip"
+        required: false
+        default: "624916D25EE309E7BE9CB935635C208D8B1DCD2E9271E1853D4F58DB4849ADCE"
+        type: string
+      repack_windows_zip:
+        description: "Repack the same README and EXE before uploading to Nexus"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: nexus-republish-windows-${{ inputs.version }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  republish-windows:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Download GitHub Windows portable zip
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          VERSION="${VERSION#v}"
+          ASSET="STS2.Mod.Manager_${VERSION}_x64_portable.zip"
+
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "ASSET=${ASSET}" >> "$GITHUB_ENV"
+
+          mkdir -p nexus-assets
+          gh release download "v${VERSION}" \
+            -R "$GITHUB_REPOSITORY" \
+            -D nexus-assets \
+            -p "$ASSET"
+
+      - name: Verify Windows portable zip
+        run: |
+          set -euo pipefail
+          ZIP="nexus-assets/${ASSET}"
+          ACTUAL_SHA="$(sha256sum "$ZIP" | awk '{ print toupper($1) }')"
+          EXPECTED_SHA="$(printf '%s' "${{ inputs.expected_sha256 }}" | tr '[:lower:]' '[:upper:]')"
+
+          echo "ZIP_SHA256=${ACTUAL_SHA}" >> "$GITHUB_ENV"
+          if [ -n "$EXPECTED_SHA" ] && [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
+            echo "Expected $EXPECTED_SHA but downloaded $ACTUAL_SHA" >&2
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import os
+          import zipfile
+
+          zip_path = os.path.join("nexus-assets", os.environ["ASSET"])
+          expected = ["README.txt", "STS2 Mod Manager.exe"]
+          with zipfile.ZipFile(zip_path) as archive:
+              entries = sorted(info.filename for info in archive.infolist() if not info.is_dir())
+          if entries != expected:
+              raise SystemExit(f"Unexpected zip entries: {entries!r}")
+          print("Verified zip entries:", ", ".join(entries))
+          PY
+
+      - name: Repack Windows portable zip
+        if: ${{ inputs.repack_windows_zip }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import zipfile
+
+          zip_path = os.path.join("nexus-assets", os.environ["ASSET"])
+          names = ["README.txt", "STS2 Mod Manager.exe"]
+          with zipfile.ZipFile(zip_path, "r") as source:
+              payload = {name: source.read(name) for name in names}
+
+          tmp_path = f"{zip_path}.tmp"
+          with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as target:
+              for name in names:
+                  info = zipfile.ZipInfo(name)
+                  info.external_attr = 0o644 << 16
+                  target.writestr(info, payload[name])
+          os.replace(tmp_path, zip_path)
+          PY
+
+          REPACKED_SHA="$(sha256sum "nexus-assets/${ASSET}" | awk '{ print toupper($1) }')"
+          echo "ZIP_SHA256=${REPACKED_SHA}" >> "$GITHUB_ENV"
+          echo "Repacked ${ASSET} as ${REPACKED_SHA}"
+
+      - name: Publish Windows portable zip to Nexus
+        env:
+          NEXUS_API_KEY:             ${{ secrets.NEXUS_API_KEY }}
+          NEXUS_FILE_GROUP_ID:       ${{ secrets.NEXUS_FILE_GROUP_ID }}
+          NEXUS_ALLOW_BOOTSTRAP:     "false"
+          NEXUSMODS_MOD_ID:          ${{ vars.NEXUSMODS_MOD_ID || '856' }}
+          NEXUSMODS_GAME_DOMAIN:     slaythespire2
+        run: node scripts/nexus-publish-release.mjs --version "$VERSION" --asset-dir nexus-assets --only windows
+
+      - name: Summarize republish
+        run: |
+          {
+            echo "### Nexus Windows republish"
+            echo
+            echo "- Version: ${VERSION}"
+            echo "- Asset: ${ASSET}"
+            echo "- SHA256: ${ZIP_SHA256}"
+            echo "- Repacked: ${{ inputs.repack_windows_zip }}"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -8,6 +8,7 @@ import { downloadDir as pathDownloadDir } from '@tauri-apps/api/path';
 
 import { SettingsView } from './Settings';
 import { AllProviders } from '../__test__/providers';
+import { chooseOption } from '../__test__/selectHelpers';
 import { getInvokeCalls, registerInvokeHandler, setMockAppVersion } from '../__test__/setup';
 import { AUTO_ADD_INSTALLS_TO_MODPACK_KEY } from '../lib/installPolicy';
 
@@ -53,7 +54,7 @@ describe('<SettingsView>', () => {
   it('shows the language override on the General tab', async () => {
     render(<Wrap />);
 
-    expect(await screen.findByLabelText('Language')).toHaveValue('auto');
+    expect(await screen.findByRole('combobox', { name: 'Language' })).toHaveTextContent('Auto');
   });
 
   it('clicking Accounts shows the Nexus + GitHub key fields', async () => {
@@ -98,10 +99,12 @@ describe('<SettingsView>', () => {
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
     await user.click(screen.getByRole('button', { name: /Backups/ }));
-    const select = await screen.findByLabelText(/Backups to keep/i);
-    expect(select).toHaveValue('3');
+    const select = await screen.findByRole('combobox', { name: /Backups to keep/i });
+    expect(select).toHaveTextContent('3');
     // The "Off" option (value 0) is offered.
-    expect(within(select as HTMLSelectElement).getByRole('option', { name: /Off/i })).toBeInTheDocument();
+    await user.click(select);
+    const listbox = await screen.findByRole('listbox');
+    expect(within(listbox).getByRole('option', { name: /Off/i })).toBeInTheDocument();
   });
 
   it('changing the retention select invokes set_backup_retention with the new count', async () => {
@@ -112,9 +115,8 @@ describe('<SettingsView>', () => {
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
     await user.click(screen.getByRole('button', { name: /Backups/ }));
-    const select = await screen.findByLabelText(/Backups to keep/i);
-    expect(within(select as HTMLSelectElement).getByRole('option', { name: '10' })).toBeInTheDocument();
-    await user.selectOptions(select, '0');
+    expect(await screen.findByRole('combobox', { name: /Backups to keep/i })).toHaveTextContent('10');
+    await chooseOption(user, /Backups to keep/i, 'Off');
     await waitFor(() => {
       expect(getInvokeCalls().some(
         (c) => c.cmd === 'set_backup_retention' && c.args?.count === 0,

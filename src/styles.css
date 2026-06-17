@@ -1965,6 +1965,100 @@ body {
   color: var(--ink);
 }
 
+/* ── Custom dropdown (Select component) ───────────────────────────────
+   Replaces native <select>, which the OS draws and which therefore can't
+   be bordered, themed, or animated. The trigger is a bordered button; the
+   panel is an absolutely-positioned listbox that fades + slides in. */
+.gf-select-wrap { position: relative; display: block; }
+.gf-select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  height: 36px;
+  padding: 0 9px 0 12px;
+  background: var(--indigo-side);
+  border: 1px solid var(--indigo-line);
+  border-radius: 7px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  text-align: start;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+.gf-select:hover:not(:disabled) {
+  border-color: var(--indigo-line2);
+  background: var(--indigo-hover);
+}
+.gf-select:focus-visible,
+.gf-select.is-open {
+  outline: none;
+  border-color: var(--gf-line);
+  box-shadow: 0 0 0 3px var(--gf-tint);
+}
+.gf-select:disabled { opacity: 0.5; cursor: not-allowed; }
+.gf-select-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gf-select-value.is-placeholder { color: var(--ink-dim); }
+.gf-select-chevron {
+  flex-shrink: 0;
+  color: var(--ink-mute);
+  transition: transform 0.18s ease, color 0.15s ease;
+}
+.gf-select.is-open .gf-select-chevron { transform: rotate(180deg); color: var(--gf-text); }
+
+.gf-select-panel {
+  position: absolute;
+  z-index: 60;
+  top: calc(100% + 5px);
+  inset-inline-start: 0;
+  min-width: 100%;
+  max-height: 280px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--indigo-panel);
+  border: 1px solid var(--indigo-line);
+  border-radius: 9px;
+  box-shadow: 0 12px 32px -10px var(--scrim-strong), 0 3px 10px -4px var(--scrim);
+  transform-origin: top;
+  animation: gf-select-in 0.15s ease;
+}
+@keyframes gf-select-in {
+  from { opacity: 0; transform: translateY(-5px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.gf-select-option {
+  display: flex;
+  align-items: center;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--ink);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+.gf-select-option.is-active { background: var(--indigo-nav-hover); }
+.gf-select-option.is-selected { color: var(--gf-text); font-weight: 600; }
+.gf-select-option.is-disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Compact variant for inline toolbar filters (sort / tag selects). */
+.gf-sort-control .gf-select-wrap { display: inline-block; }
+.gf-sort-control .gf-select { height: 32px; min-width: 142px; font-size: 12px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .gf-select-panel { animation: none; }
+  .gf-select-chevron { transition: color 0.15s ease; }
+}
+
 /* ── Inputs ───────────────────────────────────────────────────────── */
 .gf-input {
   background: var(--indigo-side);

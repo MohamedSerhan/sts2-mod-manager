@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 
 import { ModsView } from './Mods';
 import { AllProviders } from '../__test__/providers';
+import { chooseOption } from '../__test__/selectHelpers';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
 import i18n from '../i18n';
 import type { ModInfo } from '../types';
@@ -234,7 +235,7 @@ describe('<ModsView>', () => {
 
     // Choosing a tag REORDERS (does not hide): the utility mod floats to the
     // top, every mod stays visible, and untagged sorts last.
-    await user.selectOptions(screen.getByRole('combobox', { name: /Tag/i }), 'utility');
+    await chooseOption(user, /Tag/i, 'utility');
     expect(screen.getByText('BaseLib')).toBeInTheDocument();
     expect(screen.getByText('CardArtEditor')).toBeInTheDocument();
     expect(screen.getByText('NoTag')).toBeInTheDocument();
@@ -256,7 +257,7 @@ describe('<ModsView>', () => {
     render(<Wrap />);
     await screen.findByText('BaseLib');
 
-    await user.selectOptions(screen.getByRole('combobox', { name: /Tag/i }), '__no_tags__');
+    await chooseOption(user, /Tag/i, 'No tags');
 
     expect(screen.getByText('NoTag')).toBeInTheDocument();
     expect(screen.queryByText('BaseLib')).toBeNull();
@@ -277,21 +278,20 @@ describe('<ModsView>', () => {
     render(<Wrap />);
     await screen.findAllByText('AutoPath');
 
-    const sort = screen.getByRole('combobox', { name: /Sort/i });
     expectTextBefore('AutoPath', 'BaseLib');
     expectTextBefore('BaseLib', 'ZuluPatch');
 
-    await user.selectOptions(sort, 'nameDesc');
+    await chooseOption(user, /Sort/i, 'Name Z-A');
     expectTextBefore('ZuluPatch', 'BaseLib');
     expectTextBefore('BaseLib', 'AutoPath');
 
-    await user.selectOptions(sort, 'activeFirst');
+    await chooseOption(user, /Sort/i, 'Active first');
     // Both AutoPath and ZuluPatch are active; BaseLib is stored. Active
     // ones appear first, sorted alphabetically.
     expectTextBefore('AutoPath', 'ZuluPatch');
     expectTextBefore('ZuluPatch', 'BaseLib');
 
-    await user.selectOptions(sort, 'storedFirst');
+    await chooseOption(user, /Sort/i, 'Stored first');
     expectTextBefore('BaseLib', 'AutoPath');
   });
 
@@ -3310,7 +3310,7 @@ describe('<ModsView> tag priority picker', () => {
     render(<Wrap />);
     await screen.findAllByText('TaggedMod');
     expect(screen.getByText('OtherMod')).toBeInTheDocument();
-    await user.selectOptions(screen.getByRole('combobox', { name: /Tag/i }), 'Combat');
+    await chooseOption(user, /Tag/i, 'Combat');
     // Both stay visible; the Combat mod is ordered before the other.
     expect(screen.getByText('TaggedMod')).toBeInTheDocument();
     expect(screen.getByText('OtherMod')).toBeInTheDocument();

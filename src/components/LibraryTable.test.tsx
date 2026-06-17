@@ -12,6 +12,7 @@ import userEvent from '@testing-library/user-event';
 
 import { LibraryTable } from './LibraryTable';
 import { AllProviders } from '../__test__/providers';
+import { chooseOption } from '../__test__/selectHelpers';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
 import type { ModInfo, Profile } from '../types';
 
@@ -287,7 +288,7 @@ describe('<LibraryTable>', () => {
     // Default sort is inPackFirst — Alpha appears first alphabetically
     // among the non-in-pack mods.
     expect(titles()[0]).toContain('Alpha');
-    await user.selectOptions(screen.getByRole('combobox', { name: /Sort/i }), 'nameDesc');
+    await chooseOption(user, /Sort/i, 'Name Z-A');
     expect(titles()[0]).toContain('Zeta');
   });
 
@@ -949,13 +950,17 @@ describe('<LibraryTable modpackName={null}>', () => {
   });
 
   it('hides the "In this modpack first" sort option', async () => {
+    const user = userEvent.setup();
     seedInstalledMods();
     render(<Wrap modpackName={null} />);
     await screen.findAllByText('BaseLib');
     const sortSelect = screen.getByRole('combobox', { name: /Sort/i });
     // Default sort flipped to nameAsc.
-    expect(sortSelect).toHaveValue('nameAsc');
-    expect(screen.queryByRole('option', { name: /In this modpack first/i })).toBeNull();
+    expect(sortSelect).toHaveTextContent('Name A-Z');
+    // Open the dropdown: the in-pack option must not be offered here.
+    await user.click(sortSelect);
+    const listbox = await screen.findByRole('listbox');
+    expect(within(listbox).queryByRole('option', { name: /In this modpack first/i })).toBeNull();
   });
 
   it('renders rows without the storage chip or per-row Store button', async () => {

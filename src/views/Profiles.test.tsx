@@ -32,6 +32,7 @@ import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialo
 
 import { ProfilesView } from './Profiles';
 import { AllProviders } from '../__test__/providers';
+import { chooseOption } from '../__test__/selectHelpers';
 import { useApp } from '../contexts/AppContext';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
 import type { LoadOrderSettingsStatus, Profile } from '../types';
@@ -1675,13 +1676,12 @@ describe('<ProfilesView>', () => {
       expect(cardNames()).toEqual(['Zebra', 'Alpha', 'Mega']);
     });
 
-    const select = screen.getByRole('combobox', { name: /Sort/i });
-    await user.selectOptions(select, 'name');
+    await chooseOption(user, /Sort/i, /Name A/);
     await waitFor(() => {
       expect(cardNames()).toEqual(['Alpha', 'Mega', 'Zebra']);
     });
 
-    await user.selectOptions(select, 'mods');
+    await chooseOption(user, /Sort/i, 'Most mods');
     await waitFor(() => {
       expect(cardNames()).toEqual(['Mega', 'Zebra', 'Alpha']);
     });
@@ -1730,12 +1730,11 @@ describe('<ProfilesView>', () => {
       [...document.querySelectorAll('.gf-modpack-card-name')].map((el) => el.textContent);
     await waitFor(() => { expect(cardNames().length).toBe(2); });
 
-    const select = screen.getByRole('combobox', { name: /Sort/i });
     // Recently edited: Oldest has the newer updated_at.
-    await user.selectOptions(select, 'edited');
+    await chooseOption(user, /Sort/i, 'Recently edited');
     await waitFor(() => { expect(cardNames()).toEqual(['Oldest', 'Newest']); });
     // Recently created: Newest has the newer created_at.
-    await user.selectOptions(select, 'created');
+    await chooseOption(user, /Sort/i, 'Recently created');
     await waitFor(() => { expect(cardNames()).toEqual(['Newest', 'Oldest']); });
   });
 

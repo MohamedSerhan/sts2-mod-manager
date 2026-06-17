@@ -15,6 +15,7 @@ import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../components/ConfirmDialog';
 import { HelpHint } from '../components/HelpHint';
+import { Select } from '../components/Select';
 import { BrowseView } from './Browse';
 import {
   deleteAllMods,
@@ -196,17 +197,16 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
           {mods.length > 0 && (
             <label className="gf-sort-control">
               <span>{t('mods.tags.label')}</span>
-              <select
+              <Select
                 aria-label={t('mods.tags.label')}
                 value={priorityTag}
-                onChange={(e) => setPriorityTag(e.target.value)}
-              >
-                <option value="">{t('mods.tags.all')}</option>
-                <option value={NO_TAGS_FILTER_VALUE}>{t('mods.tags.noTags')}</option>
-                {tagOptions.map((tag) => (
-                  <option key={tag} value={tag}>{tag}</option>
-                ))}
-              </select>
+                onChange={setPriorityTag}
+                options={[
+                  { value: '', label: t('mods.tags.all') },
+                  { value: NO_TAGS_FILTER_VALUE, label: t('mods.tags.noTags') },
+                  ...tagOptions.map((tag) => ({ value: tag, label: tag })),
+                ]}
+              />
             </label>
           )}
           {mods.length > 0 && (

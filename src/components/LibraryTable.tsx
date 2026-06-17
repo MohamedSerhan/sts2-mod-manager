@@ -43,6 +43,7 @@ import { usePinScroll } from '../hooks/usePinScroll';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from './ConfirmDialog';
+import { Select } from './Select';
 import {
   getProfileMemberships,
   setProfileLoadOrder,
@@ -804,31 +805,23 @@ export function LibraryTable({
             <ModViewToggle density={density} onChange={setDensity} />
             <label className="gf-sort-control gf-profile-library-sort">
               <span>{t('profiles.library.sort.label')}</span>
-              <select
+              <Select
                 value={sort}
-                onChange={(event) =>
-                  setSort(event.target.value as LibrarySortMode)
-                }
+                onChange={(v) => setSort(v as LibrarySortMode)}
                 aria-label={t('profiles.library.sort.label')}
-              >
-                {/* "In this modpack first" only makes sense when a modpack
-                    is focused. In the no-focus Library view, this option
-                    is hidden so the user doesn't see a sort option that
-                    has no effect. */}
-                {modpackName != null && (
-                  <option value="inPackFirst">
-                    {t('profiles.library.sort.inPackFirst')}
-                  </option>
-                )}
-                <option value="nameAsc">{t('profiles.library.sort.nameAsc')}</option>
-                <option value="nameDesc">{t('profiles.library.sort.nameDesc')}</option>
-                <option value="activeFirst">
-                  {t('profiles.library.sort.activeFirst')}
-                </option>
-                <option value="storedFirst">
-                  {t('profiles.library.sort.storedFirst')}
-                </option>
-              </select>
+                options={[
+                  // "In this modpack first" only makes sense when a modpack
+                  // is focused. In the no-focus Library view, this option is
+                  // omitted so the user doesn't see a sort with no effect.
+                  ...(modpackName != null
+                    ? [{ value: 'inPackFirst', label: t('profiles.library.sort.inPackFirst') }]
+                    : []),
+                  { value: 'nameAsc', label: t('profiles.library.sort.nameAsc') },
+                  { value: 'nameDesc', label: t('profiles.library.sort.nameDesc') },
+                  { value: 'activeFirst', label: t('profiles.library.sort.activeFirst') },
+                  { value: 'storedFirst', label: t('profiles.library.sort.storedFirst') },
+                ]}
+              />
             </label>
           </div>
         )}

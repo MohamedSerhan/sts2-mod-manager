@@ -44,8 +44,18 @@ export function uploadDisplayName(version, asset) {
   return `STS2 Mod Manager ${version} (${asset.label})`;
 }
 
-export function orderedReleaseAssets() {
-  return [...RELEASE_ASSETS];
+export function orderedReleaseAssets(onlyKey = '') {
+  const assets = [...RELEASE_ASSETS];
+  const key = String(onlyKey || '').trim();
+  if (!key) {
+    return assets;
+  }
+  const asset = assets.find((candidate) => candidate.key === key);
+  if (!asset) {
+    const expected = assets.map((candidate) => candidate.key).join(', ');
+    throw new Error(`Unknown --only asset "${key}". Expected one of: ${expected}`);
+  }
+  return [asset];
 }
 
 export function buildModFileBody({ uploadId, modId, version, asset }) {
@@ -287,11 +297,12 @@ export async function main(argv = process.argv.slice(2)) {
   const gameDomain = args.get('game-domain') || process.env.NEXUSMODS_GAME_DOMAIN || DEFAULT_GAME_DOMAIN;
   const gameScopedModId = args.get('mod-id') || process.env.NEXUSMODS_MOD_ID || DEFAULT_GAME_SCOPED_MOD_ID;
   const allowBootstrap = (args.get('allow-bootstrap') || process.env.NEXUS_ALLOW_BOOTSTRAP || 'true') !== 'false';
+  const assets = orderedReleaseAssets(args.get('only') || process.env.NEXUS_RELEASE_ASSET_ONLY || '');
   const api = createApiClient(requireValue(process.env.NEXUS_API_KEY, 'NEXUS_API_KEY'), process.env.NEXUSMODS_API_BASE || DEFAULT_API_BASE);
   const modId = await getModUuid(api, gameDomain, gameScopedModId);
   const groups = await getUpdateGroups(api, modId);
 
-  for (const asset of orderedReleaseAssets()) {
+  for (const asset of assets) {
     console.log(`Publishing ${asset.label} to Nexus`);
     await publishAsset({ api, modId, groups, version, assetDir, asset, allowBootstrap });
   }
